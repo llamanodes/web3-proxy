@@ -12,7 +12,7 @@ Proxy Web3 Requests
 Options:
   --eth-primary-rpc the primary Ethereum RPC server
   --eth-private-rpc the private Ethereum RPC server
-  --listen-port     the private Ethereum RPC
+  --listen-port     the port to listen on
   --help            display usage information
 
 ```
