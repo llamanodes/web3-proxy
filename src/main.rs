@@ -1,15 +1,20 @@
 use std::sync::Arc;
 use warp::Filter;
 
+
+const ETH_LOCALHOST_RPC: &str = "http://localhost:8545";
+const ETH_EDEN_RPC: &str = "https://api.edennetwork.io/v1/beta";
+
+
 #[derive(argh::FromArgs)]
 /// Proxy Web3 Requests
 struct Web3ProxyConfig {
     /// the primary Ethereum RPC server
-    #[argh(option, default = "http://localhost:8545")]
+    #[argh(option, default = "ETH_LOCALHOST_RPC.to_string()")]
     eth_primary_rpc: String,
 
     /// the private Ethereum RPC server
-    #[argh(option, default = "https://api.edennetwork.io/v1/beta")]
+    #[argh(option, default = "ETH_EDEN_RPC.to_string()")]
     eth_private_rpc: String,
 
     /// the port to listen on
@@ -51,10 +56,8 @@ async fn proxy_eth_rpc(
         serde_json::Value::String("eth_sendSignedTransaction".to_string());
 
     let upstream_server = if json_body.get("method") == Some(&eth_send_signed_transaction) {
-        // TODO: read from args
         &config.eth_private_rpc
     } else {
-        // TODO: read from args
         // TODO: if querying a block older than 256 blocks old, send to an archive node. otherwise a fast sync node is fine
         &config.eth_primary_rpc
     };
