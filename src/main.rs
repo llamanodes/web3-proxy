@@ -42,6 +42,8 @@ async fn main() {
 
     let routes = warp::any().and(hello.or(proxy_eth_filter));
 
+    println!("Listening on port {}", listen_port);
+
     warp::serve(routes).run(([127, 0, 0, 1], listen_port)).await;
 }
 
