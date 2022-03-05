@@ -12,7 +12,7 @@ struct Web3ProxyConfig {
     #[argh(option)]
     eth_private_rpc: String,
 
-    /// the private Ethereum RPC
+    /// the port to listen on
     #[argh(option, default = "8845")]
     listen_port: u16,
 }
