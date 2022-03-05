@@ -21,7 +21,7 @@ Options:
 ```
 
 ```
-cargo run -- --eth-primary-rpc "https://your.favorite.provider"
+cargo run -r -- --eth-primary-rpc "https://your.favorite.provider"
 ```
 
 ```
