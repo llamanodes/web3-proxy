@@ -5,11 +5,11 @@ use warp::Filter;
 /// Proxy Web3 Requests
 struct Web3ProxyConfig {
     /// the primary Ethereum RPC server
-    #[argh(option)]
+    #[argh(option, default = "http://localhost:8545")]
     eth_primary_rpc: String,
 
     /// the private Ethereum RPC server
-    #[argh(option)]
+    #[argh(option, default = "https://api.edennetwork.io/v1/beta")]
     eth_private_rpc: String,
 
     /// the port to listen on
