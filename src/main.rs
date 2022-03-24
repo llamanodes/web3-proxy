@@ -71,7 +71,7 @@ async fn proxy_eth_rpc(
     Ok(res.text().await?)
 }
 
-/// convert result into an http response
+/// convert result into an http response. use this at the end of your warp filter
 pub fn handle_anyhow_errors<T: warp::Reply>(res: anyhow::Result<T>) -> Box<dyn warp::Reply> {
     match res {
         Ok(r) => Box::new(r.into_response()),
