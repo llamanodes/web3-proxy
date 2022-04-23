@@ -1,5 +1,5 @@
 [package]
-name = "eth-proxy"
+name = "web3-proxy"
 version = "0.1.0"
 edition = "2021"
 
