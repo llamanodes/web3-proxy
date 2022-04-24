@@ -211,15 +211,17 @@ impl Web3ProxyState {
             let client = self.client.clone();
             let json_body = json_body.clone();
             tokio::spawn(async move {
-                // TODO: there has to be a better way to do this map. i think maybe put  the map outside this spawn?
-                let resp = client
+                // TODO: there has to be a better way to do this map and map_err
+                client
                     .post(&url)
                     .json(&json_body)
                     .send()
                     .await
-                    .map_err(|e| (url.clone(), e))?;
-                resp.text()
+                    // add the url to the error so that we can decrement
+                    .map_err(|e| (url.clone(), e))?
+                    .text()
                     .await
+                    // add the url to the result and the error so that we can decrement
                     .map(|t| (url.clone(), t))
                     .map_err(|e| (url, e))
             })
