@@ -1,43 +1,64 @@
 use dashmap::DashMap;
-use futures::stream::FuturesUnordered;
+use futures::stream;
 use futures::StreamExt;
+use governor::clock::{QuantaClock, QuantaInstant};
+use governor::middleware::NoOpMiddleware;
+use governor::state::{InMemoryState, NotKeyed};
+use governor::{NotUntil, RateLimiter};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{sleep, Duration};
+// use tokio::time::{sleep, Duration};
 use warp::Filter;
+
+// TODO: what should this be?
+const PARALLEL_REQUESTS: usize = 4;
+
+type RpcRateLimiter =
+    RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware<QuantaInstant>>;
 
 /// Load balance to the least-connection rpc
 struct BalancedRpcs {
     rpcs: RwLock<Vec<String>>,
     connections: DashMap<String, u32>,
     // TODO: what type? store with connections?
-    // ratelimits: DashMap<String, u32>,
+    // ratelimits: RateLimiter<K, DashMapStateStore<K>, dyn governor::clock::Clock>,
+    ratelimits: DashMap<String, RpcRateLimiter>,
 }
 
 // TODO: also pass rate limits to this?
-impl Into<BalancedRpcs> for Vec<&str> {
+impl Into<BalancedRpcs> for Vec<(&str, u32)> {
     fn into(self) -> BalancedRpcs {
         let mut rpcs: Vec<String> = vec![];
         let connections = DashMap::new();
-        // let ratelimits = DashMap::new();
+        let ratelimits = DashMap::new();
 
-        // TODO: i'm sure there is a better way to do this with more iterator things like collect, but this works
-        for s in self.into_iter() {
+        // TODO: where should we get the rate limits from?
+        // TODO: this is not going to work. we need different rate limits for different endpoints
+
+        for (s, limit) in self.into_iter() {
             rpcs.push(s.to_string());
             connections.insert(s.to_string(), 0);
-            // ratelimits.insert(s.to_string(), 0);
+
+            if limit > 0 {
+                let quota = governor::Quota::per_second(NonZeroU32::new(limit).unwrap());
+
+                let rate_limiter = governor::RateLimiter::direct(quota);
+
+                ratelimits.insert(s.to_string(), rate_limiter);
+            }
         }
 
         BalancedRpcs {
             rpcs: RwLock::new(rpcs),
             connections,
-            // ratelimits,
+            ratelimits,
         }
     }
 }
 
 impl BalancedRpcs {
-    async fn get_upstream_server(&self) -> Option<String> {
+    async fn get_upstream_server(&self) -> Result<String, NotUntil<QuantaInstant>> {
         let mut balanced_rpcs = self.rpcs.write().await;
 
         balanced_rpcs.sort_unstable_by(|a, b| {
@@ -47,15 +68,47 @@ impl BalancedRpcs {
                 .cmp(&self.connections.get(b).unwrap())
         });
 
-        // TODO: don't just grab the first. check rate limits
-        if let Some(selected_rpc) = balanced_rpcs.first() {
+        let mut earliest_not_until = None;
+
+        for selected_rpc in balanced_rpcs.iter() {
+            // check rate limits
+            match self.ratelimits.get(selected_rpc).unwrap().check() {
+                Ok(_) => {
+                    // rate limit succeeded
+                }
+                Err(not_until) => {
+                    // rate limit failed
+                    // save the smallest not_until. if nothing succeeds, return an Err with not_until in it
+                    if earliest_not_until.is_none() {
+                        earliest_not_until = Some(not_until);
+                    } else {
+                        let earliest_possible =
+                            earliest_not_until.as_ref().unwrap().earliest_possible();
+                        let new_earliest_possible = not_until.earliest_possible();
+
+                        if earliest_possible > new_earliest_possible {
+                            earliest_not_until = Some(not_until);
+                        }
+                    }
+                    continue;
+                }
+            };
+
+            // increment our connection counter
+            // TODO: need to change this to be an atomic counter!
             let mut connections = self.connections.get_mut(selected_rpc).unwrap();
             *connections += 1;
 
-            return Some(selected_rpc.clone());
+            // return the selected RPC
+            return Ok(selected_rpc.clone());
         }
 
-        None
+        // return the smallest not_until
+        if let Some(not_until) = earliest_not_until {
+            return Err(not_until);
+        } else {
+            unimplemented!();
+        }
     }
 }
 
@@ -71,7 +124,6 @@ impl Into<LoudRpcs> for Vec<&str> {
         let mut rpcs: Vec<String> = vec![];
         // let ratelimits = DashMap::new();
 
-        // TODO: i'm sure there is a better way to do this with more iterator things like collect, but this works
         for s in self.into_iter() {
             rpcs.push(s.to_string());
             // ratelimits.insert(s.to_string(), 0);
@@ -101,7 +153,7 @@ struct Web3ProxyState {
 }
 
 impl Web3ProxyState {
-    fn new(balanced_rpc_tiers: Vec<Vec<&str>>, private_rpcs: Vec<&str>) -> Web3ProxyState {
+    fn new(balanced_rpc_tiers: Vec<Vec<(&str, u32)>>, private_rpcs: Vec<&str>) -> Web3ProxyState {
         // TODO: warn if no private relays
         Web3ProxyState {
             client: reqwest::Client::new(),
@@ -129,7 +181,7 @@ impl Web3ProxyState {
         } else {
             // this is not a private transaction (or no private relays are configured)
             for balanced_rpcs in self.balanced_rpc_tiers.iter() {
-                if let Some(upstream_server) = balanced_rpcs.get_upstream_server().await {
+                if let Ok(upstream_server) = balanced_rpcs.get_upstream_server().await {
                     // TODO: capture any errors. at least log them
                     if let Ok(result) = self
                         .try_send_requests(vec![upstream_server], &json_body)
@@ -137,6 +189,8 @@ impl Web3ProxyState {
                     {
                         return Ok(result);
                     }
+                } else {
+                    // TODO: if we got an error. save the ratelimit NotUntil so we can sleep until then before trying again
                 }
             }
         }
@@ -150,33 +204,48 @@ impl Web3ProxyState {
         json_body: &serde_json::Value,
     ) -> anyhow::Result<String> {
         // send the query to all the servers
-        let mut future_responses = FuturesUnordered::new();
-        for upstream_server in upstream_servers.into_iter() {
-            let f = self.client.post(upstream_server).json(&json_body).send();
+        let mut bodies = stream::iter(upstream_servers)
+            .map(|url| {
+                let client = self.client.clone();
+                let json_body = json_body.clone();
+                tokio::spawn(async move {
+                    let resp = client.post(url).json(&json_body).send().await?;
+                    resp.text().await
+                })
+            })
+            .buffer_unordered(PARALLEL_REQUESTS);
 
-            future_responses.push(f);
-        }
+        let mut oks = vec![];
+        let mut errs = vec![];
 
-        // start loading text responses
-        let mut future_text = FuturesUnordered::new();
-        while let Some(request) = future_responses.next().await {
-            if let Ok(request) = request {
-                let f = request.text();
-
-                future_text.push(f);
+        while let Some(b) = bodies.next().await {
+            // TODO: reduce connection counter
+            match b {
+                Ok(Ok(b)) => {
+                    // TODO: if "no block with that header", skip this response (maybe retry)
+                    oks.push(b);
+                }
+                Ok(Err(e)) => {
+                    // TODO: better errors
+                    eprintln!("Got a reqwest::Error: {}", e);
+                    errs.push(anyhow::anyhow!("Got a reqwest::Error"));
+                }
+                Err(e) => {
+                    // TODO: better errors
+                    eprintln!("Got a tokio::JoinError: {}", e);
+                    errs.push(anyhow::anyhow!("Got a tokio::JoinError"));
+                }
             }
         }
 
-        // return the first response
-        while let Some(text) = future_text.next().await {
-            if let Ok(text) = text {
-                // TODO: if "no block with that header", skip this response (maybe retry)
-                return Ok(text);
-            }
-            // TODO: capture errors
+        // TODO: which response should we use?
+        if oks.len() > 0 {
+            return Ok(oks.pop().unwrap());
+        } else if errs.len() > 0 {
+            return Err(errs.pop().unwrap());
+        } else {
+            return Err(anyhow::anyhow!("no successful responses"));
         }
-
-        Err(anyhow::anyhow!("no successful responses"))
     }
 }
 
@@ -190,13 +259,20 @@ async fn main() {
     let state = Web3ProxyState::new(
         vec![
             // local nodes
-            vec!["https://10.11.12.16:8545"],
+            vec![("https://10.11.12.16:8545", 0)],
             // paid nodes
-            // TODO: add them
+            // TODO: add paid nodes (with rate limits)
             // free nodes
-            vec!["https://main-rpc.linkpool.io", "https://rpc.ankr.com/eth"],
+            // TODO: add rate limits
+            vec![
+                ("https://main-rpc.linkpool.io", 0),
+                ("https://rpc.ankr.com/eth", 0),
+            ],
         ],
-        vec!["https://api.edennetwork.io/v1/beta"],
+        vec![
+            "https://api.edennetwork.io/v1/beta",
+            "https://api.edennetwork.io/v1/",
+        ],
     );
 
     let state: Arc<Web3ProxyState> = Arc::new(state);
