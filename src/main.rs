@@ -1,74 +1,217 @@
+use dashmap::DashMap;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::time::{sleep, Duration};
 use warp::Filter;
 
+/// Load balance to the least-connection rpc
+struct BalancedRpcs {
+    rpcs: RwLock<Vec<String>>,
+    connections: DashMap<String, u32>,
+    // TODO: what type? store with connections?
+    // ratelimits: DashMap<String, u32>,
+}
 
-const ETH_LOCALHOST_RPC: &str = "http://localhost:8545";
-const ETH_EDEN_RPC: &str = "https://api.edennetwork.io/v1/beta";
+// TODO: also pass rate limits to this?
+impl Into<BalancedRpcs> for Vec<&str> {
+    fn into(self) -> BalancedRpcs {
+        let mut rpcs: Vec<String> = vec![];
+        let connections = DashMap::new();
+        // let ratelimits = DashMap::new();
 
+        // TODO: i'm sure there is a better way to do this with more iterator things like collect, but this works
+        for s in self.into_iter() {
+            rpcs.push(s.to_string());
+            connections.insert(s.to_string(), 0);
+            // ratelimits.insert(s.to_string(), 0);
+        }
 
-#[derive(argh::FromArgs)]
-/// Proxy Web3 Requests
-struct Web3ProxyConfig {
-    /// the primary Ethereum RPC server
-    #[argh(option, default = "ETH_LOCALHOST_RPC.to_string()")]
-    eth_primary_rpc: String,
+        BalancedRpcs {
+            rpcs: RwLock::new(rpcs),
+            connections,
+            // ratelimits,
+        }
+    }
+}
 
-    /// the private Ethereum RPC server
-    #[argh(option, default = "ETH_EDEN_RPC.to_string()")]
-    eth_private_rpc: String,
+impl BalancedRpcs {
+    async fn get_upstream_server(&self) -> Option<String> {
+        let mut balanced_rpcs = self.rpcs.write().await;
 
-    /// the port to listen on
-    #[argh(option, default = "8845")]
-    listen_port: u16,
+        balanced_rpcs.sort_unstable_by(|a, b| {
+            self.connections
+                .get(a)
+                .unwrap()
+                .cmp(&self.connections.get(b).unwrap())
+        });
+
+        // TODO: don't just grab the first. check rate limits
+        if let Some(selected_rpc) = balanced_rpcs.first() {
+            let mut connections = self.connections.get_mut(selected_rpc).unwrap();
+            *connections += 1;
+
+            return Some(selected_rpc.clone());
+        }
+
+        None
+    }
+}
+
+/// Send to all the Rpcs
+struct LoudRpcs {
+    rpcs: Vec<String>,
+    // TODO: what type? store with connections?
+    // ratelimits: DashMap<String, u32>,
+}
+
+impl Into<LoudRpcs> for Vec<&str> {
+    fn into(self) -> LoudRpcs {
+        let mut rpcs: Vec<String> = vec![];
+        // let ratelimits = DashMap::new();
+
+        // TODO: i'm sure there is a better way to do this with more iterator things like collect, but this works
+        for s in self.into_iter() {
+            rpcs.push(s.to_string());
+            // ratelimits.insert(s.to_string(), 0);
+        }
+
+        LoudRpcs {
+            rpcs,
+            // ratelimits,
+        }
+    }
+}
+
+impl LoudRpcs {
+    async fn get_upstream_servers(&self) -> Vec<String> {
+        self.rpcs.clone()
+    }
+
+    fn as_bool(&self) -> bool {
+        self.rpcs.len() > 0
+    }
+}
+
+struct Web3ProxyState {
+    client: reqwest::Client,
+    balanced_rpc_tiers: Vec<BalancedRpcs>,
+    private_rpcs: LoudRpcs,
+}
+
+impl Web3ProxyState {
+    fn new(balanced_rpc_tiers: Vec<Vec<&str>>, private_rpcs: Vec<&str>) -> Web3ProxyState {
+        // TODO: warn if no private relays
+        Web3ProxyState {
+            client: reqwest::Client::new(),
+            balanced_rpc_tiers: balanced_rpc_tiers.into_iter().map(Into::into).collect(),
+            private_rpcs: private_rpcs.into(),
+        }
+    }
+
+    /// send the request to the approriate RPCs
+    async fn proxy_web3_rpc(
+        self: Arc<Web3ProxyState>,
+        json_body: serde_json::Value,
+    ) -> anyhow::Result<impl warp::Reply> {
+        let eth_send_raw_transaction =
+            serde_json::Value::String("eth_sendRawTransaction".to_string());
+
+        if self.private_rpcs.as_bool() && json_body.get("method") == Some(&eth_send_raw_transaction)
+        {
+            // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
+            let upstream_servers = self.private_rpcs.get_upstream_servers().await;
+
+            if let Ok(result) = self.try_send_requests(upstream_servers, &json_body).await {
+                return Ok(result);
+            }
+        } else {
+            // this is not a private transaction (or no private relays are configured)
+            for balanced_rpcs in self.balanced_rpc_tiers.iter() {
+                if let Some(upstream_server) = balanced_rpcs.get_upstream_server().await {
+                    // TODO: capture any errors. at least log them
+                    if let Ok(result) = self
+                        .try_send_requests(vec![upstream_server], &json_body)
+                        .await
+                    {
+                        return Ok(result);
+                    }
+                }
+            }
+        }
+
+        return Err(anyhow::anyhow!("all servers failed"));
+    }
+
+    async fn try_send_requests(
+        &self,
+        upstream_servers: Vec<String>,
+        json_body: &serde_json::Value,
+    ) -> anyhow::Result<String> {
+        // send the query to all the servers
+        let mut future_responses = FuturesUnordered::new();
+        for upstream_server in upstream_servers.into_iter() {
+            let f = self.client.post(upstream_server).json(&json_body).send();
+
+            future_responses.push(f);
+        }
+
+        // start loading text responses
+        let mut future_text = FuturesUnordered::new();
+        while let Some(request) = future_responses.next().await {
+            if let Ok(request) = request {
+                let f = request.text();
+
+                future_text.push(f);
+            }
+        }
+
+        // return the first response
+        while let Some(text) = future_text.next().await {
+            if let Ok(text) = text {
+                // TODO: if "no block with that header", skip this response (maybe retry)
+                return Ok(text);
+            }
+            // TODO: capture errors
+        }
+
+        Err(anyhow::anyhow!("no successful responses"))
+    }
 }
 
 #[tokio::main]
 async fn main() {
-    let config: Web3ProxyConfig = argh::from_env();
+    // TODO: load the config from yaml instead of hard coding
+    // TODO: support multiple chains in one process. then we could just point "chain.stytt.com" at this and caddy wouldn't need anything else
+    // TODO: i kind of want to make use of caddy's load balancing and health checking and such though
+    let listen_port = 8445;
+    // TODO: be smart about about using archive nodes?
+    let state = Web3ProxyState::new(
+        vec![
+            // local nodes
+            vec!["https://10.11.12.16:8545"],
+            // paid nodes
+            // TODO: add them
+            // free nodes
+            vec!["https://main-rpc.linkpool.io", "https://rpc.ankr.com/eth"],
+        ],
+        vec!["https://api.edennetwork.io/v1/beta"],
+    );
 
-    let config = Arc::new(config);
+    let state: Arc<Web3ProxyState> = Arc::new(state);
 
-    let listen_port = config.listen_port;
-
-    let hello = warp::path::end().map(|| format!("Hello, world!"));
-
-    let proxy_eth_filter = warp::path!("eth")
+    let proxy_rpc_filter = warp::any()
         .and(warp::post())
         .and(warp::body::json())
-        .then(move |json_body| proxy_eth_rpc(config.clone(), json_body))
+        .then(move |json_body| state.clone().proxy_web3_rpc(json_body))
         .map(handle_anyhow_errors);
 
-    // TODO: relay ftm, bsc, polygon, avax, ...
+    println!("Listening on 0.0.0.0:{}", listen_port);
 
-    let routes = warp::any().and(hello.or(proxy_eth_filter));
-
-    println!("Listening on port {}", listen_port);
-
-    warp::serve(routes).run(([127, 0, 0, 1], listen_port)).await;
-}
-
-/// send the request to the approriate Ethereum RPC
-async fn proxy_eth_rpc(
-    config: Arc<Web3ProxyConfig>,
-    json_body: serde_json::Value,
-) -> anyhow::Result<impl warp::Reply> {
-    // TODO: this should be a list of servers. query all. prefer result from first server even if it is a bit late
-    // TODO: automatically rank servers based on request latency and block height
-    let eth_send_signed_transaction =
-        serde_json::Value::String("eth_sendSignedTransaction".to_string());
-
-    let upstream_server = if json_body.get("method") == Some(&eth_send_signed_transaction) {
-        &config.eth_private_rpc
-    } else {
-        // TODO: if querying a block older than 256 blocks old, send to an archive node. otherwise a fast sync node is fine
-        &config.eth_primary_rpc
-    };
-
-    // TODO: reuse this Client/RequestBuilder
-    let client = reqwest::Client::new();
-    let res = client.post(upstream_server).json(&json_body).send().await?;
-
-    Ok(res.text().await?)
+    warp::serve(proxy_rpc_filter)
+        .run(([0, 0, 0, 0], listen_port))
+        .await;
 }
 
 /// convert result into an http response. use this at the end of your warp filter
