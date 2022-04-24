@@ -13,13 +13,14 @@ use warp::Filter;
 type RpcRateLimiter =
     RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware<QuantaInstant>>;
 
+type RateLimiterMap = DashMap<String, RpcRateLimiter>;
 type ConnectionsMap = DashMap<String, u32>;
 
 /// Load balance to the least-connection rpc
 struct BalancedRpcs {
     rpcs: RwLock<Vec<String>>,
     connections: ConnectionsMap,
-    ratelimits: DashMap<String, RpcRateLimiter>,
+    ratelimits: RateLimiterMap,
 }
 
 // TODO: also pass rate limits to this?
@@ -28,9 +29,6 @@ impl Into<BalancedRpcs> for Vec<(&str, u32)> {
         let mut rpcs: Vec<String> = vec![];
         let connections = DashMap::new();
         let ratelimits = DashMap::new();
-
-        // TODO: where should we get the rate limits from?
-        // TODO: this is not going to work. we need different rate limits for different endpoints
 
         for (s, limit) in self.into_iter() {
             rpcs.push(s.to_string());
@@ -108,31 +106,38 @@ impl BalancedRpcs {
 }
 
 /// Send to all the Rpcs
+/// Unlike BalancedRpcs, there is no tracking of connections
+/// We do still track rate limits
 struct LoudRpcs {
     rpcs: Vec<String>,
     // TODO: what type? store with connections?
-    // ratelimits: DashMap<String, u32>,
+    ratelimits: RateLimiterMap,
 }
 
-impl Into<LoudRpcs> for Vec<&str> {
+impl Into<LoudRpcs> for Vec<(&str, u32)> {
     fn into(self) -> LoudRpcs {
         let mut rpcs: Vec<String> = vec![];
-        // let ratelimits = DashMap::new();
+        let ratelimits = RateLimiterMap::new();
 
-        for s in self.into_iter() {
+        for (s, limit) in self.into_iter() {
             rpcs.push(s.to_string());
-            // ratelimits.insert(s.to_string(), 0);
+
+            if limit > 0 {
+                let quota = governor::Quota::per_second(NonZeroU32::new(limit).unwrap());
+
+                let rate_limiter = governor::RateLimiter::direct(quota);
+
+                ratelimits.insert(s.to_string(), rate_limiter);
+            }
         }
 
-        LoudRpcs {
-            rpcs,
-            // ratelimits,
-        }
+        LoudRpcs { rpcs, ratelimits }
     }
 }
 
 impl LoudRpcs {
     async fn get_upstream_servers(&self) -> Vec<String> {
+        //
         self.rpcs.clone()
     }
 
@@ -148,7 +153,10 @@ struct Web3ProxyState {
 }
 
 impl Web3ProxyState {
-    fn new(balanced_rpc_tiers: Vec<Vec<(&str, u32)>>, private_rpcs: Vec<&str>) -> Web3ProxyState {
+    fn new(
+        balanced_rpc_tiers: Vec<Vec<(&str, u32)>>,
+        private_rpcs: Vec<(&str, u32)>,
+    ) -> Web3ProxyState {
         // TODO: warn if no private relays
         Web3ProxyState {
             client: reqwest::Client::new(),
@@ -294,8 +302,8 @@ async fn main() {
             ],
         ],
         vec![
-            "https://api.edennetwork.io/v1/beta",
-            "https://api.edennetwork.io/v1/",
+            ("https://api.edennetwork.io/v1/beta", 0),
+            ("https://api.edennetwork.io/v1/", 0),
         ],
     );
 
