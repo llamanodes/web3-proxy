@@ -218,8 +218,8 @@ impl Web3ProxyState {
 
         if self.private_rpcs.as_bool() && json_body.get("method") == Some(&eth_send_raw_transaction)
         {
+            // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
             loop {
-                // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
                 match self.private_rpcs.get_upstream_servers().await {
                     Ok(upstream_servers) => {
                         if let Ok(result) = self
@@ -230,6 +230,7 @@ impl Web3ProxyState {
                         }
                     }
                     Err(not_until) => {
+                        // TODO: some sort of lock here?
                         // TODO: there should probably be a lock on this so that other queries wait
                         let deadline = not_until.wait_time_from(self.clock.now());
                         sleep(deadline).await;
@@ -274,6 +275,7 @@ impl Web3ProxyState {
                     }
                 }
 
+                // TODO: some sort of lock here?
                 // we haven't returned an Ok, sleep and try again
                 // unwrap should be safe since we would have returned if it wasn't set
                 let deadline = earliest_not_until.unwrap().wait_time_from(self.clock.now());
