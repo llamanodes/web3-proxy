@@ -45,7 +45,7 @@ async fn handle_new_head_message(message: tungstenite::Message) -> anyhow::Resul
     // TODO: parse the message as json and get out the block data. then update a map for this rpc
     println!("now what? {:?}", data);
 
-    unimplemented!();
+    Ok(())
 }
 
 impl BalancedRpcs {
