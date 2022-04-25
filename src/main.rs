@@ -237,6 +237,7 @@ impl Web3ProxyState {
                         }
                     }
                     Err(not_until) => {
+                        // sleep (with a lock) until our rate limits should be available
                         drop(read_lock);
 
                         let write_lock = self.balanced_rpc_ratelimiter_lock.write().await;
@@ -289,14 +290,13 @@ impl Web3ProxyState {
                     }
                 }
 
+                // we haven't returned an Ok, sleep and try again
                 drop(read_lock);
-
                 let write_lock = self.balanced_rpc_ratelimiter_lock.write().await;
 
-                // TODO: some sort of lock here?
-                // we haven't returned an Ok, sleep and try again
                 // unwrap should be safe since we would have returned if it wasn't set
                 let deadline = earliest_not_until.unwrap().wait_time_from(self.clock.now());
+
                 sleep(deadline).await;
 
                 drop(write_lock);
