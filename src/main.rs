@@ -17,6 +17,7 @@ use tokio_tungstenite::{connect_async, tungstenite};
 use warp::Filter;
 
 type RateLimiterMap = DashMap<String, RpcRateLimiter>;
+// TODO: include the ethers client on this map
 type ConnectionsMap = DashMap<String, u32>;
 
 type RpcRateLimiter =
@@ -27,25 +28,6 @@ struct BalancedRpcs {
     rpcs: RwLock<Vec<String>>,
     connections: ConnectionsMap,
     ratelimits: RateLimiterMap,
-    new_heads_handles: Vec<AbortHandle>,
-}
-
-impl Drop for BalancedRpcs {
-    fn drop(&mut self) {
-        for handle in self.new_heads_handles.iter() {
-            handle.abort();
-        }
-    }
-}
-
-async fn handle_new_head_message(message: tungstenite::Message) -> anyhow::Result<()> {
-    // TODO: move this to a "handle_new_head_message" function so that we can use the ? helper
-    let data: serde_json::Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-
-    // TODO: parse the message as json and get out the block data. then update a map for this rpc
-    println!("now what? {:?}", data);
-
-    Ok(())
 }
 
 impl BalancedRpcs {
@@ -56,6 +38,9 @@ impl BalancedRpcs {
 
         for (s, limit) in servers.into_iter() {
             rpcs.push(s.to_string());
+
+            // TODO: subscribe to new_heads. if websocket, this is easy. otherwise we
+
             connections.insert(s.to_string(), 0);
 
             if limit > 0 {
@@ -67,7 +52,6 @@ impl BalancedRpcs {
             }
         }
 
-        // TODO: subscribe to new_heads
         let new_heads_handles = rpcs
             .clone()
             .into_iter()
@@ -481,7 +465,7 @@ async fn main() {
     let state = Web3ProxyState::new(
         vec![
             // local nodes
-            vec![("https://10.11.12.16:8545", 0)],
+            vec![("ws://10.11.12.16:8545", 0), ("ws://10.11.12.16:8946", 0)],
             // paid nodes
             // TODO: add paid nodes (with rate limits)
             // free nodes
