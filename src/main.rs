@@ -1,13 +1,19 @@
 use dashmap::DashMap;
 use futures::future;
+use futures::future::{AbortHandle, Abortable};
+use futures::SinkExt;
+use futures::StreamExt;
 use governor::clock::{Clock, QuantaClock, QuantaInstant};
 use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::{NotUntil, RateLimiter};
+use regex::Regex;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
+use tokio_tungstenite::{connect_async, tungstenite};
 use warp::Filter;
 
 type RateLimiterMap = DashMap<String, RpcRateLimiter>;
@@ -21,6 +27,25 @@ struct BalancedRpcs {
     rpcs: RwLock<Vec<String>>,
     connections: ConnectionsMap,
     ratelimits: RateLimiterMap,
+    new_heads_handles: Vec<AbortHandle>,
+}
+
+impl Drop for BalancedRpcs {
+    fn drop(&mut self) {
+        for handle in self.new_heads_handles.iter() {
+            handle.abort();
+        }
+    }
+}
+
+async fn handle_new_head_message(message: tungstenite::Message) -> anyhow::Result<()> {
+    // TODO: move this to a "handle_new_head_message" function so that we can use the ? helper
+    let data: serde_json::Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+
+    // TODO: parse the message as json and get out the block data. then update a map for this rpc
+    println!("now what? {:?}", data);
+
+    unimplemented!();
 }
 
 impl BalancedRpcs {
@@ -42,13 +67,73 @@ impl BalancedRpcs {
             }
         }
 
+        // TODO: subscribe to new_heads
+        let new_heads_handles = rpcs
+            .clone()
+            .into_iter()
+            .map(|rpc| {
+                // start the subscription inside an abort handler. this way, dropping this BalancedRpcs will close these connections
+                let (abort_handle, abort_registration) = AbortHandle::new_pair();
+
+                tokio::spawn(Abortable::new(
+                    async move {
+                        // replace "http" at the start with "ws"
+                        // TODO: this is fragile. some nodes use different ports, too. use proper config
+                        // TODO: maybe we should use this websocket for more than just the new heads subscription. we could send all our requests over it (but would need to modify ids)
+                        let re = Regex::new("^http").expect("bad regex");
+                        let ws_rpc = re.replace(&rpc, "ws");
+
+                        // TODO: if websocket not supported, use polling?
+                        let ws_rpc = url::Url::parse(&ws_rpc).expect("invalid websocket url");
+
+                        // loop so that if it disconnects, we reconnect
+                        loop {
+                            match connect_async(&ws_rpc).await {
+                                Ok((ws_stream, _)) => {
+                                    let (mut write, mut read) = ws_stream.split();
+
+                                    // TODO: send eth_subscribe New Heads
+                                    if (write.send(tungstenite::Message::Text("{\"id\": 1, \"method\": \"eth_subscribe\", \"params\": [\"newHeads\"]}".to_string())).await).is_ok() {
+                                        if let Some(Ok(_first)) = read.next().await {
+                                            // TODO: what should we do with the first message?
+
+                                            while let Some(Ok(message)) = read.next().await {
+                                                if let Err(e) = handle_new_head_message(message).await {
+                                                    eprintln!("error handling new head message @ {}: {}", ws_rpc, e);
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        // no more messages or we got an error
+                                    }
+                                }
+                                Err(e) => {
+                                    // TODO: proper logging
+                                    eprintln!("error connecting to websocket @ {}: {}", ws_rpc, e);
+                                }
+                            }
+
+                            // TODO: log that we are going to reconnectto ws_rpc in 1 second
+                            // TODO: how long should we wait? exponential backoff?
+                            sleep(Duration::from_secs(1)).await;
+                        }
+                    },
+                    abort_registration,
+                ));
+
+                abort_handle
+            })
+            .collect();
+
         BalancedRpcs {
             rpcs: RwLock::new(rpcs),
             connections,
             ratelimits,
+            new_heads_handles,
         }
     }
 
+    /// get the best available rpc server
     async fn get_upstream_server(&self) -> Result<String, NotUntil<QuantaInstant>> {
         let mut balanced_rpcs = self.rpcs.write().await;
 
@@ -95,7 +180,7 @@ impl BalancedRpcs {
 
         // return the smallest not_until
         if let Some(not_until) = earliest_not_until {
-            return Err(not_until);
+            Err(not_until)
         } else {
             unimplemented!();
         }
@@ -131,6 +216,7 @@ impl LoudRpcs {
         LoudRpcs { rpcs, ratelimits }
     }
 
+    /// get all available rpc servers
     async fn get_upstream_servers(&self) -> Result<Vec<String>, NotUntil<QuantaInstant>> {
         let mut earliest_not_until = None;
 
@@ -160,24 +246,24 @@ impl LoudRpcs {
                 }
             };
 
-            // return the selected RPC
+            // this is rpc should work
             selected_rpcs.push(selected_rpc.clone());
         }
 
-        if selected_rpcs.len() > 0 {
+        if !selected_rpcs.is_empty() {
             return Ok(selected_rpcs);
         }
 
         // return the earliest not_until
         if let Some(not_until) = earliest_not_until {
-            return Err(not_until);
+            Err(not_until)
         } else {
             panic!("i don't think this should happen")
         }
     }
 
     fn as_bool(&self) -> bool {
-        self.rpcs.len() > 0
+        !self.rpcs.is_empty()
     }
 }
 
@@ -199,15 +285,19 @@ impl Web3ProxyState {
     ) -> Web3ProxyState {
         let clock = QuantaClock::default();
 
+        let balanced_rpc_tiers = balanced_rpc_tiers
+            .into_iter()
+            .map(|servers| BalancedRpcs::new(servers, &clock))
+            .collect();
+
+        let private_rpcs = LoudRpcs::new(private_rpcs, &clock);
+
         // TODO: warn if no private relays
         Web3ProxyState {
-            clock: clock.clone(),
+            clock,
             client: reqwest::Client::new(),
-            balanced_rpc_tiers: balanced_rpc_tiers
-                .into_iter()
-                .map(|servers| BalancedRpcs::new(servers, &clock))
-                .collect(),
-            private_rpcs: LoudRpcs::new(private_rpcs, &clock),
+            balanced_rpc_tiers,
+            private_rpcs,
             balanced_rpc_ratelimiter_lock: Default::default(),
             private_rpcs_ratelimiter_lock: Default::default(),
         }
@@ -237,6 +327,7 @@ impl Web3ProxyState {
                         }
                     }
                     Err(not_until) => {
+                        // TODO: move this to a helper function
                         // sleep (with a lock) until our rate limits should be available
                         drop(read_lock);
 
@@ -291,6 +382,7 @@ impl Web3ProxyState {
                 }
 
                 // we haven't returned an Ok, sleep and try again
+                // TODO: move this to a helper function
                 drop(read_lock);
                 let write_lock = self.balanced_rpc_ratelimiter_lock.write().await;
 
@@ -315,18 +407,19 @@ impl Web3ProxyState {
             let client = self.client.clone();
             let json_body = json_body.clone();
             tokio::spawn(async move {
-                // TODO: there has to be a better way to do this map and map_err
+                // TODO: there has to be a better way to attach the url to the result
                 client
                     .post(&url)
                     .json(&json_body)
                     .send()
                     .await
-                    // add the url to the error so that we can decrement
+                    // add the url to the error so that we can reduce connection counters
                     .map_err(|e| (url.clone(), e))?
                     .text()
                     .await
-                    // add the url to the result and the error so that we can decrement
+                    // add the url to the result so that we can reduce connection counters
                     .map(|t| (url.clone(), t))
+                    // add the url to the error so that we can reduce connection counters
                     .map_err(|e| (url, e))
             })
         }))
@@ -345,7 +438,7 @@ impl Web3ProxyState {
                         *connections.get_mut(&url).unwrap() -= 1;
                     }
 
-                    // TODO: if "no block with that header", skip this response (maybe retry)
+                    // TODO: if "no block with that header" or some other jsonrpc errors, skip this response
                     oks.push(b);
                 }
                 Ok(Err((url, e))) => {
@@ -367,10 +460,10 @@ impl Web3ProxyState {
         }
 
         // TODO: which response should we use?
-        if oks.len() > 0 {
-            return Ok(oks.pop().unwrap());
-        } else if errs.len() > 0 {
-            return Err(errs.pop().unwrap());
+        if !oks.is_empty() {
+            Ok(oks.pop().unwrap())
+        } else if !errs.is_empty() {
+            Err(errs.pop().unwrap())
         } else {
             return Err(anyhow::anyhow!("no successful responses"));
         }
