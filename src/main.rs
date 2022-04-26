@@ -1,15 +1,9 @@
-// TODO: don't use RwLock<HashMap>. i think we need a concurrent hashmap or we will hit all sorts of deadlocks
 mod block_watcher;
 mod provider;
+mod provider_tiers;
 
 use futures::future;
-use governor::clock::{Clock, QuantaClock, QuantaInstant};
-use governor::middleware::NoOpMiddleware;
-use governor::state::{InMemoryState, NotKeyed};
-use governor::NotUntil;
-use governor::RateLimiter;
-use std::collections::HashMap;
-use std::num::NonZeroU32;
+use governor::clock::{Clock, QuantaClock};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
@@ -18,8 +12,8 @@ use tracing::log::warn;
 use warp::Filter;
 
 // use crate::types::{BlockMap, ConnectionsMap, RpcRateLimiterMap};
-use crate::block_watcher::{BlockWatcher, BlockWatcherSender};
-use crate::provider::Web3Connection;
+use crate::block_watcher::BlockWatcher;
+use crate::provider_tiers::{Web3ConnectionMap, Web3ProviderTier};
 
 static APP_USER_AGENT: &str = concat!(
     "satoshiandkin/",
@@ -28,192 +22,15 @@ static APP_USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
 );
 
-type RpcRateLimiter =
-    RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware<QuantaInstant>>;
-
-type RpcRateLimiterMap = RwLock<HashMap<String, RpcRateLimiter>>;
-type ConnectionsMap = RwLock<HashMap<String, Web3Connection>>;
-
-/// Load balance to the rpc
-/// TODO: i'm not sure about having 3 locks here. can we share them?
-struct RpcTier {
-    /// RPC urls sorted by active requests
-    /// TODO: what type for the rpc?
-    rpcs: RwLock<Vec<String>>,
-    connections: Arc<ConnectionsMap>,
-    ratelimits: RpcRateLimiterMap,
-}
-
-impl RpcTier {
-    async fn try_new(
-        servers: Vec<(&str, u32)>,
-        http_client: Option<reqwest::Client>,
-        block_watcher_sender: BlockWatcherSender,
-        clock: &QuantaClock,
-    ) -> anyhow::Result<RpcTier> {
-        let mut rpcs: Vec<String> = vec![];
-        let mut connections = HashMap::new();
-        let mut ratelimits = HashMap::new();
-
-        for (s, limit) in servers.into_iter() {
-            rpcs.push(s.to_string());
-
-            let connection = Web3Connection::try_new(
-                s.to_string(),
-                http_client.clone(),
-                block_watcher_sender.clone(),
-            )
-            .await?;
-
-            connections.insert(s.to_string(), connection);
-
-            if limit > 0 {
-                let quota = governor::Quota::per_second(NonZeroU32::new(limit).unwrap());
-
-                let rate_limiter = governor::RateLimiter::direct_with_clock(quota, clock);
-
-                ratelimits.insert(s.to_string(), rate_limiter);
-            }
-        }
-
-        Ok(RpcTier {
-            rpcs: RwLock::new(rpcs),
-            connections: Arc::new(RwLock::new(connections)),
-            ratelimits: RwLock::new(ratelimits),
-        })
-    }
-
-    /// get the best available rpc server
-    async fn next_upstream_server(&self) -> Result<String, NotUntil<QuantaInstant>> {
-        let mut balanced_rpcs = self.rpcs.write().await;
-
-        // sort rpcs by their active connections
-        let connections = self.connections.read().await;
-
-        balanced_rpcs
-            .sort_unstable_by(|a, b| connections.get(a).unwrap().cmp(connections.get(b).unwrap()));
-
-        let mut earliest_not_until = None;
-
-        for selected_rpc in balanced_rpcs.iter() {
-            // TODO: check current block number. if behind, make our own NotUntil here
-            let ratelimits = self.ratelimits.write().await;
-
-            // check rate limits
-            match ratelimits.get(selected_rpc).unwrap().check() {
-                Ok(_) => {
-                    // rate limit succeeded
-                }
-                Err(not_until) => {
-                    // rate limit failed
-                    // save the smallest not_until. if nothing succeeds, return an Err with not_until in it
-                    if earliest_not_until.is_none() {
-                        earliest_not_until = Some(not_until);
-                    } else {
-                        let earliest_possible =
-                            earliest_not_until.as_ref().unwrap().earliest_possible();
-                        let new_earliest_possible = not_until.earliest_possible();
-
-                        if earliest_possible > new_earliest_possible {
-                            earliest_not_until = Some(not_until);
-                        }
-                    }
-                    continue;
-                }
-            };
-
-            // increment our connection counter
-            self.connections
-                .write()
-                .await
-                .get_mut(selected_rpc)
-                .unwrap()
-                .inc_active_requests();
-
-            // return the selected RPC
-            return Ok(selected_rpc.clone());
-        }
-
-        // return the smallest not_until
-        if let Some(not_until) = earliest_not_until {
-            Err(not_until)
-        } else {
-            unimplemented!();
-        }
-    }
-
-    /// get all available rpc servers
-    async fn get_upstream_servers(&self) -> Result<Vec<String>, NotUntil<QuantaInstant>> {
-        let mut earliest_not_until = None;
-
-        let mut selected_rpcs = vec![];
-
-        for selected_rpc in self.rpcs.read().await.iter() {
-            // check rate limits
-            match self
-                .ratelimits
-                .write()
-                .await
-                .get(selected_rpc)
-                .unwrap()
-                .check()
-            {
-                Ok(_) => {
-                    // rate limit succeeded
-                }
-                Err(not_until) => {
-                    // rate limit failed
-                    // save the smallest not_until. if nothing succeeds, return an Err with not_until in it
-                    if earliest_not_until.is_none() {
-                        earliest_not_until = Some(not_until);
-                    } else {
-                        let earliest_possible =
-                            earliest_not_until.as_ref().unwrap().earliest_possible();
-                        let new_earliest_possible = not_until.earliest_possible();
-
-                        if earliest_possible > new_earliest_possible {
-                            earliest_not_until = Some(not_until);
-                        }
-                    }
-                    continue;
-                }
-            };
-
-            // increment our connection counter
-            self.connections
-                .write()
-                .await
-                .get_mut(selected_rpc)
-                .unwrap()
-                .inc_active_requests();
-
-            // this is rpc should work
-            selected_rpcs.push(selected_rpc.clone());
-        }
-
-        if !selected_rpcs.is_empty() {
-            return Ok(selected_rpcs);
-        }
-
-        // return the earliest not_until
-        if let Some(not_until) = earliest_not_until {
-            Err(not_until)
-        } else {
-            // TODO: is this right?
-            Ok(vec![])
-        }
-    }
-}
-
 /// The application
 struct Web3ProxyApp {
     /// clock used for rate limiting
     /// TODO: use tokio's clock (will require a different ratelimiting crate)
     clock: QuantaClock,
     /// Send requests to the best server available
-    balanced_rpc_tiers: Arc<Vec<RpcTier>>,
+    balanced_rpc_tiers: Arc<Vec<Web3ProviderTier>>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
-    private_rpcs: Option<Arc<RpcTier>>,
+    private_rpcs: Option<Arc<Web3ProviderTier>>,
     /// write lock on these when all rate limits are hit
     balanced_rpc_ratelimiter_lock: RwLock<()>,
     private_rpcs_ratelimiter_lock: RwLock<()>,
@@ -226,7 +43,7 @@ impl Web3ProxyApp {
     ) -> anyhow::Result<Web3ProxyApp> {
         let clock = QuantaClock::default();
 
-        let (mut block_watcher, block_watcher_sender) = BlockWatcher::new(clock.clone());
+        let (mut block_watcher, block_watcher_sender) = BlockWatcher::new();
 
         // make a http shared client
         // TODO: how should we configure the connection pool?
@@ -241,7 +58,7 @@ impl Web3ProxyApp {
 
         let balanced_rpc_tiers = Arc::new(
             future::join_all(balanced_rpc_tiers.into_iter().map(|balanced_rpc_tier| {
-                RpcTier::try_new(
+                Web3ProviderTier::try_new(
                     balanced_rpc_tier,
                     Some(http_client.clone()),
                     block_watcher_sender.clone(),
@@ -250,14 +67,14 @@ impl Web3ProxyApp {
             }))
             .await
             .into_iter()
-            .collect::<anyhow::Result<Vec<RpcTier>>>()?,
+            .collect::<anyhow::Result<Vec<Web3ProviderTier>>>()?,
         );
 
         let private_rpcs = if private_rpcs.is_empty() {
             None
         } else {
             Some(Arc::new(
-                RpcTier::try_new(
+                Web3ProviderTier::try_new(
                     private_rpcs,
                     Some(http_client),
                     block_watcher_sender,
@@ -300,7 +117,7 @@ impl Web3ProxyApp {
                             mpsc::unbounded_channel::<anyhow::Result<serde_json::Value>>();
 
                         let clone = self.clone();
-                        let connections = private_rpcs.connections.clone();
+                        let connections = private_rpcs.clone_connections();
                         let json_body = json_body.clone();
 
                         tokio::spawn(async move {
@@ -349,7 +166,7 @@ impl Web3ProxyApp {
                                 mpsc::unbounded_channel::<anyhow::Result<serde_json::Value>>();
 
                             let clone = self.clone();
-                            let connections = balanced_rpcs.connections.clone();
+                            let connections = balanced_rpcs.clone_connections();
                             let json_body = json_body.clone();
 
                             tokio::spawn(async move {
@@ -413,7 +230,7 @@ impl Web3ProxyApp {
     async fn try_send_requests(
         &self,
         rpc_servers: Vec<String>,
-        connections: Arc<ConnectionsMap>,
+        connections: Arc<Web3ConnectionMap>,
         json_request_body: serde_json::Value,
         tx: mpsc::UnboundedSender<anyhow::Result<serde_json::Value>>,
     ) -> anyhow::Result<()> {

@@ -1,3 +1,4 @@
+///! Communicate with a web3 providers
 use derive_more::From;
 use ethers::prelude::Middleware;
 use futures::StreamExt;
@@ -5,7 +6,7 @@ use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
 use tracing::{info, warn};
 
-use crate::block_watcher::{BlockWatcherItem, BlockWatcherSender};
+use crate::block_watcher::BlockWatcherSender;
 
 // TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
 #[derive(From)]
@@ -49,16 +50,12 @@ impl Web3Provider {
                         .unwrap();
                 }
                 */
-                block_watcher_sender
-                    .send(BlockWatcherItem::SubscribeHttp(url.clone()))
-                    .unwrap();
+                info!("work in progress");
             }
             Web3Provider::Ws(provider) => {
                 let mut stream = provider.subscribe_blocks().await?;
                 while let Some(block) = stream.next().await {
-                    block_watcher_sender
-                        .send(BlockWatcherItem::NewHead(Box::new((url.clone(), block))))
-                        .unwrap();
+                    block_watcher_sender.send((url.clone(), block)).unwrap();
                 }
             }
         }
