@@ -57,7 +57,7 @@ impl Web3Provider {
                 let mut stream = provider.subscribe_blocks().await?;
                 while let Some(block) = stream.next().await {
                     block_watcher_sender
-                        .send(BlockWatcherItem::NewHead((url.clone(), block)))
+                        .send(BlockWatcherItem::NewHead(Box::new((url.clone(), block))))
                         .unwrap();
                 }
             }
