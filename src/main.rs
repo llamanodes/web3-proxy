@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::sleep;
+use tracing::info;
 use warp::Filter;
 
 static APP_USER_AGENT: &str = concat!(
@@ -75,18 +76,24 @@ impl EthersConnection {
 
             let http_client = http_client.ok_or_else(|| anyhow::anyhow!("no http_client"))?;
 
-            ethers::providers::Http::new_with_client(url, http_client)
+            let provider = ethers::providers::Http::new_with_client(url, http_client);
+
+            // TODO: dry this up
+            ethers::providers::Provider::new(provider)
+                .interval(Duration::from_secs(1))
+                .into()
         } else if url_str.starts_with("ws") {
-            // ethers::providers::Ws::connect(s.to_string()).await?
+            let provider = ethers::providers::Ws::connect(url_str.to_string()).await?;
+
             // TODO: make sure this survives disconnects
-            unimplemented!();
+
+            // TODO: dry this up
+            ethers::providers::Provider::new(provider)
+                .interval(Duration::from_secs(1))
+                .into()
         } else {
             return Err(anyhow::anyhow!("only http and ws servers are supported"));
         };
-
-        let provider = ethers::providers::Provider::new(provider)
-            .interval(Duration::from_secs(1))
-            .into();
 
         match &provider {
             EthersProvider::Http(provider) => {
@@ -663,6 +670,11 @@ impl Web3ProxyState {
 
 #[tokio::main]
 async fn main() {
+    // install global collector configured based on RUST_LOG env var.
+    tracing_subscriber::fmt::init();
+
+    info!("starting");
+
     // TODO: load the config from yaml instead of hard coding
     // TODO: support multiple chains in one process. then we could just point "chain.stytt.com" at this and caddy wouldn't need anything else
     // TODO: i kind of want to make use of caddy's load balancing and health checking and such though
