@@ -1,5 +1,6 @@
 // TODO: don't use RwLock<HashMap>. i think we need a concurrent hashmap or we will hit all sorts of deadlocks
 
+use derive_more::From;
 use ethers::prelude::{Block, TxHash};
 use ethers::providers::Middleware;
 use futures::future;
@@ -25,27 +26,15 @@ static APP_USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
 );
 
-// TODO: i'm not sure we need this. i think we can use dyn
+// TODO: i tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
+#[derive(From)]
 enum EthersProvider {
     Http(ethers::providers::Provider<ethers::providers::Http>),
     Ws(ethers::providers::Provider<ethers::providers::Ws>),
 }
 
-// TODO: seems like this should be derivable
-impl From<ethers::providers::Provider<ethers::providers::Http>> for EthersProvider {
-    fn from(item: ethers::providers::Provider<ethers::providers::Http>) -> Self {
-        EthersProvider::Http(item)
-    }
-}
-
-// TODO: seems like this should be derivable
-impl From<ethers::providers::Provider<ethers::providers::Ws>> for EthersProvider {
-    fn from(item: ethers::providers::Provider<ethers::providers::Ws>) -> Self {
-        EthersProvider::Ws(item)
-    }
-}
-
 impl EthersProvider {
+    /// Send a web3 request
     pub async fn request(
         &self,
         method: &str,
@@ -57,6 +46,7 @@ impl EthersProvider {
         }
     }
 
+    /// Subscribe to new block heads
     pub async fn new_heads(&self, url: String, blocks: Arc<BlockMap>) -> anyhow::Result<()> {
         // TODO: automatically reconnect
         match &self {
