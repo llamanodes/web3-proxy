@@ -1,4 +1,4 @@
-// TODO: don't use dashmap. we need something for async
+// TODO: don't use RwLock<HashMap>. i think we need a concurrent hashmap or we will hit all sorts of deadlocks
 
 use ethers::prelude::{Block, TxHash};
 use ethers::providers::Middleware;
