@@ -116,7 +116,7 @@ impl Web3ProxyApp {
                 let read_lock = self.private_rpcs_ratelimiter_lock.read().await;
 
                 match private_rpcs
-                    .get_upstream_servers(self.block_watcher.clone())
+                    .get_upstream_servers(1, self.block_watcher.clone())
                     .await
                 {
                     Ok(upstream_servers) => {
@@ -167,7 +167,7 @@ impl Web3ProxyApp {
 
                 for balanced_rpcs in self.balanced_rpc_tiers.iter() {
                     match balanced_rpcs
-                        .next_upstream_server(self.block_watcher.clone())
+                        .next_upstream_server(1, self.block_watcher.clone())
                         .await
                     {
                         Ok(upstream_server) => {

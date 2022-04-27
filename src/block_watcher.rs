@@ -14,8 +14,41 @@ pub type NewHead = (String, Block<TxHash>);
 pub type BlockWatcherSender = mpsc::UnboundedSender<NewHead>;
 pub type BlockWatcherReceiver = mpsc::UnboundedReceiver<NewHead>;
 
+#[derive(Eq)]
+// TODO: ethers has a similar SyncingStatus
+pub enum SyncStatus {
+    Synced(u64),
+    Behind(u64),
+    Unknown,
+}
+
+// impl Ord for SyncStatus {
+//     fn cmp(&self, other: &Self) -> cmp::Ordering {
+//         self.height.cmp(&other.height)
+//     }
+// }
+
+// impl PartialOrd for SyncStatus {
+//     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+//         Some(self.cmp(other))
+//     }
+// }
+
+impl PartialEq for SyncStatus {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Synced(a), Self::Synced(b)) => a == b,
+            (Self::Unknown, Self::Unknown) => true,
+            (Self::Behind(a), Self::Behind(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct BlockWatcher {
     sender: BlockWatcherSender,
+    /// parking_lot::Mutex is supposed to be faster, but we only lock this once, so its fine
     receiver: Mutex<BlockWatcherReceiver>,
     block_numbers: DashMap<String, u64>,
     head_block_number: AtomicU64,
@@ -37,24 +70,30 @@ impl BlockWatcher {
         self.sender.clone()
     }
 
-    pub async fn is_synced(&self, rpc: String, allowed_lag: u64) -> anyhow::Result<bool> {
+    pub fn sync_status(&self, rpc: &str, allowed_lag: u64) -> SyncStatus {
         match (
             self.head_block_number.load(atomic::Ordering::SeqCst),
-            self.block_numbers.get(&rpc),
+            self.block_numbers.get(rpc),
         ) {
-            (0, _) => Ok(false),
-            (_, None) => Ok(false),
+            (0, _) => SyncStatus::Unknown,
+            (_, None) => SyncStatus::Unknown,
             (head_block_number, Some(rpc_block_number)) => {
                 match head_block_number.cmp(&rpc_block_number) {
-                    cmp::Ordering::Equal => Ok(true),
+                    cmp::Ordering::Equal => SyncStatus::Synced(0),
                     cmp::Ordering::Greater => {
                         // this probably won't happen, but it might if the block arrives at the exact wrong time
-                        Ok(true)
+                        // TODO: should this be negative?
+                        SyncStatus::Synced(0)
                     }
                     cmp::Ordering::Less => {
                         // allow being some behind
                         let lag = head_block_number - *rpc_block_number;
-                        Ok(lag <= allowed_lag)
+
+                        if lag <= allowed_lag {
+                            SyncStatus::Synced(lag)
+                        } else {
+                            SyncStatus::Behind(lag)
+                        }
                     }
                 }
             }
@@ -90,6 +129,7 @@ impl BlockWatcher {
             let head_number = self.head_block_number.load(atomic::Ordering::SeqCst);
 
             let label_slow_heads = if head_number == 0 {
+                // first block seen
                 self.head_block_number
                     .swap(new_block_number, atomic::Ordering::SeqCst);
                 "+".to_string()
@@ -98,7 +138,7 @@ impl BlockWatcher {
                 // TODO: alert if there is a large chain split?
                 match (new_block_number).cmp(&head_number) {
                     cmp::Ordering::Equal => {
-                        // this block is saved
+                        // this block is already saved as the head
                         "".to_string()
                     }
                     cmp::Ordering::Greater => {
@@ -108,6 +148,7 @@ impl BlockWatcher {
                         "+".to_string()
                     }
                     cmp::Ordering::Less => {
+                        // this rpc is behind
                         let lag = new_block_number as i64 - head_number as i64;
                         lag.to_string()
                     }

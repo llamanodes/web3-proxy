@@ -10,7 +10,7 @@ use tracing::{info, warn};
 use crate::block_watcher::BlockWatcherSender;
 
 // TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
-#[derive(From)]
+#[derive(From, Debug)]
 pub enum Web3Provider {
     Http(ethers::providers::Provider<ethers::providers::Http>),
     Ws(ethers::providers::Provider<ethers::providers::Ws>),
@@ -72,6 +72,7 @@ impl Web3Provider {
 }
 
 /// An active connection to a Web3Rpc
+#[derive(Debug)]
 pub struct Web3Connection {
     /// keep track of currently open requests. We sort on this
     active_requests: u32,
