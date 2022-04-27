@@ -269,16 +269,11 @@ impl Web3ProxyApp {
 
             async move {
                 // get the client for this rpc server
-                let provider = connections.read().await.get(&rpc).unwrap().clone_provider();
+                let provider = connections.get(&rpc).unwrap().clone_provider();
 
                 let response = provider.request(&method, params).await;
 
-                connections
-                    .write()
-                    .await
-                    .get_mut(&rpc)
-                    .unwrap()
-                    .dec_active_requests();
+                connections.get_mut(&rpc).unwrap().dec_active_requests();
 
                 let mut response = response?;
 
