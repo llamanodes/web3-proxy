@@ -1,6 +1,6 @@
 ///! Communicate with a web3 providers
 use derive_more::From;
-use ethers::prelude::Middleware;
+use ethers::prelude::{BlockNumber, Middleware};
 use futures::StreamExt;
 use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
@@ -40,16 +40,21 @@ impl Web3Provider {
 
         // TODO: automatically reconnect
         match &self {
-            Web3Provider::Http(_provider) => {
+            Web3Provider::Http(provider) => {
                 // TODO: there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
                 // TODO: how often?
+                // TODO: maybe it would be better to have one interval for all of these, but this works for now
                 let mut interval = interval(Duration::from_secs(2));
 
                 loop {
                     // wait for 2 seconds
                     interval.tick().await;
 
-                    unimplemented!("todo: send block number")
+                    match provider.get_block(BlockNumber::Latest).await {
+                        Ok(Some(block)) => block_watcher_sender.send((url.clone(), block)).unwrap(),
+                        Ok(None) => warn!("no black at {}", url),
+                        Err(e) => warn!("getBlock at {} failed: {}", url, e),
+                    }
                 }
             }
             Web3Provider::Ws(provider) => {

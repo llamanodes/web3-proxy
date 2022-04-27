@@ -345,10 +345,16 @@ async fn main() {
             vec![("ws://10.11.12.16:8545", 0), ("ws://10.11.12.16:8946", 0)],
             // paid nodes
             // TODO: add paid nodes (with rate limits)
-            // free nodes
-            // TODO: add rate limits
             vec![
-                ("https://main-rpc.linkpool.io", 0),
+                // chainstack.com archive
+                (
+                    "wss://ws-nd-373-761-850.p2pify.com/106d73af4cebc487df5ba92f1ad8dee7",
+                    0,
+                ),
+            ],
+            // free nodes
+            vec![
+                // ("https://main-rpc.linkpool.io", 0), // linkpool is slow
                 ("https://rpc.ankr.com/eth", 0),
             ],
         ],

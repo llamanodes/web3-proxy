@@ -121,12 +121,10 @@ impl BlockWatcher {
 
             // TODO: include time since last update?
             info!(
-                "{:?} = {} Ts: {:?}, block number: {}, age: {}s {}",
+                "{:?} = {}, {}, {} sec, {}",
                 new_block.hash.unwrap(),
-                rpc,
-                // TODO: human readable time?
-                new_block.timestamp,
                 new_block.number.unwrap(),
+                rpc,
                 now - new_block.timestamp.as_u64() as i64,
                 label_slow_heads
             );
