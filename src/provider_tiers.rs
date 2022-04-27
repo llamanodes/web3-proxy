@@ -89,6 +89,14 @@ impl Web3ProviderTier {
 
         for selected_rpc in balanced_rpcs.iter() {
             // TODO: check current block number. if too far behind, make our own NotUntil here
+            if !block_watcher
+                .is_synced(selected_rpc.clone(), 3)
+                .await
+                .expect("checking is_synced failed")
+            {
+                // skip this rpc because it is not synced
+                continue;
+            }
 
             let ratelimits = self.ratelimits.write().await;
 
@@ -145,6 +153,16 @@ impl Web3ProviderTier {
         let mut selected_rpcs = vec![];
 
         for selected_rpc in self.rpcs.read().await.iter() {
+            // check that the server is synced
+            if !block_watcher
+                .is_synced(selected_rpc.clone(), 3)
+                .await
+                .expect("checking is_synced failed")
+            {
+                // skip this rpc because it is not synced
+                continue;
+            }
+
             // check rate limits
             match self
                 .ratelimits
