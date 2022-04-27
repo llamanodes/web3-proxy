@@ -4,6 +4,7 @@ use ethers::prelude::Middleware;
 use futures::StreamExt;
 use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
+use tokio::time::interval;
 use tracing::{info, warn};
 
 use crate::block_watcher::BlockWatcherSender;
@@ -40,17 +41,16 @@ impl Web3Provider {
         // TODO: automatically reconnect
         match &self {
             Web3Provider::Http(_provider) => {
-                /*
-                // TODO: not all providers have this. we need to write our interval checking
-                let mut stream = provider.watch_blocks().await?;
-                while let Some(block_number) = stream.next().await {
-                    let block = provider.get_block(block_number).await?.expect("no block");
-                    block_watcher_sender
-                        .send(Some((url.clone(), block)))
-                        .unwrap();
+                // TODO: there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
+                // TODO: how often?
+                let mut interval = interval(Duration::from_secs(2));
+
+                loop {
+                    // wait for 2 seconds
+                    interval.tick().await;
+
+                    unimplemented!("todo: send block number")
                 }
-                */
-                info!("work in progress");
             }
             Web3Provider::Ws(provider) => {
                 let mut stream = provider.subscribe_blocks().await?;
