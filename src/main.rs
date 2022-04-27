@@ -24,6 +24,7 @@ static APP_USER_AGENT: &str = concat!(
 
 /// The application
 struct Web3ProxyApp {
+    block_watcher: Arc<BlockWatcher>,
     /// clock used for rate limiting
     /// TODO: use tokio's clock (will require a different ratelimiting crate)
     clock: QuantaClock,
@@ -43,8 +44,6 @@ impl Web3ProxyApp {
     ) -> anyhow::Result<Web3ProxyApp> {
         let clock = QuantaClock::default();
 
-        let (mut block_watcher, block_watcher_sender) = BlockWatcher::new();
-
         // make a http shared client
         // TODO: how should we configure the connection pool?
         // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something
@@ -53,15 +52,19 @@ impl Web3ProxyApp {
             .user_agent(APP_USER_AGENT)
             .build()?;
 
+        let block_watcher = Arc::new(BlockWatcher::new());
+
+        let block_watcher_clone = Arc::clone(&block_watcher);
+
         // start the block_watcher
-        tokio::spawn(async move { block_watcher.run().await });
+        tokio::spawn(async move { block_watcher_clone.run().await });
 
         let balanced_rpc_tiers = Arc::new(
             future::join_all(balanced_rpc_tiers.into_iter().map(|balanced_rpc_tier| {
                 Web3ProviderTier::try_new(
                     balanced_rpc_tier,
                     Some(http_client.clone()),
-                    block_watcher_sender.clone(),
+                    block_watcher.clone(),
                     &clock,
                 )
             }))
@@ -77,7 +80,7 @@ impl Web3ProxyApp {
                 Web3ProviderTier::try_new(
                     private_rpcs,
                     Some(http_client),
-                    block_watcher_sender,
+                    block_watcher.clone(),
                     &clock,
                 )
                 .await?,
@@ -86,6 +89,7 @@ impl Web3ProxyApp {
 
         // TODO: warn if no private relays
         Ok(Web3ProxyApp {
+            block_watcher,
             clock,
             balanced_rpc_tiers,
             private_rpcs,
@@ -111,7 +115,10 @@ impl Web3ProxyApp {
             loop {
                 let read_lock = self.private_rpcs_ratelimiter_lock.read().await;
 
-                match private_rpcs.get_upstream_servers().await {
+                match private_rpcs
+                    .get_upstream_servers(self.block_watcher.clone())
+                    .await
+                {
                     Ok(upstream_servers) => {
                         let (tx, mut rx) =
                             mpsc::unbounded_channel::<anyhow::Result<serde_json::Value>>();
@@ -160,7 +167,10 @@ impl Web3ProxyApp {
                 let mut earliest_not_until = None;
 
                 for balanced_rpcs in self.balanced_rpc_tiers.iter() {
-                    match balanced_rpcs.next_upstream_server().await {
+                    match balanced_rpcs
+                        .next_upstream_server(self.block_watcher.clone())
+                        .await
+                    {
                         Ok(upstream_server) => {
                             let (tx, mut rx) =
                                 mpsc::unbounded_channel::<anyhow::Result<serde_json::Value>>();

@@ -9,7 +9,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::block_watcher::BlockWatcherSender;
+use crate::block_watcher::BlockWatcher;
 use crate::provider::Web3Connection;
 
 type Web3RateLimiter =
@@ -33,7 +33,7 @@ impl Web3ProviderTier {
     pub async fn try_new(
         servers: Vec<(&str, u32)>,
         http_client: Option<reqwest::Client>,
-        block_watcher_sender: BlockWatcherSender,
+        block_watcher: Arc<BlockWatcher>,
         clock: &QuantaClock,
     ) -> anyhow::Result<Web3ProviderTier> {
         let mut rpcs: Vec<String> = vec![];
@@ -46,7 +46,7 @@ impl Web3ProviderTier {
             let connection = Web3Connection::try_new(
                 s.to_string(),
                 http_client.clone(),
-                block_watcher_sender.clone(),
+                block_watcher.clone_sender(),
             )
             .await?;
 
@@ -73,7 +73,10 @@ impl Web3ProviderTier {
     }
 
     /// get the best available rpc server
-    pub async fn next_upstream_server(&self) -> Result<String, NotUntil<QuantaInstant>> {
+    pub async fn next_upstream_server(
+        &self,
+        block_watcher: Arc<BlockWatcher>,
+    ) -> Result<String, NotUntil<QuantaInstant>> {
         let mut balanced_rpcs = self.rpcs.write().await;
 
         // sort rpcs by their active connections
@@ -85,7 +88,8 @@ impl Web3ProviderTier {
         let mut earliest_not_until = None;
 
         for selected_rpc in balanced_rpcs.iter() {
-            // TODO: check current block number. if behind, make our own NotUntil here
+            // TODO: check current block number. if too far behind, make our own NotUntil here
+
             let ratelimits = self.ratelimits.write().await;
 
             // check rate limits
@@ -132,7 +136,10 @@ impl Web3ProviderTier {
     }
 
     /// get all available rpc servers
-    pub async fn get_upstream_servers(&self) -> Result<Vec<String>, NotUntil<QuantaInstant>> {
+    pub async fn get_upstream_servers(
+        &self,
+        block_watcher: Arc<BlockWatcher>,
+    ) -> Result<Vec<String>, NotUntil<QuantaInstant>> {
         let mut earliest_not_until = None;
 
         let mut selected_rpcs = vec![];

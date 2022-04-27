@@ -2,8 +2,9 @@
 use ethers::prelude::{Block, TxHash};
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use tracing::info;
 
 // TODO: what type for the Item? String url works, but i don't love it
@@ -13,51 +14,62 @@ pub type BlockWatcherSender = mpsc::UnboundedSender<NewHead>;
 pub type BlockWatcherReceiver = mpsc::UnboundedReceiver<NewHead>;
 
 pub struct BlockWatcher {
-    receiver: BlockWatcherReceiver,
+    sender: BlockWatcherSender,
+    receiver: RwLock<BlockWatcherReceiver>,
     /// TODO: i don't think we want a hashmap. we want a left-right or some other concurrent map
-    blocks: HashMap<String, Block<TxHash>>,
-    latest_block: Option<Block<TxHash>>,
+    blocks: RwLock<HashMap<String, Block<TxHash>>>,
+    latest_block: RwLock<Option<Block<TxHash>>>,
 }
 
 impl BlockWatcher {
-    pub fn new() -> (BlockWatcher, BlockWatcherSender) {
+    pub fn new() -> Self {
         // TODO: this also needs to return a reader for blocks
         let (sender, receiver) = mpsc::unbounded_channel();
 
-        let watcher = Self {
-            receiver,
+        Self {
+            sender,
+            receiver: RwLock::new(receiver),
             blocks: Default::default(),
-            latest_block: None,
-        };
-
-        (watcher, sender)
+            latest_block: RwLock::new(None),
+        }
     }
 
-    pub async fn run(&mut self) -> anyhow::Result<()> {
-        while let Some((rpc, block)) = self.receiver.recv().await {
+    pub fn clone_sender(&self) -> BlockWatcherSender {
+        self.sender.clone()
+    }
+
+    pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
+        let mut receiver = self.receiver.write().await;
+
+        while let Some((rpc, block)) = receiver.recv().await {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Time went backwards")
                 .as_secs() as i64;
 
-            let current_block = self.blocks.get(&rpc);
-
-            if current_block == Some(&block) {
-                // we already have this block
-                continue;
+            {
+                let blocks = self.blocks.read().await;
+                if blocks.get(&rpc) == Some(&block) {
+                    // we already have this block
+                    continue;
+                }
             }
 
-            let label_slow_blocks = if self.latest_block.is_none() {
-                self.latest_block = Some(block.clone());
+            // save the block for this rpc
+            self.blocks.write().await.insert(rpc.clone(), block.clone());
+
+            // TODO: we don't always need this to have a write lock
+            let mut latest_block = self.latest_block.write().await;
+
+            let label_slow_blocks = if latest_block.is_none() {
+                *latest_block = Some(block.clone());
                 "+"
             } else {
-                let latest_block = self.latest_block.as_ref().unwrap();
-
                 // TODO: what if they have the same number but different hashes? or aren't on the same chain?
-                match block.number.cmp(&latest_block.number) {
+                match block.number.cmp(&latest_block.as_ref().unwrap().number) {
                     Ordering::Equal => "",
                     Ordering::Greater => {
-                        self.latest_block = Some(block.clone());
+                        *latest_block = Some(block.clone());
                         "+"
                     }
                     Ordering::Less => {
@@ -78,7 +90,6 @@ impl BlockWatcher {
                 now - block.timestamp.as_u64() as i64,
                 label_slow_blocks
             );
-            self.blocks.insert(rpc, block);
         }
 
         Ok(())
