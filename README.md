@@ -28,10 +28,28 @@ cargo run -r -- --eth-primary-rpc "https://your.favorite.provider"
 curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"web3_clientVersion","params":[],"id":67}' 127.0.0.1:8845/eth
 ```
 
+## Load Testing
+
+Test the proxy:
+
+    wrk -s ./getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8445
+    wrk -s ./getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8445
+
+Test geth:
+
+    wrk -s ./getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8545
+    wrk -s ./getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8545
+
+Test erigon:
+
+    wrk -s ./getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8945
+    wrk -s ./getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8945
+
 
 ## Todo
 
 - [x] simple proxy
+- [ ] better locking. when lots of requests come in, we seem to be in the way of block updates
 - [ ] proper logging
 - [ ] load balance between multiple RPC servers
 - [ ] support more than just ETH
@@ -39,3 +57,6 @@ curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","metho
 - [ ] health check nodes by block height
 - [ ] measure latency to nodes
 - [ ] Dockerfile
+- [ ] testing getLatestBlockByNumber is not great because the latest block changes and so one run is likely to be different than another
+- [ ] if a request gets a socket timeout, try on another server
+  - maybe always try at least two servers in parallel? and then return the first? or only if the first one doesn't respond very quickly?

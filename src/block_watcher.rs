@@ -132,7 +132,7 @@ impl BlockWatcher {
                 // first block seen
                 self.head_block_number
                     .swap(new_block_number, atomic::Ordering::SeqCst);
-                "+".to_string()
+                ", +".to_string()
             } else {
                 // TODO: what if they have the same number but different hashes?
                 // TODO: alert if there is a large chain split?
@@ -145,19 +145,24 @@ impl BlockWatcher {
                         // new_block is the new head_block
                         self.head_block_number
                             .swap(new_block_number, atomic::Ordering::SeqCst);
-                        "+".to_string()
+                        ", +".to_string()
                     }
                     cmp::Ordering::Less => {
                         // this rpc is behind
                         let lag = new_block_number as i64 - head_number as i64;
-                        lag.to_string()
+
+                        let mut s = ", ".to_string();
+
+                        s.push_str(&lag.to_string());
+
+                        s
                     }
                 }
             };
 
             // TODO: include time since last update?
             info!(
-                "{:?} = {}, {}, {} sec, {}",
+                "{:?} = {}, {}, {} sec{}",
                 new_block.hash.unwrap(),
                 new_block.number.unwrap(),
                 rpc,

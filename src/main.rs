@@ -4,11 +4,12 @@ mod provider_tiers;
 
 use futures::future;
 use governor::clock::{Clock, QuantaClock};
+use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::sleep;
-use tracing::log::warn;
+use tracing::{info, warn};
 use warp::Filter;
 
 // use crate::types::{BlockMap, ConnectionsMap, RpcRateLimiterMap};
@@ -115,6 +116,8 @@ impl Web3ProxyApp {
             loop {
                 let read_lock = self.private_rpcs_ratelimiter_lock.read().await;
 
+                let json_body_clone = json_body.clone();
+
                 match private_rpcs
                     .get_upstream_servers(1, self.block_watcher.clone())
                     .await
@@ -125,11 +128,18 @@ impl Web3ProxyApp {
 
                         let clone = self.clone();
                         let connections = private_rpcs.clone_connections();
-                        let json_body = json_body.clone();
+
+                        // check incoming_id before sending any requests
+                        let incoming_id = json_body.as_object().unwrap().get("id").unwrap();
 
                         tokio::spawn(async move {
                             clone
-                                .try_send_requests(upstream_servers, connections, json_body, tx)
+                                .try_send_requests(
+                                    upstream_servers,
+                                    connections,
+                                    json_body_clone,
+                                    tx,
+                                )
                                 .await
                         });
 
@@ -138,7 +148,12 @@ impl Web3ProxyApp {
                             .await
                             .ok_or_else(|| anyhow::anyhow!("no successful response"))?;
 
-                        if let Ok(response) = response {
+                        if let Ok(partial_response) = response {
+                            let response = json!({
+                                "jsonrpc": "2.0",
+                                "id": incoming_id,
+                                "result": partial_response
+                            });
                             return Ok(warp::reply::json(&response));
                         }
                     }
@@ -165,36 +180,51 @@ impl Web3ProxyApp {
                 // there are multiple tiers. save the earliest not_until (if any). if we don't return, we will sleep until then and then try again
                 let mut earliest_not_until = None;
 
+                // check incoming_id before sending any requests
+                let incoming_id = json_body.as_object().unwrap().get("id").unwrap();
+
                 for balanced_rpcs in self.balanced_rpc_tiers.iter() {
                     match balanced_rpcs
                         .next_upstream_server(1, self.block_watcher.clone())
                         .await
                     {
                         Ok(upstream_server) => {
+                            // TODO: better type for this. right now its request (the full jsonrpc object), response (just the inner result)
                             let (tx, mut rx) =
                                 mpsc::unbounded_channel::<anyhow::Result<serde_json::Value>>();
 
-                            let clone = self.clone();
-                            let connections = balanced_rpcs.clone_connections();
-                            let json_body = json_body.clone();
+                            {
+                                // clone things so we can move them into the future and still use them here
+                                let clone = self.clone();
+                                let connections = balanced_rpcs.clone_connections();
+                                let json_body = json_body.clone();
+                                let upstream_server = upstream_server.clone();
 
-                            tokio::spawn(async move {
-                                clone
-                                    .try_send_requests(
-                                        vec![upstream_server],
-                                        connections,
-                                        json_body,
-                                        tx,
-                                    )
-                                    .await
-                            });
+                                tokio::spawn(async move {
+                                    clone
+                                        .try_send_requests(
+                                            vec![upstream_server],
+                                            connections,
+                                            json_body,
+                                            tx,
+                                        )
+                                        .await
+                                });
+                            }
 
                             let response = rx
                                 .recv()
                                 .await
                                 .ok_or_else(|| anyhow::anyhow!("no successful response"))?;
 
-                            if let Ok(response) = response {
+                            if let Ok(partial_response) = response {
+                                info!("forwarding request from {}", upstream_server);
+
+                                let response = json!({
+                                    "jsonrpc": "2.0",
+                                    "id": incoming_id,
+                                    "result": partial_response
+                                });
                                 return Ok(warp::reply::json(&response));
                             }
                         }
@@ -240,13 +270,10 @@ impl Web3ProxyApp {
         rpc_servers: Vec<String>,
         connections: Arc<Web3ConnectionMap>,
         json_request_body: serde_json::Value,
+        // TODO: better type for this
         tx: mpsc::UnboundedSender<anyhow::Result<serde_json::Value>>,
     ) -> anyhow::Result<()> {
         // {"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}
-        let incoming_id = json_request_body
-            .get("id")
-            .ok_or_else(|| anyhow::anyhow!("bad id"))?
-            .to_owned();
         let method = json_request_body
             .get("method")
             .and_then(|x| x.as_str())
@@ -259,7 +286,6 @@ impl Web3ProxyApp {
 
         // send the query to all the servers
         let bodies = future::join_all(rpc_servers.into_iter().map(|rpc| {
-            let incoming_id = incoming_id.clone();
             let connections = connections.clone();
             let method = method.clone();
             let params = params.clone();
@@ -273,14 +299,9 @@ impl Web3ProxyApp {
 
                 connections.get_mut(&rpc).unwrap().dec_active_requests();
 
-                let mut response = response?;
+                let response = response?;
 
                 // TODO: if "no block with that header" or some other jsonrpc errors, skip this response
-
-                // replace the id with what we originally received
-                if let Some(response_id) = response.get_mut("id") {
-                    *response_id = incoming_id;
-                }
 
                 // send the first good response to a one shot channel. that way we respond quickly
                 // drop the result because errors are expected after the first send
