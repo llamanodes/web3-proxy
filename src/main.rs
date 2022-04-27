@@ -46,7 +46,7 @@ impl Web3ProxyApp {
 
         // make a http shared client
         // TODO: how should we configure the connection pool?
-        // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something
+        // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something is wrong with the remote server
         let http_client = reqwest::ClientBuilder::new()
             .timeout(Duration::from_secs(300))
             .user_agent(APP_USER_AGENT)
@@ -74,6 +74,7 @@ impl Web3ProxyApp {
         );
 
         let private_rpcs = if private_rpcs.is_empty() {
+            warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             None
         } else {
             Some(Arc::new(
@@ -87,7 +88,6 @@ impl Web3ProxyApp {
             ))
         };
 
-        // TODO: warn if no private relays
         Ok(Web3ProxyApp {
             block_watcher,
             clock,
@@ -160,7 +160,6 @@ impl Web3ProxyApp {
             // this is not a private transaction (or no private relays are configured)
             // try to send to each tier, stopping at the first success
             loop {
-                // TODO: i'm not positive that this locking is correct
                 let read_lock = self.balanced_rpc_ratelimiter_lock.read().await;
 
                 // there are multiple tiers. save the earliest not_until (if any). if we don't return, we will sleep until then and then try again
@@ -204,7 +203,6 @@ impl Web3ProxyApp {
                             if earliest_not_until.is_none() {
                                 earliest_not_until = Some(not_until);
                             } else {
-                                // TODO: do we need to unwrap this far? can we just compare the not_untils
                                 let earliest_possible =
                                     earliest_not_until.as_ref().unwrap().earliest_possible();
                                 let new_earliest_possible = not_until.earliest_possible();
@@ -277,6 +275,8 @@ impl Web3ProxyApp {
 
                 let mut response = response?;
 
+                // TODO: if "no block with that header" or some other jsonrpc errors, skip this response
+
                 // replace the id with what we originally received
                 if let Some(response_id) = response.get_mut("id") {
                     *response_id = incoming_id;
@@ -284,7 +284,6 @@ impl Web3ProxyApp {
 
                 // send the first good response to a one shot channel. that way we respond quickly
                 // drop the result because errors are expected after the first send
-                // TODO: if "no block with that header" or some other jsonrpc errors, skip this response
                 let _ = tx.send(Ok(response));
 
                 Ok::<(), anyhow::Error>(())
@@ -329,11 +328,10 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     // TODO: load the config from yaml instead of hard coding
-    // TODO: support multiple chains in one process. then we could just point "chain.stytt.com" at this and caddy wouldn't need anything else
-    // TODO: i kind of want to make use of caddy's load balancing and health checking and such though
+    // TODO: support multiple chains in one process? then we could just point "chain.stytt.com" at this and caddy wouldn't need anything else
+    // TODO: be smart about about using archive nodes? have a set that doesn't use archive nodes since queries to them are more valuable
     let listen_port = 8445;
 
-    // TODO: be smart about about using archive nodes?
     let state = Web3ProxyApp::try_new(
         vec![
             // local nodes
@@ -378,7 +376,6 @@ async fn main() {
 pub fn handle_anyhow_errors<T: warp::Reply>(res: anyhow::Result<T>) -> Box<dyn warp::Reply> {
     match res {
         Ok(r) => Box::new(r.into_response()),
-        // TODO: json error?
         Err(e) => Box::new(warp::reply::with_status(
             format!("{}", e),
             reqwest::StatusCode::INTERNAL_SERVER_ERROR,

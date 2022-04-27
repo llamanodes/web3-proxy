@@ -38,12 +38,11 @@ impl Web3Provider {
     ) -> anyhow::Result<()> {
         info!("Watching new_heads from {}", url);
 
-        // TODO: automatically reconnect
         match &self {
             Web3Provider::Http(provider) => {
                 // TODO: there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
-                // TODO: how often?
-                // TODO: maybe it would be better to have one interval for all of these, but this works for now
+                // TODO: what should this interval be?
+                // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
                 let mut interval = interval(Duration::from_secs(2));
 
                 loop {
@@ -58,6 +57,7 @@ impl Web3Provider {
                 }
             }
             Web3Provider::Ws(provider) => {
+                // TODO: automatically reconnect?
                 let mut stream = provider.subscribe_blocks().await?;
                 while let Some(block) = stream.next().await {
                     block_watcher_sender.send((url.clone(), block)).unwrap();
@@ -89,7 +89,6 @@ impl Web3Connection {
         http_client: Option<reqwest::Client>,
         block_watcher_sender: BlockWatcherSender,
     ) -> anyhow::Result<Web3Connection> {
-        // TODO: create an ethers-rs rpc client and subscribe/watch new heads in a spawned task
         let provider = if url_str.starts_with("http") {
             let url: url::Url = url_str.parse()?;
 
@@ -97,16 +96,16 @@ impl Web3Connection {
 
             let provider = ethers::providers::Http::new_with_client(url, http_client);
 
-            // TODO: dry this up
+            // TODO: dry this up (needs https://github.com/gakonst/ethers-rs/issues/592)
             ethers::providers::Provider::new(provider)
                 .interval(Duration::from_secs(1))
                 .into()
         } else if url_str.starts_with("ws") {
             let provider = ethers::providers::Ws::connect(url_str.clone()).await?;
 
-            // TODO: make sure this survives disconnects
+            // TODO: make sure this automatically reconnects
 
-            // TODO: dry this up
+            // TODO: dry this up (needs https://github.com/gakonst/ethers-rs/issues/592)
             ethers::providers::Provider::new(provider)
                 .interval(Duration::from_secs(1))
                 .into()
@@ -117,7 +116,6 @@ impl Web3Connection {
         let provider = Arc::new(provider);
 
         // subscribe to new heads in a spawned future
-        // TODO: if http, maybe we should check them all on the same interval. and if there is at least one websocket, use that message to start check?
         let provider_clone: Arc<Web3Provider> = Arc::clone(&provider);
         tokio::spawn(async move {
             while let Err(e) = provider_clone

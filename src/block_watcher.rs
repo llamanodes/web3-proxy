@@ -17,15 +17,12 @@ pub type BlockWatcherReceiver = mpsc::UnboundedReceiver<NewHead>;
 pub struct BlockWatcher {
     sender: BlockWatcherSender,
     receiver: Mutex<BlockWatcherReceiver>,
-    // TODO: i don't think we want a RwLock. we want an ArcSwap or something
-    // TODO: should we just store the block number?
     block_numbers: DashMap<String, u64>,
     head_block_number: AtomicU64,
 }
 
 impl BlockWatcher {
     pub fn new() -> Self {
-        // TODO: this also needs to return a reader for blocks
         let (sender, receiver) = mpsc::unbounded_channel();
 
         Self {
@@ -56,7 +53,6 @@ impl BlockWatcher {
                     }
                     cmp::Ordering::Less => {
                         // allow being some behind
-                        // TODO: why do we need a clone here?
                         let lag = head_block_number - *rpc_block_number;
                         Ok(lag <= allowed_lag)
                     }
@@ -88,7 +84,7 @@ impl BlockWatcher {
                 .as_secs() as i64;
 
             // save the block for this rpc
-            // TODO:store the actual chain as a graph and then have self.blocks point to that?
+            // TODO: store the actual chain as a graph and then have self.blocks point to that?
             self.block_numbers.insert(rpc.clone(), new_block_number);
 
             let head_number = self.head_block_number.load(atomic::Ordering::SeqCst);
@@ -112,7 +108,6 @@ impl BlockWatcher {
                         "+".to_string()
                     }
                     cmp::Ordering::Less => {
-                        // TODO: include how many blocks behind?
                         let lag = new_block_number as i64 - head_number as i64;
                         lag.to_string()
                     }

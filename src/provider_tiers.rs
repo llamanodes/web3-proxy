@@ -20,7 +20,6 @@ type Web3RateLimiterMap = DashMap<String, Web3RateLimiter>;
 pub type Web3ConnectionMap = DashMap<String, Web3Connection>;
 
 /// Load balance to the rpc
-/// TODO: i'm not sure about having 3 locks here. can we share them?
 pub struct Web3ProviderTier {
     /// RPC urls sorted by active requests
     /// TODO: what type for the rpc?
@@ -90,13 +89,14 @@ impl Web3ProviderTier {
         let mut earliest_not_until = None;
 
         for selected_rpc in balanced_rpcs.iter() {
-            // TODO: check current block number. if too far behind, make our own NotUntil here
+            // check current block number
             if !block_watcher
                 .is_synced(selected_rpc.clone(), 3)
                 .await
                 .expect("checking is_synced failed")
             {
                 // skip this rpc because it is not synced
+                // TODO: make a NotUntil here?
                 continue;
             }
 
@@ -204,7 +204,6 @@ impl Web3ProviderTier {
         if let Some(not_until) = earliest_not_until {
             Err(not_until)
         } else {
-            // TODO: is this right?
             Ok(vec![])
         }
     }
