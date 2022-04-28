@@ -161,7 +161,7 @@ impl Web3ProviderTier {
 
     /// get the best available rpc server
     #[instrument]
-    pub async fn next_upstream_server(&self) -> Result<String, NotUntil<QuantaInstant>> {
+    pub async fn next_upstream_server(&self) -> Result<String, Option<NotUntil<QuantaInstant>>> {
         let mut earliest_not_until = None;
 
         for selected_rpc in self.synced_rpcs.load().iter() {
@@ -203,16 +203,14 @@ impl Web3ProviderTier {
             return Ok(selected_rpc.clone());
         }
 
-        // return the smallest not_until
-        if let Some(not_until) = earliest_not_until {
-            Err(not_until)
-        } else {
-            unimplemented!();
-        }
+        // this might be None
+        Err(earliest_not_until)
     }
 
     /// get all available rpc servers
-    pub async fn get_upstream_servers(&self) -> Result<Vec<String>, NotUntil<QuantaInstant>> {
+    pub async fn get_upstream_servers(
+        &self,
+    ) -> Result<Vec<String>, Option<NotUntil<QuantaInstant>>> {
         let mut earliest_not_until = None;
         let mut selected_rpcs = vec![];
         for selected_rpc in self.synced_rpcs.load().iter() {
@@ -253,11 +251,7 @@ impl Web3ProviderTier {
             return Ok(selected_rpcs);
         }
 
-        // return the earliest not_until
-        if let Some(not_until) = earliest_not_until {
-            Err(not_until)
-        } else {
-            Ok(vec![])
-        }
+        // return the earliest not_until (if no rpcs are synced, this will be None)
+        Err(earliest_not_until)
     }
 }

@@ -28,22 +28,31 @@ cargo run -r -- --eth-primary-rpc "https://your.favorite.provider"
 curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"web3_clientVersion","params":[],"id":67}' 127.0.0.1:8845/eth
 ```
 
+## Flame Graphs
+
+    $ cat /proc/sys/kernel/kptr_restrict
+    1
+    $ echo 0 |sudo tee /proc/sys/kernel/kptr_restrict
+    0
+    $ CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph
+
+
 ## Load Testing
 
 Test the proxy:
 
-    wrk -s ./getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8445
-    wrk -s ./getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8445
+    wrk -s ./data/wrk/getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8445
+    wrk -s ./data/wrk/getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8445
 
 Test geth:
 
-    wrk -s ./getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8545
-    wrk -s ./getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8545
+    wrk -s ./data/wrk/getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8545
+    wrk -s ./data/wrk/getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8545
 
 Test erigon:
 
-    wrk -s ./getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8945
-    wrk -s ./getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8945
+    wrk -s ./data/wrk/getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8945
+    wrk -s ./data/wrk/getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8945
 
 
 ## Todo
