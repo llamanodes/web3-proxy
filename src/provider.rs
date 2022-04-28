@@ -8,6 +8,7 @@ use governor::state::{InMemoryState, NotKeyed};
 use governor::NotUntil;
 use governor::RateLimiter;
 use std::fmt;
+use std::sync::atomic::{self, AtomicUsize};
 use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::time::interval;
@@ -91,7 +92,7 @@ impl Web3Provider {
 #[derive(Debug)]
 pub struct Web3Connection {
     /// keep track of currently open requests. We sort on this
-    active_requests: u32,
+    active_requests: AtomicUsize,
     provider: Arc<Web3Provider>,
     ratelimiter: Option<Web3RateLimiter>,
 }
@@ -146,13 +147,13 @@ impl Web3Connection {
         });
 
         Ok(Web3Connection {
-            active_requests: 0,
+            active_requests: Default::default(),
             provider,
             ratelimiter,
         })
     }
 
-    pub fn try_inc_active_requests(&mut self) -> Result<(), NotUntil<QuantaInstant>> {
+    pub fn try_inc_active_requests(&self) -> Result<(), NotUntil<QuantaInstant>> {
         // check rate limits
         if let Some(ratelimiter) = self.ratelimiter.as_ref() {
             match ratelimiter.check() {
@@ -170,13 +171,15 @@ impl Web3Connection {
             }
         };
 
-        self.active_requests += 1;
+        // TODO: what ordering?!
+        self.active_requests.fetch_add(1, atomic::Ordering::AcqRel);
 
         Ok(())
     }
 
-    pub fn dec_active_requests(&mut self) {
-        self.active_requests -= 1;
+    pub fn dec_active_requests(&self) {
+        // TODO: what ordering?!
+        self.active_requests.fetch_sub(1, atomic::Ordering::AcqRel);
     }
 }
 
@@ -184,7 +187,10 @@ impl Eq for Web3Connection {}
 
 impl Ord for Web3Connection {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.active_requests.cmp(&other.active_requests)
+        // TODO: what atomic ordering?!
+        self.active_requests
+            .load(atomic::Ordering::Acquire)
+            .cmp(&other.active_requests.load(atomic::Ordering::Acquire))
     }
 }
 
@@ -197,6 +203,8 @@ impl PartialOrd for Web3Connection {
 /// note that this is just comparing the active requests. two providers with different rpc urls are equal!
 impl PartialEq for Web3Connection {
     fn eq(&self, other: &Self) -> bool {
-        self.active_requests == other.active_requests
+        // TODO: what ordering?!
+        self.active_requests.load(atomic::Ordering::Acquire)
+            == other.active_requests.load(atomic::Ordering::Acquire)
     }
 }

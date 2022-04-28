@@ -3759,7 +3759,6 @@ dependencies = [
  "arc-swap",
  "argh",
  "atomic-counter",
- "dashmap",
  "derive_more",
  "ethers",
  "futures",

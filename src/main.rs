@@ -57,6 +57,22 @@ impl Web3ProxyApp {
     ) -> anyhow::Result<Web3ProxyApp> {
         let clock = QuantaClock::default();
 
+        let mut rpcs = vec![];
+        for balanced_rpc_tier in balanced_rpc_tiers.iter() {
+            for rpc_data in balanced_rpc_tier {
+                let rpc = rpc_data.0.to_string();
+
+                rpcs.push(rpc);
+            }
+        }
+        for rpc_data in private_rpcs.iter() {
+            let rpc = rpc_data.0.to_string();
+
+            rpcs.push(rpc);
+        }
+
+        let block_watcher = Arc::new(BlockWatcher::new(rpcs));
+
         // make a http shared client
         // TODO: how should we configure the connection pool?
         // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something is wrong with the remote server
@@ -64,17 +80,6 @@ impl Web3ProxyApp {
             .timeout(Duration::from_secs(300))
             .user_agent(APP_USER_AGENT)
             .build()?;
-
-        let block_watcher = Arc::new(BlockWatcher::new());
-
-        let (new_block_sender, mut new_block_receiver) = watch::channel::<String>("".to_string());
-
-        {
-            // TODO: spawn this later?
-            // spawn a future for the block_watcher
-            let block_watcher = block_watcher.clone();
-            tokio::spawn(async move { block_watcher.run(new_block_sender).await });
-        }
 
         let balanced_rpc_tiers = Arc::new(
             future::join_all(balanced_rpc_tiers.into_iter().map(|balanced_rpc_tier| {
@@ -104,6 +109,15 @@ impl Web3ProxyApp {
                 .await?,
             ))
         };
+
+        let (new_block_sender, mut new_block_receiver) = watch::channel::<String>("".to_string());
+
+        {
+            // TODO: spawn this later?
+            // spawn a future for the block_watcher
+            let block_watcher = block_watcher.clone();
+            tokio::spawn(async move { block_watcher.run(new_block_sender).await });
+        }
 
         {
             // spawn a future for sorting our synced rpcs
@@ -368,7 +382,7 @@ impl Web3ProxyApp {
 
                 let response = provider.request(&method, params).await;
 
-                connections.get_mut(&rpc).unwrap().dec_active_requests();
+                connections.get(&rpc).unwrap().dec_active_requests();
 
                 let response = response?;
 

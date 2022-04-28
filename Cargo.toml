@@ -10,7 +10,6 @@ arc-swap = "1.5.0"
 argh = "0.1.7"
 anyhow = "1.0.57"
 atomic-counter = "1.0.1"
-dashmap = "5.2.0"
 derive_more = "0.99"
 ethers = { git = "https://github.com/gakonst/ethers-rs", features = ["rustls", "ws"] }
 futures = { version = "0.3.21", features = ["thread-pool"] }

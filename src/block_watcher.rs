@@ -1,7 +1,7 @@
 ///! Track the head block of all the web3 providers
-use dashmap::DashMap;
 use ethers::prelude::{Block, TxHash};
 use std::cmp;
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
@@ -26,7 +26,8 @@ pub struct BlockWatcher {
     sender: BlockWatcherSender,
     /// this Mutex is locked over awaits, so we want an async lock
     receiver: Mutex<BlockWatcherReceiver>,
-    block_numbers: DashMap<String, u64>,
+    // TODO: better key
+    block_numbers: HashMap<String, AtomicU64>,
     head_block_number: AtomicU64,
 }
 
@@ -38,13 +39,15 @@ impl fmt::Debug for BlockWatcher {
 }
 
 impl BlockWatcher {
-    pub fn new() -> Self {
+    pub fn new(rpcs: Vec<String>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
+
+        let block_numbers = rpcs.into_iter().map(|rpc| (rpc, 0.into())).collect();
 
         Self {
             sender,
             receiver: Mutex::new(receiver),
-            block_numbers: Default::default(),
+            block_numbers,
             head_block_number: Default::default(),
         }
     }
@@ -55,12 +58,14 @@ impl BlockWatcher {
 
     pub fn sync_status(&self, rpc: &str, allowed_lag: u64) -> SyncStatus {
         match (
-            self.head_block_number.load(atomic::Ordering::SeqCst),
+            self.head_block_number.load(atomic::Ordering::Acquire),
             self.block_numbers.get(rpc),
         ) {
             (0, _) => SyncStatus::Unknown,
             (_, None) => SyncStatus::Unknown,
             (head_block_number, Some(rpc_block_number)) => {
+                let rpc_block_number = rpc_block_number.load(atomic::Ordering::Acquire);
+
                 match head_block_number.cmp(&rpc_block_number) {
                     cmp::Ordering::Equal => SyncStatus::Synced(0),
                     cmp::Ordering::Greater => {
@@ -70,7 +75,7 @@ impl BlockWatcher {
                     }
                     cmp::Ordering::Less => {
                         // allow being some behind
-                        let lag = head_block_number - *rpc_block_number;
+                        let lag = head_block_number - rpc_block_number;
 
                         if lag <= allowed_lag {
                             SyncStatus::Synced(lag)
@@ -94,10 +99,12 @@ impl BlockWatcher {
 
             {
                 if let Some(rpc_block_number) = self.block_numbers.get(&rpc) {
+                    let rpc_block_number = rpc_block_number.load(atomic::Ordering::Acquire);
+
                     // if we already have this block height
                     // this probably own't happen with websockets, but is likely with polling against http rpcs
                     // TODO: should we compare more than just height? hash too?
-                    if *rpc_block_number == new_block_number {
+                    if rpc_block_number == new_block_number {
                         continue;
                     }
                 }
@@ -110,14 +117,17 @@ impl BlockWatcher {
 
             // save the block for this rpc
             // TODO: store the actual chain as a graph and then have self.blocks point to that?
-            self.block_numbers.insert(rpc.clone(), new_block_number);
+            self.block_numbers
+                .get(&rpc)
+                .unwrap()
+                .swap(new_block_number, atomic::Ordering::Release);
 
-            let head_number = self.head_block_number.load(atomic::Ordering::SeqCst);
+            let head_number = self.head_block_number.load(atomic::Ordering::Acquire);
 
             let label_slow_heads = if head_number == 0 {
                 // first block seen
                 self.head_block_number
-                    .swap(new_block_number, atomic::Ordering::SeqCst);
+                    .swap(new_block_number, atomic::Ordering::AcqRel);
                 ", +".to_string()
             } else {
                 // TODO: what if they have the same number but different hashes?
@@ -130,7 +140,7 @@ impl BlockWatcher {
                     cmp::Ordering::Greater => {
                         // new_block is the new head_block
                         self.head_block_number
-                            .swap(new_block_number, atomic::Ordering::SeqCst);
+                            .swap(new_block_number, atomic::Ordering::AcqRel);
                         ", +".to_string()
                     }
                     cmp::Ordering::Less => {

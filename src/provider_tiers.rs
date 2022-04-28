@@ -1,6 +1,5 @@
 ///! Communicate with groups of web3 providers
 use arc_swap::ArcSwap;
-use dashmap::DashMap;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
 use std::cmp;
@@ -13,7 +12,7 @@ use crate::block_watcher::{BlockWatcher, SyncStatus};
 use crate::provider::Web3Connection;
 
 // TODO: move the rate limiter into the connection
-pub type Web3ConnectionMap = DashMap<String, Web3Connection>;
+pub type Web3ConnectionMap = HashMap<String, Web3Connection>;
 
 /// Load balance to the rpc
 pub struct Web3ProviderTier {
@@ -39,7 +38,7 @@ impl Web3ProviderTier {
         clock: &QuantaClock,
     ) -> anyhow::Result<Web3ProviderTier> {
         let mut rpcs: Vec<String> = vec![];
-        let connections = DashMap::new();
+        let mut connections = HashMap::new();
 
         for (s, limit) in servers.into_iter() {
             rpcs.push(s.to_string());
@@ -144,7 +143,7 @@ impl Web3ProviderTier {
             self.connections
                 .get(a)
                 .unwrap()
-                .cmp(&self.connections.get(b).unwrap())
+                .cmp(self.connections.get(b).unwrap())
         });
 
         // filter out
@@ -166,7 +165,7 @@ impl Web3ProviderTier {
             // increment our connection counter
             if let Err(not_until) = self
                 .connections
-                .get_mut(selected_rpc)
+                .get(selected_rpc)
                 .unwrap()
                 .try_inc_active_requests()
             {
@@ -204,7 +203,7 @@ impl Web3ProviderTier {
             // TODO: share code with next_upstream_server
             if let Err(not_until) = self
                 .connections
-                .get_mut(selected_rpc)
+                .get(selected_rpc)
                 .unwrap()
                 .try_inc_active_requests()
             {
