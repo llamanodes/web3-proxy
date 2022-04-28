@@ -2,6 +2,11 @@
 use derive_more::From;
 use ethers::prelude::{BlockNumber, Middleware};
 use futures::StreamExt;
+use governor::clock::{QuantaClock, QuantaInstant};
+use governor::middleware::NoOpMiddleware;
+use governor::state::{InMemoryState, NotKeyed};
+use governor::NotUntil;
+use governor::RateLimiter;
 use std::fmt;
 use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
@@ -9,6 +14,9 @@ use tokio::time::interval;
 use tracing::{info, warn};
 
 use crate::block_watcher::BlockWatcherSender;
+
+type Web3RateLimiter =
+    RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware<QuantaInstant>>;
 
 // TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
 #[derive(From)]
@@ -85,6 +93,7 @@ pub struct Web3Connection {
     /// keep track of currently open requests. We sort on this
     active_requests: u32,
     provider: Arc<Web3Provider>,
+    ratelimiter: Option<Web3RateLimiter>,
 }
 
 impl Web3Connection {
@@ -97,6 +106,7 @@ impl Web3Connection {
         url_str: String,
         http_client: Option<reqwest::Client>,
         block_watcher_sender: BlockWatcherSender,
+        ratelimiter: Option<Web3RateLimiter>,
     ) -> anyhow::Result<Web3Connection> {
         let provider = if url_str.starts_with("http") {
             let url: url::Url = url_str.parse()?;
@@ -138,11 +148,31 @@ impl Web3Connection {
         Ok(Web3Connection {
             active_requests: 0,
             provider,
+            ratelimiter,
         })
     }
 
-    pub fn inc_active_requests(&mut self) {
+    pub fn try_inc_active_requests(&mut self) -> Result<(), NotUntil<QuantaInstant>> {
+        // check rate limits
+        if let Some(ratelimiter) = self.ratelimiter.as_ref() {
+            match ratelimiter.check() {
+                Ok(_) => {
+                    // rate limit succeeded
+                }
+                Err(not_until) => {
+                    // rate limit failed
+                    // save the smallest not_until. if nothing succeeds, return an Err with not_until in it
+                    // TODO: use tracing better
+                    warn!("Exhausted rate limit on {:?}: {}", self, not_until);
+
+                    return Err(not_until);
+                }
+            }
+        };
+
         self.active_requests += 1;
+
+        Ok(())
     }
 
     pub fn dec_active_requests(&mut self) {

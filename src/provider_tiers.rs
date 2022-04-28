@@ -2,25 +2,17 @@
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use governor::clock::{QuantaClock, QuantaInstant};
-use governor::middleware::NoOpMiddleware;
-use governor::state::{InMemoryState, NotKeyed};
 use governor::NotUntil;
-use governor::RateLimiter;
 use std::cmp;
 use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use tracing::{info, instrument};
 
 use crate::block_watcher::{BlockWatcher, SyncStatus};
 use crate::provider::Web3Connection;
 
-type Web3RateLimiter =
-    RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware<QuantaInstant>>;
-
-type Web3RateLimiterMap = DashMap<String, Web3RateLimiter>;
-
+// TODO: move the rate limiter into the connection
 pub type Web3ConnectionMap = DashMap<String, Web3Connection>;
 
 /// Load balance to the rpc
@@ -30,7 +22,6 @@ pub struct Web3ProviderTier {
     synced_rpcs: ArcSwap<Vec<String>>,
     rpcs: Vec<String>,
     connections: Arc<Web3ConnectionMap>,
-    ratelimiters: Web3RateLimiterMap,
 }
 
 impl fmt::Debug for Web3ProviderTier {
@@ -49,34 +40,35 @@ impl Web3ProviderTier {
     ) -> anyhow::Result<Web3ProviderTier> {
         let mut rpcs: Vec<String> = vec![];
         let connections = DashMap::new();
-        let ratelimits = DashMap::new();
 
         for (s, limit) in servers.into_iter() {
             rpcs.push(s.to_string());
+
+            let ratelimiter = if limit > 0 {
+                let quota = governor::Quota::per_second(NonZeroU32::new(limit).unwrap());
+
+                let rate_limiter = governor::RateLimiter::direct_with_clock(quota, clock);
+
+                Some(rate_limiter)
+            } else {
+                None
+            };
 
             let connection = Web3Connection::try_new(
                 s.to_string(),
                 http_client.clone(),
                 block_watcher.clone_sender(),
+                ratelimiter,
             )
             .await?;
 
             connections.insert(s.to_string(), connection);
-
-            if limit > 0 {
-                let quota = governor::Quota::per_second(NonZeroU32::new(limit).unwrap());
-
-                let rate_limiter = governor::RateLimiter::direct_with_clock(quota, clock);
-
-                ratelimits.insert(s.to_string(), rate_limiter);
-            }
         }
 
         Ok(Web3ProviderTier {
             synced_rpcs: ArcSwap::from(Arc::new(vec![])),
             rpcs,
             connections: Arc::new(connections),
-            ratelimiters: ratelimits,
         })
     }
 
@@ -167,44 +159,31 @@ impl Web3ProviderTier {
     }
 
     /// get the best available rpc server
-    #[instrument]
     pub async fn next_upstream_server(&self) -> Result<String, Option<NotUntil<QuantaInstant>>> {
         let mut earliest_not_until = None;
 
         for selected_rpc in self.synced_rpcs.load().iter() {
-            // check rate limits
-            if let Some(ratelimiter) = self.ratelimiters.get(selected_rpc) {
-                match ratelimiter.check() {
-                    Ok(_) => {
-                        // rate limit succeeded
-                    }
-                    Err(not_until) => {
-                        // rate limit failed
-                        // save the smallest not_until. if nothing succeeds, return an Err with not_until in it
-                        // TODO: use tracing better
-                        info!("Exhausted rate limit on {}: {}", selected_rpc, not_until);
-
-                        if earliest_not_until.is_none() {
-                            earliest_not_until = Some(not_until);
-                        } else {
-                            let earliest_possible =
-                                earliest_not_until.as_ref().unwrap().earliest_possible();
-                            let new_earliest_possible = not_until.earliest_possible();
-
-                            if earliest_possible > new_earliest_possible {
-                                earliest_not_until = Some(not_until);
-                            }
-                        }
-                        continue;
-                    }
-                }
-            };
-
             // increment our connection counter
-            self.connections
+            if let Err(not_until) = self
+                .connections
                 .get_mut(selected_rpc)
                 .unwrap()
-                .inc_active_requests();
+                .try_inc_active_requests()
+            {
+                // TODO: do this better
+                if earliest_not_until.is_none() {
+                    earliest_not_until = Some(not_until);
+                } else {
+                    let earliest_possible =
+                        earliest_not_until.as_ref().unwrap().earliest_possible();
+                    let new_earliest_possible = not_until.earliest_possible();
+
+                    if earliest_possible > new_earliest_possible {
+                        earliest_not_until = Some(not_until);
+                    }
+                }
+                continue;
+            }
 
             // return the selected RPC
             return Ok(selected_rpc.clone());
@@ -221,34 +200,27 @@ impl Web3ProviderTier {
         let mut earliest_not_until = None;
         let mut selected_rpcs = vec![];
         for selected_rpc in self.synced_rpcs.load().iter() {
-            // check rate limits
-            match self.ratelimiters.get(selected_rpc).unwrap().check() {
-                Ok(_) => {
-                    // rate limit succeeded
-                }
-                Err(not_until) => {
-                    // rate limit failed
-                    // save the smallest not_until. if nothing succeeds, return an Err with not_until in it
-                    if earliest_not_until.is_none() {
-                        earliest_not_until = Some(not_until);
-                    } else {
-                        let earliest_possible =
-                            earliest_not_until.as_ref().unwrap().earliest_possible();
-                        let new_earliest_possible = not_until.earliest_possible();
-
-                        if earliest_possible > new_earliest_possible {
-                            earliest_not_until = Some(not_until);
-                        }
-                    }
-                    continue;
-                }
-            };
-
-            // increment our connection counter
-            self.connections
+            // check rate limits and increment our connection counter
+            // TODO: share code with next_upstream_server
+            if let Err(not_until) = self
+                .connections
                 .get_mut(selected_rpc)
                 .unwrap()
-                .inc_active_requests();
+                .try_inc_active_requests()
+            {
+                if earliest_not_until.is_none() {
+                    earliest_not_until = Some(not_until);
+                } else {
+                    let earliest_possible =
+                        earliest_not_until.as_ref().unwrap().earliest_possible();
+                    let new_earliest_possible = not_until.earliest_possible();
+
+                    if earliest_possible > new_earliest_possible {
+                        earliest_not_until = Some(not_until);
+                    }
+                }
+                continue;
+            }
 
             // this is rpc should work
             selected_rpcs.push(selected_rpc.clone());
