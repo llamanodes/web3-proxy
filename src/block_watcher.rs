@@ -2,6 +2,7 @@
 use dashmap::DashMap;
 use ethers::prelude::{Block, TxHash};
 use std::cmp;
+use std::fmt;
 use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,13 +22,19 @@ pub enum SyncStatus {
     Unknown,
 }
 
-#[derive(Debug)]
 pub struct BlockWatcher {
     sender: BlockWatcherSender,
     /// this Mutex is locked over awaits, so we want an async lock
     receiver: Mutex<BlockWatcherReceiver>,
     block_numbers: DashMap<String, u64>,
     head_block_number: AtomicU64,
+}
+
+impl fmt::Debug for BlockWatcher {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        write!(f, "BlockWatcher(...)")
+    }
 }
 
 impl BlockWatcher {

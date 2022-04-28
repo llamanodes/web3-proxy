@@ -8,6 +8,7 @@ use governor::NotUntil;
 use governor::RateLimiter;
 use std::cmp;
 use std::collections::HashMap;
+use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use tracing::{info, instrument};
@@ -23,7 +24,6 @@ type Web3RateLimiterMap = DashMap<String, Web3RateLimiter>;
 pub type Web3ConnectionMap = DashMap<String, Web3Connection>;
 
 /// Load balance to the rpc
-#[derive(Debug)]
 pub struct Web3ProviderTier {
     /// TODO: what type for the rpc? Vec<String> isn't great. i think we want this to be the key for the provider and not the provider itself
     /// TODO: we probably want a better lock
@@ -31,6 +31,13 @@ pub struct Web3ProviderTier {
     rpcs: Vec<String>,
     connections: Arc<Web3ConnectionMap>,
     ratelimiters: Web3RateLimiterMap,
+}
+
+impl fmt::Debug for Web3ProviderTier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        write!(f, "Web3ProviderTier")
+    }
 }
 
 impl Web3ProviderTier {

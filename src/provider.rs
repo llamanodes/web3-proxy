@@ -2,6 +2,7 @@
 use derive_more::From;
 use ethers::prelude::{BlockNumber, Middleware};
 use futures::StreamExt;
+use std::fmt;
 use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::time::interval;
@@ -10,10 +11,17 @@ use tracing::{info, warn};
 use crate::block_watcher::BlockWatcherSender;
 
 // TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
-#[derive(From, Debug)]
+#[derive(From)]
 pub enum Web3Provider {
     Http(ethers::providers::Provider<ethers::providers::Http>),
     Ws(ethers::providers::Provider<ethers::providers::Ws>),
+}
+
+impl fmt::Debug for Web3Provider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        write!(f, "Web3Provider(...)")
+    }
 }
 
 /// Forward functions to the inner ethers::providers::Provider

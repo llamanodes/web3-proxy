@@ -6,11 +6,12 @@ use futures::future;
 use governor::clock::{Clock, QuantaClock};
 use serde_json::json;
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch, RwLock};
 use tokio::time::sleep;
-use tracing::{instrument, warn};
+use tracing::warn;
 use warp::Filter;
 
 // use crate::types::{BlockMap, ConnectionsMap, RpcRateLimiterMap};
@@ -26,7 +27,6 @@ static APP_USER_AGENT: &str = concat!(
 
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
-#[derive(Debug)]
 struct Web3ProxyApp {
     /// clock used for rate limiting
     /// TODO: use tokio's clock (will require a different ratelimiting crate)
@@ -42,8 +42,14 @@ struct Web3ProxyApp {
     private_rpcs_ratelimiter_lock: RwLock<()>,
 }
 
+impl fmt::Debug for Web3ProxyApp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        write!(f, "Web3ProxyApp(...)")
+    }
+}
+
 impl Web3ProxyApp {
-    #[instrument]
     async fn try_new(
         allowed_lag: u64,
         balanced_rpc_tiers: Vec<Vec<(&str, u32)>>,
@@ -149,7 +155,6 @@ impl Web3ProxyApp {
 
     /// send the request to the approriate RPCs
     /// TODO: dry this up
-    #[instrument]
     async fn proxy_web3_rpc(
         self: Arc<Web3ProxyApp>,
         json_body: serde_json::Value,
@@ -331,7 +336,6 @@ impl Web3ProxyApp {
         }
     }
 
-    #[instrument]
     async fn try_send_requests(
         &self,
         rpc_servers: Vec<String>,
