@@ -5,7 +5,7 @@ use std::cmp;
 use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, watch, Mutex};
 use tracing::info;
 
 // TODO: what type for the Item? String url works, but i don't love it
@@ -14,7 +14,6 @@ pub type NewHead = (String, Block<TxHash>);
 pub type BlockWatcherSender = mpsc::UnboundedSender<NewHead>;
 pub type BlockWatcherReceiver = mpsc::UnboundedReceiver<NewHead>;
 
-#[derive(Eq)]
 // TODO: ethers has a similar SyncingStatus
 pub enum SyncStatus {
     Synced(u64),
@@ -22,33 +21,10 @@ pub enum SyncStatus {
     Unknown,
 }
 
-// impl Ord for SyncStatus {
-//     fn cmp(&self, other: &Self) -> cmp::Ordering {
-//         self.height.cmp(&other.height)
-//     }
-// }
-
-// impl PartialOrd for SyncStatus {
-//     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-//         Some(self.cmp(other))
-//     }
-// }
-
-impl PartialEq for SyncStatus {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Synced(a), Self::Synced(b)) => a == b,
-            (Self::Unknown, Self::Unknown) => true,
-            (Self::Behind(a), Self::Behind(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct BlockWatcher {
     sender: BlockWatcherSender,
-    /// parking_lot::Mutex is supposed to be faster, but we only lock this once, so its fine
+    /// this Mutex is locked over awaits, so we want an async lock
     receiver: Mutex<BlockWatcherReceiver>,
     block_numbers: DashMap<String, u64>,
     head_block_number: AtomicU64,
@@ -100,7 +76,10 @@ impl BlockWatcher {
         }
     }
 
-    pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
+    pub async fn run(
+        self: Arc<Self>,
+        new_block_sender: watch::Sender<String>,
+    ) -> anyhow::Result<()> {
         let mut receiver = self.receiver.lock().await;
 
         while let Some((rpc, new_block)) = receiver.recv().await {
@@ -159,6 +138,9 @@ impl BlockWatcher {
                     }
                 }
             };
+
+            // have the provider tiers update_synced_rpcs
+            new_block_sender.send(rpc.clone())?;
 
             // TODO: include time since last update?
             info!(

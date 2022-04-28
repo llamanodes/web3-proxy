@@ -1,4 +1,5 @@
-/// Communicate with groups of web3 providers
+///! Communicate with groups of web3 providers
+use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::middleware::NoOpMiddleware;
@@ -6,9 +7,9 @@ use governor::state::{InMemoryState, NotKeyed};
 use governor::NotUntil;
 use governor::RateLimiter;
 use std::cmp;
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::{info, instrument};
 
 use crate::block_watcher::{BlockWatcher, SyncStatus};
@@ -24,9 +25,10 @@ pub type Web3ConnectionMap = DashMap<String, Web3Connection>;
 /// Load balance to the rpc
 #[derive(Debug)]
 pub struct Web3ProviderTier {
-    /// RPC urls sorted by active requests
-    /// TODO: what type for the rpc? i think we want this to be the key for the provider and not the provider itself
-    rpcs: RwLock<Vec<String>>,
+    /// TODO: what type for the rpc? Vec<String> isn't great. i think we want this to be the key for the provider and not the provider itself
+    /// TODO: we probably want a better lock
+    synced_rpcs: ArcSwap<Vec<String>>,
+    rpcs: Vec<String>,
     connections: Arc<Web3ConnectionMap>,
     ratelimiters: Web3RateLimiterMap,
 }
@@ -64,7 +66,8 @@ impl Web3ProviderTier {
         }
 
         Ok(Web3ProviderTier {
-            rpcs: RwLock::new(rpcs),
+            synced_rpcs: ArcSwap::from(Arc::new(vec![])),
+            rpcs,
             connections: Arc::new(connections),
             ratelimiters: ratelimits,
         })
@@ -74,32 +77,36 @@ impl Web3ProviderTier {
         self.connections.clone()
     }
 
-    /// get the best available rpc server
-    #[instrument]
-    pub async fn next_upstream_server(
+    pub fn clone_rpcs(&self) -> Vec<String> {
+        self.rpcs.clone()
+    }
+
+    pub fn update_synced_rpcs(
         &self,
-        allowed_lag: u64,
         block_watcher: Arc<BlockWatcher>,
-    ) -> Result<String, NotUntil<QuantaInstant>> {
-        let mut available_rpcs = self.rpcs.write().await;
+        allowed_lag: u64,
+    ) -> anyhow::Result<()> {
+        let mut available_rpcs = self.rpcs.clone();
 
-        // sort rpcs by their active connections
-        available_rpcs.sort_unstable_by(|a, b| {
-            self.connections
-                .get(a)
-                .unwrap()
-                .cmp(&self.connections.get(b).unwrap())
-        });
+        // collect sync status for all the rpcs
+        let sync_status: HashMap<String, SyncStatus> = available_rpcs
+            .clone()
+            .into_iter()
+            .map(|rpc| {
+                let status = block_watcher.sync_status(&rpc, allowed_lag);
+                (rpc, status)
+            })
+            .collect();
 
-        // sort rpcs by their block height
+        // sort rpcs by their sync status and active connections
         available_rpcs.sort_unstable_by(|a, b| {
-            let a_synced = block_watcher.sync_status(a, allowed_lag);
-            let b_synced = block_watcher.sync_status(b, allowed_lag);
+            let a_synced = sync_status.get(a).unwrap();
+            let b_synced = sync_status.get(b).unwrap();
 
             match (a_synced, b_synced) {
                 (SyncStatus::Synced(a), SyncStatus::Synced(b)) => {
                     if a != b {
-                        return a.cmp(&b);
+                        return a.cmp(b);
                     }
                     // else they are equal and we want to compare on active connections
                 }
@@ -125,7 +132,7 @@ impl Web3ProviderTier {
                 }
                 (SyncStatus::Behind(a), SyncStatus::Behind(b)) => {
                     if a != b {
-                        return a.cmp(&b);
+                        return a.cmp(b);
                     }
                     // else they are equal and we want to compare on active connections
                 }
@@ -141,23 +148,23 @@ impl Web3ProviderTier {
                 .cmp(&self.connections.get(b).unwrap())
         });
 
+        // filter out
+        let synced_rpcs: Vec<String> = available_rpcs
+            .into_iter()
+            .take_while(|rpc| matches!(sync_status.get(rpc).unwrap(), SyncStatus::Synced(_)))
+            .collect();
+
+        self.synced_rpcs.swap(Arc::new(synced_rpcs));
+
+        Ok(())
+    }
+
+    /// get the best available rpc server
+    #[instrument]
+    pub async fn next_upstream_server(&self) -> Result<String, NotUntil<QuantaInstant>> {
         let mut earliest_not_until = None;
 
-        for selected_rpc in available_rpcs.iter() {
-            // check current block number
-            // TODO: i don't like that we fetched sync_status above and then do it again here. cache?
-            if let SyncStatus::Synced(_) = block_watcher.sync_status(selected_rpc, allowed_lag) {
-                // rpc is synced
-            } else {
-                // skip this rpc because it is not synced
-                // TODO: make a NotUntil here?
-                // TODO: include how many blocks behind
-                // TODO: better log
-                info!("{} is not synced", selected_rpc);
-                // we sorted on block height. so if this one isn't synced, none of the later ones will be either
-                break;
-            }
-
+        for selected_rpc in self.synced_rpcs.load().iter() {
             // check rate limits
             if let Some(ratelimiter) = self.ratelimiters.get(selected_rpc) {
                 match ratelimiter.check() {
@@ -205,23 +212,10 @@ impl Web3ProviderTier {
     }
 
     /// get all available rpc servers
-    pub async fn get_upstream_servers(
-        &self,
-        allowed_lag: u64,
-        block_watcher: Arc<BlockWatcher>,
-    ) -> Result<Vec<String>, NotUntil<QuantaInstant>> {
+    pub async fn get_upstream_servers(&self) -> Result<Vec<String>, NotUntil<QuantaInstant>> {
         let mut earliest_not_until = None;
-
         let mut selected_rpcs = vec![];
-
-        for selected_rpc in self.rpcs.read().await.iter() {
-            if let SyncStatus::Synced(_) = block_watcher.sync_status(selected_rpc, allowed_lag) {
-                // rpc is synced
-            } else {
-                // skip this rpc because it is not synced
-                continue;
-            }
-
+        for selected_rpc in self.synced_rpcs.load().iter() {
             // check rate limits
             match self.ratelimiters.get(selected_rpc).unwrap().check() {
                 Ok(_) => {

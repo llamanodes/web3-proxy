@@ -5,11 +5,12 @@ mod provider_tiers;
 use futures::future;
 use governor::clock::{Clock, QuantaClock};
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, watch, RwLock};
 use tokio::time::sleep;
-use tracing::{info, warn};
+use tracing::{instrument, warn};
 use warp::Filter;
 
 // use crate::types::{BlockMap, ConnectionsMap, RpcRateLimiterMap};
@@ -24,8 +25,8 @@ static APP_USER_AGENT: &str = concat!(
 );
 
 /// The application
+#[derive(Debug)]
 struct Web3ProxyApp {
-    block_watcher: Arc<BlockWatcher>,
     /// clock used for rate limiting
     /// TODO: use tokio's clock (will require a different ratelimiting crate)
     clock: QuantaClock,
@@ -34,12 +35,16 @@ struct Web3ProxyApp {
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     private_rpcs: Option<Arc<Web3ProviderTier>>,
     /// write lock on these when all rate limits are hit
+    /// this lock will be held open over an await, so use async locking
     balanced_rpc_ratelimiter_lock: RwLock<()>,
+    /// this lock will be held open over an await, so use async locking
     private_rpcs_ratelimiter_lock: RwLock<()>,
 }
 
 impl Web3ProxyApp {
+    #[instrument]
     async fn try_new(
+        allowed_lag: u64,
         balanced_rpc_tiers: Vec<Vec<(&str, u32)>>,
         private_rpcs: Vec<(&str, u32)>,
     ) -> anyhow::Result<Web3ProxyApp> {
@@ -55,10 +60,14 @@ impl Web3ProxyApp {
 
         let block_watcher = Arc::new(BlockWatcher::new());
 
-        let block_watcher_clone = Arc::clone(&block_watcher);
+        let (new_block_sender, mut new_block_receiver) = watch::channel::<String>("".to_string());
 
-        // start the block_watcher
-        tokio::spawn(async move { block_watcher_clone.run().await });
+        {
+            // TODO: spawn this later?
+            // spawn a future for the block_watcher
+            let block_watcher = block_watcher.clone();
+            tokio::spawn(async move { block_watcher.run(new_block_sender).await });
+        }
 
         let balanced_rpc_tiers = Arc::new(
             future::join_all(balanced_rpc_tiers.into_iter().map(|balanced_rpc_tier| {
@@ -89,8 +98,46 @@ impl Web3ProxyApp {
             ))
         };
 
+        {
+            // spawn a future for sorting our synced rpcs
+            // TODO: spawn this later?
+            let balanced_rpc_tiers = balanced_rpc_tiers.clone();
+            let private_rpcs = private_rpcs.clone();
+            let block_watcher = block_watcher.clone();
+
+            tokio::spawn(async move {
+                let mut tier_map = HashMap::new();
+                let mut private_map = HashMap::new();
+
+                for balanced_rpc_tier in balanced_rpc_tiers.iter() {
+                    for rpc in balanced_rpc_tier.clone_rpcs() {
+                        tier_map.insert(rpc, balanced_rpc_tier);
+                    }
+                }
+
+                if let Some(private_rpcs) = private_rpcs {
+                    for rpc in private_rpcs.clone_rpcs() {
+                        private_map.insert(rpc, private_rpcs.clone());
+                    }
+                }
+
+                while new_block_receiver.changed().await.is_ok() {
+                    let updated_rpc = new_block_receiver.borrow().clone();
+
+                    if let Some(tier) = tier_map.get(&updated_rpc) {
+                        tier.update_synced_rpcs(block_watcher.clone(), allowed_lag)
+                            .unwrap();
+                    } else if let Some(tier) = private_map.get(&updated_rpc) {
+                        tier.update_synced_rpcs(block_watcher.clone(), allowed_lag)
+                            .unwrap();
+                    } else {
+                        panic!("howd this happen");
+                    }
+                }
+            });
+        }
+
         Ok(Web3ProxyApp {
-            block_watcher,
             clock,
             balanced_rpc_tiers,
             private_rpcs,
@@ -101,6 +148,7 @@ impl Web3ProxyApp {
 
     /// send the request to the approriate RPCs
     /// TODO: dry this up
+    #[instrument]
     async fn proxy_web3_rpc(
         self: Arc<Web3ProxyApp>,
         json_body: serde_json::Value,
@@ -118,10 +166,7 @@ impl Web3ProxyApp {
 
                 let json_body_clone = json_body.clone();
 
-                match private_rpcs
-                    .get_upstream_servers(1, self.block_watcher.clone())
-                    .await
-                {
+                match private_rpcs.get_upstream_servers().await {
                     Ok(upstream_servers) => {
                         let (tx, mut rx) =
                             mpsc::unbounded_channel::<anyhow::Result<serde_json::Value>>();
@@ -184,10 +229,8 @@ impl Web3ProxyApp {
                 let incoming_id = json_body.as_object().unwrap().get("id").unwrap();
 
                 for balanced_rpcs in self.balanced_rpc_tiers.iter() {
-                    match balanced_rpcs
-                        .next_upstream_server(1, self.block_watcher.clone())
-                        .await
-                    {
+                    // TODO: what allowed lag?
+                    match balanced_rpcs.next_upstream_server().await {
                         Ok(upstream_server) => {
                             // TODO: better type for this. right now its request (the full jsonrpc object), response (just the inner result)
                             let (tx, mut rx) =
@@ -218,7 +261,8 @@ impl Web3ProxyApp {
                                 .ok_or_else(|| anyhow::anyhow!("no successful response"))?;
 
                             if let Ok(partial_response) = response {
-                                info!("forwarding request from {}", upstream_server);
+                                // TODO: trace
+                                // info!("forwarding request from {}", upstream_server);
 
                                 let response = json!({
                                     "jsonrpc": "2.0",
@@ -354,6 +398,7 @@ async fn main() {
     let listen_port = 8445;
 
     let state = Web3ProxyApp::try_new(
+        1,
         vec![
             // local nodes
             vec![("ws://10.11.12.16:8545", 0), ("ws://10.11.12.16:8946", 0)],
@@ -368,7 +413,7 @@ async fn main() {
             ],
             // free nodes
             vec![
-                // ("https://main-rpc.linkpool.io", 0), // linkpool is slow
+                // ("https://main-rpc.linkpool.io", 0), // linkpool is slow and often offline
                 ("https://rpc.ankr.com/eth", 0),
             ],
         ],
