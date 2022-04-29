@@ -242,22 +242,6 @@ impl Ord for Web3Connection {
     }
 }
 
-/**
-
-Lets say geth has 1000 active requests and erigon also has 1000 active requests
-
-geth is much faster, so we want it to get the rest
-
-geth's soft limit is 120k. erigon's soft limit is 60k
-
-120 vs 60
-
-Lets say geth has 100k active requests and erigon has 100k active requests. same soft limits
-
-0.8333
-
- */
-
 impl PartialOrd for Web3Connection {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
