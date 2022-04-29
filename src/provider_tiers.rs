@@ -6,7 +6,6 @@ use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
 use serde_json::value::RawValue;
-use std::cmp;
 use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU32;
@@ -192,62 +191,22 @@ impl Web3ProviderTier {
             })
             .collect();
 
-        // sort rpcs by their sync status and active connections
+        // sort rpcs by their sync status
+        // TODO: if we only changed one row, we don't need to sort the whole thing. i think we can do this better
         available_rpcs.sort_unstable_by(|a, b| {
             let a_synced = sync_status.get(a).unwrap();
             let b_synced = sync_status.get(b).unwrap();
 
-            match (a_synced, b_synced) {
-                (SyncStatus::Synced(a), SyncStatus::Synced(b)) => {
-                    if a != b {
-                        return a.cmp(b);
-                    }
-                    // else they are equal and we want to compare on active connections
-                }
-                (SyncStatus::Synced(_), SyncStatus::Unknown) => {
-                    return cmp::Ordering::Greater;
-                }
-                (SyncStatus::Unknown, SyncStatus::Synced(_)) => {
-                    return cmp::Ordering::Less;
-                }
-                (SyncStatus::Unknown, SyncStatus::Unknown) => {
-                    // neither rpc is synced
-                    // this means neither will have connections
-                    return cmp::Ordering::Equal;
-                }
-                (SyncStatus::Synced(_), SyncStatus::Behind(_)) => {
-                    return cmp::Ordering::Greater;
-                }
-                (SyncStatus::Behind(_), SyncStatus::Synced(_)) => {
-                    return cmp::Ordering::Less;
-                }
-                (SyncStatus::Behind(_), SyncStatus::Unknown) => {
-                    return cmp::Ordering::Greater;
-                }
-                (SyncStatus::Behind(a), SyncStatus::Behind(b)) => {
-                    if a != b {
-                        return a.cmp(b);
-                    }
-                    // else they are equal and we want to compare on active connections
-                }
-                (SyncStatus::Unknown, SyncStatus::Behind(_)) => {
-                    return cmp::Ordering::Less;
-                }
-            }
-
-            // sort on active connections
-            self.connections
-                .get(a)
-                .unwrap()
-                .cmp(self.connections.get(b).unwrap())
+            a_synced.cmp(b_synced)
         });
 
-        // filter out
+        // filter out unsynced rpcs
         let synced_rpcs: Vec<String> = available_rpcs
             .into_iter()
             .take_while(|rpc| matches!(sync_status.get(rpc).unwrap(), SyncStatus::Synced(_)))
             .collect();
 
+        // TODO: is arcswap the best type for this?
         self.synced_rpcs.swap(Arc::new(synced_rpcs));
 
         Ok(())
@@ -257,7 +216,19 @@ impl Web3ProviderTier {
     pub async fn next_upstream_server(&self) -> Result<String, Option<NotUntil<QuantaInstant>>> {
         let mut earliest_not_until = None;
 
-        for selected_rpc in self.synced_rpcs.load().iter() {
+        // TODO: this clone is probably not the best way to do this
+        let mut synced_rpcs = Vec::clone(&*self.synced_rpcs.load());
+
+        // TODO: we don't want to sort on active connections. we want to sort on remaining capacity for connections. for example, geth can handle more than erigon
+        synced_rpcs.sort_unstable_by(|a, b| {
+            // sort on active connections
+            self.connections
+                .get(a)
+                .unwrap()
+                .cmp(self.connections.get(b).unwrap())
+        });
+
+        for selected_rpc in synced_rpcs.iter() {
             // increment our connection counter
             if let Err(not_until) = self
                 .connections

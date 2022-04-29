@@ -9,12 +9,11 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, watch, RwLock};
+use tokio::sync::{mpsc, watch};
 use tokio::time::sleep;
 use tracing::warn;
 use warp::Filter;
 
-// use crate::types::{BlockMap, ConnectionsMap, RpcRateLimiterMap};
 use crate::block_watcher::BlockWatcher;
 use crate::provider::JsonRpcRequest;
 use crate::provider_tiers::Web3ProviderTier;
@@ -36,11 +35,6 @@ struct Web3ProxyApp {
     balanced_rpc_tiers: Arc<Vec<Web3ProviderTier>>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     private_rpcs: Option<Arc<Web3ProviderTier>>,
-    /// write lock on these when all rate limits are hit
-    /// this lock will be held open over an await, so use async locking
-    balanced_rpc_ratelimiter_lock: RwLock<()>,
-    /// this lock will be held open over an await, so use async locking
-    private_rpcs_ratelimiter_lock: RwLock<()>,
 }
 
 impl fmt::Debug for Web3ProxyApp {
@@ -165,8 +159,6 @@ impl Web3ProxyApp {
             clock,
             balanced_rpc_tiers,
             private_rpcs,
-            balanced_rpc_ratelimiter_lock: Default::default(),
-            private_rpcs_ratelimiter_lock: Default::default(),
         })
     }
 
@@ -182,8 +174,6 @@ impl Web3ProxyApp {
             // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
             loop {
                 // TODO: think more about this lock. i think it won't actually help the herd. it probably makes it worse if we have a tight lag_limit
-                let read_lock = self.private_rpcs_ratelimiter_lock.read().await;
-
                 match private_rpcs.get_upstream_servers().await {
                     Ok(upstream_servers) => {
                         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -216,16 +206,10 @@ impl Web3ProxyApp {
                     Err(not_until) => {
                         // TODO: move this to a helper function
                         // sleep (with a lock) until our rate limits should be available
-                        drop(read_lock);
-
                         if let Some(not_until) = not_until {
-                            let write_lock = self.balanced_rpc_ratelimiter_lock.write().await;
-
                             let deadline = not_until.wait_time_from(self.clock.now());
 
                             sleep(deadline).await;
-
-                            drop(write_lock);
                         }
                     }
                 };
@@ -234,8 +218,6 @@ impl Web3ProxyApp {
             // this is not a private transaction (or no private relays are configured)
             // try to send to each tier, stopping at the first success
             loop {
-                let read_lock = self.balanced_rpc_ratelimiter_lock.read().await;
-
                 // there are multiple tiers. save the earliest not_until (if any). if we don't return, we will sleep until then and then try again
                 let mut earliest_not_until = None;
 
@@ -300,18 +282,10 @@ impl Web3ProxyApp {
                 }
 
                 // we haven't returned an Ok, sleep and try again
-                // TODO: move this to a helper function
-                drop(read_lock);
-
-                // unwrap should be safe since we would have returned if it wasn't set
                 if let Some(earliest_not_until) = earliest_not_until {
-                    let write_lock = self.balanced_rpc_ratelimiter_lock.write().await;
-
                     let deadline = earliest_not_until.wait_time_from(self.clock.now());
 
                     sleep(deadline).await;
-
-                    drop(write_lock);
                 } else {
                     // TODO: how long should we wait?
                     // TODO: max wait time?
