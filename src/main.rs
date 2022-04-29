@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::sleep;
 use tracing::warn;
 use warp::Filter;
+use warp::Reply;
 
 use crate::block_watcher::BlockWatcher;
 use crate::provider::JsonRpcRequest;
@@ -355,12 +356,16 @@ async fn main() {
 }
 
 /// convert result into an http response. use this at the end of your warp filter
-pub fn handle_anyhow_errors<T: warp::Reply>(res: anyhow::Result<T>) -> Box<dyn warp::Reply> {
+/// TODO: using boxes can't be the best way. think about this more
+fn handle_anyhow_errors<T: warp::Reply>(
+    res: anyhow::Result<T>,
+) -> warp::http::Response<warp::hyper::Body> {
     match res {
-        Ok(r) => Box::new(r.into_response()),
-        Err(e) => Box::new(warp::reply::with_status(
+        Ok(r) => r.into_response(),
+        Err(e) => warp::reply::with_status(
             format!("{}", e),
-            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-        )),
+            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+        )
+        .into_response(),
     }
 }
