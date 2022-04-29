@@ -7,6 +7,8 @@ use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::NotUntil;
 use governor::RateLimiter;
+use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use std::fmt;
 use std::sync::atomic::{self, AtomicUsize};
 use std::time::Duration;
@@ -19,6 +21,39 @@ use crate::block_watcher::BlockWatcherSender;
 type Web3RateLimiter =
     RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware<QuantaInstant>>;
 
+#[derive(Clone, Deserialize)]
+pub struct JsonRpcRequest {
+    pub jsonrpc: Box<RawValue>,
+    pub id: Box<RawValue>,
+    pub method: String,
+    pub params: Box<RawValue>,
+}
+
+impl fmt::Debug for JsonRpcRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        f.debug_struct("JsonRpcRequest")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct JsonRpcForwardedResponse {
+    pub jsonrpc: Box<RawValue>,
+    pub id: Box<RawValue>,
+    pub result: Box<RawValue>,
+}
+
+impl fmt::Debug for JsonRpcForwardedResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        f.debug_struct("JsonRpcForwardedResponse")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 // TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
 #[derive(From)]
 pub enum Web3Provider {
@@ -29,7 +64,7 @@ pub enum Web3Provider {
 impl fmt::Debug for Web3Provider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
-        write!(f, "Web3Provider(...)")
+        f.debug_struct("Web3Provider").finish_non_exhaustive()
     }
 }
 
@@ -40,7 +75,7 @@ impl Web3Provider {
         &self,
         method: &str,
         params: Box<serde_json::value::RawValue>,
-    ) -> Result<serde_json::Value, ethers::prelude::ProviderError> {
+    ) -> Result<JsonRpcForwardedResponse, ethers::prelude::ProviderError> {
         match self {
             Self::Http(provider) => provider.request(method, params).await,
             Self::Ws(provider) => provider.request(method, params).await,

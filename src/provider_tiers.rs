@@ -1,18 +1,110 @@
 ///! Communicate with groups of web3 providers
 use arc_swap::ArcSwap;
+use derive_more::From;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
+use serde_json::value::RawValue;
 use std::cmp;
 use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use tokio::sync::mpsc;
+use tracing::warn;
 
 use crate::block_watcher::{BlockWatcher, SyncStatus};
-use crate::provider::Web3Connection;
+use crate::provider::{JsonRpcForwardedResponse, Web3Connection};
 
-// TODO: move the rate limiter into the connection
-pub type Web3ConnectionMap = HashMap<String, Web3Connection>;
+#[derive(From)]
+pub struct Web3Connections(HashMap<String, Web3Connection>);
+
+impl Web3Connections {
+    pub fn get(&self, rpc: &str) -> Option<&Web3Connection> {
+        self.0.get(rpc)
+    }
+
+    pub async fn try_send_request(
+        &self,
+        rpc: String,
+        method: String,
+        params: Box<RawValue>,
+    ) -> anyhow::Result<JsonRpcForwardedResponse> {
+        let connection = self.get(&rpc).unwrap();
+
+        // TODO: do we need this clone or can we do a reference?
+        let provider = connection.clone_provider();
+
+        let response = provider.request(&method, params).await;
+
+        connection.dec_active_requests();
+
+        // TODO: if "no block with that header" or some other jsonrpc errors, skip this response
+
+        response.map_err(Into::into)
+    }
+
+    pub async fn try_send_requests(
+        self: Arc<Self>,
+        rpc_servers: Vec<String>,
+        method: String,
+        params: Box<RawValue>,
+        // TODO: i think this should actually be a oneshot
+        response_sender: mpsc::UnboundedSender<anyhow::Result<JsonRpcForwardedResponse>>,
+    ) -> anyhow::Result<()> {
+        let method = Arc::new(method);
+
+        let mut unordered_futures = FuturesUnordered::new();
+
+        for rpc in rpc_servers {
+            let connections = self.clone();
+            let method = method.to_string();
+            let params = params.clone();
+            let response_sender = response_sender.clone();
+
+            let handle = tokio::spawn(async move {
+                // get the client for this rpc server
+                let response = connections.try_send_request(rpc, method, params).await?;
+
+                // send the first good response to a one shot channel. that way we respond quickly
+                // drop the result because errors are expected after the first send
+                response_sender.send(Ok(response)).map_err(Into::into)
+            });
+
+            unordered_futures.push(handle);
+        }
+
+        // TODO: use iterators instead of pushing into a vec
+        let mut errs = vec![];
+        if let Some(x) = unordered_futures.next().await {
+            match x.unwrap() {
+                Ok(_) => {}
+                Err(e) => {
+                    // TODO: better errors
+                    warn!("Got an error sending request: {}", e);
+                    errs.push(e);
+                }
+            }
+        }
+
+        // get the first error (if any)
+        let e = if !errs.is_empty() {
+            Err(errs.pop().unwrap())
+        } else {
+            Err(anyhow::anyhow!("no successful responses"))
+        };
+
+        // send the error to the channel
+        if response_sender.send(e).is_ok() {
+            // if we were able to send an error, then we never sent a success
+            return Err(anyhow::anyhow!("no successful responses"));
+        } else {
+            // if sending the error failed. the other side must be closed (which means we sent a success earlier)
+            Ok(())
+        }
+    }
+}
 
 /// Load balance to the rpc
 pub struct Web3ProviderTier {
@@ -20,13 +112,13 @@ pub struct Web3ProviderTier {
     /// TODO: we probably want a better lock
     synced_rpcs: ArcSwap<Vec<String>>,
     rpcs: Vec<String>,
-    connections: Arc<Web3ConnectionMap>,
+    connections: Arc<Web3Connections>,
 }
 
 impl fmt::Debug for Web3ProviderTier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
-        write!(f, "Web3ProviderTier")
+        f.debug_struct("Web3ProviderTier").finish_non_exhaustive()
     }
 }
 
@@ -67,11 +159,15 @@ impl Web3ProviderTier {
         Ok(Web3ProviderTier {
             synced_rpcs: ArcSwap::from(Arc::new(vec![])),
             rpcs,
-            connections: Arc::new(connections),
+            connections: Arc::new(connections.into()),
         })
     }
 
-    pub fn clone_connections(&self) -> Arc<Web3ConnectionMap> {
+    pub fn connections(&self) -> &Web3Connections {
+        &self.connections
+    }
+
+    pub fn clone_connections(&self) -> Arc<Web3Connections> {
         self.connections.clone()
     }
 
