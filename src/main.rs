@@ -317,10 +317,6 @@ async fn main() {
             // TODO: add paid nodes (with rate limits)
             // vec![
             //     // chainstack.com archive
-            //     (
-            //         "wss://ws-nd-373-761-850.p2pify.com/106d73af4cebc487df5ba92f1ad8dee7",
-            //         0,
-            //     ),
             // ],
             // free nodes
             // vec![
@@ -329,8 +325,10 @@ async fn main() {
             // ],
         ],
         vec![
-            // ("https://api.edennetwork.io/v1/beta", 0),
             // ("https://api.edennetwork.io/v1/", 0),
+            // ("https://api.edennetwork.io/v1/beta", 0),
+            // ("https://rpc.ethermine.org/", 0),
+            // ("https://rpc.flashbots.net", 0),
         ],
     )
     .await
