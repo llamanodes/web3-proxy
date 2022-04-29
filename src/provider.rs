@@ -39,7 +39,7 @@ impl Web3Provider {
     pub async fn request(
         &self,
         method: &str,
-        params: serde_json::Value,
+        params: Box<serde_json::value::RawValue>,
     ) -> Result<serde_json::Value, ethers::prelude::ProviderError> {
         match self {
             Self::Http(provider) => provider.request(method, params).await,

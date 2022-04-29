@@ -6,7 +6,9 @@ use futures::future;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use governor::clock::{Clock, QuantaClock};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -26,6 +28,21 @@ static APP_USER_AGENT: &str = concat!(
     "/",
     env!("CARGO_PKG_VERSION"),
 );
+
+#[derive(Clone, Deserialize)]
+struct JsonRpcRequest {
+    jsonrpc: Box<RawValue>,
+    id: Box<RawValue>,
+    method: String,
+    params: Box<RawValue>,
+}
+
+#[derive(Clone, Serialize)]
+struct JsonRpcForwardedResponse {
+    jsonrpc: Box<RawValue>,
+    id: Box<RawValue>,
+    result: Box<RawValue>,
+}
 
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
@@ -175,13 +192,9 @@ impl Web3ProxyApp {
     /// TODO: dry this up
     async fn proxy_web3_rpc(
         self: Arc<Web3ProxyApp>,
-        json_body: serde_json::Value,
+        json_body: JsonRpcRequest,
     ) -> anyhow::Result<impl warp::Reply> {
-        let eth_send_raw_transaction =
-            serde_json::Value::String("eth_sendRawTransaction".to_string());
-
-        if self.private_rpcs.is_some() && json_body.get("method") == Some(&eth_send_raw_transaction)
-        {
+        if self.private_rpcs.is_some() && json_body.method == "eth_sendRawTransaction" {
             let private_rpcs = self.private_rpcs.clone().unwrap();
 
             // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
@@ -199,7 +212,7 @@ impl Web3ProxyApp {
                         let connections = private_rpcs.clone_connections();
 
                         // check incoming_id before sending any requests
-                        let incoming_id = json_body.as_object().unwrap().get("id").unwrap();
+                        let incoming_id = &*json_body.id;
 
                         tokio::spawn(async move {
                             clone
@@ -253,7 +266,7 @@ impl Web3ProxyApp {
                 let mut earliest_not_until = None;
 
                 // check incoming_id before sending any requests
-                let incoming_id = json_body.as_object().unwrap().get("id").unwrap();
+                let incoming_id = &*json_body.id;
 
                 for balanced_rpcs in self.balanced_rpc_tiers.iter() {
                     // TODO: what allowed lag?
@@ -358,20 +371,13 @@ impl Web3ProxyApp {
         &self,
         rpc_servers: Vec<String>,
         connections: Arc<Web3ConnectionMap>,
-        json_request_body: serde_json::Value,
+        json_request_body: JsonRpcRequest,
         // TODO: better type for this
         tx: mpsc::UnboundedSender<anyhow::Result<serde_json::Value>>,
     ) -> anyhow::Result<()> {
         // {"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}
-        let method = json_request_body
-            .get("method")
-            .and_then(|x| x.as_str())
-            .ok_or_else(|| anyhow::anyhow!("bad id"))?
-            .to_string();
-        let params = json_request_body
-            .get("params")
-            .ok_or_else(|| anyhow::anyhow!("no params"))?
-            .to_owned();
+        let method = json_request_body.method.clone();
+        let params = json_request_body.params;
 
         if rpc_servers.len() == 1 {
             let rpc = rpc_servers.first().unwrap();
