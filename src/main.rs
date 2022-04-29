@@ -47,8 +47,8 @@ impl fmt::Debug for Web3ProxyApp {
 impl Web3ProxyApp {
     async fn try_new(
         allowed_lag: u64,
-        balanced_rpc_tiers: Vec<Vec<(&str, u32)>>,
-        private_rpcs: Vec<(&str, u32)>,
+        balanced_rpc_tiers: Vec<Vec<(&str, u32, Option<u32>)>>,
+        private_rpcs: Vec<(&str, u32, Option<u32>)>,
     ) -> anyhow::Result<Web3ProxyApp> {
         let clock = QuantaClock::default();
 
@@ -242,7 +242,7 @@ impl Web3ProxyApp {
 
                                     json!({
                                         // TODO: re-use their jsonrpc?
-                                        "jsonrpc": json_body.jsonrpc,
+                                        "jsonrpc": "2.0",
                                         "id": json_body.id,
                                         "result": partial_response
                                     })
@@ -250,7 +250,7 @@ impl Web3ProxyApp {
                                 Err(e) => {
                                     // TODO: what is the proper format for an error?
                                     json!({
-                                        "jsonrpc": json_body.jsonrpc,
+                                        "jsonrpc": "2.0",
                                         "id": json_body.id,
                                         "error": format!("{}", e)
                                     })
@@ -312,23 +312,27 @@ async fn main() {
         allowed_lag,
         vec![
             // local nodes
-            vec![("ws://10.11.12.16:8545", 0), ("ws://10.11.12.16:8946", 0)],
+            vec![
+                ("ws://10.11.12.16:8545", 68_800, None),
+                ("ws://10.11.12.16:8946", 152_138, None),
+            ],
             // paid nodes
             // TODO: add paid nodes (with rate limits)
             // vec![
             //     // chainstack.com archive
+            //     // moralis free (25/sec rate limit)
             // ],
             // free nodes
             // vec![
-            //     // ("https://main-rpc.linkpool.io", 0), // linkpool is slow and often offline
-            //     ("https://rpc.ankr.com/eth", 0),
+            //     // ("https://main-rpc.linkpool.io", 4_779, None), // linkpool is slow and often offline
+            //     ("https://rpc.ankr.com/eth", 23_967, None),
             // ],
         ],
         vec![
-            // ("https://api.edennetwork.io/v1/", 0),
-            // ("https://api.edennetwork.io/v1/beta", 0),
-            // ("https://rpc.ethermine.org/", 0),
-            // ("https://rpc.flashbots.net", 0),
+            // ("https://api.edennetwork.io/v1/", 1_805, None),
+            // ("https://api.edennetwork.io/v1/beta", 300, None),
+            // ("https://rpc.ethermine.org/", 5_861, None),
+            // ("https://rpc.flashbots.net", 7074, None),
         ],
     )
     .await

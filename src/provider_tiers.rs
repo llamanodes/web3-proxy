@@ -123,7 +123,7 @@ impl fmt::Debug for Web3ProviderTier {
 
 impl Web3ProviderTier {
     pub async fn try_new(
-        servers: Vec<(&str, u32)>,
+        servers: Vec<(&str, u32, Option<u32>)>,
         http_client: Option<reqwest::Client>,
         block_watcher: Arc<BlockWatcher>,
         clock: &QuantaClock,
@@ -131,11 +131,11 @@ impl Web3ProviderTier {
         let mut rpcs: Vec<String> = vec![];
         let mut connections = HashMap::new();
 
-        for (s, limit) in servers.into_iter() {
+        for (s, soft_limit, hard_limit) in servers.into_iter() {
             rpcs.push(s.to_string());
 
-            let ratelimiter = if limit > 0 {
-                let quota = governor::Quota::per_second(NonZeroU32::new(limit).unwrap());
+            let hard_rate_limiter = if let Some(hard_limit) = hard_limit {
+                let quota = governor::Quota::per_second(NonZeroU32::new(hard_limit).unwrap());
 
                 let rate_limiter = governor::RateLimiter::direct_with_clock(quota, clock);
 
@@ -148,7 +148,8 @@ impl Web3ProviderTier {
                 s.to_string(),
                 http_client.clone(),
                 block_watcher.clone_sender(),
-                ratelimiter,
+                hard_rate_limiter,
+                soft_limit as f32,
             )
             .await?;
 
@@ -192,7 +193,7 @@ impl Web3ProviderTier {
             .collect();
 
         // sort rpcs by their sync status
-        // TODO: if we only changed one row, we don't need to sort the whole thing. i think we can do this better
+        // TODO: if we only changed one entry, we don't need to sort the whole thing. we can do this better
         available_rpcs.sort_unstable_by(|a, b| {
             let a_synced = sync_status.get(a).unwrap();
             let b_synced = sync_status.get(b).unwrap();
@@ -221,11 +222,11 @@ impl Web3ProviderTier {
 
         // TODO: we don't want to sort on active connections. we want to sort on remaining capacity for connections. for example, geth can handle more than erigon
         synced_rpcs.sort_unstable_by(|a, b| {
+            let a = self.connections.get(a).unwrap();
+            let b = self.connections.get(b).unwrap();
+
             // sort on active connections
-            self.connections
-                .get(a)
-                .unwrap()
-                .cmp(self.connections.get(b).unwrap())
+            a.cmp(b)
         });
 
         for selected_rpc in synced_rpcs.iter() {

@@ -10,7 +10,7 @@ use governor::RateLimiter;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::fmt;
-use std::sync::atomic::{self, AtomicUsize};
+use std::sync::atomic::{self, AtomicU32};
 use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::time::interval;
@@ -23,7 +23,6 @@ type Web3RateLimiter =
 
 #[derive(Clone, Deserialize)]
 pub struct JsonRpcRequest {
-    pub jsonrpc: Box<RawValue>,
     pub id: Box<RawValue>,
     pub method: String,
     pub params: Box<RawValue>,
@@ -38,9 +37,9 @@ impl fmt::Debug for JsonRpcRequest {
     }
 }
 
+// TODO: check for errors too!
 #[derive(Clone, Deserialize, Serialize)]
 pub struct JsonRpcForwardedResponse {
-    pub jsonrpc: Box<RawValue>,
     pub id: Box<RawValue>,
     pub result: Box<RawValue>,
 }
@@ -124,12 +123,19 @@ impl Web3Provider {
 }
 
 /// An active connection to a Web3Rpc
-#[derive(Debug)]
 pub struct Web3Connection {
     /// keep track of currently open requests. We sort on this
-    active_requests: AtomicUsize,
+    active_requests: AtomicU32,
     provider: Arc<Web3Provider>,
     ratelimiter: Option<Web3RateLimiter>,
+    /// used for load balancing to the least loaded server
+    soft_limit: f32,
+}
+
+impl fmt::Debug for Web3Connection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Web3Connection").finish_non_exhaustive()
+    }
 }
 
 impl Web3Connection {
@@ -142,7 +148,8 @@ impl Web3Connection {
         url_str: String,
         http_client: Option<reqwest::Client>,
         block_watcher_sender: BlockWatcherSender,
-        ratelimiter: Option<Web3RateLimiter>,
+        hard_rate_limiter: Option<Web3RateLimiter>,
+        soft_limit: f32,
     ) -> anyhow::Result<Web3Connection> {
         let provider = if url_str.starts_with("http") {
             let url: url::Url = url_str.parse()?;
@@ -184,7 +191,8 @@ impl Web3Connection {
         Ok(Web3Connection {
             active_requests: Default::default(),
             provider,
-            ratelimiter,
+            ratelimiter: hard_rate_limiter,
+            soft_limit,
         })
     }
 
@@ -223,11 +231,32 @@ impl Eq for Web3Connection {}
 impl Ord for Web3Connection {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // TODO: what atomic ordering?!
-        self.active_requests
-            .load(atomic::Ordering::Acquire)
-            .cmp(&other.active_requests.load(atomic::Ordering::Acquire))
+        let a = self.active_requests.load(atomic::Ordering::Acquire);
+        let b = other.active_requests.load(atomic::Ordering::Acquire);
+
+        // TODO: how should we include the soft limit? floats are slower than integer math
+        let a = a as f32 / self.soft_limit;
+        let b = b as f32 / other.soft_limit;
+
+        a.partial_cmp(&b).unwrap()
     }
 }
+
+/**
+
+Lets say geth has 1000 active requests and erigon also has 1000 active requests
+
+geth is much faster, so we want it to get the rest
+
+geth's soft limit is 120k. erigon's soft limit is 60k
+
+120 vs 60
+
+Lets say geth has 100k active requests and erigon has 100k active requests. same soft limits
+
+0.8333
+
+ */
 
 impl PartialOrd for Web3Connection {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {

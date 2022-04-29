@@ -27,14 +27,14 @@ impl Ord for SyncStatus {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         match (self, other) {
             (SyncStatus::Synced(a), SyncStatus::Synced(b)) => a.cmp(b),
-            (SyncStatus::Synced(_), SyncStatus::Unknown) => cmp::Ordering::Greater,
-            (SyncStatus::Unknown, SyncStatus::Synced(_)) => cmp::Ordering::Less,
-            (SyncStatus::Unknown, SyncStatus::Unknown) => cmp::Ordering::Equal,
             (SyncStatus::Synced(_), SyncStatus::Behind(_)) => cmp::Ordering::Greater,
+            (SyncStatus::Synced(_), SyncStatus::Unknown) => cmp::Ordering::Greater,
             (SyncStatus::Behind(_), SyncStatus::Synced(_)) => cmp::Ordering::Less,
-            (SyncStatus::Behind(_), SyncStatus::Unknown) => cmp::Ordering::Greater,
             (SyncStatus::Behind(a), SyncStatus::Behind(b)) => a.cmp(b),
+            (SyncStatus::Behind(_), SyncStatus::Unknown) => cmp::Ordering::Greater,
+            (SyncStatus::Unknown, SyncStatus::Synced(_)) => cmp::Ordering::Less,
             (SyncStatus::Unknown, SyncStatus::Behind(_)) => cmp::Ordering::Less,
+            (SyncStatus::Unknown, SyncStatus::Unknown) => cmp::Ordering::Equal,
         }
     }
 }
