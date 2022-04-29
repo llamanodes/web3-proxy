@@ -3,6 +3,8 @@ mod provider;
 mod provider_tiers;
 
 use futures::future;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use governor::clock::{Clock, QuantaClock};
 use serde_json::json;
 use std::collections::HashMap;
@@ -77,6 +79,7 @@ impl Web3ProxyApp {
         // TODO: how should we configure the connection pool?
         // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something is wrong with the remote server
         let http_client = reqwest::ClientBuilder::new()
+            .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(300))
             .user_agent(APP_USER_AGENT)
             .build()?;
@@ -97,6 +100,7 @@ impl Web3ProxyApp {
 
         let private_rpcs = if private_rpcs.is_empty() {
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
+            // TODO: instead of None, set it to a list of all the rpcs from balanced_rpc_tiers. that way we broadcast very loudly
             None
         } else {
             Some(Arc::new(
@@ -369,14 +373,18 @@ impl Web3ProxyApp {
             .ok_or_else(|| anyhow::anyhow!("no params"))?
             .to_owned();
 
-        // send the query to all the servers
-        let bodies = future::join_all(rpc_servers.into_iter().map(|rpc| {
+        // TODO: lets just use a usize index or something
+        let method = Arc::new(method);
+
+        let mut unordered_futures = FuturesUnordered::new();
+
+        for rpc in rpc_servers {
             let connections = connections.clone();
             let method = method.clone();
             let params = params.clone();
             let tx = tx.clone();
 
-            async move {
+            let handle = tokio::spawn(async move {
                 // get the client for this rpc server
                 let provider = connections.get(&rpc).unwrap().clone_provider();
 
@@ -393,14 +401,15 @@ impl Web3ProxyApp {
                 let _ = tx.send(Ok(response));
 
                 Ok::<(), anyhow::Error>(())
-            }
-        }))
-        .await;
+            });
+
+            unordered_futures.push(handle);
+        }
 
         // TODO: use iterators instead of pushing into a vec
         let mut errs = vec![];
-        for x in bodies {
-            match x {
+        if let Some(x) = unordered_futures.next().await {
+            match x.unwrap() {
                 Ok(_) => {}
                 Err(e) => {
                     // TODO: better errors
@@ -437,9 +446,11 @@ async fn main() {
     // TODO: support multiple chains in one process? then we could just point "chain.stytt.com" at this and caddy wouldn't need anything else
     // TODO: be smart about about using archive nodes? have a set that doesn't use archive nodes since queries to them are more valuable
     let listen_port = 8445;
+    // TODO: what should this be? 0 will cause a thundering herd
+    let allowed_lag = 0;
 
     let state = Web3ProxyApp::try_new(
-        1,
+        allowed_lag,
         vec![
             // local nodes
             vec![("ws://10.11.12.16:8545", 0), ("ws://10.11.12.16:8946", 0)],
@@ -471,15 +482,13 @@ async fn main() {
     let proxy_rpc_filter = warp::any()
         .and(warp::post())
         .and(warp::body::json())
-        .then(move |json_body| state.clone().proxy_web3_rpc(json_body))
-        .map(handle_anyhow_errors);
+        .then(move |json_body| state.clone().proxy_web3_rpc(json_body));
 
-    // TODO: filter for displaying connections
-    // TODO: filter for displaying
+    // TODO: filter for displaying connections and their block heights
 
     // TODO: warp trace is super verbose. how do we make this more readable?
     // let routes = proxy_rpc_filter.with(warp::trace::request());
-    let routes = proxy_rpc_filter;
+    let routes = proxy_rpc_filter.map(handle_anyhow_errors);
 
     warp::serve(routes).run(([0, 0, 0, 0], listen_port)).await;
 }
