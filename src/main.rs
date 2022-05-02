@@ -1,23 +1,20 @@
-mod block_watcher;
-mod provider;
-mod provider_tiers;
+mod connection;
+mod connections;
 
 use futures::future;
 use governor::clock::{Clock, QuantaClock};
 use serde_json::json;
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::warn;
 use warp::Filter;
 use warp::Reply;
 
-use crate::block_watcher::BlockWatcher;
-use crate::provider::JsonRpcRequest;
-use crate::provider_tiers::Web3ProviderTier;
+use crate::connection::JsonRpcRequest;
+use crate::connections::Web3Connections;
 
 static APP_USER_AGENT: &str = concat!(
     "satoshiandkin/",
@@ -33,9 +30,9 @@ struct Web3ProxyApp {
     /// TODO: use tokio's clock (will require a different ratelimiting crate)
     clock: QuantaClock,
     /// Send requests to the best server available
-    balanced_rpc_tiers: Arc<Vec<Web3ProviderTier>>,
+    balanced_rpc_tiers: Vec<Arc<Web3Connections>>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
-    private_rpcs: Option<Arc<Web3ProviderTier>>,
+    private_rpcs: Option<Arc<Web3Connections>>,
 }
 
 impl fmt::Debug for Web3ProxyApp {
@@ -47,7 +44,6 @@ impl fmt::Debug for Web3ProxyApp {
 
 impl Web3ProxyApp {
     async fn try_new(
-        allowed_lag: u64,
         balanced_rpc_tiers: Vec<Vec<(&str, u32, Option<u32>)>>,
         private_rpcs: Vec<(&str, u32, Option<u32>)>,
     ) -> anyhow::Result<Web3ProxyApp> {
@@ -67,8 +63,6 @@ impl Web3ProxyApp {
             rpcs.push(rpc);
         }
 
-        let block_watcher = Arc::new(BlockWatcher::new(rpcs));
-
         // make a http shared client
         // TODO: how should we configure the connection pool?
         // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something is wrong with the remote server
@@ -78,83 +72,21 @@ impl Web3ProxyApp {
             .user_agent(APP_USER_AGENT)
             .build()?;
 
-        let balanced_rpc_tiers = Arc::new(
+        let balanced_rpc_tiers =
             future::join_all(balanced_rpc_tiers.into_iter().map(|balanced_rpc_tier| {
-                Web3ProviderTier::try_new(
-                    balanced_rpc_tier,
-                    Some(http_client.clone()),
-                    block_watcher.clone(),
-                    &clock,
-                )
+                Web3Connections::try_new(balanced_rpc_tier, Some(http_client.clone()), &clock)
             }))
             .await
             .into_iter()
-            .collect::<anyhow::Result<Vec<Web3ProviderTier>>>()?,
-        );
+            .collect::<anyhow::Result<Vec<Arc<Web3Connections>>>>()?;
 
         let private_rpcs = if private_rpcs.is_empty() {
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             // TODO: instead of None, set it to a list of all the rpcs from balanced_rpc_tiers. that way we broadcast very loudly
             None
         } else {
-            Some(Arc::new(
-                Web3ProviderTier::try_new(
-                    private_rpcs,
-                    Some(http_client),
-                    block_watcher.clone(),
-                    &clock,
-                )
-                .await?,
-            ))
+            Some(Web3Connections::try_new(private_rpcs, Some(http_client), &clock).await?)
         };
-
-        let (new_block_sender, mut new_block_receiver) = watch::channel::<String>("".to_string());
-
-        {
-            // TODO: spawn this later?
-            // spawn a future for the block_watcher
-            let block_watcher = block_watcher.clone();
-            tokio::spawn(async move { block_watcher.run(new_block_sender).await });
-        }
-
-        {
-            // spawn a future for sorting our synced rpcs
-            // TODO: spawn this later?
-            let balanced_rpc_tiers = balanced_rpc_tiers.clone();
-            let private_rpcs = private_rpcs.clone();
-            let block_watcher = block_watcher.clone();
-
-            tokio::spawn(async move {
-                let mut tier_map = HashMap::new();
-                let mut private_map = HashMap::new();
-
-                for balanced_rpc_tier in balanced_rpc_tiers.iter() {
-                    for rpc in balanced_rpc_tier.clone_rpcs() {
-                        tier_map.insert(rpc, balanced_rpc_tier);
-                    }
-                }
-
-                if let Some(private_rpcs) = private_rpcs {
-                    for rpc in private_rpcs.clone_rpcs() {
-                        private_map.insert(rpc, private_rpcs.clone());
-                    }
-                }
-
-                while new_block_receiver.changed().await.is_ok() {
-                    let updated_rpc = new_block_receiver.borrow().clone();
-
-                    if let Some(tier) = tier_map.get(&updated_rpc) {
-                        tier.update_synced_rpcs(block_watcher.clone(), allowed_lag)
-                            .unwrap();
-                    } else if let Some(tier) = private_map.get(&updated_rpc) {
-                        tier.update_synced_rpcs(block_watcher.clone(), allowed_lag)
-                            .unwrap();
-                    } else {
-                        panic!("howd this happen");
-                    }
-                }
-            });
-        }
 
         Ok(Web3ProxyApp {
             clock,
@@ -175,11 +107,11 @@ impl Web3ProxyApp {
             // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
             loop {
                 // TODO: think more about this lock. i think it won't actually help the herd. it probably makes it worse if we have a tight lag_limit
-                match private_rpcs.get_upstream_servers().await {
+                match private_rpcs.get_upstream_servers() {
                     Ok(upstream_servers) => {
                         let (tx, mut rx) = mpsc::unbounded_channel();
 
-                        let connections = private_rpcs.clone_connections();
+                        let connections = private_rpcs.clone();
                         let method = json_body.method.clone();
                         let params = json_body.params.clone();
 
@@ -226,13 +158,11 @@ impl Web3ProxyApp {
                     // TODO: what allowed lag?
                     match balanced_rpcs.next_upstream_server().await {
                         Ok(upstream_server) => {
-                            let connections = balanced_rpcs.connections();
-
-                            let response = connections
+                            let response = balanced_rpcs
                                 .try_send_request(
-                                    upstream_server,
-                                    json_body.method.clone(),
-                                    json_body.params.clone(),
+                                    &upstream_server,
+                                    &json_body.method,
+                                    &json_body.params,
                                 )
                                 .await;
 
@@ -307,15 +237,13 @@ async fn main() {
     // TODO: be smart about about using archive nodes? have a set that doesn't use archive nodes since queries to them are more valuable
     let listen_port = 8445;
     // TODO: what should this be? 0 will cause a thundering herd
-    let allowed_lag = 0;
 
     let state = Web3ProxyApp::try_new(
-        allowed_lag,
         vec![
             // local nodes
             vec![
-                ("ws://10.11.12.16:8545", 68_800, None),
-                ("ws://10.11.12.16:8946", 152_138, None),
+                ("ws://127.0.0.1:8545", 68_800, None),
+                ("ws://127.0.0.1:8946", 152_138, None),
             ],
             // paid nodes
             // TODO: add paid nodes (with rate limits)
@@ -324,16 +252,16 @@ async fn main() {
             //     // moralis free (25/sec rate limit)
             // ],
             // free nodes
-            // vec![
-            //     // ("https://main-rpc.linkpool.io", 4_779, None), // linkpool is slow and often offline
-            //     ("https://rpc.ankr.com/eth", 23_967, None),
-            // ],
+            vec![
+                ("https://main-rpc.linkpool.io", 4_779, None), // linkpool is slow and often offline
+                ("https://rpc.ankr.com/eth", 23_967, None),
+            ],
         ],
         vec![
-            // ("https://api.edennetwork.io/v1/", 1_805, None),
-            // ("https://api.edennetwork.io/v1/beta", 300, None),
-            // ("https://rpc.ethermine.org/", 5_861, None),
-            // ("https://rpc.flashbots.net", 7074, None),
+            ("https://api.edennetwork.io/v1/", 1_805, None),
+            ("https://api.edennetwork.io/v1/beta", 300, None),
+            ("https://rpc.ethermine.org/", 5_861, None),
+            ("https://rpc.flashbots.net", 7074, None),
         ],
     )
     .await
