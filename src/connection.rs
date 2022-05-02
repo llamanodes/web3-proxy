@@ -160,6 +160,10 @@ impl Web3Connection {
         self.active_requests.load(atomic::Ordering::Acquire)
     }
 
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
     /// Subscribe to new blocks
     // #[instrument]
     pub async fn new_heads(
@@ -185,7 +189,7 @@ impl Web3Connection {
                     // TODO: also send something to the provider_tier so it can sort?
                     let old_block_number = self
                         .head_block_number
-                        .swap(block_number, atomic::Ordering::SeqCst);
+                        .swap(block_number, atomic::Ordering::AcqRel);
 
                     if old_block_number != block_number {
                         info!("new block on {}: {}", self, block_number);
@@ -208,7 +212,7 @@ impl Web3Connection {
                     // TODO: also send something to the provider_tier so it can sort?
                     let old_block_number = self
                         .head_block_number
-                        .swap(block_number, atomic::Ordering::SeqCst);
+                        .swap(block_number, atomic::Ordering::AcqRel);
 
                     if old_block_number != block_number {
                         info!("new block on {}: {}", self, block_number);
@@ -257,14 +261,14 @@ impl Web3Connection {
         };
 
         // TODO: what ordering?!
-        self.active_requests.fetch_add(1, atomic::Ordering::SeqCst);
+        self.active_requests.fetch_add(1, atomic::Ordering::AcqRel);
 
         Ok(())
     }
 
     pub fn dec_active_requests(&self) {
         // TODO: what ordering?!
-        self.active_requests.fetch_sub(1, atomic::Ordering::SeqCst);
+        self.active_requests.fetch_sub(1, atomic::Ordering::AcqRel);
     }
 }
 
@@ -273,8 +277,8 @@ impl Eq for Web3Connection {}
 impl Ord for Web3Connection {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // TODO: what atomic ordering?!
-        let a = self.active_requests.load(atomic::Ordering::SeqCst);
-        let b = other.active_requests.load(atomic::Ordering::SeqCst);
+        let a = self.active_requests.load(atomic::Ordering::Acquire);
+        let b = other.active_requests.load(atomic::Ordering::Acquire);
 
         // TODO: how should we include the soft limit? floats are slower than integer math
         let a = a as f32 / self.soft_limit as f32;

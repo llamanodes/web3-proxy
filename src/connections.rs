@@ -1,11 +1,11 @@
 ///! Communicate with a group of web3 providers
+use arc_swap::ArcSwap;
 use derive_more::From;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use fxhash::FxHashMap;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
-use parking_lot::RwLock;
 use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
@@ -18,7 +18,14 @@ use crate::connection::{JsonRpcForwardedResponse, Web3Connection};
 #[derive(Clone, Default)]
 struct SyncedConnections {
     head_block_number: u64,
-    inner: Vec<Arc<Web3Connection>>,
+    inner: Vec<usize>,
+}
+
+impl fmt::Debug for SyncedConnections {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        f.debug_struct("SyncedConnections").finish_non_exhaustive()
+    }
 }
 
 impl SyncedConnections {
@@ -37,7 +44,8 @@ impl SyncedConnections {
 pub struct Web3Connections {
     inner: Vec<Arc<Web3Connection>>,
     /// TODO: what is the best type for this? Heavy reads with writes every few seconds. When writes happen, there is a burst of them
-    synced_connections: RwLock<SyncedConnections>,
+    /// TODO: arcswap was a lot faster, but i think we need a lock for proper logic
+    synced_connections: ArcSwap<SyncedConnections>,
 }
 
 impl fmt::Debug for Web3Connections {
@@ -77,7 +85,7 @@ impl Web3Connections {
 
         let connections = Arc::new(Self {
             inner: connections,
-            synced_connections: RwLock::new(SyncedConnections::new(num_connections)),
+            synced_connections: ArcSwap::new(Arc::new(SyncedConnections::new(num_connections))),
         });
 
         for connection in connections.inner.iter() {
@@ -85,11 +93,14 @@ impl Web3Connections {
             let connection = Arc::clone(connection);
             let connections = connections.clone();
             tokio::spawn(async move {
+                // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
                 if let Err(e) = connection.new_heads(Some(connections)).await {
                     warn!("new_heads error: {:?}", e);
                 }
             });
         }
+
+        // TODO: listen on a receiver mpsc channel?
 
         Ok(connections)
     }
@@ -177,34 +188,47 @@ impl Web3Connections {
         rpc: &Arc<Web3Connection>,
         new_block: u64,
     ) -> anyhow::Result<()> {
-        // TODO: is RwLock the best type for this?
+        // TODO: is RwLock the best type for this? i don't think so anymore. we probably want to use channels and have a single writer using a left-right or arcswap or something
         // TODO: start with a read lock?
-        let mut synced_connections = self.synced_connections.write();
+        let synced_connections = self.synced_connections.load();
 
         // should we load new_block here?
 
-        match synced_connections.head_block_number.cmp(&new_block) {
-            cmp::Ordering::Equal => {
-                // this rpc is synced, but it isn't the first to this block
-            }
-            cmp::Ordering::Less => {
-                // this is a new head block. clear the current synced connections
-                // TODO: this is too verbose with a bunch of tiers. include the tier
-                // info!("new head block from {:?}: {}", rpc, new_block);
+        let mut new_synced_connections: SyncedConnections =
+            match synced_connections.head_block_number.cmp(&new_block) {
+                cmp::Ordering::Equal => {
+                    // this rpc is synced, but it isn't the first to this block
+                    (**synced_connections).to_owned()
+                }
+                cmp::Ordering::Less => {
+                    // this is a new head block. clear the current synced connections
+                    // TODO: this is too verbose with a bunch of tiers. include the tier
+                    // info!("new head block from {:?}: {}", rpc, new_block);
 
-                synced_connections.inner.clear();
+                    let mut new_synced_connections = SyncedConnections::new(self.inner.len());
 
-                synced_connections.head_block_number = new_block;
-            }
-            cmp::Ordering::Greater => {
-                // not the latest block. return now
-                return Ok(());
-            }
-        }
+                    // synced_connections.inner.clear();
 
-        let rpc = Arc::clone(rpc);
+                    new_synced_connections.head_block_number = new_block;
 
-        synced_connections.inner.push(rpc);
+                    new_synced_connections
+                }
+                cmp::Ordering::Greater => {
+                    // not the latest block. return now
+                    return Ok(());
+                }
+            };
+
+        let rpc_index = self
+            .inner
+            .iter()
+            .position(|x| x.url() == rpc.url())
+            .unwrap();
+
+        new_synced_connections.inner.push(rpc_index);
+
+        self.synced_connections
+            .swap(Arc::new(new_synced_connections));
 
         Ok(())
     }
@@ -216,24 +240,29 @@ impl Web3Connections {
         let mut earliest_not_until = None;
 
         // TODO: this clone is probably not the best way to do this
-        let mut synced_rpcs = self.synced_connections.read().inner.clone();
+        let mut synced_rpc_indexes = self.synced_connections.load().inner.clone();
 
-        // i'm pretty sure i did this safely. Hash on Web3Connection just uses the url and not any of the atomics
-        #[allow(clippy::mutable_key_type)]
-        let cache: FxHashMap<Arc<Web3Connection>, u32> = synced_rpcs
+        let cache: FxHashMap<usize, u32> = synced_rpc_indexes
             .iter()
-            .map(|synced_rpc| (synced_rpc.clone(), synced_rpc.active_requests()))
+            .map(|synced_index| {
+                (
+                    *synced_index,
+                    self.inner.get(*synced_index).unwrap().active_requests(),
+                )
+            })
             .collect();
 
         // TODO: i think we might need to load active connections and then
-        synced_rpcs.sort_unstable_by(|a, b| {
+        synced_rpc_indexes.sort_unstable_by(|a, b| {
             let a = cache.get(a).unwrap();
             let b = cache.get(b).unwrap();
 
             a.cmp(b)
         });
 
-        for selected_rpc in synced_rpcs.iter() {
+        for selected_rpc in synced_rpc_indexes.into_iter() {
+            let selected_rpc = self.inner.get(selected_rpc).unwrap();
+
             // increment our connection counter
             if let Err(not_until) = selected_rpc.try_inc_active_requests() {
                 earliest_possible(&mut earliest_not_until, not_until);

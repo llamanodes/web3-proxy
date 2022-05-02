@@ -191,6 +191,7 @@ impl Web3ProxyApp {
                             return Ok(warp::reply::json(&response));
                         }
                         Err(None) => {
+                            // TODO: this is too verbose. if there are other servers in other tiers, use those!
                             warn!("No servers in sync!");
                         }
                         Err(Some(not_until)) => {
