@@ -82,17 +82,23 @@ pub struct Web3Connection {
     head_block_number: AtomicU64,
 }
 
-impl Hash for Web3Connection {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.url.hash(state);
-    }
-}
-
 impl fmt::Debug for Web3Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Web3Connection")
             .field("url", &self.url)
             .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Display for Web3Connection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", &self.url)
+    }
+}
+
+impl Hash for Web3Connection {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.url.hash(state);
     }
 }
 
@@ -160,7 +166,7 @@ impl Web3Connection {
         self: Arc<Self>,
         connections: Option<Arc<Web3Connections>>,
     ) -> anyhow::Result<()> {
-        info!("Watching new_heads on {:?}", self);
+        info!("Watching new_heads on {}", self);
 
         match &self.provider {
             Web3Provider::Http(provider) => {
@@ -173,26 +179,20 @@ impl Web3Connection {
                     // wait for 2 seconds
                     interval.tick().await;
 
-                    match (
-                        &connections,
-                        provider.get_block_number().await.map(|x| x.as_u64()),
-                    ) {
-                        (None, Ok(block_number)) => {
-                            // TODO: only store if this isn't already stored?
-                            // TODO: also send something to the provider_tier so it can sort?
-                            self.head_block_number
-                                .store(block_number, atomic::Ordering::SeqCst);
-                        }
-                        (Some(connections), Ok(block_number)) => {
-                            let old_block_number = self
-                                .head_block_number
-                                .swap(block_number, atomic::Ordering::SeqCst);
+                    let block_number = provider.get_block_number().await.map(|x| x.as_u64())?;
 
-                            if old_block_number != block_number {
-                                connections.update_synced_rpcs(&self, block_number)?;
-                            }
+                    // TODO: only store if this isn't already stored?
+                    // TODO: also send something to the provider_tier so it can sort?
+                    let old_block_number = self
+                        .head_block_number
+                        .swap(block_number, atomic::Ordering::SeqCst);
+
+                    if old_block_number != block_number {
+                        info!("new block on {}: {}", self, block_number);
+
+                        if let Some(connections) = &connections {
+                            connections.update_synced_rpcs(&self, block_number)?;
                         }
-                        (_, Err(e)) => warn!("getBlockNumber failed: {}", e),
                     }
                 }
             }
@@ -211,7 +211,7 @@ impl Web3Connection {
                         .swap(block_number, atomic::Ordering::SeqCst);
 
                     if old_block_number != block_number {
-                        info!("new block on {:?}: {}", self, block_number);
+                        info!("new block on {}: {}", self, block_number);
 
                         if let Some(connections) = &connections {
                             connections.update_synced_rpcs(&self, block_number)?;
@@ -221,7 +221,7 @@ impl Web3Connection {
             }
         }
 
-        info!("Done watching new_heads");
+        info!("Done watching new_heads on {}", self);
 
         Ok(())
     }
