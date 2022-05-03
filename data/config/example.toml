@@ -9,35 +9,8 @@ listen_port = 8445
     url = "ws://127.0.0.1:8545"
     soft_limit = 68_000
 
-    #[balanced_rpc_tiers.0.local_geth]
-    #url = "ws://127.0.0.1:8946"
-    #soft_limit = 160_000
-
-[balanced_rpc_tiers.1]
-
-    #[balanced_rpc_tiers.1.linkpool]
-    ##linkpool is slow and often offline
-    #url = "https://main-rpc.linkpool.io"
-    #soft_limit = 4_779
-
-    [balanced_rpc_tiers.1.ankr]
-    url = "https://rpc.ankr.com/eth"
-    soft_limit = 23_967
-
 [private_rpcs]
-
-    [private_rpcs.eden]
-    url = "https://api.edennetwork.io/v1/"
-    soft_limit = 1_805
 
     [private_rpcs.eden_beta]
     url = "https://api.edennetwork.io/v1/beta"
     soft_limit = 5_861
-
-    [private_rpcs.ethermine]
-    url = "https://rpc.ethermine.org"
-    soft_limit = 5_861
-
-    [private_rpcs.flashbots]
-    url = "https://rpc.flashbots.net"
-    soft_limit = 7074
