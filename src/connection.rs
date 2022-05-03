@@ -166,21 +166,34 @@ impl Web3Connection {
                 // TODO: it would be faster to get the block number, but subscriptions don't provide that
                 // TODO: maybe we can do provider.subscribe("newHeads") and then parse into a custom struct that only gets the number out?
                 let mut stream = provider.subscribe_blocks().await?;
+
+                // query the block once since the subscription doesn't send the current block
+                // there is a very small race condition here where the stream could send us a new block right now
+                // all it does is print "new block" for the same block as current block
+                let block_number = provider.get_block_number().await.map(|x| x.as_u64())?;
+
+                info!("current block on {}: {}", self, block_number);
+
+                self.head_block_number
+                    .store(block_number, atomic::Ordering::Release);
+
+                if let Some(connections) = &connections {
+                    connections.update_synced_rpcs(&self, block_number)?;
+                }
+
                 while let Some(block) = stream.next().await {
                     let block_number = block.number.unwrap().as_u64();
 
                     // TODO: only store if this isn't already stored?
                     // TODO: also send something to the provider_tier so it can sort?
-                    let old_block_number = self
-                        .head_block_number
-                        .swap(block_number, atomic::Ordering::AcqRel);
+                    // TODO: do we need this old block number check? its helpful on http, but here it shouldn't dupe except maybe on the first run
+                    self.head_block_number
+                        .store(block_number, atomic::Ordering::Release);
 
-                    if old_block_number != block_number {
-                        info!("new block on {}: {}", self, block_number);
+                    info!("new block on {}: {}", self, block_number);
 
-                        if let Some(connections) = &connections {
-                            connections.update_synced_rpcs(&self, block_number)?;
-                        }
+                    if let Some(connections) = &connections {
+                        connections.update_synced_rpcs(&self, block_number)?;
                     }
                 }
             }
