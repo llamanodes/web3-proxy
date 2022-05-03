@@ -178,8 +178,7 @@ impl Web3Connections {
         rpc: &Arc<Web3Connection>,
         new_block: u64,
     ) -> anyhow::Result<()> {
-        // TODO: is RwLock the best type for this? i don't think so anymore. we probably want to use channels and have a single writer using a left-right or arcswap or something
-        // TODO: start with a read lock?
+        // TODO: try a left_right instead of an ArcSwap.
         let synced_connections = self.synced_connections.load();
 
         // should we load new_block here?
