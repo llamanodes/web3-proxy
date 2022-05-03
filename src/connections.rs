@@ -10,7 +10,6 @@ use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tracing::warn;
 
 use crate::config::Web3ConnectionConfig;
@@ -93,8 +92,6 @@ impl Web3Connections {
             });
         }
 
-        // TODO: listen on a receiver mpsc channel?
-
         Ok(connections)
     }
 
@@ -120,7 +117,7 @@ impl Web3Connections {
         connections: Vec<Arc<Web3Connection>>,
         method: String,
         params: Box<RawValue>,
-        response_sender: mpsc::UnboundedSender<anyhow::Result<JsonRpcForwardedResponse>>,
+        response_sender: flume::Sender<anyhow::Result<JsonRpcForwardedResponse>>,
     ) -> anyhow::Result<()> {
         let mut unordered_futures = FuturesUnordered::new();
 

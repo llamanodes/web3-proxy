@@ -10,7 +10,6 @@ use governor::RateLimiter;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::num::NonZeroU32;
 use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::time::Duration;
@@ -23,39 +22,7 @@ use crate::connections::Web3Connections;
 type Web3RateLimiter =
     RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware<QuantaInstant>>;
 
-#[derive(Clone, Deserialize)]
-pub struct JsonRpcRequest {
-    pub id: Box<RawValue>,
-    pub method: String,
-    pub params: Box<RawValue>,
-}
-
-impl fmt::Debug for JsonRpcRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: the default formatter takes forever to write. this is too quiet though
-        f.debug_struct("JsonRpcRequest")
-            .field("id", &self.id)
-            .finish_non_exhaustive()
-    }
-}
-
-// TODO: check for errors too!
-#[derive(Clone, Deserialize, Serialize)]
-pub struct JsonRpcForwardedResponse {
-    pub id: Box<RawValue>,
-    pub result: Box<RawValue>,
-}
-
-impl fmt::Debug for JsonRpcForwardedResponse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: the default formatter takes forever to write. this is too quiet though
-        f.debug_struct("JsonRpcForwardedResponse")
-            .field("id", &self.id)
-            .finish_non_exhaustive()
-    }
-}
-
-// TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
+/// TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
 #[derive(From)]
 pub enum Web3Provider {
     Http(ethers::providers::Provider<ethers::providers::Http>),
@@ -93,12 +60,6 @@ impl fmt::Debug for Web3Connection {
 impl fmt::Display for Web3Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", &self.url)
-    }
-}
-
-impl Hash for Web3Connection {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.url.hash(state);
     }
 }
 
@@ -300,5 +261,37 @@ impl PartialEq for Web3Connection {
         // TODO: what ordering?!
         self.active_requests.load(atomic::Ordering::Acquire)
             == other.active_requests.load(atomic::Ordering::Acquire)
+    }
+}
+
+#[derive(Clone, Deserialize)]
+pub struct JsonRpcRequest {
+    pub id: Box<RawValue>,
+    pub method: String,
+    pub params: Box<RawValue>,
+}
+
+impl fmt::Debug for JsonRpcRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        f.debug_struct("JsonRpcRequest")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
+// TODO: check for errors too!
+#[derive(Clone, Deserialize, Serialize)]
+pub struct JsonRpcForwardedResponse {
+    pub id: Box<RawValue>,
+    pub result: Box<RawValue>,
+}
+
+impl fmt::Debug for JsonRpcForwardedResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        f.debug_struct("JsonRpcForwardedResponse")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
     }
 }

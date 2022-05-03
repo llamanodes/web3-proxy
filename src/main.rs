@@ -10,7 +10,6 @@ use std::fmt;
 use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::warn;
 use warp::Filter;
@@ -99,7 +98,7 @@ impl Web3ProxyApp {
                 // TODO: think more about this lock. i think it won't actually help the herd. it probably makes it worse if we have a tight lag_limit
                 match private_rpcs.get_upstream_servers() {
                     Ok(upstream_servers) => {
-                        let (tx, mut rx) = mpsc::unbounded_channel();
+                        let (tx, rx) = flume::unbounded();
 
                         let connections = private_rpcs.clone();
                         let method = json_body.method.clone();
@@ -112,10 +111,7 @@ impl Web3ProxyApp {
                         });
 
                         // wait for the first response
-                        let response = rx
-                            .recv()
-                            .await
-                            .ok_or_else(|| anyhow::anyhow!("no successful response"))?;
+                        let response = rx.recv_async().await?;
 
                         if let Ok(partial_response) = response {
                             let response = json!({
