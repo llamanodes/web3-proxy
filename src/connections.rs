@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::warn;
 
+use crate::config::Web3ConnectionConfig;
 use crate::connection::{JsonRpcForwardedResponse, Web3Connection};
 
 #[derive(Clone, Default)]
@@ -60,7 +61,7 @@ impl fmt::Debug for Web3Connections {
 impl Web3Connections {
     pub async fn try_new(
         // TODO: servers should be a Web3ConnectionBuilder struct
-        servers: Vec<(&str, u32, Option<u32>)>,
+        servers: Vec<Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
         clock: &QuantaClock,
     ) -> anyhow::Result<Arc<Self>> {
@@ -68,17 +69,8 @@ impl Web3Connections {
 
         let num_connections = servers.len();
 
-        for (s, soft_rate_limit, hard_rate_limit) in servers.into_iter() {
-            let connection = Web3Connection::try_new(
-                s.to_string(),
-                http_client.clone(),
-                hard_rate_limit,
-                Some(clock),
-                soft_rate_limit,
-            )
-            .await?;
-
-            let connection = Arc::new(connection);
+        for server_config in servers.into_iter() {
+            let connection = server_config.try_build(clock, http_client.clone()).await?;
 
             connections.push(connection);
         }
@@ -90,6 +82,7 @@ impl Web3Connections {
 
         for connection in connections.inner.iter() {
             // subscribe to new heads in a spawned future
+            // TODO: channel instead. then we can have one future with write access to a left-right
             let connection = Arc::clone(connection);
             let connections = connections.clone();
             tokio::spawn(async move {
