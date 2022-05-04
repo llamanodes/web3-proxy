@@ -9,6 +9,7 @@ use crate::Web3ProxyApp;
 #[derive(Deserialize)]
 pub struct RootConfig {
     pub config: Web3ProxyConfig,
+    // BTreeMap so that iterating keeps the same order
     pub balanced_rpc_tiers: BTreeMap<String, HashMap<String, Web3ConnectionConfig>>,
     pub private_rpcs: HashMap<String, Web3ConnectionConfig>,
 }
