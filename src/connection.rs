@@ -135,13 +135,13 @@ impl Web3Connection {
 
         match &self.provider {
             Web3Provider::Http(provider) => {
-                // TODO: there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
+                // there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
                 // TODO: what should this interval be? probably some fraction of block time
                 // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
                 let mut interval = interval(Duration::from_secs(2));
 
                 loop {
-                    // wait for 2 seconds
+                    // wait for the interval
                     interval.tick().await;
 
                     let block_number = provider.get_block_number().await.map(|x| x.as_u64())?;
