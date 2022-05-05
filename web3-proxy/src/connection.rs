@@ -95,6 +95,7 @@ impl Web3Connection {
                 .interval(Duration::from_secs(1))
                 .into()
         } else if url_str.starts_with("ws") {
+            // TODO: wrapper automatically reconnect
             let provider = ethers::providers::Ws::connect(url_str.clone()).await?;
 
             // TODO: make sure this automatically reconnects
@@ -142,6 +143,7 @@ impl Web3Connection {
 
                 loop {
                     // wait for the interval
+                    // TODO: if error or rate limit, increase interval?
                     interval.tick().await;
 
                     let block_number = provider.get_block_number().await.map(|x| x.as_u64())?;

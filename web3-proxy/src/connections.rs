@@ -69,10 +69,13 @@ impl Web3Connections {
         let num_connections = servers.len();
 
         for server_config in servers.into_iter() {
-            let connection = server_config.try_build(clock, http_client.clone()).await?;
-
-            connections.push(connection);
+            match server_config.try_build(clock, http_client.clone()).await {
+                Ok(connection) => connections.push(connection),
+                Err(e) => warn!("Unable to connect to a server! {}", e),
+            }
         }
+
+        // TODO: exit if no connections?
 
         let connections = Arc::new(Self {
             inner: connections,
