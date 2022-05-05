@@ -13,11 +13,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
-use tracing::warn;
+use tracing::{info, warn};
 use warp::Filter;
 use warp::Reply;
 
-use crate::config::RootConfig;
+use crate::config::{CliConfig, RpcConfig};
 use crate::connection::JsonRpcRequest;
 use crate::connections::Web3Connections;
 
@@ -252,19 +252,18 @@ async fn main() -> anyhow::Result<()> {
     // install global collector configured based on RUST_LOG env var.
     tracing_subscriber::fmt::init();
 
-    // TODO: use flags for the config path
-    let config = "./data/config/example.toml";
+    let cli_config: CliConfig = argh::from_env();
 
-    let config: String = fs::read_to_string(config)?;
-
-    let config: RootConfig = toml::from_str(&config)?;
+    info!("Loading rpc config @ {}", cli_config.rpc_config_path);
+    let rpc_config: String = fs::read_to_string(cli_config.rpc_config_path)?;
+    let rpc_config: RpcConfig = toml::from_str(&rpc_config)?;
 
     // TODO: load the config from yaml instead of hard coding
     // TODO: support multiple chains in one process? then we could just point "chain.stytt.com" at this and caddy wouldn't need anything else
     // TODO: be smart about about using archive nodes? have a set that doesn't use archive nodes since queries to them are more valuable
-    let listen_port = config.config.listen_port;
+    let listen_port = cli_config.listen_port;
 
-    let app = config.try_build().await?;
+    let app = rpc_config.try_build().await?;
 
     let app: Arc<Web3ProxyApp> = Arc::new(app);
 
