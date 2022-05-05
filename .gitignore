@@ -1,5 +1,5 @@
-/data/config/*.toml
-/flamegraph.svg
-/perf.data
-/perf.data.old
+/web3-proxy/data/config/*.toml
+flamegraph.svg
+perf.data
+perf.data.old
 /target
