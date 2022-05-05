@@ -213,7 +213,7 @@ impl Web3ProxyApp {
                         }
                         Err(None) => {
                             // TODO: this is too verbose. if there are other servers in other tiers, use those!
-                            warn!("No servers in sync!");
+                            // warn!("No servers in sync!");
                         }
                         Err(Some(not_until)) => {
                             // save the smallest not_until. if nothing succeeds, return an Err with not_until in it

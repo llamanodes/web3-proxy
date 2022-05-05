@@ -24,7 +24,7 @@ pub struct CliConfig {
 pub struct RpcConfig {
     // BTreeMap so that iterating keeps the same order
     pub balanced_rpc_tiers: BTreeMap<String, HashMap<String, Web3ConnectionConfig>>,
-    pub private_rpcs: HashMap<String, Web3ConnectionConfig>,
+    pub private_rpcs: Option<HashMap<String, Web3ConnectionConfig>>,
 }
 
 #[derive(Deserialize)]
@@ -41,7 +41,12 @@ impl RpcConfig {
             .into_values()
             .map(|x| x.into_values().collect())
             .collect();
-        let private_rpcs = self.private_rpcs.into_values().collect();
+
+        let private_rpcs = if let Some(private_rpcs) = self.private_rpcs {
+            private_rpcs.into_values().collect()
+        } else {
+            vec![]
+        };
 
         Web3ProxyApp::try_new(balanced_rpc_tiers, private_rpcs).await
     }

@@ -88,9 +88,11 @@ impl Web3Connections {
             let connection = Arc::clone(connection);
             let connections = connections.clone();
             tokio::spawn(async move {
+                let url = connection.url().to_string();
+
                 // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
                 if let Err(e) = connection.new_heads(Some(connections)).await {
-                    warn!("new_heads error: {:?}", e);
+                    warn!("new_heads error on {}: {:?}", url, e);
                 }
             });
         }

@@ -146,6 +146,7 @@ impl Web3Connection {
                     // TODO: if error or rate limit, increase interval?
                     interval.tick().await;
 
+                    // TODO: rate limit!
                     let block_number = provider.get_block_number().await.map(|x| x.as_u64())?;
 
                     // TODO: only store if this isn't already stored?
@@ -172,6 +173,7 @@ impl Web3Connection {
                 // query the block once since the subscription doesn't send the current block
                 // there is a very small race condition here where the stream could send us a new block right now
                 // all it does is print "new block" for the same block as current block
+                // TODO: rate limit!
                 let block_number = provider.get_block_number().await.map(|x| x.as_u64())?;
 
                 info!("current block on {}: {}", self, block_number);
