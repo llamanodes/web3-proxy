@@ -4,7 +4,7 @@ WORKDIR /usr/src/web3-proxy
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/src/web3-proxy/target \
-    cargo install --path .
+    cargo install --path ./web3-proxy
 
 FROM debian:buster-slim
 # RUN apt-get update && apt-get install -y extra-runtime-dependencies && rm -rf /var/lib/apt/lists/*
