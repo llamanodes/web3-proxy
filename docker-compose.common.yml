@@ -1,0 +1,5 @@
+services:
+  base:
+    build: .
+    restart: unless-stopped
+    command: --rpc-config-path /config.toml

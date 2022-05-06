@@ -1,6 +1,7 @@
+config/*.toml
+.git
 Dockerfile
-flamegraph.svg
-perf.data
-perf.data.old
-/target
-/web3-proxy/data/config/*.toml
+target
+web3-proxy/flamegraph.svg
+web3-proxy/perf.data
+web3-proxy/perf.data.old

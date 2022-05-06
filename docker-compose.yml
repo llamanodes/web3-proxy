@@ -1,18 +1,84 @@
 ---
 version: "3.4"
 
-# docker run --rm -it -v $PWD/web3-proxy/data/config/production-arbitrum.toml:/config.toml satoshiandkin/web3-proxy --rpc-config-path /config.toml
-
-
-base-service:
-  &base
-  data-transport-layer:
-    build: .
-    restart: unless-stopped
-    command: --rpc-config-path /config.toml
-
 services:
   arbitrum:
-    <<: *base
+    extends:
+      file: docker-compose.common.yml
+      service: base
     volumes:
-      - ./web3-proxy/data/config/production-arbitrum.toml:/config.toml
+      - ./config/production-arbitrum.toml:/config.toml
+    ports:
+      - 7500:8544
+
+  avalanche-c:
+    extends:
+      file: docker-compose.common.yml
+      service: base
+    volumes:
+      - ./config/production-avalanche-c.toml:/config.toml
+    ports:
+      - 7501:8544
+
+  bsc:
+    extends:
+      file: docker-compose.common.yml
+      service: base
+    volumes:
+      - ./config/production-bsc.toml:/config.toml
+    ports:
+      - 7502:8544
+
+  eth:
+    extends:
+      file: docker-compose.common.yml
+      service: base
+    volumes:
+      - ./config/production-eth.toml:/config.toml
+    ports:
+      - 7503:8544
+
+  fantom:
+    extends:
+      file: docker-compose.common.yml
+      service: base
+    volumes:
+      - ./config/production-fantom.toml:/config.toml
+    ports:
+      - 7504:8544
+
+  gnosis:
+    extends:
+      file: docker-compose.common.yml
+      service: base
+    volumes:
+      - ./config/production-gnosis.toml:/config.toml
+    ports:
+      - 7505:8544
+
+  goerli:
+    extends:
+      file: docker-compose.common.yml
+      service: base
+    volumes:
+      - ./config/production-goerli.toml:/config.toml
+    ports:
+      - 7506:8544
+
+  optimism:
+    extends:
+      file: docker-compose.common.yml
+      service: base
+    volumes:
+      - ./config/production-optimism.toml:/config.toml
+    ports:
+      - 7507:8544
+
+  polygon:
+    extends:
+      file: docker-compose.common.yml
+      service: base
+    volumes:
+      - ./config/production-polygon.toml:/config.toml
+    ports:
+      - 7508:8544
