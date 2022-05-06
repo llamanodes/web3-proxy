@@ -11,7 +11,7 @@ use crate::Web3ProxyApp;
 /// Reach new heights.
 pub struct CliConfig {
     /// what port the proxy should listen on
-    #[argh(option, default = "8445")]
+    #[argh(option, default = "8544")]
     pub listen_port: u16,
 
     /// what port the proxy should listen on
