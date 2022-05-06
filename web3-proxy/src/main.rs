@@ -3,12 +3,13 @@ mod connection;
 mod connections;
 
 use config::Web3ConnectionConfig;
+use connection::JsonRpcForwardedResponse;
 use futures::future;
 use governor::clock::{Clock, QuantaClock};
 use linkedhashmap::LinkedHashMap;
-use serde_json::json;
 use std::fmt;
 use std::fs;
+use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -28,11 +29,17 @@ static APP_USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
 );
 
-const RESPONSE_CACHE_CAP: usize = 128;
+// TODO: put this in config? what size should we do?
+const RESPONSE_CACHE_CAP: usize = 1024;
+
+/// TODO: these types are probably very bad keys and values. i couldn't get caching of warp::reply::Json to work
+type ResponseLruCache = RwLock<LinkedHashMap<(u64, String, String), JsonRpcForwardedResponse>>;
 
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
+// TODO: if Web3ProxyApp is always in an Arc, i think we can avoid having at least some of these internal things in arcs
 pub struct Web3ProxyApp {
+    best_head_block_number: Arc<AtomicU64>,
     /// clock used for rate limiting
     /// TODO: use tokio's clock (will require a different ratelimiting crate)
     clock: QuantaClock,
@@ -40,14 +47,18 @@ pub struct Web3ProxyApp {
     balanced_rpc_tiers: Vec<Arc<Web3Connections>>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     private_rpcs: Option<Arc<Web3Connections>>,
-    /// TODO: these types are probably very bad keys and values. i couldn't get caching of warp::reply::Json to work
-    response_cache: RwLock<LinkedHashMap<(u64, String, String), serde_json::Value>>,
+    response_cache: ResponseLruCache,
 }
 
 impl fmt::Debug for Web3ProxyApp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
-        f.debug_struct("Web3ProxyApp").finish_non_exhaustive()
+        f.debug_struct("Web3ProxyApp")
+            .field(
+                "best_head_block_number",
+                &self.best_head_block_number.load(atomic::Ordering::Relaxed),
+            )
+            .finish_non_exhaustive()
     }
 }
 
@@ -57,6 +68,8 @@ impl Web3ProxyApp {
         private_rpcs: Vec<Web3ConnectionConfig>,
     ) -> anyhow::Result<Web3ProxyApp> {
         let clock = QuantaClock::default();
+
+        let best_head_block_number = Arc::new(AtomicU64::new(0));
 
         // make a http shared client
         // TODO: how should we configure the connection pool?
@@ -70,7 +83,12 @@ impl Web3ProxyApp {
         // TODO: attach context to this error
         let balanced_rpc_tiers =
             future::join_all(balanced_rpc_tiers.into_iter().map(|balanced_rpc_tier| {
-                Web3Connections::try_new(balanced_rpc_tier, Some(http_client.clone()), &clock)
+                Web3Connections::try_new(
+                    best_head_block_number.clone(),
+                    balanced_rpc_tier,
+                    Some(http_client.clone()),
+                    &clock,
+                )
             }))
             .await
             .into_iter()
@@ -82,10 +100,19 @@ impl Web3ProxyApp {
             // TODO: instead of None, set it to a list of all the rpcs from balanced_rpc_tiers. that way we broadcast very loudly
             None
         } else {
-            Some(Web3Connections::try_new(private_rpcs, Some(http_client), &clock).await?)
+            Some(
+                Web3Connections::try_new(
+                    best_head_block_number.clone(),
+                    private_rpcs,
+                    Some(http_client),
+                    &clock,
+                )
+                .await?,
+            )
         };
 
         Ok(Web3ProxyApp {
+            best_head_block_number,
             clock,
             balanced_rpc_tiers,
             private_rpcs,
@@ -113,6 +140,7 @@ impl Web3ProxyApp {
                         let method = json_body.method.clone();
                         let params = json_body.params.clone();
 
+                        // TODO: benchmark this compared to waiting on unbounded futures
                         tokio::spawn(async move {
                             connections
                                 .try_send_requests(upstream_servers, method, params, tx)
@@ -120,14 +148,16 @@ impl Web3ProxyApp {
                         });
 
                         // wait for the first response
-                        let response = rx.recv_async().await?;
+                        let backend_response = rx.recv_async().await?;
 
-                        if let Ok(partial_response) = response {
-                            let response = json!({
-                                "jsonrpc": "2.0",
-                                "id": json_body.id,
-                                "result": partial_response
-                            });
+                        if let Ok(backend_response) = backend_response {
+                            // TODO: i think we
+                            let response = JsonRpcForwardedResponse {
+                                jsonrpc: "2.0".to_string(),
+                                id: json_body.id,
+                                result: Some(backend_response),
+                                error: None,
+                            };
                             return Ok(warp::reply::json(&response));
                         }
                     }
@@ -181,17 +211,19 @@ impl Web3ProxyApp {
                                     // TODO: trace here was really slow with millions of requests.
                                     // info!("forwarding request from {}", upstream_server);
 
-                                    let response = json!({
+                                    let response = JsonRpcForwardedResponse {
                                         // TODO: re-use their jsonrpc?
-                                        "jsonrpc": "2.0",
-                                        "id": json_body.id,
+                                        jsonrpc: "2.0".to_string(),
+                                        id: json_body.id,
                                         // TODO: since we only use the result here, should that be all we return from try_send_request?
-                                        "result": partial_response.result,
-                                    });
+                                        result: Some(partial_response),
+                                        error: None,
+                                    };
 
                                     // TODO: small race condidition here. parallel requests with the same query will both be saved to the cache
                                     let mut response_cache = self.response_cache.write().await;
 
+                                    // TODO: cache the warp::reply to save us serializing every time
                                     response_cache.insert(cache_key, response.clone());
                                     if response_cache.len() >= RESPONSE_CACHE_CAP {
                                         response_cache.pop_front();
@@ -201,11 +233,12 @@ impl Web3ProxyApp {
                                 }
                                 Err(e) => {
                                     // TODO: what is the proper format for an error?
-                                    json!({
-                                        "jsonrpc": "2.0",
-                                        "id": json_body.id,
-                                        "error": format!("{}", e)
-                                    })
+                                    JsonRpcForwardedResponse {
+                                        jsonrpc: "2.0".to_string(),
+                                        id: json_body.id,
+                                        result: None,
+                                        error: Some(format!("{}", e)),
+                                    }
                                 }
                             };
 

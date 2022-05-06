@@ -1,19 +1,20 @@
 ///! Communicate with a group of web3 providers
-use arc_swap::ArcSwap;
 use derive_more::From;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
 use hashbrown::HashMap;
+use parking_lot::RwLock;
 use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
+use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
 use tracing::warn;
 
 use crate::config::Web3ConnectionConfig;
-use crate::connection::{ActiveRequestHandle, JsonRpcForwardedResponse, Web3Connection};
+use crate::connection::{ActiveRequestHandle, Web3Connection};
 
 #[derive(Clone, Default)]
 struct SyncedConnections {
@@ -44,8 +45,9 @@ impl SyncedConnections {
 pub struct Web3Connections {
     inner: Vec<Arc<Web3Connection>>,
     /// TODO: what is the best type for this? Heavy reads with writes every few seconds. When writes happen, there is a burst of them
-    /// TODO: arcswap was a lot faster, but i think we need a lock for proper logic
-    synced_connections: ArcSwap<SyncedConnections>,
+    /// TODO: we probably need a better lock on this
+    synced_connections: RwLock<SyncedConnections>,
+    best_head_block_number: Arc<AtomicU64>,
 }
 
 impl fmt::Debug for Web3Connections {
@@ -59,7 +61,7 @@ impl fmt::Debug for Web3Connections {
 
 impl Web3Connections {
     pub async fn try_new(
-        // TODO: servers should be a Web3ConnectionBuilder struct
+        best_head_block_number: Arc<AtomicU64>,
         servers: Vec<Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
         clock: &QuantaClock,
@@ -78,20 +80,25 @@ impl Web3Connections {
         // TODO: exit if no connections?
 
         let connections = Arc::new(Self {
+            best_head_block_number: best_head_block_number.clone(),
             inner: connections,
-            synced_connections: ArcSwap::new(Arc::new(SyncedConnections::new(num_connections))),
+            synced_connections: RwLock::new(SyncedConnections::new(num_connections)),
         });
 
         for connection in connections.inner.iter() {
             // subscribe to new heads in a spawned future
-            // TODO: channel instead. then we can have one future with write access to a left-right
+            // TODO: channel instead. then we can have one future with write access to a left-right?
             let connection = Arc::clone(connection);
             let connections = connections.clone();
+            let best_head_block_number = best_head_block_number.clone();
             tokio::spawn(async move {
                 let url = connection.url().to_string();
 
                 // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
-                if let Err(e) = connection.new_heads(Some(connections)).await {
+                if let Err(e) = connection
+                    .new_heads(Some(connections), best_head_block_number)
+                    .await
+                {
                     warn!("new_heads error on {}: {:?}", url, e);
                 }
             });
@@ -101,15 +108,15 @@ impl Web3Connections {
     }
 
     pub fn head_block_number(&self) -> u64 {
-        self.synced_connections.load().head_block_number
+        self.best_head_block_number.load(atomic::Ordering::Acquire)
     }
 
-    pub async fn try_send_request<'a>(
+    pub async fn try_send_request(
         &self,
         connection_handle: ActiveRequestHandle,
         method: &str,
         params: &RawValue,
-    ) -> anyhow::Result<JsonRpcForwardedResponse> {
+    ) -> anyhow::Result<Box<RawValue>> {
         // connection.in_active_requests was called when this rpc was selected
 
         let response = connection_handle.request(method, params).await;
@@ -124,7 +131,7 @@ impl Web3Connections {
         connections: Vec<ActiveRequestHandle>,
         method: String,
         params: Box<RawValue>,
-        response_sender: flume::Sender<anyhow::Result<JsonRpcForwardedResponse>>,
+        response_sender: flume::Sender<anyhow::Result<Box<RawValue>>>,
     ) -> anyhow::Result<()> {
         let mut unordered_futures = FuturesUnordered::new();
 
@@ -185,35 +192,38 @@ impl Web3Connections {
         rpc: &Arc<Web3Connection>,
         new_block: u64,
     ) -> anyhow::Result<()> {
-        // TODO: try a left_right instead of an ArcSwap.
-        let synced_connections = self.synced_connections.load();
+        let mut synced_connections = self.synced_connections.write();
 
-        // should we load new_block here?
+        let current_block_number = synced_connections.head_block_number;
 
-        let mut new_synced_connections: SyncedConnections =
-            match synced_connections.head_block_number.cmp(&new_block) {
-                cmp::Ordering::Equal => {
-                    // this rpc is synced, but it isn't the first to this block
-                    (**synced_connections).to_owned()
-                }
-                cmp::Ordering::Less => {
-                    // this is a new head block. clear the current synced connections
-                    // TODO: this is too verbose with a bunch of tiers. include the tier
-                    // info!("new head block from {:?}: {}", rpc, new_block);
+        let best_head_block = self.head_block_number();
 
-                    let mut new_synced_connections = SyncedConnections::new(self.inner.len());
+        match current_block_number.cmp(&best_head_block) {
+            cmp::Ordering::Equal => {
+                // this rpc tier is synced, and it isn't the first to this block
+            }
+            cmp::Ordering::Less => {}
+            cmp::Ordering::Greater => {}
+        }
 
-                    // synced_connections.inner.clear();
+        match current_block_number.cmp(&new_block) {
+            cmp::Ordering::Equal => {
+                // this rpc is synced, and it isn't the first to this block
+            }
+            cmp::Ordering::Less => {
+                // this is a new head block. clear the current synced connections
+                // TODO: this is too verbose with a bunch of tiers. include the tier
+                // info!("new head block from {:?}: {}", rpc, new_block);
 
-                    new_synced_connections.head_block_number = new_block;
+                synced_connections.inner.clear();
 
-                    new_synced_connections
-                }
-                cmp::Ordering::Greater => {
-                    // not the latest block. return now
-                    return Ok(());
-                }
-            };
+                synced_connections.head_block_number = new_block;
+            }
+            cmp::Ordering::Greater => {
+                // not the latest block. return now
+                return Ok(());
+            }
+        }
 
         let rpc_index = self
             .inner
@@ -221,10 +231,7 @@ impl Web3Connections {
             .position(|x| x.url() == rpc.url())
             .unwrap();
 
-        new_synced_connections.inner.push(rpc_index);
-
-        self.synced_connections
-            .swap(Arc::new(new_synced_connections));
+        synced_connections.inner.push(rpc_index);
 
         Ok(())
     }
@@ -236,7 +243,7 @@ impl Web3Connections {
         let mut earliest_not_until = None;
 
         // TODO: this clone is probably not the best way to do this
-        let mut synced_rpc_indexes = self.synced_connections.load().inner.clone();
+        let mut synced_rpc_indexes = self.synced_connections.read().inner.clone();
 
         let cache: HashMap<usize, u32> = synced_rpc_indexes
             .iter()

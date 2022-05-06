@@ -133,13 +133,14 @@ impl Web3Connection {
     pub async fn new_heads(
         self: Arc<Self>,
         connections: Option<Arc<Web3Connections>>,
+        best_head_block_number: Arc<AtomicU64>,
     ) -> anyhow::Result<()> {
         info!("Watching new_heads on {}", self);
 
         match &self.provider {
             Web3Provider::Http(provider) => {
                 // there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
-                // TODO: what should this interval be? probably some fraction of block time
+                // TODO: what should this interval be? probably some fraction of block time. set automatically?
                 // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
                 let mut interval = interval(Duration::from_secs(2));
                 interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -149,7 +150,6 @@ impl Web3Connection {
                     // TODO: if error or rate limit, increase interval?
                     interval.tick().await;
 
-                    // rate limits
                     let active_request_handle = self.wait_for_request_handle().await;
 
                     let block_number = provider.get_block_number().await.map(|x| x.as_u64())?;
@@ -164,6 +164,14 @@ impl Web3Connection {
 
                     if old_block_number != block_number {
                         info!("new block on {}: {}", self, block_number);
+
+                        // we don't care about this result.
+                        let _ = best_head_block_number.compare_exchange(
+                            old_block_number,
+                            block_number,
+                            atomic::Ordering::AcqRel,
+                            atomic::Ordering::Acquire,
+                        );
 
                         if let Some(connections) = &connections {
                             connections.update_synced_rpcs(&self, block_number)?;
@@ -193,8 +201,17 @@ impl Web3Connection {
 
                 info!("current block on {}: {}", self, block_number);
 
-                self.head_block_number
-                    .store(block_number, atomic::Ordering::Release);
+                let old_block_number = self
+                    .head_block_number
+                    .swap(block_number, atomic::Ordering::Release);
+
+                // we don't care about this result
+                let _ = best_head_block_number.compare_exchange(
+                    old_block_number,
+                    block_number,
+                    atomic::Ordering::AcqRel,
+                    atomic::Ordering::Acquire,
+                );
 
                 if let Some(connections) = &connections {
                     connections.update_synced_rpcs(&self, block_number)?;
@@ -208,6 +225,9 @@ impl Web3Connection {
                     // TODO: do we need this old block number check? its helpful on http, but here it shouldn't dupe except maybe on the first run
                     self.head_block_number
                         .store(block_number, atomic::Ordering::Release);
+
+                    // TODO: what ordering?
+                    best_head_block_number.fetch_max(block_number, atomic::Ordering::AcqRel);
 
                     info!("new block on {}: {}", self, block_number);
 
@@ -284,7 +304,7 @@ impl ActiveRequestHandle {
         self,
         method: &str,
         params: &serde_json::value::RawValue,
-    ) -> Result<JsonRpcForwardedResponse, ethers::prelude::ProviderError> {
+    ) -> Result<Box<RawValue>, ethers::prelude::ProviderError> {
         match &self.0.provider {
             Web3Provider::Http(provider) => provider.request(method, params).await,
             Web3Provider::Ws(provider) => provider.request(method, params).await,
@@ -347,11 +367,15 @@ impl fmt::Debug for JsonRpcRequest {
     }
 }
 
-// TODO: check for errors too!
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct JsonRpcForwardedResponse {
+    pub jsonrpc: String,
     pub id: Box<RawValue>,
-    pub result: Box<RawValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Box<RawValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    // TODO: optional error
 }
 
 impl fmt::Debug for JsonRpcForwardedResponse {
