@@ -7,6 +7,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install --path ./web3-proxy
 
 FROM debian:buster-slim
-# RUN apt-get update && apt-get install -y extra-runtime-dependencies && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /usr/local/cargo/bin/web3-proxy /usr/local/bin/web3-proxy
-CMD ["web3-proxy"]
+ENTRYPOINT ["web3-proxy"]
