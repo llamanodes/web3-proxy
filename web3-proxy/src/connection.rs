@@ -120,10 +120,17 @@ impl Web3Connection {
         })
     }
 
+    #[inline]
     pub fn active_requests(&self) -> u32 {
         self.active_requests.load(atomic::Ordering::Acquire)
     }
 
+    #[inline]
+    pub fn head_block_number(&self) -> u64 {
+        self.head_block_number.load(atomic::Ordering::Acquire)
+    }
+
+    #[inline]
     pub fn url(&self) -> &str {
         &self.url
     }
@@ -174,7 +181,7 @@ impl Web3Connection {
                         );
 
                         if let Some(connections) = &connections {
-                            connections.update_synced_rpcs(&self, block_number)?;
+                            connections.update_synced_rpcs(&self)?;
                         }
                     }
                 }
@@ -214,7 +221,7 @@ impl Web3Connection {
                 );
 
                 if let Some(connections) = &connections {
-                    connections.update_synced_rpcs(&self, block_number)?;
+                    connections.update_synced_rpcs(&self)?;
                 }
 
                 while let Some(block) = stream.next().await {
@@ -232,7 +239,7 @@ impl Web3Connection {
                     info!("new block on {}: {}", self, block_number);
 
                     if let Some(connections) = &connections {
-                        connections.update_synced_rpcs(&self, block_number)?;
+                        connections.update_synced_rpcs(&self)?;
                     }
                 }
             }

@@ -187,41 +187,55 @@ impl Web3Connections {
         }
     }
 
-    pub fn update_synced_rpcs(
-        &self,
-        rpc: &Arc<Web3Connection>,
-        new_block: u64,
-    ) -> anyhow::Result<()> {
+    pub fn update_synced_rpcs(&self, rpc: &Arc<Web3Connection>) -> anyhow::Result<()> {
         let mut synced_connections = self.synced_connections.write();
 
-        let current_block_number = synced_connections.head_block_number;
+        let current_best_block_number = synced_connections.head_block_number;
 
-        let best_head_block = self.head_block_number();
+        let new_block = rpc.head_block_number();
 
-        match current_block_number.cmp(&best_head_block) {
-            cmp::Ordering::Equal => {
-                // this rpc tier is synced, and it isn't the first to this block
-            }
-            cmp::Ordering::Less => {}
-            cmp::Ordering::Greater => {}
-        }
+        let overall_best_head_block = self.head_block_number();
 
-        match current_block_number.cmp(&new_block) {
-            cmp::Ordering::Equal => {
-                // this rpc is synced, and it isn't the first to this block
-            }
-            cmp::Ordering::Less => {
-                // this is a new head block. clear the current synced connections
-                // TODO: this is too verbose with a bunch of tiers. include the tier
-                // info!("new head block from {:?}: {}", rpc, new_block);
-
+        // TODO: double check this logic
+        match (
+            new_block.cmp(&overall_best_head_block),
+            new_block.cmp(&current_best_block_number),
+        ) {
+            (cmp::Ordering::Greater, cmp::Ordering::Greater) => {
+                // this newest block is the new overall best block
                 synced_connections.inner.clear();
 
                 synced_connections.head_block_number = new_block;
             }
-            cmp::Ordering::Greater => {
-                // not the latest block. return now
+            (cmp::Ordering::Equal, cmp::Ordering::Less) => {
+                // no need to do anything
                 return Ok(());
+            }
+            (cmp::Ordering::Greater, cmp::Ordering::Less) => {
+                // this isn't the best block in the tier. don't do anything
+                return Ok(());
+            }
+            (cmp::Ordering::Equal, cmp::Ordering::Equal) => {
+                // this rpc tier is synced, and it isn't the first to this block
+            }
+            (cmp::Ordering::Less, cmp::Ordering::Less) => {
+                // this rpc is behind the best and the tier. don't do anything
+                return Ok(());
+            }
+            (cmp::Ordering::Less, cmp::Ordering::Equal) => {
+                panic!("Less+Equal should be impossible")
+            }
+            (cmp::Ordering::Less, cmp::Ordering::Greater) => {
+                panic!("Less+greater should be impossible")
+            }
+            (cmp::Ordering::Equal, cmp::Ordering::Greater) => {
+                // we caught up to another tier
+                synced_connections.inner.clear();
+
+                synced_connections.head_block_number = new_block;
+            }
+            (cmp::Ordering::Greater, cmp::Ordering::Equal) => {
+                panic!("Greater+Equal should be impossible")
             }
         }
 
