@@ -186,9 +186,14 @@ impl Web3Connections {
     pub fn update_synced_rpcs(&self, rpc: &Arc<Web3Connection>) -> anyhow::Result<()> {
         let mut synced_connections = self.synced_connections.write();
 
-        let current_best_block_number = synced_connections.head_block_number;
-
         let new_block = rpc.head_block_number();
+
+        if new_block == 0 {
+            warn!("{:?} is still syncing", rpc);
+            return Ok(());
+        }
+
+        let current_best_block_number = synced_connections.head_block_number;
 
         let overall_best_head_block = self.head_block_number();
 
@@ -210,8 +215,8 @@ impl Web3Connections {
                     atomic::Ordering::AcqRel,
                     atomic::Ordering::Acquire,
                 ) {
-                    Ok(current_best_block_number) => {
-                        info!("new head block from {}: {}", rpc, current_best_block_number);
+                    Ok(_) => {
+                        info!("new head block from {}: {}", rpc, new_block);
                     }
                     Err(current_best_block_number) => {
                         // actually, there was a race and this ended up not being the latest block. return now without adding this rpc to the synced list
