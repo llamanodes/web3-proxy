@@ -2,7 +2,7 @@
 use derive_more::From;
 use ethers::prelude::Middleware;
 use futures::StreamExt;
-use governor::clock::{QuantaClock, QuantaInstant};
+use governor::clock::{Clock, QuantaClock, QuantaInstant};
 use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::NotUntil;
@@ -14,7 +14,7 @@ use std::num::NonZeroU32;
 use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
-use tokio::time::interval;
+use tokio::time::{interval, sleep, MissedTickBehavior};
 use tracing::{info, warn};
 
 use crate::connections::Web3Connections;
@@ -47,6 +47,7 @@ pub struct Web3Connection {
     /// used for load balancing to the least loaded server
     soft_limit: u32,
     head_block_number: AtomicU64,
+    clock: QuantaClock,
 }
 
 impl fmt::Debug for Web3Connection {
@@ -69,14 +70,14 @@ impl Web3Connection {
         url_str: String,
         http_client: Option<reqwest::Client>,
         hard_rate_limit: Option<u32>,
-        clock: Option<&QuantaClock>,
+        clock: &QuantaClock,
         // TODO: think more about this type
         soft_limit: u32,
     ) -> anyhow::Result<Web3Connection> {
         let hard_rate_limiter = if let Some(hard_rate_limit) = hard_rate_limit {
             let quota = governor::Quota::per_second(NonZeroU32::new(hard_rate_limit).unwrap());
 
-            let rate_limiter = governor::RateLimiter::direct_with_clock(quota, clock.unwrap());
+            let rate_limiter = governor::RateLimiter::direct_with_clock(quota, clock);
 
             Some(rate_limiter)
         } else {
@@ -109,6 +110,7 @@ impl Web3Connection {
         };
 
         Ok(Web3Connection {
+            clock: clock.clone(),
             url: url_str.clone(),
             active_requests: Default::default(),
             provider,
@@ -140,14 +142,19 @@ impl Web3Connection {
                 // TODO: what should this interval be? probably some fraction of block time
                 // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
                 let mut interval = interval(Duration::from_secs(2));
+                interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
                 loop {
                     // wait for the interval
                     // TODO: if error or rate limit, increase interval?
                     interval.tick().await;
 
-                    // TODO: rate limit!
+                    // rate limits
+                    let active_request_handle = self.wait_for_request_handle().await;
+
                     let block_number = provider.get_block_number().await.map(|x| x.as_u64())?;
+
+                    drop(active_request_handle);
 
                     // TODO: only store if this isn't already stored?
                     // TODO: also send something to the provider_tier so it can sort?
@@ -165,16 +172,24 @@ impl Web3Connection {
                 }
             }
             Web3Provider::Ws(provider) => {
+                // rate limits
+                let active_request_handle = self.wait_for_request_handle().await;
+
                 // TODO: automatically reconnect?
                 // TODO: it would be faster to get the block number, but subscriptions don't provide that
                 // TODO: maybe we can do provider.subscribe("newHeads") and then parse into a custom struct that only gets the number out?
                 let mut stream = provider.subscribe_blocks().await?;
+
+                drop(active_request_handle);
+                let active_request_handle = self.wait_for_request_handle().await;
 
                 // query the block once since the subscription doesn't send the current block
                 // there is a very small race condition here where the stream could send us a new block right now
                 // all it does is print "new block" for the same block as current block
                 // TODO: rate limit!
                 let block_number = provider.get_block_number().await.map(|x| x.as_u64())?;
+
+                drop(active_request_handle);
 
                 info!("current block on {}: {}", self, block_number);
 
@@ -208,24 +223,31 @@ impl Web3Connection {
         Ok(())
     }
 
-    /// Send a web3 request
-    pub async fn request(
-        &self,
-        method: &str,
-        params: &serde_json::value::RawValue,
-    ) -> Result<JsonRpcForwardedResponse, ethers::prelude::ProviderError> {
-        match &self.provider {
-            Web3Provider::Http(provider) => provider.request(method, params).await,
-            Web3Provider::Ws(provider) => provider.request(method, params).await,
+    pub async fn wait_for_request_handle(self: &Arc<Self>) -> ActiveRequestHandle {
+        // rate limits
+        loop {
+            match self.try_request_handle() {
+                Ok(pending_request_handle) => return pending_request_handle,
+                Err(not_until) => {
+                    let deadline = not_until.wait_time_from(self.clock.now());
+
+                    sleep(deadline).await;
+                }
+            }
         }
+
+        // TODO: return a thing that when we drop it decrements?
     }
 
-    pub fn try_inc_active_requests(&self) -> Result<(), NotUntil<QuantaInstant>> {
+    pub fn try_request_handle(
+        self: &Arc<Self>,
+    ) -> Result<ActiveRequestHandle, NotUntil<QuantaInstant>> {
         // check rate limits
         if let Some(ratelimiter) = self.ratelimiter.as_ref() {
             match ratelimiter.check() {
                 Ok(_) => {
                     // rate limit succeeded
+                    return Ok(ActiveRequestHandle(self.clone()));
                 }
                 Err(not_until) => {
                     // rate limit failed
@@ -238,15 +260,43 @@ impl Web3Connection {
             }
         };
 
-        // TODO: what ordering?!
-        self.active_requests.fetch_add(1, atomic::Ordering::AcqRel);
+        Ok(ActiveRequestHandle::new(self.clone()))
+    }
+}
 
-        Ok(())
+/// Drop this once a connection to completes
+pub struct ActiveRequestHandle(Arc<Web3Connection>);
+
+impl ActiveRequestHandle {
+    fn new(connection: Arc<Web3Connection>) -> Self {
+        // TODO: what ordering?!
+        connection
+            .active_requests
+            .fetch_add(1, atomic::Ordering::AcqRel);
+
+        Self(connection)
     }
 
-    pub fn dec_active_requests(&self) {
-        // TODO: what ordering?!
-        self.active_requests.fetch_sub(1, atomic::Ordering::AcqRel);
+    /// Send a web3 request
+    /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
+    /// By taking self here, we ensure that this is dropped after the request is complete
+    pub async fn request(
+        self,
+        method: &str,
+        params: &serde_json::value::RawValue,
+    ) -> Result<JsonRpcForwardedResponse, ethers::prelude::ProviderError> {
+        match &self.0.provider {
+            Web3Provider::Http(provider) => provider.request(method, params).await,
+            Web3Provider::Ws(provider) => provider.request(method, params).await,
+        }
+    }
+}
+
+impl Drop for ActiveRequestHandle {
+    fn drop(&mut self) {
+        self.0
+            .active_requests
+            .fetch_sub(1, atomic::Ordering::AcqRel);
     }
 }
 

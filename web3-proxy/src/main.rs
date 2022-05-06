@@ -67,7 +67,7 @@ impl Web3ProxyApp {
             .user_agent(APP_USER_AGENT)
             .build()?;
 
-        // TODO: attach context to this error?
+        // TODO: attach context to this error
         let balanced_rpc_tiers =
             future::join_all(balanced_rpc_tiers.into_iter().map(|balanced_rpc_tier| {
                 Web3Connections::try_new(balanced_rpc_tier, Some(http_client.clone()), &clock)
@@ -76,7 +76,7 @@ impl Web3ProxyApp {
             .into_iter()
             .collect::<anyhow::Result<Vec<Arc<Web3Connections>>>>()?;
 
-        // TODO: attach context to this error?
+        // TODO: attach context to this error
         let private_rpcs = if private_rpcs.is_empty() {
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             // TODO: instead of None, set it to a list of all the rpcs from balanced_rpc_tiers. that way we broadcast very loudly
@@ -170,7 +170,7 @@ impl Web3ProxyApp {
                         Ok(upstream_server) => {
                             let response = balanced_rpcs
                                 .try_send_request(
-                                    &upstream_server,
+                                    upstream_server,
                                     &json_body.method,
                                     &json_body.params,
                                 )

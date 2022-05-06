@@ -16,7 +16,7 @@ pub struct CliConfig {
 
     /// what port the proxy should listen on
     // TODO: use flags for the config path  "./data/config/example.toml"
-    #[argh(option, default = "\"./data/config/example.toml\".to_string()")]
+    #[argh(option, default = "\"./config/example.toml\".to_string()")]
     pub rpc_config_path: String,
 }
 
@@ -62,7 +62,7 @@ impl Web3ConnectionConfig {
             self.url,
             http_client,
             self.hard_limit,
-            Some(clock),
+            clock,
             self.soft_limit,
         )
         .await

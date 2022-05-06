@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tracing::warn;
 
 use crate::config::Web3ConnectionConfig;
-use crate::connection::{JsonRpcForwardedResponse, Web3Connection};
+use crate::connection::{ActiveRequestHandle, JsonRpcForwardedResponse, Web3Connection};
 
 #[derive(Clone, Default)]
 struct SyncedConnections {
@@ -104,17 +104,15 @@ impl Web3Connections {
         self.synced_connections.load().head_block_number
     }
 
-    pub async fn try_send_request(
+    pub async fn try_send_request<'a>(
         &self,
-        connection: &Web3Connection,
+        connection_handle: ActiveRequestHandle,
         method: &str,
         params: &RawValue,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         // connection.in_active_requests was called when this rpc was selected
 
-        let response = connection.request(method, params).await;
-
-        connection.dec_active_requests();
+        let response = connection_handle.request(method, params).await;
 
         // TODO: if "no block with that header" or some other jsonrpc errors, skip this response
 
@@ -123,7 +121,7 @@ impl Web3Connections {
 
     pub async fn try_send_requests(
         self: Arc<Self>,
-        connections: Vec<Arc<Web3Connection>>,
+        connections: Vec<ActiveRequestHandle>,
         method: String,
         params: Box<RawValue>,
         response_sender: flume::Sender<anyhow::Result<JsonRpcForwardedResponse>>,
@@ -140,7 +138,7 @@ impl Web3Connections {
             let handle = tokio::spawn(async move {
                 // get the client for this rpc server
                 let response = connections
-                    .try_send_request(connection.as_ref(), &method, &params)
+                    .try_send_request(connection, &method, &params)
                     .await?;
 
                 // send the first good response to a one shot channel. that way we respond quickly
@@ -234,7 +232,7 @@ impl Web3Connections {
     /// get the best available rpc server
     pub async fn next_upstream_server(
         &self,
-    ) -> Result<Arc<Web3Connection>, Option<NotUntil<QuantaInstant>>> {
+    ) -> Result<ActiveRequestHandle, Option<NotUntil<QuantaInstant>>> {
         let mut earliest_not_until = None;
 
         // TODO: this clone is probably not the best way to do this
@@ -255,6 +253,9 @@ impl Web3Connections {
             let a = cache.get(a).unwrap();
             let b = cache.get(b).unwrap();
 
+            // TODO: don't just sort by active requests. sort by active requests as a percentage of soft limit
+            // TODO: if those are equal, sort on soft limit
+
             a.cmp(b)
         });
 
@@ -262,14 +263,12 @@ impl Web3Connections {
             let selected_rpc = self.inner.get(selected_rpc).unwrap();
 
             // increment our connection counter
-            if let Err(not_until) = selected_rpc.try_inc_active_requests() {
-                earliest_possible(&mut earliest_not_until, not_until);
-
-                continue;
+            match selected_rpc.try_request_handle() {
+                Err(not_until) => {
+                    earliest_possible(&mut earliest_not_until, not_until);
+                }
+                Ok(handle) => return Ok(handle),
             }
-
-            // return the selected RPC
-            return Ok(selected_rpc.clone());
         }
 
         // this might be None
@@ -280,21 +279,20 @@ impl Web3Connections {
     /// even fetches if they aren't in sync. This is useful for broadcasting signed transactions
     pub fn get_upstream_servers(
         &self,
-    ) -> Result<Vec<Arc<Web3Connection>>, Option<NotUntil<QuantaInstant>>> {
+    ) -> Result<Vec<ActiveRequestHandle>, Option<NotUntil<QuantaInstant>>> {
         let mut earliest_not_until = None;
         // TODO: with capacity?
         let mut selected_rpcs = vec![];
 
         for connection in self.inner.iter() {
             // check rate limits and increment our connection counter
-            if let Err(not_until) = connection.try_inc_active_requests() {
-                earliest_possible(&mut earliest_not_until, not_until);
-
-                // this rpc is not available. skip it
-                continue;
+            match connection.try_request_handle() {
+                Err(not_until) => {
+                    earliest_possible(&mut earliest_not_until, not_until);
+                    // this rpc is not available. skip it
+                }
+                Ok(handle) => selected_rpcs.push(handle),
             }
-
-            selected_rpcs.push(connection.clone());
         }
 
         if !selected_rpcs.is_empty() {
