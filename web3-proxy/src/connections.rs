@@ -223,10 +223,17 @@ impl Web3Connections {
                 return Ok(());
             }
             (cmp::Ordering::Less, cmp::Ordering::Equal) => {
-                panic!("Less+Equal should be impossible")
+                // this rpc is behind the best. but is an improvement for the tier
+                return Ok(());
             }
             (cmp::Ordering::Less, cmp::Ordering::Greater) => {
-                panic!("Less+greater should be impossible")
+                // this rpc is behind the best, but it is catching up
+                synced_connections.inner.clear();
+
+                synced_connections.head_block_number = new_block;
+
+                // return now because this isn't actually synced
+                return Ok(());
             }
             (cmp::Ordering::Equal, cmp::Ordering::Greater) => {
                 // we caught up to another tier
