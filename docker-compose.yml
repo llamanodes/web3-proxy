@@ -1,0 +1,18 @@
+---
+version: "3.4"
+
+# docker run --rm -it -v $PWD/web3-proxy/data/config/production-arbitrum.toml:/config.toml satoshiandkin/web3-proxy --rpc-config-path /config.toml
+
+
+base-service:
+  &base
+  data-transport-layer:
+    build: .
+    restart: unless-stopped
+    command: --rpc-config-path /config.toml
+
+services:
+  arbitrum:
+    <<: *base
+    volumes:
+      - ./web3-proxy/data/config/production-arbitrum.toml:/config.toml

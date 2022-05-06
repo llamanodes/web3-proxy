@@ -1,4 +1,4 @@
-/web3-proxy/data/config/*.toml
+/config/*.toml
 flamegraph.svg
 perf.data
 perf.data.old
