@@ -131,6 +131,11 @@ impl Web3Connection {
     }
 
     #[inline]
+    pub fn soft_limit(&self) -> u32 {
+        self.soft_limit
+    }
+
+    #[inline]
     pub fn url(&self) -> &str {
         &self.url
     }
@@ -140,7 +145,6 @@ impl Web3Connection {
     pub async fn new_heads(
         self: Arc<Self>,
         connections: Option<Arc<Web3Connections>>,
-        best_head_block_number: Arc<AtomicU64>,
     ) -> anyhow::Result<()> {
         info!("Watching new_heads on {}", self);
 
@@ -170,18 +174,10 @@ impl Web3Connection {
                         .swap(block_number, atomic::Ordering::AcqRel);
 
                     if old_block_number != block_number {
-                        info!("new block on {}: {}", self, block_number);
-
-                        // we don't care about this result.
-                        let _ = best_head_block_number.compare_exchange(
-                            old_block_number,
-                            block_number,
-                            atomic::Ordering::AcqRel,
-                            atomic::Ordering::Acquire,
-                        );
-
                         if let Some(connections) = &connections {
                             connections.update_synced_rpcs(&self)?;
+                        } else {
+                            info!("new block on {}: {}", self, block_number);
                         }
                     }
                 }
@@ -206,37 +202,24 @@ impl Web3Connection {
 
                 drop(active_request_handle);
 
-                info!("current block on {}: {}", self, block_number);
-
-                let old_block_number = self
-                    .head_block_number
-                    .swap(block_number, atomic::Ordering::Release);
-
-                // we don't care about this result
-                let _ = best_head_block_number.compare_exchange(
-                    old_block_number,
-                    block_number,
-                    atomic::Ordering::AcqRel,
-                    atomic::Ordering::Acquire,
-                );
+                // TODO: swap and check the result?
+                self.head_block_number
+                    .store(block_number, atomic::Ordering::Release);
 
                 if let Some(connections) = &connections {
                     connections.update_synced_rpcs(&self)?;
+                } else {
+                    info!("new head block from {}: {}", self, block_number);
                 }
 
-                while let Some(block) = stream.next().await {
-                    let block_number = block.number.unwrap().as_u64();
+                while let Some(new_block) = stream.next().await {
+                    let new_block_number = new_block.number.unwrap().as_u64();
 
                     // TODO: only store if this isn't already stored?
                     // TODO: also send something to the provider_tier so it can sort?
                     // TODO: do we need this old block number check? its helpful on http, but here it shouldn't dupe except maybe on the first run
                     self.head_block_number
-                        .store(block_number, atomic::Ordering::Release);
-
-                    // TODO: what ordering?
-                    best_head_block_number.fetch_max(block_number, atomic::Ordering::AcqRel);
-
-                    info!("new block on {}: {}", self, block_number);
+                        .fetch_max(new_block_number, atomic::Ordering::AcqRel);
 
                     if let Some(connections) = &connections {
                         connections.update_synced_rpcs(&self)?;

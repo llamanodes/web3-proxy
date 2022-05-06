@@ -11,7 +11,7 @@ use std::cmp;
 use std::fmt;
 use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
-use tracing::warn;
+use tracing::{debug, info, trace, warn};
 
 use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, Web3Connection};
@@ -90,15 +90,11 @@ impl Web3Connections {
             // TODO: channel instead. then we can have one future with write access to a left-right?
             let connection = Arc::clone(connection);
             let connections = connections.clone();
-            let best_head_block_number = best_head_block_number.clone();
             tokio::spawn(async move {
                 let url = connection.url().to_string();
 
                 // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
-                if let Err(e) = connection
-                    .new_heads(Some(connections), best_head_block_number)
-                    .await
-                {
+                if let Err(e) = connection.new_heads(Some(connections)).await {
                     warn!("new_heads error on {}: {:?}", url, e);
                 }
             });
@@ -202,10 +198,30 @@ impl Web3Connections {
             new_block.cmp(&current_best_block_number),
         ) {
             (cmp::Ordering::Greater, cmp::Ordering::Greater) => {
-                // this newest block is the new overall best block
+                // the rpc's newest block is the new overall best block
                 synced_connections.inner.clear();
 
                 synced_connections.head_block_number = new_block;
+
+                // TODO: what ordering?
+                match self.best_head_block_number.compare_exchange(
+                    overall_best_head_block,
+                    new_block,
+                    atomic::Ordering::AcqRel,
+                    atomic::Ordering::Acquire,
+                ) {
+                    Ok(current_best_block_number) => {
+                        info!("new head block from {}: {}", rpc, current_best_block_number);
+                    }
+                    Err(current_best_block_number) => {
+                        // actually, there was a race and this ended up not being the latest block. return now without adding this rpc to the synced list
+                        debug!(
+                            "behind {} on {:?}: {}",
+                            current_best_block_number, rpc, new_block
+                        );
+                        return Ok(());
+                    }
+                }
             }
             (cmp::Ordering::Equal, cmp::Ordering::Less) => {
                 // no need to do anything
@@ -242,7 +258,9 @@ impl Web3Connections {
                 synced_connections.head_block_number = new_block;
             }
             (cmp::Ordering::Greater, cmp::Ordering::Equal) => {
-                panic!("Greater+Equal should be impossible")
+                // TODO: what should we do? i think we got here because we aren't using atomics properly
+                // the overall block hasn't yet updated, but our internal block has
+                // TODO: maybe we should
             }
         }
 
@@ -252,7 +270,10 @@ impl Web3Connections {
             .position(|x| x.url() == rpc.url())
             .unwrap();
 
+        // TODO: hopefully nothing ends up in here twice. Greater+Equal might do that to us
         synced_connections.inner.push(rpc_index);
+
+        trace!("Now synced {:?}: {:?}", self, synced_connections.inner);
 
         Ok(())
     }
@@ -266,25 +287,39 @@ impl Web3Connections {
         // TODO: this clone is probably not the best way to do this
         let mut synced_rpc_indexes = self.synced_connections.read().inner.clone();
 
-        let cache: HashMap<usize, u32> = synced_rpc_indexes
+        // // TODO: how should we include the soft limit? floats are slower than integer math
+        // let a = a as f32 / self.soft_limit as f32;
+        // let b = b as f32 / other.soft_limit as f32;
+
+        let sort_cache: HashMap<usize, (f32, u32)> = synced_rpc_indexes
             .iter()
             .map(|synced_index| {
-                (
-                    *synced_index,
-                    self.inner.get(*synced_index).unwrap().active_requests(),
-                )
+                let key = *synced_index;
+
+                let connection = self.inner.get(*synced_index).unwrap();
+
+                let active_requests = connection.active_requests();
+                let soft_limit = connection.soft_limit();
+
+                let utilization = active_requests as f32 / soft_limit as f32;
+
+                (key, (utilization, soft_limit))
             })
             .collect();
 
         // TODO: i think we might need to load active connections and then
         synced_rpc_indexes.sort_unstable_by(|a, b| {
-            let a = cache.get(a).unwrap();
-            let b = cache.get(b).unwrap();
+            let (a_utilization, a_soft_limit) = sort_cache.get(a).unwrap();
+            let (b_utilization, b_soft_limit) = sort_cache.get(b).unwrap();
 
-            // TODO: don't just sort by active requests. sort by active requests as a percentage of soft limit
-            // TODO: if those are equal, sort on soft limit
-
-            a.cmp(b)
+            // TODO: i'm comparing floats. crap
+            match a_utilization
+                .partial_cmp(b_utilization)
+                .unwrap_or(cmp::Ordering::Equal)
+            {
+                cmp::Ordering::Equal => a_soft_limit.cmp(b_soft_limit),
+                x => x,
+            }
         });
 
         for selected_rpc in synced_rpc_indexes.into_iter() {
@@ -295,9 +330,15 @@ impl Web3Connections {
                 Err(not_until) => {
                     earliest_possible(&mut earliest_not_until, not_until);
                 }
-                Ok(handle) => return Ok(handle),
+                Ok(handle) => {
+                    trace!("next server on {:?}: {:?}", self, selected_rpc);
+                    return Ok(handle);
+                }
             }
         }
+
+        // TODO: this is too verbose
+        // warn!("no servers on {:?}! {:?}", self, earliest_not_until);
 
         // this might be None
         Err(earliest_not_until)

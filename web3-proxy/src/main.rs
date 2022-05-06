@@ -175,17 +175,32 @@ impl Web3ProxyApp {
         } else {
             // this is not a private transaction (or no private relays are configured)
             // try to send to each tier, stopping at the first success
+            // if no tiers are synced, fallback to privates
             loop {
                 // there are multiple tiers. save the earliest not_until (if any). if we don't return, we will sleep until then and then try again
                 let mut earliest_not_until = None;
 
-                for balanced_rpcs in self.balanced_rpc_tiers.iter() {
-                    let current_block = balanced_rpcs.head_block_number(); // TODO: we don't store current block for everything anymore. we store it on the connections
+                // TODO: how can we better build this iterator?
+                let rpc_iter = if let Some(private_rpcs) = self.private_rpcs.as_ref() {
+                    self.balanced_rpc_tiers.iter().chain(vec![private_rpcs])
+                } else {
+                    self.balanced_rpc_tiers.iter().chain(vec![])
+                };
+
+                for balanced_rpcs in rpc_iter {
+                    let best_head_block_number =
+                        self.best_head_block_number.load(atomic::Ordering::Acquire); // TODO: we don't store current block for everything anymore. we store it on the connections
+
+                    let best_rpc_block_number = balanced_rpcs.head_block_number();
+
+                    if best_rpc_block_number < best_head_block_number {
+                        continue;
+                    }
 
                     // TODO: building this cache key is slow and its large, but i don't see a better way right now
                     // TODO: inspect the params and see if a block is specified. if so, use that block number instead of current_block
                     let cache_key = (
-                        current_block,
+                        best_head_block_number,
                         json_body.method.clone(),
                         json_body.params.to_string(),
                     );
@@ -212,7 +227,6 @@ impl Web3ProxyApp {
                                     // info!("forwarding request from {}", upstream_server);
 
                                     let response = JsonRpcForwardedResponse {
-                                        // TODO: re-use their jsonrpc?
                                         jsonrpc: "2.0".to_string(),
                                         id: json_body.id,
                                         // TODO: since we only use the result here, should that be all we return from try_send_request?
@@ -245,7 +259,7 @@ impl Web3ProxyApp {
                             return Ok(warp::reply::json(&response));
                         }
                         Err(None) => {
-                            // TODO: this is too verbose. if there are other servers in other tiers, use those!
+                            // TODO: this is too verbose. if there are other servers in other tiers, we use those!
                             // warn!("No servers in sync!");
                         }
                         Err(Some(not_until)) => {
@@ -267,7 +281,8 @@ impl Web3ProxyApp {
                     }
                 }
 
-                // we haven't returned an Ok, sleep and try again
+                // we haven't returned an Ok
+                // if we did return a rate limit error, sleep and try again
                 if let Some(earliest_not_until) = earliest_not_until {
                     let deadline = earliest_not_until.wait_time_from(self.clock.now());
 
@@ -275,7 +290,9 @@ impl Web3ProxyApp {
                 } else {
                     // TODO: how long should we wait?
                     // TODO: max wait time?
-                    sleep(Duration::from_millis(500)).await;
+                    warn!("No servers in sync!");
+                    // TODO: return json error? return a 502?
+                    return Err(anyhow::anyhow!("no servers in sync"));
                 };
             }
         }
