@@ -258,10 +258,8 @@ impl Web3ProxyApp {
                                     match e {
                                         ProviderError::JsonRpcClientError(e) => {
                                             // TODO: we should check what type the provider is rather than trying to downcast both types of errors
-                                            let downcast_e: Option<&Box<HttpClientError>> =
-                                                e.downcast_ref();
-                                            if let Some(e) = downcast_e {
-                                                match &**e {
+                                            if let Some(e) = e.downcast_ref::<HttpClientError>() {
+                                                match &*e {
                                                     HttpClientError::JsonRpcError(e) => {
                                                         code = e.code;
                                                         message = e.message.clone();
@@ -274,27 +272,24 @@ impl Web3ProxyApp {
                                                         data = None;
                                                     }
                                                 }
-                                            } else {
-                                                let downcast_e: Option<&Box<WsClientError>> =
-                                                    e.downcast_ref();
-
-                                                if let Some(e) = downcast_e {
-                                                    match &**e {
-                                                        WsClientError::JsonRpcError(e) => {
-                                                            code = e.code;
-                                                            message = e.message.clone();
-                                                            data = e.data.clone();
-                                                        }
-                                                        e => {
-                                                            // TODO: improve this
-                                                            code = -32603;
-                                                            message = format!("{}", e);
-                                                            data = None;
-                                                        }
+                                            } else if let Some(e) =
+                                                e.downcast_ref::<WsClientError>()
+                                            {
+                                                match &*e {
+                                                    WsClientError::JsonRpcError(e) => {
+                                                        code = e.code;
+                                                        message = e.message.clone();
+                                                        data = e.data.clone();
                                                     }
-                                                } else {
-                                                    unimplemented!();
+                                                    e => {
+                                                        // TODO: improve this
+                                                        code = -32603;
+                                                        message = format!("{}", e);
+                                                        data = None;
+                                                    }
                                                 }
+                                            } else {
+                                                unimplemented!();
                                             }
                                         }
                                         _ => {
