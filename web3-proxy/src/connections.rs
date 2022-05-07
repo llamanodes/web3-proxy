@@ -113,11 +113,9 @@ impl Web3Connections {
         method: &str,
         params: &RawValue,
     ) -> Result<Box<RawValue>, ethers::prelude::ProviderError> {
-        // connection.in_active_requests was called when this rpc was selected
-
         let response = connection_handle.request(method, params).await;
 
-        // TODO: if "no block with that header" or some other jsonrpc errors, skip this response
+        // TODO: if "no block with that header" or some other jsonrpc errors, skip this response?
 
         response
     }

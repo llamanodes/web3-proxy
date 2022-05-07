@@ -279,6 +279,7 @@ pub struct ActiveRequestHandle(Arc<Web3Connection>);
 
 impl ActiveRequestHandle {
     fn new(connection: Arc<Web3Connection>) -> Self {
+        // TODO: attach the incoming id to this? will be helpful for logging
         // TODO: what ordering?!
         connection
             .active_requests
@@ -297,7 +298,7 @@ impl ActiveRequestHandle {
     ) -> Result<Box<RawValue>, ethers::prelude::ProviderError> {
         // TODO: this should probably be trace level and use a span
         // TODO: it would be nice to have the request id on this
-        info!("Sending {}({}) to {}", method, params.to_string(), self.0);
+        trace!("Sending {}({}) to {}", method, params.to_string(), self.0);
 
         let response = match &self.0.provider {
             Web3Provider::Http(provider) => provider.request(method, params).await,
@@ -306,7 +307,7 @@ impl ActiveRequestHandle {
 
         // TODO: i think ethers already has trace logging (and does it much more fancy)
         // TODO: at least instrument this with more useful information
-        info!("Response from {}: {:?}", self.0, response);
+        trace!("Response from {}: {:?}", self.0, response);
 
         response
     }
