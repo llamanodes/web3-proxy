@@ -3,7 +3,12 @@ mod connection;
 mod connections;
 
 use config::Web3ConnectionConfig;
+use connection::JsonRpcErrorData;
 use connection::JsonRpcForwardedResponse;
+use ethers::prelude::HttpClientError;
+use ethers::prelude::ProviderError;
+// use ethers::providers::transports::common::JsonRpcError;
+
 use futures::future;
 use governor::clock::{Clock, QuantaClock};
 use linkedhashmap::LinkedHashMap;
@@ -246,12 +251,51 @@ impl Web3ProxyApp {
                                     response
                                 }
                                 Err(e) => {
-                                    // TODO: what is the proper format for an error?
+                                    let code;
+                                    let message: String;
+                                    let data;
+
+                                    match e {
+                                        ProviderError::JsonRpcClientError(e) => {
+                                            // TODO: better log. get the original code somehow. its buried deep inside boxes though
+                                            // warn!("JsonRpcClientError: {:?}", e);
+
+                                            // TODO: we should check what type the provider is rather than trying to downcast both types of errors
+                                            let e: Result<Box<HttpClientError>, _> = e.downcast();
+                                            if let Ok(e) = &e {
+                                                match &**e {
+                                                    HttpClientError::JsonRpcError(e) => {
+                                                        code = e.code;
+                                                        message = e.message.clone();
+                                                        data = e.data.clone();
+                                                    }
+                                                    e => {
+                                                        // TODO: improve this
+                                                        code = -32603;
+                                                        message = format!("{}", e);
+                                                        data = None;
+                                                    }
+                                                }
+                                            } else {
+                                                unimplemented!();
+                                            }
+                                        }
+                                        _ => {
+                                            code = -32603;
+                                            message = format!("{}", e);
+                                            data = None;
+                                        }
+                                    }
+
                                     JsonRpcForwardedResponse {
                                         jsonrpc: "2.0".to_string(),
                                         id: json_body.id,
                                         result: None,
-                                        error: Some(format!("{}", e)),
+                                        error: Some(JsonRpcErrorData {
+                                            code,
+                                            message,
+                                            data,
+                                        }),
                                     }
                                 }
                             };

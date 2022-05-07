@@ -357,6 +357,17 @@ impl fmt::Debug for JsonRpcRequest {
     }
 }
 
+#[derive(Serialize, Clone)]
+pub struct JsonRpcErrorData {
+    /// The error code
+    pub code: i64,
+    /// The error message
+    pub message: String,
+    /// Additional data
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+}
+
 #[derive(Clone, Serialize)]
 pub struct JsonRpcForwardedResponse {
     pub jsonrpc: String,
@@ -364,7 +375,7 @@ pub struct JsonRpcForwardedResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+    pub error: Option<JsonRpcErrorData>,
     // TODO: optional error
 }
 
