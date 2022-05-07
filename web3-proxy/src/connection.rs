@@ -209,7 +209,7 @@ impl Web3Connection {
                 if let Some(connections) = &connections {
                     connections.update_synced_rpcs(&self)?;
                 } else {
-                    info!("new head block from {}: {}", self, block_number);
+                    info!("new head block {} from {}", block_number, self);
                 }
 
                 while let Some(new_block) = stream.next().await {
@@ -295,10 +295,20 @@ impl ActiveRequestHandle {
         method: &str,
         params: &serde_json::value::RawValue,
     ) -> Result<Box<RawValue>, ethers::prelude::ProviderError> {
-        match &self.0.provider {
+        // TODO: this should probably be trace level and use a span
+        // TODO: it would be nice to have the request id on this
+        info!("Sending {}({}) to {}", method, params.to_string(), self.0);
+
+        let response = match &self.0.provider {
             Web3Provider::Http(provider) => provider.request(method, params).await,
             Web3Provider::Ws(provider) => provider.request(method, params).await,
-        }
+        };
+
+        // TODO: i think ethers already has trace logging (and does it much more fancy)
+        // TODO: at least instrument this with more useful information
+        info!("Response from {}: {:?}", self.0, response);
+
+        response
     }
 }
 

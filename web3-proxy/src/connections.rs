@@ -216,7 +216,7 @@ impl Web3Connections {
                     atomic::Ordering::Acquire,
                 ) {
                     Ok(_) => {
-                        info!("new head block from {}: {}", rpc, new_block);
+                        info!("new head block {} from {}", new_block, rpc);
                     }
                     Err(current_best_block_number) => {
                         // actually, there was a race and this ended up not being the latest block. return now without adding this rpc to the synced list
