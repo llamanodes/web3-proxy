@@ -5,8 +5,8 @@ mod connections;
 use config::Web3ConnectionConfig;
 use connection::JsonRpcErrorData;
 use connection::JsonRpcForwardedResponse;
-use ethers::prelude::HttpClientError;
 use ethers::prelude::ProviderError;
+use ethers::prelude::{HttpClientError, WsClientError};
 // use ethers::providers::transports::common::JsonRpcError;
 
 use futures::future;
@@ -257,12 +257,10 @@ impl Web3ProxyApp {
 
                                     match e {
                                         ProviderError::JsonRpcClientError(e) => {
-                                            // TODO: better log. get the original code somehow. its buried deep inside boxes though
-                                            // warn!("JsonRpcClientError: {:?}", e);
-
                                             // TODO: we should check what type the provider is rather than trying to downcast both types of errors
-                                            let e: Result<Box<HttpClientError>, _> = e.downcast();
-                                            if let Ok(e) = &e {
+                                            let downcast_e: Option<&Box<HttpClientError>> =
+                                                e.downcast_ref();
+                                            if let Some(e) = downcast_e {
                                                 match &**e {
                                                     HttpClientError::JsonRpcError(e) => {
                                                         code = e.code;
@@ -277,7 +275,26 @@ impl Web3ProxyApp {
                                                     }
                                                 }
                                             } else {
-                                                unimplemented!();
+                                                let downcast_e: Option<&Box<WsClientError>> =
+                                                    e.downcast_ref();
+
+                                                if let Some(e) = downcast_e {
+                                                    match &**e {
+                                                        WsClientError::JsonRpcError(e) => {
+                                                            code = e.code;
+                                                            message = e.message.clone();
+                                                            data = e.data.clone();
+                                                        }
+                                                        e => {
+                                                            // TODO: improve this
+                                                            code = -32603;
+                                                            message = format!("{}", e);
+                                                            data = None;
+                                                        }
+                                                    }
+                                                } else {
+                                                    unimplemented!();
+                                                }
                                             }
                                         }
                                         _ => {
