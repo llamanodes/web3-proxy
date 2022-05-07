@@ -15,7 +15,7 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::time::{interval, sleep, MissedTickBehavior};
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 use crate::connections::Web3Connections;
 
