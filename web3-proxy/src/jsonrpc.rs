@@ -83,7 +83,7 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
                     match key {
                         Field::JsonRpc => {
                             // throw away the value
-                            let foo: String = map.next_value()?;
+                            let _: String = map.next_value()?;
                         }
                         Field::Id => {
                             if id.is_some() {
