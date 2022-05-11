@@ -1,0 +1,29 @@
+[balanced_rpc_tiers]
+
+[balanced_rpc_tiers.0]
+
+    [balanced_rpc_tiers.0.geth]
+    url = "ws://127.0.0.1:8546"
+    soft_limit = 200_000
+
+    [balanced_rpc_tiers.0.ankr]
+    url = "https://rpc.ankr.com/eth"
+    soft_limit = 3_000
+
+[private_rpcs]
+
+    [private_rpcs.eden]
+    url = "https://api.edennetwork.io/v1/"
+    soft_limit = 1_805
+
+    [private_rpcs.eden_beta]
+    url = "https://api.edennetwork.io/v1/beta"
+    soft_limit = 5_861
+
+    [private_rpcs.ethermine]
+    url = "https://rpc.ethermine.org"
+    soft_limit = 5_861
+
+    [private_rpcs.flashbots]
+    url = "https://rpc.flashbots.net"
+    soft_limit = 7074

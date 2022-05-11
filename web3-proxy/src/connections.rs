@@ -1,4 +1,4 @@
-///! Communicate with a group of web3 providers
+///! Load balanced communication with a group of web3 providers
 use derive_more::From;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -109,27 +109,28 @@ impl Web3Connections {
 
     pub async fn try_send_request(
         &self,
-        connection_handle: ActiveRequestHandle,
+        active_request_handle: ActiveRequestHandle,
         method: &str,
         params: &RawValue,
     ) -> Result<Box<RawValue>, ethers::prelude::ProviderError> {
-        let response = connection_handle.request(method, params).await;
+        let response = active_request_handle.request(method, params).await;
 
         // TODO: if "no block with that header" or some other jsonrpc errors, skip this response?
 
         response
     }
 
-    pub async fn try_send_requests(
+    /// Send the same request to all the handles. Returning the fastest successful result.
+    pub async fn try_send_parallel_requests(
         self: Arc<Self>,
-        connections: Vec<ActiveRequestHandle>,
+        active_request_handles: Vec<ActiveRequestHandle>,
         method: String,
         params: Box<RawValue>,
         response_sender: flume::Sender<anyhow::Result<Box<RawValue>>>,
     ) -> anyhow::Result<()> {
         let mut unordered_futures = FuturesUnordered::new();
 
-        for connection in connections {
+        for connection in active_request_handles {
             // clone things so we can pass them to a future
             let connections = self.clone();
             let method = method.clone();
@@ -150,7 +151,7 @@ impl Web3Connections {
             unordered_futures.push(handle);
         }
 
-        // TODO: use iterators instead of pushing into a vec
+        // TODO: use iterators instead of pushing into a vec?
         let mut errs = vec![];
         if let Some(x) = unordered_futures.next().await {
             match x.unwrap() {

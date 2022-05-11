@@ -1,4 +1,4 @@
-///! Communicate with a web3 provider
+///! Rate-limited communication with a web3 provider
 use derive_more::From;
 use ethers::prelude::Middleware;
 use futures::StreamExt;
@@ -7,7 +7,6 @@ use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::NotUntil;
 use governor::RateLimiter;
-use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::fmt;
 use std::num::NonZeroU32;
@@ -274,7 +273,7 @@ impl Web3Connection {
     }
 }
 
-/// Drop this once a connection to completes
+/// Drop this once a connection completes
 pub struct ActiveRequestHandle(Arc<Web3Connection>);
 
 impl ActiveRequestHandle {
@@ -349,52 +348,5 @@ impl PartialEq for Web3Connection {
         // TODO: what ordering?!
         self.active_requests.load(atomic::Ordering::Acquire)
             == other.active_requests.load(atomic::Ordering::Acquire)
-    }
-}
-
-#[derive(Clone, Deserialize)]
-pub struct JsonRpcRequest {
-    pub id: Box<RawValue>,
-    pub method: String,
-    pub params: Box<RawValue>,
-}
-
-impl fmt::Debug for JsonRpcRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: the default formatter takes forever to write. this is too quiet though
-        f.debug_struct("JsonRpcRequest")
-            .field("id", &self.id)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Serialize, Clone)]
-pub struct JsonRpcErrorData {
-    /// The error code
-    pub code: i64,
-    /// The error message
-    pub message: String,
-    /// Additional data
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<serde_json::Value>,
-}
-
-#[derive(Clone, Serialize)]
-pub struct JsonRpcForwardedResponse {
-    pub jsonrpc: String,
-    pub id: Box<RawValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Box<RawValue>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<JsonRpcErrorData>,
-    // TODO: optional error
-}
-
-impl fmt::Debug for JsonRpcForwardedResponse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: the default formatter takes forever to write. this is too quiet though
-        f.debug_struct("JsonRpcForwardedResponse")
-            .field("id", &self.id)
-            .finish_non_exhaustive()
     }
 }
