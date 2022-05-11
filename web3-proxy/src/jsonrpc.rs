@@ -83,6 +83,8 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
                     match key {
                         Field::JsonRpc => {
                             // throw away the value
+                            // TODO: should we check that it's 2.0?
+                            // TODO: how do we skip over this value entirely?
                             let _: String = map.next_value()?;
                         }
                         Field::Id => {
