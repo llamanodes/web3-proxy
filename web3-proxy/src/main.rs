@@ -6,7 +6,7 @@ mod jsonrpc;
 
 use std::fs;
 use std::sync::Arc;
-use tracing::{info, trace, warn};
+use tracing::info;
 use warp::Filter;
 use warp::Reply;
 
@@ -17,10 +17,6 @@ use crate::config::{CliConfig, RpcConfig};
 async fn main() -> anyhow::Result<()> {
     // install global collector configured based on RUST_LOG env var.
     tracing_subscriber::fmt::init();
-
-    info!("test info");
-    warn!("test warn");
-    trace!("test trace");
 
     let cli_config: CliConfig = argh::from_env();
 
