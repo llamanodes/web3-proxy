@@ -308,6 +308,7 @@ impl Web3ProxyApp {
                                     response
                                 }
                                 Err(e) => {
+                                    // TODO: move this to a helper function?
                                     let code;
                                     let message: String;
                                     let data;

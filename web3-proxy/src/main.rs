@@ -4,6 +4,8 @@ mod connection;
 mod connections;
 mod jsonrpc;
 
+use jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
+use serde_json::value::RawValue;
 use std::fs;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
@@ -72,11 +74,24 @@ fn handle_anyhow_errors<T: warp::Reply>(
 ) -> warp::http::Response<warp::hyper::Body> {
     match res {
         Ok(r) => r.into_response(),
-        Err(e) => warp::reply::with_status(
-            // TODO: json error
-            format!("{}", e),
-            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-        )
+        Err(e) => {
+            let e = JsonRpcForwardedResponse {
+                jsonrpc: "2.0".to_string(),
+                // TODO: what id can we use? how do we make sure it gets attached to this?
+                id: RawValue::from_string("0".to_string()).unwrap(),
+                result: None,
+                error: Some(JsonRpcErrorData {
+                    code: -32099,
+                    message: format!("{:?}", e),
+                    data: None,
+                }),
+            };
+
+            warp::reply::with_status(
+                serde_json::to_string(&e).unwrap(),
+                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
         .into_response(),
     }
 }
