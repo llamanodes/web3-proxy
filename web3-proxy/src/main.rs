@@ -5,7 +5,9 @@ mod connections;
 mod jsonrpc;
 
 use std::fs;
+use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
+use tokio::runtime;
 use tracing::info;
 use warp::Filter;
 use warp::Reply;
@@ -13,8 +15,7 @@ use warp::Reply;
 use crate::app::Web3ProxyApp;
 use crate::config::{CliConfig, RpcConfig};
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     // install global collector configured based on RUST_LOG env var.
     tracing_subscriber::fmt::init();
 
@@ -24,27 +25,44 @@ async fn main() -> anyhow::Result<()> {
     let rpc_config: String = fs::read_to_string(cli_config.rpc_config_path)?;
     let rpc_config: RpcConfig = toml::from_str(&rpc_config)?;
 
-    // TODO: load the config from yaml instead of hard coding
-    // TODO: support multiple chains in one process? then we could just point "chain.stytt.com" at this and caddy wouldn't need anything else
-    // TODO: be smart about about using archive nodes? have a set that doesn't use archive nodes since queries to them are more valuable
-    let listen_port = cli_config.listen_port;
+    // TODO: setting title inside of tokio doesnt seem to work. lets do it outside of tokio
+    proctitle::set_title(format!("web3-proxy-{}", rpc_config.shared.chain_id));
 
-    let app = rpc_config.try_build().await?;
+    let chain_id = rpc_config.shared.chain_id;
 
-    let app: Arc<Web3ProxyApp> = Arc::new(app);
+    let rt = runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .thread_name_fn(move || {
+            static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
+            // TODO: what ordering?
+            let worker_id = ATOMIC_ID.fetch_add(1, atomic::Ordering::SeqCst);
+            // TODO: i think these max at 15 characters
+            format!("web3-{}-{}", chain_id, worker_id)
+        })
+        .build()?;
 
-    let proxy_rpc_filter = warp::any()
-        .and(warp::post())
-        .and(warp::body::json())
-        .then(move |json_body| app.clone().proxy_web3_rpc(json_body));
+    // spawn the root task
+    rt.block_on(async {
+        let listen_port = cli_config.listen_port;
 
-    // TODO: filter for displaying connections and their block heights
+        let app = rpc_config.try_build().await.unwrap();
 
-    // TODO: warp trace is super verbose. how do we make this more readable?
-    // let routes = proxy_rpc_filter.with(warp::trace::request());
-    let routes = proxy_rpc_filter.map(handle_anyhow_errors);
+        let app: Arc<Web3ProxyApp> = Arc::new(app);
 
-    warp::serve(routes).run(([0, 0, 0, 0], listen_port)).await;
+        let proxy_rpc_filter = warp::any()
+            .and(warp::post())
+            .and(warp::body::json())
+            .then(move |json_body| app.clone().proxy_web3_rpc(json_body));
+
+        // TODO: filter for displaying connections and their block heights
+
+        // TODO: warp trace is super verbose. how do we make this more readable?
+        // let routes = proxy_rpc_filter.with(warp::trace::request());
+        let routes = proxy_rpc_filter.map(handle_anyhow_errors);
+
+        warp::serve(routes).run(([0, 0, 0, 0], listen_port)).await;
+    });
 
     Ok(())
 }

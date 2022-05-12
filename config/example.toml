@@ -1,3 +1,6 @@
+[shared]
+chain_id = 1
+
 [balanced_rpc_tiers]
 
 [balanced_rpc_tiers.0]

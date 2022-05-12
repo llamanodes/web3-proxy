@@ -2497,6 +2497,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "proctitle"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "924cd8a0de90723d63fed19c5035ea129913a0bc998b37686a67f1eaf6a2aab5"
+dependencies = [
+ "lazy_static",
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "quanta"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3854,6 +3865,7 @@ dependencies = [
  "hashbrown 0.12.1",
  "linkedhashmap",
  "parking_lot 0.12.0",
+ "proctitle",
  "regex",
  "reqwest",
  "rustc-hash",

@@ -17,6 +17,7 @@ governor = { version = "0.4.2", features = ["dashmap", "std"] }
 hashbrown = "0.12.1"
 linkedhashmap = { path = "../linkedhashmap" }
 parking_lot = "0.12.0"
+proctitle = "0.1.1"
 regex = "1.5.5"
 reqwest = { version = "0.11.10", default-features = false, features = ["json", "rustls"] }
 rustc-hash = "1.1.0"

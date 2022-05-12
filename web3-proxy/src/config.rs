@@ -21,9 +21,17 @@ pub struct CliConfig {
 
 #[derive(Deserialize)]
 pub struct RpcConfig {
-    // BTreeMap so that iterating keeps the same order
+    pub shared: RpcSharedConfig,
+    // BTreeMap so that iterating keeps the same order. we want tier 0 before tier 1!
     pub balanced_rpc_tiers: BTreeMap<String, HashMap<String, Web3ConnectionConfig>>,
     pub private_rpcs: Option<HashMap<String, Web3ConnectionConfig>>,
+}
+
+/// shared configuration between Web3Connections
+#[derive(Deserialize)]
+pub struct RpcSharedConfig {
+    /// TODO: what type for chain_id? TODO: this isn't at the right level. this is inside a "Config"
+    pub chain_id: usize,
 }
 
 #[derive(Deserialize)]
@@ -48,7 +56,7 @@ impl RpcConfig {
             vec![]
         };
 
-        Web3ProxyApp::try_new(balanced_rpc_tiers, private_rpcs).await
+        Web3ProxyApp::try_new(self.shared.chain_id, balanced_rpc_tiers, private_rpcs).await
     }
 }
 
@@ -57,9 +65,11 @@ impl Web3ConnectionConfig {
     pub async fn try_build(
         self,
         clock: &QuantaClock,
+        chain_id: usize,
         http_client: Option<reqwest::Client>,
     ) -> anyhow::Result<Arc<Web3Connection>> {
         Web3Connection::try_new(
+            chain_id,
             self.url,
             http_client,
             self.hard_limit,
@@ -67,6 +77,5 @@ impl Web3ConnectionConfig {
             self.soft_limit,
         )
         .await
-        .map(Arc::new)
     }
 }

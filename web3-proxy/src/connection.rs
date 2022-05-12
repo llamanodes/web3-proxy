@@ -7,7 +7,6 @@ use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::NotUntil;
 use governor::RateLimiter;
-use serde_json::value::RawValue;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::atomic::{self, AtomicU32, AtomicU64};
@@ -66,13 +65,14 @@ impl fmt::Display for Web3Connection {
 impl Web3Connection {
     /// Connect to a web3 rpc and subscribe to new heads
     pub async fn try_new(
+        chain_id: usize,
         url_str: String,
         http_client: Option<reqwest::Client>,
         hard_rate_limit: Option<u32>,
         clock: &QuantaClock,
         // TODO: think more about this type
         soft_limit: u32,
-    ) -> anyhow::Result<Web3Connection> {
+    ) -> anyhow::Result<Arc<Web3Connection>> {
         let hard_rate_limiter = if let Some(hard_rate_limit) = hard_rate_limit {
             let quota = governor::Quota::per_second(NonZeroU32::new(hard_rate_limit).unwrap());
 
@@ -108,7 +108,7 @@ impl Web3Connection {
             return Err(anyhow::anyhow!("only http and ws servers are supported"));
         };
 
-        Ok(Web3Connection {
+        let connection = Web3Connection {
             clock: clock.clone(),
             url: url_str.clone(),
             active_requests: Default::default(),
@@ -116,7 +116,35 @@ impl Web3Connection {
             ratelimiter: hard_rate_limiter,
             soft_limit,
             head_block_number: 0.into(),
-        })
+        };
+
+        let connection = Arc::new(connection);
+
+        // TODO: check the chain_id here
+        let active_request_handle = connection.wait_for_request_handle().await;
+
+        // TODO: passing empty_params like this feels awkward.
+        let empty_params: Option<()> = None;
+        let found_chain_id: String = active_request_handle
+            .request("eth_chainId", empty_params)
+            .await
+            .unwrap();
+
+        let found_chain_id =
+            usize::from_str_radix(found_chain_id.trim_start_matches("0x"), 16).unwrap();
+
+        if chain_id != found_chain_id {
+            return Err(anyhow::anyhow!(
+                "incorrect chain id! Expected {}. Found {}",
+                chain_id,
+                found_chain_id
+            ));
+        }
+
+        // TODO: use anyhow
+        assert_eq!(chain_id, found_chain_id);
+
+        Ok(connection)
     }
 
     #[inline]
@@ -233,7 +261,6 @@ impl Web3Connection {
     }
 
     pub async fn wait_for_request_handle(self: &Arc<Self>) -> ActiveRequestHandle {
-        // rate limits
         loop {
             match self.try_request_handle() {
                 Ok(pending_request_handle) => return pending_request_handle,
@@ -244,8 +271,6 @@ impl Web3Connection {
                 }
             }
         }
-
-        // TODO: return a thing that when we drop it decrements?
     }
 
     pub fn try_request_handle(
@@ -290,11 +315,15 @@ impl ActiveRequestHandle {
     /// Send a web3 request
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// By taking self here, we ensure that this is dropped after the request is complete
-    pub async fn request(
-        self,
+    pub async fn request<T, R>(
+        &self,
         method: &str,
-        params: &Option<Box<serde_json::value::RawValue>>,
-    ) -> Result<Box<RawValue>, ethers::prelude::ProviderError> {
+        params: T,
+    ) -> Result<R, ethers::prelude::ProviderError>
+    where
+        T: fmt::Debug + serde::Serialize + Send + Sync,
+        R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug,
+    {
         // TODO: this should probably be trace level and use a span
         // TODO: it would be nice to have the request id on this
         trace!("Sending {}({:?}) to {}", method, params, self.0);

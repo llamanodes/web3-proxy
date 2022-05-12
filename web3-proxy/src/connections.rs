@@ -61,6 +61,7 @@ impl fmt::Debug for Web3Connections {
 
 impl Web3Connections {
     pub async fn try_new(
+        chain_id: usize,
         best_head_block_number: Arc<AtomicU64>,
         servers: Vec<Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
@@ -72,7 +73,10 @@ impl Web3Connections {
         let num_connections = servers.len();
 
         for server_config in servers.into_iter() {
-            match server_config.try_build(clock, http_client.clone()).await {
+            match server_config
+                .try_build(clock, chain_id, http_client.clone())
+                .await
+            {
                 Ok(connection) => connections.push(connection),
                 Err(e) => warn!("Unable to connect to a server! {}", e),
             }

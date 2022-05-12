@@ -30,7 +30,8 @@ static APP_USER_AGENT: &str = concat!(
 const RESPONSE_CACHE_CAP: usize = 1024;
 
 /// TODO: these types are probably very bad keys and values. i couldn't get caching of warp::reply::Json to work
-type ResponseLruCache = RwLock<LinkedHashMap<(u64, String, String), JsonRpcForwardedResponse>>;
+type ResponseLruCache =
+    RwLock<LinkedHashMap<(u64, String, Option<String>), JsonRpcForwardedResponse>>;
 
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
@@ -61,6 +62,7 @@ impl fmt::Debug for Web3ProxyApp {
 
 impl Web3ProxyApp {
     pub async fn try_new(
+        chain_id: usize,
         balanced_rpc_tiers: Vec<Vec<Web3ConnectionConfig>>,
         private_rpcs: Vec<Web3ConnectionConfig>,
     ) -> anyhow::Result<Web3ProxyApp> {
@@ -81,6 +83,7 @@ impl Web3ProxyApp {
         let balanced_rpc_tiers =
             future::join_all(balanced_rpc_tiers.into_iter().map(|balanced_rpc_tier| {
                 Web3Connections::try_new(
+                    chain_id,
                     best_head_block_number.clone(),
                     balanced_rpc_tier,
                     Some(http_client.clone()),
@@ -100,6 +103,7 @@ impl Web3ProxyApp {
         } else {
             Some(
                 Web3Connections::try_new(
+                    chain_id,
                     best_head_block_number.clone(),
                     private_rpcs,
                     Some(http_client),
@@ -225,6 +229,9 @@ impl Web3ProxyApp {
                             let deadline = not_until.wait_time_from(self.clock.now());
 
                             sleep(deadline).await;
+                        } else {
+                            // TODO: what should we do here?
+                            return Err(anyhow::anyhow!("no private rpcs!"));
                         }
                     }
                 };
@@ -246,7 +253,7 @@ impl Web3ProxyApp {
 
                 for balanced_rpcs in rpc_iter {
                     let best_head_block_number =
-                        self.best_head_block_number.load(atomic::Ordering::Acquire); // TODO: we don't store current block for everything anymore. we store it on the connections
+                        self.best_head_block_number.load(atomic::Ordering::Acquire);
 
                     let best_rpc_block_number = balanced_rpcs.head_block_number();
 
@@ -259,11 +266,7 @@ impl Web3ProxyApp {
                     let cache_key = (
                         best_head_block_number,
                         request.method.clone(),
-                        request
-                            .params
-                            .clone()
-                            .map(|x| x.to_string())
-                            .unwrap_or_else(|| "[]".to_string()),
+                        request.params.clone().map(|x| x.to_string()),
                     );
 
                     if let Some(cached) = self.response_cache.read().await.get(&cache_key) {
@@ -302,6 +305,7 @@ impl Web3ProxyApp {
                                     // TODO: cache the warp::reply to save us serializing every time
                                     response_cache.insert(cache_key, response.clone());
                                     if response_cache.len() >= RESPONSE_CACHE_CAP {
+                                        // TODO: this isn't really an LRU. what is this called? should we make it an lru? these caches only live for one block
                                         response_cache.pop_front();
                                     }
 
@@ -412,7 +416,7 @@ impl Web3ProxyApp {
                     // TODO: how long should we wait?
                     // TODO: max wait time?
                     warn!("No servers in sync!");
-                    // TODO: return json error? return a 502?
+                    // TODO: return a 502?
                     return Err(anyhow::anyhow!("no servers in sync"));
                 };
             }

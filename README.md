@@ -72,6 +72,7 @@ Note: Testing with `getLatestBlockByNumber.lua` is not great because the latest 
 
 ## Todo
 
+- [ ] some production configs are using 100% cpu
 - [ ] after connecting to a server, check that it gives the expected chainId
 - [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
 - [ ] proper logging with useful instrumentation
@@ -79,6 +80,9 @@ Note: Testing with `getLatestBlockByNumber.lua` is not great because the latest 
 - [ ] if a request gets a socket timeout, try on another server
   - maybe always try at least two servers in parallel? and then return the first? or only if the first one doesn't respond very quickly?
 - [ ] incoming rate limiting (by ip or by api key or what?)
+- [ ] improve caching
+  - [ ] if the params include a block, we can cache for longer
+  - [ ] if the call is something simple like "symbol" or "decimals", cache that too
 - [ ] measure latency to nodes?
 - [ ] one proxy for mulitple chains?
 - [ ] zero downtime deploys
