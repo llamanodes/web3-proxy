@@ -13,7 +13,7 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::time::{interval, sleep, MissedTickBehavior};
-use tracing::{debug, info, warn};
+use tracing::{info, trace, warn};
 
 use crate::connections::Web3Connections;
 
@@ -325,7 +325,7 @@ impl ActiveRequestHandle {
     {
         // TODO: this should probably be trace level and use a span
         // TODO: it would be nice to have the request id on this
-        debug!("Sending {}({:?}) to {}", method, params, self.0);
+        trace!("Sending {}({:?}) to {}", method, params, self.0);
 
         let response = match &self.0.provider {
             Web3Provider::Http(provider) => provider.request(method, params).await,
@@ -334,7 +334,7 @@ impl ActiveRequestHandle {
 
         // TODO: i think ethers already has trace logging (and does it much more fancy)
         // TODO: at least instrument this with more useful information
-        debug!("Response from {}: {:?}", self.0, response);
+        trace!("Response from {}: {:?}", self.0, response);
 
         response
     }
