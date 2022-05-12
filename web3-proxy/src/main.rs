@@ -31,7 +31,6 @@ fn main() -> anyhow::Result<()> {
     let chain_id = rpc_config.shared.chain_id;
 
     let rt = runtime::Builder::new_multi_thread()
-        .worker_threads(4)
         .enable_all()
         .thread_name_fn(move || {
             static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
