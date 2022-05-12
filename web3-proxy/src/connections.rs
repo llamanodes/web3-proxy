@@ -131,6 +131,7 @@ impl Web3Connections {
         params: Option<Box<RawValue>>,
         response_sender: flume::Sender<anyhow::Result<Box<RawValue>>>,
     ) -> anyhow::Result<()> {
+        // TODO: if only 1 active_request_handles, do self.try_send_request
         let mut unordered_futures = FuturesUnordered::new();
 
         for connection in active_request_handles {
