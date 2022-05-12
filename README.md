@@ -82,6 +82,7 @@ Note: Testing with `getLatestBlockByNumber.lua` is not great because the latest 
 - [ ] measure latency to nodes?
 - [ ] one proxy for mulitple chains?
 - [ ] zero downtime deploys
+- [ ] are we using Acquire/Release/AcqRel properly? or do we need other modes?
 - [x] simple proxy
 - [x] better locking. when lots of requests come in, we seem to be in the way of block updates
 - [x] load balance between multiple RPC servers
