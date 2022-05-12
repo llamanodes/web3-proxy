@@ -81,6 +81,7 @@ Note: Testing with `getLatestBlockByNumber.lua` is not great because the latest 
 - [ ] incoming rate limiting (by ip or by api key or what?)
 - [ ] measure latency to nodes?
 - [ ] one proxy for mulitple chains?
+- [ ] zero downtime deploys
 - [x] simple proxy
 - [x] better locking. when lots of requests come in, we seem to be in the way of block updates
 - [x] load balance between multiple RPC servers
