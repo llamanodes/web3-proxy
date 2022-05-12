@@ -278,12 +278,8 @@ impl Web3ProxyApp {
                     // TODO: what allowed lag?
                     match balanced_rpcs.next_upstream_server().await {
                         Ok(active_request_handle) => {
-                            let response = balanced_rpcs
-                                .try_send_request(
-                                    active_request_handle,
-                                    &request.method,
-                                    &request.params,
-                                )
+                            let response = active_request_handle
+                                .request(&request.method, &request.params)
                                 .await;
 
                             let response = match response {

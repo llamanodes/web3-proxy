@@ -114,19 +114,6 @@ impl Web3Connections {
         self.best_head_block_number.load(atomic::Ordering::Acquire)
     }
 
-    pub async fn try_send_request(
-        &self,
-        active_request_handle: ActiveRequestHandle,
-        method: &str,
-        params: &Option<Box<RawValue>>,
-    ) -> Result<Box<RawValue>, ethers::prelude::ProviderError> {
-        let response = active_request_handle.request(method, params).await;
-
-        // TODO: if "no block with that header" or some other jsonrpc errors, skip this response?
-
-        response
-    }
-
     /// Send the same request to all the handles. Returning the fastest successful result.
     pub async fn try_send_parallel_requests(
         self: Arc<Self>,
@@ -138,18 +125,15 @@ impl Web3Connections {
         // TODO: if only 1 active_request_handles, do self.try_send_request
         let mut unordered_futures = FuturesUnordered::new();
 
-        for connection in active_request_handles {
+        for active_request_handle in active_request_handles {
             // clone things so we can pass them to a future
-            let connections = self.clone();
             let method = method.clone();
             let params = params.clone();
             let response_sender = response_sender.clone();
 
             let handle = tokio::spawn(async move {
-                // get the client for this rpc server
-                let response = connections
-                    .try_send_request(connection, &method, &params)
-                    .await?;
+                let response: Box<RawValue> =
+                    active_request_handle.request(&method, &params).await?;
 
                 // send the first good response to a one shot channel. that way we respond quickly
                 // drop the result because errors are expected after the first send
