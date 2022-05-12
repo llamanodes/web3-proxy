@@ -5,13 +5,18 @@ chain_id = 1
 
 [balanced_rpc_tiers.0]
 
+    [balanced_rpc_tiers.0.erigon_archive]
+    url = "ws://127.0.0.1:8549"
+    # TODO: double check soft_limit on erigon
+    soft_limit = 100_000
+
     [balanced_rpc_tiers.0.geth]
     url = "ws://127.0.0.1:8546"
     soft_limit = 200_000
 
-    #[balanced_rpc_tiers.0.ankr]
-    #url = "https://rpc.ankr.com/eth"
-    #soft_limit = 3_000
+    [balanced_rpc_tiers.0.ankr]
+    url = "https://rpc.ankr.com/eth"
+    soft_limit = 3_000
 
 [private_rpcs]
 
