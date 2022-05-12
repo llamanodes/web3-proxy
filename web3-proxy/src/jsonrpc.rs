@@ -62,7 +62,6 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
                 let mut batch: Vec<JsonRpcRequest> =
                     Vec::with_capacity(seq.size_hint().unwrap_or(10));
 
-                // this was easier than expected
                 while let Ok(Some(s)) = seq.next_element::<JsonRpcRequest>() {
                     batch.push(s);
                 }
@@ -107,6 +106,7 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
                         }
                     }
                 }
+
                 let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
                 let method = method.ok_or_else(|| de::Error::missing_field("method"))?;
                 let params = params.ok_or_else(|| de::Error::missing_field("params"))?;

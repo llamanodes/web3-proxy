@@ -65,6 +65,7 @@ impl Web3Connections {
         servers: Vec<Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
         clock: &QuantaClock,
+        subscribe_heads: bool,
     ) -> anyhow::Result<Arc<Self>> {
         let mut connections = vec![];
 
@@ -85,19 +86,21 @@ impl Web3Connections {
             synced_connections: RwLock::new(SyncedConnections::new(num_connections)),
         });
 
-        for connection in connections.inner.iter() {
-            // subscribe to new heads in a spawned future
-            // TODO: channel instead. then we can have one future with write access to a left-right?
-            let connection = Arc::clone(connection);
-            let connections = connections.clone();
-            tokio::spawn(async move {
-                let url = connection.url().to_string();
+        if subscribe_heads {
+            for connection in connections.inner.iter() {
+                // subscribe to new heads in a spawned future
+                // TODO: channel instead. then we can have one future with write access to a left-right?
+                let connection = Arc::clone(connection);
+                let connections = connections.clone();
+                tokio::spawn(async move {
+                    let url = connection.url().to_string();
 
-                // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
-                if let Err(e) = connection.new_heads(Some(connections)).await {
-                    warn!("new_heads error on {}: {:?}", url, e);
-                }
-            });
+                    // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
+                    if let Err(e) = connection.new_heads(Some(connections)).await {
+                        warn!("new_heads error on {}: {:?}", url, e);
+                    }
+                });
+            }
         }
 
         Ok(connections)

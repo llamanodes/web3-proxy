@@ -85,6 +85,7 @@ impl Web3ProxyApp {
                     balanced_rpc_tier,
                     Some(http_client.clone()),
                     &clock,
+                    true,
                 )
             }))
             .await
@@ -103,6 +104,7 @@ impl Web3ProxyApp {
                     private_rpcs,
                     Some(http_client),
                     &clock,
+                    false,
                 )
                 .await?,
             )
