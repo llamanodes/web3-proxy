@@ -8,14 +8,13 @@ use crate::connection::Web3Connection;
 use crate::Web3ProxyApp;
 
 #[derive(FromArgs)]
-/// Reach new heights.
+/// Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
 pub struct CliConfig {
     /// what port the proxy should listen on
     #[argh(option, default = "8544")]
     pub listen_port: u16,
 
-    /// what port the proxy should listen on
-    // TODO: use flags for the config path  "./data/config/example.toml"
+    /// path to a toml of rpc servers
     #[argh(option, default = "\"./config/example.toml\".to_string()")]
     pub rpc_config_path: String,
 }
@@ -35,6 +34,7 @@ pub struct Web3ConnectionConfig {
 }
 
 impl RpcConfig {
+    /// Create a Web3ProxyApp from config
     pub async fn try_build(self) -> anyhow::Result<Web3ProxyApp> {
         let balanced_rpc_tiers = self
             .balanced_rpc_tiers
@@ -53,6 +53,7 @@ impl RpcConfig {
 }
 
 impl Web3ConnectionConfig {
+    /// Create a Web3Connection from config
     pub async fn try_build(
         self,
         clock: &QuantaClock,
