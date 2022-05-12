@@ -9,7 +9,7 @@ pub struct JsonRpcRequest {
     // pub jsonrpc: Box<RawValue>,
     pub id: Box<RawValue>,
     pub method: String,
-    pub params: Box<RawValue>,
+    pub params: Option<Box<RawValue>>,
 }
 
 impl fmt::Debug for JsonRpcRequest {
@@ -176,7 +176,7 @@ mod tests {
 
         assert_eq!(output.id.to_string(), "1");
         assert_eq!(output.method, "eth_blockNumber");
-        assert_eq!(output.params.to_string(), "[]");
+        assert_eq!(output.params.unwrap().to_string(), "[]");
 
         // test deserializing it into an enum
         let output: JsonRpcRequestEnum = serde_json::from_str(input).unwrap();
@@ -196,7 +196,7 @@ mod tests {
         assert_eq!(output[0].id.to_string(), "27");
         assert_eq!(output[0].method, "eth_getCode");
         assert_eq!(
-            output[0].params.to_string(),
+            output[0].params.as_ref().unwrap().to_string(),
             r#"["0x5ba1e12693dc8f9c48aad8770482f4739beed696","0xe0e6a4"]"#
         );
 
@@ -207,7 +207,5 @@ mod tests {
         let output: JsonRpcRequestEnum = serde_json::from_str(input).unwrap();
 
         assert!(matches!(output, JsonRpcRequestEnum::Batch(_)));
-
-        assert_eq!(0, 1);
     }
 }

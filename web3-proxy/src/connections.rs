@@ -114,7 +114,7 @@ impl Web3Connections {
         &self,
         active_request_handle: ActiveRequestHandle,
         method: &str,
-        params: &RawValue,
+        params: &Option<Box<RawValue>>,
     ) -> Result<Box<RawValue>, ethers::prelude::ProviderError> {
         let response = active_request_handle.request(method, params).await;
 
@@ -128,7 +128,7 @@ impl Web3Connections {
         self: Arc<Self>,
         active_request_handles: Vec<ActiveRequestHandle>,
         method: String,
-        params: Box<RawValue>,
+        params: Option<Box<RawValue>>,
         response_sender: flume::Sender<anyhow::Result<Box<RawValue>>>,
     ) -> anyhow::Result<()> {
         let mut unordered_futures = FuturesUnordered::new();

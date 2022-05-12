@@ -293,11 +293,11 @@ impl ActiveRequestHandle {
     pub async fn request(
         self,
         method: &str,
-        params: &serde_json::value::RawValue,
+        params: &Option<Box<serde_json::value::RawValue>>,
     ) -> Result<Box<RawValue>, ethers::prelude::ProviderError> {
         // TODO: this should probably be trace level and use a span
         // TODO: it would be nice to have the request id on this
-        trace!("Sending {}({}) to {}", method, params.to_string(), self.0);
+        trace!("Sending {}({:?}) to {}", method, params, self.0);
 
         let response = match &self.0.provider {
             Web3Provider::Http(provider) => provider.request(method, params).await,

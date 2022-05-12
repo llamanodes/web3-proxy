@@ -259,7 +259,11 @@ impl Web3ProxyApp {
                     let cache_key = (
                         best_head_block_number,
                         request.method.clone(),
-                        request.params.to_string(),
+                        request
+                            .params
+                            .clone()
+                            .map(|x| x.to_string())
+                            .unwrap_or_else(|| "[]".to_string()),
                     );
 
                     if let Some(cached) = self.response_cache.read().await.get(&cache_key) {
