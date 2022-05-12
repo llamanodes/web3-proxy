@@ -125,20 +125,31 @@ impl Web3Connection {
 
         // TODO: passing empty_params like this feels awkward.
         let empty_params: Option<()> = None;
-        let found_chain_id: String = active_request_handle
+        // TODO: some rpcs (on bsc and fantom) do not return an id
+        let found_chain_id: Result<String, _> = active_request_handle
             .request("eth_chainId", empty_params)
-            .await
-            .unwrap();
+            .await;
 
-        let found_chain_id =
-            usize::from_str_radix(found_chain_id.trim_start_matches("0x"), 16).unwrap();
+        match found_chain_id {
+            Ok(found_chain_id) => {
+                let found_chain_id =
+                    usize::from_str_radix(found_chain_id.trim_start_matches("0x"), 16).unwrap();
 
-        if chain_id != found_chain_id {
-            return Err(anyhow::anyhow!(
-                "incorrect chain id! Expected {}. Found {}",
-                chain_id,
-                found_chain_id
-            ));
+                if chain_id != found_chain_id {
+                    return Err(anyhow::anyhow!(
+                        "incorrect chain id! Expected {}. Found {}",
+                        chain_id,
+                        found_chain_id
+                    ));
+                }
+            }
+            Err(e) => {
+                // TODO: this is not the right way to use anyhow
+                let e_str = format!("{}", e);
+                let e = anyhow::Error::from(e).context(format!("{:?}: {}", connection, e_str));
+
+                return Err(e);
+            }
         }
 
         info!("Successful connection: {}", connection);
