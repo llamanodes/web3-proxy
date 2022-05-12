@@ -144,10 +144,7 @@ impl Web3Connection {
                 }
             }
             Err(e) => {
-                // TODO: this is not the right way to use anyhow
-                let e_str = format!("{}", e);
-                let e = anyhow::Error::from(e).context(format!("{:?}: {}", connection, e_str));
-
+                let e = anyhow::Error::from(e).context(format!("{}", connection));
                 return Err(e);
             }
         }

@@ -78,7 +78,7 @@ impl Web3Connections {
                 .await
             {
                 Ok(connection) => connections.push(connection),
-                Err(e) => warn!("Unable to connect to a server! {}", e),
+                Err(e) => warn!("Unable to connect to a server! {:?}", e),
             }
         }
 
