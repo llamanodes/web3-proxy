@@ -27,7 +27,7 @@ fn main() -> anyhow::Result<()> {
     let rpc_config: String = fs::read_to_string(cli_config.rpc_config_path)?;
     let rpc_config: RpcConfig = toml::from_str(&rpc_config)?;
 
-    // TODO: setting title inside of tokio doesnt seem to work. lets do it outside of tokio
+    // TODO: this doesn't seem to do anything
     proctitle::set_title(format!("web3-proxy-{}", rpc_config.shared.chain_id));
 
     let chain_id = rpc_config.shared.chain_id;
@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
         .enable_all()
         .thread_name_fn(move || {
             static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
-            // TODO: what ordering?
+            // TODO: what ordering? i think we want seqcst so that these all happen in order, but that might be stricter than we really need
             let worker_id = ATOMIC_ID.fetch_add(1, atomic::Ordering::SeqCst);
             // TODO: i think these max at 15 characters
             format!("web3-{}-{}", chain_id, worker_id)
@@ -77,7 +77,7 @@ fn handle_anyhow_errors<T: warp::Reply>(
         Err(e) => {
             let e = JsonRpcForwardedResponse {
                 jsonrpc: "2.0".to_string(),
-                // TODO: what id can we use? how do we make sure it gets attached to this?
+                // TODO: what id can we use? how do we make sure the incoming id gets attached to this?
                 id: RawValue::from_string("0".to_string()).unwrap(),
                 result: None,
                 error: Some(JsonRpcErrorData {

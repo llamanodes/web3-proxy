@@ -209,7 +209,7 @@ impl Web3Connection {
 
                     if old_block_number != block_number {
                         if let Some(connections) = &connections {
-                            connections.update_synced_rpcs(&self)?;
+                            connections.update_synced_rpcs(&self).await?;
                         } else {
                             info!("new block on {}: {}", self, block_number);
                         }
@@ -241,7 +241,7 @@ impl Web3Connection {
                     .store(block_number, atomic::Ordering::Release);
 
                 if let Some(connections) = &connections {
-                    connections.update_synced_rpcs(&self)?;
+                    connections.update_synced_rpcs(&self).await?;
                 } else {
                     info!("new head block {} from {}", block_number, self);
                 }
@@ -256,7 +256,7 @@ impl Web3Connection {
                         .fetch_max(new_block_number, atomic::Ordering::AcqRel);
 
                     if let Some(connections) = &connections {
-                        connections.update_synced_rpcs(&self)?;
+                        connections.update_synced_rpcs(&self).await?;
                     }
                 }
             }

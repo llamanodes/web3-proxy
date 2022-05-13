@@ -5,12 +5,12 @@ use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
 use hashbrown::HashMap;
-use parking_lot::RwLock;
 use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
 use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{debug, info, trace, warn};
 
 use crate::config::Web3ConnectionConfig;
@@ -174,13 +174,13 @@ impl Web3Connections {
         }
     }
 
-    pub fn update_synced_rpcs(&self, rpc: &Arc<Web3Connection>) -> anyhow::Result<()> {
-        let mut synced_connections = self.synced_connections.write();
+    pub async fn update_synced_rpcs(&self, rpc: &Arc<Web3Connection>) -> anyhow::Result<()> {
+        let mut synced_connections = self.synced_connections.write().await;
 
         let new_block = rpc.head_block_number();
 
         if new_block == 0 {
-            warn!("{:?} is still syncing", rpc);
+            warn!("{} is still syncing", rpc);
             return Ok(());
         }
 
@@ -281,7 +281,7 @@ impl Web3Connections {
         let mut earliest_not_until = None;
 
         // TODO: this clone is probably not the best way to do this
-        let mut synced_rpc_indexes = self.synced_connections.read().inner.clone();
+        let mut synced_rpc_indexes = self.synced_connections.read().await.inner.clone();
 
         // // TODO: how should we include the soft limit? floats are slower than integer math
         // let a = a as f32 / self.soft_limit as f32;
