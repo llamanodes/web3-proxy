@@ -69,29 +69,3 @@ Test erigon:
 
 
 Note: Testing with `getLatestBlockByNumber.lua` is not great because the latest block changes and so one run is likely to be very different than another.
-
-## Todo
-
-- [ ] some production configs are using 100% cpu
-- [ ] after connecting to a server, check that it gives the expected chainId
-- [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
-- [ ] proper logging with useful instrumentation
-- [ ] think more about how multiple rpc tiers should work
-- [ ] if a request gets a socket timeout, try on another server
-  - maybe always try at least two servers in parallel? and then return the first? or only if the first one doesn't respond very quickly?
-- [ ] incoming rate limiting (by ip or by api key or what?)
-- [ ] improve caching
-  - [ ] if the params include a block, we can cache for longer
-  - [ ] if the call is something simple like "symbol" or "decimals", cache that too
-- [ ] measure latency to nodes?
-- [ ] one proxy for mulitple chains?
-- [ ] zero downtime deploys
-- [ ] are we using Acquire/Release/AcqRel properly? or do we need other modes?
-- [x] simple proxy
-- [x] better locking. when lots of requests come in, we seem to be in the way of block updates
-- [x] load balance between multiple RPC servers
-- [x] support more than just ETH
-- [x] option to disable private rpc and send everything to primary
-- [x] health check nodes by block height
-- [x] Dockerfile
-- [x] docker-compose.yml

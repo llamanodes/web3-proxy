@@ -1,8 +1,36 @@
 # Todo
 
-- [ ] the ethermine rpc is usually fastest. but its in the private tier. since we only allow synced rpcs, we are going to not have an rpc a lot of the time
-    - [ ] if not backends. return a 502 instead of delaying?
-- [ ] tarpit ratelimiting at the start, but reject if incoming requests is super high
-- [ ] thundering herd problem if we only allow a lag of 0 blocks. i don't see any solution besides allowing a one or two block lag
+- [ ] some production configs are occassionally stuck waiting at 100% cpu
+  - looks like its getting stuck on `futex(0x7fc15067b478, FUTEX_WAIT_PRIVATE, 1, NULL`
+  - they stop processing new blocks. i'm guessing 2 blocks arrive at the same time, but i thought our locks would handle that
+- [ ] proper logging with useful instrumentation
+- [ ] handle websocket disconnect and reconnect
+- [ ] warning if no blocks for too long. maybe reconnect automatically?
+- [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
+    - thundering herd problem if we only allow a lag of 0 blocks
+- [ ] tarpit hard_ratelimit at the start, but reject if incoming requests is super high?
 - [ ] add the backend server to the header?
-- [ ] the web3proxyapp object gets cloned for every call. why do we need any arcs inside that? shouldn't they be able to connect to the app's?
+- [ ] the web3proxyapp object gets cloned for every call. why do we need any arcs inside that? shouldn't they be able to connect to the app's? can we just use static lifetimes
+- [ ] think more about how multiple rpc tiers should work
+- [ ] if a request gets a socket timeout, try on another server
+  - maybe always try at least two servers in parallel? and then return the first? or only if the first one doesn't respond very quickly?
+- [ ] incoming rate limiting (by ip or by api key or what?)
+- [ ] improve caching
+  - [ ] if the params include a block, we can cache for longer
+  - [ ] if the call is something simple like "symbol" or "decimals", cache that too
+  - [ ] when we receive a block, we should store it for later eth_getBlockByNumber and similar calls
+- [ ] measure latency to nodes?
+- [ ] one proxy for mulitple chains?
+- [ ] zero downtime deploys
+- [ ] are we using Acquire/Release/AcqRel properly? or do we need other modes?
+- [x] simple proxy
+- [x] better locking. when lots of requests come in, we seem to be in the way of block updates
+- [x] load balance between multiple RPC servers
+- [x] support more than just ETH
+- [x] option to disable private rpc and send everything to primary
+- [x] health check nodes by block height
+- [x] Dockerfile
+- [x] docker-compose.yml
+- [x] after connecting to a server, check that it gives the expected chainId
+- [x] the ethermine rpc is usually fastest. but its in the private tier. since we only allow synced rpcs, we are going to not have an rpc a lot of the time
+- [x] if not backends. return a 502 instead of delaying?
