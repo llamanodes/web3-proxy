@@ -273,7 +273,7 @@ impl Web3Connections {
         // TODO: hopefully nothing ends up in here twice. Greater+Equal might do that to us
         synced_connections.inner.push(rpc_index);
 
-        trace!("Now synced {:?}: {:?}", self, synced_connections.inner);
+        info!("Now synced {:?}: {:?}", self, synced_connections.inner);
 
         Ok(())
     }
