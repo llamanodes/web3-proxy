@@ -11,7 +11,7 @@ use std::fmt;
 use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, trace, warn, instrument};
+use tracing::{debug, info, instrument, trace, warn};
 
 use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, Web3Connection};
@@ -177,9 +177,9 @@ impl Web3Connections {
     /// TODO: possible dead lock here. investigate more. probably refactor
     #[instrument]
     pub async fn update_synced_rpcs(&self, rpc: &Arc<Web3Connection>) -> anyhow::Result<()> {
-        info!("Locking synced_connections")
+        info!("Locking synced_connections");
         let mut synced_connections = self.synced_connections.write().await;
-        info!("Locked synced_connections")
+        info!("Locked synced_connections");
 
         let new_block = rpc.head_block_number();
 
