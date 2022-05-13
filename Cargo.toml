@@ -3,3 +3,7 @@ members = [
   "linkedhashmap",
   "web3-proxy",
 ]
+
+[profile.release]
+lto = true
+panic = "abort"

@@ -1,5 +1,8 @@
 FROM rust:1-bullseye as builder
 
+# potentially faster. https://nnethercote.github.io/perf-book/build-configuration.html
+ENV RUSTFLAGS "-C target-cpu=native"
+
 WORKDIR /usr/src/web3-proxy
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
