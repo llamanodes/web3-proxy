@@ -263,8 +263,6 @@ impl Web3ProxyApp {
 
                     // TODO: building this cache key is slow and its large, but i don't see a better way right now
                     // TODO: inspect the params and see if a block is specified. if so, use that block number instead of current_block
-                    // TODO: move this to a helper function. have it be a lot smarter
-                    // TODO: have 2 caches. a small `block_cache` for most calls and a large `immutable_cache` for items that won't change
                     let cache_key = (
                         best_head_block_number,
                         request.method.clone(),
@@ -298,15 +296,13 @@ impl Web3ProxyApp {
                                     };
 
                                     // TODO: small race condidition here. parallel requests with the same query will both be saved to the cache
-                                    // TODO: try_write is unlikely to get the lock. i think instead we should spawn another task for caching
-                                    if let Ok(mut response_cache) = self.response_cache.try_write()
-                                    {
-                                        // TODO: cache the warp::reply to save us serializing every time
-                                        response_cache.insert(cache_key, response.clone());
-                                        if response_cache.len() >= RESPONSE_CACHE_CAP {
-                                            // TODO: this isn't really an LRU. what is this called? should we make it an lru? these caches only live for one block
-                                            response_cache.pop_front();
-                                        }
+                                    let mut response_cache = self.response_cache.write().await;
+
+                                    // TODO: cache the warp::reply to save us serializing every time
+                                    response_cache.insert(cache_key, response.clone());
+                                    if response_cache.len() >= RESPONSE_CACHE_CAP {
+                                        // TODO: this isn't really an LRU. what is this called? should we make it an lru? these caches only live for one block
+                                        response_cache.pop_front();
                                     }
 
                                     response
