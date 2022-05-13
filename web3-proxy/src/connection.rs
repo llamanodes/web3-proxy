@@ -249,9 +249,9 @@ impl Web3Connection {
                 while let Some(new_block) = stream.next().await {
                     let new_block_number = new_block.number.unwrap().as_u64();
 
-                    // TODO: only store if this isn't already stored?
-                    // TODO: also send something to the provider_tier so it can sort?
-                    // TODO: do we need this old block number check? its helpful on http, but here it shouldn't dupe except maybe on the first run
+                    // TODO: we need to include the block hash here otherwise
+                    // TODO: add the block to our cache
+
                     self.head_block_number
                         .fetch_max(new_block_number, atomic::Ordering::AcqRel);
 

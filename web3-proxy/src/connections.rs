@@ -174,6 +174,7 @@ impl Web3Connections {
         }
     }
 
+    /// TODO: possible dead lock here. investigate more. probably refactor
     pub async fn update_synced_rpcs(&self, rpc: &Arc<Web3Connection>) -> anyhow::Result<()> {
         let mut synced_connections = self.synced_connections.write().await;
 
