@@ -345,7 +345,7 @@ impl Web3Connections {
     }
 
     /// get all rpc servers that are not rate limited
-    /// even fetches if they aren't in sync. This is useful for broadcasting signed transactions
+    /// returns servers even if they aren't in sync. This is useful for broadcasting signed transactions
     pub fn get_upstream_servers(
         &self,
     ) -> Result<Vec<ActiveRequestHandle>, Option<NotUntil<QuantaInstant>>> {

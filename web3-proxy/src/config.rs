@@ -1,7 +1,7 @@
 use argh::FromArgs;
 use governor::clock::QuantaClock;
 use serde::Deserialize;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::connection::Web3Connection;
@@ -22,8 +22,7 @@ pub struct CliConfig {
 #[derive(Deserialize)]
 pub struct RpcConfig {
     pub shared: RpcSharedConfig,
-    // BTreeMap so that iterating keeps the same order. we want tier 0 before tier 1!
-    pub balanced_rpc_tiers: BTreeMap<String, HashMap<String, Web3ConnectionConfig>>,
+    pub balanced_rpcs: HashMap<String, Web3ConnectionConfig>,
     pub private_rpcs: Option<HashMap<String, Web3ConnectionConfig>>,
 }
 
@@ -44,11 +43,7 @@ pub struct Web3ConnectionConfig {
 impl RpcConfig {
     /// Create a Web3ProxyApp from config
     pub async fn try_build(self) -> anyhow::Result<Web3ProxyApp> {
-        let balanced_rpc_tiers = self
-            .balanced_rpc_tiers
-            .into_values()
-            .map(|x| x.into_values().collect())
-            .collect();
+        let balanced_rpcs = self.balanced_rpcs.into_values().collect();
 
         let private_rpcs = if let Some(private_rpcs) = self.private_rpcs {
             private_rpcs.into_values().collect()
@@ -56,7 +51,7 @@ impl RpcConfig {
             vec![]
         };
 
-        Web3ProxyApp::try_new(self.shared.chain_id, balanced_rpc_tiers, private_rpcs).await
+        Web3ProxyApp::try_new(self.shared.chain_id, balanced_rpcs, private_rpcs).await
     }
 }
 

@@ -4,6 +4,7 @@ members = [
   "web3-proxy",
 ]
 
-[profile.release]
-lto = true
-panic = "abort"
+# TODO: enable these once rapid development is done
+#[profile.release]
+#lto = true
+#panic = "abort"

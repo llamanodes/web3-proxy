@@ -45,6 +45,7 @@ pub struct Web3Connection {
     /// used for load balancing to the least loaded server
     soft_limit: u32,
     head_block_number: AtomicU64,
+    /// the same clock that is used by the rate limiter
     clock: QuantaClock,
 }
 
@@ -268,6 +269,7 @@ impl Web3Connection {
     }
 
     pub async fn wait_for_request_handle(self: &Arc<Self>) -> ActiveRequestHandle {
+        // TODO: maximum wait time
         loop {
             match self.try_request_handle() {
                 Ok(pending_request_handle) => return pending_request_handle,
@@ -288,7 +290,7 @@ impl Web3Connection {
             match ratelimiter.check() {
                 Ok(_) => {
                     // rate limit succeeded
-                    return Ok(ActiveRequestHandle(self.clone()));
+                    return Ok(ActiveRequestHandle::new(self.clone()));
                 }
                 Err(not_until) => {
                     // rate limit failed

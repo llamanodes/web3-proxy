@@ -1,20 +1,18 @@
 [shared]
 chain_id = 1
 
-[balanced_rpc_tiers]
+[balanced_rpcs]
 
-[balanced_rpc_tiers.0]
-
-    [balanced_rpc_tiers.0.erigon_archive]
+    [balanced_rpcs.erigon_archive]
     url = "ws://127.0.0.1:8549"
     # TODO: double check soft_limit on erigon
     soft_limit = 100_000
 
-    [balanced_rpc_tiers.0.geth]
+    [balanced_rpcs.geth]
     url = "ws://127.0.0.1:8546"
     soft_limit = 200_000
 
-    [balanced_rpc_tiers.0.ankr]
+    [balanced_rpcs.ankr]
     url = "https://rpc.ankr.com/eth"
     soft_limit = 3_000
 
