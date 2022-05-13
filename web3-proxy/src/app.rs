@@ -261,6 +261,7 @@ impl Web3ProxyApp {
                         continue;
                     }
 
+                    /*
                     // TODO: building this cache key is slow and its large, but i don't see a better way right now
                     // TODO: inspect the params and see if a block is specified. if so, use that block number instead of current_block
                     // TODO: move this to a helper function. have it be a lot smarter
@@ -276,6 +277,7 @@ impl Web3ProxyApp {
                         // TODO: return a reference in the other places so that this works without a clone?
                         return Ok(cached.to_owned());
                     }
+                    */
 
                     // TODO: what allowed lag?
                     match balanced_rpcs.next_upstream_server().await {
@@ -297,6 +299,7 @@ impl Web3ProxyApp {
                                         error: None,
                                     };
 
+                                    /*
                                     // TODO: small race condidition here. parallel requests with the same query will both be saved to the cache
                                     // TODO: try_write is unlikely to get the lock. i think instead we should spawn another task for caching
                                     if let Ok(mut response_cache) = self.response_cache.try_write()
@@ -308,6 +311,7 @@ impl Web3ProxyApp {
                                             response_cache.pop_front();
                                         }
                                     }
+                                    */
 
                                     response
                                 }
