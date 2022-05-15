@@ -4,9 +4,12 @@ version = "0.2.0"
 authors = ["quininer <quininer@live.com>"]
 edition = "2018"
 
+[features]
+inline-more = [ "hashbrown" ]
+
 [dependencies]
 slab = "0.4.6"
-hashbrown = "0.12.1"
+hashbrown = { version = "0.12.1", optional = true }
 
 [dev-dependencies]
 criterion = "0.3.5"

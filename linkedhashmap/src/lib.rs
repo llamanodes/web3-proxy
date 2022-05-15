@@ -1,10 +1,15 @@
 pub mod linkedlist;
 
-use hashbrown::HashMap;
 use linkedlist::{LinkedList, NodeSlab};
 use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
+
+#[cfg(feature = "hashbrown")]
+use hashbrown::HashMap;
+
+#[cfg(not(feature = "hashbrown"))]
+use std::collections::HashMap;
 
 pub struct LinkedHashMap<K, V, S = RandomState> {
     slab: NodeSlab<(K, V)>,
@@ -96,7 +101,7 @@ where
         self.map.clear();
     }
 
-    #[inline]
+    #[cfg_attr(feature = "inline-more", inline(always))]
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         let index = self.list.push(&mut self.slab, (key.clone(), value));
         let index = self.map.insert(key, index)?;
@@ -104,7 +109,7 @@ where
         Some(value)
     }
 
-    #[inline]
+    #[cfg_attr(feature = "inline-more", inline(always))]
     pub fn get<Q>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
@@ -115,7 +120,7 @@ where
         Some(value)
     }
 
-    #[inline]
+    #[cfg_attr(feature = "inline-more", inline(always))]
     pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
     where
         K: Borrow<Q>,
@@ -126,7 +131,7 @@ where
         Some(value)
     }
 
-    #[inline]
+    #[cfg_attr(feature = "inline-more", inline(always))]
     pub fn touch<Q>(&mut self, key: &Q) -> Option<&mut V>
     where
         K: Borrow<Q>,
@@ -137,7 +142,7 @@ where
         Some(value)
     }
 
-    #[inline]
+    #[cfg_attr(feature = "inline-more", inline(always))]
     pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
     where
         K: Borrow<Q>,
@@ -148,14 +153,14 @@ where
         Some(value)
     }
 
-    #[inline]
+    #[cfg_attr(feature = "inline-more", inline(always))]
     pub fn pop_front(&mut self) -> Option<(K, V)> {
         let (k, v) = self.list.pop_front(&mut self.slab)?;
         self.map.remove(&k)?;
         Some((k, v))
     }
 
-    #[inline]
+    #[cfg_attr(feature = "inline-more", inline(always))]
     pub fn pop_last(&mut self) -> Option<(K, V)> {
         let (k, v) = self.list.pop_last(&mut self.slab)?;
         self.map.remove(&k)?;
