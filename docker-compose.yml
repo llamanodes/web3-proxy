@@ -38,6 +38,15 @@ services:
     ports:
       - 7503:8544
 
+  eth-archive:
+    extends:
+      file: docker-compose.common.yml
+      service: base
+    volumes:
+      - ./config/production-eth-archive.toml:/config.toml
+    ports:
+      - 7603:8544
+
   fantom:
     extends:
       file: docker-compose.common.yml
