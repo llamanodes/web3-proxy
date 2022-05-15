@@ -1,5 +1,7 @@
 # Todo
 
+- [ ] eth_sendRawTransaction should return the most common result, not the first
+- [ ] if chain split detected, don't send transactions
 - [ ] endpoint for health checks. if no synced servers, give a 502 error
 - [ ] some production configs are occassionally stuck waiting at 100% cpu
   - looks like its getting stuck on `futex(0x7fc15067b478, FUTEX_WAIT_PRIVATE, 1, NULL`

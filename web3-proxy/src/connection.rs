@@ -1,6 +1,6 @@
 ///! Rate-limited communication with a web3 provider
 use derive_more::From;
-use ethers::prelude::Middleware;
+use ethers::prelude::{Block, Middleware, ProviderError, TxHash, H256};
 use futures::StreamExt;
 use governor::clock::{Clock, QuantaClock, QuantaInstant};
 use governor::middleware::NoOpMiddleware;
@@ -9,13 +9,11 @@ use governor::NotUntil;
 use governor::RateLimiter;
 use std::fmt;
 use std::num::NonZeroU32;
-use std::sync::atomic::{self, AtomicU32, AtomicU64};
+use std::sync::atomic::{self, AtomicU32};
 use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::time::{interval, sleep, MissedTickBehavior};
 use tracing::{info, trace, warn};
-
-use crate::connections::Web3Connections;
 
 type Web3RateLimiter =
     RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware<QuantaInstant>>;
@@ -44,7 +42,6 @@ pub struct Web3Connection {
     ratelimiter: Option<Web3RateLimiter>,
     /// used for load balancing to the least loaded server
     soft_limit: u32,
-    head_block_number: AtomicU64,
     /// the same clock that is used by the rate limiter
     clock: QuantaClock,
 }
@@ -117,7 +114,6 @@ impl Web3Connection {
             provider,
             ratelimiter: hard_rate_limiter,
             soft_limit,
-            head_block_number: 0.into(),
         };
 
         let connection = Arc::new(connection);
@@ -159,11 +155,6 @@ impl Web3Connection {
     }
 
     #[inline]
-    pub fn head_block_number(&self) -> u64 {
-        self.head_block_number.load(atomic::Ordering::Acquire)
-    }
-
-    #[inline]
     pub fn soft_limit(&self) -> u32 {
         self.soft_limit
     }
@@ -173,11 +164,32 @@ impl Web3Connection {
         &self.url
     }
 
+    fn send_block(
+        self: &Arc<Self>,
+        block: Result<Block<TxHash>, ProviderError>,
+        block_sender: &flume::Sender<(u64, H256, Arc<Self>)>,
+    ) {
+        match block {
+            Ok(block) => {
+                let block_number = block.number.unwrap().as_u64();
+                let block_hash = block.hash.unwrap();
+
+                // TODO: i'm pretty sure we don't need send_async, but double check
+                block_sender
+                    .send((block_number, block_hash, self.clone()))
+                    .unwrap();
+            }
+            Err(e) => {
+                warn!("unable to get block from {}: {}", self, e);
+            }
+        }
+    }
+
     /// Subscribe to new blocks
     // #[instrument]
-    pub async fn new_heads(
+    pub async fn subscribe_new_heads(
         self: Arc<Self>,
-        connections: Option<Arc<Web3Connections>>,
+        block_sender: flume::Sender<(u64, H256, Arc<Self>)>,
     ) -> anyhow::Result<()> {
         info!("Watching new_heads on {}", self);
 
@@ -196,23 +208,14 @@ impl Web3Connection {
 
                     let active_request_handle = self.wait_for_request_handle().await;
 
-                    let block_number = provider.get_block_number().await.map(|x| x.as_u64())?;
+                    // TODO: i feel like this should be easier. there is a provider.getBlock, but i don't know how to give it "latest"
+                    let block: Result<Block<TxHash>, _> = provider
+                        .request("eth_getBlockByNumber", ("latest", false))
+                        .await;
 
                     drop(active_request_handle);
 
-                    // TODO: only store if this isn't already stored?
-                    // TODO: also send something to the provider_tier so it can sort?
-                    let old_block_number = self
-                        .head_block_number
-                        .swap(block_number, atomic::Ordering::AcqRel);
-
-                    if old_block_number != block_number {
-                        if let Some(connections) = &connections {
-                            connections.update_synced_rpcs(&self).await?;
-                        } else {
-                            info!("new block on {}: {}", self, block_number);
-                        }
-                    }
+                    self.send_block(block, &block_sender);
                 }
             }
             Web3Provider::Ws(provider) => {
@@ -231,32 +234,16 @@ impl Web3Connection {
                 // there is a very small race condition here where the stream could send us a new block right now
                 // all it does is print "new block" for the same block as current block
                 // TODO: rate limit!
-                let block_number = provider.get_block_number().await.map(|x| x.as_u64())?;
+                let block: Result<Block<TxHash>, _> = provider
+                    .request("eth_getBlockByNumber", ("latest", false))
+                    .await;
 
                 drop(active_request_handle);
 
-                // TODO: swap and check the result?
-                self.head_block_number
-                    .store(block_number, atomic::Ordering::Release);
-
-                if let Some(connections) = &connections {
-                    connections.update_synced_rpcs(&self).await?;
-                } else {
-                    info!("new head block {} from {}", block_number, self);
-                }
+                self.send_block(block, &block_sender);
 
                 while let Some(new_block) = stream.next().await {
-                    let new_block_number = new_block.number.unwrap().as_u64();
-
-                    // TODO: only store if this isn't already stored?
-                    // TODO: also send something to the provider_tier so it can sort?
-                    // TODO: do we need this old block number check? its helpful on http, but here it shouldn't dupe except maybe on the first run
-                    self.head_block_number
-                        .fetch_max(new_block_number, atomic::Ordering::AcqRel);
-
-                    if let Some(connections) = &connections {
-                        connections.update_synced_rpcs(&self).await?;
-                    }
+                    self.send_block(Ok(new_block), &block_sender);
                 }
             }
         }
