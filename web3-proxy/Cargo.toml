@@ -15,7 +15,7 @@ flume = "0.10.12"
 futures = { version = "0.3.21", features = ["thread-pool"] }
 governor = { version = "0.4.2", features = ["dashmap", "std"] }
 hashbrown = "0.12.1"
-linkedhashmap = { path = "../linkedhashmap" }
+linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }
 parking_lot = "0.12.0"
 proctitle = "0.1.1"
 regex = "1.5.5"

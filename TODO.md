@@ -17,9 +17,9 @@
   - maybe always try at least two servers in parallel? and then return the first? or only if the first one doesn't respond very quickly?
 - [ ] incoming rate limiting (by ip or by api key or what?)
 - [ ] improve caching
-  - [ ] if the params include a block, we can cache for longer
+  - [ ] if the eth_call (or similar) params include a block, we can cache for longer
   - [ ] if the call is something simple like "symbol" or "decimals", cache that too
-  - [ ] when we receive a block, we should store it for later eth_getBlockByNumber and similar calls
+  - [ ] when we receive a block, we should store it for later eth_getBlockByNumber, eth_blockNumber, and similar calls
 - [ ] measure latency to nodes?
 - [ ] one proxy for mulitple chains?
 - [ ] zero downtime deploys

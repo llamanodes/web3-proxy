@@ -68,6 +68,7 @@ impl Web3Connection {
     pub async fn try_new(
         chain_id: usize,
         url_str: String,
+        // optional because this is only used for http providers. websocket providers don't use it
         http_client: Option<reqwest::Client>,
         hard_rate_limit: Option<u32>,
         clock: &QuantaClock,
@@ -112,7 +113,7 @@ impl Web3Connection {
         let connection = Web3Connection {
             clock: clock.clone(),
             url: url_str.clone(),
-            active_requests: Default::default(),
+            active_requests: 0.into(),
             provider,
             ratelimiter: hard_rate_limiter,
             soft_limit,
@@ -121,14 +122,11 @@ impl Web3Connection {
 
         let connection = Arc::new(connection);
 
-        // TODO: check the chain_id here
+        // check the server's chain_id here
         let active_request_handle = connection.wait_for_request_handle().await;
-
-        // TODO: passing empty_params like this feels awkward.
-        let empty_params: Option<()> = None;
-        // TODO: some rpcs (on bsc and fantom) do not return an id
+        // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
         let found_chain_id: Result<String, _> = active_request_handle
-            .request("eth_chainId", empty_params)
+            .request("eth_chainId", Option::None::<()>)
             .await;
 
         match found_chain_id {
