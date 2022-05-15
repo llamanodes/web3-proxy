@@ -6,8 +6,7 @@ use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
 use hashbrown::HashMap;
-use left_right::{Absorb, ReadHandle, WriteHandle};
-use parking_lot::RwLock;
+use left_right::{Absorb, ReadHandleFactory, WriteHandle};
 use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
@@ -18,7 +17,7 @@ use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, Web3Connection};
 
 #[derive(Clone, Default)]
-struct SyncedConnections {
+pub struct SyncedConnections {
     head_block_number: u64,
     head_block_hash: H256,
     inner: Vec<Arc<Web3Connection>>,
@@ -32,22 +31,26 @@ impl fmt::Debug for SyncedConnections {
 }
 
 impl SyncedConnections {
-    fn new(max_connections: usize) -> Self {
-        let inner = Vec::with_capacity(max_connections);
-
-        Self {
-            head_block_number: 0,
-            head_block_hash: Default::default(),
-            inner,
-        }
+    pub fn get_head_block_hash(&self) -> &H256 {
+        &self.head_block_hash
     }
 
-    fn update(&mut self, new_block_num: u64, new_block_hash: H256, rpc: Arc<Web3Connection>) {
+    fn update(
+        &mut self,
+        log: bool,
+        new_block_num: u64,
+        new_block_hash: H256,
+        rpc: Arc<Web3Connection>,
+    ) -> bool {
+        let mut update_needed: bool = false;
+
         // TODO: double check this logic
         match new_block_num.cmp(&self.head_block_number) {
             cmp::Ordering::Greater => {
                 // the rpc's newest block is the new overall best block
-                info!("new head block {} from {}", new_block_num, rpc);
+                if log {
+                    info!("new head block {} from {}", new_block_num, rpc);
+                }
 
                 self.inner.clear();
                 self.inner.push(rpc);
@@ -59,52 +62,65 @@ impl SyncedConnections {
                 if new_block_hash != self.head_block_hash {
                     // same height, but different chain
                     // TODO: anything else we should do? set some "nextSafeBlockHeight" to delay sending transactions?
-                    warn!(
-                        "chain is forked at #{}! {} has {:?}. First was {:?}",
-                        new_block_num, rpc, new_block_hash, self.head_block_hash
-                    );
-                    return;
+                    if log {
+                        warn!(
+                            "chain is forked at #{}! {} has {:?}. First was {:?}",
+                            new_block_num, rpc, new_block_hash, self.head_block_hash
+                        );
+                    }
+                    return update_needed;
                 }
 
                 // do not clear synced_connections.
                 // we just want to add this rpc to the end
                 self.inner.push(rpc);
+
+                update_needed = true;
             }
             cmp::Ordering::Less => {
                 // this isn't the best block in the tier. don't do anything
-                return;
+                return update_needed;
             }
         }
 
         // TODO: better log
-        trace!("Now synced: {:?}", self.inner);
+        if log {
+            trace!("Now synced: {:?}", self.inner);
+        }
+
+        update_needed
     }
 }
 
-struct SyncedConnectionsUpdate {
-    new_block_number: u64,
-    new_block_hash: H256,
-    rpc: Arc<Web3Connection>,
+enum SyncedConnectionsOp {
+    SyncedConnectionsUpdate(u64, H256, Arc<Web3Connection>),
+    SyncedConnectionsCapacity(usize),
 }
 
-impl Absorb<SyncedConnectionsUpdate> for SyncedConnections {
-    fn absorb_first(&mut self, operation: &mut SyncedConnectionsUpdate, _: &Self) {
-        self.update(
-            operation.new_block_number,
-            operation.new_block_hash,
-            operation.rpc.clone(),
-        );
+impl Absorb<SyncedConnectionsOp> for SyncedConnections {
+    fn absorb_first(&mut self, operation: &mut SyncedConnectionsOp, _: &Self) {
+        match operation {
+            SyncedConnectionsOp::SyncedConnectionsUpdate(new_block_number, new_block_hash, rpc) => {
+                self.update(true, *new_block_number, *new_block_hash, rpc.clone());
+            }
+            SyncedConnectionsOp::SyncedConnectionsCapacity(capacity) => {
+                self.inner = Vec::with_capacity(*capacity);
+            }
+        }
     }
 
-    fn absorb_second(&mut self, operation: SyncedConnectionsUpdate, _: &Self) {
-        self.update(
-            operation.new_block_number,
-            operation.new_block_hash,
-            operation.rpc,
-        );
+    fn absorb_second(&mut self, operation: SyncedConnectionsOp, _: &Self) {
+        match operation {
+            SyncedConnectionsOp::SyncedConnectionsUpdate(new_block_number, new_block_hash, rpc) => {
+                // TODO: disable logging on this one?
+                self.update(false, new_block_number, new_block_hash, rpc);
+            }
+            SyncedConnectionsOp::SyncedConnectionsCapacity(capacity) => {
+                self.inner = Vec::with_capacity(capacity);
+            }
+        }
     }
 
-    // See the documentation of `Absorb::drop_first`.
     fn drop_first(self: Box<Self>) {}
 
     fn sync_with(&mut self, first: &Self) {
@@ -118,8 +134,8 @@ impl Absorb<SyncedConnectionsUpdate> for SyncedConnections {
 pub struct Web3Connections {
     inner: Vec<Arc<Web3Connection>>,
     /// TODO: what is the best type for this? Heavy reads with writes every few seconds. When writes happen, there is a burst of them
-    /// TODO: we probably need a better lock on this. left_right with the writer in a mutex
-    synced_connections: RwLock<SyncedConnections>,
+    /// TODO: why does the reader need a mutex? is there a better way to do this?
+    synced_connections_reader: ReadHandleFactory<SyncedConnections>,
 }
 
 impl fmt::Debug for Web3Connections {
@@ -139,10 +155,10 @@ impl Web3Connections {
         clock: &QuantaClock,
         subscribe_heads: bool,
     ) -> anyhow::Result<Arc<Self>> {
-        let mut connections = vec![];
-
         let num_connections = servers.len();
 
+        // turn configs into connections
+        let mut connections = Vec::with_capacity(num_connections);
         for server_config in servers.into_iter() {
             match server_config
                 .try_build(clock, chain_id, http_client.clone())
@@ -153,29 +169,20 @@ impl Web3Connections {
             }
         }
 
-        // TODO: exit if no connections?
+        if connections.len() < 2 {
+            // TODO: less than 3? what should we do here?
+            return Err(anyhow::anyhow!(
+                "need at least 2 connections when subscribing to heads!"
+            ));
+        }
 
-        let connections = Arc::new(Self {
-            inner: connections,
-            synced_connections: RwLock::new(SyncedConnections::new(num_connections)),
-        });
+        let (block_sender, block_receiver) = flume::unbounded();
+
+        let (mut synced_connections_writer, synced_connections_reader) =
+            left_right::new::<SyncedConnections, SyncedConnectionsOp>();
 
         if subscribe_heads {
-            if connections.inner.len() < 2 {
-                // TODO: less than 3? what should we do here?
-                return Err(anyhow::anyhow!(
-                    "need at least 2 connections when subscribing to heads!"
-                ));
-            }
-
-            let (block_sender, block_receiver) = flume::unbounded();
-
-            {
-                let connections = Arc::clone(&connections);
-                tokio::spawn(async move { connections.update_synced_rpcs(block_receiver).await });
-            }
-
-            for connection in connections.inner.iter() {
+            for connection in connections.iter() {
                 // subscribe to new heads in a spawned future
                 // TODO: channel instead. then we can have one future with write access to a left-right?
                 let connection = Arc::clone(connection);
@@ -191,12 +198,31 @@ impl Web3Connections {
             }
         }
 
+        synced_connections_writer.append(SyncedConnectionsOp::SyncedConnectionsCapacity(
+            num_connections,
+        ));
+        synced_connections_writer.publish();
+
+        let connections = Arc::new(Self {
+            inner: connections,
+            synced_connections_reader: synced_connections_reader.factory(),
+        });
+
+        if subscribe_heads {
+            let connections = Arc::clone(&connections);
+            tokio::spawn(async move {
+                connections
+                    .update_synced_rpcs(block_receiver, synced_connections_writer)
+                    .await
+            });
+        }
+
         Ok(connections)
     }
 
-    // pub fn synced_connections(&self) -> &RwLock<SyncedConnections> {
-    //     &self.synced_connections
-    // }
+    pub fn get_synced_rpcs(&self) -> left_right::ReadHandle<SyncedConnections> {
+        self.synced_connections_reader.handle()
+    }
 
     /// Send the same request to all the handles. Returning the fastest successful result.
     pub async fn try_send_parallel_requests(
@@ -259,10 +285,10 @@ impl Web3Connections {
     }
 
     /// TODO: possible dead lock here. investigate more. probably refactor
-    // #[instrument]
-    pub async fn update_synced_rpcs(
+    async fn update_synced_rpcs(
         &self,
         block_receiver: flume::Receiver<(u64, H256, Arc<Web3Connection>)>,
+        mut synced_connections_writer: WriteHandle<SyncedConnections, SyncedConnectionsOp>,
     ) -> anyhow::Result<()> {
         while let Ok((new_block_num, new_block_hash, rpc)) = block_receiver.recv_async().await {
             if new_block_num == 0 {
@@ -270,10 +296,14 @@ impl Web3Connections {
                 continue;
             }
 
-            // TODO: experiment with different locks and such here
-            let mut synced_connections = self.synced_connections.write();
+            synced_connections_writer.append(SyncedConnectionsOp::SyncedConnectionsUpdate(
+                new_block_num,
+                new_block_hash,
+                rpc,
+            ));
 
-            synced_connections.update(new_block_num, new_block_hash, rpc);
+            // TODO: only publish when the second block arrives?
+            synced_connections_writer.publish();
         }
 
         Ok(())
@@ -285,8 +315,12 @@ impl Web3Connections {
     ) -> Result<ActiveRequestHandle, Option<NotUntil<QuantaInstant>>> {
         let mut earliest_not_until = None;
 
-        // TODO: this clone is definitely not the best way to do this
-        let mut synced_rpc_arcs = self.synced_connections.read().inner.clone();
+        let mut synced_rpc_arcs = self
+            .synced_connections_reader
+            .handle()
+            .enter()
+            .map(|x| x.inner.clone())
+            .unwrap();
 
         // // TODO: how should we include the soft limit? floats are slower than integer math
         // let a = a as f32 / self.soft_limit as f32;
