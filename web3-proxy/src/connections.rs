@@ -6,12 +6,12 @@ use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
 use hashbrown::HashMap;
+use left_right::{Absorb, ReadHandle, WriteHandle};
+use parking_lot::RwLock;
 use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
-use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::{info, trace, warn};
 
 use crate::config::Web3ConnectionConfig;
@@ -41,6 +41,76 @@ impl SyncedConnections {
             inner,
         }
     }
+
+    fn update(&mut self, new_block_num: u64, new_block_hash: H256, rpc: Arc<Web3Connection>) {
+        // TODO: double check this logic
+        match new_block_num.cmp(&self.head_block_number) {
+            cmp::Ordering::Greater => {
+                // the rpc's newest block is the new overall best block
+                info!("new head block {} from {}", new_block_num, rpc);
+
+                self.inner.clear();
+                self.inner.push(rpc);
+
+                self.head_block_number = new_block_num;
+                self.head_block_hash = new_block_hash;
+            }
+            cmp::Ordering::Equal => {
+                if new_block_hash != self.head_block_hash {
+                    // same height, but different chain
+                    // TODO: anything else we should do? set some "nextSafeBlockHeight" to delay sending transactions?
+                    warn!(
+                        "chain is forked at #{}! {} has {:?}. First was {:?}",
+                        new_block_num, rpc, new_block_hash, self.head_block_hash
+                    );
+                    return;
+                }
+
+                // do not clear synced_connections.
+                // we just want to add this rpc to the end
+                self.inner.push(rpc);
+            }
+            cmp::Ordering::Less => {
+                // this isn't the best block in the tier. don't do anything
+                return;
+            }
+        }
+
+        // TODO: better log
+        trace!("Now synced: {:?}", self.inner);
+    }
+}
+
+struct SyncedConnectionsUpdate {
+    new_block_number: u64,
+    new_block_hash: H256,
+    rpc: Arc<Web3Connection>,
+}
+
+impl Absorb<SyncedConnectionsUpdate> for SyncedConnections {
+    fn absorb_first(&mut self, operation: &mut SyncedConnectionsUpdate, _: &Self) {
+        self.update(
+            operation.new_block_number,
+            operation.new_block_hash,
+            operation.rpc.clone(),
+        );
+    }
+
+    fn absorb_second(&mut self, operation: SyncedConnectionsUpdate, _: &Self) {
+        self.update(
+            operation.new_block_number,
+            operation.new_block_hash,
+            operation.rpc,
+        );
+    }
+
+    // See the documentation of `Absorb::drop_first`.
+    fn drop_first(self: Box<Self>) {}
+
+    fn sync_with(&mut self, first: &Self) {
+        // TODO: not sure about this
+        *self = first.clone()
+    }
 }
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
@@ -48,9 +118,8 @@ impl SyncedConnections {
 pub struct Web3Connections {
     inner: Vec<Arc<Web3Connection>>,
     /// TODO: what is the best type for this? Heavy reads with writes every few seconds. When writes happen, there is a burst of them
-    /// TODO: we probably need a better lock on this
+    /// TODO: we probably need a better lock on this. left_right with the writer in a mutex
     synced_connections: RwLock<SyncedConnections>,
-    best_head_block_number: Arc<AtomicU64>,
 }
 
 impl fmt::Debug for Web3Connections {
@@ -65,7 +134,6 @@ impl fmt::Debug for Web3Connections {
 impl Web3Connections {
     pub async fn try_new(
         chain_id: usize,
-        best_head_block_number: Arc<AtomicU64>,
         servers: Vec<Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
         clock: &QuantaClock,
@@ -88,12 +156,18 @@ impl Web3Connections {
         // TODO: exit if no connections?
 
         let connections = Arc::new(Self {
-            best_head_block_number: best_head_block_number.clone(),
             inner: connections,
             synced_connections: RwLock::new(SyncedConnections::new(num_connections)),
         });
 
         if subscribe_heads {
+            if connections.inner.len() < 2 {
+                // TODO: less than 3? what should we do here?
+                return Err(anyhow::anyhow!(
+                    "need at least 2 connections when subscribing to heads!"
+                ));
+            }
+
             let (block_sender, block_receiver) = flume::unbounded();
 
             {
@@ -120,9 +194,9 @@ impl Web3Connections {
         Ok(connections)
     }
 
-    pub fn head_block_number(&self) -> u64 {
-        self.best_head_block_number.load(atomic::Ordering::Acquire)
-    }
+    // pub fn synced_connections(&self) -> &RwLock<SyncedConnections> {
+    //     &self.synced_connections
+    // }
 
     /// Send the same request to all the handles. Returning the fastest successful result.
     pub async fn try_send_parallel_requests(
@@ -197,42 +271,9 @@ impl Web3Connections {
             }
 
             // TODO: experiment with different locks and such here
-            let mut synced_connections = self.synced_connections.write().await;
+            let mut synced_connections = self.synced_connections.write();
 
-            // TODO: double check this logic
-            match new_block_num.cmp(&synced_connections.head_block_number) {
-                cmp::Ordering::Greater => {
-                    // the rpc's newest block is the new overall best block
-                    info!("new head block {} from {}", new_block_num, rpc);
-
-                    synced_connections.inner.clear();
-                    synced_connections.inner.push(rpc);
-
-                    synced_connections.head_block_number = new_block_num;
-                    synced_connections.head_block_hash = new_block_hash;
-                }
-                cmp::Ordering::Equal => {
-                    if new_block_hash != synced_connections.head_block_hash {
-                        // same height, but different chain
-                        warn!(
-                            "chain is forked! {} has {}. First #{} was {}",
-                            rpc, new_block_hash, new_block_num, synced_connections.head_block_hash
-                        );
-                        continue;
-                    }
-
-                    // do not clear synced_connections.
-                    // we just want to add this rpc to the end
-                    synced_connections.inner.push(rpc);
-                }
-                cmp::Ordering::Less => {
-                    // this isn't the best block in the tier. don't do anything
-                    continue;
-                }
-            }
-
-            // TODO: better log
-            trace!("Now synced: {:?}", synced_connections.inner);
+            synced_connections.update(new_block_num, new_block_hash, rpc);
         }
 
         Ok(())
@@ -244,15 +285,15 @@ impl Web3Connections {
     ) -> Result<ActiveRequestHandle, Option<NotUntil<QuantaInstant>>> {
         let mut earliest_not_until = None;
 
-        // TODO: this clone is probably not the best way to do this
-        let mut synced_rpc_indexes = self.synced_connections.read().await.inner.clone();
+        // TODO: this clone is definitely not the best way to do this
+        let mut synced_rpc_arcs = self.synced_connections.read().inner.clone();
 
         // // TODO: how should we include the soft limit? floats are slower than integer math
         // let a = a as f32 / self.soft_limit as f32;
         // let b = b as f32 / other.soft_limit as f32;
 
         // TODO: better key!
-        let sort_cache: HashMap<String, (f32, u32)> = synced_rpc_indexes
+        let sort_cache: HashMap<String, (f32, u32)> = synced_rpc_arcs
             .iter()
             .map(|connection| {
                 // TODO: better key!
@@ -267,7 +308,7 @@ impl Web3Connections {
             .collect();
 
         // TODO: i think we might need to load active connections and then
-        synced_rpc_indexes.sort_unstable_by(|a, b| {
+        synced_rpc_arcs.sort_unstable_by(|a, b| {
             // TODO: better keys
             let a_key = format!("{}", a);
             let b_key = format!("{}", b);
@@ -285,7 +326,7 @@ impl Web3Connections {
             }
         });
 
-        for selected_rpc in synced_rpc_indexes.into_iter() {
+        for selected_rpc in synced_rpc_arcs.into_iter() {
             // increment our connection counter
             match selected_rpc.try_request_handle() {
                 Err(not_until) => {

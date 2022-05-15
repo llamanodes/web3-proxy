@@ -201,6 +201,8 @@ impl Web3Connection {
                 let mut interval = interval(Duration::from_secs(2));
                 interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
+                let mut last_hash = Default::default();
+
                 loop {
                     // wait for the interval
                     // TODO: if error or rate limit, increase interval?
@@ -214,6 +216,17 @@ impl Web3Connection {
                         .await;
 
                     drop(active_request_handle);
+
+                    // don't send repeat blocks
+                    if let Ok(block) = &block {
+                        let new_hash = block.hash.unwrap();
+
+                        if new_hash == last_hash {
+                            continue;
+                        }
+
+                        last_hash = new_hash;
+                    }
 
                     self.send_block(block, &block_sender);
                 }

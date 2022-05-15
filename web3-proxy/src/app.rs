@@ -5,14 +5,12 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
-use ethers::prelude::ProviderError;
-use ethers::prelude::{HttpClientError, WsClientError};
+use ethers::prelude::{HttpClientError, ProviderError, WsClientError};
 use futures::future::join_all;
 use governor::clock::{Clock, QuantaClock};
-use linkedhashmap::LinkedHashMap;
-use parking_lot::RwLock;
+// use linkedhashmap::LinkedHashMap;
+// use parking_lot::RwLock;
 use std::fmt;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -25,12 +23,12 @@ static APP_USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
 );
 
-// TODO: put this in config? what size should we do?
-const RESPONSE_CACHE_CAP: usize = 1024;
+// // TODO: put this in config? what size should we do?
+// const RESPONSE_CACHE_CAP: usize = 1024;
 
-/// TODO: these types are probably very bad keys and values. i couldn't get caching of warp::reply::Json to work
-type ResponseLruCache =
-    RwLock<LinkedHashMap<(u64, String, Option<String>), JsonRpcForwardedResponse>>;
+// /// TODO: these types are probably very bad keys and values. i couldn't get caching of warp::reply::Json to work
+// type ResponseLruCache =
+//     RwLock<LinkedHashMap<(H256, String, Option<String>), JsonRpcForwardedResponse>>;
 
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
@@ -43,7 +41,7 @@ pub struct Web3ProxyApp {
     balanced_rpcs: Arc<Web3Connections>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     private_rpcs: Arc<Web3Connections>,
-    response_cache: ResponseLruCache,
+    // response_cache: ResponseLruCache,
 }
 
 impl fmt::Debug for Web3ProxyApp {
@@ -61,8 +59,6 @@ impl Web3ProxyApp {
     ) -> anyhow::Result<Web3ProxyApp> {
         let clock = QuantaClock::default();
 
-        let best_head_block_number = Arc::new(AtomicU64::new(0));
-
         // make a http shared client
         // TODO: how should we configure the connection pool?
         // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something is wrong with the remote server
@@ -75,7 +71,6 @@ impl Web3ProxyApp {
         // TODO: attach context to this error
         let balanced_rpcs = Web3Connections::try_new(
             chain_id,
-            best_head_block_number.clone(),
             balanced_rpcs,
             Some(http_client.clone()),
             &clock,
@@ -88,22 +83,15 @@ impl Web3ProxyApp {
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             balanced_rpcs.clone()
         } else {
-            Web3Connections::try_new(
-                chain_id,
-                best_head_block_number.clone(),
-                private_rpcs,
-                Some(http_client),
-                &clock,
-                false,
-            )
-            .await?
+            Web3Connections::try_new(chain_id, private_rpcs, Some(http_client), &clock, false)
+                .await?
         };
 
         Ok(Web3ProxyApp {
             clock,
             balanced_rpcs,
             private_rpcs,
-            response_cache: Default::default(),
+            // response_cache: Default::default(),
         })
     }
 
@@ -221,22 +209,24 @@ impl Web3ProxyApp {
             // this is not a private transaction (or no private relays are configured)
             // try to send to each tier, stopping at the first success
             // if no tiers are synced, fallback to privates
+            // TODO: think more about this loop.
             loop {
-                let best_block_number = self.balanced_rpcs.head_block_number();
+                // TODO: bring back this caching
+                // let best_block_hash = self.balanced_rpcs.head_block_hash();
 
-                // TODO: building this cache key is slow and its large, but i don't see a better way right now
-                // TODO: inspect the params and see if a block is specified. if so, use that block number instead of current_block
-                let cache_key = (
-                    best_block_number,
-                    request.method.clone(),
-                    request.params.clone().map(|x| x.to_string()),
-                );
+                // // TODO: building this cache key is slow and its large, but i don't see a better way right now
+                // // TODO: inspect the params and see if a block is specified. if so, use that block number instead of current_block
+                // let cache_key = (
+                //     best_block_hash,
+                //     request.method.clone(),
+                //     request.params.clone().map(|x| x.to_string()),
+                // );
 
-                if let Some(cached) = self.response_cache.read().get(&cache_key) {
-                    // TODO: this still serializes every time
-                    // TODO: return a reference in the other places so that this works without a clone?
-                    return Ok(cached.to_owned());
-                }
+                // if let Some(cached) = self.response_cache.read().get(&cache_key) {
+                //     // TODO: this still serializes every time
+                //     // TODO: return a reference in the other places so that this works without a clone?
+                //     return Ok(cached.to_owned());
+                // }
 
                 match self.balanced_rpcs.next_upstream_server().await {
                     Ok(active_request_handle) => {
@@ -249,27 +239,27 @@ impl Web3ProxyApp {
                                 // TODO: trace here was really slow with millions of requests.
                                 // info!("forwarding request from {}", upstream_server);
 
-                                let response = JsonRpcForwardedResponse {
+                                JsonRpcForwardedResponse {
                                     jsonrpc: "2.0".to_string(),
                                     id: request.id,
                                     // TODO: since we only use the result here, should that be all we return from try_send_request?
                                     result: Some(partial_response),
                                     error: None,
-                                };
-
-                                // TODO: small race condidition here. parallel requests with the same query will both be saved to the cache
-                                let mut response_cache = self.response_cache.write();
-
-                                // TODO: cache the warp::reply to save us serializing every time
-                                response_cache.insert(cache_key, response.clone());
-                                if response_cache.len() >= RESPONSE_CACHE_CAP {
-                                    // TODO: this isn't really an LRU. what is this called? should we make it an lru? these caches only live for one block
-                                    response_cache.pop_front();
                                 }
 
-                                drop(response_cache);
+                                // // TODO: small race condidition here. parallel requests with the same query will both be saved to the cache
+                                // let mut response_cache = self.response_cache.write();
 
-                                response
+                                // // TODO: cache the warp::reply to save us serializing every time
+                                // response_cache.insert(cache_key, response.clone());
+                                // if response_cache.len() >= RESPONSE_CACHE_CAP {
+                                //     // TODO: this isn't an LRU. it's a "least recently created". does that have a fancy name? should we make it an lru? these caches only live for one block
+                                //     response_cache.pop_front();
+                                // }
+
+                                // drop(response_cache);
+
+                                // response
                             }
                             Err(e) => {
                                 // TODO: move this to a helper function?
