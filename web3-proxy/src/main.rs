@@ -5,10 +5,13 @@ mod connections;
 mod jsonrpc;
 
 use jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
+use parking_lot::deadlock;
 use serde_json::value::RawValue;
 use std::fs;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use tokio::runtime;
 use tracing::info;
 use warp::Filter;
@@ -42,6 +45,24 @@ fn main() -> anyhow::Result<()> {
             format!("web3-{}-{}", chain_id, worker_id)
         })
         .build()?;
+
+    // spawn a thread for deadlock detection
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(10));
+        let deadlocks = deadlock::check_deadlock();
+        if deadlocks.is_empty() {
+            continue;
+        }
+
+        println!("{} deadlocks detected", deadlocks.len());
+        for (i, threads) in deadlocks.iter().enumerate() {
+            println!("Deadlock #{}", i);
+            for t in threads {
+                println!("Thread Id {:#?}", t.thread_id());
+                println!("{:#?}", t.backtrace());
+            }
+        }
+    });
 
     // spawn the root task
     rt.block_on(async {

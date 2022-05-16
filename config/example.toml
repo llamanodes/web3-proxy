@@ -35,5 +35,5 @@ chain_id = 1
     soft_limit = 7074
 
     [private_rpcs.securerpc]
-    url = "wss://gibson.securerpc.com/v1"
+    url = "https://gibson.securerpc.com/v1"
     soft_limit = 4560

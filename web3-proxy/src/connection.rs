@@ -164,7 +164,7 @@ impl Web3Connection {
         &self.url
     }
 
-    fn send_block(
+    async fn send_block(
         self: &Arc<Self>,
         block: Result<Block<TxHash>, ProviderError>,
         block_sender: &flume::Sender<(u64, H256, Arc<Self>)>,
@@ -176,7 +176,8 @@ impl Web3Connection {
 
                 // TODO: i'm pretty sure we don't need send_async, but double check
                 block_sender
-                    .send((block_number, block_hash, self.clone()))
+                    .send_async((block_number, block_hash, self.clone()))
+                    .await
                     .unwrap();
             }
             Err(e) => {
@@ -228,7 +229,7 @@ impl Web3Connection {
                         last_hash = new_hash;
                     }
 
-                    self.send_block(block, &block_sender);
+                    self.send_block(block, &block_sender).await;
                 }
             }
             Web3Provider::Ws(provider) => {
@@ -253,10 +254,10 @@ impl Web3Connection {
 
                 drop(active_request_handle);
 
-                self.send_block(block, &block_sender);
+                self.send_block(block, &block_sender).await;
 
                 while let Some(new_block) = stream.next().await {
-                    self.send_block(Ok(new_block), &block_sender);
+                    self.send_block(Ok(new_block), &block_sender).await;
                 }
             }
         }

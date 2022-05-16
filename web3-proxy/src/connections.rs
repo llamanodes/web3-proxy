@@ -245,7 +245,10 @@ impl Web3Connections {
 
                 // send the first good response to a one shot channel. that way we respond quickly
                 // drop the result because errors are expected after the first send
-                response_sender.send(Ok(response)).map_err(Into::into)
+                response_sender
+                    .send_async(Ok(response))
+                    .await
+                    .map_err(Into::into)
             });
 
             unordered_futures.push(handle);
@@ -273,7 +276,7 @@ impl Web3Connections {
         };
 
         // send the error to the channel
-        if response_sender.send(e).is_ok() {
+        if response_sender.send_async(e).await.is_ok() {
             // if we were able to send an error, then we never sent a success
             return Err(anyhow::anyhow!("no successful responses"));
         } else {

@@ -5,6 +5,6 @@ members = [
 ]
 
 # TODO: enable these once rapid development is done
-#[profile.release]
+[profile.release]
 #lto = true
-#panic = "abort"
+panic = "abort"
