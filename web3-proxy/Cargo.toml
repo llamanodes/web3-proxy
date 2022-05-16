@@ -13,7 +13,7 @@ derive_more = "0.99.17"
 ethers = { git = "https://github.com/gakonst/ethers-rs", features = ["rustls", "ws"] }
 flume = "0.10.12"
 futures = { version = "0.3.21", features = ["thread-pool"] }
-governor = { version = "0.4.2", features = ["dashmap", "std"] }
+governor = { version = "0.4.2", features = ["std"] }
 hashbrown = "0.12.1"
 left-right = "0.11.4"
 linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }
