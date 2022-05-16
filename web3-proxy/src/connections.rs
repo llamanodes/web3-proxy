@@ -133,8 +133,6 @@ impl Absorb<SyncedConnectionsOp> for SyncedConnections {
 #[derive(From)]
 pub struct Web3Connections {
     inner: Vec<Arc<Web3Connection>>,
-    /// TODO: what is the best type for this? Heavy reads with writes every few seconds. When writes happen, there is a burst of them
-    /// TODO: why does the reader need a mutex? is there a better way to do this?
     synced_connections_reader: ReadHandleFactory<SyncedConnections>,
 }
 
