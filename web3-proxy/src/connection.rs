@@ -199,6 +199,7 @@ impl Web3Connection {
                 // there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
                 // TODO: what should this interval be? probably some fraction of block time. set automatically?
                 // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
+                // TODO: if there are some websocket providers, maybe have a longer interval and a channel that tells the https to update when a websocket gets a new head? if they are slow this wouldn't work well though
                 let mut interval = interval(Duration::from_secs(2));
                 interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -209,27 +210,32 @@ impl Web3Connection {
                     // TODO: if error or rate limit, increase interval?
                     interval.tick().await;
 
-                    let active_request_handle = self.wait_for_request_handle().await;
+                    match self.try_request_handle() {
+                        Ok(active_request_handle) => {
+                            // TODO: i feel like this should be easier. there is a provider.getBlock, but i don't know how to give it "latest"
+                            let block: Result<Block<TxHash>, _> = provider
+                                .request("eth_getBlockByNumber", ("latest", false))
+                                .await;
 
-                    // TODO: i feel like this should be easier. there is a provider.getBlock, but i don't know how to give it "latest"
-                    let block: Result<Block<TxHash>, _> = provider
-                        .request("eth_getBlockByNumber", ("latest", false))
-                        .await;
+                            drop(active_request_handle);
 
-                    drop(active_request_handle);
+                            // don't send repeat blocks
+                            if let Ok(block) = &block {
+                                let new_hash = block.hash.unwrap();
 
-                    // don't send repeat blocks
-                    if let Ok(block) = &block {
-                        let new_hash = block.hash.unwrap();
+                                if new_hash == last_hash {
+                                    continue;
+                                }
 
-                        if new_hash == last_hash {
-                            continue;
+                                last_hash = new_hash;
+                            }
+
+                            self.send_block(block, &block_sender).await;
                         }
-
-                        last_hash = new_hash;
+                        Err(e) => {
+                            warn!("Failed getting latest block from {}: {:?}", self, e);
+                        }
                     }
-
-                    self.send_block(block, &block_sender).await;
                 }
             }
             Web3Provider::Ws(provider) => {
@@ -248,11 +254,9 @@ impl Web3Connection {
                 // there is a very small race condition here where the stream could send us a new block right now
                 // all it does is print "new block" for the same block as current block
                 // TODO: rate limit!
-                let block: Result<Block<TxHash>, _> = provider
+                let block: Result<Block<TxHash>, _> = active_request_handle
                     .request("eth_getBlockByNumber", ("latest", false))
                     .await;
-
-                drop(active_request_handle);
 
                 self.send_block(block, &block_sender).await;
 
@@ -269,7 +273,8 @@ impl Web3Connection {
 
     pub async fn wait_for_request_handle(self: &Arc<Self>) -> ActiveRequestHandle {
         // TODO: maximum wait time
-        loop {
+
+        for _ in 0..10 {
             match self.try_request_handle() {
                 Ok(pending_request_handle) => return pending_request_handle,
                 Err(not_until) => {
@@ -279,6 +284,9 @@ impl Web3Connection {
                 }
             }
         }
+
+        // TODO: what should we do?
+        panic!("no request handle after 10 tries");
     }
 
     pub fn try_request_handle(

@@ -5,6 +5,7 @@ members = [
 ]
 
 # TODO: enable these once rapid development is done
-[profile.release]
+# TODO: we can't do panic = abort because the websockets disconnect by panicing sometimes
+#[profile.release]
+#panic = abort
 #lto = true
-panic = "abort"

@@ -3965,6 +3965,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "argh",
+ "dashmap",
  "derive_more",
  "ethers",
  "flume",
