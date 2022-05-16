@@ -317,10 +317,6 @@ impl Web3Connections {
             .map(|x| x.inner.clone())
             .unwrap();
 
-        // // TODO: how should we include the soft limit? floats are slower than integer math
-        // let a = a as f32 / self.soft_limit as f32;
-        // let b = b as f32 / other.soft_limit as f32;
-
         // TODO: better key!
         let sort_cache: HashMap<String, (f32, u32)> = synced_rpc_arcs
             .iter()
@@ -330,6 +326,7 @@ impl Web3Connections {
                 let active_requests = connection.active_requests();
                 let soft_limit = connection.soft_limit();
 
+                // TODO: how should we include the soft limit? floats are slower than integer math
                 let utilization = active_requests as f32 / soft_limit as f32;
 
                 (key, (utilization, soft_limit))
