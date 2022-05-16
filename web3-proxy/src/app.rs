@@ -211,6 +211,8 @@ impl Web3ProxyApp {
             // if no tiers are synced, fallback to privates
             // TODO: think more about this loop.
             loop {
+                // todo: bring back this caching
+                /*
                 let best_block_hash = self
                     .balanced_rpcs
                     .get_synced_rpcs()
@@ -231,6 +233,7 @@ impl Web3ProxyApp {
                     // TODO: return a reference in the other places so that this works without a clone?
                     return Ok(cached.to_owned());
                 }
+                */
 
                 match self.balanced_rpcs.next_upstream_server().await {
                     Ok(active_request_handle) => {
@@ -251,6 +254,7 @@ impl Web3ProxyApp {
                                     error: None,
                                 };
 
+                                /*
                                 // TODO: small race condidition here. parallel requests with the same query will both be saved to the cache
                                 let mut response_cache = self.response_cache.write();
 
@@ -262,6 +266,7 @@ impl Web3ProxyApp {
                                 }
 
                                 drop(response_cache);
+                                 */
 
                                 response
                             }
