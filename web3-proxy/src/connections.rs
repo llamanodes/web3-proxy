@@ -41,9 +41,7 @@ impl SyncedConnections {
         new_block_num: u64,
         new_block_hash: H256,
         rpc: Arc<Web3Connection>,
-    ) -> bool {
-        let mut update_needed: bool = false;
-
+    ) {
         // TODO: double check this logic
         match new_block_num.cmp(&self.head_block_number) {
             cmp::Ordering::Greater => {
@@ -64,22 +62,20 @@ impl SyncedConnections {
                     // TODO: anything else we should do? set some "nextSafeBlockHeight" to delay sending transactions?
                     if log {
                         warn!(
-                            "chain is forked at #{}! {} has {:?}. First was {:?}",
-                            new_block_num, rpc, new_block_hash, self.head_block_hash
+                            "chain is forked at #{}! {} has {:?}. {:?} have {:?}",
+                            new_block_num, rpc, new_block_hash, self.inner, self.head_block_hash
                         );
                     }
-                    return update_needed;
+                    return;
                 }
 
                 // do not clear synced_connections.
                 // we just want to add this rpc to the end
                 self.inner.push(rpc);
-
-                update_needed = true;
             }
             cmp::Ordering::Less => {
                 // this isn't the best block in the tier. don't do anything
-                return update_needed;
+                return;
             }
         }
 
@@ -87,8 +83,6 @@ impl SyncedConnections {
         if log {
             trace!("Now synced: {:?}", self.inner);
         }
-
-        update_needed
     }
 }
 
