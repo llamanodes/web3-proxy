@@ -3,3 +3,5 @@ services:
     build: .
     restart: unless-stopped
     command: --rpc-config-path /config.toml
+    environment:
+      RUST_LOG: "web3_proxy=debug"
