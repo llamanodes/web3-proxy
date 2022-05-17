@@ -12,6 +12,7 @@ use std::num::NonZeroU32;
 use std::sync::atomic::{self, AtomicU32};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::RwLock;
+use tokio::task;
 use tokio::time::{interval, sleep, timeout_at, Duration, Instant, MissedTickBehavior};
 use tracing::{info, instrument, trace, warn};
 
@@ -309,6 +310,9 @@ impl Web3Connection {
                         {
                             Ok(Some(new_block)) => {
                                 self.send_block(Ok(new_block), &block_sender).await;
+
+                                // TODO: really not sure about this
+                                task::yield_now().await;
                             }
                             Ok(None) => {
                                 warn!("subscription ended");

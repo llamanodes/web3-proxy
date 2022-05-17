@@ -15,6 +15,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
+use tokio::task;
 use tokio::time::sleep;
 use tracing::{debug, instrument, trace, warn};
 
@@ -140,7 +141,9 @@ impl Web3ProxyApp {
                 .into_iter()
                 .map(|request| {
                     let clone = self.clone();
-                    tokio::spawn(async move { clone.proxy_web3_rpc_request(request).await })
+                    task::Builder::default()
+                        .name("proxy_web3_rpc_request")
+                        .spawn(async move { clone.proxy_web3_rpc_request(request).await })
                 })
                 .collect::<Vec<_>>(),
         )
@@ -177,11 +180,18 @@ impl Web3ProxyApp {
 
                     // TODO: benchmark this compared to waiting on unbounded futures
                     // TODO: do something with this handle?
-                    tokio::spawn(async move {
-                        connections
-                            .try_send_parallel_requests(active_request_handles, method, params, tx)
-                            .await
-                    });
+                    task::Builder::default()
+                        .name("try_send_parallel_requests")
+                        .spawn(async move {
+                            connections
+                                .try_send_parallel_requests(
+                                    active_request_handles,
+                                    method,
+                                    params,
+                                    tx,
+                                )
+                                .await
+                        });
 
                     // wait for the first response
                     // TODO: we don't want the first response. we want the quorum response

@@ -22,7 +22,8 @@ use crate::config::{CliConfig, RpcConfig};
 
 fn main() -> anyhow::Result<()> {
     // install global collector configured based on RUST_LOG env var.
-    tracing_subscriber::fmt::init();
+    // tracing_subscriber::fmt::init();
+    console_subscriber::init();
 
     let cli_config: CliConfig = argh::from_env();
 
@@ -35,8 +36,10 @@ fn main() -> anyhow::Result<()> {
 
     let chain_id = rpc_config.shared.chain_id;
 
+    // TODO: get worker_threads from config
     let rt = runtime::Builder::new_multi_thread()
         .enable_all()
+        .worker_threads(8)
         .thread_name_fn(move || {
             static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
             // TODO: what ordering? i think we want seqcst so that these all happen in order, but that might be stricter than we really need

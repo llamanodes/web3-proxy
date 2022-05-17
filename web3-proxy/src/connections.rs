@@ -11,6 +11,7 @@ use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
 use std::sync::Arc;
+use tokio::task;
 use tracing::{info, instrument, trace, warn};
 
 use crate::config::Web3ConnectionConfig;
@@ -185,22 +186,24 @@ impl Web3Connections {
                 // TODO: channel instead. then we can have one future with write access to a left-right?
                 let connection = Arc::clone(connection);
                 let block_sender = block_sender.clone();
-                tokio::spawn(async move {
-                    let url = connection.url().to_string();
+                task::Builder::default()
+                    .name("subscribe_new_heads")
+                    .spawn(async move {
+                        let url = connection.url().to_string();
 
-                    // loop to automatically reconnect
-                    // TODO: make this cancellable?
-                    loop {
-                        // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
-                        if let Err(e) = connection
-                            .clone()
-                            .subscribe_new_heads(block_sender.clone(), true)
-                            .await
-                        {
-                            warn!("new_heads error on {}: {:?}", url, e);
+                        // loop to automatically reconnect
+                        // TODO: make this cancellable?
+                        loop {
+                            // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
+                            if let Err(e) = connection
+                                .clone()
+                                .subscribe_new_heads(block_sender.clone(), true)
+                                .await
+                            {
+                                warn!("new_heads error on {}: {:?}", url, e);
+                            }
                         }
-                    }
-                });
+                    });
             }
         }
 
@@ -216,11 +219,13 @@ impl Web3Connections {
 
         if subscribe_heads {
             let connections = Arc::clone(&connections);
-            tokio::spawn(async move {
-                connections
-                    .update_synced_rpcs(block_receiver, synced_connections_writer)
-                    .await
-            });
+            task::Builder::default()
+                .name("update_synced_rpcs")
+                .spawn(async move {
+                    connections
+                        .update_synced_rpcs(block_receiver, synced_connections_writer)
+                        .await
+                });
         }
 
         Ok(connections)
@@ -248,17 +253,19 @@ impl Web3Connections {
             let params = params.clone();
             let response_sender = response_sender.clone();
 
-            let handle = tokio::spawn(async move {
-                let response: Box<RawValue> =
-                    active_request_handle.request(&method, &params).await?;
+            let handle = task::Builder::default()
+                .name("send_request")
+                .spawn(async move {
+                    let response: Box<RawValue> =
+                        active_request_handle.request(&method, &params).await?;
 
-                // send the first good response to a one shot channel. that way we respond quickly
-                // drop the result because errors are expected after the first send
-                response_sender
-                    .send_async(Ok(response))
-                    .await
-                    .map_err(Into::into)
-            });
+                    // send the first good response to a one shot channel. that way we respond quickly
+                    // drop the result because errors are expected after the first send
+                    response_sender
+                        .send_async(Ok(response))
+                        .await
+                        .map_err(Into::into)
+                });
 
             unordered_futures.push(handle);
         }
