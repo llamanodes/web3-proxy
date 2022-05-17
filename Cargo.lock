@@ -3637,6 +3637,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4bc28f93baff38037f64e6f43d34cfa1605f27a49c34e8a04c5e78b0babf2596"
 dependencies = [
  "ansi_term",
+ "parking_lot 0.12.0",
  "sharded-slab",
  "smallvec",
  "thread_local",
