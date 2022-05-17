@@ -96,7 +96,7 @@ fn handle_anyhow_errors<T: warp::Reply>(
     match res {
         Ok(r) => r.into_response(),
         Err(e) => {
-            warn!("Responding with an error: {:?}", e);
+            warn!("Responding with error: {:?}", e);
 
             let e = JsonRpcForwardedResponse {
                 jsonrpc: "2.0".to_string(),

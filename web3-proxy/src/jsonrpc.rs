@@ -16,11 +16,11 @@ pub struct JsonRpcRequest {
 impl fmt::Debug for JsonRpcRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
+        // TODO: how should we include params in this? maybe just the length?
         f.debug_struct("JsonRpcRequest")
             .field("id", &self.id)
             .field("method", &self.method)
-            .field("params", &self.params)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

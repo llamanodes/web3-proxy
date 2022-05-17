@@ -47,7 +47,7 @@ impl SyncedConnections {
             cmp::Ordering::Greater => {
                 // the rpc's newest block is the new overall best block
                 if log {
-                    info!("new head block {} from {}", new_block_num, rpc);
+                    info!("new head {} from {}", new_block_num, rpc);
                 }
 
                 self.inner.clear();
@@ -60,10 +60,15 @@ impl SyncedConnections {
                 if new_block_hash != self.head_block_hash {
                     // same height, but different chain
                     // TODO: anything else we should do? set some "nextSafeBlockHeight" to delay sending transactions?
+                    // TODO: sometimes a node changes its block. if that happens, a new block is probably right behind this one
                     if log {
                         warn!(
-                            "chain is forked at #{}! {} has {:?}. {:?} have {:?}",
-                            new_block_num, rpc, new_block_hash, self.inner, self.head_block_hash
+                            "chain is forked at #{}! {} has {}. {} rpcs have {}",
+                            new_block_num,
+                            rpc,
+                            new_block_hash,
+                            self.inner.len(),
+                            self.head_block_hash
                         );
                     }
                     return;
@@ -140,7 +145,7 @@ impl fmt::Debug for Web3Connections {
 }
 
 impl Web3Connections {
-    #[instrument(skip_all)]
+    #[instrument(name = "try_new_Web3Connections", skip_all)]
     pub async fn try_new(
         chain_id: usize,
         servers: Vec<Web3ConnectionConfig>,
@@ -183,9 +188,17 @@ impl Web3Connections {
                 tokio::spawn(async move {
                     let url = connection.url().to_string();
 
-                    // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
-                    if let Err(e) = connection.subscribe_new_heads(block_sender).await {
-                        warn!("new_heads error on {}: {:?}", url, e);
+                    // loop to automatically reconnect
+                    // TODO: make this cancellable?
+                    loop {
+                        // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
+                        if let Err(e) = connection
+                            .clone()
+                            .subscribe_new_heads(block_sender.clone(), true)
+                            .await
+                        {
+                            warn!("new_heads error on {}: {:?}", url, e);
+                        }
                     }
                 });
             }

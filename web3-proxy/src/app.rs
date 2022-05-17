@@ -56,7 +56,7 @@ impl fmt::Debug for Web3ProxyApp {
 }
 
 impl Web3ProxyApp {
-    #[instrument(skip_all)]
+    #[instrument(name = "try_new_Web3ProxyApp", skip_all)]
     pub async fn try_new(
         chain_id: usize,
         balanced_rpcs: Vec<Web3ConnectionConfig>,
@@ -119,6 +119,7 @@ impl Web3ProxyApp {
             }
         };
 
+        // TODO: i don't seem to ever see this log. why?
         debug!("Forwarding response: {:?}", response);
 
         Ok(warp::reply::json(&response))

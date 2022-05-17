@@ -43,7 +43,7 @@ pub struct Web3ConnectionConfig {
 
 impl RpcConfig {
     /// Create a Web3ProxyApp from config
-    #[instrument(skip_all)]
+    #[instrument(name = "try_build_RpcConfig", skip_all)]
     pub async fn try_build(self) -> anyhow::Result<Web3ProxyApp> {
         let balanced_rpcs = self.balanced_rpcs.into_values().collect();
 
@@ -59,7 +59,7 @@ impl RpcConfig {
 
 impl Web3ConnectionConfig {
     /// Create a Web3Connection from config
-    #[instrument(skip_all)]
+    #[instrument(name = "try_build_Web3ConnectionConfig", skip_all)]
     pub async fn try_build(
         self,
         clock: &QuantaClock,
