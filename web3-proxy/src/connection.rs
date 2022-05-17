@@ -7,13 +7,14 @@ use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::NotUntil;
 use governor::RateLimiter;
+use parking_lot::RwLock;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::atomic::{self, AtomicU32};
 use std::time::Duration;
 use std::{cmp::Ordering, sync::Arc};
-use tokio::time::{interval, sleep, MissedTickBehavior};
-use tracing::{info, trace, warn};
+use tokio::time::{interval, sleep, timeout_at, Instant, MissedTickBehavior};
+use tracing::{info, instrument, trace, warn};
 
 type Web3RateLimiter =
     RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware<QuantaInstant>>;
@@ -38,6 +39,7 @@ pub struct Web3Connection {
     url: String,
     /// keep track of currently open requests. We sort on this
     active_requests: AtomicU32,
+    // TODO: put this in a RwLock so that we can replace it if re-connecting
     provider: Web3Provider,
     ratelimiter: Option<Web3RateLimiter>,
     /// used for load balancing to the least loaded server
@@ -61,7 +63,11 @@ impl fmt::Display for Web3Connection {
 }
 
 impl Web3Connection {
+    #[instrument(skip_all)]
+    async fn reconnect(&self) {}
+
     /// Connect to a web3 rpc and subscribe to new heads
+    #[instrument(skip_all)]
     pub async fn try_new(
         chain_id: usize,
         url_str: String,
@@ -164,6 +170,7 @@ impl Web3Connection {
         &self.url
     }
 
+    #[instrument(skip_all)]
     async fn send_block(
         self: &Arc<Self>,
         block: Result<Block<TxHash>, ProviderError>,
@@ -187,7 +194,7 @@ impl Web3Connection {
     }
 
     /// Subscribe to new blocks
-    // #[instrument]
+    #[instrument(skip_all)]
     pub async fn subscribe_new_heads(
         self: Arc<Self>,
         block_sender: flume::Sender<(u64, H256, Arc<Self>)>,
@@ -260,9 +267,15 @@ impl Web3Connection {
 
                 self.send_block(block, &block_sender).await;
 
-                while let Some(new_block) = stream.next().await {
+                // TODO: what should this timeout be? needs to be larger than worst case block time
+                // TODO: although reconnects will make this less of an issue
+                while let Ok(Some(new_block)) =
+                    timeout_at(Instant::now() + Duration::from_secs(300), stream.next()).await
+                {
                     self.send_block(Ok(new_block), &block_sender).await;
                 }
+
+                // TODO: re-connect!
             }
         }
 
@@ -271,6 +284,7 @@ impl Web3Connection {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     pub async fn wait_for_request_handle(self: &Arc<Self>) -> ActiveRequestHandle {
         // TODO: maximum wait time
 
@@ -331,6 +345,7 @@ impl ActiveRequestHandle {
     /// Send a web3 request
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// By taking self here, we ensure that this is dropped after the request is complete
+    #[instrument(skip_all)]
     pub async fn request<T, R>(
         &self,
         method: &str,

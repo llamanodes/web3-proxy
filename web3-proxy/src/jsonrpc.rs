@@ -161,7 +161,7 @@ impl fmt::Debug for JsonRpcForwardedResponse {
 }
 
 /// JSONRPC Responses can include one or many response objects.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum JsonRpcForwardedResponseEnum {
     Single(JsonRpcForwardedResponse),

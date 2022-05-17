@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::sleep;
-use tracing::{trace, warn};
+use tracing::{debug, instrument, trace, warn};
 
 static APP_USER_AGENT: &str = concat!(
     "satoshiandkin/",
@@ -56,6 +56,7 @@ impl fmt::Debug for Web3ProxyApp {
 }
 
 impl Web3ProxyApp {
+    #[instrument(skip_all)]
     pub async fn try_new(
         chain_id: usize,
         balanced_rpcs: Vec<Web3ConnectionConfig>,
@@ -102,11 +103,12 @@ impl Web3ProxyApp {
 
     /// send the request to the approriate RPCs
     /// TODO: dry this up
+    #[instrument(skip_all)]
     pub async fn proxy_web3_rpc(
         self: Arc<Web3ProxyApp>,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<impl warp::Reply> {
-        trace!("Received request: {:?}", request);
+        debug!("Received request: {:?}", request);
 
         let response = match request {
             JsonRpcRequestEnum::Single(request) => {
@@ -117,9 +119,12 @@ impl Web3ProxyApp {
             }
         };
 
+        debug!("Forwarding response: {:?}", response);
+
         Ok(warp::reply::json(&response))
     }
 
+    #[instrument(skip_all)]
     async fn proxy_web3_rpc_requests(
         self: Arc<Web3ProxyApp>,
         requests: Vec<JsonRpcRequest>,
@@ -149,6 +154,7 @@ impl Web3ProxyApp {
         Ok(collected)
     }
 
+    #[instrument(skip_all)]
     async fn proxy_web3_rpc_request(
         self: Arc<Web3ProxyApp>,
         request: JsonRpcRequest,
@@ -233,6 +239,9 @@ impl Web3ProxyApp {
                 // first check to see if this is cached
                 if let Some(cached) = self.response_cache.read().get(&cache_key) {
                     let _ = self.active_requests.remove(&cache_key);
+
+                    // TODO: emit a stat
+                    trace!("cache hit!");
 
                     return Ok(cached.to_owned());
                 }

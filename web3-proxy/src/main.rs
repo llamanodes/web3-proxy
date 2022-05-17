@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::runtime;
-use tracing::info;
+use tracing::{info, warn};
 use warp::Filter;
 use warp::Reply;
 
@@ -96,6 +96,8 @@ fn handle_anyhow_errors<T: warp::Reply>(
     match res {
         Ok(r) => r.into_response(),
         Err(e) => {
+            warn!("Responding with an error: {:?}", e);
+
             let e = JsonRpcForwardedResponse {
                 jsonrpc: "2.0".to_string(),
                 // TODO: what id can we use? how do we make sure the incoming id gets attached to this?

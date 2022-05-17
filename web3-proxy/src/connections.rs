@@ -11,7 +11,7 @@ use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
 use std::sync::Arc;
-use tracing::{info, trace, warn};
+use tracing::{info, instrument, trace, warn};
 
 use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, Web3Connection};
@@ -140,6 +140,7 @@ impl fmt::Debug for Web3Connections {
 }
 
 impl Web3Connections {
+    #[instrument(skip_all)]
     pub async fn try_new(
         chain_id: usize,
         servers: Vec<Web3ConnectionConfig>,
@@ -217,6 +218,7 @@ impl Web3Connections {
     }
 
     /// Send the same request to all the handles. Returning the fastest successful result.
+    #[instrument(skip_all)]
     pub async fn try_send_parallel_requests(
         self: Arc<Self>,
         active_request_handles: Vec<ActiveRequestHandle>,
@@ -280,6 +282,7 @@ impl Web3Connections {
     }
 
     /// TODO: possible dead lock here. investigate more. probably refactor
+    #[instrument(skip_all)]
     async fn update_synced_rpcs(
         &self,
         block_receiver: flume::Receiver<(u64, H256, Arc<Web3Connection>)>,
@@ -305,6 +308,7 @@ impl Web3Connections {
     }
 
     /// get the best available rpc server
+    #[instrument(skip_all)]
     pub async fn next_upstream_server(
         &self,
     ) -> Result<ActiveRequestHandle, Option<NotUntil<QuantaInstant>>> {
