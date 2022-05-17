@@ -14,20 +14,25 @@ derive_more = "0.99.17"
 ethers = { git = "https://github.com/gakonst/ethers-rs", features = ["rustls", "ws"] }
 flume = "0.10.12"
 futures = { version = "0.3.21", features = ["thread-pool"] }
+# TODO: governor has a "futures" and "futures-timer" feature. do we want those?
 governor = { version = "0.4.2", features = ["dashmap", "std"] }
 hashbrown = "0.12.1"
 left-right = "0.11.4"
 linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }
+# TODO: parking_lot has an "arc_lock" feature that we might want to use
 parking_lot = { version = "0.12.0", features = ["deadlock_detection"] }
 proctitle = "0.1.1"
+# TODO: regex has several "perf" features that we might want to use
 regex = "1.5.5"
-reqwest = { version = "0.11.10", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.11.10", default-features = false, features = ["json", "tokio-rustls"] }
 rustc-hash = "1.1.0"
 serde = { version = "1.0.137", features = [] }
-serde_json = { version = "1.0.81", default-features = false, features = ["alloc"] }
+serde_json = { version = "1.0.81", default-features = false, features = ["alloc", "raw_value"] }
 tokio = { version = "1.18.2", features = ["full"] }
 toml = "0.5.9"
 tracing = "0.1.34"
+# TODO: tracing-subscriber has serde and serde_json features that we might want to use
 tracing-subscriber = "0.3.11"
 url = "2.2.2"
+# TODO: replace warp with axum?
 warp = "0.3.2"
