@@ -50,6 +50,13 @@ Flame graphs make finding slow code painless:
     $ CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph
 
 
+## GDB
+
+Run the proxy under gdb for advanced debugging:
+
+    cargo build --release && RUST_LOG=web3_proxy=debug rust-gdb --args target/debug/web3-proxy --listen-port 7503 --rpc-config-path ./config/production-eth.toml
+
+
 ## Load Testing
 
 Test the proxy:

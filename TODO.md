@@ -6,6 +6,7 @@
   - [ ] when we receive a block, we should store it for later eth_getBlockByNumber, eth_blockNumber, and similar calls
 - [ ] eth_sendRawTransaction should return the most common result, not the first
 - [ ] if chain split detected, don't send transactions
+- [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
 - [ ] endpoint for health checks. if no synced servers, give a 502 error
   - [ ] move from warp to auxm?
 - [ ] some production configs are occassionally stuck waiting at 100% cpu

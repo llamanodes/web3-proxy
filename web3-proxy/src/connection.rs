@@ -222,6 +222,7 @@ impl Web3Connection {
     }
 
     /// Subscribe to new blocks. If `reconnect` is true, this runs forever.
+    /// TODO: instrument with the url
     #[instrument(skip_all)]
     pub async fn subscribe_new_heads(
         self: Arc<Self>,
@@ -302,13 +303,23 @@ impl Web3Connection {
 
                     // TODO: what should this timeout be? needs to be larger than worst case block time
                     // TODO: although reconnects will make this less of an issue
-                    while let Ok(Some(new_block)) =
-                        timeout_at(Instant::now() + Duration::from_secs(300), stream.next()).await
-                    {
-                        self.send_block(Ok(new_block), &block_sender).await;
+                    loop {
+                        match timeout_at(Instant::now() + Duration::from_secs(300), stream.next())
+                            .await
+                        {
+                            Ok(Some(new_block)) => {
+                                self.send_block(Ok(new_block), &block_sender).await;
+                            }
+                            Ok(None) => {
+                                warn!("subscription ended");
+                                break;
+                            }
+                            Err(e) => {
+                                warn!("subscription ended with an error: {:?}", e);
+                                break;
+                            }
+                        }
                     }
-
-                    // TODO: re-connect!
                 }
             }
 
