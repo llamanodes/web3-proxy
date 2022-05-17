@@ -22,7 +22,7 @@ use crate::config::{CliConfig, RpcConfig};
 
 fn main() -> anyhow::Result<()> {
     // install global collector configured based on RUST_LOG env var.
-    // tracing_subscriber::fmt::init();
+    // TODO: if RUST_LOG isn't set, set it to "web3_proxy=debug" or something
     console_subscriber::init();
 
     let cli_config: CliConfig = argh::from_env();

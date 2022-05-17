@@ -146,7 +146,7 @@ impl fmt::Debug for Web3Connections {
 }
 
 impl Web3Connections {
-    #[instrument(name = "try_new_Web3Connections", skip_all)]
+    // #[instrument(name = "try_new_Web3Connections", skip_all)]
     pub async fn try_new(
         chain_id: usize,
         servers: Vec<Web3ConnectionConfig>,
