@@ -25,6 +25,8 @@ fn main() -> anyhow::Result<()> {
     // TODO: if RUST_LOG isn't set, set it to "web3_proxy=debug" or something
     console_subscriber::init();
 
+    fdlimit::raise_fd_limit();
+
     let cli_config: CliConfig = argh::from_env();
 
     info!("Loading rpc config @ {}", cli_config.rpc_config_path);

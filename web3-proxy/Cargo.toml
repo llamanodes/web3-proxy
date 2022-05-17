@@ -13,6 +13,7 @@ console-subscriber = { version = "0.1.5", features = ["parking_lot"] }
 dashmap = "5.3.3"
 derive_more = "0.99.17"
 ethers = { git = "https://github.com/gakonst/ethers-rs", features = ["rustls", "ws"] }
+fdlimit = "0.2.1"
 flume = "0.10.12"
 futures = { version = "0.3.21", features = ["thread-pool"] }
 # TODO: governor has a "futures" and "futures-timer" feature. do we want those?
