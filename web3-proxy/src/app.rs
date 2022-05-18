@@ -71,27 +71,28 @@ impl Web3ProxyApp {
         // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something is wrong with the remote server
         let http_client = reqwest::ClientBuilder::new()
             .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(300))
+            .timeout(Duration::from_secs(60))
             .user_agent(APP_USER_AGENT)
             .build()?;
 
         // TODO: attach context to this error
-        let balanced_rpcs = Web3Connections::try_new(
-            chain_id,
-            balanced_rpcs,
-            Some(http_client.clone()),
-            &clock,
-            true,
-        )
-        .await?;
+        let balanced_rpcs =
+            Web3Connections::try_new(chain_id, balanced_rpcs, Some(http_client.clone()), &clock)
+                .await?;
+
+        {
+            let balanced_rpcs = balanced_rpcs.clone();
+            task::spawn(async move {
+                balanced_rpcs.subscribe_heads().await;
+            });
+        }
 
         // TODO: attach context to this error
         let private_rpcs = if private_rpcs.is_empty() {
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             balanced_rpcs.clone()
         } else {
-            Web3Connections::try_new(chain_id, private_rpcs, Some(http_client), &clock, false)
-                .await?
+            Web3Connections::try_new(chain_id, private_rpcs, Some(http_client), &clock).await?
         };
 
         Ok(Web3ProxyApp {
@@ -140,12 +141,7 @@ impl Web3ProxyApp {
         let responses = join_all(
             requests
                 .into_iter()
-                .map(|request| {
-                    let clone = self.clone();
-                    task::Builder::default()
-                        .name("proxy_web3_rpc_request")
-                        .spawn(async move { clone.proxy_web3_rpc_request(request).await })
-                })
+                .map(|request| self.clone().proxy_web3_rpc_request(request))
                 .collect::<Vec<_>>(),
         )
         .await;
@@ -153,7 +149,7 @@ impl Web3ProxyApp {
         // TODO: i'm sure this could be done better with iterators
         let mut collected: Vec<JsonRpcForwardedResponse> = Vec::with_capacity(num_requests);
         for response in responses {
-            collected.push(response??);
+            collected.push(response?);
         }
 
         Ok(collected)
@@ -165,8 +161,6 @@ impl Web3ProxyApp {
         request: JsonRpcRequest,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         trace!("Received request: {:?}", request);
-
-        // TODO: apparently json_body can be a vec of multiple requests. should we split them up?  we need to respond with a Vec too
 
         if request.method == "eth_sendRawTransaction" {
             // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
@@ -231,7 +225,7 @@ impl Web3ProxyApp {
             // TODO: how much should we retry?
             for i in 0..10 {
                 // TODO: think more about this loop.
-                // TODO: set tracing span to have the loop count in it
+                // TODO: add more to this span
                 let span = info_span!("i", i);
                 let _enter = span.enter();
 

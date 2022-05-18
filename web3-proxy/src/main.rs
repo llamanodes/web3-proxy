@@ -7,6 +7,7 @@ mod jsonrpc;
 use jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
 use parking_lot::deadlock;
 use serde_json::value::RawValue;
+use std::env;
 use std::fs;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
@@ -21,8 +22,12 @@ use crate::app::Web3ProxyApp;
 use crate::config::{CliConfig, RpcConfig};
 
 fn main() -> anyhow::Result<()> {
+    // TODO: is there a better way to do this?
+    if env::var("RUST_LOG").is_err() {
+        env::set_var("RUST_LOG", "web3_proxy=debug");
+    }
+
     // install global collector configured based on RUST_LOG env var.
-    // TODO: if RUST_LOG isn't set, set it to "web3_proxy=debug" or something
     console_subscriber::init();
 
     fdlimit::raise_fd_limit();
@@ -38,18 +43,22 @@ fn main() -> anyhow::Result<()> {
 
     let chain_id = rpc_config.shared.chain_id;
 
-    // TODO: get worker_threads from config
-    let rt = runtime::Builder::new_multi_thread()
-        .enable_all()
-        .worker_threads(8)
-        .thread_name_fn(move || {
-            static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
-            // TODO: what ordering? i think we want seqcst so that these all happen in order, but that might be stricter than we really need
-            let worker_id = ATOMIC_ID.fetch_add(1, atomic::Ordering::SeqCst);
-            // TODO: i think these max at 15 characters
-            format!("web3-{}-{}", chain_id, worker_id)
-        })
-        .build()?;
+    // TODO: multithreaded runtime once i'm done debugging
+    let mut rt_builder = runtime::Builder::new_current_thread();
+
+    rt_builder.enable_all().thread_name_fn(move || {
+        static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
+        // TODO: what ordering? i think we want seqcst so that these all happen in order, but that might be stricter than we really need
+        let worker_id = ATOMIC_ID.fetch_add(1, atomic::Ordering::SeqCst);
+        // TODO: i think these max at 15 characters
+        format!("web3-{}-{}", chain_id, worker_id)
+    });
+
+    if cli_config.worker_threads > 0 {
+        rt_builder.worker_threads(cli_config.worker_threads);
+    }
+
+    let rt = rt_builder.build()?;
 
     // spawn a thread for deadlock detection
     thread::spawn(move || loop {
@@ -73,7 +82,7 @@ fn main() -> anyhow::Result<()> {
     rt.block_on(async {
         let listen_port = cli_config.listen_port;
 
-        let app = rpc_config.try_build().await.unwrap();
+        let app = rpc_config.try_build().await?;
 
         let app: Arc<Web3ProxyApp> = Arc::new(app);
 
@@ -89,9 +98,9 @@ fn main() -> anyhow::Result<()> {
         let routes = proxy_rpc_filter.map(handle_anyhow_errors);
 
         warp::serve(routes).run(([0, 0, 0, 0], listen_port)).await;
-    });
 
-    Ok(())
+        Ok(())
+    })
 }
 
 /// convert result into a jsonrpc error. use this at the end of your warp filter

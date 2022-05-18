@@ -1,6 +1,7 @@
 ///! Load balanced communication with a group of web3 providers
 use derive_more::From;
 use ethers::prelude::H256;
+use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
@@ -11,8 +12,10 @@ use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::task;
-use tracing::{info, instrument, trace, warn};
+use tracing::Instrument;
+use tracing::{info, info_span, instrument, trace, warn};
 
 use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, Web3Connection};
@@ -88,6 +91,8 @@ impl SyncedConnections {
         // TODO: better log
         if log {
             trace!("Now synced: {:?}", self.inner);
+        } else {
+            trace!("Now synced #2: {:?}", self.inner);
         }
     }
 }
@@ -134,6 +139,7 @@ impl Absorb<SyncedConnectionsOp> for SyncedConnections {
 pub struct Web3Connections {
     inner: Vec<Arc<Web3Connection>>,
     synced_connections_reader: ReadHandleFactory<SyncedConnections>,
+    synced_connections_writer: Mutex<WriteHandle<SyncedConnections, SyncedConnectionsOp>>,
 }
 
 impl fmt::Debug for Web3Connections {
@@ -152,7 +158,6 @@ impl Web3Connections {
         servers: Vec<Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
         clock: &QuantaClock,
-        subscribe_heads: bool,
     ) -> anyhow::Result<Arc<Self>> {
         let num_connections = servers.len();
 
@@ -175,60 +180,62 @@ impl Web3Connections {
             ));
         }
 
-        let (block_sender, block_receiver) = flume::unbounded();
-
         let (mut synced_connections_writer, synced_connections_reader) =
             left_right::new::<SyncedConnections, SyncedConnectionsOp>();
-
-        if subscribe_heads {
-            for connection in connections.iter() {
-                // subscribe to new heads in a spawned future
-                // TODO: channel instead. then we can have one future with write access to a left-right?
-                let connection = Arc::clone(connection);
-                let block_sender = block_sender.clone();
-                task::Builder::default()
-                    .name("subscribe_new_heads")
-                    .spawn(async move {
-                        let url = connection.url().to_string();
-
-                        // loop to automatically reconnect
-                        // TODO: make this cancellable?
-                        loop {
-                            // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
-                            if let Err(e) = connection
-                                .clone()
-                                .subscribe_new_heads(block_sender.clone(), true)
-                                .await
-                            {
-                                warn!("new_heads error on {}: {:?}", url, e);
-                            }
-                        }
-                    });
-            }
-        }
 
         synced_connections_writer.append(SyncedConnectionsOp::SyncedConnectionsCapacity(
             num_connections,
         ));
+        trace!("publishing synced connections");
         synced_connections_writer.publish();
+        trace!("published synced connections");
 
         let connections = Arc::new(Self {
             inner: connections,
             synced_connections_reader: synced_connections_reader.factory(),
+            synced_connections_writer: Mutex::new(synced_connections_writer),
         });
 
-        if subscribe_heads {
-            let connections = Arc::clone(&connections);
-            task::Builder::default()
-                .name("update_synced_rpcs")
+        Ok(connections)
+    }
+
+    pub async fn subscribe_heads(self: &Arc<Self>) {
+        let (block_sender, block_receiver) = flume::unbounded();
+
+        let mut handles = vec![];
+
+        for connection in self.inner.iter() {
+            // subscribe to new heads in a spawned future
+            // TODO: channel instead. then we can have one future with write access to a left-right?
+            let connection = Arc::clone(connection);
+            let block_sender = block_sender.clone();
+
+            // let url = connection.url().to_string();
+
+            let handle = task::Builder::default()
+                .name("subscribe_new_heads")
                 .spawn(async move {
-                    connections
-                        .update_synced_rpcs(block_receiver, synced_connections_writer)
+                    // loop to automatically reconnect
+                    // TODO: make this cancellable?
+                    // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
+                    // TODO: proper spann
+                    connection
+                        .subscribe_new_heads(block_sender.clone(), true)
+                        .instrument(tracing::info_span!("url"))
                         .await
                 });
+
+            handles.push(handle);
         }
 
-        Ok(connections)
+        let connections = Arc::clone(self);
+        let handle = task::Builder::default()
+            .name("update_synced_rpcs")
+            .spawn(async move { connections.update_synced_rpcs(block_receiver).await });
+
+        handles.push(handle);
+
+        join_all(handles).await;
     }
 
     pub fn get_synced_rpcs(&self) -> left_right::ReadHandle<SyncedConnections> {
@@ -306,13 +313,17 @@ impl Web3Connections {
     async fn update_synced_rpcs(
         &self,
         block_receiver: flume::Receiver<(u64, H256, Arc<Web3Connection>)>,
-        mut synced_connections_writer: WriteHandle<SyncedConnections, SyncedConnectionsOp>,
     ) -> anyhow::Result<()> {
+        let mut synced_connections_writer = self.synced_connections_writer.lock().await;
+
         while let Ok((new_block_num, new_block_hash, rpc)) = block_receiver.recv_async().await {
             if new_block_num == 0 {
                 warn!("{} is still syncing", rpc);
                 continue;
             }
+
+            let span = info_span!("new_block_num", new_block_num,);
+            let _enter = span.enter();
 
             synced_connections_writer.append(SyncedConnectionsOp::SyncedConnectionsUpdate(
                 new_block_num,
@@ -321,8 +332,18 @@ impl Web3Connections {
             ));
 
             // TODO: only publish when the second block arrives?
+            // TODO: use spans properly
+            trace!("publishing synced connections for block {}", new_block_num,);
             synced_connections_writer.publish();
+            trace!(
+                "published synced connections for block {} from {}",
+                new_block_num,
+                "some rpc"
+            );
         }
+
+        // TODO: if there was an error, we should return it
+        warn!("block_receiver exited!");
 
         Ok(())
     }

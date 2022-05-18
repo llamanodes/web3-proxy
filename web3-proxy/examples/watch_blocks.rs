@@ -4,10 +4,14 @@ use std::{str::FromStr, time::Duration};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    console_subscriber::init();
+
+    fdlimit::raise_fd_limit();
+
     // erigon does not support most filters
     // let url = "http://10.11.12.16:8545";
     // geth
-    let url = "http://10.11.12.16:8945";
+    let url = "http://10.11.12.16:8545";
 
     println!("Watching blocks from {:?}", url);
 
@@ -15,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
 
     let provider = Provider::new(provider).interval(Duration::from_secs(1));
 
-    let mut stream = provider.watch_blocks().await?.take(3);
+    let mut stream = provider.watch_blocks().await?;
     while let Some(block_number) = stream.next().await {
         let block = provider.get_block(block_number).await?.unwrap();
         println!(

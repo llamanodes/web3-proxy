@@ -415,9 +415,10 @@ impl ActiveRequestHandle {
         T: fmt::Debug + serde::Serialize + Send + Sync,
         R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug,
     {
-        // TODO: this should probably be trace level and use a span
+        // TODO: use tracing spans properly
         // TODO: it would be nice to have the request id on this
-        trace!("Sending {}({:?}) to {}", method, params, self.0);
+        // TODO: including params in this is way too verbose
+        trace!("Sending {} to {}", method, self.0);
 
         let provider = self.0.provider.read().await.clone();
 
@@ -428,7 +429,8 @@ impl ActiveRequestHandle {
 
         // TODO: i think ethers already has trace logging (and does it much more fancy)
         // TODO: at least instrument this with more useful information
-        trace!("Response from {}: {:?}", self.0, response);
+        // trace!("Reply from {}: {:?}", self.0, response);
+        trace!("Reply from {}", self.0);
 
         response
     }

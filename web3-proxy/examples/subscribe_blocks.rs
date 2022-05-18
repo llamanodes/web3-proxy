@@ -4,10 +4,14 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    console_subscriber::init();
+
+    fdlimit::raise_fd_limit();
+
     // erigon
-    let url = "ws://10.11.12.16:8545";
+    // let url = "ws://10.11.12.16:8548";
     // geth
-    // let url = "ws://10.11.12.16:8946";
+    let url = "ws://10.11.12.16:8546";
 
     println!("Subscribing to blocks from {}", url);
 
@@ -15,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
 
     let provider = Provider::new(provider).interval(Duration::from_secs(1));
 
-    let mut stream = provider.subscribe_blocks().await?.take(3);
+    let mut stream = provider.subscribe_blocks().await?;
     while let Some(block) = stream.next().await {
         println!(
             "{:?} = Ts: {:?}, block number: {}",
