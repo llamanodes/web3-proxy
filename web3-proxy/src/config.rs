@@ -13,15 +13,15 @@ use crate::Web3ProxyApp;
 pub struct CliConfig {
     /// what port the proxy should listen on
     #[argh(option, default = "8544")]
-    pub listen_port: u16,
+    pub port: u16,
 
     /// number of worker threads
     #[argh(option, default = "0")]
-    pub worker_threads: usize,
+    pub workers: usize,
 
     /// path to a toml of rpc servers
     #[argh(option, default = "\"./config/example.toml\".to_string()")]
-    pub rpc_config_path: String,
+    pub config: String,
 }
 
 #[derive(Deserialize)]

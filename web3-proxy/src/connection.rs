@@ -195,11 +195,6 @@ impl Web3Connection {
         self.soft_limit
     }
 
-    #[inline]
-    pub fn url(&self) -> &str {
-        &self.url
-    }
-
     #[instrument(skip_all)]
     async fn send_block(
         self: &Arc<Self>,

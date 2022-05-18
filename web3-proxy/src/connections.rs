@@ -7,6 +7,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
+use hashbrown::HashMap;
 use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
@@ -219,11 +220,10 @@ impl Web3Connections {
     ) -> anyhow::Result<()> {
         let max_connections = self.inner.len();
 
-        let mut connection_states: Vec<(u64, H256)> = Vec::with_capacity(max_connections);
-        let mut head_block_hash = H256::zero();
-        let mut head_block_num = 0u64;
+        let mut connection_states: HashMap<usize, (u64, H256)> =
+            HashMap::with_capacity(max_connections);
 
-        let mut synced_connections = SyncedConnections::new(max_connections);
+        let mut pending_synced_connections = SyncedConnections::new(max_connections);
 
         while let Ok((new_block_num, new_block_hash, rpc_id)) = block_receiver.recv_async().await {
             if new_block_num == 0 {
@@ -238,37 +238,38 @@ impl Web3Connections {
             connection_states.insert(rpc_id, (new_block_num, new_block_hash));
 
             // TODO: do something to update the synced blocks
-            match new_block_num.cmp(&head_block_num) {
+            match new_block_num.cmp(&pending_synced_connections.head_block_num) {
                 cmp::Ordering::Greater => {
                     // the rpc's newest block is the new overall best block
                     info!("new head from #{}", rpc_id);
 
-                    synced_connections.inner.clear();
-                    synced_connections.inner.push(rpc_id);
+                    pending_synced_connections.inner.clear();
+                    pending_synced_connections.inner.push(rpc_id);
 
-                    head_block_num = new_block_num;
-                    head_block_hash = new_block_hash;
+                    pending_synced_connections.head_block_num = new_block_num;
+                    pending_synced_connections.head_block_hash = new_block_hash;
                 }
                 cmp::Ordering::Equal => {
-                    if new_block_hash != head_block_hash {
+                    if new_block_hash != pending_synced_connections.head_block_hash {
                         // same height, but different chain
                         // TODO: anything else we should do? set some "nextSafeBlockHeight" to delay sending transactions?
                         // TODO: sometimes a node changes its block. if that happens, a new block is probably right behind this one
                         warn!(
-                            "chain is forked at #{}! {} has {}. {} rpcs have {}",
+                            "chain is forked at #{}! #{} has {}. {} rpcs have {}",
                             new_block_num,
                             rpc_id,
                             new_block_hash,
-                            synced_connections.inner.len(),
-                            head_block_hash
+                            pending_synced_connections.inner.len(),
+                            pending_synced_connections.head_block_hash
                         );
-                        // TODO: don't continue. check to see which head block is more popular!
+                        // TODO: don't continue. check connection_states to see which head block is more popular!
                         continue;
                     }
 
                     // do not clear synced_connections.
                     // we just want to add this rpc to the end
-                    synced_connections.inner.push(rpc_id);
+                    // TODO: HashSet here? i think we get dupes if we don't
+                    pending_synced_connections.inner.push(rpc_id);
                 }
                 cmp::Ordering::Less => {
                     // this isn't the best block in the tier. don't do anything
@@ -277,11 +278,11 @@ impl Web3Connections {
             }
 
             // the synced connections have changed
-            let new_data = Arc::new(synced_connections.clone());
+            let synced_connections = Arc::new(pending_synced_connections.clone());
 
             // TODO: only do this if there are 2 nodes synced to this block?
             // do the arcswap
-            self.synced_connections.swap(new_data);
+            self.synced_connections.swap(synced_connections);
         }
 
         // TODO: if there was an error, we should return it

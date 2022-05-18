@@ -34,8 +34,8 @@ fn main() -> anyhow::Result<()> {
 
     let cli_config: CliConfig = argh::from_env();
 
-    info!("Loading rpc config @ {}", cli_config.rpc_config_path);
-    let rpc_config: String = fs::read_to_string(cli_config.rpc_config_path)?;
+    info!("Loading rpc config @ {}", cli_config.config);
+    let rpc_config: String = fs::read_to_string(cli_config.config)?;
     let rpc_config: RpcConfig = toml::from_str(&rpc_config)?;
 
     // TODO: this doesn't seem to do anything
@@ -54,8 +54,8 @@ fn main() -> anyhow::Result<()> {
         format!("web3-{}-{}", chain_id, worker_id)
     });
 
-    if cli_config.worker_threads > 0 {
-        rt_builder.worker_threads(cli_config.worker_threads);
+    if cli_config.workers > 0 {
+        rt_builder.worker_threads(cli_config.workers);
     }
 
     let rt = rt_builder.build()?;
@@ -80,7 +80,7 @@ fn main() -> anyhow::Result<()> {
 
     // spawn the root task
     rt.block_on(async {
-        let listen_port = cli_config.listen_port;
+        let listen_port = cli_config.port;
 
         let app = rpc_config.try_build().await?;
 
