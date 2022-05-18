@@ -300,7 +300,7 @@ impl Web3Connections {
 
         let mut synced_rpc_indexes = self.synced_connections.load().inner.clone();
 
-        let sort_cache: Vec<(f32, u32)> = synced_rpc_indexes
+        let sort_cache: HashMap<usize, (f32, u32)> = synced_rpc_indexes
             .iter()
             .map(|rpc_id| {
                 let rpc = self.inner.get(*rpc_id).unwrap();
@@ -311,14 +311,13 @@ impl Web3Connections {
                 // TODO: how should we include the soft limit? floats are slower than integer math
                 let utilization = active_requests as f32 / soft_limit as f32;
 
-                (utilization, soft_limit)
+                (*rpc_id, (utilization, soft_limit))
             })
             .collect();
 
-        // TODO: i think we might need to load active connections and then
         synced_rpc_indexes.sort_unstable_by(|a, b| {
-            let (a_utilization, a_soft_limit) = sort_cache.get(*a).unwrap();
-            let (b_utilization, b_soft_limit) = sort_cache.get(*b).unwrap();
+            let (a_utilization, a_soft_limit) = sort_cache.get(a).unwrap();
+            let (b_utilization, b_soft_limit) = sort_cache.get(b).unwrap();
 
             // TODO: i'm comparing floats. crap
             match a_utilization
