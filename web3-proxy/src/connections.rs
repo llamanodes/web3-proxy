@@ -1,4 +1,5 @@
 ///! Load balanced communication with a group of web3 providers
+use arc_swap::ArcSwap;
 use derive_more::From;
 use ethers::prelude::H256;
 use futures::future::join_all;
@@ -6,13 +7,10 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
-use hashbrown::HashMap;
-use left_right::{Absorb, ReadHandleFactory, WriteHandle};
 use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio::task;
 use tracing::Instrument;
 use tracing::{info, info_span, instrument, trace, warn};
@@ -20,11 +18,11 @@ use tracing::{info, info_span, instrument, trace, warn};
 use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, Web3Connection};
 
-#[derive(Clone, Default)]
-pub struct SyncedConnections {
-    head_block_number: u64,
+#[derive(Clone)]
+struct SyncedConnections {
+    head_block_num: u64,
     head_block_hash: H256,
-    inner: Vec<Arc<Web3Connection>>,
+    inner: Vec<usize>,
 }
 
 impl fmt::Debug for SyncedConnections {
@@ -35,102 +33,16 @@ impl fmt::Debug for SyncedConnections {
 }
 
 impl SyncedConnections {
+    fn new(max_connections: usize) -> Self {
+        Self {
+            head_block_num: 0,
+            head_block_hash: Default::default(),
+            inner: Vec::with_capacity(max_connections),
+        }
+    }
+
     pub fn get_head_block_hash(&self) -> &H256 {
         &self.head_block_hash
-    }
-
-    fn update(
-        &mut self,
-        log: bool,
-        new_block_num: u64,
-        new_block_hash: H256,
-        rpc: Arc<Web3Connection>,
-    ) {
-        // TODO: double check this logic
-        match new_block_num.cmp(&self.head_block_number) {
-            cmp::Ordering::Greater => {
-                // the rpc's newest block is the new overall best block
-                if log {
-                    info!("new head {} from {}", new_block_num, rpc);
-                }
-
-                self.inner.clear();
-                self.inner.push(rpc);
-
-                self.head_block_number = new_block_num;
-                self.head_block_hash = new_block_hash;
-            }
-            cmp::Ordering::Equal => {
-                if new_block_hash != self.head_block_hash {
-                    // same height, but different chain
-                    // TODO: anything else we should do? set some "nextSafeBlockHeight" to delay sending transactions?
-                    // TODO: sometimes a node changes its block. if that happens, a new block is probably right behind this one
-                    if log {
-                        warn!(
-                            "chain is forked at #{}! {} has {}. {} rpcs have {}",
-                            new_block_num,
-                            rpc,
-                            new_block_hash,
-                            self.inner.len(),
-                            self.head_block_hash
-                        );
-                    }
-                    return;
-                }
-
-                // do not clear synced_connections.
-                // we just want to add this rpc to the end
-                self.inner.push(rpc);
-            }
-            cmp::Ordering::Less => {
-                // this isn't the best block in the tier. don't do anything
-                return;
-            }
-        }
-
-        // TODO: better log
-        if log {
-            trace!("Now synced: {:?}", self.inner);
-        } else {
-            trace!("Now synced #2: {:?}", self.inner);
-        }
-    }
-}
-
-enum SyncedConnectionsOp {
-    SyncedConnectionsUpdate(u64, H256, Arc<Web3Connection>),
-    SyncedConnectionsCapacity(usize),
-}
-
-impl Absorb<SyncedConnectionsOp> for SyncedConnections {
-    fn absorb_first(&mut self, operation: &mut SyncedConnectionsOp, _: &Self) {
-        match operation {
-            SyncedConnectionsOp::SyncedConnectionsUpdate(new_block_number, new_block_hash, rpc) => {
-                self.update(true, *new_block_number, *new_block_hash, rpc.clone());
-            }
-            SyncedConnectionsOp::SyncedConnectionsCapacity(capacity) => {
-                self.inner = Vec::with_capacity(*capacity);
-            }
-        }
-    }
-
-    fn absorb_second(&mut self, operation: SyncedConnectionsOp, _: &Self) {
-        match operation {
-            SyncedConnectionsOp::SyncedConnectionsUpdate(new_block_number, new_block_hash, rpc) => {
-                // TODO: disable logging on this one?
-                self.update(false, new_block_number, new_block_hash, rpc);
-            }
-            SyncedConnectionsOp::SyncedConnectionsCapacity(capacity) => {
-                self.inner = Vec::with_capacity(capacity);
-            }
-        }
-    }
-
-    fn drop_first(self: Box<Self>) {}
-
-    fn sync_with(&mut self, first: &Self) {
-        // TODO: not sure about this
-        *self = first.clone()
     }
 }
 
@@ -138,8 +50,7 @@ impl Absorb<SyncedConnectionsOp> for SyncedConnections {
 #[derive(From)]
 pub struct Web3Connections {
     inner: Vec<Arc<Web3Connection>>,
-    synced_connections_reader: ReadHandleFactory<SyncedConnections>,
-    synced_connections_writer: Mutex<WriteHandle<SyncedConnections, SyncedConnectionsOp>>,
+    synced_connections: ArcSwap<SyncedConnections>,
 }
 
 impl fmt::Debug for Web3Connections {
@@ -180,20 +91,11 @@ impl Web3Connections {
             ));
         }
 
-        let (mut synced_connections_writer, synced_connections_reader) =
-            left_right::new::<SyncedConnections, SyncedConnectionsOp>();
-
-        synced_connections_writer.append(SyncedConnectionsOp::SyncedConnectionsCapacity(
-            num_connections,
-        ));
-        trace!("publishing synced connections");
-        synced_connections_writer.publish();
-        trace!("published synced connections");
+        let synced_connections = SyncedConnections::new(num_connections);
 
         let connections = Arc::new(Self {
             inner: connections,
-            synced_connections_reader: synced_connections_reader.factory(),
-            synced_connections_writer: Mutex::new(synced_connections_writer),
+            synced_connections: ArcSwap::new(Arc::new(synced_connections)),
         });
 
         Ok(connections)
@@ -204,7 +106,7 @@ impl Web3Connections {
 
         let mut handles = vec![];
 
-        for connection in self.inner.iter() {
+        for (rpc_id, connection) in self.inner.iter().enumerate() {
             // subscribe to new heads in a spawned future
             // TODO: channel instead. then we can have one future with write access to a left-right?
             let connection = Arc::clone(connection);
@@ -220,7 +122,7 @@ impl Web3Connections {
                     // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
                     // TODO: proper spann
                     connection
-                        .subscribe_new_heads(block_sender.clone(), true)
+                        .subscribe_new_heads(rpc_id, block_sender.clone(), true)
                         .instrument(tracing::info_span!("url"))
                         .await
                 });
@@ -238,8 +140,8 @@ impl Web3Connections {
         join_all(handles).await;
     }
 
-    pub fn get_synced_rpcs(&self) -> left_right::ReadHandle<SyncedConnections> {
-        self.synced_connections_reader.handle()
+    pub fn get_head_block_hash(&self) -> H256 {
+        *self.synced_connections.load().get_head_block_hash()
     }
 
     /// Send the same request to all the handles. Returning the fastest successful result.
@@ -309,37 +211,77 @@ impl Web3Connections {
     }
 
     /// TODO: possible dead lock here. investigate more. probably refactor
+    /// TODO: move parts of this onto SyncedConnections?
     #[instrument(skip_all)]
     async fn update_synced_rpcs(
         &self,
-        block_receiver: flume::Receiver<(u64, H256, Arc<Web3Connection>)>,
+        block_receiver: flume::Receiver<(u64, H256, usize)>,
     ) -> anyhow::Result<()> {
-        let mut synced_connections_writer = self.synced_connections_writer.lock().await;
+        let max_connections = self.inner.len();
 
-        while let Ok((new_block_num, new_block_hash, rpc)) = block_receiver.recv_async().await {
+        let mut connection_states: Vec<(u64, H256)> = Vec::with_capacity(max_connections);
+        let mut head_block_hash = H256::zero();
+        let mut head_block_num = 0u64;
+
+        let mut synced_connections = SyncedConnections::new(max_connections);
+
+        while let Ok((new_block_num, new_block_hash, rpc_id)) = block_receiver.recv_async().await {
             if new_block_num == 0 {
-                warn!("{} is still syncing", rpc);
-                continue;
+                // TODO: show the actual rpc url?
+                warn!("rpc #{} is still syncing", rpc_id);
             }
 
-            let span = info_span!("new_block_num", new_block_num,);
+            // TODO: span with rpc in it, too
+            let span = info_span!("new_block", new_block_num);
             let _enter = span.enter();
 
-            synced_connections_writer.append(SyncedConnectionsOp::SyncedConnectionsUpdate(
-                new_block_num,
-                new_block_hash,
-                rpc,
-            ));
+            connection_states.insert(rpc_id, (new_block_num, new_block_hash));
 
-            // TODO: only publish when the second block arrives?
-            // TODO: use spans properly
-            trace!("publishing synced connections for block {}", new_block_num,);
-            synced_connections_writer.publish();
-            trace!(
-                "published synced connections for block {} from {}",
-                new_block_num,
-                "some rpc"
-            );
+            // TODO: do something to update the synced blocks
+            match new_block_num.cmp(&head_block_num) {
+                cmp::Ordering::Greater => {
+                    // the rpc's newest block is the new overall best block
+                    info!("new head from #{}", rpc_id);
+
+                    synced_connections.inner.clear();
+                    synced_connections.inner.push(rpc_id);
+
+                    head_block_num = new_block_num;
+                    head_block_hash = new_block_hash;
+                }
+                cmp::Ordering::Equal => {
+                    if new_block_hash != head_block_hash {
+                        // same height, but different chain
+                        // TODO: anything else we should do? set some "nextSafeBlockHeight" to delay sending transactions?
+                        // TODO: sometimes a node changes its block. if that happens, a new block is probably right behind this one
+                        warn!(
+                            "chain is forked at #{}! {} has {}. {} rpcs have {}",
+                            new_block_num,
+                            rpc_id,
+                            new_block_hash,
+                            synced_connections.inner.len(),
+                            head_block_hash
+                        );
+                        // TODO: don't continue. check to see which head block is more popular!
+                        continue;
+                    }
+
+                    // do not clear synced_connections.
+                    // we just want to add this rpc to the end
+                    synced_connections.inner.push(rpc_id);
+                }
+                cmp::Ordering::Less => {
+                    // this isn't the best block in the tier. don't do anything
+                    continue;
+                }
+            }
+
+            // the synced connections have changed
+            let new_data = Arc::new(synced_connections.clone());
+
+            // TODO: only do this if there are 2 nodes synced to this block?
+            // do the arcswap
+            self.synced_connections.swap(new_data);
         }
 
         // TODO: if there was an error, we should return it
@@ -355,37 +297,27 @@ impl Web3Connections {
     ) -> Result<ActiveRequestHandle, Option<NotUntil<QuantaInstant>>> {
         let mut earliest_not_until = None;
 
-        let mut synced_rpc_arcs = self
-            .synced_connections_reader
-            .handle()
-            .enter()
-            .map(|x| x.inner.clone())
-            .unwrap();
+        let mut synced_rpc_indexes = self.synced_connections.load().inner.clone();
 
-        // TODO: better key!
-        let sort_cache: HashMap<String, (f32, u32)> = synced_rpc_arcs
+        let sort_cache: Vec<(f32, u32)> = synced_rpc_indexes
             .iter()
-            .map(|connection| {
-                // TODO: better key!
-                let key = format!("{}", connection);
-                let active_requests = connection.active_requests();
-                let soft_limit = connection.soft_limit();
+            .map(|rpc_id| {
+                let rpc = self.inner.get(*rpc_id).unwrap();
+
+                let active_requests = rpc.active_requests();
+                let soft_limit = rpc.soft_limit();
 
                 // TODO: how should we include the soft limit? floats are slower than integer math
                 let utilization = active_requests as f32 / soft_limit as f32;
 
-                (key, (utilization, soft_limit))
+                (utilization, soft_limit)
             })
             .collect();
 
         // TODO: i think we might need to load active connections and then
-        synced_rpc_arcs.sort_unstable_by(|a, b| {
-            // TODO: better keys
-            let a_key = format!("{}", a);
-            let b_key = format!("{}", b);
-
-            let (a_utilization, a_soft_limit) = sort_cache.get(&a_key).unwrap();
-            let (b_utilization, b_soft_limit) = sort_cache.get(&b_key).unwrap();
+        synced_rpc_indexes.sort_unstable_by(|a, b| {
+            let (a_utilization, a_soft_limit) = sort_cache.get(*a).unwrap();
+            let (b_utilization, b_soft_limit) = sort_cache.get(*b).unwrap();
 
             // TODO: i'm comparing floats. crap
             match a_utilization
@@ -397,14 +329,16 @@ impl Web3Connections {
             }
         });
 
-        for selected_rpc in synced_rpc_arcs.into_iter() {
+        for rpc_id in synced_rpc_indexes.into_iter() {
+            let rpc = self.inner.get(rpc_id).unwrap();
+
             // increment our connection counter
-            match selected_rpc.try_request_handle() {
+            match rpc.try_request_handle() {
                 Err(not_until) => {
                     earliest_possible(&mut earliest_not_until, not_until);
                 }
                 Ok(handle) => {
-                    trace!("next server on {:?}: {:?}", self, selected_rpc);
+                    trace!("next server on {:?}: {:?}", self, rpc_id);
                     return Ok(handle);
                 }
             }

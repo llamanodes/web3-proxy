@@ -98,7 +98,8 @@ impl Web3Connection {
     #[instrument(skip_all)]
     pub async fn reconnect(
         self: &Arc<Self>,
-        block_sender: &flume::Sender<(u64, H256, Arc<Self>)>,
+        block_sender: &flume::Sender<(u64, H256, usize)>,
+        rpc_id: usize,
     ) -> anyhow::Result<()> {
         // websocket doesn't need the http client
         let http_client = None;
@@ -108,7 +109,7 @@ impl Web3Connection {
 
         // TODO: tell the block subscriber that we are at 0
         block_sender
-            .send_async((0, H256::default(), self.clone()))
+            .send_async((0, H256::default(), rpc_id))
             .await?;
 
         let new_provider = Web3Provider::from_str(&self.url, http_client).await?;
@@ -203,7 +204,8 @@ impl Web3Connection {
     async fn send_block(
         self: &Arc<Self>,
         block: Result<Block<TxHash>, ProviderError>,
-        block_sender: &flume::Sender<(u64, H256, Arc<Self>)>,
+        block_sender: &flume::Sender<(u64, H256, usize)>,
+        rpc_id: usize,
     ) {
         match block {
             Ok(block) => {
@@ -212,7 +214,7 @@ impl Web3Connection {
 
                 // TODO: i'm pretty sure we don't need send_async, but double check
                 block_sender
-                    .send_async((block_number, block_hash, self.clone()))
+                    .send_async((block_number, block_hash, rpc_id))
                     .await
                     .unwrap();
             }
@@ -227,7 +229,8 @@ impl Web3Connection {
     #[instrument(skip_all)]
     pub async fn subscribe_new_heads(
         self: Arc<Self>,
-        block_sender: flume::Sender<(u64, H256, Arc<Self>)>,
+        rpc_id: usize,
+        block_sender: flume::Sender<(u64, H256, usize)>,
         reconnect: bool,
     ) -> anyhow::Result<()> {
         loop {
@@ -272,7 +275,7 @@ impl Web3Connection {
                                     last_hash = new_hash;
                                 }
 
-                                self.send_block(block, &block_sender).await;
+                                self.send_block(block, &block_sender, rpc_id).await;
                             }
                             Err(e) => {
                                 warn!("Failed getting latest block from {}: {:?}", self, e);
@@ -300,7 +303,7 @@ impl Web3Connection {
                         .request("eth_getBlockByNumber", ("latest", false))
                         .await;
 
-                    self.send_block(block, &block_sender).await;
+                    self.send_block(block, &block_sender, rpc_id).await;
 
                     // TODO: what should this timeout be? needs to be larger than worst case block time
                     // TODO: although reconnects will make this less of an issue
@@ -309,7 +312,7 @@ impl Web3Connection {
                             .await
                         {
                             Ok(Some(new_block)) => {
-                                self.send_block(Ok(new_block), &block_sender).await;
+                                self.send_block(Ok(new_block), &block_sender, rpc_id).await;
 
                                 // TODO: really not sure about this
                                 task::yield_now().await;
@@ -334,7 +337,7 @@ impl Web3Connection {
                 warn!("new heads subscription exited. reconnecting in 10 seconds...");
                 sleep(Duration::from_secs(10)).await;
 
-                self.reconnect(&block_sender).await?;
+                self.reconnect(&block_sender, rpc_id).await?;
             } else {
                 break;
             }

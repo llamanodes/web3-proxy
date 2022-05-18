@@ -231,21 +231,16 @@ impl Web3ProxyApp {
 
                 // todo: move getting a cache_key or the result into a helper function. then we could have multiple caches
                 // TODO: i think we are maybe getting stuck on this lock. maybe a new block arrives, it tries to write and gets hung up on something. then this can't proceed
-                trace!("{:?} waiting for best_block_hash", request);
+                trace!("{:?} waiting for head_block_hash", request);
 
-                let best_block_hash = self
-                    .balanced_rpcs
-                    .get_synced_rpcs()
-                    .enter()
-                    .map(|x| *x.get_head_block_hash())
-                    .unwrap();
+                let head_block_hash = self.balanced_rpcs.get_head_block_hash();
 
-                trace!("{:?} best_block_hash {}", request, best_block_hash);
+                trace!("{:?} head_block_hash {}", request, head_block_hash);
 
                 // TODO: building this cache key is slow and its large, but i don't see a better way right now
                 // TODO: inspect the params and see if a block is specified. if so, use that block number instead of current_block
                 let cache_key = (
-                    best_block_hash,
+                    head_block_hash,
                     request.method.clone(),
                     request.params.clone().map(|x| x.to_string()),
                 );

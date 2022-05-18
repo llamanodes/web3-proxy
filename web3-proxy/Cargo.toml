@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.57"
+arc-swap = "1.5.0"
 argh = "0.1.7"
 # axum = "*"  # TODO: use this instead of warp?
 console-subscriber = { version = "0.1.5", features = ["parking_lot"] }
@@ -19,7 +20,6 @@ futures = { version = "0.3.21", features = ["thread-pool"] }
 # TODO: governor has a "futures" and "futures-timer" feature. do we want those?
 governor = { version = "0.4.2", features = ["dashmap", "std"] }
 hashbrown = "0.12.1"
-left-right = "0.11.4"
 linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }
 # TODO: parking_lot has an "arc_lock" feature that we might want to use
 parking_lot = { version = "0.12.0", features = ["deadlock_detection"] }
