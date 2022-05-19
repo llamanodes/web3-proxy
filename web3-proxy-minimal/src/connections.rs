@@ -145,15 +145,15 @@ impl Web3Connections {
         let mut pending_synced_connections = SyncedConnections::new(max_connections);
 
         while let Ok((new_block_num, new_block_hash, rpc_id)) = block_receiver.recv_async().await {
+            // TODO: span with rpc in it, too
+            // TODO: make sure i'm doing this span right
+            let span = info_span!("block_receiver", rpc_id, new_block_num);
+            let _enter = span.enter();
+
             if new_block_num == 0 {
                 // TODO: show the actual rpc url?
                 warn!("rpc #{} is still syncing", rpc_id);
             }
-
-            // TODO: span with rpc in it, too
-            // TODO: make sure i'm doing this span right
-            let span = info_span!("new_block", new_block_num);
-            let _enter = span.enter();
 
             connection_states.insert(rpc_id, (new_block_num, new_block_hash));
 
@@ -161,7 +161,7 @@ impl Web3Connections {
             match new_block_num.cmp(&pending_synced_connections.head_block_num) {
                 cmp::Ordering::Greater => {
                     // the rpc's newest block is the new overall best block
-                    info!(rpc_id, "new head");
+                    info!("new head");
 
                     pending_synced_connections.inner.clear();
                     pending_synced_connections.inner.insert(rpc_id);
@@ -229,6 +229,7 @@ impl Web3Connections {
                     // this isn't the best block in the tier. don't do anything
                     if !pending_synced_connections.inner.remove(&rpc_id) {
                         // we didn't remove anything. nothing more to do
+                        // the rpc must be behind by more than 1 block
                         continue;
                     }
                     // we removed. don't continue so that we update self.synced_connections
@@ -238,7 +239,10 @@ impl Web3Connections {
             // the synced connections have changed
             let synced_connections = Arc::new(pending_synced_connections.clone());
 
-            info!("new synced_connections: {:?}", synced_connections);
+            info!(
+                "new synced_connections for {:?}: {:?}",
+                synced_connections.head_block_hash, synced_connections.inner
+            );
 
             // TODO: only do this if there are 2 nodes synced to this block?
             // do the arcswap

@@ -227,15 +227,15 @@ impl Web3Connections {
         let mut pending_synced_connections = SyncedConnections::new(max_connections);
 
         while let Ok((new_block_num, new_block_hash, rpc_id)) = block_receiver.recv_async().await {
-            if new_block_num == 0 {
-                // TODO: show the actual rpc url?
-                warn!("rpc #{} is still syncing", rpc_id);
-            }
-
-            // TODO: span with rpc in it, too
+            // TODO: span with more in it?
             // TODO: make sure i'm doing this span right
-            let span = info_span!("new_block", new_block_num);
+            // TODO: show the actual rpc url?
+            let span = info_span!("block_receiver", rpc_id, new_block_num);
             let _enter = span.enter();
+
+            if new_block_num == 0 {
+                warn!("rpc is still syncing");
+            }
 
             connection_states.insert(rpc_id, (new_block_num, new_block_hash));
 
@@ -243,7 +243,7 @@ impl Web3Connections {
             match new_block_num.cmp(&pending_synced_connections.head_block_num) {
                 cmp::Ordering::Greater => {
                     // the rpc's newest block is the new overall best block
-                    info!(rpc_id, "new head");
+                    info!("new head");
 
                     pending_synced_connections.inner.clear();
                     pending_synced_connections.inner.insert(rpc_id);
