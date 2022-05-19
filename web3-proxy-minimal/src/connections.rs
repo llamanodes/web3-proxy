@@ -161,7 +161,7 @@ impl Web3Connections {
             match new_block_num.cmp(&pending_synced_connections.head_block_num) {
                 cmp::Ordering::Greater => {
                     // the rpc's newest block is the new overall best block
-                    info!("new head");
+                    info!("new head: {:?}", new_block_hash);
 
                     pending_synced_connections.inner.clear();
                     pending_synced_connections.inner.insert(rpc_id);
@@ -240,7 +240,7 @@ impl Web3Connections {
             let synced_connections = Arc::new(pending_synced_connections.clone());
 
             info!(
-                "new synced_connections for {:?}: {:?}",
+                "new synced_connections for {}: {:?}",
                 synced_connections.head_block_hash, synced_connections.inner
             );
 
