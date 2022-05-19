@@ -13,7 +13,7 @@ use std::sync::atomic::{self, AtomicU32};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::RwLock;
 use tokio::task;
-use tokio::time::{interval, sleep, timeout_at, Duration, Instant, MissedTickBehavior};
+use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
 use tracing::{info, instrument, trace, warn};
 
 type Web3RateLimiter =
@@ -107,10 +107,8 @@ impl Web3Connection {
         // since this lock is held open over an await, we use tokio's locking
         let mut provider = self.provider.write().await;
 
-        // TODO: tell the block subscriber that we are at 0
-        block_sender
-            .send_async((0, H256::default(), rpc_id))
-            .await?;
+        // tell the block subscriber that we are at 0
+        block_sender.send_async((0, H256::zero(), rpc_id)).await?;
 
         let new_provider = Web3Provider::from_str(&self.url, http_client).await?;
 
@@ -300,24 +298,18 @@ impl Web3Connection {
 
                     self.send_block(block, &block_sender, rpc_id).await;
 
-                    // TODO: what should this timeout be? needs to be larger than worst case block time
+                    // TODO: should the stream have a timeout on it here?
                     // TODO: although reconnects will make this less of an issue
                     loop {
-                        match timeout_at(Instant::now() + Duration::from_secs(300), stream.next())
-                            .await
-                        {
-                            Ok(Some(new_block)) => {
+                        match stream.next().await {
+                            Some(new_block) => {
                                 self.send_block(Ok(new_block), &block_sender, rpc_id).await;
 
                                 // TODO: really not sure about this
                                 task::yield_now().await;
                             }
-                            Ok(None) => {
+                            None => {
                                 warn!("subscription ended");
-                                break;
-                            }
-                            Err(e) => {
-                                warn!("subscription ended with an error: {:?}", e);
                                 break;
                             }
                         }

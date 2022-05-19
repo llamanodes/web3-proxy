@@ -7,9 +7,10 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use serde_json::value::RawValue;
 use std::cmp;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use tokio::task;
@@ -23,7 +24,7 @@ use crate::connection::{ActiveRequestHandle, Web3Connection};
 struct SyncedConnections {
     head_block_num: u64,
     head_block_hash: H256,
-    inner: Vec<usize>,
+    inner: HashSet<usize>,
 }
 
 impl fmt::Debug for SyncedConnections {
@@ -38,7 +39,7 @@ impl SyncedConnections {
         Self {
             head_block_num: 0,
             head_block_hash: Default::default(),
-            inner: Vec::with_capacity(max_connections),
+            inner: HashSet::with_capacity(max_connections),
         }
     }
 
@@ -232,6 +233,7 @@ impl Web3Connections {
             }
 
             // TODO: span with rpc in it, too
+            // TODO: make sure i'm doing this span right
             let span = info_span!("new_block", new_block_num);
             let _enter = span.enter();
 
@@ -241,39 +243,76 @@ impl Web3Connections {
             match new_block_num.cmp(&pending_synced_connections.head_block_num) {
                 cmp::Ordering::Greater => {
                     // the rpc's newest block is the new overall best block
-                    info!("new head from #{}", rpc_id);
+                    info!(rpc_id, "new head");
 
                     pending_synced_connections.inner.clear();
-                    pending_synced_connections.inner.push(rpc_id);
+                    pending_synced_connections.inner.insert(rpc_id);
 
                     pending_synced_connections.head_block_num = new_block_num;
+
+                    // TODO: if the parent hash isn't our previous best block, ignore it
                     pending_synced_connections.head_block_hash = new_block_hash;
                 }
                 cmp::Ordering::Equal => {
-                    if new_block_hash != pending_synced_connections.head_block_hash {
+                    if new_block_hash == pending_synced_connections.head_block_hash {
+                        // this rpc has caught up with the best known head
+                        // do not clear synced_connections.
+                        // we just want to add this rpc to the end
+                        // TODO: HashSet here? i think we get dupes if we don't
+                        pending_synced_connections.inner.insert(rpc_id);
+                    } else {
                         // same height, but different chain
-                        // TODO: anything else we should do? set some "nextSafeBlockHeight" to delay sending transactions?
-                        // TODO: sometimes a node changes its block. if that happens, a new block is probably right behind this one
-                        warn!(
-                            "chain is forked at #{}! #{} has {}. {} rpcs have {}",
-                            new_block_num,
-                            rpc_id,
-                            new_block_hash,
-                            pending_synced_connections.inner.len(),
-                            pending_synced_connections.head_block_hash
-                        );
-                        // TODO: don't continue. check connection_states to see which head block is more popular!
-                        continue;
-                    }
 
-                    // do not clear synced_connections.
-                    // we just want to add this rpc to the end
-                    // TODO: HashSet here? i think we get dupes if we don't
-                    pending_synced_connections.inner.push(rpc_id);
+                        // check connection_states to see which head block is more popular!
+                        let mut rpc_ids_by_block: BTreeMap<H256, Vec<usize>> = BTreeMap::new();
+
+                        let mut synced_rpcs = 0;
+
+                        for (rpc_id, (block_num, block_hash)) in connection_states.iter() {
+                            if *block_num != new_block_num {
+                                // this connection isn't synced. we don't care what hash it has
+                                continue;
+                            }
+
+                            synced_rpcs += 1;
+
+                            let count = rpc_ids_by_block
+                                .entry(*block_hash)
+                                .or_insert_with(|| Vec::with_capacity(max_connections - 1));
+
+                            count.push(*rpc_id);
+                        }
+
+                        let most_common_head_hash = rpc_ids_by_block
+                            .iter()
+                            .max_by(|a, b| a.1.len().cmp(&b.1.len()))
+                            .map(|(k, _v)| k)
+                            .unwrap();
+
+                        warn!(
+                            "chain is forked! {} possible heads. {}/{}/{} rpcs have {}",
+                            rpc_ids_by_block.len(),
+                            rpc_ids_by_block.get(most_common_head_hash).unwrap().len(),
+                            synced_rpcs,
+                            max_connections,
+                            most_common_head_hash
+                        );
+
+                        // this isn't the best block in the tier. don't do anything
+                        if !pending_synced_connections.inner.remove(&rpc_id) {
+                            // we didn't remove anything. nothing more to do
+                            continue;
+                        }
+                        // we removed. don't continue so that we update self.synced_connections
+                    }
                 }
                 cmp::Ordering::Less => {
                     // this isn't the best block in the tier. don't do anything
-                    continue;
+                    if !pending_synced_connections.inner.remove(&rpc_id) {
+                        // we didn't remove anything. nothing more to do
+                        continue;
+                    }
+                    // we removed. don't continue so that we update self.synced_connections
                 }
             }
 
@@ -298,9 +337,15 @@ impl Web3Connections {
     ) -> Result<ActiveRequestHandle, Option<NotUntil<QuantaInstant>>> {
         let mut earliest_not_until = None;
 
-        let mut synced_rpc_indexes = self.synced_connections.load().inner.clone();
+        let mut synced_rpc_ids: Vec<usize> = self
+            .synced_connections
+            .load()
+            .inner
+            .iter()
+            .cloned()
+            .collect();
 
-        let sort_cache: HashMap<usize, (f32, u32)> = synced_rpc_indexes
+        let sort_cache: HashMap<usize, (f32, u32)> = synced_rpc_ids
             .iter()
             .map(|rpc_id| {
                 let rpc = self.inner.get(*rpc_id).unwrap();
@@ -308,14 +353,13 @@ impl Web3Connections {
                 let active_requests = rpc.active_requests();
                 let soft_limit = rpc.soft_limit();
 
-                // TODO: how should we include the soft limit? floats are slower than integer math
                 let utilization = active_requests as f32 / soft_limit as f32;
 
                 (*rpc_id, (utilization, soft_limit))
             })
             .collect();
 
-        synced_rpc_indexes.sort_unstable_by(|a, b| {
+        synced_rpc_ids.sort_unstable_by(|a, b| {
             let (a_utilization, a_soft_limit) = sort_cache.get(a).unwrap();
             let (b_utilization, b_soft_limit) = sort_cache.get(b).unwrap();
 
@@ -329,7 +373,8 @@ impl Web3Connections {
             }
         });
 
-        for rpc_id in synced_rpc_indexes.into_iter() {
+        // now that the rpcs are sorted, try to get an active request handle for one of them
+        for rpc_id in synced_rpc_ids.into_iter() {
             let rpc = self.inner.get(rpc_id).unwrap();
 
             // increment our connection counter
@@ -344,8 +389,7 @@ impl Web3Connections {
             }
         }
 
-        // TODO: this is too verbose
-        // warn!("no servers on {:?}! {:?}", self, earliest_not_until);
+        warn!("no servers on {:?}! {:?}", self, earliest_not_until);
 
         // this might be None
         Err(earliest_not_until)

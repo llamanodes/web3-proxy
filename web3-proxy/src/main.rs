@@ -28,6 +28,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     // install global collector configured based on RUST_LOG env var.
+    // tracing_subscriber::fmt().init();
     console_subscriber::init();
 
     fdlimit::raise_fd_limit();
@@ -43,8 +44,7 @@ fn main() -> anyhow::Result<()> {
 
     let chain_id = rpc_config.shared.chain_id;
 
-    // TODO: multithreaded runtime once i'm done debugging
-    let mut rt_builder = runtime::Builder::new_current_thread();
+    let mut rt_builder = runtime::Builder::new_multi_thread();
 
     rt_builder.enable_all().thread_name_fn(move || {
         static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
