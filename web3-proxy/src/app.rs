@@ -17,7 +17,6 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task;
 use tokio::time::sleep;
-use tracing::info_span;
 use tracing::{debug, instrument, trace, warn};
 
 static APP_USER_AGENT: &str = concat!(
@@ -224,13 +223,12 @@ impl Web3ProxyApp {
         } else {
             // this is not a private transaction (or no private relays are configured)
             // TODO: how much should we retry?
-            for i in 0..10usize {
+            for _i in 0..10usize {
                 // TODO: think more about this loop.
                 // // TODO: add more to this span. and do it properly
                 // let span = info_span!("i", ?i);
                 // let _enter = span.enter();
 
-                /*
                 // todo: move getting a cache_key or the result into a helper function. then we could have multiple caches
                 // TODO: i think we are maybe getting stuck on this lock. maybe a new block arrives, it tries to write and gets hung up on something. then this can't proceed
                 trace!("{:?} waiting for head_block_hash", request);
@@ -297,7 +295,6 @@ impl Web3ProxyApp {
                         );
                     }
                 }
-                 */
 
                 match self.balanced_rpcs.next_upstream_server().await {
                     Ok(active_request_handle) => {
@@ -310,15 +307,14 @@ impl Web3ProxyApp {
                                 // TODO: trace here was really slow with millions of requests.
                                 // trace!("forwarding request from {}", upstream_server);
 
-                                JsonRpcForwardedResponse {
+                                let response = JsonRpcForwardedResponse {
                                     jsonrpc: "2.0".to_string(),
                                     id: request.id,
                                     // TODO: since we only use the result here, should that be all we return from try_send_request?
                                     result: Some(partial_response),
                                     error: None,
-                                }
+                                };
 
-                                /*
                                 // TODO: small race condidition here. parallel requests with the same query will both be saved to the cache
                                 let mut response_cache = self.response_cache.write();
 
@@ -334,13 +330,12 @@ impl Web3ProxyApp {
                                 // TODO: needing to remove manually here makes me think we should do this differently
                                 let _ = self.active_requests.remove(&cache_key);
                                 let _ = in_flight_tx.send(false);
-                                */
 
-                                // response
+                                response
                             }
                             Err(e) => {
-                                // // send now since we aren't going to cache an error response
-                                // let _ = in_flight_tx.send(false);
+                                // send now since we aren't going to cache an error response
+                                let _ = in_flight_tx.send(false);
 
                                 // TODO: move this to a helper function?
                                 let code;
@@ -402,8 +397,8 @@ impl Web3ProxyApp {
                             }
                         };
 
-                        // // TODO: needing to remove manually here makes me think we should do this differently
-                        // let _ = self.active_requests.remove(&cache_key);
+                        // TODO: needing to remove manually here makes me think we should do this differently
+                        let _ = self.active_requests.remove(&cache_key);
 
                         if response.error.is_some() {
                             trace!("Sending error reply: {:?}", response);
@@ -412,7 +407,7 @@ impl Web3ProxyApp {
                         } else {
                             trace!("Sending reply: {:?}", response);
 
-                            // let _ = in_flight_tx.send(false);
+                            let _ = in_flight_tx.send(false);
                         }
 
                         return Ok(response);
@@ -421,9 +416,9 @@ impl Web3ProxyApp {
                         // TODO: this is too verbose. if there are other servers in other tiers, we use those!
                         warn!("No servers in sync!");
 
-                        // // TODO: needing to remove manually here makes me think we should do this differently
-                        // let _ = self.active_requests.remove(&cache_key);
-                        // let _ = in_flight_tx.send(false);
+                        // TODO: needing to remove manually here makes me think we should do this differently
+                        let _ = self.active_requests.remove(&cache_key);
+                        let _ = in_flight_tx.send(false);
 
                         return Err(anyhow::anyhow!("no servers in sync"));
                     }
@@ -439,9 +434,9 @@ impl Web3ProxyApp {
 
                         warn!("All rate limits exceeded. Sleeping");
 
-                        // // TODO: needing to remove manually here makes me think we should do this differently
-                        // let _ = self.active_requests.remove(&cache_key);
-                        // let _ = in_flight_tx.send(false);
+                        // TODO: needing to remove manually here makes me think we should do this differently
+                        let _ = self.active_requests.remove(&cache_key);
+                        let _ = in_flight_tx.send(false);
 
                         continue;
                     }

@@ -1,0 +1,35 @@
+[shared]
+chain_id = 1
+
+[balanced_rpcs]
+
+    [balanced_rpcs.erigon_archive]
+    url = "http://127.0.0.1:8549"
+    # TODO: double check soft_limit on erigon
+    soft_limit = 100_000
+
+    [balanced_rpcs.geth]
+    url = "http://127.0.0.1:8545"
+    soft_limit = 200_000
+
+[private_rpcs]
+
+    [private_rpcs.eden]
+    url = "https://api.edennetwork.io/v1/"
+    soft_limit = 1_805
+
+    [private_rpcs.eden_beta]
+    url = "https://api.edennetwork.io/v1/beta"
+    soft_limit = 5_861
+
+    [private_rpcs.ethermine]
+    url = "https://rpc.ethermine.org"
+    soft_limit = 5_861
+
+    [private_rpcs.flashbots]
+    url = "https://rpc.flashbots.net"
+    soft_limit = 7074
+
+    [private_rpcs.securerpc]
+    url = "https://gibson.securerpc.com/v1"
+    soft_limit = 4560

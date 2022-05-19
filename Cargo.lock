@@ -4298,6 +4298,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "web3-proxy-minimal"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "argh",
+ "console-subscriber",
+ "derive_more",
+ "ethers",
+ "fdlimit",
+ "flume",
+ "futures",
+ "hashbrown 0.12.1",
+ "parking_lot 0.12.0",
+ "regex",
+ "reqwest",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "webpki"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
