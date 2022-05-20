@@ -9,7 +9,7 @@ All other requests are sent to an RPC server on the latest block (alchemy, moral
 Each server has different limits to configure. The `soft_limit` is the number of parallel active requests where a server starts to slow down. The `hard_limit` is where a server starts giving rate limits or other errors.
 
 ```
-cargo run --release -- --help
+cargo run --release -p web3-proxy -- --help
 ```
 ```
    Compiling web3-proxy v0.1.0 (/home/bryan/src/web3-proxy/web3-proxy)
@@ -28,7 +28,7 @@ Options:
 Start the server with the defaults (listen on `http://localhost:8544` and use `./config/example.toml` which proxies to a local websocket on 8546 and ankr's public ETH node):
 
 ```
-cargo run --release
+cargo run --release -p web3-proxy
 ```
 
 Check that the proxy is working:
@@ -45,7 +45,7 @@ Flame graphs make finding slow code painless:
 
     $ cat /proc/sys/kernel/kptr_restrict
     1
-    $ echo 0 |sudo tee /proc/sys/kernel/kptr_restrict
+    $ echo 0 | sudo tee /proc/sys/kernel/kptr_restrict
     0
     $ CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph
 
