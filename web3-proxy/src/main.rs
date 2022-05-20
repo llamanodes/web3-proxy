@@ -5,16 +5,14 @@ mod connections;
 mod frontend;
 mod jsonrpc;
 
-use jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
 use parking_lot::deadlock;
-use serde_json::value::RawValue;
 use std::fs;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::runtime;
-use tracing::{debug, error, info, trace, warn};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::app::Web3ProxyApp;
