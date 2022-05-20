@@ -34,6 +34,8 @@ type CacheKey = (H256, String, Option<String>);
 
 type ResponseLruCache = RwLock<LinkedHashMap<CacheKey, JsonRpcForwardedResponse>>;
 
+type ActiveRequestsMap = DashMap<CacheKey, watch::Receiver<bool>>;
+
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
 // TODO: if Web3ProxyApp is always in an Arc, i think we can avoid having at least some of these internal things in arcs
@@ -45,7 +47,7 @@ pub struct Web3ProxyApp {
     balanced_rpcs: Arc<Web3Connections>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     private_rpcs: Arc<Web3Connections>,
-    active_requests: DashMap<CacheKey, watch::Receiver<bool>>,
+    active_requests: ActiveRequestsMap,
     response_cache: ResponseLruCache,
 }
 
@@ -102,6 +104,18 @@ impl Web3ProxyApp {
             active_requests: Default::default(),
             response_cache: Default::default(),
         })
+    }
+
+    pub fn get_balanced_rpcs(&self) -> &Web3Connections {
+        &self.balanced_rpcs
+    }
+
+    pub fn get_private_rpcs(&self) -> &Web3Connections {
+        &self.private_rpcs
+    }
+
+    pub fn get_active_requests(&self) -> &ActiveRequestsMap {
+        &self.active_requests
     }
 
     /// send the request to the approriate RPCs

@@ -7,6 +7,8 @@ use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::NotUntil;
 use governor::RateLimiter;
+use serde::ser::{SerializeStruct, Serializer};
+use serde::Serialize;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::atomic::{self, AtomicU32};
@@ -78,8 +80,30 @@ pub struct Web3Connection {
     soft_limit: u32,
     /// the same clock that is used by the rate limiter
     clock: QuantaClock,
+    // TODO: track total number of requests?
 }
 
+impl Serialize for Web3Connection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 3 is the number of fields in the struct.
+        let mut state = serializer.serialize_struct("Web3Connection", 1)?;
+
+        // TODO: sanitize any credentials in the url
+        state.serialize_field("url", &self.url)?;
+
+        state.serialize_field("soft_limit", &self.soft_limit)?;
+
+        state.serialize_field(
+            "active_requests",
+            &self.active_requests.load(atomic::Ordering::Acquire),
+        )?;
+
+        state.end()
+    }
+}
 impl fmt::Debug for Web3Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Web3Connection")

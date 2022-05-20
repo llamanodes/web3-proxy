@@ -9,6 +9,7 @@ use axum::{
     Json,
     Router,
 };
+use serde_json::json;
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -52,17 +53,32 @@ async fn root() -> impl IntoResponse {
 // TODO: i can't get https://docs.rs/axum/latest/axum/error_handling/index.html to work
 async fn proxy_web3_rpc(
     payload: Json<JsonRpcRequestEnum>,
-    state: Extension<Arc<Web3ProxyApp>>,
+    app: Extension<Arc<Web3ProxyApp>>,
 ) -> impl IntoResponse {
-    match state.0.proxy_web3_rpc(payload.0).await {
+    match app.0.proxy_web3_rpc(payload.0).await {
         Ok(response) => (StatusCode::OK, serde_json::to_string(&response).unwrap()),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)),
     }
 }
 
-/// Status page
-async fn status(state: Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
-    (StatusCode::INTERNAL_SERVER_ERROR, "Hello, list_rpcs!")
+/// Very basic status page
+async fn status(app: Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
+    let app = app.0.as_ref();
+
+    let balanced_rpcs = app.get_balanced_rpcs();
+
+    let private_rpcs = app.get_private_rpcs();
+
+    let num_active_requests = app.get_active_requests().len();
+
+    // TODO: what else should we include? uptime? prometheus?
+    let body = json!({
+        "balanced_rpcs": balanced_rpcs,
+        "private_rpcs": private_rpcs,
+        "num_active_requests": num_active_requests,
+    });
+
+    (StatusCode::INTERNAL_SERVER_ERROR, body.to_string())
 }
 
 async fn handler_404() -> impl IntoResponse {
@@ -93,3 +109,5 @@ async fn _handle_anyhow_error(err: anyhow::Error) -> impl IntoResponse {
         serde_json::to_string(&err).unwrap(),
     )
 }
+
+// i think we want a custom result type. it has an anyhow result inside. it impl IntoResponse

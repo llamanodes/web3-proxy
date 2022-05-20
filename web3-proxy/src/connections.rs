@@ -8,6 +8,8 @@ use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
 use hashbrown::HashMap;
+use serde::ser::{SerializeStruct, Serializer};
+use serde::Serialize;
 use serde_json::value::RawValue;
 use std::cmp;
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,7 +22,8 @@ use tracing::{info, info_span, instrument, trace, warn};
 use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, Web3Connection};
 
-#[derive(Clone, Default)]
+// Serialize so we can print it on our debug endpoint
+#[derive(Clone, Default, Serialize)]
 struct SyncedConnections {
     head_block_num: u64,
     head_block_hash: H256,
@@ -45,6 +48,21 @@ impl SyncedConnections {
 pub struct Web3Connections {
     inner: Vec<Arc<Web3Connection>>,
     synced_connections: ArcSwap<SyncedConnections>,
+}
+
+impl Serialize for Web3Connections {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let inner: Vec<&Web3Connection> = self.inner.iter().map(|x| x.as_ref()).collect();
+
+        // 3 is the number of fields in the struct.
+        let mut state = serializer.serialize_struct("Web3Connections", 2)?;
+        state.serialize_field("rpcs", &inner)?;
+        state.serialize_field("synced_connections", &**self.synced_connections.load())?;
+        state.end()
+    }
 }
 
 impl fmt::Debug for Web3Connections {
