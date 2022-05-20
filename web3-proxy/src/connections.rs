@@ -7,10 +7,10 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use governor::clock::{QuantaClock, QuantaInstant};
 use governor::NotUntil;
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 use serde_json::value::RawValue;
 use std::cmp;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 use tokio::task;
@@ -24,7 +24,7 @@ use crate::connection::{ActiveRequestHandle, Web3Connection};
 struct SyncedConnections {
     head_block_num: u64,
     head_block_hash: H256,
-    inner: HashSet<usize>,
+    inner: BTreeSet<usize>,
 }
 
 impl fmt::Debug for SyncedConnections {

@@ -3,9 +3,9 @@ use arc_swap::ArcSwap;
 use derive_more::From;
 use ethers::prelude::H256;
 use futures::future::join_all;
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 use std::cmp;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 use tokio::task;
@@ -14,21 +14,11 @@ use tracing::{info, info_span, instrument, warn};
 
 use crate::connection::Web3Connection;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct SyncedConnections {
     head_block_num: u64,
     head_block_hash: H256,
-    inner: HashSet<usize>,
-}
-
-impl SyncedConnections {
-    fn new(max_connections: usize) -> Self {
-        Self {
-            head_block_num: 0,
-            head_block_hash: Default::default(),
-            inner: HashSet::with_capacity(max_connections),
-        }
-    }
+    inner: BTreeSet<usize>,
 }
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
@@ -72,7 +62,7 @@ impl Web3Connections {
             ));
         }
 
-        let synced_connections = SyncedConnections::new(num_connections);
+        let synced_connections = SyncedConnections::default();
 
         let connections = Arc::new(Self {
             inner: connections,
@@ -142,7 +132,7 @@ impl Web3Connections {
         let mut connection_states: HashMap<usize, (u64, H256)> =
             HashMap::with_capacity(max_connections);
 
-        let mut pending_synced_connections = SyncedConnections::new(max_connections);
+        let mut pending_synced_connections = SyncedConnections::default();
 
         while let Ok((new_block_num, new_block_hash, rpc_id)) = block_receiver.recv_async().await {
             // TODO: span with rpc in it, too
