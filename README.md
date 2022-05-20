@@ -9,19 +9,20 @@ All other requests are sent to an RPC server on the latest block (alchemy, moral
 Each server has different limits to configure. The `soft_limit` is the number of parallel active requests where a server starts to slow down. The `hard_limit` is where a server starts giving rate limits or other errors.
 
 ```
-cargo run --release -p web3-proxy -- --help
+$ cargo run --release -p web3-proxy -- --help
 ```
 ```
    Compiling web3-proxy v0.1.0 (/home/bryan/src/web3-proxy/web3-proxy)
-    Finished release [optimized] target(s) in 9.45s
+    Finished release [optimized + debuginfo] target(s) in 17.69s
      Running `target/release/web3-proxy --help`
-Usage: web3-proxy [--listen-port <listen-port>] [--rpc-config-path <rpc-config-path>]
+Usage: web3-proxy [--port <port>] [--workers <workers>] [--config <config>]
 
 Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
 
 Options:
-  --listen-port     what port the proxy should listen on
-  --rpc-config-path path to a toml of rpc servers
+  --port            what port the proxy should listen on
+  --workers         number of worker threads
+  --config          path to a toml of rpc servers
   --help            display usage information
 ```
 
@@ -34,7 +35,7 @@ cargo run --release -p web3-proxy
 Check that the proxy is working:
 
 ```
-curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"web3_clientVersion","id":1}' 127.0.0.1:8544/eth
+curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"web3_clientVersion","id":1}' 127.0.0.1:8544
 ```
 
 You can copy `config/example.toml` to `config/production-$CHAINNAME.toml` and then run `docker-compose up --build -d` start a proxies for many chains.
