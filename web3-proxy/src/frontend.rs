@@ -30,12 +30,13 @@ pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> 
         .route("/status", get(status))
         .layer(Extension(proxy_app));
 
+    // 404 for any unknown routes
     let app = app.fallback(handler_404.into_service());
 
     // run our app with hyper
     // `axum::Server` is a re-export of `hyper::Server`
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::debug!("listening on {}", addr);
+    tracing::info!("listening on port {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
@@ -60,7 +61,7 @@ async fn proxy_web3_rpc(
 }
 
 /// Status page
-async fn status() -> impl IntoResponse {
+async fn status(state: Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     (StatusCode::INTERNAL_SERVER_ERROR, "Hello, list_rpcs!")
 }
 
