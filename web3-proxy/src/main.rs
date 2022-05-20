@@ -7,7 +7,6 @@ mod jsonrpc;
 use jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
 use parking_lot::deadlock;
 use serde_json::value::RawValue;
-use std::env;
 use std::fs;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
