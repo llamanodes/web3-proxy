@@ -2,6 +2,6 @@ services:
   base:
     build: .
     restart: unless-stopped
-    command: --config /config.toml
+    command: --config /config.toml --workers 8
     environment:
       RUST_LOG: "web3_proxy=trace"
