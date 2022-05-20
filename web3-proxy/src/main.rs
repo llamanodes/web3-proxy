@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod connection;
 mod connections;
+mod frontend;
 mod jsonrpc;
 
 use jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
@@ -13,9 +14,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::runtime;
-use tracing::{info, warn};
-use warp::Filter;
-use warp::Reply;
+use tracing::{debug, error, info, trace, warn};
+use tracing_subscriber::EnvFilter;
 
 use crate::app::Web3ProxyApp;
 use crate::config::{CliConfig, RpcConfig};
@@ -25,8 +25,10 @@ fn main() -> anyhow::Result<()> {
     // TODO: what should the default log level be?
 
     // install global collector configured based on RUST_LOG env var.
-    tracing_subscriber::fmt().compact().init();
-    // console_subscriber::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .compact()
+        .init();
 
     fdlimit::raise_fd_limit();
 
@@ -77,55 +79,10 @@ fn main() -> anyhow::Result<()> {
 
     // spawn the root task
     rt.block_on(async {
-        let listen_port = cli_config.port;
-
         let app = rpc_config.try_build().await?;
 
         let app: Arc<Web3ProxyApp> = Arc::new(app);
 
-        let proxy_rpc_filter = warp::any()
-            .and(warp::post())
-            .and(warp::body::json())
-            .then(move |json_body| app.clone().proxy_web3_rpc(json_body));
-
-        // TODO: filter for displaying connections and their block heights
-
-        // TODO: warp trace is super verbose. how do we make this more readable?
-        // let routes = proxy_rpc_filter.with(warp::trace::request());
-        let routes = proxy_rpc_filter.map(handle_anyhow_errors);
-
-        warp::serve(routes).run(([0, 0, 0, 0], listen_port)).await;
-
-        Ok(())
+        frontend::run(cli_config.port, app).await
     })
-}
-
-/// convert result into a jsonrpc error. use this at the end of your warp filter
-fn handle_anyhow_errors<T: warp::Reply>(
-    res: anyhow::Result<T>,
-) -> warp::http::Response<warp::hyper::Body> {
-    match res {
-        Ok(r) => r.into_response(),
-        Err(e) => {
-            warn!("Responding with error: {:?}", e);
-
-            let e = JsonRpcForwardedResponse {
-                jsonrpc: "2.0".to_string(),
-                // TODO: what id can we use? how do we make sure the incoming id gets attached to this?
-                id: RawValue::from_string("0".to_string()).unwrap(),
-                result: None,
-                error: Some(JsonRpcErrorData {
-                    code: -32099,
-                    message: format!("{:?}", e),
-                    data: None,
-                }),
-            };
-
-            warp::reply::with_status(
-                serde_json::to_string(&e).unwrap(),
-                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-            )
-        }
-        .into_response(),
-    }
 }

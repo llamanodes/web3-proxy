@@ -110,7 +110,7 @@ impl Web3ProxyApp {
     pub async fn proxy_web3_rpc(
         self: Arc<Web3ProxyApp>,
         request: JsonRpcRequestEnum,
-    ) -> anyhow::Result<impl warp::Reply> {
+    ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         // TODO: i don't always see this in the logs. why?
         debug!("Received request: {:?}", request);
 
@@ -126,7 +126,7 @@ impl Web3ProxyApp {
         // TODO: i don't always see this in the logs. why?
         debug!("Forwarding response: {:?}", response);
 
-        Ok(warp::reply::json(&response))
+        Ok(response)
     }
 
     // #[instrument(skip_all)]

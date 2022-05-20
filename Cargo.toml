@@ -2,7 +2,6 @@
 members = [
   "linkedhashmap",
   "web3-proxy",
-  "web3-proxy-frontend",
 ]
 
 # TODO: enable lto (and maybe other things proven with benchmarks) once rapid development is done
