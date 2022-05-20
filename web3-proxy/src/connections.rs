@@ -207,7 +207,7 @@ impl Web3Connections {
 
     /// TODO: possible dead lock here. investigate more. probably refactor
     /// TODO: move parts of this onto SyncedConnections?
-    #[instrument(skip_all)]
+    // we don't instrument here because we put a span inside the while loop
     async fn update_synced_rpcs(
         &self,
         block_receiver: flume::Receiver<(u64, H256, usize)>,
