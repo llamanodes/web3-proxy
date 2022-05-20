@@ -79,6 +79,7 @@ impl Web3ProxyApp {
             Web3Connections::try_new(chain_id, balanced_rpcs, Some(http_client.clone()), &clock)
                 .await?;
 
+        // TODO: do this separately instead of during try_new
         {
             let balanced_rpcs = balanced_rpcs.clone();
             task::spawn(async move {
@@ -110,7 +111,6 @@ impl Web3ProxyApp {
         self: Arc<Web3ProxyApp>,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<impl warp::Reply> {
-        // TODO: i feel like i don't see this log when i should (even though i do see the response)
         debug!("Received request: {:?}", request);
 
         let response = match request {
@@ -122,7 +122,6 @@ impl Web3ProxyApp {
             }
         };
 
-        // TODO: i feel like i don't see this log when i should (even though i do see the response)
         debug!("Forwarding response: {:?}", response);
 
         Ok(warp::reply::json(&response))

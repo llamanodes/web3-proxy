@@ -3,7 +3,6 @@ members = [
   "linkedhashmap",
   "web3-proxy",
   "web3-proxy-frontend",
-  "web3-proxy-minimal",
 ]
 
 # TODO: enable these once rapid development is done

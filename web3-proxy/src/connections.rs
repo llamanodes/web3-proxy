@@ -20,7 +20,7 @@ use tracing::{info, info_span, instrument, trace, warn};
 use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, Web3Connection};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct SyncedConnections {
     head_block_num: u64,
     head_block_hash: H256,
@@ -35,14 +35,6 @@ impl fmt::Debug for SyncedConnections {
 }
 
 impl SyncedConnections {
-    fn new(max_connections: usize) -> Self {
-        Self {
-            head_block_num: 0,
-            head_block_hash: Default::default(),
-            inner: HashSet::with_capacity(max_connections),
-        }
-    }
-
     pub fn get_head_block_hash(&self) -> &H256 {
         &self.head_block_hash
     }
@@ -93,7 +85,7 @@ impl Web3Connections {
             ));
         }
 
-        let synced_connections = SyncedConnections::new(num_connections);
+        let synced_connections = SyncedConnections::default();
 
         let connections = Arc::new(Self {
             inner: connections,
@@ -139,6 +131,7 @@ impl Web3Connections {
 
         handles.push(handle);
 
+        // TODO: do something with join_all's result
         join_all(handles).await;
     }
 
@@ -224,7 +217,7 @@ impl Web3Connections {
         let mut connection_states: HashMap<usize, (u64, H256)> =
             HashMap::with_capacity(max_connections);
 
-        let mut pending_synced_connections = SyncedConnections::new(max_connections);
+        let mut pending_synced_connections = SyncedConnections::default();
 
         while let Ok((new_block_num, new_block_hash, rpc_id)) = block_receiver.recv_async().await {
             // TODO: span with more in it?

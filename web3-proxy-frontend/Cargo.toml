@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-axum = "*"
+axum = "0.5.6"
 console-subscriber = { version = "0.1.5", features = ["parking_lot"] }
 hashbrown = "0.12.1"
 serde = { version = "1.0.137", features = [] }
