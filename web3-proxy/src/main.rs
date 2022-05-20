@@ -28,8 +28,8 @@ fn main() -> anyhow::Result<()> {
     }
 
     // install global collector configured based on RUST_LOG env var.
-    // tracing_subscriber::fmt().init();
-    console_subscriber::init();
+    tracing_subscriber::fmt().init();
+    // console_subscriber::init();
 
     fdlimit::raise_fd_limit();
 
