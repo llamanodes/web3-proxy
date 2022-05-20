@@ -111,6 +111,7 @@ impl Web3ProxyApp {
         self: Arc<Web3ProxyApp>,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<impl warp::Reply> {
+        // TODO: i don't always see this in the logs. why?
         debug!("Received request: {:?}", request);
 
         let response = match request {
@@ -122,6 +123,7 @@ impl Web3ProxyApp {
             }
         };
 
+        // TODO: i don't always see this in the logs. why?
         debug!("Forwarding response: {:?}", response);
 
         Ok(warp::reply::json(&response))

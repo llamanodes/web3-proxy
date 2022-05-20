@@ -23,12 +23,10 @@ use crate::config::{CliConfig, RpcConfig};
 
 fn main() -> anyhow::Result<()> {
     // TODO: is there a better way to do this?
-    if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "web3_proxy=debug");
-    }
+    // TODO: what should the default log level be?
 
     // install global collector configured based on RUST_LOG env var.
-    tracing_subscriber::fmt().init();
+    tracing_subscriber::fmt().compact().init();
     // console_subscriber::init();
 
     fdlimit::raise_fd_limit();
