@@ -236,7 +236,7 @@ impl Web3Connections {
             match new_block_num.cmp(&pending_synced_connections.head_block_num) {
                 cmp::Ordering::Greater => {
                     // the rpc's newest block is the new overall best block
-                    info!("new head");
+                    info!("new head: {:?}", new_block_hash);
 
                     pending_synced_connections.inner.clear();
                     pending_synced_connections.inner.insert(rpc_id);
@@ -312,7 +312,13 @@ impl Web3Connections {
             // the synced connections have changed
             let synced_connections = Arc::new(pending_synced_connections.clone());
 
-            // TODO: only do this if there are 2 nodes synced to this block?
+            trace!(
+                "rpcs at {}: {:?}",
+                synced_connections.head_block_hash,
+                synced_connections.inner
+            );
+
+            // TODO: only publish if there are x (default 2) nodes synced to this block?
             // do the arcswap
             self.synced_connections.swap(synced_connections);
         }
