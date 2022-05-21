@@ -96,11 +96,9 @@ impl Web3Connections {
             }
         }
 
+        // TODO: less than 3? what should we do here?
         if connections.len() < 2 {
-            // TODO: less than 3? what should we do here?
-            return Err(anyhow::anyhow!(
-                "need at least 2 connections when subscribing to heads!"
-            ));
+            warn!("Only 1 connection!");
         }
 
         let synced_connections = SyncedConnections::default();
