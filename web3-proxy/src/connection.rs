@@ -73,8 +73,9 @@ pub struct Web3Connection {
     url: String,
     /// keep track of currently open requests. We sort on this
     active_requests: AtomicU32,
-    // TODO: put this in a RwLock so that we can replace it if re-connecting
+    /// provider is in a RwLock so that we can replace it if re-connecting
     provider: RwLock<Arc<Web3Provider>>,
+    /// this should store rate limits in redis/memcache/etc so that restarts and multiple proxies don't block eachother
     ratelimiter: Option<Web3RateLimiter>,
     /// used for load balancing to the least loaded server
     soft_limit: u32,

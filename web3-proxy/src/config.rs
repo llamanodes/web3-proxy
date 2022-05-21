@@ -20,7 +20,7 @@ pub struct CliConfig {
     pub workers: usize,
 
     /// path to a toml of rpc servers
-    #[argh(option, default = "\"./config/example.toml\".to_string()")]
+    #[argh(option, default = "\"./config/development.toml\".to_string()")]
     pub config: String,
 }
 

@@ -1,5 +1,6 @@
 services:
   base:
+    # TODO: build in dev but use docker hub in prod?
     build: .
     restart: unless-stopped
     command: --config /config.toml --workers 8

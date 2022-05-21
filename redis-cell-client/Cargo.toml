@@ -1,0 +1,9 @@
+[package]
+name = "redis-ratelimit-client"
+version = "0.2.0"
+authors = ["Bryan Stitt <bryan@stitthappens.com>"]
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0.57"
+redis = { version = "0.21.5", features = ["aio", "tokio", "tokio-comp"] }

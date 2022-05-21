@@ -255,6 +255,7 @@ impl Web3Connections {
                 cmp::Ordering::Greater => {
                     // the rpc's newest block is the new overall best block
                     // TODO: if trace, do the full block hash?
+                    // TODO: only accept this block if it is a child of the current head_block
                     info!("new head: {}", new_block_hash);
 
                     pending_synced_connections.inner.clear();

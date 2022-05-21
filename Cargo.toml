@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "linkedhashmap",
+  "redis-cell-client",
   "web3-proxy",
 ]
 

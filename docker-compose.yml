@@ -1,93 +1,16 @@
 ---
+# development config
 version: "3.4"
 
 services:
-  arbitrum:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-arbitrum.toml:/config.toml
-    ports:
-      - 7500:8544
-
-  avalanche-c:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-avalanche-c.toml:/config.toml
-    ports:
-      - 7501:8544
-
-  bsc:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-bsc.toml:/config.toml
-    ports:
-      - 7502:8544
+  redis:
+    build: ./redis-cell-server/
 
   eth:
     extends:
       file: docker-compose.common.yml
       service: base
     volumes:
-      - ./config/production-eth.toml:/config.toml
+      - ./config/example.toml:/config.toml
     ports:
-      - 7503:8544
-
-  eth-archive:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-eth-archive.toml:/config.toml
-    ports:
-      - 7603:8544
-
-  fantom:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-fantom.toml:/config.toml
-    ports:
-      - 7504:8544
-
-  gnosis:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-gnosis.toml:/config.toml
-    ports:
-      - 7505:8544
-
-  goerli:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-goerli.toml:/config.toml
-    ports:
-      - 7506:8544
-
-  optimism:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-optimism.toml:/config.toml
-    ports:
-      - 7507:8544
-
-  polygon:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-polygon.toml:/config.toml
-    ports:
-      - 7508:8544
+      - 8544:8544
