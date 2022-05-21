@@ -2,24 +2,16 @@
 use derive_more::From;
 use ethers::prelude::{Block, Middleware, ProviderError, TxHash, H256};
 use futures::StreamExt;
-use governor::clock::{Clock, QuantaClock, QuantaInstant};
-use governor::middleware::NoOpMiddleware;
-use governor::state::{InMemoryState, NotKeyed};
-use governor::NotUntil;
-use governor::RateLimiter;
+use redis_cell_client::{RedisCellClient, RedisCellKey};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use std::fmt;
-use std::num::NonZeroU32;
 use std::sync::atomic::{self, AtomicU32};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::RwLock;
 use tokio::task;
 use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
 use tracing::{info, instrument, trace, warn};
-
-type Web3RateLimiter =
-    RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware<QuantaInstant>>;
 
 /// TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
 #[derive(From)]
@@ -30,11 +22,16 @@ pub enum Web3Provider {
 
 impl Web3Provider {
     #[instrument]
-    async fn from_str(url_str: &str, http_client: Option<reqwest::Client>) -> anyhow::Result<Self> {
+    async fn from_str(
+        url_str: &str,
+        http_client: Option<&reqwest::Client>,
+    ) -> anyhow::Result<Self> {
         let provider = if url_str.starts_with("http") {
             let url: url::Url = url_str.parse()?;
 
-            let http_client = http_client.ok_or_else(|| anyhow::anyhow!("no http_client"))?;
+            let http_client = http_client
+                .ok_or_else(|| anyhow::anyhow!("no http_client"))?
+                .clone();
 
             let provider = ethers::providers::Http::new_with_client(url, http_client);
 
@@ -75,12 +72,10 @@ pub struct Web3Connection {
     active_requests: AtomicU32,
     /// provider is in a RwLock so that we can replace it if re-connecting
     provider: RwLock<Arc<Web3Provider>>,
-    /// this should store rate limits in redis/memcache/etc so that restarts and multiple proxies don't block eachother
-    ratelimiter: Option<Web3RateLimiter>,
+    /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
+    hard_limit: Option<RedisCellKey>,
     /// used for load balancing to the least loaded server
     soft_limit: u32,
-    /// the same clock that is used by the rate limiter
-    clock: QuantaClock,
     // TODO: track total number of requests?
 }
 
@@ -143,35 +138,35 @@ impl Web3Connection {
     }
 
     /// Connect to a web3 rpc and subscribe to new heads
-    #[instrument(name = "try_new_Web3Connection", skip(clock, http_client))]
+    #[instrument(name = "try_new_Web3Connection", skip(hard_limit, http_client))]
     pub async fn try_new(
         chain_id: usize,
         url_str: String,
         // optional because this is only used for http providers. websocket providers don't use it
-        http_client: Option<reqwest::Client>,
-        hard_rate_limit: Option<u32>,
-        clock: &QuantaClock,
+        http_client: Option<&reqwest::Client>,
+        hard_limit: Option<(u32, &RedisCellClient)>,
         // TODO: think more about this type
         soft_limit: u32,
     ) -> anyhow::Result<Arc<Web3Connection>> {
-        let hard_rate_limiter = if let Some(hard_rate_limit) = hard_rate_limit {
-            let quota = governor::Quota::per_second(NonZeroU32::new(hard_rate_limit).unwrap());
-
-            let rate_limiter = governor::RateLimiter::direct_with_clock(quota, clock);
-
-            Some(rate_limiter)
-        } else {
-            None
-        };
+        let hard_limit = hard_limit.map(|(hard_rate_limit, hard_rate_limiter)| {
+            // TODO: allow different max_burst and count_per_period and period
+            let period = 1;
+            RedisCellKey::new(
+                hard_rate_limiter,
+                format!("{},{}", chain_id, url_str),
+                hard_rate_limit,
+                hard_rate_limit,
+                period,
+            )
+        });
 
         let provider = Web3Provider::from_str(&url_str, http_client).await?;
 
         let connection = Web3Connection {
-            clock: clock.clone(),
             url: url_str.clone(),
             active_requests: 0.into(),
             provider: RwLock::new(Arc::new(provider)),
-            ratelimiter: hard_rate_limiter,
+            hard_limit,
             soft_limit,
         };
 
@@ -273,7 +268,7 @@ impl Web3Connection {
                         // TODO: if error or rate limit, increase interval?
                         interval.tick().await;
 
-                        match self.try_request_handle() {
+                        match self.try_request_handle().await {
                             Ok(active_request_handle) => {
                                 // TODO: i feel like this should be easier. there is a provider.getBlock, but i don't know how to give it "latest"
                                 let block: Result<Block<TxHash>, _> = provider
@@ -364,12 +359,10 @@ impl Web3Connection {
         // TODO: maximum wait time
 
         for _ in 0..10 {
-            match self.try_request_handle() {
+            match self.try_request_handle().await {
                 Ok(pending_request_handle) => return pending_request_handle,
-                Err(not_until) => {
-                    let deadline = not_until.wait_time_from(self.clock.now());
-
-                    sleep(deadline).await;
+                Err(retry_after) => {
+                    sleep(retry_after).await;
                 }
             }
         }
@@ -378,23 +371,21 @@ impl Web3Connection {
         panic!("no request handle after 10 tries");
     }
 
-    pub fn try_request_handle(
-        self: &Arc<Self>,
-    ) -> Result<ActiveRequestHandle, NotUntil<QuantaInstant>> {
+    pub async fn try_request_handle(self: &Arc<Self>) -> Result<ActiveRequestHandle, Duration> {
         // check rate limits
-        if let Some(ratelimiter) = self.ratelimiter.as_ref() {
-            match ratelimiter.check() {
+        if let Some(ratelimiter) = self.hard_limit.as_ref() {
+            match ratelimiter.throttle().await {
                 Ok(_) => {
                     // rate limit succeeded
                     return Ok(ActiveRequestHandle::new(self.clone()));
                 }
-                Err(not_until) => {
+                Err(retry_after) => {
                     // rate limit failed
-                    // save the smallest not_until. if nothing succeeds, return an Err with not_until in it
+                    // save the smallest retry_after. if nothing succeeds, return an Err with retry_after in it
                     // TODO: use tracing better
-                    warn!("Exhausted rate limit on {:?}: {}", self, not_until);
+                    warn!("Exhausted rate limit on {:?}: {:?}", self, retry_after);
 
-                    return Err(not_until);
+                    return Err(retry_after);
                 }
             }
         };

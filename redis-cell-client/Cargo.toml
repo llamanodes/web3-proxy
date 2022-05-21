@@ -1,5 +1,5 @@
 [package]
-name = "redis-ratelimit-client"
+name = "redis-cell-client"
 version = "0.2.0"
 authors = ["Bryan Stitt <bryan@stitthappens.com>"]
 edition = "2018"

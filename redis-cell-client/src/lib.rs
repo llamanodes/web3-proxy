@@ -1,3 +1,3 @@
 mod client;
 
-pub use client::RedisCellClient;
+pub use client::{RedisCellClient, RedisCellKey};

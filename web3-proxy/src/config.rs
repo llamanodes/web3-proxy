@@ -1,14 +1,13 @@
 use argh::FromArgs;
-use governor::clock::QuantaClock;
+use redis_cell_client::RedisCellClient;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-// use tracing::instrument;
 
 use crate::connection::Web3Connection;
 use crate::Web3ProxyApp;
 
-#[derive(FromArgs)]
+#[derive(Debug, FromArgs)]
 /// Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
 pub struct CliConfig {
     /// what port the proxy should listen on
@@ -24,7 +23,7 @@ pub struct CliConfig {
     pub config: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct RpcConfig {
     pub shared: RpcSharedConfig,
     pub balanced_rpcs: HashMap<String, Web3ConnectionConfig>,
@@ -32,13 +31,14 @@ pub struct RpcConfig {
 }
 
 /// shared configuration between Web3Connections
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct RpcSharedConfig {
     /// TODO: what type for chain_id? TODO: this isn't at the right level. this is inside a "Config"
     pub chain_id: usize,
+    pub rate_limit_redis: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Web3ConnectionConfig {
     url: String,
     soft_limit: u32,
@@ -57,7 +57,13 @@ impl RpcConfig {
             vec![]
         };
 
-        Web3ProxyApp::try_new(self.shared.chain_id, balanced_rpcs, private_rpcs).await
+        Web3ProxyApp::try_new(
+            self.shared.chain_id,
+            self.shared.rate_limit_redis,
+            balanced_rpcs,
+            private_rpcs,
+        )
+        .await
     }
 }
 
@@ -66,16 +72,17 @@ impl Web3ConnectionConfig {
     // #[instrument(name = "try_build_Web3ConnectionConfig", skip_all)]
     pub async fn try_build(
         self,
-        clock: &QuantaClock,
+        redis_ratelimiter: Option<&RedisCellClient>,
         chain_id: usize,
-        http_client: Option<reqwest::Client>,
+        http_client: Option<&reqwest::Client>,
     ) -> anyhow::Result<Arc<Web3Connection>> {
+        let hard_rate_limit = self.hard_limit.map(|x| (x, redis_ratelimiter.unwrap()));
+
         Web3Connection::try_new(
             chain_id,
             self.url,
             http_client,
-            self.hard_limit,
-            clock,
+            hard_rate_limit,
             self.soft_limit,
         )
         .await

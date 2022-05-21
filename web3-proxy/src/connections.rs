@@ -5,9 +5,8 @@ use ethers::prelude::H256;
 use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use governor::clock::{QuantaClock, QuantaInstant};
-use governor::NotUntil;
 use hashbrown::HashMap;
+use redis_cell_client::RedisCellClient;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::value::RawValue;
@@ -15,6 +14,7 @@ use std::cmp;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::task;
 use tracing::Instrument;
 use tracing::{info, info_span, instrument, trace, warn};
@@ -79,8 +79,8 @@ impl Web3Connections {
     pub async fn try_new(
         chain_id: usize,
         servers: Vec<Web3ConnectionConfig>,
-        http_client: Option<reqwest::Client>,
-        clock: &QuantaClock,
+        http_client: Option<&reqwest::Client>,
+        rate_limiter: Option<&RedisCellClient>,
     ) -> anyhow::Result<Arc<Self>> {
         let num_connections = servers.len();
 
@@ -88,7 +88,7 @@ impl Web3Connections {
         let mut connections = Vec::with_capacity(num_connections);
         for server_config in servers.into_iter() {
             match server_config
-                .try_build(clock, chain_id, http_client.clone())
+                .try_build(rate_limiter, chain_id, http_client)
                 .await
             {
                 Ok(connection) => connections.push(connection),
@@ -351,10 +351,8 @@ impl Web3Connections {
 
     /// get the best available rpc server
     #[instrument(skip_all)]
-    pub async fn next_upstream_server(
-        &self,
-    ) -> Result<ActiveRequestHandle, Option<NotUntil<QuantaInstant>>> {
-        let mut earliest_not_until = None;
+    pub async fn next_upstream_server(&self) -> Result<ActiveRequestHandle, Option<Duration>> {
+        let mut earliest_retry_after = None;
 
         let mut synced_rpc_ids: Vec<usize> = self
             .synced_connections
@@ -397,9 +395,9 @@ impl Web3Connections {
             let rpc = self.inner.get(rpc_id).unwrap();
 
             // increment our connection counter
-            match rpc.try_request_handle() {
-                Err(not_until) => {
-                    earliest_possible(&mut earliest_not_until, not_until);
+            match rpc.try_request_handle().await {
+                Err(retry_after) => {
+                    earliest_retry_after = earliest_retry_after.min(Some(retry_after));
                 }
                 Ok(handle) => {
                     trace!("next server on {:?}: {:?}", self, rpc_id);
@@ -408,26 +406,24 @@ impl Web3Connections {
             }
         }
 
-        warn!("no servers on {:?}! {:?}", self, earliest_not_until);
+        warn!("no servers on {:?}! {:?}", self, earliest_retry_after);
 
         // this might be None
-        Err(earliest_not_until)
+        Err(earliest_retry_after)
     }
 
     /// get all rpc servers that are not rate limited
     /// returns servers even if they aren't in sync. This is useful for broadcasting signed transactions
-    pub fn get_upstream_servers(
-        &self,
-    ) -> Result<Vec<ActiveRequestHandle>, Option<NotUntil<QuantaInstant>>> {
-        let mut earliest_not_until = None;
+    pub async fn get_upstream_servers(&self) -> Result<Vec<ActiveRequestHandle>, Option<Duration>> {
+        let mut earliest_retry_after = None;
         // TODO: with capacity?
         let mut selected_rpcs = vec![];
 
         for connection in self.inner.iter() {
             // check rate limits and increment our connection counter
-            match connection.try_request_handle() {
-                Err(not_until) => {
-                    earliest_possible(&mut earliest_not_until, not_until);
+            match connection.try_request_handle().await {
+                Err(retry_after) => {
+                    earliest_retry_after = earliest_retry_after.min(Some(retry_after));
                     // this rpc is not available. skip it
                 }
                 Ok(handle) => selected_rpcs.push(handle),
@@ -438,24 +434,7 @@ impl Web3Connections {
             return Ok(selected_rpcs);
         }
 
-        // return the earliest not_until (if no rpcs are synced, this will be None)
-        Err(earliest_not_until)
-    }
-}
-
-fn earliest_possible(
-    earliest_not_until_option: &mut Option<NotUntil<QuantaInstant>>,
-    new_not_until: NotUntil<QuantaInstant>,
-) {
-    match earliest_not_until_option.as_ref() {
-        None => *earliest_not_until_option = Some(new_not_until),
-        Some(earliest_not_until) => {
-            let earliest_possible = earliest_not_until.earliest_possible();
-            let new_earliest_possible = new_not_until.earliest_possible();
-
-            if earliest_possible > new_earliest_possible {
-                *earliest_not_until_option = Some(new_not_until);
-            }
-        }
+        // return the earliest retry_after (if no rpcs are synced, this will be None)
+        Err(earliest_retry_after)
     }
 }

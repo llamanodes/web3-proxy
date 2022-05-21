@@ -1,6 +1,6 @@
 [shared]
 chain_id = 1
-rate_limit_redis = "redis:6379"
+rate_limit_redis = "redis://redis:6379/"
 
 [balanced_rpcs]
 
@@ -17,6 +17,7 @@ rate_limit_redis = "redis:6379"
     [balanced_rpcs.geth]
     url = "http://10.11.12.16:8545"
     soft_limit = 200_000
+    hard_limit = 1_000
 
     [balanced_rpcs.geth_ws]
     url = "ws://10.11.12.16:8546"

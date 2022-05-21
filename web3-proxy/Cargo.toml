@@ -16,10 +16,9 @@ ethers = { git = "https://github.com/SatoshiAndKin/ethers-rs", features = ["rust
 fdlimit = "0.2.1"
 flume = "0.10.12"
 futures = { version = "0.3.21", features = ["thread-pool"] }
-# TODO: governor has a "futures" and "futures-timer" feature. do we want those?
-governor = { version = "0.4.2", features = ["dashmap", "std"] }
 hashbrown = "0.12.1"
 linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }
+redis-cell-client = { path = "../redis-cell-client" }
 # TODO: parking_lot has an "arc_lock" feature that we might want to use
 parking_lot = { version = "0.12.0", features = ["deadlock_detection"] }
 proctitle = "0.1.1"

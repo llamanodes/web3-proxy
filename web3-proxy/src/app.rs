@@ -8,16 +8,16 @@ use crate::jsonrpc::JsonRpcRequestEnum;
 use dashmap::DashMap;
 use ethers::prelude::{HttpClientError, ProviderError, WsClientError, H256};
 use futures::future::join_all;
-use governor::clock::{Clock, QuantaClock};
 use linkedhashmap::LinkedHashMap;
 use parking_lot::RwLock;
+use redis_cell_client::RedisCellClient;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task;
 use tokio::time::sleep;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 static APP_USER_AGENT: &str = concat!(
     "satoshiandkin/",
@@ -40,9 +40,6 @@ type ActiveRequestsMap = DashMap<CacheKey, watch::Receiver<bool>>;
 // TODO: this debug impl is way too verbose. make something smaller
 // TODO: if Web3ProxyApp is always in an Arc, i think we can avoid having at least some of these internal things in arcs
 pub struct Web3ProxyApp {
-    /// clock used for rate limiting
-    /// TODO: use tokio's clock? (will require a different ratelimiting crate)
-    clock: QuantaClock,
     /// Send requests to the best server available
     balanced_rpcs: Arc<Web3Connections>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
@@ -62,24 +59,37 @@ impl Web3ProxyApp {
     // #[instrument(name = "try_new_Web3ProxyApp", skip_all)]
     pub async fn try_new(
         chain_id: usize,
+        redis_address: Option<String>,
         balanced_rpcs: Vec<Web3ConnectionConfig>,
         private_rpcs: Vec<Web3ConnectionConfig>,
     ) -> anyhow::Result<Web3ProxyApp> {
-        let clock = QuantaClock::default();
-
         // make a http shared client
         // TODO: how should we configure the connection pool?
         // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something is wrong with the remote server
-        let http_client = reqwest::ClientBuilder::new()
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(60))
-            .user_agent(APP_USER_AGENT)
-            .build()?;
+        let http_client = Some(
+            reqwest::ClientBuilder::new()
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(60))
+                .user_agent(APP_USER_AGENT)
+                .build()?,
+        );
+
+        let rate_limiter = match redis_address {
+            Some(redis_address) => {
+                info!("Conneting to redis on {}", redis_address);
+                Some(RedisCellClient::open(&redis_address).await.unwrap())
+            }
+            None => None,
+        };
 
         // TODO: attach context to this error
-        let balanced_rpcs =
-            Web3Connections::try_new(chain_id, balanced_rpcs, Some(http_client.clone()), &clock)
-                .await?;
+        let balanced_rpcs = Web3Connections::try_new(
+            chain_id,
+            balanced_rpcs,
+            http_client.as_ref(),
+            rate_limiter.as_ref(),
+        )
+        .await?;
 
         // TODO: do this separately instead of during try_new
         {
@@ -94,11 +104,16 @@ impl Web3ProxyApp {
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             balanced_rpcs.clone()
         } else {
-            Web3Connections::try_new(chain_id, private_rpcs, Some(http_client), &clock).await?
+            Web3Connections::try_new(
+                chain_id,
+                private_rpcs,
+                http_client.as_ref(),
+                rate_limiter.as_ref(),
+            )
+            .await?
         };
 
         Ok(Web3ProxyApp {
-            clock,
             balanced_rpcs,
             private_rpcs,
             active_requests: Default::default(),
@@ -180,7 +195,7 @@ impl Web3ProxyApp {
         if request.method == "eth_sendRawTransaction" {
             // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
             // TODO: think more about this lock. i think it won't actually help the herd. it probably makes it worse if we have a tight lag_limit
-            match self.private_rpcs.get_upstream_servers() {
+            match self.private_rpcs.get_upstream_servers().await {
                 Ok(active_request_handles) => {
                     let (tx, rx) = flume::unbounded();
 
@@ -222,15 +237,11 @@ impl Web3ProxyApp {
                     // TODO: return a 502?
                     return Err(anyhow::anyhow!("no private rpcs!"));
                 }
-                Err(Some(not_until)) => {
+                Err(Some(retry_after)) => {
                     // TODO: move this to a helper function
                     // sleep (TODO: with a lock?) until our rate limits should be available
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
-                    let deadline = not_until.wait_time_from(self.clock.now());
-
-                    let deadline = deadline.min(Duration::from_millis(200));
-
-                    sleep(deadline).await;
+                    sleep(retry_after).await;
 
                     warn!("All rate limits exceeded. Sleeping");
                 }
@@ -437,17 +448,13 @@ impl Web3ProxyApp {
 
                         return Err(anyhow::anyhow!("no servers in sync"));
                     }
-                    Err(Some(not_until)) => {
+                    Err(Some(retry_after)) => {
                         // TODO: move this to a helper function
                         // sleep (TODO: with a lock?) until our rate limits should be available
                         // TODO: if a server catches up sync while we are waiting, we could stop waiting
-                        let deadline = not_until.wait_time_from(self.clock.now());
-
-                        let deadline = deadline.min(Duration::from_millis(200));
-
-                        sleep(deadline).await;
-
                         warn!("All rate limits exceeded. Sleeping");
+
+                        sleep(retry_after).await;
 
                         // TODO: needing to remove manually here makes me think we should do this differently
                         let _ = self.active_requests.remove(&cache_key);
