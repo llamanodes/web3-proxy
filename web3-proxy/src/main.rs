@@ -19,8 +19,11 @@ use crate::app::Web3ProxyApp;
 use crate::config::{CliConfig, RpcConfig};
 
 fn main() -> anyhow::Result<()> {
+    // if RUST_LOG isn't set, configure a default
     // TODO: is there a better way to do this?
-    // TODO: what should the default log level be?
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info,web3_proxy=debug");
+    }
 
     // install global collector configured based on RUST_LOG env var.
     tracing_subscriber::fmt()

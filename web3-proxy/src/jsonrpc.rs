@@ -1,3 +1,4 @@
+use ethers::prelude::{HttpClientError, ProviderError, WsClientError};
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::Serialize;
 use serde_json::value::RawValue;
@@ -157,6 +158,68 @@ impl fmt::Debug for JsonRpcForwardedResponse {
         f.debug_struct("JsonRpcForwardedResponse")
             .field("id", &self.id)
             .finish_non_exhaustive()
+    }
+}
+
+impl JsonRpcForwardedResponse {
+    pub fn from_ethers_error(e: ProviderError, id: Box<serde_json::value::RawValue>) -> Self {
+        // TODO: move turning ClientError into json to a helper function?
+        let code;
+        let message: String;
+        let data;
+
+        match e {
+            ProviderError::JsonRpcClientError(e) => {
+                // TODO: we should check what type the provider is rather than trying to downcast both types of errors
+                if let Some(e) = e.downcast_ref::<HttpClientError>() {
+                    match &*e {
+                        HttpClientError::JsonRpcError(e) => {
+                            code = e.code;
+                            message = e.message.clone();
+                            data = e.data.clone();
+                        }
+                        e => {
+                            // TODO: improve this
+                            code = -32603;
+                            message = format!("{}", e);
+                            data = None;
+                        }
+                    }
+                } else if let Some(e) = e.downcast_ref::<WsClientError>() {
+                    match &*e {
+                        WsClientError::JsonRpcError(e) => {
+                            code = e.code;
+                            message = e.message.clone();
+                            data = e.data.clone();
+                        }
+                        e => {
+                            // TODO: improve this
+                            code = -32603;
+                            message = format!("{}", e);
+                            data = None;
+                        }
+                    }
+                } else {
+                    unimplemented!();
+                }
+            }
+            _ => {
+                code = -32603;
+                message = format!("{}", e);
+                data = None;
+            }
+        }
+
+        Self {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcErrorData {
+                code,
+                message,
+                data,
+            }),
+        }
     }
 }
 
