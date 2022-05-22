@@ -44,13 +44,13 @@ pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> 
         .map_err(Into::into)
 }
 
-/// basic handler that responds with a page for configuration your
-/// TODO: check auth (from authp?) here?
+/// a page for configuring your wallet with all the rpcs
+/// TODO: check auth (from authp?) here
 async fn root() -> impl IntoResponse {
     "Hello, World!"
 }
 
-// TODO: i can't get https://docs.rs/axum/latest/axum/error_handling/index.html to work
+/// TODO: check auth (from authp?) here
 async fn proxy_web3_rpc(
     payload: Json<JsonRpcRequestEnum>,
     app: Extension<Arc<Web3ProxyApp>>,
@@ -81,12 +81,13 @@ async fn status(app: Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     (StatusCode::INTERNAL_SERVER_ERROR, body.to_string())
 }
 
+/// TODO: pretty 404 page
 async fn handler_404() -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "nothing to see here")
 }
 
-// handle errors by converting them into something that implements `IntoResponse`
-// TODO: use this
+/// handle errors by converting them into something that implements `IntoResponse`
+/// TODO: use this. i can't get https://docs.rs/axum/latest/axum/error_handling/index.html to work
 async fn _handle_anyhow_error(err: anyhow::Error) -> impl IntoResponse {
     let err = format!("{:?}", err);
 

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::task;
 use tracing::Instrument;
-use tracing::{info, info_span, instrument, trace, warn};
+use tracing::{debug, info, info_span, instrument, trace, warn};
 
 use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, Web3Connection};
@@ -112,7 +112,8 @@ impl Web3Connections {
     }
 
     pub async fn subscribe_heads(self: &Arc<Self>) {
-        let (block_sender, block_receiver) = flume::unbounded();
+        // TODO: i don't think this needs to be very big
+        let (block_sender, block_receiver) = flume::bounded(16);
 
         let mut handles = vec![];
 
@@ -329,6 +330,11 @@ impl Web3Connections {
 
             // the synced connections have changed
             let synced_connections = Arc::new(pending_synced_connections.clone());
+
+            if synced_connections.inner.len() == max_connections {
+                // TODO: more metrics
+                debug!("all head: {}", new_block_hash);
+            }
 
             trace!(
                 "rpcs at {}: {:?}",
