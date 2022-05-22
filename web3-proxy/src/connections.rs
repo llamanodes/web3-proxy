@@ -98,7 +98,7 @@ impl Web3Connections {
 
         // TODO: less than 3? what should we do here?
         if connections.len() < 2 {
-            warn!("Only 1 connection!");
+            warn!("Only {} connection(s)!", connections.len());
         }
 
         let synced_connections = SyncedConnections::default();
