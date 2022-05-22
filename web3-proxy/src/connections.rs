@@ -6,7 +6,6 @@ use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
-use redis_cell_client::RedisCellClient;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::value::RawValue;
@@ -80,7 +79,7 @@ impl Web3Connections {
         chain_id: usize,
         servers: Vec<Web3ConnectionConfig>,
         http_client: Option<&reqwest::Client>,
-        rate_limiter: Option<&RedisCellClient>,
+        rate_limiter: Option<&redis_cell_client::MultiplexedConnection>,
     ) -> anyhow::Result<Arc<Self>> {
         let num_connections = servers.len();
 

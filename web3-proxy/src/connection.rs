@@ -2,7 +2,7 @@
 use derive_more::From;
 use ethers::prelude::{Block, Middleware, ProviderError, TxHash, H256};
 use futures::StreamExt;
-use redis_cell_client::{RedisCellClient, RedisCellKey};
+use redis_cell_client::RedisCellClient;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use std::fmt;
@@ -73,7 +73,7 @@ pub struct Web3Connection {
     /// provider is in a RwLock so that we can replace it if re-connecting
     provider: RwLock<Arc<Web3Provider>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
-    hard_limit: Option<RedisCellKey>,
+    hard_limit: Option<redis_cell_client::RedisCellClient>,
     /// used for load balancing to the least loaded server
     soft_limit: u32,
     // TODO: track total number of requests?
@@ -144,15 +144,15 @@ impl Web3Connection {
         url_str: String,
         // optional because this is only used for http providers. websocket providers don't use it
         http_client: Option<&reqwest::Client>,
-        hard_limit: Option<(u32, &RedisCellClient)>,
+        hard_limit: Option<(u32, &redis_cell_client::MultiplexedConnection)>,
         // TODO: think more about this type
         soft_limit: u32,
     ) -> anyhow::Result<Arc<Web3Connection>> {
-        let hard_limit = hard_limit.map(|(hard_rate_limit, hard_rate_limiter)| {
+        let hard_limit = hard_limit.map(|(hard_rate_limit, redis_conection)| {
             // TODO: allow different max_burst and count_per_period and period
             let period = 1;
-            RedisCellKey::new(
-                hard_rate_limiter,
+            RedisCellClient::new(
+                redis_conection.clone(),
                 format!("{},{}", chain_id, url_str),
                 hard_rate_limit,
                 hard_rate_limit,

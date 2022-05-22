@@ -9,7 +9,6 @@ use ethers::prelude::H256;
 use futures::future::join_all;
 use linkedhashmap::LinkedHashMap;
 use parking_lot::RwLock;
-use redis_cell_client::RedisCellClient;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -74,10 +73,17 @@ impl Web3ProxyApp {
 
         let rate_limiter = match redis_address {
             Some(redis_address) => {
-                info!("Conneting to redis on {}", redis_address);
-                Some(RedisCellClient::open(&redis_address).await.unwrap())
+                info!("Connecting to redis on {}", redis_address);
+                let redis_client = redis_cell_client::Client::open(redis_address)?;
+
+                let redis_conn = redis_client.get_multiplexed_tokio_connection().await?;
+
+                Some(redis_conn)
             }
-            None => None,
+            None => {
+                info!("No redis address");
+                None
+            }
         };
 
         // TODO: attach context to this error

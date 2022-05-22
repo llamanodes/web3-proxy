@@ -3,10 +3,10 @@
 version: "3.4"
 
 services:
-  redis:
+  dev-redis:
     build: ./redis-cell-server/
 
-  eth:
+  dev-eth:
     extends:
       file: docker-compose.common.yml
       service: base

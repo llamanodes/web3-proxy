@@ -1,5 +1,4 @@
 use argh::FromArgs;
-use redis_cell_client::RedisCellClient;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -72,11 +71,11 @@ impl Web3ConnectionConfig {
     // #[instrument(name = "try_build_Web3ConnectionConfig", skip_all)]
     pub async fn try_build(
         self,
-        redis_ratelimiter: Option<&RedisCellClient>,
+        redis_conn: Option<&redis_cell_client::MultiplexedConnection>,
         chain_id: usize,
         http_client: Option<&reqwest::Client>,
     ) -> anyhow::Result<Arc<Web3Connection>> {
-        let hard_rate_limit = self.hard_limit.map(|x| (x, redis_ratelimiter.unwrap()));
+        let hard_rate_limit = self.hard_limit.map(|x| (x, redis_conn.unwrap()));
 
         Web3Connection::try_new(
             chain_id,
