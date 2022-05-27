@@ -173,6 +173,7 @@ impl Web3Connection {
         let connection = Arc::new(connection);
 
         // check the server's chain_id here
+        // TODO: move this outside the `new` function and into a `start` function or something
         let active_request_handle = connection.wait_for_request_handle().await;
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
         let found_chain_id: Result<String, _> = active_request_handle
@@ -459,8 +460,8 @@ impl Ord for Web3Connection {
         let b = other.active_requests.load(atomic::Ordering::Acquire);
 
         // TODO: how should we include the soft limit? floats are slower than integer math
-        let a = a as f32 / self.soft_limit as f32;
-        let b = b as f32 / other.soft_limit as f32;
+        let a = (a + 1) as f32 / self.soft_limit as f32;
+        let b = (b + 1) as f32 / other.soft_limit as f32;
 
         a.partial_cmp(&b).unwrap()
     }
