@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# change to the project's root directory
+cd "${0%/*}/.."
+
+exec docker-compose -f docker-compose.prod.yml "$@"

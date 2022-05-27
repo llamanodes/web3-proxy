@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# change to the project's root directory
+cd "${0%/*}/.."
+
+# put our scripts on the path
+export PATH="$(pwd)/bin:$PATH"
+
+# build the image
+docker-compose-production build --pull
+
+# run the image
+docker-compose-production up -d
+
+sleep 3
+
+docker-compose-production ps
+
+echo "$(pwd)/bin/docker-compose-production logs -f"
