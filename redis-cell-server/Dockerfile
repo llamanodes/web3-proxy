@@ -1,3 +1,4 @@
+# A redis server with the libredis_cell module installed
 FROM rust:1-bullseye as builder
 
 WORKDIR /usr/src/redis-cell

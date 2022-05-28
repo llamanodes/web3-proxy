@@ -242,65 +242,14 @@ impl Web3ProxyApp {
         for _i in 0..10usize {
             // // TODO: add more to this span
             // let span = info_span!("i", ?i);
-            // let _enter = span.enter();
+            // let _enter = span.enter(); // DO NOT ENTER! we can't use enter across awaits! (clippy lint soon)
             if request.method == "eth_sendRawTransaction" {
                 // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
                 // TODO: think more about this lock. i think it won't actually help the herd. it probably makes it worse if we have a tight lag_limit
-                match self.private_rpcs.get_upstream_servers().await {
-                    Ok(active_request_handles) => {
-                        // TODO: refactor this to block until it has responses from all and also to return the most common success response
-                        // TODO: i don't think we need to spawn it if we do that.
-                        let (tx, rx) = flume::bounded(1);
-
-                        let connections = self.private_rpcs.clone();
-                        let method = request.method.clone();
-                        let params = request.params.clone();
-
-                        // TODO: benchmark this compared to waiting on unbounded futures
-                        // TODO: do something with this handle?
-                        // TODO:
-                        task::Builder::default()
-                            .name("try_send_parallel_requests")
-                            .spawn(async move {
-                                connections
-                                    .try_send_parallel_requests(
-                                        active_request_handles,
-                                        method,
-                                        params,
-                                        tx,
-                                    )
-                                    .await
-                            });
-
-                        // wait for the first response
-                        // TODO: we don't want the first response. we want the quorum response
-                        let backend_response = rx.recv_async().await?;
-
-                        if let Ok(backend_response) = backend_response {
-                            // TODO: i think we
-                            let response = JsonRpcForwardedResponse {
-                                jsonrpc: "2.0".to_string(),
-                                id: request.id,
-                                result: Some(backend_response),
-                                error: None,
-                            };
-                            return Ok(response);
-                        }
-                    }
-                    Err(None) => {
-                        // TODO: return a 502?
-                        // TODO: i don't think this will ever happen
-                        return Err(anyhow::anyhow!("no private rpcs!"));
-                    }
-                    Err(Some(retry_after)) => {
-                        // TODO: move this to a helper function
-                        // sleep (TODO: with a lock?) until our rate limits should be available
-                        // TODO: if a server catches up sync while we are waiting, we could stop waiting
-                        sleep(retry_after).await;
-
-                        warn!("All rate limits exceeded. Sleeping");
-                    }
-                };
+                return self
+                    .private_rpcs
+                    .try_send_all_upstream_servers(request)
+                    .await;
             } else {
                 // this is not a private transaction (or no private relays are configured)
 
@@ -353,6 +302,7 @@ impl Web3ProxyApp {
                     }
                 }
 
+                // TODO: move this whole match to a function on self.balanced_rpcs
                 match self.balanced_rpcs.next_upstream_server().await {
                     Ok(active_request_handle) => {
                         let response = active_request_handle

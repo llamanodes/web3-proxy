@@ -15,6 +15,7 @@ pub struct RedisCellClient {
 
 impl RedisCellClient {
     // todo: seems like this could be derived
+    // TODO: take something generic for conn
     pub fn new(
         conn: MultiplexedConnection,
         key: String,
