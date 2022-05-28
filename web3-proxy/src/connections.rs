@@ -180,7 +180,7 @@ impl Web3Connections {
             .collect::<Vec<Result<Box<RawValue>, ProviderError>>>()
             .await;
 
-        // TODO: Strings are not great keys, but we can't use RawValue or ProviderError as keys
+        // TODO: Strings are not great keys, but we can't use RawValue or ProviderError as keys because they don't implement Hash or Eq
         let mut count_map: HashMap<String, Result<Box<RawValue>, ProviderError>> = HashMap::new();
         let mut counts: Counter<String> = Counter::new();
         let mut any_ok = false;
@@ -199,7 +199,6 @@ impl Web3Connections {
         }
 
         for (most_common, _) in counts.most_common_ordered() {
-            // TODO: how do we take this?
             let most_common = count_map.remove(&most_common).unwrap();
 
             if any_ok && most_common.is_err() {
@@ -466,7 +465,7 @@ impl Web3Connections {
                 Err(None) => {
                     // TODO: return a 502?
                     // TODO: i don't think this will ever happen
-                    return Err(anyhow::anyhow!("no private rpcs!"));
+                    return Err(anyhow::anyhow!("no available rpcs!"));
                 }
                 Err(Some(retry_after)) => {
                     // TODO: move this to a helper function

@@ -1,30 +1,30 @@
 # Todo
 
-- [ ] use redis and redis-cell for rate limits
+- [x] use redis and redis-cell for rate limits
+- [ ] if we don't cache errors, then in-flight request caching is going to bottleneck 
 - [x] some production configs are occassionally stuck waiting at 100% cpu
   - they stop processing new blocks. i'm guessing 2 blocks arrive at the same time, but i thought our locks would handle that
   - even after removing a bunch of the locks, the deadlock still happens. i can't reliably reproduce. i just let it run for awhile and it happens.
   - running gdb shows the thread at tokio tungstenite thread is spinning near 100% cpu and none of the rest of the program is proceeding
   - fixed by https://github.com/gakonst/ethers-rs/pull/1287
-- [ ] should we use ethers-rs' quorum provider for the private rpcs? i think it would work well, but won't work with our current reconnect logic
 - [ ] improve caching
   - [ ] if the eth_call (or similar) params include a block, we can cache for longer
   - [ ] if the call is something simple like "symbol" or "decimals", cache that too
   - [ ] when we receive a block, we should store it for later eth_getBlockByNumber, eth_blockNumber, and similar calls
-- [ ] eth_sendRawTransaction should return the most common result, not the first
-- [ ] if chain split detected, don't send transactions
+- [x] eth_sendRawTransaction should return the most common result, not the first
+- [ ] if chain split detected, don't send transactions?
 - [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
 - [ ] endpoint for health checks. if no synced servers, give a 502 error
 - [x] move from warp to auxm?
 - [ ] proper logging with useful instrumentation
-- [ ] handle websocket disconnect and reconnect
+- [x] handle websocket disconnect and reconnect
 - [ ] warning if no blocks for too long. maybe reconnect automatically?
 - [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
     - thundering herd problem if we only allow a lag of 0 blocks
     - we can fix this by only `publish`ing the sorted list once a certain sync limit is reached 
 - [ ] tarpit hard_ratelimit at the start, but reject if incoming requests is super high?
 - [ ] add the backend server to the header?
-- [ ] the web3proxyapp object gets cloned for every call. why do we need any arcs inside that? shouldn't they be able to connect to the app's? can we just use static lifetimes
+- [x] the web3proxyapp object gets cloned for every call. why do we need any arcs inside that? shouldn't they be able to connect to the app's? can we just use static lifetimes
 - [ ] think more about how multiple rpc tiers should work
 - [ ] if a request gets a socket timeout, try on another server
   - maybe always try at least two servers in parallel? and then return the first? or only if the first one doesn't respond very quickly?

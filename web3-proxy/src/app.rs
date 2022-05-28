@@ -302,7 +302,7 @@ impl Web3ProxyApp {
                     }
                 }
 
-                // TODO: move this whole match to a function on self.balanced_rpcs
+                // TODO: move this whole match to a function on self.balanced_rpcs. incoming requests checks makes it awkward
                 match self.balanced_rpcs.next_upstream_server().await {
                     Ok(active_request_handle) => {
                         let response = active_request_handle
