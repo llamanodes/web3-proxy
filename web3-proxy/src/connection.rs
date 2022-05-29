@@ -191,6 +191,8 @@ impl Web3Connection {
                         chain_id,
                         found_chain_id
                     ));
+                } else {
+                    info!("Successful connection");
                 }
             }
             Err(e) => {
@@ -198,8 +200,6 @@ impl Web3Connection {
                 return Err(e);
             }
         }
-
-        info!("Successful connection: {}", connection);
 
         Ok(connection)
     }
