@@ -162,6 +162,23 @@ impl fmt::Debug for JsonRpcForwardedResponse {
 }
 
 impl JsonRpcForwardedResponse {
+    pub fn from_anyhow_error(err: anyhow::Error, id: Box<RawValue>) -> Self {
+        let err = format!("{:?}", err);
+
+        JsonRpcForwardedResponse {
+            jsonrpc: "2.0".to_string(),
+            // TODO: what id can we use? how do we make sure the incoming id gets attached to this?
+            id,
+            result: None,
+            error: Some(JsonRpcErrorData {
+                // TODO: set this jsonrpc error code to match the http status code
+                code: -32099,
+                message: err,
+                data: None,
+            }),
+        }
+    }
+
     pub fn from_response_result(
         result: Result<Box<RawValue>, ProviderError>,
         id: Box<RawValue>,

@@ -141,7 +141,7 @@ impl Web3ProxyApp {
     /// TODO: dry this up
     #[instrument(skip_all)]
     pub async fn proxy_web3_rpc(
-        self: Arc<Web3ProxyApp>,
+        &self,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         // TODO: i don't always see this in the logs. why?
@@ -168,7 +168,7 @@ impl Web3ProxyApp {
 
     // #[instrument(skip_all)]
     async fn proxy_web3_rpc_requests(
-        self: Arc<Web3ProxyApp>,
+        &self,
         requests: Vec<JsonRpcRequest>,
     ) -> anyhow::Result<Vec<JsonRpcForwardedResponse>> {
         // TODO: we should probably change ethers-rs to support this directly
@@ -179,7 +179,7 @@ impl Web3ProxyApp {
         let responses = join_all(
             requests
                 .into_iter()
-                .map(|request| self.clone().proxy_web3_rpc_request(request))
+                .map(|request| self.proxy_web3_rpc_request(request))
                 .collect::<Vec<_>>(),
         )
         .await;
@@ -232,7 +232,7 @@ impl Web3ProxyApp {
 
     // #[instrument(skip_all)]
     async fn proxy_web3_rpc_request(
-        self: Arc<Web3ProxyApp>,
+        &self,
         request: JsonRpcRequest,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         trace!("Received request: {:?}", request);
