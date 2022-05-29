@@ -101,6 +101,7 @@ async fn _handle_anyhow_error(err: anyhow::Error, code: Option<StatusCode>) -> i
         id: RawValue::from_string("0".to_string()).unwrap(),
         result: None,
         error: Some(JsonRpcErrorData {
+            // TODO: set this jsonrpc error code to match the http status code
             code: -32099,
             message: err,
             data: None,
