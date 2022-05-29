@@ -162,7 +162,27 @@ impl fmt::Debug for JsonRpcForwardedResponse {
 }
 
 impl JsonRpcForwardedResponse {
-    pub fn from_ethers_error(e: ProviderError, id: Box<serde_json::value::RawValue>) -> Self {
+    pub fn from_response_result(
+        result: Result<Box<RawValue>, ProviderError>,
+        id: Box<RawValue>,
+    ) -> Self {
+        match result {
+            Ok(response) => Self::from_response(response, id),
+            Err(e) => Self::from_ethers_error(e, id),
+        }
+    }
+
+    pub fn from_response(partial_response: Box<RawValue>, id: Box<RawValue>) -> Self {
+        JsonRpcForwardedResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            // TODO: since we only use the result here, should that be all we return from try_send_request?
+            result: Some(partial_response),
+            error: None,
+        }
+    }
+
+    pub fn from_ethers_error(e: ProviderError, id: Box<RawValue>) -> Self {
         // TODO: move turning ClientError into json to a helper function?
         let code;
         let message: String;

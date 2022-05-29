@@ -434,6 +434,49 @@ impl Web3Connections {
         Err(earliest_retry_after)
     }
 
+    /// be sure there is a timeout on this or it might loop forever
+    pub async fn try_send_best_upstream_server(
+        &self,
+        request: JsonRpcRequest,
+    ) -> anyhow::Result<JsonRpcForwardedResponse> {
+        loop {
+            match self.next_upstream_server().await {
+                Ok(active_request_handle) => {
+                    let response_result = active_request_handle
+                        .request(&request.method, &request.params)
+                        .await;
+
+                    let response =
+                        JsonRpcForwardedResponse::from_response_result(response_result, request.id);
+
+                    if response.error.is_some() {
+                        trace!(?response, "Sending error reply",);
+                        // errors already sent false to the in_flight_tx
+                    } else {
+                        trace!(?response, "Sending reply");
+                    }
+
+                    return Ok(response);
+                }
+                Err(None) => {
+                    warn!(?self, "No servers in sync!");
+
+                    return Err(anyhow::anyhow!("no servers in sync"));
+                }
+                Err(Some(retry_after)) => {
+                    // TODO: move this to a helper function
+                    // sleep (TODO: with a lock?) until our rate limits should be available
+                    // TODO: if a server catches up sync while we are waiting, we could stop waiting
+                    warn!(?retry_after, "All rate limits exceeded. Sleeping");
+
+                    sleep(retry_after).await;
+
+                    continue;
+                }
+            }
+        }
+    }
+
     pub async fn try_send_all_upstream_servers(
         &self,
         request: JsonRpcRequest,
@@ -463,6 +506,8 @@ impl Web3Connections {
                     return Ok(response);
                 }
                 Err(None) => {
+                    warn!(?self, "No servers in sync!");
+
                     // TODO: return a 502?
                     // TODO: i don't think this will ever happen
                     return Err(anyhow::anyhow!("no available rpcs!"));
