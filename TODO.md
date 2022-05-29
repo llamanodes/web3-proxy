@@ -1,5 +1,12 @@
 # Todo
 
+- [ ] support websocket clients
+  - we support websockets for the backends already, but we need them for the frontend too
+  - [ ] when block subscribers receive blocks, store them in a cache
+  - [ ] have a /ws endpoint (figure out how to route on / later)
+  - [ ] ws endpoint shouldn't be that different from the http endpoint
+  - inspect any jsonrpc errors. if its something like "header not found" or "block with id $x not found" retry on another node (and add a negative score to that server)
+    - this error seems to happen when we use load balanced rpcs
 - [x] use redis and redis-cell for rate limits
 - [ ] if we don't cache errors, then in-flight request caching is going to bottleneck 
 - [x] some production configs are occassionally stuck waiting at 100% cpu
@@ -26,6 +33,7 @@
 - [ ] add the backend server to the header?
 - [x] the web3proxyapp object gets cloned for every call. why do we need any arcs inside that? shouldn't they be able to connect to the app's? can we just use static lifetimes
 - [ ] think more about how multiple rpc tiers should work
+  - we should have a "backup" tier that is only used when the primary tier has no servers or is multiple blocks behind. we don't want the backup tier taking over all the time. only if the primary tier has fallen behind or gone entirely offline
 - [ ] if a request gets a socket timeout, try on another server
   - maybe always try at least two servers in parallel? and then return the first? or only if the first one doesn't respond very quickly?
 - [ ] incoming rate limiting (by ip or by api key or what?)

@@ -56,8 +56,8 @@ async fn proxy_web3_rpc(
     app: Extension<Arc<Web3ProxyApp>>,
 ) -> impl IntoResponse {
     match app.0.proxy_web3_rpc(payload.0).await {
-        Ok(response) => (StatusCode::OK, serde_json::to_string(&response).unwrap()),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)),
+        Ok(response) => (StatusCode::OK, Json(&response)).into_response(),
+        Err(err) => _handle_anyhow_error(err, None).await.into_response(),
     }
 }
 
@@ -78,17 +78,19 @@ async fn status(app: Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
         "num_active_requests": num_active_requests,
     });
 
-    (StatusCode::INTERNAL_SERVER_ERROR, body.to_string())
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
 }
 
-/// TODO: pretty 404 page
+/// TODO: pretty 404 page? or us a json error fine?
 async fn handler_404() -> impl IntoResponse {
-    (StatusCode::NOT_FOUND, "nothing to see here")
+    let err = anyhow::anyhow!("nothing to see here");
+
+    _handle_anyhow_error(err, Some(StatusCode::NOT_FOUND)).await
 }
 
 /// handle errors by converting them into something that implements `IntoResponse`
 /// TODO: use this. i can't get https://docs.rs/axum/latest/axum/error_handling/index.html to work
-async fn _handle_anyhow_error(err: anyhow::Error) -> impl IntoResponse {
+async fn _handle_anyhow_error(err: anyhow::Error, code: Option<StatusCode>) -> impl IntoResponse {
     let err = format!("{:?}", err);
 
     warn!("Responding with error: {}", err);
@@ -105,10 +107,9 @@ async fn _handle_anyhow_error(err: anyhow::Error) -> impl IntoResponse {
         }),
     };
 
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        serde_json::to_string(&err).unwrap(),
-    )
+    let code = code.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+
+    (code, Json(err))
 }
 
 // i think we want a custom result type. it has an anyhow result inside. it impl IntoResponse
