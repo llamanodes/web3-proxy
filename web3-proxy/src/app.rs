@@ -4,9 +4,11 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
+use axum::extract::ws::Message;
 use dashmap::DashMap;
 use ethers::prelude::H256;
 use futures::future::join_all;
+use futures::future::Abortable;
 use linkedhashmap::LinkedHashMap;
 use parking_lot::RwLock;
 use std::fmt;
@@ -123,6 +125,16 @@ impl Web3ProxyApp {
             incoming_requests: Default::default(),
             response_cache: Default::default(),
         })
+    }
+
+    pub async fn eth_subscribe(
+        &self,
+        payload: JsonRpcRequest,
+        // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its way easier for now
+        // TODO: i think we will need to change this to support unsubscribe
+        subscription_tx: Abortable<flume::Sender<Message>>,
+    ) -> anyhow::Result<JsonRpcForwardedResponse> {
+        unimplemented!();
     }
 
     pub fn get_balanced_rpcs(&self) -> &Web3Connections {

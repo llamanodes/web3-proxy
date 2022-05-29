@@ -7,8 +7,10 @@ use axum::{
     routing::{get, post},
     Extension, Json, Router,
 };
+use futures::future::{AbortHandle, Abortable};
 use futures::stream::{SplitSink, SplitStream, StreamExt};
 use futures::SinkExt;
+use hashbrown::HashMap;
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
@@ -17,7 +19,9 @@ use tracing::warn;
 
 use crate::{
     app::Web3ProxyApp,
-    jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest, JsonRpcRequestEnum},
+    jsonrpc::{
+        JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest, JsonRpcRequestEnum,
+    },
 };
 
 pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
@@ -86,23 +90,62 @@ async fn read_web3_socket(
     mut ws_rx: SplitStream<WebSocket>,
     response_tx: flume::Sender<Message>,
 ) {
+    let mut subscriptions = HashMap::new();
+
     while let Some(Ok(msg)) = ws_rx.next().await {
         // new message from our client. forward to a backend and then send it through response_tx
-        // TODO: spawn this processing?
         let response_msg = match msg {
             Message::Text(payload) => {
-                let (id, response) = match serde_json::from_str(&payload) {
+                let (id, response) = match serde_json::from_str::<JsonRpcRequest>(&payload) {
                     Ok(payload) => {
-                        let payload: JsonRpcRequest = payload;
-
                         let id = payload.id.clone();
 
-                        let payload = JsonRpcRequestEnum::Single(payload);
+                        let response: anyhow::Result<JsonRpcForwardedResponseEnum> =
+                            if payload.method == "eth_subscribe" {
+                                let (subscription_handle, subscription_registration) =
+                                    AbortHandle::new_pair();
 
-                        (id, app.0.proxy_web3_rpc(payload).await)
+                                let subscription_response_tx =
+                                    Abortable::new(response_tx.clone(), subscription_registration);
+
+                                let response: anyhow::Result<JsonRpcForwardedResponse> = app
+                                    .0
+                                    .eth_subscribe(payload, subscription_response_tx)
+                                    .await
+                                    .map(Into::into);
+
+                                if let Ok(response) = &response {
+                                    // TODO: better key. maybe we should just use u64
+                                    subscriptions.insert(
+                                        response.result.as_ref().unwrap().to_string(),
+                                        subscription_handle,
+                                    );
+                                }
+
+                                response.map(JsonRpcForwardedResponseEnum::Single)
+                            } else if payload.method == "eth_unsubscribe" {
+                                let subscription_id = payload.params.unwrap().to_string();
+
+                                subscriptions.remove(&subscription_id);
+
+                                let response = JsonRpcForwardedResponse::from_string(
+                                    "true".to_string(),
+                                    id.clone(),
+                                );
+
+                                Ok(response.into())
+                            } else {
+                                // TODO: if this is a subscription request, we need to do some special handling. something with channels
+                                // TODO: just handle subscribe_newBlock
+
+                                app.0.proxy_web3_rpc(payload.into()).await
+                            };
+
+                        (id, response)
                     }
                     Err(err) => {
-                        let id = RawValue::from_string("-1".to_string()).unwrap();
+                        // TODO: what should this id be?
+                        let id = RawValue::from_string("0".to_string()).unwrap();
                         (id, Err(err.into()))
                     }
                 };

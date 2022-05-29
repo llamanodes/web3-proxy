@@ -1,3 +1,4 @@
+use derive_more::From;
 use ethers::prelude::{HttpClientError, ProviderError, WsClientError};
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::Serialize;
@@ -26,7 +27,7 @@ impl fmt::Debug for JsonRpcRequest {
 }
 
 /// Requests can come in multiple formats
-#[derive(Debug)]
+#[derive(Debug, From)]
 pub enum JsonRpcRequestEnum {
     Batch(Vec<JsonRpcRequest>),
     Single(JsonRpcRequest),
@@ -189,6 +190,12 @@ impl JsonRpcForwardedResponse {
         }
     }
 
+    pub fn from_string(partial_response: String, id: Box<RawValue>) -> Self {
+        let partial_response = RawValue::from_string(partial_response).unwrap();
+
+        Self::from_response(partial_response, id)
+    }
+
     pub fn from_response(partial_response: Box<RawValue>, id: Box<RawValue>) -> Self {
         JsonRpcForwardedResponse {
             jsonrpc: "2.0".to_string(),
@@ -261,7 +268,7 @@ impl JsonRpcForwardedResponse {
 }
 
 /// JSONRPC Responses can include one or many response objects.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, From, Serialize)]
 #[serde(untagged)]
 pub enum JsonRpcForwardedResponseEnum {
     Single(JsonRpcForwardedResponse),

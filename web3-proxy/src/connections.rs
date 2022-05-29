@@ -114,8 +114,8 @@ impl Web3Connections {
     }
 
     pub async fn subscribe_heads(self: &Arc<Self>) {
-        // TODO: i don't think this needs to be very big
-        let (block_sender, block_receiver) = flume::bounded(16);
+        // TODO: benchmark bounded vs unbounded?
+        let (block_sender, block_receiver) = flume::unbounded();
 
         let mut handles = vec![];
 
@@ -133,7 +133,7 @@ impl Web3Connections {
                     // loop to automatically reconnect
                     // TODO: make this cancellable?
                     // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
-                    // TODO: proper spann
+                    // TODO: proper span
                     connection
                         .subscribe_new_heads(rpc_id, block_sender.clone(), true)
                         .instrument(tracing::info_span!("url"))
@@ -221,10 +221,10 @@ impl Web3Connections {
         &self,
         block_receiver: flume::Receiver<(u64, H256, usize)>,
     ) -> anyhow::Result<()> {
-        let max_connections = self.inner.len();
+        let total_rpcs = self.inner.len();
 
         let mut connection_states: HashMap<usize, (u64, H256)> =
-            HashMap::with_capacity(max_connections);
+            HashMap::with_capacity(total_rpcs);
 
         let mut pending_synced_connections = SyncedConnections::default();
 
@@ -270,7 +270,7 @@ impl Web3Connections {
                         // check connection_states to see which head block is more popular!
                         let mut rpc_ids_by_block: BTreeMap<H256, Vec<usize>> = BTreeMap::new();
 
-                        let mut synced_rpcs = 0;
+                        let mut counted_rpcs = 0;
 
                         for (rpc_id, (block_num, block_hash)) in connection_states.iter() {
                             if *block_num != new_block_num {
@@ -278,36 +278,34 @@ impl Web3Connections {
                                 continue;
                             }
 
-                            synced_rpcs += 1;
+                            counted_rpcs += 1;
 
                             let count = rpc_ids_by_block
                                 .entry(*block_hash)
-                                .or_insert_with(|| Vec::with_capacity(max_connections - 1));
+                                .or_insert_with(|| Vec::with_capacity(total_rpcs - 1));
 
                             count.push(*rpc_id);
                         }
 
-                        let most_common_head_hash = rpc_ids_by_block
+                        let most_common_head_hash = *rpc_ids_by_block
                             .iter()
                             .max_by(|a, b| a.1.len().cmp(&b.1.len()))
                             .map(|(k, _v)| k)
                             .unwrap();
 
+                        let synced_rpcs = rpc_ids_by_block.remove(&most_common_head_hash).unwrap();
+
                         warn!(
                             "chain is forked! {} possible heads. {}/{}/{} rpcs have {}",
-                            rpc_ids_by_block.len(),
-                            rpc_ids_by_block.get(most_common_head_hash).unwrap().len(),
-                            synced_rpcs,
-                            max_connections,
+                            rpc_ids_by_block.len() + 1,
+                            synced_rpcs.len(),
+                            counted_rpcs,
+                            total_rpcs,
                             most_common_head_hash
                         );
 
-                        // this isn't the best block in the tier. don't do anything
-                        if !pending_synced_connections.inner.remove(&rpc_id) {
-                            // we didn't remove anything. nothing more to do
-                            continue;
-                        }
-                        // we removed. don't continue so that we update self.synced_connections
+                        pending_synced_connections.head_block_hash = most_common_head_hash;
+                        pending_synced_connections.inner = synced_rpcs.into_iter().collect();
                     }
                 }
                 cmp::Ordering::Less => {
@@ -323,7 +321,7 @@ impl Web3Connections {
             // the synced connections have changed
             let synced_connections = Arc::new(pending_synced_connections.clone());
 
-            if synced_connections.inner.len() == max_connections {
+            if synced_connections.inner.len() == total_rpcs {
                 // TODO: more metrics
                 debug!("all head: {}", new_block_hash);
             }
