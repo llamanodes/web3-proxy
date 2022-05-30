@@ -12,6 +12,7 @@ use futures::future::{join_all, AbortHandle};
 use futures::stream::StreamExt;
 use linkedhashmap::LinkedHashMap;
 use parking_lot::RwLock;
+use serde_json::json;
 use serde_json::value::RawValue;
 use std::fmt;
 use std::sync::Arc;
@@ -144,9 +145,12 @@ impl Web3ProxyApp {
     ) -> anyhow::Result<(AbortHandle, JsonRpcForwardedResponse)> {
         let (subscription_handle, subscription_registration) = AbortHandle::new_pair();
 
+        // TODO: generate subscription_id as needed. atomic u16?
+        let subscription_id = "0xcd0c3e8af590364c09d0fa6a1210faf5".to_string();
+
         let f = {
             let head_block_receiver = self.head_block_receiver.clone();
-            let id = id.clone();
+            let subscription_id = subscription_id.clone();
 
             if payload.params.as_deref().unwrap().to_string() == r#"["newHeads"]"# {
                 info!("received new heads subscription");
@@ -158,14 +162,19 @@ impl Web3ProxyApp {
 
                     while let Some(new_head) = head_block_receiver.next().await {
                         // TODO: this String to RawValue probably not efficient, but it works for now
-                        let msg = JsonRpcForwardedResponse::from_string(
-                            serde_json::to_string(&new_head).unwrap(),
-                            id.clone(),
-                        );
+                        // TODO: make a struct for this?
+                        let msg = json!({
+                            "jsonrpc": "2.0",
+                            "method":"eth_subscription",
+                            "params": {
+                                "subscription": subscription_id,
+                                "result": new_head,
+                            },
+                        });
+
+                        // let msg = JsonRpcForwardedResponse::from_json(&msg, id.clone());
 
                         let msg = Message::Text(serde_json::to_string(&msg).unwrap());
-
-                        info!(?msg);
 
                         subscription_tx.send_async(msg).await.unwrap();
                     }
@@ -176,9 +185,6 @@ impl Web3ProxyApp {
         };
 
         tokio::spawn(f);
-
-        // TODO: generate subscription_id as needed. atomic u16?
-        let subscription_id = r#""0xcd0c3e8af590364c09d0fa6a1210faf5""#.to_string();
 
         let response = JsonRpcForwardedResponse::from_string(subscription_id, id);
 
