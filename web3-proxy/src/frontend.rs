@@ -7,7 +7,6 @@ use axum::{
     routing::{get, post},
     Extension, Json, Router,
 };
-use futures::future::{AbortHandle, Abortable};
 use futures::stream::{SplitSink, SplitStream, StreamExt};
 use futures::SinkExt;
 use hashbrown::HashMap;
@@ -15,7 +14,7 @@ use serde_json::json;
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::{
     app::Web3ProxyApp,
@@ -102,34 +101,38 @@ async fn read_web3_socket(
 
                         let response: anyhow::Result<JsonRpcForwardedResponseEnum> =
                             if payload.method == "eth_subscribe" {
-                                let (subscription_handle, subscription_registration) =
-                                    AbortHandle::new_pair();
-
-                                let subscription_response_tx =
-                                    Abortable::new(response_tx.clone(), subscription_registration);
-
-                                let response: anyhow::Result<JsonRpcForwardedResponse> = app
+                                // TODO: if we pass eth_subscribe the response_tx, we
+                                let response = app
                                     .0
-                                    .eth_subscribe(payload, subscription_response_tx)
-                                    .await
-                                    .map(Into::into);
+                                    .eth_subscribe(id.clone(), payload, response_tx.clone())
+                                    .await;
 
-                                if let Ok(response) = &response {
-                                    // TODO: better key. maybe we should just use u64
-                                    subscriptions.insert(
-                                        response.result.as_ref().unwrap().to_string(),
-                                        subscription_handle,
-                                    );
+                                match response {
+                                    Ok((handle, response)) => {
+                                        // TODO: better key
+                                        subscriptions.insert(
+                                            response.result.as_ref().unwrap().to_string(),
+                                            handle,
+                                        );
+
+                                        Ok(response.into())
+                                    }
+                                    Err(err) => Err(err),
                                 }
-
-                                response.map(JsonRpcForwardedResponseEnum::Single)
                             } else if payload.method == "eth_unsubscribe" {
                                 let subscription_id = payload.params.unwrap().to_string();
 
-                                subscriptions.remove(&subscription_id);
+                                let partial_response = match subscriptions.remove(&subscription_id)
+                                {
+                                    None => "false",
+                                    Some(handle) => {
+                                        handle.abort();
+                                        "true"
+                                    }
+                                };
 
                                 let response = JsonRpcForwardedResponse::from_string(
-                                    "true".to_string(),
+                                    partial_response.to_string(),
                                     id.clone(),
                                 );
 
@@ -166,9 +169,12 @@ async fn read_web3_socket(
             _ => unimplemented!(),
         };
 
-        if response_tx.send_async(response_msg).await.is_err() {
-            // TODO: log the error
-            break;
+        match response_tx.send_async(response_msg).await {
+            Ok(_) => {}
+            Err(err) => {
+                error!("{}", err);
+                break;
+            }
         };
     }
 }

@@ -6,11 +6,14 @@ use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
 use axum::extract::ws::Message;
 use dashmap::DashMap;
-use ethers::prelude::H256;
-use futures::future::join_all;
+use ethers::prelude::{Block, TxHash, H256};
 use futures::future::Abortable;
+use futures::future::{join_all, AbortHandle};
+use futures::stream::StreamExt;
+use futures::FutureExt;
 use linkedhashmap::LinkedHashMap;
 use parking_lot::RwLock;
+use serde_json::value::RawValue;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,6 +49,7 @@ pub struct Web3ProxyApp {
     private_rpcs: Arc<Web3Connections>,
     incoming_requests: ActiveRequestsMap,
     response_cache: ResponseLrcCache,
+    head_block_receiver: flume::Receiver<Block<TxHash>>,
 }
 
 impl fmt::Debug for Web3ProxyApp {
@@ -97,11 +101,13 @@ impl Web3ProxyApp {
         )
         .await?;
 
+        let (head_block_sender, head_block_receiver) = flume::unbounded();
+
         // TODO: do this separately instead of during try_new
         {
             let balanced_rpcs = balanced_rpcs.clone();
             task::spawn(async move {
-                balanced_rpcs.subscribe_heads().await;
+                balanced_rpcs.subscribe_all_heads(head_block_sender).await;
             });
         }
 
@@ -124,17 +130,57 @@ impl Web3ProxyApp {
             private_rpcs,
             incoming_requests: Default::default(),
             response_cache: Default::default(),
+            head_block_receiver,
         })
     }
 
     pub async fn eth_subscribe(
         &self,
+        id: Box<RawValue>,
         payload: JsonRpcRequest,
-        // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its way easier for now
-        // TODO: i think we will need to change this to support unsubscribe
-        subscription_tx: Abortable<flume::Sender<Message>>,
-    ) -> anyhow::Result<JsonRpcForwardedResponse> {
-        unimplemented!();
+        // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
+        subscription_tx: flume::Sender<Message>,
+    ) -> anyhow::Result<(AbortHandle, JsonRpcForwardedResponse)> {
+        let (subscription_handle, subscription_registration) = AbortHandle::new_pair();
+
+        let f = {
+            let head_block_receiver = self.head_block_receiver.clone();
+            let id = id.clone();
+
+            if payload.params.as_deref().unwrap().to_string() == r#"["newHeads"]"# {
+                async move {
+                    let mut head_block_receiver = Abortable::new(
+                        head_block_receiver.into_recv_async().into_stream(),
+                        subscription_registration,
+                    );
+
+                    while let Some(Ok(new_head)) = head_block_receiver.next().await {
+                        // TODO: this String to RawValue probably not efficient, but it works for now
+                        let msg = JsonRpcForwardedResponse::from_string(
+                            serde_json::to_string(&new_head).unwrap(),
+                            id.clone(),
+                        );
+
+                        let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+
+                        info!(?msg);
+
+                        subscription_tx.send_async(msg).await.unwrap();
+                    }
+                }
+            } else {
+                return Err(anyhow::anyhow!("unimplemented"));
+            }
+        };
+
+        tokio::spawn(f);
+
+        // TODO: generate subscription_id as needed. atomic u16?
+        let subscription_id = "0xcd0c3e8af590364c09d0fa6a1210faf5".to_string();
+
+        let response = JsonRpcForwardedResponse::from_string(subscription_id, id);
+
+        Ok((subscription_handle, response))
     }
 
     pub fn get_balanced_rpcs(&self) -> &Web3Connections {

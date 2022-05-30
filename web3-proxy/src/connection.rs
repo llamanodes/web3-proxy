@@ -1,6 +1,6 @@
 ///! Rate-limited communication with a web3 provider
 use derive_more::From;
-use ethers::prelude::{Block, Middleware, ProviderError, TxHash, H256};
+use ethers::prelude::{Block, Middleware, ProviderError, TxHash};
 use futures::StreamExt;
 use redis_cell_client::RedisCellClient;
 use serde::ser::{SerializeStruct, Serializer};
@@ -118,7 +118,7 @@ impl Web3Connection {
     #[instrument(skip_all)]
     pub async fn reconnect(
         self: &Arc<Self>,
-        block_sender: &flume::Sender<(u64, H256, usize)>,
+        block_sender: &flume::Sender<(Block<TxHash>, usize)>,
         rpc_id: usize,
     ) -> anyhow::Result<()> {
         // websocket doesn't need the http client
@@ -128,7 +128,7 @@ impl Web3Connection {
         let mut provider = self.provider.write().await;
 
         // tell the block subscriber that we are at 0
-        block_sender.send_async((0, H256::zero(), rpc_id)).await?;
+        block_sender.send_async((Block::default(), rpc_id)).await?;
 
         let new_provider = Web3Provider::from_str(&self.url, http_client).await?;
 
@@ -218,19 +218,13 @@ impl Web3Connection {
     async fn send_block(
         self: &Arc<Self>,
         block: Result<Block<TxHash>, ProviderError>,
-        block_sender: &flume::Sender<(u64, H256, usize)>,
+        block_sender: &flume::Sender<(Block<TxHash>, usize)>,
         rpc_id: usize,
     ) {
         match block {
             Ok(block) => {
-                let block_number = block.number.unwrap().as_u64();
-                let block_hash = block.hash.unwrap();
-
                 // TODO: i'm pretty sure we don't need send_async, but double check
-                block_sender
-                    .send_async((block_number, block_hash, rpc_id))
-                    .await
-                    .unwrap();
+                block_sender.send_async((block, rpc_id)).await.unwrap();
             }
             Err(e) => {
                 warn!("unable to get block from {}: {}", self, e);
@@ -244,7 +238,7 @@ impl Web3Connection {
     pub async fn subscribe_new_heads(
         self: Arc<Self>,
         rpc_id: usize,
-        block_sender: flume::Sender<(u64, H256, usize)>,
+        block_sender: flume::Sender<(Block<TxHash>, usize)>,
         reconnect: bool,
     ) -> anyhow::Result<()> {
         loop {

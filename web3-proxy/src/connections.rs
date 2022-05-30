@@ -2,7 +2,7 @@
 use arc_swap::ArcSwap;
 use counter::Counter;
 use derive_more::From;
-use ethers::prelude::{ProviderError, H256};
+use ethers::prelude::{Block, ProviderError, TxHash, H256};
 use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -113,9 +113,12 @@ impl Web3Connections {
         Ok(connections)
     }
 
-    pub async fn subscribe_heads(self: &Arc<Self>) {
-        // TODO: benchmark bounded vs unbounded?
-        let (block_sender, block_receiver) = flume::unbounded();
+    pub async fn subscribe_all_heads(
+        self: &Arc<Self>,
+        head_block_sender: flume::Sender<Block<TxHash>>,
+    ) {
+        // TODO: benchmark bounded vs unbounded
+        let (block_sender, block_receiver) = flume::unbounded::<(Block<TxHash>, usize)>();
 
         let mut handles = vec![];
 
@@ -146,7 +149,11 @@ impl Web3Connections {
         let connections = Arc::clone(self);
         let handle = task::Builder::default()
             .name("update_synced_rpcs")
-            .spawn(async move { connections.update_synced_rpcs(block_receiver).await });
+            .spawn(async move {
+                connections
+                    .update_synced_rpcs(block_receiver, head_block_sender)
+                    .await
+            });
 
         handles.push(handle);
 
@@ -219,16 +226,19 @@ impl Web3Connections {
     // we don't instrument here because we put a span inside the while loop
     async fn update_synced_rpcs(
         &self,
-        block_receiver: flume::Receiver<(u64, H256, usize)>,
+        block_receiver: flume::Receiver<(Block<TxHash>, usize)>,
+        head_block_sender: flume::Sender<Block<TxHash>>,
     ) -> anyhow::Result<()> {
         let total_rpcs = self.inner.len();
 
-        let mut connection_states: HashMap<usize, (u64, H256)> =
-            HashMap::with_capacity(total_rpcs);
+        let mut connection_states: HashMap<usize, _> = HashMap::with_capacity(total_rpcs);
 
         let mut pending_synced_connections = SyncedConnections::default();
 
-        while let Ok((new_block_num, new_block_hash, rpc_id)) = block_receiver.recv_async().await {
+        while let Ok((new_block, rpc_id)) = block_receiver.recv_async().await {
+            let new_block_num = new_block.number.unwrap().as_u64();
+            let new_block_hash = new_block.hash.unwrap();
+
             // TODO: span with more in it?
             // TODO: make sure i'm doing this span right
             // TODO: show the actual rpc url?
@@ -256,6 +266,8 @@ impl Web3Connections {
 
                     // TODO: if the parent hash isn't our previous best block, ignore it
                     pending_synced_connections.head_block_hash = new_block_hash;
+
+                    head_block_sender.send_async(new_block).await?;
                 }
                 cmp::Ordering::Equal => {
                     if new_block_hash == pending_synced_connections.head_block_hash {
@@ -304,7 +316,12 @@ impl Web3Connections {
                             most_common_head_hash
                         );
 
-                        pending_synced_connections.head_block_hash = most_common_head_hash;
+                        // TODO: do this more efficiently?
+                        if pending_synced_connections.head_block_hash != most_common_head_hash {
+                            head_block_sender.send_async(new_block).await?;
+                            pending_synced_connections.head_block_hash = most_common_head_hash;
+                        }
+
                         pending_synced_connections.inner = synced_rpcs.into_iter().collect();
                     }
                 }
