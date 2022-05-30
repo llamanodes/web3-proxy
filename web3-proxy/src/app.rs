@@ -15,6 +15,7 @@ use parking_lot::RwLock;
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::fmt;
+use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -52,6 +53,7 @@ pub struct Web3ProxyApp {
     response_cache: ResponseLrcCache,
     // don't drop this or the sender will stop working
     head_block_receiver: watch::Receiver<Block<TxHash>>,
+    next_subscription_id: AtomicUsize,
 }
 
 impl fmt::Debug for Web3ProxyApp {
@@ -133,6 +135,7 @@ impl Web3ProxyApp {
             incoming_requests: Default::default(),
             response_cache: Default::default(),
             head_block_receiver,
+            next_subscription_id: 1.into(),
         })
     }
 
@@ -145,8 +148,11 @@ impl Web3ProxyApp {
     ) -> anyhow::Result<(AbortHandle, JsonRpcForwardedResponse)> {
         let (subscription_handle, subscription_registration) = AbortHandle::new_pair();
 
-        // TODO: generate subscription_id as needed. atomic u16?
-        let subscription_id = "0xcd0c3e8af590364c09d0fa6a1210faf5".to_string();
+        let subscription_id = self
+            .next_subscription_id
+            .fetch_add(1, atomic::Ordering::SeqCst);
+
+        let subscription_id = format!("{:#x}", subscription_id);
 
         let f = {
             let head_block_receiver = self.head_block_receiver.clone();
