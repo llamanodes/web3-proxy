@@ -220,16 +220,18 @@ impl Web3Connection {
         block: Result<Block<TxHash>, ProviderError>,
         block_sender: &flume::Sender<(Block<TxHash>, usize)>,
         rpc_id: usize,
-    ) {
+    ) -> anyhow::Result<()> {
         match block {
             Ok(block) => {
                 // TODO: i'm pretty sure we don't need send_async, but double check
-                block_sender.send_async((block, rpc_id)).await.unwrap();
+                block_sender.send_async((block, rpc_id)).await?;
             }
             Err(e) => {
                 warn!("unable to get block from {}: {}", self, e);
             }
         }
+
+        Ok(())
     }
 
     /// Subscribe to new blocks. If `reconnect` is true, this runs forever.
@@ -283,7 +285,7 @@ impl Web3Connection {
                                     last_hash = new_hash;
                                 }
 
-                                self.send_block(block, &block_sender, rpc_id).await;
+                                self.send_block(block, &block_sender, rpc_id).await?;
                             }
                             Err(e) => {
                                 warn!("Failed getting latest block from {}: {:?}", self, e);
@@ -311,14 +313,15 @@ impl Web3Connection {
                         .request("eth_getBlockByNumber", ("latest", false))
                         .await;
 
-                    self.send_block(block, &block_sender, rpc_id).await;
+                    self.send_block(block, &block_sender, rpc_id).await?;
 
                     // TODO: should the stream have a timeout on it here?
                     // TODO: although reconnects will make this less of an issue
                     loop {
                         match stream.next().await {
                             Some(new_block) => {
-                                self.send_block(Ok(new_block), &block_sender, rpc_id).await;
+                                self.send_block(Ok(new_block), &block_sender, rpc_id)
+                                    .await?;
 
                                 // TODO: really not sure about this
                                 task::yield_now().await;

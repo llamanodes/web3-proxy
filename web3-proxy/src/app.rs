@@ -10,7 +10,6 @@ use ethers::prelude::{Block, TxHash, H256};
 use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
 use futures::stream::StreamExt;
-use futures::FutureExt;
 use linkedhashmap::LinkedHashMap;
 use parking_lot::RwLock;
 use serde_json::value::RawValue;
@@ -20,6 +19,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task;
 use tokio::time::timeout;
+use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, info, instrument, trace, warn};
 
 static APP_USER_AGENT: &str = concat!(
@@ -49,7 +49,8 @@ pub struct Web3ProxyApp {
     private_rpcs: Arc<Web3Connections>,
     incoming_requests: ActiveRequestsMap,
     response_cache: ResponseLrcCache,
-    head_block_receiver: flume::Receiver<Block<TxHash>>,
+    // don't drop this or the sender will stop working
+    head_block_receiver: watch::Receiver<Block<TxHash>>,
 }
 
 impl fmt::Debug for Web3ProxyApp {
@@ -101,7 +102,7 @@ impl Web3ProxyApp {
         )
         .await?;
 
-        let (head_block_sender, head_block_receiver) = flume::unbounded();
+        let (head_block_sender, head_block_receiver) = watch::channel(Block::default());
 
         // TODO: do this separately instead of during try_new
         {
@@ -148,13 +149,14 @@ impl Web3ProxyApp {
             let id = id.clone();
 
             if payload.params.as_deref().unwrap().to_string() == r#"["newHeads"]"# {
+                info!("received new heads subscription");
                 async move {
                     let mut head_block_receiver = Abortable::new(
-                        head_block_receiver.into_recv_async().into_stream(),
+                        WatchStream::new(head_block_receiver),
                         subscription_registration,
                     );
 
-                    while let Some(Ok(new_head)) = head_block_receiver.next().await {
+                    while let Some(new_head) = head_block_receiver.next().await {
                         // TODO: this String to RawValue probably not efficient, but it works for now
                         let msg = JsonRpcForwardedResponse::from_string(
                             serde_json::to_string(&new_head).unwrap(),
@@ -176,7 +178,7 @@ impl Web3ProxyApp {
         tokio::spawn(f);
 
         // TODO: generate subscription_id as needed. atomic u16?
-        let subscription_id = "0xcd0c3e8af590364c09d0fa6a1210faf5".to_string();
+        let subscription_id = r#""0xcd0c3e8af590364c09d0fa6a1210faf5""#.to_string();
 
         let response = JsonRpcForwardedResponse::from_string(subscription_id, id);
 

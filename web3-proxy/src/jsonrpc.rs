@@ -4,6 +4,7 @@ use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::Serialize;
 use serde_json::value::RawValue;
 use std::fmt;
+use tracing::trace;
 
 #[derive(Clone, serde::Deserialize)]
 pub struct JsonRpcRequest {
@@ -191,6 +192,7 @@ impl JsonRpcForwardedResponse {
     }
 
     pub fn from_string(partial_response: String, id: Box<RawValue>) -> Self {
+        trace!("partial_response: {}", partial_response);
         let partial_response = RawValue::from_string(partial_response).unwrap();
 
         Self::from_response(partial_response, id)

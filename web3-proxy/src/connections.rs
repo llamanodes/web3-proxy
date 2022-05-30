@@ -15,6 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::watch;
 use tokio::task;
 use tokio::time::sleep;
 use tracing::Instrument;
@@ -115,7 +116,7 @@ impl Web3Connections {
 
     pub async fn subscribe_all_heads(
         self: &Arc<Self>,
-        head_block_sender: flume::Sender<Block<TxHash>>,
+        head_block_sender: watch::Sender<Block<TxHash>>,
     ) {
         // TODO: benchmark bounded vs unbounded
         let (block_sender, block_receiver) = flume::unbounded::<(Block<TxHash>, usize)>();
@@ -227,7 +228,7 @@ impl Web3Connections {
     async fn update_synced_rpcs(
         &self,
         block_receiver: flume::Receiver<(Block<TxHash>, usize)>,
-        head_block_sender: flume::Sender<Block<TxHash>>,
+        head_block_sender: watch::Sender<Block<TxHash>>,
     ) -> anyhow::Result<()> {
         let total_rpcs = self.inner.len();
 
@@ -267,7 +268,7 @@ impl Web3Connections {
                     // TODO: if the parent hash isn't our previous best block, ignore it
                     pending_synced_connections.head_block_hash = new_block_hash;
 
-                    head_block_sender.send_async(new_block).await?;
+                    head_block_sender.send(new_block)?;
                 }
                 cmp::Ordering::Equal => {
                     if new_block_hash == pending_synced_connections.head_block_hash {
@@ -318,7 +319,7 @@ impl Web3Connections {
 
                         // TODO: do this more efficiently?
                         if pending_synced_connections.head_block_hash != most_common_head_hash {
-                            head_block_sender.send_async(new_block).await?;
+                            head_block_sender.send(new_block)?;
                             pending_synced_connections.head_block_hash = most_common_head_hash;
                         }
 
