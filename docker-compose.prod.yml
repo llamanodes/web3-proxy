@@ -74,7 +74,7 @@ services:
       file: docker-compose.common.yml
       service: base
     volumes:
-      - ./config/production-fantom.toml:/config.toml
+      - ./config/production-fantom-archive.toml:/config.toml
     ports:
       - 7604:8544
 
