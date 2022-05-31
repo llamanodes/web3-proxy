@@ -183,7 +183,6 @@ async fn read_web3_socket(
                 break;
             }
             Message::Binary(mut payload) => {
-                // TODO: what should we do here?
                 let payload = from_utf8_mut(&mut payload).unwrap();
 
                 handle_socket_payload(app.0.as_ref(), payload, &response_tx, &mut subscriptions)
