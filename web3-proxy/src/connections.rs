@@ -237,7 +237,14 @@ impl Web3Connections {
         let mut pending_synced_connections = SyncedConnections::default();
 
         while let Ok((new_block, rpc_id)) = block_receiver.recv_async().await {
-            let new_block_num = new_block.number.unwrap().as_u64();
+            // TODO: wth. how is this happening? need more logs
+            let new_block_num = match new_block.number {
+                Some(x) => x.as_u64(),
+                None => {
+                    warn!(?new_block, "Block without number!");
+                    continue;
+                }
+            };
             let new_block_hash = new_block.hash.unwrap();
 
             // TODO: span with more in it?

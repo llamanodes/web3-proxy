@@ -309,6 +309,8 @@ impl Web3ProxyApp {
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         trace!("Received request: {:?}", request);
 
+        // TODO: if eth_chainId or net_version, serve those without querying the backend
+
         // TODO: how much should we retry? probably with a timeout and not with a count like this
         // TODO: think more about this loop.
         // // TODO: add more to this span
