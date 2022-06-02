@@ -484,7 +484,11 @@ impl Web3Connections {
                 Err(None) => {
                     warn!(?self, "No servers in sync!");
 
-                    return Err(anyhow::anyhow!("no servers in sync"));
+                    // TODO: sleep how long? until synced_connections changes or rate limits are available
+                    sleep(Duration::from_millis(200)).await;
+
+                    continue;
+                    // return Err(anyhow::anyhow!("no servers in sync"));
                 }
                 Err(Some(retry_after)) => {
                     // TODO: move this to a helper function
@@ -531,17 +535,23 @@ impl Web3Connections {
                 Err(None) => {
                     warn!(?self, "No servers in sync!");
 
-                    // TODO: return a 502?
                     // TODO: i don't think this will ever happen
-                    return Err(anyhow::anyhow!("no available rpcs!"));
+                    // TODO: return a 502? if it does?
+                    // return Err(anyhow::anyhow!("no available rpcs!"));
+                    // TODO: sleep how long?
+                    sleep(Duration::from_millis(200)).await;
+
+                    continue;
                 }
                 Err(Some(retry_after)) => {
                     // TODO: move this to a helper function
                     // sleep (TODO: with a lock?) until our rate limits should be available
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
+                    warn!("All rate limits exceeded. Sleeping");
+
                     sleep(retry_after).await;
 
-                    warn!("All rate limits exceeded. Sleeping");
+                    continue;
                 }
             }
         }
