@@ -5,4 +5,5 @@ services:
     restart: unless-stopped
     command: --config /config.toml --workers 8
     environment:
-      RUST_LOG: "info,web3_proxy=debug"
+      #RUST_LOG: "info,web3_proxy=debug"
+      RUST_LOG: info
