@@ -184,9 +184,9 @@ impl JsonRpcForwardedResponse {
     pub fn from_response_result(
         result: Result<Box<RawValue>, ProviderError>,
         id: Box<RawValue>,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         match result {
-            Ok(response) => Self::from_response(response, id),
+            Ok(response) => Ok(Self::from_response(response, id)),
             Err(e) => Self::from_ethers_error(e, id),
         }
     }
@@ -208,7 +208,7 @@ impl JsonRpcForwardedResponse {
         }
     }
 
-    pub fn from_ethers_error(e: ProviderError, id: Box<RawValue>) -> Self {
+    pub fn from_ethers_error(e: ProviderError, id: Box<RawValue>) -> anyhow::Result<Self> {
         // TODO: move turning ClientError into json to a helper function?
         let code;
         let message: String;
@@ -216,47 +216,46 @@ impl JsonRpcForwardedResponse {
 
         match e {
             ProviderError::JsonRpcClientError(e) => {
-                // TODO: we should check what type the provider is rather than trying to downcast both types of errors
-                if let Some(e) = e.downcast_ref::<HttpClientError>() {
-                    match &*e {
+                // TODO: check what type the provider is rather than trying to downcast both types of errors
+                let e = e.downcast::<HttpClientError>();
+
+                if let Ok(e) = e {
+                    match *e {
                         HttpClientError::JsonRpcError(e) => {
                             code = e.code;
                             message = e.message.clone();
-                            data = e.data.clone();
+                            data = e.data;
                         }
                         e => {
-                            // TODO: improve this
-                            code = -32603;
-                            message = format!("{}", e);
-                            data = None;
-                        }
-                    }
-                } else if let Some(e) = e.downcast_ref::<WsClientError>() {
-                    match &*e {
-                        WsClientError::JsonRpcError(e) => {
-                            code = e.code;
-                            message = e.message.clone();
-                            data = e.data.clone();
-                        }
-                        e => {
-                            // TODO: improve this
-                            code = -32603;
-                            message = format!("{}", e);
-                            data = None;
+                            // this is not an rpc error. keep it as an error
+                            return Err(e.into());
                         }
                     }
                 } else {
-                    unimplemented!();
+                    // it wasn't an HttpClientError. try WsClientError
+                    let e = e.unwrap_err().downcast::<WsClientError>();
+
+                    if let Ok(e) = e {
+                        match *e {
+                            WsClientError::JsonRpcError(e) => {
+                                code = e.code;
+                                message = e.message.clone();
+                                data = e.data;
+                            }
+                            e => {
+                                // this is not an rpc error. keep it as an error
+                                return Err(e.into());
+                            }
+                        }
+                    } else {
+                        unimplemented!();
+                    }
                 }
             }
-            _ => {
-                code = -32603;
-                message = format!("{}", e);
-                data = None;
-            }
+            e => return Err(e.into()),
         }
 
-        Self {
+        Ok(Self {
             jsonrpc: "2.0".to_string(),
             id,
             result: None,
@@ -265,7 +264,7 @@ impl JsonRpcForwardedResponse {
                 message,
                 data,
             }),
-        }
+        })
     }
 }
 

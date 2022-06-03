@@ -469,17 +469,32 @@ impl Web3Connections {
                         .request(&request.method, &request.params)
                         .await;
 
-                    let response =
-                        JsonRpcForwardedResponse::from_response_result(response_result, request.id);
+                    match JsonRpcForwardedResponse::from_response_result(
+                        response_result,
+                        request.id.clone(),
+                    ) {
+                        Ok(response) => {
+                            if response.error.is_some() {
+                                trace!(?response, "Sending error reply",);
+                                // errors already sent false to the in_flight_tx
+                            } else {
+                                trace!(?response, "Sending reply");
+                            }
 
-                    if response.error.is_some() {
-                        trace!(?response, "Sending error reply",);
-                        // errors already sent false to the in_flight_tx
-                    } else {
-                        trace!(?response, "Sending reply");
+                            return Ok(response);
+                        }
+                        Err(e) => {
+                            warn!(?self, ?e, "Backend server error!");
+
+                            // TODO: sleep how long? until synced_connections changes or rate limits are available
+                            sleep(Duration::from_millis(100)).await;
+
+                            // TODO: when we retry, depending on the error, skip using this same server
+                            // for example, if rpc isn't available on this server, retrying is bad
+                            // but if an http error, retrying on same is probably fine
+                            continue;
+                        }
                     }
-
-                    return Ok(response);
                 }
                 Err(None) => {
                     warn!(?self, "No servers in sync!");
