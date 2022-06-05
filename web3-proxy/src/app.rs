@@ -171,7 +171,7 @@ impl Web3ProxyApp {
                     );
 
                     while let Some(new_head) = head_block_receiver.next().await {
-                        // TODO: make a struct for this? using JsonRpcForwardedResponse won't work because it needs an id
+                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
                         let msg = json!({
                             "jsonrpc": "2.0",
                             "method":"eth_subscription",
