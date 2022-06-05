@@ -158,7 +158,7 @@ impl Web3ProxyApp {
             let head_block_receiver = self.head_block_receiver.clone();
             let subscription_id = subscription_id.clone();
 
-            if payload.params.as_deref().unwrap().to_string() == r#"["newHeads"]"# {
+            if payload.params.as_deref().unwrap().get() == r#"["newHeads"]"# {
                 info!("received new heads subscription");
                 async move {
                     let mut head_block_receiver = Abortable::new(
