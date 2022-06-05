@@ -49,10 +49,7 @@ async fn handle_socket_payload(
             let response: anyhow::Result<JsonRpcForwardedResponseEnum> = if payload.method
                 == "eth_subscribe"
             {
-                // TODO: if we pass eth_subscribe the response_tx, we
-                let response = app
-                    .eth_subscribe(id.clone(), payload, response_tx.clone())
-                    .await;
+                let response = app.eth_subscribe(payload, response_tx.clone()).await;
 
                 match response {
                     Ok((handle, response)) => {
@@ -79,9 +76,6 @@ async fn handle_socket_payload(
 
                 Ok(response.into())
             } else {
-                // TODO: if this is a subscription request, we need to do some special handling. something with channels
-                // TODO: just handle subscribe_newBlock
-
                 app.proxy_web3_rpc(payload.into()).await
             };
 
