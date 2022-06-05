@@ -13,7 +13,7 @@ pub struct CliConfig {
     #[argh(option, default = "8544")]
     pub port: u16,
 
-    /// number of worker threads
+    /// number of worker threads. Defaults to the number of logical processors
     #[argh(option, default = "0")]
     pub workers: usize,
 

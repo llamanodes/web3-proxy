@@ -83,7 +83,7 @@ async fn handle_socket_payload(
         }
         Err(err) => {
             // TODO: what should this id be?
-            let id = RawValue::from_string("0".to_string()).unwrap();
+            let id = RawValue::from_string("null".to_string()).unwrap();
             (id, Err(err.into()))
         }
     };

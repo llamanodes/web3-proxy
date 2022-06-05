@@ -158,13 +158,12 @@ impl Web3ProxyApp {
         let f = {
             let subscription_id = subscription_id.clone();
 
-            let id = payload.id;
             let params = payload.params.as_deref().unwrap().get();
 
             if params == r#"["newHeads"]"# {
                 let head_block_receiver = self.head_block_receiver.clone();
 
-                info!("received new heads subscription");
+                trace!(?subscription_id, "new heads subscription");
                 async move {
                     let mut head_block_receiver = Abortable::new(
                         WatchStream::new(head_block_receiver),
@@ -172,9 +171,8 @@ impl Web3ProxyApp {
                     );
 
                     while let Some(new_head) = head_block_receiver.next().await {
-                        // TODO: make a struct for this? using JsonRpcForwardedResponse
+                        // TODO: make a struct for this? using JsonRpcForwardedResponse won't work because it needs an id
                         let msg = json!({
-                            "id": id,
                             "jsonrpc": "2.0",
                             "method":"eth_subscription",
                             "params": {
@@ -185,8 +183,13 @@ impl Web3ProxyApp {
 
                         let msg = Message::Text(serde_json::to_string(&msg).unwrap());
 
-                        subscription_tx.send_async(msg).await.unwrap();
+                        if subscription_tx.send_async(msg).await.is_err() {
+                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                            break;
+                        };
                     }
+
+                    trace!(?subscription_id, "closed new heads subscription");
                 }
             } else {
                 return Err(anyhow::anyhow!("unimplemented"));

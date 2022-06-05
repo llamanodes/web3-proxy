@@ -12,12 +12,12 @@ pub async fn handler_404() -> impl IntoResponse {
 
 /// handle errors by converting them into something that implements `IntoResponse`
 /// TODO: use this. i can't get https://docs.rs/axum/latest/axum/error_handling/index.html to work
+/// TODO: i think we want a custom result type instead. put the anyhow result inside. then `impl IntoResponse for CustomResult`
 pub async fn handle_anyhow_error(
     err: anyhow::Error,
     code: Option<StatusCode>,
 ) -> impl IntoResponse {
-    // TODO: what id can we use? how do we make sure the incoming id gets attached to this?
-    let id = RawValue::from_string("0".to_string()).unwrap();
+    let id = RawValue::from_string("null".to_string()).unwrap();
 
     let err = JsonRpcForwardedResponse::from_anyhow_error(err, id);
 
@@ -27,5 +27,3 @@ pub async fn handle_anyhow_error(
 
     (code, Json(err))
 }
-
-// i think we want a custom result type. it has an anyhow result inside. if it impl IntoResponse I think we'll get this for free

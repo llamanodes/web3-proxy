@@ -193,7 +193,9 @@ impl JsonRpcForwardedResponse {
 
     pub fn from_string(partial_response: String, id: Box<RawValue>) -> Self {
         trace!("partial_response: {}", partial_response);
-        let partial_response = RawValue::from_string(partial_response).unwrap();
+        // TODO: anyhow result on this
+        // TODO: proper escaping. this feels wrong. probably refactor to not need this at all
+        let partial_response = RawValue::from_string(format!(r#""{}""#, partial_response)).unwrap();
 
         Self::from_response(partial_response, id)
     }
