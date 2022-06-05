@@ -10,7 +10,6 @@ use axum::{
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
-
 use crate::app::Web3ProxyApp;
 
 pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
@@ -21,7 +20,7 @@ pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> 
         .route("/", post(http_proxy::proxy_web3_rpc))
         // `websocket /` goes to `proxy_web3_ws`
         .route("/", get(ws_proxy::websocket_handler))
-        // `GET /index.html` goes to `index`
+        // `GET /index.html` goes to `index` (todo, somehow combine this with http_proxy::proxy_web3_rpc)
         .route("/index.html", get(http::index))
         // `GET /status` goes to `status`
         .route("/status", get(http::status))
