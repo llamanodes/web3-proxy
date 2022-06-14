@@ -83,6 +83,7 @@ impl Web3ProxyApp {
         balanced_rpcs: Vec<Web3ConnectionConfig>,
         private_rpcs: Vec<Web3ConnectionConfig>,
     ) -> anyhow::Result<(Arc<Web3ProxyApp>, AnyhowJoinHandle<()>)> {
+        // TODO: try_join_all instead
         let mut handles = FuturesUnordered::new();
 
         // make a http shared client
