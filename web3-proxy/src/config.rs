@@ -1,10 +1,11 @@
+use crate::app::AnyhowJoinHandle;
+use crate::connection::Web3Connection;
+use crate::Web3ProxyApp;
 use argh::FromArgs;
+use ethers::prelude::{Block, TxHash};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-
-use crate::connection::Web3Connection;
-use crate::Web3ProxyApp;
 
 #[derive(Debug, FromArgs)]
 /// Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
@@ -47,7 +48,7 @@ pub struct Web3ConnectionConfig {
 impl RpcConfig {
     /// Create a Web3ProxyApp from config
     // #[instrument(name = "try_build_RpcConfig", skip_all)]
-    pub async fn try_build(self) -> anyhow::Result<Arc<Web3ProxyApp>> {
+    pub async fn spawn(self) -> anyhow::Result<(Arc<Web3ProxyApp>, AnyhowJoinHandle<()>)> {
         let balanced_rpcs = self.balanced_rpcs.into_values().collect();
 
         let private_rpcs = if let Some(private_rpcs) = self.private_rpcs {
@@ -69,13 +70,16 @@ impl RpcConfig {
 impl Web3ConnectionConfig {
     /// Create a Web3Connection from config
     // #[instrument(name = "try_build_Web3ConnectionConfig", skip_all)]
-    pub async fn try_build(
+    pub async fn spawn(
         self,
-        redis_conn: Option<&redis_cell_client::MultiplexedConnection>,
+        rate_limiter: Option<&redis_cell_client::MultiplexedConnection>,
         chain_id: usize,
         http_client: Option<&reqwest::Client>,
-    ) -> anyhow::Result<Arc<Web3Connection>> {
-        let hard_rate_limit = self.hard_limit.map(|x| (x, redis_conn.unwrap()));
+        block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Web3Connection>)>>,
+        tx_id_sender: Option<flume::Sender<(TxHash, Arc<Web3Connection>)>>,
+        reconnect: bool,
+    ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
+        let hard_rate_limit = self.hard_limit.map(|x| (x, rate_limiter.unwrap()));
 
         Web3Connection::spawn(
             chain_id,
@@ -83,6 +87,9 @@ impl Web3ConnectionConfig {
             http_client,
             hard_rate_limit,
             self.soft_limit,
+            block_sender,
+            tx_id_sender,
+            reconnect,
         )
         .await
     }

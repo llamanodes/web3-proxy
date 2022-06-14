@@ -2,7 +2,7 @@
 use arc_swap::ArcSwap;
 use counter::Counter;
 use derive_more::From;
-use ethers::prelude::{Block, ProviderError, TransactionReceipt, TxHash, H256};
+use ethers::prelude::{Block, ProviderError, Transaction, TxHash, H256};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
@@ -17,9 +17,9 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task;
 use tokio::time::sleep;
-use tracing::Instrument;
 use tracing::{debug, info, info_span, instrument, trace, warn};
 
+use crate::app::AnyhowJoinHandle;
 use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, Web3Connection};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
@@ -82,22 +82,38 @@ impl Web3Connections {
     // #[instrument(name = "spawn_Web3Connections", skip_all)]
     pub async fn spawn(
         chain_id: usize,
-        servers: Vec<Web3ConnectionConfig>,
+        server_configs: Vec<Web3ConnectionConfig>,
         http_client: Option<&reqwest::Client>,
         rate_limiter: Option<&redis_cell_client::MultiplexedConnection>,
         head_block_sender: Option<watch::Sender<Block<TxHash>>>,
-        pending_tx_receipt_sender: Option<flume::Sender<TransactionReceipt>>,
-    ) -> anyhow::Result<Arc<Self>> {
-        let num_connections = servers.len();
+        pending_tx_sender: Option<flume::Sender<Transaction>>,
+    ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
+        let num_connections = server_configs.len();
+
+        let handles = FuturesUnordered::new();
+
+        // TODO: only create these if head_block_sender and pending_tx_sender are set
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
+        let (block_sender, block_receiver) = flume::unbounded();
 
         // turn configs into connections
         let mut connections = Vec::with_capacity(num_connections);
-        for server_config in servers.into_iter() {
+        for server_config in server_configs.into_iter() {
             match server_config
-                .try_build(rate_limiter, chain_id, http_client)
+                .spawn(
+                    rate_limiter,
+                    chain_id,
+                    http_client,
+                    Some(block_sender.clone()),
+                    Some(pending_tx_id_sender.clone()),
+                    true,
+                )
                 .await
             {
-                Ok(connection) => connections.push(connection),
+                Ok((connection, connection_handle)) => {
+                    handles.push(connection_handle);
+                    connections.push(connection)
+                }
                 Err(e) => warn!("Unable to connect to a server! {:?}", e),
             }
         }
@@ -119,57 +135,50 @@ impl Web3Connections {
 
             tokio::spawn(async move {
                 connections
-                    .subscribe(head_block_sender, pending_tx_receipt_sender)
+                    .subscribe(
+                        pending_tx_id_sender,
+                        pending_tx_id_receiver,
+                        block_receiver,
+                        head_block_sender,
+                        pending_tx_sender,
+                    )
                     .await
             })
         };
 
-        Ok(connections)
+        Ok((connections, handle))
     }
 
     /// subscribe to all the backend rpcs
     async fn subscribe(
         self: Arc<Self>,
+        pending_tx_id_sender: flume::Sender<(TxHash, Arc<Web3Connection>)>,
+        pending_tx_id_receiver: flume::Receiver<(TxHash, Arc<Web3Connection>)>,
+        block_receiver: flume::Receiver<(Block<TxHash>, Arc<Web3Connection>)>,
         head_block_sender: Option<watch::Sender<Block<TxHash>>>,
-        pending_tx_receipt_sender: Option<flume::Sender<TransactionReceipt>>,
+        pending_tx_sender: Option<flume::Sender<Transaction>>,
     ) -> anyhow::Result<()> {
         let mut futures = FuturesUnordered::new();
 
-        // subscribe to pending transactions
-        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
-        let (block_sender, block_receiver) = flume::unbounded();
-
-        // one future subscribes to pendingTransactions on all the rpcs. it sends them through the funnel
-        // TODO: do this only when someone is subscribed. otherwise this will be way too many queries
-        for (rpc_id, connection) in self.inner.iter().cloned().enumerate() {
-            let pending_tx_id_sender = pending_tx_id_sender.clone();
-            let block_sender = block_sender.clone();
-
-            let handle = tokio::spawn(async move {
-                // loop to automatically reconnect
-                // TODO: make this cancellable?
-                // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
-                // TODO: proper span
-                connection
-                    .subscribe(block_sender, pending_tx_id_sender, true)
-                    .instrument(tracing::info_span!("rpc", ?rpc_id))
-                    .await
-            });
-
-            futures.push(handle);
-        }
-
-        // the next future subscribes to the transaction funnel
+        // setup the transaction funnel
         // it skips any duplicates (unless they are being orphaned)
         // fetches new transactions from the notifying rpc
         // forwards new transacitons to pending_tx_receipt_sender
-        {
+        if let Some(pending_tx_sender) = pending_tx_sender {
             // TODO: do something with the handle so we can catch any errors
             let handle = task::spawn(async move {
                 while let Ok((pending_transaction_id, rpc)) =
                     pending_tx_id_receiver.recv_async().await
                 {
-                    unimplemented!("de-dedup the pending txid")
+                    let request_handle = rpc.wait_for_request_handle().await;
+
+                    let pending_transaction: Transaction = request_handle
+                        .request("eth_getTransactionByHash", (pending_transaction_id,))
+                        .await?;
+
+                    // unimplemented!("de-dedup the pending txid");
+
+                    pending_tx_sender.send_async(pending_transaction).await?;
                 }
 
                 Ok(())
@@ -178,8 +187,7 @@ impl Web3Connections {
             futures.push(handle);
         }
 
-        // the next future subscribes to the block funnel
-
+        // setup the block funnel
         if let Some(head_block_sender) = head_block_sender {
             let connections = Arc::clone(&self);
             let handle = task::Builder::default()
@@ -193,9 +201,16 @@ impl Web3Connections {
             futures.push(handle);
         }
 
+        if futures.is_empty() {
+            // no transaction or block subscriptions.
+            unimplemented!("every second, check that the provider is still connected");
+        }
+
         if let Some(Err(e)) = futures.next().await {
             return Err(e.into());
         }
+
+        info!("subscriptions over: {:?}", self);
 
         Ok(())
     }

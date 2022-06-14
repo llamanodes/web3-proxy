@@ -6,10 +6,11 @@ use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
 use axum::extract::ws::Message;
 use dashmap::DashMap;
-use ethers::prelude::TransactionReceipt;
+use ethers::prelude::Transaction;
 use ethers::prelude::{Block, TxHash, H256};
 use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
+use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use linkedhashmap::LinkedHashMap;
 use parking_lot::RwLock;
@@ -19,6 +20,7 @@ use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
@@ -40,6 +42,16 @@ type ResponseLrcCache = RwLock<LinkedHashMap<CacheKey, JsonRpcForwardedResponse>
 
 type ActiveRequestsMap = DashMap<CacheKey, watch::Receiver<bool>>;
 
+pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
+
+pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T> {
+    match handle.await {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(err)) => Err(err),
+        Err(err) => Err(err.into()),
+    }
+}
+
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
 // TODO: if Web3ProxyApp is always in an Arc, i think we can avoid having at least some of these internal things in arcs
@@ -53,7 +65,7 @@ pub struct Web3ProxyApp {
     // don't drop this or the sender will stop working
     head_block_receiver: watch::Receiver<Block<TxHash>>,
     // TODO: i think we want a TxState enum for Confirmed(TxHash, BlockHash) or Pending(TxHash) or Orphan(TxHash, BlockHash)
-    pending_tx_receipt_receiver: flume::Receiver<TransactionReceipt>,
+    pending_tx_receiver: flume::Receiver<Transaction>,
     next_subscription_id: AtomicUsize,
 }
 
@@ -70,7 +82,9 @@ impl Web3ProxyApp {
         redis_address: Option<String>,
         balanced_rpcs: Vec<Web3ConnectionConfig>,
         private_rpcs: Vec<Web3ConnectionConfig>,
-    ) -> anyhow::Result<Arc<Web3ProxyApp>> {
+    ) -> anyhow::Result<(Arc<Web3ProxyApp>, AnyhowJoinHandle<()>)> {
+        let mut handles = FuturesUnordered::new();
+
         // make a http shared client
         // TODO: how should we configure the connection pool?
         // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something is wrong with the remote server
@@ -100,35 +114,41 @@ impl Web3ProxyApp {
 
         // TODO: subscribe to pending transactions on the private rpcs, too?
         let (head_block_sender, head_block_receiver) = watch::channel(Block::default());
-        let (pending_tx_receipt_sender, pending_tx_receipt_receiver) = flume::unbounded();
+        let (pending_tx_sender, pending_tx_receiver) = flume::unbounded();
 
         // TODO: attach context to this error
-        let balanced_rpcs = Web3Connections::spawn(
+        let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
             chain_id,
             balanced_rpcs,
             http_client.as_ref(),
             rate_limiter.as_ref(),
             Some(head_block_sender),
-            Some(pending_tx_receipt_sender),
+            Some(pending_tx_sender),
         )
         .await?;
+
+        handles.push(balanced_handle);
 
         let private_rpcs = if private_rpcs.is_empty() {
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             balanced_rpcs.clone()
         } else {
             // TODO: attach context to this error
-            Web3Connections::spawn(
+            let (private_rpcs, private_handle) = Web3Connections::spawn(
                 chain_id,
                 private_rpcs,
                 http_client.as_ref(),
                 rate_limiter.as_ref(),
                 // subscribing to new heads here won't work well
                 None,
-                // TODO: subscribe to pending transactions on the private rpcs, too?
+                // TODO: subscribe to pending transactions on the private rpcs?
                 None,
             )
-            .await?
+            .await?;
+
+            handles.push(private_handle);
+
+            private_rpcs
         };
 
         let app = Web3ProxyApp {
@@ -137,13 +157,26 @@ impl Web3ProxyApp {
             incoming_requests: Default::default(),
             response_cache: Default::default(),
             head_block_receiver,
-            pending_tx_receipt_receiver,
+            pending_tx_receiver,
             next_subscription_id: 1.into(),
         };
 
         let app = Arc::new(app);
 
-        Ok(app)
+        // create a handle that returns on the first error
+        let handle = tokio::spawn(async move {
+            while let Some(x) = handles.next().await {
+                match x {
+                    Err(e) => return Err(e.into()),
+                    Ok(Err(e)) => return Err(e),
+                    Ok(Ok(())) => {}
+                }
+            }
+
+            Ok(())
+        });
+
+        Ok((app, handle))
     }
 
     pub async fn eth_subscribe(

@@ -7,17 +7,16 @@ mod connections;
 mod frontend;
 mod jsonrpc;
 
+use crate::app::{flatten_handle, Web3ProxyApp};
+use crate::config::{CliConfig, RpcConfig};
 use parking_lot::deadlock;
 use std::fs;
 use std::sync::atomic::{self, AtomicUsize};
 use std::thread;
 use std::time::Duration;
 use tokio::runtime;
-use tracing::{info, trace};
+use tracing::{error, info, trace};
 use tracing_subscriber::EnvFilter;
-
-use crate::app::Web3ProxyApp;
-use crate::config::{CliConfig, RpcConfig};
 
 fn main() -> anyhow::Result<()> {
     // if RUST_LOG isn't set, configure a default
@@ -83,8 +82,20 @@ fn main() -> anyhow::Result<()> {
 
     // spawn the root task
     rt.block_on(async {
-        let app = rpc_config.try_build().await?;
+        let (app, app_handle) = rpc_config.spawn().await?;
 
-        frontend::run(cli_config.port, app).await
+        let frontend_handle = tokio::spawn(frontend::run(cli_config.port, app));
+
+        match tokio::try_join!(flatten_handle(app_handle), flatten_handle(frontend_handle)) {
+            Ok(_) => {
+                // do something with the values
+                info!("app completed")
+            }
+            Err(err) => {
+                error!(?err, "app failed");
+            }
+        }
+
+        Ok(())
     })
 }

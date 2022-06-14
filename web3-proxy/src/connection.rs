@@ -9,10 +9,13 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32};
 use std::{cmp::Ordering, sync::Arc};
+use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use tokio::task;
 use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
-use tracing::{info, instrument, trace, warn};
+use tracing::{error, info, instrument, trace, warn};
+
+use crate::app::AnyhowJoinHandle;
 
 /// TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
 #[derive(From)]
@@ -117,7 +120,8 @@ impl fmt::Display for Web3Connection {
 
 impl Web3Connection {
     /// Connect to a web3 rpc
-    #[instrument(name = "spawn_Web3Connection", skip(hard_limit, http_client))]
+    // #[instrument(name = "spawn_Web3Connection", skip(hard_limit, http_client))]
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         chain_id: usize,
         url_str: String,
@@ -126,7 +130,10 @@ impl Web3Connection {
         hard_limit: Option<(u32, &redis_cell_client::MultiplexedConnection)>,
         // TODO: think more about this type
         soft_limit: u32,
-    ) -> anyhow::Result<Arc<Web3Connection>> {
+        block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Self>)>>,
+        tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
+        reconnect: bool,
+    ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_conection)| {
             // TODO: allow different max_burst and count_per_period and period
             let period = 1;
@@ -172,7 +179,7 @@ impl Web3Connection {
                         found_chain_id
                     ));
                 } else {
-                    info!("Successful connection");
+                    info!(?connection, "success");
                 }
             }
             Err(e) => {
@@ -181,7 +188,16 @@ impl Web3Connection {
             }
         }
 
-        Ok(connection)
+        let handle = {
+            let connection = connection.clone();
+            tokio::spawn(async move {
+                connection
+                    .subscribe(block_sender, tx_id_sender, reconnect)
+                    .await
+            })
+        };
+
+        Ok((connection, handle))
     }
 
     #[instrument(skip_all)]
@@ -243,50 +259,59 @@ impl Web3Connection {
         Ok(())
     }
 
-    pub async fn subscribe(
+    async fn subscribe(
         self: Arc<Self>,
-        block_sender: flume::Sender<(Block<TxHash>, Arc<Self>)>,
-        tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
+        block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Self>)>>,
+        tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
     ) -> anyhow::Result<()> {
-        loop {
-            // TODO: make these abortable so that if one fails the other can be cancelled?
+        match (block_sender, tx_id_sender) {
+            (None, None) => {
+                // TODO: is there a better way to make a channel that is never ready?
+                let (tx, rx) = oneshot::channel::<()>();
+                rx.await?;
+                drop(tx);
+            }
+            (Some(block_sender), Some(tx_id_sender)) => {
+                // TODO: make these abortable so that if one fails the other can be cancelled?
+                loop {
+                    let new_heads = {
+                        let clone = self.clone();
+                        let block_sender = block_sender.clone();
 
-            let new_heads = {
-                let clone = self.clone();
-                let block_sender = block_sender.clone();
+                        clone.subscribe_new_heads(block_sender)
+                    };
 
-                clone.subscribe_new_heads(block_sender)
-            };
+                    let pending_txs = {
+                        let clone = self.clone();
+                        let tx_id_sender = tx_id_sender.clone();
 
-            let pending_txs = {
-                let clone = self.clone();
-                let tx_id_sender = tx_id_sender.clone();
+                        clone.subscribe_pending_transactions(tx_id_sender)
+                    };
 
-                clone.subscribe_pending_transactions(tx_id_sender)
-            };
+                    match tokio::try_join!(new_heads, pending_txs) {
+                        Ok(_) => break,
+                        Err(err) => {
+                            if reconnect {
+                                // TODO: exponential backoff
+                                // TODO: share code with new heads subscription
+                                warn!(
+                                    "subscription exited. Attempting to reconnect in 1 second. {:?}", err
+                                );
+                                sleep(Duration::from_secs(1)).await;
 
-            tokio::select! {
-                _ = new_heads => {
-                    info!(?self, "new heads subscription completed");
-                }
-                _ = pending_txs => {
-                    info!(?self, "pending transactions subscription completed");
+                                // TODO: loop on reconnecting! do not return with a "?" here
+                                // TODO: this isn't going to work. it will get in a loop with newHeads
+                                self.reconnect(&block_sender).await?;
+                            } else {
+                                error!("subscription exited. {:?}", err);
+                                break;
+                            }
+                        }
+                    };
                 }
             }
-
-            if reconnect {
-                // TODO: exponential backoff
-                // TODO: share code with new heads subscription
-                warn!("pending transactions subscription exited. Attempting to reconnect in 1 second...");
-                sleep(Duration::from_secs(1)).await;
-
-                // TODO: loop on reconnecting! do not return with a "?" here
-                // TODO: this isn't going to work. it will get in a loop with newHeads
-                self.reconnect(&block_sender).await?;
-            } else {
-                break;
-            }
+            _ => panic!(),
         }
 
         Ok(())
@@ -299,7 +324,7 @@ impl Web3Connection {
         self: Arc<Self>,
         block_sender: flume::Sender<(Block<TxHash>, Arc<Self>)>,
     ) -> anyhow::Result<()> {
-        info!("Watching new_heads on {}", self);
+        info!("watching {}", self);
 
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
@@ -390,7 +415,7 @@ impl Web3Connection {
         self: Arc<Self>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
     ) -> anyhow::Result<()> {
-        info!("watching pending transactions on {}", self);
+        info!("watching {}", self);
 
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
@@ -400,7 +425,7 @@ impl Web3Connection {
                     // TODO: what should this interval be? probably automatically set to some fraction of block time
                     // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
                     // TODO: if there are some websocket providers, maybe have a longer interval and a channel that tells the https to update when a websocket gets a new head? if they are slow this wouldn't work well though
-                    let mut interval = interval(Duration::from_secs(2));
+                    let mut interval = interval(Duration::from_secs(60));
                     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
                     // TODO: create a filter
@@ -410,6 +435,8 @@ impl Web3Connection {
                         // TODO: if error or rate limit, increase interval?
                         interval.tick().await;
 
+                        // TODO: actually do something here
+                        /*
                         match self.try_request_handle().await {
                             Ok(active_request_handle) => {
                                 // TODO: check the filter
@@ -419,6 +446,7 @@ impl Web3Connection {
                                 warn!("Failed getting latest block from {}: {:?}", self, e);
                             }
                         }
+                        */
                     }
                 }
                 Web3Provider::Ws(provider) => {
@@ -469,7 +497,7 @@ impl Web3Connection {
             }
         }
 
-        // TODO: what should we do?
+        // TODO: what should we do? panic isn't ever what we want
         panic!("no request handle after 10 tries");
     }
 
