@@ -6,6 +6,7 @@ use redis_cell_client::RedisCellClient;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::RwLock;
@@ -115,33 +116,9 @@ impl fmt::Display for Web3Connection {
 }
 
 impl Web3Connection {
-    #[instrument(skip_all)]
-    pub async fn reconnect(
-        self: &Arc<Self>,
-        block_sender: &flume::Sender<(Block<TxHash>, usize)>,
-        rpc_id: usize,
-    ) -> anyhow::Result<()> {
-        // websocket doesn't need the http client
-        let http_client = None;
-
-        // since this lock is held open over an await, we use tokio's locking
-        let mut provider = self.provider.write().await;
-
-        *provider = None;
-
-        // tell the block subscriber that we are at 0
-        block_sender.send_async((Block::default(), rpc_id)).await?;
-
-        let new_provider = Web3Provider::from_str(&self.url, http_client).await?;
-
-        *provider = Some(Arc::new(new_provider));
-
-        Ok(())
-    }
-
-    /// Connect to a web3 rpc and subscribe to new heads
-    #[instrument(name = "try_new_Web3Connection", skip(hard_limit, http_client))]
-    pub async fn try_new(
+    /// Connect to a web3 rpc
+    #[instrument(name = "spawn_Web3Connection", skip(hard_limit, http_client))]
+    pub async fn spawn(
         chain_id: usize,
         url_str: String,
         // optional because this is only used for http providers. websocket providers don't use it
@@ -176,9 +153,10 @@ impl Web3Connection {
 
         // check the server's chain_id here
         // TODO: move this outside the `new` function and into a `start` function or something
-        let active_request_handle = connection.wait_for_request_handle().await;
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
-        let found_chain_id: Result<String, _> = active_request_handle
+        let found_chain_id: Result<String, _> = connection
+            .wait_for_request_handle()
+            .await
             .request("eth_chainId", Option::None::<()>)
             .await;
 
@@ -206,6 +184,31 @@ impl Web3Connection {
         Ok(connection)
     }
 
+    #[instrument(skip_all)]
+    pub async fn reconnect(
+        self: &Arc<Self>,
+        block_sender: &flume::Sender<(Block<TxHash>, Arc<Self>)>,
+    ) -> anyhow::Result<()> {
+        // websocket doesn't need the http client
+        let http_client = None;
+
+        // since this lock is held open over an await, we use tokio's locking
+        let mut provider = self.provider.write().await;
+
+        *provider = None;
+
+        // tell the block subscriber that we are at 0
+        block_sender
+            .send_async((Block::default(), self.clone()))
+            .await?;
+
+        let new_provider = Web3Provider::from_str(&self.url, http_client).await?;
+
+        *provider = Some(Arc::new(new_provider));
+
+        Ok(())
+    }
+
     #[inline]
     pub fn active_requests(&self) -> u32 {
         self.active_requests.load(atomic::Ordering::Acquire)
@@ -225,13 +228,12 @@ impl Web3Connection {
     async fn send_block(
         self: &Arc<Self>,
         block: Result<Block<TxHash>, ProviderError>,
-        block_sender: &flume::Sender<(Block<TxHash>, usize)>,
-        rpc_id: usize,
+        block_sender: &flume::Sender<(Block<TxHash>, Arc<Self>)>,
     ) -> anyhow::Result<()> {
         match block {
             Ok(block) => {
                 // TODO: i'm pretty sure we don't need send_async, but double check
-                block_sender.send_async((block, rpc_id)).await?;
+                block_sender.send_async((block, self.clone())).await?;
             }
             Err(e) => {
                 warn!("unable to get block from {}: {}", self, e);
@@ -241,120 +243,216 @@ impl Web3Connection {
         Ok(())
     }
 
-    /// Subscribe to new blocks. If `reconnect` is true, this runs forever.
-    /// TODO: instrument with the url
-    #[instrument(skip_all)]
-    pub async fn subscribe_new_heads(
+    pub async fn subscribe(
         self: Arc<Self>,
-        rpc_id: usize,
-        block_sender: flume::Sender<(Block<TxHash>, usize)>,
+        block_sender: flume::Sender<(Block<TxHash>, Arc<Self>)>,
+        tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
         reconnect: bool,
     ) -> anyhow::Result<()> {
         loop {
-            info!("Watching new_heads on {}", self);
+            // TODO: make these abortable so that if one fails the other can be cancelled?
 
-            // TODO: is a RwLock of an Option<Arc> the right thing here?
-            if let Some(provider) = self.provider.read().await.clone() {
-                match &*provider {
-                    Web3Provider::Http(provider) => {
-                        // there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
-                        // TODO: what should this interval be? probably some fraction of block time. set automatically?
-                        // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
-                        // TODO: if there are some websocket providers, maybe have a longer interval and a channel that tells the https to update when a websocket gets a new head? if they are slow this wouldn't work well though
-                        let mut interval = interval(Duration::from_secs(2));
-                        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            let new_heads = {
+                let clone = self.clone();
+                let block_sender = block_sender.clone();
 
-                        let mut last_hash = Default::default();
+                clone.subscribe_new_heads(block_sender)
+            };
 
-                        loop {
-                            // wait for the interval
-                            // TODO: if error or rate limit, increase interval?
-                            interval.tick().await;
+            let pending_txs = {
+                let clone = self.clone();
+                let tx_id_sender = tx_id_sender.clone();
 
-                            match self.try_request_handle().await {
-                                Ok(active_request_handle) => {
-                                    // TODO: i feel like this should be easier. there is a provider.getBlock, but i don't know how to give it "latest"
-                                    let block: Result<Block<TxHash>, _> = provider
-                                        .request("eth_getBlockByNumber", ("latest", false))
-                                        .await;
+                clone.subscribe_pending_transactions(tx_id_sender)
+            };
 
-                                    drop(active_request_handle);
-
-                                    // don't send repeat blocks
-                                    if let Ok(block) = &block {
-                                        let new_hash = block.hash.unwrap();
-
-                                        if new_hash == last_hash {
-                                            continue;
-                                        }
-
-                                        last_hash = new_hash;
-                                    }
-
-                                    self.send_block(block, &block_sender, rpc_id).await?;
-                                }
-                                Err(e) => {
-                                    warn!("Failed getting latest block from {}: {:?}", self, e);
-                                }
-                            }
-                        }
-                    }
-                    Web3Provider::Ws(provider) => {
-                        // rate limits
-                        let active_request_handle = self.wait_for_request_handle().await;
-
-                        // TODO: automatically reconnect?
-                        // TODO: it would be faster to get the block number, but subscriptions don't provide that
-                        // TODO: maybe we can do provider.subscribe("newHeads") and then parse into a custom struct that only gets the number out?
-                        let mut stream = provider.subscribe_blocks().await?;
-
-                        drop(active_request_handle);
-                        let active_request_handle = self.wait_for_request_handle().await;
-
-                        // query the block once since the subscription doesn't send the current block
-                        // there is a very small race condition here where the stream could send us a new block right now
-                        // all it does is print "new block" for the same block as current block
-                        // TODO: rate limit!
-                        let block: Result<Block<TxHash>, _> = active_request_handle
-                            .request("eth_getBlockByNumber", ("latest", false))
-                            .await;
-
-                        self.send_block(block, &block_sender, rpc_id).await?;
-
-                        // TODO: should the stream have a timeout on it here?
-                        // TODO: although reconnects will make this less of an issue
-                        loop {
-                            match stream.next().await {
-                                Some(new_block) => {
-                                    self.send_block(Ok(new_block), &block_sender, rpc_id)
-                                        .await?;
-
-                                    // TODO: really not sure about this
-                                    task::yield_now().await;
-                                }
-                                None => {
-                                    warn!("subscription ended");
-                                    break;
-                                }
-                            }
-                        }
-                    }
+            tokio::select! {
+                _ = new_heads => {
+                    info!(?self, "new heads subscription completed");
+                }
+                _ = pending_txs => {
+                    info!(?self, "pending transactions subscription completed");
                 }
             }
 
             if reconnect {
                 // TODO: exponential backoff
-                warn!("new heads subscription exited. Attempting to reconnect in 1 second...");
+                // TODO: share code with new heads subscription
+                warn!("pending transactions subscription exited. Attempting to reconnect in 1 second...");
                 sleep(Duration::from_secs(1)).await;
 
                 // TODO: loop on reconnecting! do not return with a "?" here
-                self.reconnect(&block_sender, rpc_id).await?;
+                // TODO: this isn't going to work. it will get in a loop with newHeads
+                self.reconnect(&block_sender).await?;
             } else {
                 break;
             }
         }
 
-        info!("Done watching new_heads on {}", self);
+        Ok(())
+    }
+
+    /// Subscribe to new blocks. If `reconnect` is true, this runs forever.
+    /// TODO: instrument with the url
+    #[instrument(skip_all)]
+    async fn subscribe_new_heads(
+        self: Arc<Self>,
+        block_sender: flume::Sender<(Block<TxHash>, Arc<Self>)>,
+    ) -> anyhow::Result<()> {
+        info!("Watching new_heads on {}", self);
+
+        // TODO: is a RwLock of an Option<Arc> the right thing here?
+        if let Some(provider) = self.provider.read().await.clone() {
+            match &*provider {
+                Web3Provider::Http(_provider) => {
+                    // there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
+                    // TODO: what should this interval be? probably some fraction of block time. set automatically?
+                    // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
+                    // TODO: if there are some websocket providers, maybe have a longer interval and a channel that tells the https to update when a websocket gets a new head? if they are slow this wouldn't work well though
+                    let mut interval = interval(Duration::from_secs(2));
+                    interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+                    let mut last_hash = Default::default();
+
+                    loop {
+                        // wait for the interval
+                        // TODO: if error or rate limit, increase interval?
+                        interval.tick().await;
+
+                        match self.try_request_handle().await {
+                            Ok(active_request_handle) => {
+                                // TODO: i feel like this should be easier. there is a provider.getBlock, but i don't know how to give it "latest"
+                                let block: Result<Block<TxHash>, _> = active_request_handle
+                                    .request("eth_getBlockByNumber", ("latest", false))
+                                    .await;
+
+                                // don't send repeat blocks
+                                if let Ok(block) = &block {
+                                    let new_hash = block.hash.unwrap();
+
+                                    if new_hash == last_hash {
+                                        continue;
+                                    }
+
+                                    last_hash = new_hash;
+                                }
+
+                                self.send_block(block, &block_sender).await?;
+                            }
+                            Err(e) => {
+                                warn!("Failed getting latest block from {}: {:?}", self, e);
+                            }
+                        }
+                    }
+                }
+                Web3Provider::Ws(provider) => {
+                    let active_request_handle = self.wait_for_request_handle().await;
+                    let mut stream = provider.subscribe_blocks().await?;
+                    drop(active_request_handle);
+
+                    // query the block once since the subscription doesn't send the current block
+                    // there is a very small race condition here where the stream could send us a new block right now
+                    // all it does is print "new block" for the same block as current block
+                    // TODO: subscribe to Block<TransactionReceipt> instead?
+                    let block: Result<Block<TxHash>, _> = self
+                        .wait_for_request_handle()
+                        .await
+                        .request("eth_getBlockByNumber", ("latest", false))
+                        .await;
+
+                    self.send_block(block, &block_sender).await?;
+
+                    // TODO: should the stream have a timeout on it here?
+                    // TODO: although reconnects will make this less of an issue
+                    loop {
+                        match stream.next().await {
+                            Some(new_block) => {
+                                self.send_block(Ok(new_block), &block_sender).await?;
+
+                                // TODO: really not sure about this
+                                task::yield_now().await;
+                            }
+                            None => {
+                                warn!("subscription ended");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    async fn subscribe_pending_transactions(
+        self: Arc<Self>,
+        tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
+    ) -> anyhow::Result<()> {
+        info!("watching pending transactions on {}", self);
+
+        // TODO: is a RwLock of an Option<Arc> the right thing here?
+        if let Some(provider) = self.provider.read().await.clone() {
+            match &*provider {
+                Web3Provider::Http(_provider) => {
+                    // there is a "watch_pending_transactions" function, but a lot of public nodes do not support the necessary rpc endpoints
+                    // TODO: what should this interval be? probably automatically set to some fraction of block time
+                    // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
+                    // TODO: if there are some websocket providers, maybe have a longer interval and a channel that tells the https to update when a websocket gets a new head? if they are slow this wouldn't work well though
+                    let mut interval = interval(Duration::from_secs(2));
+                    interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+                    // TODO: create a filter
+
+                    loop {
+                        // wait for the interval
+                        // TODO: if error or rate limit, increase interval?
+                        interval.tick().await;
+
+                        match self.try_request_handle().await {
+                            Ok(active_request_handle) => {
+                                // TODO: check the filter
+                                unimplemented!("actually send a request");
+                            }
+                            Err(e) => {
+                                warn!("Failed getting latest block from {}: {:?}", self, e);
+                            }
+                        }
+                    }
+                }
+                Web3Provider::Ws(provider) => {
+                    // rate limits
+                    let active_request_handle = self.wait_for_request_handle().await;
+
+                    // TODO: automatically reconnect?
+                    // TODO: it would be faster to get the block number, but subscriptions don't provide that
+                    // TODO: maybe we can do provider.subscribe("newHeads") and then parse into a custom struct that only gets the number out?
+                    let mut stream = provider.subscribe_pending_txs().await?;
+
+                    drop(active_request_handle);
+
+                    // TODO: query existing pending txs?
+
+                    // TODO: should the stream have a timeout on it here?
+                    // TODO: although reconnects will make this less of an issue
+                    loop {
+                        match stream.next().await {
+                            Some(pending_tx_id) => {
+                                tx_id_sender
+                                    .send_async((pending_tx_id, self.clone()))
+                                    .await?;
+                            }
+                            None => {
+                                warn!("subscription ended");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -401,6 +499,12 @@ impl Web3Connection {
         };
 
         Ok(ActiveRequestHandle::new(self.clone()))
+    }
+}
+
+impl Hash for Web3Connection {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.url.hash(state);
     }
 }
 

@@ -46,37 +46,40 @@ async fn handle_socket_payload(
         Ok(payload) => {
             let id = payload.id.clone();
 
-            let response: anyhow::Result<JsonRpcForwardedResponseEnum> = if payload.method
-                == "eth_subscribe"
-            {
-                let response = app.eth_subscribe(payload, response_tx.clone()).await;
+            let response: anyhow::Result<JsonRpcForwardedResponseEnum> = match &payload.method[..] {
+                "eth_subscribe" => {
+                    let response = app.eth_subscribe(payload, response_tx.clone()).await;
 
-                match response {
-                    Ok((handle, response)) => {
-                        // TODO: better key
-                        subscriptions.insert(response.result.as_ref().unwrap().to_string(), handle);
+                    match response {
+                        Ok((handle, response)) => {
+                            // TODO: better key
+                            subscriptions
+                                .insert(response.result.as_ref().unwrap().to_string(), handle);
 
-                        Ok(response.into())
+                            Ok(response.into())
+                        }
+                        Err(err) => Err(err),
                     }
-                    Err(err) => Err(err),
                 }
-            } else if payload.method == "eth_unsubscribe" {
-                let subscription_id = payload.params.unwrap().to_string();
+                "eth_unsubscribe" => {
+                    let subscription_id = payload.params.unwrap().to_string();
 
-                let partial_response = match subscriptions.remove(&subscription_id) {
-                    None => "false",
-                    Some(handle) => {
-                        handle.abort();
-                        "true"
-                    }
-                };
+                    let partial_response = match subscriptions.remove(&subscription_id) {
+                        None => "false",
+                        Some(handle) => {
+                            handle.abort();
+                            "true"
+                        }
+                    };
 
-                let response =
-                    JsonRpcForwardedResponse::from_string(partial_response.to_string(), id.clone());
+                    let response = JsonRpcForwardedResponse::from_string(
+                        partial_response.to_string(),
+                        id.clone(),
+                    );
 
-                Ok(response.into())
-            } else {
-                app.proxy_web3_rpc(payload.into()).await
+                    Ok(response.into())
+                }
+                _ => app.proxy_web3_rpc(payload.into()).await,
             };
 
             (id, response)

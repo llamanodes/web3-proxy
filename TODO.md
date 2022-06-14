@@ -1,10 +1,12 @@
 # Todo
 
-- [ ] support websocket clients
+- [ ] if web3 proxy gets an http error back, retry another node
+- [ ] refactor Connection::spawn. have it return a handle to the spawned future of it running with block and transaction subscriptions
+- [ ] refactor Connections::spawn. have it return a handle that is selecting on those handles?
+- [x] support websocket clients
   - we support websockets for the backends already, but we need them for the frontend too
-  - [ ] when block subscribers receive blocks, store them in a cache
-  - [ ] have a /ws endpoint (figure out how to route on / later)
-  - [ ] ws endpoint shouldn't be that different from the http endpoint
+  - [ ] when block subscribers receive blocks, store them in a cache. use this cache instead of querying eth_getBlock
+  - [x] have a /ws endpoint (figure out how to route on / later)
   - inspect any jsonrpc errors. if its something like "header not found" or "block with id $x not found" retry on another node (and add a negative score to that server)
     - this error seems to happen when we use load balanced rpcs
 - [x] use redis and redis-cell for rate limits
@@ -41,6 +43,7 @@
 - [ ] one proxy for mulitple chains?
 - [ ] zero downtime deploys
 - [ ] are we using Acquire/Release/AcqRel properly? or do we need other modes?
+- [ ] subscription id should be per connection, not global
 - [x] simple proxy
 - [x] better locking. when lots of requests come in, we seem to be in the way of block updates
 - [x] load balance between multiple RPC servers

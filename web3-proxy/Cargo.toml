@@ -9,13 +9,13 @@ edition = "2021"
 anyhow = "1.0.57"
 arc-swap = "1.5.0"
 argh = "0.1.7"
-axum = { version = "0.5.6", features = ["serde_json", "tokio-tungstenite", "ws"] }
+axum = { version = "0.5.7", features = ["serde_json", "tokio-tungstenite", "ws"] }
 counter = "0.5.5"
 dashmap = "5.3.4"
 derive_more = "0.99.17"
 ethers = { git = "https://github.com/gakonst/ethers-rs", features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
-flume = "0.10.12"
+flume = "0.10.13"
 futures = { version = "0.3.21", features = ["thread-pool"] }
 hashbrown = "0.12.1"
 linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }
@@ -25,15 +25,15 @@ parking_lot = { version = "0.12.1", features = ["deadlock_detection"] }
 proctitle = "0.1.1"
 # TODO: regex has several "perf" features that we might want to use
 regex = "1.5.6"
-reqwest = { version = "0.11.10", default-features = false, features = ["json", "tokio-rustls"] }
+reqwest = { version = "0.11.11", default-features = false, features = ["json", "tokio-rustls"] }
 rustc-hash = "1.1.0"
 serde = { version = "1.0.137", features = [] }
 serde_json = { version = "1.0.81", default-features = false, features = ["alloc", "raw_value"] }
-tokio = { version = "1.18.2", features = ["full", "tracing"] }
+tokio = { version = "1.19.2", features = ["full", "tracing"] }
 toml = "0.5.9"
-tracing = "0.1.34"
+tracing = "0.1.35"
 # TODO: tracing-subscriber has serde and serde_json features that we might want to use
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "parking_lot"] }
 url = "2.2.2"
 tower = "0.4.12"
-tokio-stream = { version = "0.1.8", features = ["sync"] }
+tokio-stream = { version = "0.1.9", features = ["sync"] }

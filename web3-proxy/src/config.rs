@@ -47,7 +47,7 @@ pub struct Web3ConnectionConfig {
 impl RpcConfig {
     /// Create a Web3ProxyApp from config
     // #[instrument(name = "try_build_RpcConfig", skip_all)]
-    pub async fn try_build(self) -> anyhow::Result<Web3ProxyApp> {
+    pub async fn try_build(self) -> anyhow::Result<Arc<Web3ProxyApp>> {
         let balanced_rpcs = self.balanced_rpcs.into_values().collect();
 
         let private_rpcs = if let Some(private_rpcs) = self.private_rpcs {
@@ -56,7 +56,7 @@ impl RpcConfig {
             vec![]
         };
 
-        Web3ProxyApp::try_new(
+        Web3ProxyApp::spawn(
             self.shared.chain_id,
             self.shared.rate_limit_redis,
             balanced_rpcs,
@@ -77,7 +77,7 @@ impl Web3ConnectionConfig {
     ) -> anyhow::Result<Arc<Web3Connection>> {
         let hard_rate_limit = self.hard_limit.map(|x| (x, redis_conn.unwrap()));
 
-        Web3Connection::try_new(
+        Web3Connection::spawn(
             chain_id,
             self.url,
             http_client,

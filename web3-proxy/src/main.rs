@@ -10,7 +10,6 @@ mod jsonrpc;
 use parking_lot::deadlock;
 use std::fs;
 use std::sync::atomic::{self, AtomicUsize};
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::runtime;
@@ -85,8 +84,6 @@ fn main() -> anyhow::Result<()> {
     // spawn the root task
     rt.block_on(async {
         let app = rpc_config.try_build().await?;
-
-        let app: Arc<Web3ProxyApp> = Arc::new(app);
 
         frontend::run(cli_config.port, app).await
     })

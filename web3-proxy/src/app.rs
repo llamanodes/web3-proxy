@@ -6,6 +6,7 @@ use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
 use axum::extract::ws::Message;
 use dashmap::DashMap;
+use ethers::prelude::TransactionReceipt;
 use ethers::prelude::{Block, TxHash, H256};
 use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
@@ -18,10 +19,9 @@ use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
-use tokio::task;
 use tokio::time::timeout;
 use tokio_stream::wrappers::WatchStream;
-use tracing::{debug, info, instrument, trace, warn};
+use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
 
 static APP_USER_AGENT: &str = concat!(
     "satoshiandkin/",
@@ -52,6 +52,8 @@ pub struct Web3ProxyApp {
     response_cache: ResponseLrcCache,
     // don't drop this or the sender will stop working
     head_block_receiver: watch::Receiver<Block<TxHash>>,
+    // TODO: i think we want a TxState enum for Confirmed(TxHash, BlockHash) or Pending(TxHash) or Orphan(TxHash, BlockHash)
+    pending_tx_receipt_receiver: flume::Receiver<TransactionReceipt>,
     next_subscription_id: AtomicUsize,
 }
 
@@ -63,12 +65,12 @@ impl fmt::Debug for Web3ProxyApp {
 }
 
 impl Web3ProxyApp {
-    pub async fn try_new(
+    pub async fn spawn(
         chain_id: usize,
         redis_address: Option<String>,
         balanced_rpcs: Vec<Web3ConnectionConfig>,
         private_rpcs: Vec<Web3ConnectionConfig>,
-    ) -> anyhow::Result<Web3ProxyApp> {
+    ) -> anyhow::Result<Arc<Web3ProxyApp>> {
         // make a http shared client
         // TODO: how should we configure the connection pool?
         // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something is wrong with the remote server
@@ -85,6 +87,7 @@ impl Web3ProxyApp {
                 info!("Connecting to redis on {}", redis_address);
                 let redis_client = redis_cell_client::Client::open(redis_address)?;
 
+                // TODO: r2d2 connection pool?
                 let redis_conn = redis_client.get_multiplexed_tokio_connection().await?;
 
                 Some(redis_conn)
@@ -95,47 +98,52 @@ impl Web3ProxyApp {
             }
         };
 
+        // TODO: subscribe to pending transactions on the private rpcs, too?
+        let (head_block_sender, head_block_receiver) = watch::channel(Block::default());
+        let (pending_tx_receipt_sender, pending_tx_receipt_receiver) = flume::unbounded();
+
         // TODO: attach context to this error
-        let balanced_rpcs = Web3Connections::try_new(
+        let balanced_rpcs = Web3Connections::spawn(
             chain_id,
             balanced_rpcs,
             http_client.as_ref(),
             rate_limiter.as_ref(),
+            Some(head_block_sender),
+            Some(pending_tx_receipt_sender),
         )
         .await?;
 
-        let (head_block_sender, head_block_receiver) = watch::channel(Block::default());
-
-        // TODO: do this separately instead of during try_new
-        {
-            let balanced_rpcs = balanced_rpcs.clone();
-            task::spawn(async move {
-                balanced_rpcs.subscribe_all_heads(head_block_sender).await;
-            });
-        }
-
-        // TODO: attach context to this error
         let private_rpcs = if private_rpcs.is_empty() {
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             balanced_rpcs.clone()
         } else {
-            Web3Connections::try_new(
+            // TODO: attach context to this error
+            Web3Connections::spawn(
                 chain_id,
                 private_rpcs,
                 http_client.as_ref(),
                 rate_limiter.as_ref(),
+                // subscribing to new heads here won't work well
+                None,
+                // TODO: subscribe to pending transactions on the private rpcs, too?
+                None,
             )
             .await?
         };
 
-        Ok(Web3ProxyApp {
+        let app = Web3ProxyApp {
             balanced_rpcs,
             private_rpcs,
             incoming_requests: Default::default(),
             response_cache: Default::default(),
             head_block_receiver,
+            pending_tx_receipt_receiver,
             next_subscription_id: 1.into(),
-        })
+        };
+
+        let app = Arc::new(app);
+
+        Ok(app)
     }
 
     pub async fn eth_subscribe(
@@ -146,57 +154,60 @@ impl Web3ProxyApp {
     ) -> anyhow::Result<(AbortHandle, JsonRpcForwardedResponse)> {
         let (subscription_handle, subscription_registration) = AbortHandle::new_pair();
 
+        // TODO: this only needs to be unique per connection. we don't need it globably unique
         let subscription_id = self
             .next_subscription_id
             .fetch_add(1, atomic::Ordering::SeqCst);
-
         let subscription_id = format!("{:#x}", subscription_id);
 
         // save the id so we can use it in the response
         let id = payload.id.clone();
 
-        let f = {
+        let subscription_future = {
             let subscription_id = subscription_id.clone();
 
-            let params = payload.params.as_deref().unwrap().get();
+            match payload.params.as_deref().unwrap().get() {
+                r#"["newHeads"]"# => {
+                    let head_block_receiver = self.head_block_receiver.clone();
 
-            if params == r#"["newHeads"]"# {
-                let head_block_receiver = self.head_block_receiver.clone();
+                    trace!(?subscription_id, "new heads subscription");
+                    async move {
+                        let mut head_block_receiver = Abortable::new(
+                            WatchStream::new(head_block_receiver),
+                            subscription_registration,
+                        );
 
-                trace!(?subscription_id, "new heads subscription");
-                async move {
-                    let mut head_block_receiver = Abortable::new(
-                        WatchStream::new(head_block_receiver),
-                        subscription_registration,
-                    );
+                        while let Some(new_head) = head_block_receiver.next().await {
+                            // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                            let msg = json!({
+                                "jsonrpc": "2.0",
+                                "method":"eth_subscription",
+                                "params": {
+                                    "subscription": subscription_id,
+                                    "result": new_head,
+                                },
+                            });
 
-                    while let Some(new_head) = head_block_receiver.next().await {
-                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                        let msg = json!({
-                            "jsonrpc": "2.0",
-                            "method":"eth_subscription",
-                            "params": {
-                                "subscription": subscription_id,
-                                "result": new_head,
-                            },
-                        });
+                            let msg = Message::Text(serde_json::to_string(&msg).unwrap());
 
-                        let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+                            if subscription_tx.send_async(msg).await.is_err() {
+                                // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                                break;
+                            };
+                        }
 
-                        if subscription_tx.send_async(msg).await.is_err() {
-                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                            break;
-                        };
+                        trace!(?subscription_id, "closed new heads subscription");
                     }
-
-                    trace!(?subscription_id, "closed new heads subscription");
                 }
-            } else {
-                return Err(anyhow::anyhow!("unimplemented"));
+                r#"["pendingTransactions"]"# => {
+                    unimplemented!("pendingTransactions")
+                }
+                _ => return Err(anyhow::anyhow!("unimplemented")),
             }
         };
 
-        tokio::spawn(f);
+        // TODO: what should we do with this handle? i think its fine to just drop it
+        tokio::spawn(subscription_future);
 
         let response = JsonRpcForwardedResponse::from_string(subscription_id, id);
 
@@ -319,89 +330,92 @@ impl Web3ProxyApp {
 
         // TODO: how much should we retry? probably with a timeout and not with a count like this
         // TODO: think more about this loop.
-        // // TODO: add more to this span
-        // let span = info_span!("i", ?i);
+        // // TODO: add more to this span such as
+        let span = info_span!("rpc_request");
         // let _enter = span.enter(); // DO NOT ENTER! we can't use enter across awaits! (clippy lint soon)
-        if request.method == "eth_sendRawTransaction" {
-            // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
-            // TODO: think more about this lock. i think it won't actually help the herd. it probably makes it worse if we have a tight lag_limit
-            return self
-                .private_rpcs
-                .try_send_all_upstream_servers(request)
-                .await;
-        } else {
-            // this is not a private transaction (or no private relays are configured)
-
-            let (cache_key, response_cache) = match self.get_cached_response(&request) {
-                (cache_key, Ok(response)) => {
-                    let _ = self.incoming_requests.remove(&cache_key);
-
-                    return Ok(response);
-                }
-                (cache_key, Err(response_cache)) => (cache_key, response_cache),
-            };
-
-            // check if this request is already in flight
-            // TODO: move this logic into an IncomingRequestHandler (ActiveRequestHandler has an rpc, but this won't)
-            let (incoming_tx, incoming_rx) = watch::channel(true);
-            let mut other_incoming_rx = None;
-            match self.incoming_requests.entry(cache_key.clone()) {
-                dashmap::mapref::entry::Entry::Occupied(entry) => {
-                    other_incoming_rx = Some(entry.get().clone());
-                }
-                dashmap::mapref::entry::Entry::Vacant(entry) => {
-                    entry.insert(incoming_rx);
-                }
+        match &request.method[..] {
+            "eth_sendRawTransaction" => {
+                // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
+                // TODO: think more about this lock. i think it won't actually help the herd. it probably makes it worse if we have a tight lag_limit
+                self.private_rpcs
+                    .try_send_all_upstream_servers(request)
+                    .instrument(span)
+                    .await
             }
+            _ => {
+                // this is not a private transaction (or no private relays are configured)
 
-            if let Some(mut other_incoming_rx) = other_incoming_rx {
-                // wait for the other request to finish. it might have finished successfully or with an error
-                trace!("{:?} waiting on in-flight request", request);
+                let (cache_key, response_cache) = match self.get_cached_response(&request) {
+                    (cache_key, Ok(response)) => {
+                        let _ = self.incoming_requests.remove(&cache_key);
 
-                let _ = other_incoming_rx.changed().await;
+                        return Ok(response);
+                    }
+                    (cache_key, Err(response_cache)) => (cache_key, response_cache),
+                };
 
-                // now that we've waited, lets check the cache again
-                if let Some(cached) = response_cache.read().get(&cache_key) {
-                    let _ = self.incoming_requests.remove(&cache_key);
-                    let _ = incoming_tx.send(false);
-
-                    // TODO: emit a stat
-                    trace!(
-                        "{:?} cache hit after waiting for in-flight request!",
-                        request
-                    );
-
-                    return Ok(cached.to_owned());
-                } else {
-                    // TODO: emit a stat
-                    trace!(
-                        "{:?} cache miss after waiting for in-flight request!",
-                        request
-                    );
+                // check if this request is already in flight
+                // TODO: move this logic into an IncomingRequestHandler (ActiveRequestHandler has an rpc, but this won't)
+                let (incoming_tx, incoming_rx) = watch::channel(true);
+                let mut other_incoming_rx = None;
+                match self.incoming_requests.entry(cache_key.clone()) {
+                    dashmap::mapref::entry::Entry::Occupied(entry) => {
+                        other_incoming_rx = Some(entry.get().clone());
+                    }
+                    dashmap::mapref::entry::Entry::Vacant(entry) => {
+                        entry.insert(incoming_rx);
+                    }
                 }
+
+                if let Some(mut other_incoming_rx) = other_incoming_rx {
+                    // wait for the other request to finish. it might have finished successfully or with an error
+                    trace!("{:?} waiting on in-flight request", request);
+
+                    let _ = other_incoming_rx.changed().await;
+
+                    // now that we've waited, lets check the cache again
+                    if let Some(cached) = response_cache.read().get(&cache_key) {
+                        let _ = self.incoming_requests.remove(&cache_key);
+                        let _ = incoming_tx.send(false);
+
+                        // TODO: emit a stat
+                        trace!(
+                            "{:?} cache hit after waiting for in-flight request!",
+                            request
+                        );
+
+                        return Ok(cached.to_owned());
+                    } else {
+                        // TODO: emit a stat
+                        trace!(
+                            "{:?} cache miss after waiting for in-flight request!",
+                            request
+                        );
+                    }
+                }
+
+                let response = self
+                    .balanced_rpcs
+                    .try_send_best_upstream_server(request)
+                    .await?;
+
+                // TODO: small race condidition here. parallel requests with the same query will both be saved to the cache
+                let mut response_cache = response_cache.write();
+
+                // TODO: cache the warp::reply to save us serializing every time
+                response_cache.insert(cache_key.clone(), response.clone());
+                if response_cache.len() >= RESPONSE_CACHE_CAP {
+                    // TODO: this isn't an LRU. it's a "least recently created". does that have a fancy name? should we make it an lru? these caches only live for one block
+                    response_cache.pop_front();
+                }
+
+                drop(response_cache);
+
+                let _ = self.incoming_requests.remove(&cache_key);
+                let _ = incoming_tx.send(false);
+
+                Ok(response)
             }
-
-            let response = self
-                .balanced_rpcs
-                .try_send_best_upstream_server(request)
-                .await?;
-
-            // TODO: small race condidition here. parallel requests with the same query will both be saved to the cache
-            let mut response_cache = response_cache.write();
-
-            // TODO: cache the warp::reply to save us serializing every time
-            response_cache.insert(cache_key.clone(), response.clone());
-            if response_cache.len() >= RESPONSE_CACHE_CAP {
-                // TODO: this isn't an LRU. it's a "least recently created". does that have a fancy name? should we make it an lru? these caches only live for one block
-                response_cache.pop_front();
-            }
-
-            drop(response_cache);
-
-            let _ = self.incoming_requests.remove(&cache_key);
-            let _ = incoming_tx.send(false);
-
-            Ok(response)
         }
     }
 }

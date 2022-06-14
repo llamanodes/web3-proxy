@@ -2,8 +2,7 @@
 use arc_swap::ArcSwap;
 use counter::Counter;
 use derive_more::From;
-use ethers::prelude::{Block, ProviderError, TxHash, H256};
-use futures::future::join_all;
+use ethers::prelude::{Block, ProviderError, TransactionReceipt, TxHash, H256};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
@@ -30,7 +29,9 @@ use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 struct SyncedConnections {
     head_block_num: u64,
     head_block_hash: H256,
-    inner: BTreeSet<usize>,
+    // TODO: this should be able to serialize, but it isn't
+    #[serde(skip_serializing)]
+    inner: BTreeSet<Arc<Web3Connection>>,
 }
 
 impl fmt::Debug for SyncedConnections {
@@ -78,12 +79,14 @@ impl fmt::Debug for Web3Connections {
 }
 
 impl Web3Connections {
-    // #[instrument(name = "try_new_Web3Connections", skip_all)]
-    pub async fn try_new(
+    // #[instrument(name = "spawn_Web3Connections", skip_all)]
+    pub async fn spawn(
         chain_id: usize,
         servers: Vec<Web3ConnectionConfig>,
         http_client: Option<&reqwest::Client>,
         rate_limiter: Option<&redis_cell_client::MultiplexedConnection>,
+        head_block_sender: Option<watch::Sender<Block<TxHash>>>,
+        pending_tx_receipt_sender: Option<flume::Sender<TransactionReceipt>>,
     ) -> anyhow::Result<Arc<Self>> {
         let num_connections = servers.len();
 
@@ -111,55 +114,90 @@ impl Web3Connections {
             synced_connections: ArcSwap::new(Arc::new(synced_connections)),
         });
 
+        let handle = {
+            let connections = connections.clone();
+
+            tokio::spawn(async move {
+                connections
+                    .subscribe(head_block_sender, pending_tx_receipt_sender)
+                    .await
+            })
+        };
+
         Ok(connections)
     }
 
-    pub async fn subscribe_all_heads(
-        self: &Arc<Self>,
-        head_block_sender: watch::Sender<Block<TxHash>>,
-    ) {
-        // TODO: benchmark bounded vs unbounded
-        let (block_sender, block_receiver) = flume::unbounded::<(Block<TxHash>, usize)>();
+    /// subscribe to all the backend rpcs
+    async fn subscribe(
+        self: Arc<Self>,
+        head_block_sender: Option<watch::Sender<Block<TxHash>>>,
+        pending_tx_receipt_sender: Option<flume::Sender<TransactionReceipt>>,
+    ) -> anyhow::Result<()> {
+        let mut futures = FuturesUnordered::new();
 
-        let mut handles = vec![];
+        // subscribe to pending transactions
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
+        let (block_sender, block_receiver) = flume::unbounded();
 
-        for (rpc_id, connection) in self.inner.iter().enumerate() {
-            // subscribe to new heads in a spawned future
-            // TODO: channel instead. then we can have one future with write access to a left-right?
-            let connection = Arc::clone(connection);
+        // one future subscribes to pendingTransactions on all the rpcs. it sends them through the funnel
+        // TODO: do this only when someone is subscribed. otherwise this will be way too many queries
+        for (rpc_id, connection) in self.inner.iter().cloned().enumerate() {
+            let pending_tx_id_sender = pending_tx_id_sender.clone();
             let block_sender = block_sender.clone();
 
-            // let url = connection.url().to_string();
-
-            let handle = task::Builder::default()
-                .name("subscribe_new_heads")
-                .spawn(async move {
-                    // loop to automatically reconnect
-                    // TODO: make this cancellable?
-                    // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
-                    // TODO: proper span
-                    connection
-                        .subscribe_new_heads(rpc_id, block_sender.clone(), true)
-                        .instrument(tracing::info_span!("url"))
-                        .await
-                });
-
-            handles.push(handle);
-        }
-
-        let connections = Arc::clone(self);
-        let handle = task::Builder::default()
-            .name("update_synced_rpcs")
-            .spawn(async move {
-                connections
-                    .update_synced_rpcs(block_receiver, head_block_sender)
+            let handle = tokio::spawn(async move {
+                // loop to automatically reconnect
+                // TODO: make this cancellable?
+                // TODO: instead of passing Some(connections), pass Some(channel_sender). Then listen on the receiver below to keep local heads up-to-date
+                // TODO: proper span
+                connection
+                    .subscribe(block_sender, pending_tx_id_sender, true)
+                    .instrument(tracing::info_span!("rpc", ?rpc_id))
                     .await
             });
 
-        handles.push(handle);
+            futures.push(handle);
+        }
 
-        // TODO: do something with join_all's result
-        join_all(handles).await;
+        // the next future subscribes to the transaction funnel
+        // it skips any duplicates (unless they are being orphaned)
+        // fetches new transactions from the notifying rpc
+        // forwards new transacitons to pending_tx_receipt_sender
+        {
+            // TODO: do something with the handle so we can catch any errors
+            let handle = task::spawn(async move {
+                while let Ok((pending_transaction_id, rpc)) =
+                    pending_tx_id_receiver.recv_async().await
+                {
+                    unimplemented!("de-dedup the pending txid")
+                }
+
+                Ok(())
+            });
+
+            futures.push(handle);
+        }
+
+        // the next future subscribes to the block funnel
+
+        if let Some(head_block_sender) = head_block_sender {
+            let connections = Arc::clone(&self);
+            let handle = task::Builder::default()
+                .name("update_synced_rpcs")
+                .spawn(async move {
+                    connections
+                        .update_synced_rpcs(block_receiver, head_block_sender, pending_tx_id_sender)
+                        .await
+                });
+
+            futures.push(handle);
+        }
+
+        if let Some(Err(e)) = futures.next().await {
+            return Err(e.into());
+        }
+
+        Ok(())
     }
 
     pub fn get_head_block_hash(&self) -> H256 {
@@ -227,16 +265,18 @@ impl Web3Connections {
     // we don't instrument here because we put a span inside the while loop
     async fn update_synced_rpcs(
         &self,
-        block_receiver: flume::Receiver<(Block<TxHash>, usize)>,
+        block_receiver: flume::Receiver<(Block<TxHash>, Arc<Web3Connection>)>,
         head_block_sender: watch::Sender<Block<TxHash>>,
+        pending_tx_id_sender: flume::Sender<(TxHash, Arc<Web3Connection>)>,
     ) -> anyhow::Result<()> {
         let total_rpcs = self.inner.len();
 
-        let mut connection_states: HashMap<usize, _> = HashMap::with_capacity(total_rpcs);
+        let mut connection_states: HashMap<Arc<Web3Connection>, _> =
+            HashMap::with_capacity(total_rpcs);
 
         let mut pending_synced_connections = SyncedConnections::default();
 
-        while let Ok((new_block, rpc_id)) = block_receiver.recv_async().await {
+        while let Ok((new_block, rpc)) = block_receiver.recv_async().await {
             // TODO: wth. how is this happening? need more logs
             let new_block_num = match new_block.number {
                 Some(x) => x.as_u64(),
@@ -250,14 +290,16 @@ impl Web3Connections {
             // TODO: span with more in it?
             // TODO: make sure i'm doing this span right
             // TODO: show the actual rpc url?
-            let span = info_span!("block_receiver", rpc_id, new_block_num);
+            let span = info_span!("block_receiver", ?rpc, new_block_num);
+
+            // TODO: clippy lint to make sure we don't hold this across an awaited future
             let _enter = span.enter();
 
             if new_block_num == 0 {
                 warn!("rpc is still syncing");
             }
 
-            connection_states.insert(rpc_id, (new_block_num, new_block_hash));
+            connection_states.insert(rpc.clone(), (new_block_num, new_block_hash));
 
             // TODO: do something to update the synced blocks
             match new_block_num.cmp(&pending_synced_connections.head_block_num) {
@@ -268,7 +310,7 @@ impl Web3Connections {
                     info!("new head: {}", new_block_hash);
 
                     pending_synced_connections.inner.clear();
-                    pending_synced_connections.inner.insert(rpc_id);
+                    pending_synced_connections.inner.insert(rpc);
 
                     pending_synced_connections.head_block_num = new_block_num;
 
@@ -283,16 +325,17 @@ impl Web3Connections {
                         // do not clear synced_connections.
                         // we just want to add this rpc to the end
                         // TODO: HashSet here? i think we get dupes if we don't
-                        pending_synced_connections.inner.insert(rpc_id);
+                        pending_synced_connections.inner.insert(rpc);
                     } else {
                         // same height, but different chain
 
                         // check connection_states to see which head block is more popular!
-                        let mut rpc_ids_by_block: BTreeMap<H256, Vec<usize>> = BTreeMap::new();
+                        let mut rpc_ids_by_block: BTreeMap<H256, Vec<Arc<Web3Connection>>> =
+                            BTreeMap::new();
 
                         let mut counted_rpcs = 0;
 
-                        for (rpc_id, (block_num, block_hash)) in connection_states.iter() {
+                        for (rpc, (block_num, block_hash)) in connection_states.iter() {
                             if *block_num != new_block_num {
                                 // this connection isn't synced. we don't care what hash it has
                                 continue;
@@ -304,7 +347,7 @@ impl Web3Connections {
                                 .entry(*block_hash)
                                 .or_insert_with(|| Vec::with_capacity(total_rpcs - 1));
 
-                            count.push(*rpc_id);
+                            count.push(rpc.clone());
                         }
 
                         let most_common_head_hash = *rpc_ids_by_block
@@ -335,7 +378,7 @@ impl Web3Connections {
                 }
                 cmp::Ordering::Less => {
                     // this isn't the best block in the tier. don't do anything
-                    if !pending_synced_connections.inner.remove(&rpc_id) {
+                    if !pending_synced_connections.inner.remove(&rpc) {
                         // we didn't remove anything. nothing more to do
                         continue;
                     }
@@ -373,7 +416,7 @@ impl Web3Connections {
     pub async fn next_upstream_server(&self) -> Result<ActiveRequestHandle, Option<Duration>> {
         let mut earliest_retry_after = None;
 
-        let mut synced_rpc_ids: Vec<usize> = self
+        let mut synced_rpcs: Vec<Arc<Web3Connection>> = self
             .synced_connections
             .load()
             .inner
@@ -381,21 +424,19 @@ impl Web3Connections {
             .cloned()
             .collect();
 
-        let sort_cache: HashMap<usize, (f32, u32)> = synced_rpc_ids
+        let sort_cache: HashMap<Arc<Web3Connection>, (f32, u32)> = synced_rpcs
             .iter()
-            .map(|rpc_id| {
-                let rpc = self.inner.get(*rpc_id).unwrap();
-
+            .map(|rpc| {
                 let active_requests = rpc.active_requests();
                 let soft_limit = rpc.soft_limit();
 
                 let utilization = active_requests as f32 / soft_limit as f32;
 
-                (*rpc_id, (utilization, soft_limit))
+                (rpc.clone(), (utilization, soft_limit))
             })
             .collect();
 
-        synced_rpc_ids.sort_unstable_by(|a, b| {
+        synced_rpcs.sort_unstable_by(|a, b| {
             let (a_utilization, a_soft_limit) = sort_cache.get(a).unwrap();
             let (b_utilization, b_soft_limit) = sort_cache.get(b).unwrap();
 
@@ -410,16 +451,14 @@ impl Web3Connections {
         });
 
         // now that the rpcs are sorted, try to get an active request handle for one of them
-        for rpc_id in synced_rpc_ids.into_iter() {
-            let rpc = self.inner.get(rpc_id).unwrap();
-
+        for rpc in synced_rpcs.into_iter() {
             // increment our connection counter
             match rpc.try_request_handle().await {
                 Err(retry_after) => {
                     earliest_retry_after = earliest_retry_after.min(Some(retry_after));
                 }
                 Ok(handle) => {
-                    trace!("next server on {:?}: {:?}", self, rpc_id);
+                    trace!("next server on {:?}: {:?}", self, rpc);
                     return Ok(handle);
                 }
             }
