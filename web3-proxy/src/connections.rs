@@ -238,6 +238,13 @@ impl Web3Connections {
         Ok(())
     }
 
+    pub fn get_pending_tx(
+        &self,
+        tx_hash: &TxHash,
+    ) -> Option<dashmap::mapref::one::Ref<TxHash, Transaction>> {
+        self.pending_transactions.get(tx_hash)
+    }
+
     pub fn get_head_block_hash(&self) -> H256 {
         *self.synced_connections.load().get_head_block_hash()
     }

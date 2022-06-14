@@ -187,12 +187,12 @@ impl Web3ProxyApp {
     }
 
     pub async fn eth_subscribe(
-        &self,
+        self: Arc<Self>,
         payload: JsonRpcRequest,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
         subscription_tx: flume::Sender<Message>,
     ) -> anyhow::Result<(AbortHandle, JsonRpcForwardedResponse)> {
-        let (subscription_handle, subscription_registration) = AbortHandle::new_pair();
+        let (subscription_abort_handle, subscription_registration) = AbortHandle::new_pair();
 
         // TODO: this only needs to be unique per connection. we don't need it globably unique
         let subscription_id = self
@@ -203,7 +203,7 @@ impl Web3ProxyApp {
         // save the id so we can use it in the response
         let id = payload.id.clone();
 
-        let subscription_future = {
+        let subscription_join_handle = {
             let subscription_id = subscription_id.clone();
 
             match payload.params.as_deref().unwrap().get() {
@@ -211,7 +211,7 @@ impl Web3ProxyApp {
                     let head_block_receiver = self.head_block_receiver.clone();
 
                     trace!(?subscription_id, "new heads subscription");
-                    async move {
+                    tokio::spawn(async move {
                         let mut head_block_receiver = Abortable::new(
                             WatchStream::new(head_block_receiver),
                             subscription_registration,
@@ -237,21 +237,61 @@ impl Web3ProxyApp {
                         }
 
                         trace!(?subscription_id, "closed new heads subscription");
-                    }
+                    })
                 }
-                r#"["pendingTransactions"]"# => {
-                    unimplemented!("pendingTransactions")
+                r#"["newPendingTransactions"]"# => {
+                    let pending_tx_receiver = self.pending_tx_receiver.clone();
+
+                    trace!(?subscription_id, "pending transactions subscription");
+                    tokio::spawn(async move {
+                        while let Ok(new_tx_state) = pending_tx_receiver.recv_async().await {
+                            let new_tx = match new_tx_state {
+                                TxState::Confirmed(..) => continue,
+                                TxState::Orphaned(tx_hash, _block_hash) => {
+                                    self.balanced_rpcs.get_pending_tx(&tx_hash)
+                                }
+                                TxState::Pending(tx_hash) => {
+                                    self.balanced_rpcs.get_pending_tx(&tx_hash)
+                                }
+                            };
+
+                            if new_tx.is_none() {
+                                continue;
+                            }
+
+                            let new_tx = &*new_tx.unwrap();
+
+                            // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                            let msg = json!({
+                                "jsonrpc": "2.0",
+                                "method": "eth_subscription",
+                                "params": {
+                                    "subscription": subscription_id,
+                                    // upstream just sends the txid, but we want to send the whole transaction
+                                    "result": new_tx,
+                                },
+                            });
+
+                            let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+
+                            if subscription_tx.send_async(msg).await.is_err() {
+                                // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                                break;
+                            };
+                        }
+
+                        trace!(?subscription_id, "closed new heads subscription");
+                    })
                 }
                 _ => return Err(anyhow::anyhow!("unimplemented")),
             }
         };
 
-        // TODO: what should we do with this handle? i think its fine to just drop it
-        tokio::spawn(subscription_future);
+        // TODO: do something with subscription_join_handle?
 
         let response = JsonRpcForwardedResponse::from_string(subscription_id, id);
 
-        Ok((subscription_handle, response))
+        Ok((subscription_abort_handle, response))
     }
 
     pub fn get_balanced_rpcs(&self) -> &Web3Connections {

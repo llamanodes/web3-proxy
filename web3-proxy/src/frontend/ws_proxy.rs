@@ -37,7 +37,7 @@ async fn proxy_web3_socket(app: Extension<Arc<Web3ProxyApp>>, socket: WebSocket)
 }
 
 async fn handle_socket_payload(
-    app: &Web3ProxyApp,
+    app: Arc<Web3ProxyApp>,
     payload: &str,
     response_tx: &flume::Sender<Message>,
     subscriptions: &mut HashMap<String, AbortHandle>,
@@ -48,7 +48,10 @@ async fn handle_socket_payload(
 
             let response: anyhow::Result<JsonRpcForwardedResponseEnum> = match &payload.method[..] {
                 "eth_subscribe" => {
-                    let response = app.eth_subscribe(payload, response_tx.clone()).await;
+                    let response = app
+                        .clone()
+                        .eth_subscribe(payload, response_tx.clone())
+                        .await;
 
                     match response {
                         Ok((handle, response)) => {
@@ -115,7 +118,7 @@ async fn read_web3_socket(
         // new message from our client. forward to a backend and then send it through response_tx
         let response_msg = match msg {
             Message::Text(payload) => {
-                handle_socket_payload(app.0.as_ref(), &payload, &response_tx, &mut subscriptions)
+                handle_socket_payload(app.0.clone(), &payload, &response_tx, &mut subscriptions)
                     .await
             }
             Message::Ping(x) => Message::Pong(x),
@@ -130,7 +133,7 @@ async fn read_web3_socket(
             Message::Binary(mut payload) => {
                 let payload = from_utf8_mut(&mut payload).unwrap();
 
-                handle_socket_payload(app.0.as_ref(), payload, &response_tx, &mut subscriptions)
+                handle_socket_payload(app.0.clone(), payload, &response_tx, &mut subscriptions)
                     .await
             }
         };
