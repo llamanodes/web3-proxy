@@ -7,6 +7,7 @@ use crate::jsonrpc::JsonRpcRequestEnum;
 use axum::extract::ws::Message;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
+use ethers::prelude::Transaction;
 use ethers::prelude::{Block, TxHash, H256};
 use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
@@ -53,9 +54,9 @@ pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T>
 }
 
 pub enum TxState {
-    Confirmed(TxHash, H256),
-    Pending(TxHash),
-    Orphaned(TxHash, H256),
+    Confirmed(Transaction),
+    Pending(Transaction),
+    Orphaned(Transaction),
 }
 
 /// The application
@@ -247,19 +248,9 @@ impl Web3ProxyApp {
                         while let Ok(new_tx_state) = pending_tx_receiver.recv_async().await {
                             let new_tx = match new_tx_state {
                                 TxState::Confirmed(..) => continue,
-                                TxState::Orphaned(tx_hash, _block_hash) => {
-                                    self.balanced_rpcs.get_pending_tx(&tx_hash)
-                                }
-                                TxState::Pending(tx_hash) => {
-                                    self.balanced_rpcs.get_pending_tx(&tx_hash)
-                                }
+                                TxState::Orphaned(tx) => tx,
+                                TxState::Pending(tx) => tx,
                             };
-
-                            if new_tx.is_none() {
-                                continue;
-                            }
-
-                            let new_tx = &*new_tx.unwrap();
 
                             // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
                             let msg = json!({

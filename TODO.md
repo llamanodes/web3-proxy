@@ -1,8 +1,8 @@
 # Todo
 
 - [ ] if web3 proxy gets an http error back, retry another node
-- [ ] refactor Connection::spawn. have it return a handle to the spawned future of it running with block and transaction subscriptions
-- [ ] refactor Connections::spawn. have it return a handle that is selecting on those handles?
+- [x] refactor Connection::spawn. have it return a handle to the spawned future of it running with block and transaction subscriptions
+- [x] refactor Connections::spawn. have it return a handle that is selecting on those handles?
 - [x] support websocket clients
   - we support websockets for the backends already, but we need them for the frontend too
   - [ ] when block subscribers receive blocks, store them in a cache. use this cache instead of querying eth_getBlock
@@ -44,6 +44,7 @@
 - [ ] zero downtime deploys
 - [ ] are we using Acquire/Release/AcqRel properly? or do we need other modes?
 - [ ] subscription id should be per connection, not global
+- [ ] emit stats
 - [x] simple proxy
 - [x] better locking. when lots of requests come in, we seem to be in the way of block updates
 - [x] load balance between multiple RPC servers
