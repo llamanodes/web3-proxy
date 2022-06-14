@@ -5,8 +5,8 @@ use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
 use axum::extract::ws::Message;
+use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
-use ethers::prelude::Transaction;
 use ethers::prelude::{Block, TxHash, H256};
 use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
@@ -52,6 +52,12 @@ pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T>
     }
 }
 
+pub enum TxState {
+    Confirmed(TxHash, H256),
+    Pending(TxHash),
+    Orphaned(TxHash, H256),
+}
+
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
 // TODO: if Web3ProxyApp is always in an Arc, i think we can avoid having at least some of these internal things in arcs
@@ -65,7 +71,7 @@ pub struct Web3ProxyApp {
     // don't drop this or the sender will stop working
     head_block_receiver: watch::Receiver<Block<TxHash>>,
     // TODO: i think we want a TxState enum for Confirmed(TxHash, BlockHash) or Pending(TxHash) or Orphan(TxHash, BlockHash)
-    pending_tx_receiver: flume::Receiver<Transaction>,
+    pending_tx_receiver: flume::Receiver<TxState>,
     next_subscription_id: AtomicUsize,
 }
 
@@ -393,10 +399,10 @@ impl Web3ProxyApp {
                 let (incoming_tx, incoming_rx) = watch::channel(true);
                 let mut other_incoming_rx = None;
                 match self.incoming_requests.entry(cache_key.clone()) {
-                    dashmap::mapref::entry::Entry::Occupied(entry) => {
+                    DashMapEntry::Occupied(entry) => {
                         other_incoming_rx = Some(entry.get().clone());
                     }
-                    dashmap::mapref::entry::Entry::Vacant(entry) => {
+                    DashMapEntry::Vacant(entry) => {
                         entry.insert(incoming_rx);
                     }
                 }
