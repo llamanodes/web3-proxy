@@ -10,6 +10,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
+
 use crate::app::Web3ProxyApp;
 
 pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
