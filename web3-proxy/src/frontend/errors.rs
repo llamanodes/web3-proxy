@@ -1,7 +1,8 @@
-use crate::jsonrpc::JsonRpcForwardedResponse;
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use serde_json::value::RawValue;
 use tracing::warn;
+
+use crate::jsonrpc::JsonRpcForwardedResponse;
 
 /// TODO: pretty 404 page? or us a json error fine?
 pub async fn handler_404() -> impl IntoResponse {

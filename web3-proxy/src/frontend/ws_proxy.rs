@@ -1,7 +1,3 @@
-use crate::{
-    app::Web3ProxyApp,
-    jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
-};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     response::IntoResponse,
@@ -16,7 +12,12 @@ use hashbrown::HashMap;
 use serde_json::value::RawValue;
 use std::str::from_utf8_mut;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+
+use crate::{
+    app::Web3ProxyApp,
+    jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
+};
 
 pub async fn websocket_handler(
     app: Extension<Arc<Web3ProxyApp>>,
@@ -154,8 +155,8 @@ async fn write_web3_socket(
 ) {
     while let Ok(msg) = response_rx.recv_async().await {
         // a response is ready. write it to ws_tx
-        if ws_tx.send(msg).await.is_err() {
-            // TODO: log the error
+        if let Err(err) = ws_tx.send(msg).await {
+            warn!(?err, "unable to write to websocket");
             break;
         };
     }

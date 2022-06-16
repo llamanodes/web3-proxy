@@ -1,7 +1,8 @@
-use super::errors::handle_anyhow_error;
-use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use std::sync::Arc;
+
+use super::errors::handle_anyhow_error;
+use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 
 pub async fn proxy_web3_rpc(
     payload: Json<JsonRpcRequestEnum>,

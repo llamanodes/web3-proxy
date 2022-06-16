@@ -1,6 +1,8 @@
 ///! Rate-limited communication with a web3 provider
+use anyhow::Context;
 use derive_more::From;
 use ethers::prelude::{Block, Middleware, ProviderError, TxHash};
+use futures::future::try_join_all;
 use futures::StreamExt;
 use redis_cell_client::RedisCellClient;
 use serde::ser::{SerializeStruct, Serializer};
@@ -9,13 +11,12 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32};
 use std::{cmp::Ordering, sync::Arc};
-use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use tokio::task;
 use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
 use tracing::{error, info, instrument, trace, warn};
 
-use crate::app::AnyhowJoinHandle;
+use crate::app::{flatten_handle, AnyhowJoinHandle};
 
 /// TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
 #[derive(From)]
@@ -203,7 +204,7 @@ impl Web3Connection {
     #[instrument(skip_all)]
     pub async fn reconnect(
         self: &Arc<Self>,
-        block_sender: &flume::Sender<(Block<TxHash>, Arc<Self>)>,
+        block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Self>)>>,
     ) -> anyhow::Result<()> {
         // websocket doesn't need the http client
         let http_client = None;
@@ -214,10 +215,14 @@ impl Web3Connection {
         *provider = None;
 
         // tell the block subscriber that we are at 0
-        block_sender
-            .send_async((Block::default(), self.clone()))
-            .await?;
+        if let Some(block_sender) = block_sender {
+            block_sender
+                .send_async((Block::default(), self.clone()))
+                .await
+                .context("block_sender at 0")?;
+        }
 
+        // TODO: if this fails, keep retrying
         let new_provider = Web3Provider::from_str(&self.url, http_client).await?;
 
         *provider = Some(Arc::new(new_provider));
@@ -249,7 +254,10 @@ impl Web3Connection {
         match block {
             Ok(block) => {
                 // TODO: i'm pretty sure we don't need send_async, but double check
-                block_sender.send_async((block, self.clone())).await?;
+                block_sender
+                    .send_async((block, self.clone()))
+                    .await
+                    .context("block_sender")?;
             }
             Err(e) => {
                 warn!("unable to get block from {}: {}", self, e);
@@ -265,53 +273,52 @@ impl Web3Connection {
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
     ) -> anyhow::Result<()> {
-        match (block_sender, tx_id_sender) {
-            (None, None) => {
-                // TODO: is there a better way to make a channel that is never ready?
-                let (tx, rx) = oneshot::channel::<()>();
-                rx.await?;
-                drop(tx);
+        loop {
+            let mut futures = vec![];
+
+            if let Some(block_sender) = &block_sender {
+                let f = self.clone().subscribe_new_heads(block_sender.clone());
+
+                futures.push(flatten_handle(tokio::spawn(f)));
             }
-            (Some(block_sender), Some(tx_id_sender)) => {
-                // TODO: make these abortable so that if one fails the other can be cancelled?
-                loop {
-                    let new_heads = {
-                        let clone = self.clone();
-                        let block_sender = block_sender.clone();
 
-                        clone.subscribe_new_heads(block_sender)
-                    };
+            if let Some(tx_id_sender) = &tx_id_sender {
+                let f = self
+                    .clone()
+                    .subscribe_pending_transactions(tx_id_sender.clone());
 
-                    let pending_txs = {
-                        let clone = self.clone();
-                        let tx_id_sender = tx_id_sender.clone();
+                futures.push(flatten_handle(tokio::spawn(f)));
+            }
 
-                        clone.subscribe_pending_transactions(tx_id_sender)
-                    };
+            if futures.is_empty() {
+                // TODO: is there a better way to make a channel that is never ready?
+                info!(?self, "no-op subscription");
+                return Ok(());
+            }
 
-                    match tokio::try_join!(new_heads, pending_txs) {
-                        Ok(_) => break,
-                        Err(err) => {
-                            if reconnect {
-                                // TODO: exponential backoff
-                                // TODO: share code with new heads subscription
-                                warn!(
-                                    "subscription exited. Attempting to reconnect in 1 second. {:?}", err
-                                );
-                                sleep(Duration::from_secs(1)).await;
+            match try_join_all(futures).await {
+                Ok(_) => break,
+                Err(err) => {
+                    if reconnect {
+                        // TODO: exponential backoff
+                        let retry_in = Duration::from_secs(1);
+                        warn!(
+                            ?self,
+                            "subscription exited. Attempting to reconnect in {:?}. {:?}",
+                            retry_in,
+                            err
+                        );
+                        sleep(retry_in).await;
 
-                                // TODO: loop on reconnecting! do not return with a "?" here
-                                // TODO: this isn't going to work. it will get in a loop with newHeads
-                                self.reconnect(&block_sender).await?;
-                            } else {
-                                error!("subscription exited. {:?}", err);
-                                break;
-                            }
-                        }
-                    };
+                        // TODO: loop on reconnecting! do not return with a "?" here
+                        // TODO: this isn't going to work. it will get in a loop with newHeads
+                        self.reconnect(block_sender.clone()).await?;
+                    } else {
+                        error!(?self, ?err, "subscription exited");
+                        return Err(err);
+                    }
                 }
             }
-            _ => panic!(),
         }
 
         Ok(())
@@ -463,13 +470,14 @@ impl Web3Connection {
                     // TODO: query existing pending txs?
 
                     // TODO: should the stream have a timeout on it here?
-                    // TODO: although reconnects will make this less of an issue
+                    // TODO: i don't think loop match is what we want. i think while let would be better
                     loop {
                         match stream.next().await {
                             Some(pending_tx_id) => {
                                 tx_id_sender
                                     .send_async((pending_tx_id, self.clone()))
-                                    .await?;
+                                    .await
+                                    .context("tx_id_sender")?;
                             }
                             None => {
                                 warn!("subscription ended");

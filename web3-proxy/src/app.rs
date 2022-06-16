@@ -1,9 +1,3 @@
-use crate::config::Web3ConnectionConfig;
-use crate::connections::Web3Connections;
-use crate::jsonrpc::JsonRpcForwardedResponse;
-use crate::jsonrpc::JsonRpcForwardedResponseEnum;
-use crate::jsonrpc::JsonRpcRequest;
-use crate::jsonrpc::JsonRpcRequestEnum;
 use axum::extract::ws::Message;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
@@ -20,11 +14,18 @@ use std::fmt;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
+
+use crate::config::Web3ConnectionConfig;
+use crate::connections::Web3Connections;
+use crate::jsonrpc::JsonRpcForwardedResponse;
+use crate::jsonrpc::JsonRpcForwardedResponseEnum;
+use crate::jsonrpc::JsonRpcRequest;
+use crate::jsonrpc::JsonRpcRequestEnum;
 
 static APP_USER_AGENT: &str = concat!(
     "satoshiandkin/",
@@ -53,9 +54,11 @@ pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T>
     }
 }
 
+#[derive(Clone)]
 pub enum TxState {
-    Confirmed(Transaction),
+    Known(TxHash),
     Pending(Transaction),
+    Confirmed(Transaction),
     Orphaned(Transaction),
 }
 
@@ -70,9 +73,9 @@ pub struct Web3ProxyApp {
     incoming_requests: ActiveRequestsMap,
     response_cache: ResponseLrcCache,
     // don't drop this or the sender will stop working
+    // TODO: broadcast channel instead?
     head_block_receiver: watch::Receiver<Block<TxHash>>,
-    // TODO: i think we want a TxState enum for Confirmed(TxHash, BlockHash) or Pending(TxHash) or Orphan(TxHash, BlockHash)
-    pending_tx_receiver: flume::Receiver<TxState>,
+    pending_tx_sender: broadcast::Sender<TxState>,
     next_subscription_id: AtomicUsize,
 }
 
@@ -122,7 +125,9 @@ impl Web3ProxyApp {
 
         // TODO: subscribe to pending transactions on the private rpcs, too?
         let (head_block_sender, head_block_receiver) = watch::channel(Block::default());
-        let (pending_tx_sender, pending_tx_receiver) = flume::unbounded();
+        // TODO: will one receiver lagging be okay?
+        let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(16);
+        drop(pending_tx_receiver);
 
         // TODO: attach context to this error
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
@@ -131,7 +136,7 @@ impl Web3ProxyApp {
             http_client.as_ref(),
             rate_limiter.as_ref(),
             Some(head_block_sender),
-            Some(pending_tx_sender),
+            Some(pending_tx_sender.clone()),
         )
         .await?;
 
@@ -165,7 +170,7 @@ impl Web3ProxyApp {
             incoming_requests: Default::default(),
             response_cache: Default::default(),
             head_block_receiver,
-            pending_tx_receiver,
+            pending_tx_sender,
             next_subscription_id: 1.into(),
         };
 
@@ -241,12 +246,48 @@ impl Web3ProxyApp {
                     })
                 }
                 r#"["newPendingTransactions"]"# => {
-                    let pending_tx_receiver = self.pending_tx_receiver.clone();
+                    let mut pending_tx_receiver = self.pending_tx_sender.subscribe();
 
                     trace!(?subscription_id, "pending transactions subscription");
                     tokio::spawn(async move {
-                        while let Ok(new_tx_state) = pending_tx_receiver.recv_async().await {
+                        while let Ok(new_tx_state) = pending_tx_receiver.recv().await {
                             let new_tx = match new_tx_state {
+                                TxState::Known(..) => continue,
+                                TxState::Confirmed(..) => continue,
+                                TxState::Orphaned(tx) => tx,
+                                TxState::Pending(tx) => tx,
+                            };
+
+                            // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                            let msg = json!({
+                                "jsonrpc": "2.0",
+                                "method": "eth_subscription",
+                                "params": {
+                                    "subscription": subscription_id,
+                                    "result": new_tx.hash,
+                                },
+                            });
+
+                            let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+
+                            if subscription_tx.send_async(msg).await.is_err() {
+                                // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                                break;
+                            };
+                        }
+
+                        trace!(?subscription_id, "closed new heads subscription");
+                    })
+                }
+                r#"["newPendingFullTransactions"]"# => {
+                    // TODO: too much copy/pasta with newPendingTransactions
+                    let mut pending_tx_receiver = self.pending_tx_sender.subscribe();
+
+                    trace!(?subscription_id, "pending transactions subscription");
+                    tokio::spawn(async move {
+                        while let Ok(new_tx_state) = pending_tx_receiver.recv().await {
+                            let new_tx = match new_tx_state {
+                                TxState::Known(..) => continue,
                                 TxState::Confirmed(..) => continue,
                                 TxState::Orphaned(tx) => tx,
                                 TxState::Pending(tx) => tx,
@@ -281,6 +322,8 @@ impl Web3ProxyApp {
         // TODO: do something with subscription_join_handle?
 
         let response = JsonRpcForwardedResponse::from_string(subscription_id, id);
+
+        // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?
 
         Ok((subscription_abort_handle, response))
     }

@@ -1,7 +1,8 @@
-use crate::app::Web3ProxyApp;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use serde_json::json;
 use std::sync::Arc;
+
+use crate::app::Web3ProxyApp;
 
 /// a page for configuring your wallet with all the rpcs
 /// TODO: check auth (from authp?) here

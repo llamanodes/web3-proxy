@@ -1,10 +1,12 @@
 ///! Load balanced communication with a group of web3 providers
+use anyhow::Context;
 use arc_swap::ArcSwap;
 use counter::Counter;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
 use derive_more::From;
 use ethers::prelude::{Block, ProviderError, Transaction, TxHash, H256};
+use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
@@ -16,12 +18,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 use tokio::task;
 use tokio::time::sleep;
 use tracing::{debug, info, info_span, instrument, trace, warn};
 
-use crate::app::{AnyhowJoinHandle, TxState};
+use crate::app::{flatten_handle, AnyhowJoinHandle, TxState};
 use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, Web3Connection};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
@@ -34,6 +36,7 @@ struct SyncedConnections {
     // TODO: this should be able to serialize, but it isn't
     #[serde(skip_serializing)]
     inner: BTreeSet<Arc<Web3Connection>>,
+    // TODO: use petgraph for keeping track of the chain so we can do better fork handling
 }
 
 impl fmt::Debug for SyncedConnections {
@@ -54,7 +57,7 @@ impl SyncedConnections {
 pub struct Web3Connections {
     inner: Vec<Arc<Web3Connection>>,
     synced_connections: ArcSwap<SyncedConnections>,
-    pending_transactions: DashMap<TxHash, Transaction>,
+    pending_transactions: DashMap<TxHash, TxState>,
 }
 
 impl Serialize for Web3Connections {
@@ -89,7 +92,7 @@ impl Web3Connections {
         http_client: Option<&reqwest::Client>,
         rate_limiter: Option<&redis_cell_client::MultiplexedConnection>,
         head_block_sender: Option<watch::Sender<Block<TxHash>>>,
-        pending_tx_sender: Option<flume::Sender<TxState>>,
+        pending_tx_sender: Option<broadcast::Sender<TxState>>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let num_connections = server_configs.len();
 
@@ -153,15 +156,86 @@ impl Web3Connections {
         Ok((connections, handle))
     }
 
+    async fn send_transaction(
+        self: Arc<Self>,
+        rpc: Arc<Web3Connection>,
+        pending_tx_id: TxHash,
+        pending_tx_sender: broadcast::Sender<TxState>,
+    ) -> anyhow::Result<()> {
+        for i in 0..30 {
+            // TODO: also check the "confirmed transactions" mapping? maybe one shared mapping with TxState in it?
+            match self.pending_transactions.entry(pending_tx_id) {
+                DashMapEntry::Occupied(_entry) => {
+                    // TODO: if its occupied, but still only "Known", multiple nodes have this transaction. ask both
+                    return Ok(());
+                }
+                DashMapEntry::Vacant(entry) => {
+                    let request_handle = rpc.wait_for_request_handle().await;
+
+                    // TODO: how many retries?
+                    // TODO: use a generic retry provider instead?
+                    let tx_result = request_handle
+                        .request("eth_getTransactionByHash", (pending_tx_id,))
+                        .await;
+
+                    // TODO: yearn devs have had better luck with batching these, but i think that's likely just adding a delay itself
+                    // TODO: there is a race here sometimes the rpc isn't yet ready to serve the transaction (even though they told us about it!)
+                    let pending_transaction = match tx_result {
+                        Ok(tx) => Some(tx),
+                        Err(err) => {
+                            trace!(
+                                ?i,
+                                ?err,
+                                ?pending_tx_id,
+                                "error getting transaction by hash"
+                            );
+
+                            // TODO: how long? exponential backoff?
+                            sleep(Duration::from_millis(100)).await;
+                            continue;
+                        }
+                    };
+
+                    trace!(?pending_transaction, "pending");
+
+                    let pending_transaction: Transaction = pending_transaction.unwrap();
+
+                    // TODO: do not unwrap. orphans might make this unsafe
+                    let tx_state = match &pending_transaction.block_hash {
+                        Some(_block_hash) => {
+                            // the transaction is already confirmed. no need to save in the pending_transactions map
+                            TxState::Confirmed(pending_transaction)
+                        }
+                        None => {
+                            let state = TxState::Pending(pending_transaction);
+                            entry.insert(state.clone());
+                            state
+                        }
+                    };
+
+                    // TODO: maybe we should just send the txid and they can get it from the dashmap?
+                    let _ = pending_tx_sender.send(tx_state);
+
+                    info!(?pending_tx_id, "sent");
+
+                    return Ok(());
+                }
+            }
+        }
+
+        info!(?pending_tx_id, "not found");
+        Ok(())
+    }
+
     /// subscribe to all the backend rpcs
     async fn subscribe(
         self: Arc<Self>,
         pending_tx_id_receiver: flume::Receiver<(TxHash, Arc<Web3Connection>)>,
         block_receiver: flume::Receiver<(Block<TxHash>, Arc<Web3Connection>)>,
         head_block_sender: Option<watch::Sender<Block<TxHash>>>,
-        pending_tx_sender: Option<flume::Sender<TxState>>,
+        pending_tx_sender: Option<broadcast::Sender<TxState>>,
     ) -> anyhow::Result<()> {
-        let mut futures = FuturesUnordered::new();
+        let mut futures = vec![];
 
         // setup the transaction funnel
         // it skips any duplicates (unless they are being orphaned)
@@ -171,39 +245,23 @@ impl Web3Connections {
             // TODO: do something with the handle so we can catch any errors
             let clone = self.clone();
             let handle = task::spawn(async move {
-                while let Ok((pending_transaction_id, rpc)) =
-                    pending_tx_id_receiver.recv_async().await
-                {
-                    match clone.pending_transactions.entry(pending_transaction_id) {
-                        DashMapEntry::Occupied(_entry) => continue,
-                        DashMapEntry::Vacant(entry) => {
-                            let request_handle = rpc.wait_for_request_handle().await;
+                while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv_async().await {
+                    // TODO: spawn this
+                    let f = clone.clone().send_transaction(
+                        rpc,
+                        pending_tx_id,
+                        pending_tx_sender.clone(),
+                    );
 
-                            let pending_transaction: Transaction = request_handle
-                                .request("eth_getTransactionByHash", (pending_transaction_id,))
-                                .await?;
-
-                            trace!(?pending_transaction, "pending");
-
-                            // TODO: do not unwrap. orphans might make this unsafe
-                            let tx_state = match &pending_transaction.block_hash {
-                                Some(_block_hash) => TxState::Confirmed(pending_transaction),
-                                None => {
-                                    entry.insert(pending_transaction.clone());
-                                    TxState::Pending(pending_transaction)
-                                }
-                            };
-
-                            // TODO: maybe we should just send the txid and they can get it from the dashmap?
-                            pending_tx_sender.send_async(tx_state).await?;
-                        }
-                    }
+                    tokio::spawn(f);
                 }
 
                 Ok(())
             });
 
-            futures.push(handle);
+            futures.push(flatten_handle(handle));
+        } else {
+            unimplemented!();
         }
 
         // setup the block funnel
@@ -218,7 +276,7 @@ impl Web3Connections {
                         .await
                 });
 
-            futures.push(handle);
+            futures.push(flatten_handle(handle));
         }
 
         if futures.is_empty() {
@@ -226,8 +284,8 @@ impl Web3Connections {
             unimplemented!("every second, check that the provider is still connected");
         }
 
-        if let Some(Err(e)) = futures.next().await {
-            return Err(e.into());
+        if let Err(e) = try_join_all(futures).await {
+            return Err(e);
         }
 
         info!("subscriptions over: {:?}", self);
@@ -310,7 +368,7 @@ impl Web3Connections {
         block_receiver: flume::Receiver<(Block<TxHash>, Arc<Web3Connection>)>,
         head_block_sender: watch::Sender<Block<TxHash>>,
         // TODO: use pending_tx_sender
-        pending_tx_sender: Option<flume::Sender<TxState>>,
+        pending_tx_sender: Option<broadcast::Sender<TxState>>,
     ) -> anyhow::Result<()> {
         let total_rpcs = self.inner.len();
 
@@ -323,8 +381,11 @@ impl Web3Connections {
             let new_block_num = match new_block.number {
                 Some(x) => x.as_u64(),
                 None => {
-                    // TODO: wth. how is this happening? need more logs
-                    warn!(?new_block, "Block without number!");
+                    // block without a number is expected a node is syncing or
+                    if new_block.hash.is_some() {
+                        // this seems unlikely, but i'm pretty sure we see it
+                        warn!(?new_block, "Block without number!");
+                    }
                     continue;
                 }
             };
@@ -360,7 +421,9 @@ impl Web3Connections {
                     // TODO: if the parent hash isn't our previous best block, ignore it
                     pending_synced_connections.head_block_hash = new_block_hash;
 
-                    head_block_sender.send(new_block.clone())?;
+                    head_block_sender
+                        .send(new_block.clone())
+                        .context("head_block_sender")?;
 
                     // TODO: mark all transactions as confirmed
                     // TODO: mark any orphaned transactions as unconfirmed
@@ -415,7 +478,9 @@ impl Web3Connections {
 
                         // TODO: do this more efficiently?
                         if pending_synced_connections.head_block_hash != most_common_head_hash {
-                            head_block_sender.send(new_block.clone())?;
+                            head_block_sender
+                                .send(new_block.clone())
+                                .context("head_block_sender")?;
                             pending_synced_connections.head_block_hash = most_common_head_hash;
                         }
 
@@ -449,15 +514,10 @@ impl Web3Connections {
             // TODO: what if the hashes don't match?
             if pending_synced_connections.head_block_hash == new_block_hash {
                 // mark all transactions in the block as confirmed
-                if let Some(pending_tx_sender) = &pending_tx_sender {
-                    // TODO: we need new_block to be the new_head_block
+                if pending_tx_sender.is_some() {
                     for tx_hash in &new_block.transactions {
-                        match self.pending_transactions.remove(tx_hash) {
-                            Some((_tx_id, tx)) => {
-                                pending_tx_sender.send_async(TxState::Confirmed(tx)).await?;
-                            }
-                            None => continue,
-                        }
+                        // TODO: should we mark as confirmed via pending_tx_sender so that orphans are easier?
+                        let _ = self.pending_transactions.remove(tx_hash);
                     }
                 };
 

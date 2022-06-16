@@ -1,11 +1,12 @@
-use crate::app::AnyhowJoinHandle;
-use crate::connection::Web3Connection;
-use crate::Web3ProxyApp;
 use argh::FromArgs;
 use ethers::prelude::{Block, TxHash};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use crate::app::AnyhowJoinHandle;
+use crate::connection::Web3Connection;
+use crate::Web3ProxyApp;
 
 #[derive(Debug, FromArgs)]
 /// Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.

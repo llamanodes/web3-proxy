@@ -1,5 +1,8 @@
 # Todo
 
+- [ ] it works for a few seconds and then gets stuck on something
+- [ ] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more
+- [ ] its working with one backend node, but multiple breaks. something to do with pending transactions
 - [ ] if web3 proxy gets an http error back, retry another node
 - [x] refactor Connection::spawn. have it return a handle to the spawned future of it running with block and transaction subscriptions
 - [x] refactor Connections::spawn. have it return a handle that is selecting on those handles?
