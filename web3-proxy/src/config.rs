@@ -1,7 +1,9 @@
 use argh::FromArgs;
 use ethers::prelude::{Block, TxHash};
+use futures::Future;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::app::AnyhowJoinHandle;
@@ -49,7 +51,12 @@ pub struct Web3ConnectionConfig {
 impl RpcConfig {
     /// Create a Web3ProxyApp from config
     // #[instrument(name = "try_build_RpcConfig", skip_all)]
-    pub async fn spawn(self) -> anyhow::Result<(Arc<Web3ProxyApp>, AnyhowJoinHandle<()>)> {
+    pub async fn spawn(
+        self,
+    ) -> anyhow::Result<(
+        Arc<Web3ProxyApp>,
+        Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
+    )> {
         let balanced_rpcs = self.balanced_rpcs.into_values().collect();
 
         let private_rpcs = if let Some(private_rpcs) = self.private_rpcs {

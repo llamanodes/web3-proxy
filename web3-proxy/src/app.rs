@@ -3,14 +3,16 @@ use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
 use ethers::prelude::Transaction;
 use ethers::prelude::{Block, TxHash, H256};
-use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
+use futures::future::{try_join_all, Abortable};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
+use futures::Future;
 use linkedhashmap::LinkedHashMap;
 use parking_lot::RwLock;
 use serde_json::json;
 use std::fmt;
+use std::pin::Pin;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,6 +56,20 @@ pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T>
     }
 }
 
+pub async fn flatten_handles(
+    mut handles: FuturesUnordered<AnyhowJoinHandle<()>>,
+) -> anyhow::Result<()> {
+    while let Some(x) = handles.next().await {
+        match x {
+            Err(e) => return Err(e.into()),
+            Ok(Err(e)) => return Err(e),
+            Ok(Ok(())) => {}
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Clone)]
 pub enum TxState {
     Known(TxHash),
@@ -65,6 +81,7 @@ pub enum TxState {
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
 // TODO: if Web3ProxyApp is always in an Arc, i think we can avoid having at least some of these internal things in arcs
+// TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
 pub struct Web3ProxyApp {
     /// Send requests to the best server available
     balanced_rpcs: Arc<Web3Connections>,
@@ -76,6 +93,8 @@ pub struct Web3ProxyApp {
     // TODO: broadcast channel instead?
     head_block_receiver: watch::Receiver<Block<TxHash>>,
     pending_tx_sender: broadcast::Sender<TxState>,
+    pending_tx_receiver: broadcast::Receiver<TxState>,
+    pending_transactions: Arc<DashMap<TxHash, TxState>>,
     next_subscription_id: AtomicUsize,
 }
 
@@ -92,9 +111,12 @@ impl Web3ProxyApp {
         redis_address: Option<String>,
         balanced_rpcs: Vec<Web3ConnectionConfig>,
         private_rpcs: Vec<Web3ConnectionConfig>,
-    ) -> anyhow::Result<(Arc<Web3ProxyApp>, AnyhowJoinHandle<()>)> {
+    ) -> anyhow::Result<(
+        Arc<Web3ProxyApp>,
+        Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
+    )> {
         // TODO: try_join_all instead
-        let mut handles = FuturesUnordered::new();
+        let handles = FuturesUnordered::new();
 
         // make a http shared client
         // TODO: how should we configure the connection pool?
@@ -127,7 +149,12 @@ impl Web3ProxyApp {
         let (head_block_sender, head_block_receiver) = watch::channel(Block::default());
         // TODO: will one receiver lagging be okay?
         let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(16);
-        drop(pending_tx_receiver);
+
+        let pending_transactions = Arc::new(DashMap::new());
+
+        // TODO: don't drop the pending_tx_receiver. instead, read it to mark transactions as "seen". once seen, we won't re-send them
+        // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
+        // TODO: we should still have some sort of expiration or maximum size limit for the map
 
         // TODO: attach context to this error
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
@@ -137,6 +164,7 @@ impl Web3ProxyApp {
             rate_limiter.as_ref(),
             Some(head_block_sender),
             Some(pending_tx_sender.clone()),
+            pending_transactions.clone(),
         )
         .await?;
 
@@ -155,7 +183,8 @@ impl Web3ProxyApp {
                 // subscribing to new heads here won't work well
                 None,
                 // TODO: subscribe to pending transactions on the private rpcs?
-                None,
+                Some(pending_tx_sender.clone()),
+                pending_transactions.clone(),
             )
             .await?;
 
@@ -171,23 +200,16 @@ impl Web3ProxyApp {
             response_cache: Default::default(),
             head_block_receiver,
             pending_tx_sender,
+            pending_tx_receiver,
+            pending_transactions,
             next_subscription_id: 1.into(),
         };
 
         let app = Arc::new(app);
 
         // create a handle that returns on the first error
-        let handle = tokio::spawn(async move {
-            while let Some(x) = handles.next().await {
-                match x {
-                    Err(e) => return Err(e.into()),
-                    Ok(Err(e)) => return Err(e),
-                    Ok(Ok(())) => {}
-                }
-            }
-
-            Ok(())
-        });
+        // TODO: move this to a helper. i think Web3Connections needs it too
+        let handle = Box::pin(flatten_handles(handles));
 
         Ok((app, handle))
     }

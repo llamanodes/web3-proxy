@@ -89,7 +89,7 @@ fn main() -> anyhow::Result<()> {
 
         // if everything is working, these should both run forever
         tokio::select! {
-            x = flatten_handle(app_handle) => {
+            x = app_handle => {
                 // TODO: error log if error
                 info!(?x, "app_handle exited");
             }
