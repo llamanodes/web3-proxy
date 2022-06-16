@@ -162,6 +162,7 @@ impl Web3Connection {
         // check the server's chain_id here
         // TODO: move this outside the `new` function and into a `start` function or something
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
+        // TODO: this will wait forever. do we want that?
         let found_chain_id: Result<String, _> = connection
             .wait_for_request_handle()
             .await
@@ -385,7 +386,6 @@ impl Web3Connection {
                     // query the block once since the subscription doesn't send the current block
                     // there is a very small race condition here where the stream could send us a new block right now
                     // all it does is print "new block" for the same block as current block
-                    // TODO: subscribe to Block<TransactionReceipt> instead?
                     let block: Result<Block<TxHash>, _> = self
                         .wait_for_request_handle()
                         .await
@@ -492,11 +492,12 @@ impl Web3Connection {
         Ok(())
     }
 
+    /// be careful with this; it will wait forever!
     #[instrument(skip_all)]
     pub async fn wait_for_request_handle(self: &Arc<Self>) -> ActiveRequestHandle {
-        // TODO: maximum wait time
+        // TODO: maximum wait time?
 
-        for _ in 0..10 {
+        loop {
             match self.try_request_handle().await {
                 Ok(pending_request_handle) => return pending_request_handle,
                 Err(retry_after) => {
@@ -504,9 +505,6 @@ impl Web3Connection {
                 }
             }
         }
-
-        // TODO: what should we do? panic isn't ever what we want
-        panic!("no request handle after 10 tries");
     }
 
     pub async fn try_request_handle(self: &Arc<Self>) -> Result<ActiveRequestHandle, Duration> {

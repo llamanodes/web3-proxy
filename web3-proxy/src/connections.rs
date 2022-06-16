@@ -161,15 +161,26 @@ impl Web3Connections {
         &self,
         rpc: Arc<Web3Connection>,
         pending_tx_id: TxHash,
-    ) -> Result<TxState, ProviderError> {
+    ) -> Result<Option<TxState>, ProviderError> {
         // TODO: yearn devs have had better luck with batching these, but i think that's likely just adding a delay itself
         // TODO: there is a race here sometimes the rpc isn't yet ready to serve the transaction (even though they told us about it!)
         // TODO: maximum wait time
-        let pending_transaction: Transaction = rpc
-            .wait_for_request_handle()
-            .await
-            .request("eth_getTransactionByHash", (pending_tx_id,))
-            .await?;
+        let pending_transaction: Transaction = match rpc.try_request_handle().await {
+            Ok(request_handle) => {
+                request_handle
+                    .request("eth_getTransactionByHash", (pending_tx_id,))
+                    .await?
+            }
+            Err(err) => {
+                trace!(
+                    ?pending_tx_id,
+                    ?rpc,
+                    ?err,
+                    "cancelled funneling transaction"
+                );
+                return Ok(None);
+            }
+        };
 
         trace!(?pending_transaction, "pending");
 
@@ -177,9 +188,9 @@ impl Web3Connections {
         match &pending_transaction.block_hash {
             Some(_block_hash) => {
                 // the transaction is already confirmed. no need to save in the pending_transactions map
-                Ok(TxState::Confirmed(pending_transaction))
+                Ok(Some(TxState::Confirmed(pending_transaction)))
             }
-            None => Ok(TxState::Pending(pending_transaction)),
+            None => Ok(Some(TxState::Pending(pending_transaction))),
         }
     }
 
@@ -207,7 +218,7 @@ impl Web3Connections {
         // query the rpc for this transaction
         // it is possible that another rpc is also being queried. thats fine. we want the fastest response
         match self._funnel_transaction(rpc.clone(), pending_tx_id).await {
-            Ok(tx_state) => {
+            Ok(Some(tx_state)) => {
                 let _ = pending_tx_sender.send(tx_state);
 
                 trace!(?pending_tx_id, "sent");
@@ -215,6 +226,7 @@ impl Web3Connections {
                 // we sent the transaction. return now. don't break looping because that gives a warning
                 return Ok(());
             }
+            Ok(None) => {}
             Err(err) => {
                 trace!(?err, ?pending_tx_id, "failed fetching transaction");
                 // unable to update the entry. sleep and try again soon

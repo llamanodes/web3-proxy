@@ -1,8 +1,10 @@
 # Todo
 
-- [ ] it works for a few seconds and then gets stuck on something
+- [x] it works for a few seconds and then gets stuck on something.
+  - [x] its working with one backend node, but multiple breaks. something to do with pending transactions
+  - [x] dashmap entry api is easy to deadlock! be careful with it!
 - [ ] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more
-- [ ] its working with one backend node, but multiple breaks. something to do with pending transactions
+- [ ] ethers has a transactions_unsorted httprpc method that we should probably use. all rpcs probably don't support it, so make it okay for that to fail
 - [ ] if web3 proxy gets an http error back, retry another node
 - [x] refactor Connection::spawn. have it return a handle to the spawned future of it running with block and transaction subscriptions
 - [x] refactor Connections::spawn. have it return a handle that is selecting on those handles?
