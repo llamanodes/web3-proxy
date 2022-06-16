@@ -3,8 +3,8 @@ use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
 use ethers::prelude::Transaction;
 use ethers::prelude::{Block, TxHash, H256};
+use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
-use futures::future::{try_join_all, Abortable};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use futures::Future;
@@ -19,7 +19,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
-use tokio_stream::wrappers::WatchStream;
+use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
 
 use crate::config::Web3ConnectionConfig;
@@ -56,23 +56,23 @@ pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T>
     }
 }
 
-pub async fn flatten_handles(
-    mut handles: FuturesUnordered<AnyhowJoinHandle<()>>,
+pub async fn flatten_handles<T>(
+    mut handles: FuturesUnordered<AnyhowJoinHandle<T>>,
 ) -> anyhow::Result<()> {
     while let Some(x) = handles.next().await {
         match x {
             Err(e) => return Err(e.into()),
             Ok(Err(e)) => return Err(e),
-            Ok(Ok(())) => {}
+            Ok(Ok(_)) => {}
         }
     }
 
     Ok(())
 }
 
+// TODO: think more about TxState. d
 #[derive(Clone)]
 pub enum TxState {
-    Known(TxHash),
     Pending(Transaction),
     Confirmed(Transaction),
     Orphaned(Transaction),
@@ -93,7 +93,6 @@ pub struct Web3ProxyApp {
     // TODO: broadcast channel instead?
     head_block_receiver: watch::Receiver<Block<TxHash>>,
     pending_tx_sender: broadcast::Sender<TxState>,
-    pending_tx_receiver: broadcast::Receiver<TxState>,
     pending_transactions: Arc<DashMap<TxHash, TxState>>,
     next_subscription_id: AtomicUsize,
 }
@@ -106,6 +105,10 @@ impl fmt::Debug for Web3ProxyApp {
 }
 
 impl Web3ProxyApp {
+    pub fn get_pending_transactions(&self) -> &DashMap<TxHash, TxState> {
+        &self.pending_transactions
+    }
+
     pub async fn spawn(
         chain_id: usize,
         redis_address: Option<String>,
@@ -193,6 +196,9 @@ impl Web3ProxyApp {
             private_rpcs
         };
 
+        // TODO: use this? it could listen for confirmed transactions and then clear pending_transactions, but the head_block_sender is doing that
+        drop(pending_tx_receiver);
+
         let app = Web3ProxyApp {
             balanced_rpcs,
             private_rpcs,
@@ -200,7 +206,6 @@ impl Web3ProxyApp {
             response_cache: Default::default(),
             head_block_receiver,
             pending_tx_sender,
-            pending_tx_receiver,
             pending_transactions,
             next_subscription_id: 1.into(),
         };
@@ -231,115 +236,127 @@ impl Web3ProxyApp {
         // save the id so we can use it in the response
         let id = payload.id.clone();
 
-        let subscription_join_handle = {
-            let subscription_id = subscription_id.clone();
+        match payload.params.as_deref().unwrap().get() {
+            r#"["newHeads"]"# => {
+                let head_block_receiver = self.head_block_receiver.clone();
 
-            match payload.params.as_deref().unwrap().get() {
-                r#"["newHeads"]"# => {
-                    let head_block_receiver = self.head_block_receiver.clone();
+                let subscription_id = subscription_id.clone();
 
-                    trace!(?subscription_id, "new heads subscription");
-                    tokio::spawn(async move {
-                        let mut head_block_receiver = Abortable::new(
-                            WatchStream::new(head_block_receiver),
-                            subscription_registration,
-                        );
+                trace!(?subscription_id, "new heads subscription");
+                tokio::spawn(async move {
+                    let mut head_block_receiver = Abortable::new(
+                        WatchStream::new(head_block_receiver),
+                        subscription_registration,
+                    );
 
-                        while let Some(new_head) = head_block_receiver.next().await {
-                            // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                            let msg = json!({
-                                "jsonrpc": "2.0",
-                                "method":"eth_subscription",
-                                "params": {
-                                    "subscription": subscription_id,
-                                    "result": new_head,
-                                },
-                            });
+                    while let Some(new_head) = head_block_receiver.next().await {
+                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                        let msg = json!({
+                            "jsonrpc": "2.0",
+                            "method":"eth_subscription",
+                            "params": {
+                                "subscription": subscription_id,
+                                "result": new_head,
+                            },
+                        });
 
-                            let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+                        let msg = Message::Text(serde_json::to_string(&msg).unwrap());
 
-                            if subscription_tx.send_async(msg).await.is_err() {
-                                // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                                break;
-                            };
-                        }
+                        if subscription_tx.send_async(msg).await.is_err() {
+                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                            break;
+                        };
+                    }
 
-                        trace!(?subscription_id, "closed new heads subscription");
-                    })
-                }
-                r#"["newPendingTransactions"]"# => {
-                    let mut pending_tx_receiver = self.pending_tx_sender.subscribe();
-
-                    trace!(?subscription_id, "pending transactions subscription");
-                    tokio::spawn(async move {
-                        while let Ok(new_tx_state) = pending_tx_receiver.recv().await {
-                            let new_tx = match new_tx_state {
-                                TxState::Known(..) => continue,
-                                TxState::Confirmed(..) => continue,
-                                TxState::Orphaned(tx) => tx,
-                                TxState::Pending(tx) => tx,
-                            };
-
-                            // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                            let msg = json!({
-                                "jsonrpc": "2.0",
-                                "method": "eth_subscription",
-                                "params": {
-                                    "subscription": subscription_id,
-                                    "result": new_tx.hash,
-                                },
-                            });
-
-                            let msg = Message::Text(serde_json::to_string(&msg).unwrap());
-
-                            if subscription_tx.send_async(msg).await.is_err() {
-                                // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                                break;
-                            };
-                        }
-
-                        trace!(?subscription_id, "closed new heads subscription");
-                    })
-                }
-                r#"["newPendingFullTransactions"]"# => {
-                    // TODO: too much copy/pasta with newPendingTransactions
-                    let mut pending_tx_receiver = self.pending_tx_sender.subscribe();
-
-                    trace!(?subscription_id, "pending transactions subscription");
-                    tokio::spawn(async move {
-                        while let Ok(new_tx_state) = pending_tx_receiver.recv().await {
-                            let new_tx = match new_tx_state {
-                                TxState::Known(..) => continue,
-                                TxState::Confirmed(..) => continue,
-                                TxState::Orphaned(tx) => tx,
-                                TxState::Pending(tx) => tx,
-                            };
-
-                            // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                            let msg = json!({
-                                "jsonrpc": "2.0",
-                                "method": "eth_subscription",
-                                "params": {
-                                    "subscription": subscription_id,
-                                    // upstream just sends the txid, but we want to send the whole transaction
-                                    "result": new_tx,
-                                },
-                            });
-
-                            let msg = Message::Text(serde_json::to_string(&msg).unwrap());
-
-                            if subscription_tx.send_async(msg).await.is_err() {
-                                // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                                break;
-                            };
-                        }
-
-                        trace!(?subscription_id, "closed new heads subscription");
-                    })
-                }
-                _ => return Err(anyhow::anyhow!("unimplemented")),
+                    trace!(?subscription_id, "closed new heads subscription");
+                });
             }
-        };
+            r#"["newPendingTransactions"]"# => {
+                let pending_tx_receiver = self.pending_tx_sender.subscribe();
+
+                let mut pending_tx_receiver = Abortable::new(
+                    BroadcastStream::new(pending_tx_receiver),
+                    subscription_registration,
+                );
+
+                let subscription_id = subscription_id.clone();
+
+                trace!(?subscription_id, "pending transactions subscription");
+                tokio::spawn(async move {
+                    while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
+                        let new_tx = match new_tx_state {
+                            TxState::Pending(tx) => tx,
+                            TxState::Confirmed(..) => continue,
+                            TxState::Orphaned(tx) => tx,
+                        };
+
+                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                        let msg = json!({
+                            "jsonrpc": "2.0",
+                            "method": "eth_subscription",
+                            "params": {
+                                "subscription": subscription_id,
+                                "result": new_tx.hash,
+                            },
+                        });
+
+                        let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+
+                        if subscription_tx.send_async(msg).await.is_err() {
+                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                            break;
+                        };
+                    }
+
+                    trace!(?subscription_id, "closed new heads subscription");
+                });
+            }
+            r#"["newPendingFullTransactions"]"# => {
+                // TODO: too much copy/pasta with newPendingTransactions
+                let pending_tx_receiver = self.pending_tx_sender.subscribe();
+
+                let mut pending_tx_receiver = Abortable::new(
+                    BroadcastStream::new(pending_tx_receiver),
+                    subscription_registration,
+                );
+
+                let subscription_id = subscription_id.clone();
+
+                trace!(?subscription_id, "pending transactions subscription");
+
+                // TODO: do something with this handle?
+                tokio::spawn(async move {
+                    while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
+                        let new_tx = match new_tx_state {
+                            TxState::Pending(tx) => tx,
+                            TxState::Confirmed(..) => continue,
+                            TxState::Orphaned(tx) => tx,
+                        };
+
+                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                        let msg = json!({
+                            "jsonrpc": "2.0",
+                            "method": "eth_subscription",
+                            "params": {
+                                "subscription": subscription_id,
+                                // upstream just sends the txid, but we want to send the whole transaction
+                                "result": new_tx,
+                            },
+                        });
+
+                        let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+
+                        if subscription_tx.send_async(msg).await.is_err() {
+                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                            break;
+                        };
+                    }
+
+                    trace!(?subscription_id, "closed new heads subscription");
+                });
+            }
+            _ => return Err(anyhow::anyhow!("unimplemented")),
+        }
 
         // TODO: do something with subscription_join_handle?
 

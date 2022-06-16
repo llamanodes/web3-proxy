@@ -2,7 +2,6 @@
 use anyhow::Context;
 use arc_swap::ArcSwap;
 use counter::Counter;
-use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
 use derive_more::From;
 use ethers::prelude::{Block, ProviderError, Transaction, TxHash, H256};
@@ -165,6 +164,7 @@ impl Web3Connections {
     ) -> Result<TxState, ProviderError> {
         // TODO: yearn devs have had better luck with batching these, but i think that's likely just adding a delay itself
         // TODO: there is a race here sometimes the rpc isn't yet ready to serve the transaction (even though they told us about it!)
+        // TODO: maximum wait time
         let pending_transaction: Transaction = rpc
             .wait_for_request_handle()
             .await
@@ -190,67 +190,44 @@ impl Web3Connections {
         pending_tx_sender: broadcast::Sender<TxState>,
     ) -> anyhow::Result<()> {
         // TODO: how many retries? until some timestamp is hit is probably better. maybe just loop and call this with a timeout
-        for i in 0..30 {
-            // TODO: also check the "confirmed transactions" mapping? maybe one shared mapping with TxState in it?
-            info!(?pending_tx_id, "checking pending_transactions");
-            let tx_state = match self.pending_transactions.entry(pending_tx_id) {
-                DashMapEntry::Occupied(mut entry) => {
-                    if let TxState::Known(_) = entry.get() {
-                        // TODO: if its occupied, but still only "Known", multiple nodes have this transaction. ask both
-                        match self._funnel_transaction(rpc.clone(), pending_tx_id).await {
-                            Ok(tx_state) => {
-                                entry.insert(tx_state.clone());
+        // TODO: after more investigation, i don't think retries will help. i think this is because chains of transactions get dropped from memory
+        // TODO: also check the "confirmed transactions" mapping? maybe one shared mapping with TxState in it?
+        trace!(?pending_tx_id, "checking pending_transactions on {}", rpc);
 
-                                Some(tx_state)
-                            }
-                            Err(err) => {
-                                debug!(
-                                    ?i,
-                                    ?err,
-                                    ?pending_tx_id,
-                                    "failed sending transaction (retry/race)"
-                                );
-
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    }
-                }
-                DashMapEntry::Vacant(entry) => {
-                    // TODO: how many retries?
-                    // TODO: use a generic retry provider instead?
-                    match self._funnel_transaction(rpc.clone(), pending_tx_id).await {
-                        Ok(tx_state) => {
-                            entry.insert(tx_state.clone());
-
-                            Some(tx_state)
-                        }
-                        Err(err) => {
-                            debug!(?i, ?err, ?pending_tx_id, "failed sending transaction");
-
-                            None
-                        }
-                    }
-                }
-            };
-
-            if let Some(tx_state) = tx_state {
-                let _ = pending_tx_sender.send(tx_state);
-
-                info!(?pending_tx_id, "sent");
-
-                // since we sent a transaction, we should return
-                return Ok(());
-            }
-
-            // unable to update the entry. sleep and try again soon
-            // TODO: exponential backoff with jitter starting from a much smaller time
-            sleep(Duration::from_millis(3000)).await;
+        if self.pending_transactions.contains_key(&pending_tx_id) {
+            // this transaction has already been processed
+            return Ok(());
         }
 
-        info!(?pending_tx_id, "not found");
+        if pending_tx_sender.receiver_count() == 0 {
+            // no receivers, so no point in querying to get the full transaction
+            return Ok(());
+        }
+
+        // query the rpc for this transaction
+        // it is possible that another rpc is also being queried. thats fine. we want the fastest response
+        match self._funnel_transaction(rpc.clone(), pending_tx_id).await {
+            Ok(tx_state) => {
+                let _ = pending_tx_sender.send(tx_state);
+
+                trace!(?pending_tx_id, "sent");
+
+                // we sent the transaction. return now. don't break looping because that gives a warning
+                return Ok(());
+            }
+            Err(err) => {
+                trace!(?err, ?pending_tx_id, "failed fetching transaction");
+                // unable to update the entry. sleep and try again soon
+                // TODO: retry with exponential backoff with jitter starting from a much smaller time
+                // sleep(Duration::from_millis(100)).await;
+            }
+        }
+
+        // warn is too loud. this is somewhat common
+        // "There is a Pending txn with a lower account nonce. This txn can only be executed after confirmation of the earlier Txn Hash#"
+        // sometimes it's been pending for many hours
+        // sometimes it's maybe something else?
+        debug!(?pending_tx_id, "not found on {}", rpc);
         Ok(())
     }
 
@@ -544,8 +521,11 @@ impl Web3Connections {
                 // mark all transactions in the block as confirmed
                 if pending_tx_sender.is_some() {
                     for tx_hash in &new_block.transactions {
-                        // TODO: should we mark as confirmed via pending_tx_sender so that orphans are easier?
+                        // TODO: should we mark as confirmed via pending_tx_sender?
+                        // TODO: possible deadlock here!
+                        // trace!("removing {}...", tx_hash);
                         let _ = self.pending_transactions.remove(tx_hash);
+                        // trace!("removed {}", tx_hash);
                     }
                 };
 
