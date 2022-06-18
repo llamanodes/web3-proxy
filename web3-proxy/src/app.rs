@@ -355,6 +355,50 @@ impl Web3ProxyApp {
                     trace!(?subscription_id, "closed new heads subscription");
                 });
             }
+            r#"["newPendingRawTransactions"]"# => {
+                // TODO: too much copy/pasta with newPendingTransactions
+                let pending_tx_receiver = self.pending_tx_sender.subscribe();
+
+                let mut pending_tx_receiver = Abortable::new(
+                    BroadcastStream::new(pending_tx_receiver),
+                    subscription_registration,
+                );
+
+                let subscription_id = subscription_id.clone();
+
+                trace!(?subscription_id, "pending transactions subscription");
+
+                // TODO: do something with this handle?
+                tokio::spawn(async move {
+                    while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
+                        let new_tx = match new_tx_state {
+                            TxState::Pending(tx) => tx,
+                            TxState::Confirmed(..) => continue,
+                            TxState::Orphaned(tx) => tx,
+                        };
+
+                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                        let msg = json!({
+                            "jsonrpc": "2.0",
+                            "method": "eth_subscription",
+                            "params": {
+                                "subscription": subscription_id,
+                                // upstream just sends the txid, but we want to send the whole transaction
+                                "result": new_tx.rlp(),
+                            },
+                        });
+
+                        let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+
+                        if subscription_tx.send_async(msg).await.is_err() {
+                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                            break;
+                        };
+                    }
+
+                    trace!(?subscription_id, "closed new heads subscription");
+                });
+            }
             _ => return Err(anyhow::anyhow!("unimplemented")),
         }
 

@@ -1,5 +1,6 @@
 # Todo
 
+- [ ] quick requests/second timer until we have real stats
 - [x] it works for a few seconds and then gets stuck on something.
   - [x] its working with one backend node, but multiple breaks. something to do with pending transactions
   - [x] dashmap entry api is easy to deadlock! be careful with it!

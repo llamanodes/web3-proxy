@@ -427,7 +427,7 @@ impl Web3Connection {
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
             match &*provider {
-                Web3Provider::Http(_provider) => {
+                Web3Provider::Http(provider) => {
                     // there is a "watch_pending_transactions" function, but a lot of public nodes do not support the necessary rpc endpoints
                     // TODO: what should this interval be? probably automatically set to some fraction of block time
                     // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now

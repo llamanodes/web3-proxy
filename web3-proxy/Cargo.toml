@@ -35,5 +35,5 @@ tracing = "0.1.35"
 # TODO: tracing-subscriber has serde and serde_json features that we might want to use
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "parking_lot"] }
 url = "2.2.2"
-tower = "0.4.12"
+tower = "0.4.13"
 tokio-stream = { version = "0.1.9", features = ["sync"] }

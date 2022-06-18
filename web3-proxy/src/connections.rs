@@ -205,13 +205,13 @@ impl Web3Connections {
         // TODO: also check the "confirmed transactions" mapping? maybe one shared mapping with TxState in it?
         trace!(?pending_tx_id, "checking pending_transactions on {}", rpc);
 
-        if self.pending_transactions.contains_key(&pending_tx_id) {
-            // this transaction has already been processed
+        if pending_tx_sender.receiver_count() == 0 {
+            // no receivers, so no point in querying to get the full transaction
             return Ok(());
         }
 
-        if pending_tx_sender.receiver_count() == 0 {
-            // no receivers, so no point in querying to get the full transaction
+        if self.pending_transactions.contains_key(&pending_tx_id) {
+            // this transaction has already been processed
             return Ok(());
         }
 
@@ -309,13 +309,6 @@ impl Web3Connections {
 
         Ok(())
     }
-
-    // pub fn get_pending_tx(
-    //     &self,
-    //     tx_hash: &TxHash,
-    // ) -> Option<dashmap::mapref::one::Ref<TxHash, Transaction>> {
-    //     self.pending_transactions.get(tx_hash)
-    // }
 
     pub fn get_head_block_hash(&self) -> H256 {
         *self.synced_connections.load().get_head_block_hash()
