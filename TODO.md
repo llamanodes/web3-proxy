@@ -1,64 +1,77 @@
 # Todo
 
-- [ ] quick requests/second timer until we have real stats
-- [x] it works for a few seconds and then gets stuck on something.
-  - [x] its working with one backend node, but multiple breaks. something to do with pending transactions
-  - [x] dashmap entry api is easy to deadlock! be careful with it!
-- [ ] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more
-- [ ] ethers has a transactions_unsorted httprpc method that we should probably use. all rpcs probably don't support it, so make it okay for that to fail
-- [ ] if web3 proxy gets an http error back, retry another node
-- [x] refactor Connection::spawn. have it return a handle to the spawned future of it running with block and transaction subscriptions
-- [x] refactor Connections::spawn. have it return a handle that is selecting on those handles?
-- [x] support websocket clients
-  - we support websockets for the backends already, but we need them for the frontend too
-  - [ ] when block subscribers receive blocks, store them in a cache. use this cache instead of querying eth_getBlock
-  - [x] have a /ws endpoint (figure out how to route on / later)
-  - inspect any jsonrpc errors. if its something like "header not found" or "block with id $x not found" retry on another node (and add a negative score to that server)
-    - this error seems to happen when we use load balanced rpcs
-- [x] use redis and redis-cell for rate limits
-- [ ] if we don't cache errors, then in-flight request caching is going to bottleneck 
-- [x] some production configs are occassionally stuck waiting at 100% cpu
-  - they stop processing new blocks. i'm guessing 2 blocks arrive at the same time, but i thought our locks would handle that
-  - even after removing a bunch of the locks, the deadlock still happens. i can't reliably reproduce. i just let it run for awhile and it happens.
-  - running gdb shows the thread at tokio tungstenite thread is spinning near 100% cpu and none of the rest of the program is proceeding
-  - fixed by https://github.com/gakonst/ethers-rs/pull/1287
-- [ ] improve caching
-  - [ ] if the eth_call (or similar) params include a block, we can cache for longer
-  - [ ] if the call is something simple like "symbol" or "decimals", cache that too
-  - [ ] when we receive a block, we should store it for later eth_getBlockByNumber, eth_blockNumber, and similar calls
-- [x] eth_sendRawTransaction should return the most common result, not the first
-- [ ] if chain split detected, don't send transactions?
-- [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
-- [ ] endpoint for health checks. if no synced servers, give a 502 error
-- [x] move from warp to auxm?
-- [ ] proper logging with useful instrumentation
-- [x] handle websocket disconnect and reconnect
-- [ ] warning if no blocks for too long. maybe reconnect automatically?
-- [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
-    - thundering herd problem if we only allow a lag of 0 blocks
-    - we can fix this by only `publish`ing the sorted list once a certain sync limit is reached 
-- [ ] tarpit hard_ratelimit at the start, but reject if incoming requests is super high?
-- [ ] add the backend server to the header?
-- [x] the web3proxyapp object gets cloned for every call. why do we need any arcs inside that? shouldn't they be able to connect to the app's? can we just use static lifetimes
-- [ ] think more about how multiple rpc tiers should work
-  - we should have a "backup" tier that is only used when the primary tier has no servers or is multiple blocks behind. we don't want the backup tier taking over all the time. only if the primary tier has fallen behind or gone entirely offline
-- [ ] if a request gets a socket timeout, try on another server
-  - maybe always try at least two servers in parallel? and then return the first? or only if the first one doesn't respond very quickly?
-- [ ] incoming rate limiting (by ip or by api key or what?)
-- [ ] measure latency to nodes?
-- [ ] one proxy for mulitple chains?
-- [ ] zero downtime deploys
-- [ ] are we using Acquire/Release/AcqRel properly? or do we need other modes?
-- [ ] subscription id should be per connection, not global
-- [ ] emit stats
+## MVP
+
 - [x] simple proxy
 - [x] better locking. when lots of requests come in, we seem to be in the way of block updates
 - [x] load balance between multiple RPC servers
 - [x] support more than just ETH
 - [x] option to disable private rpc and send everything to primary
+- [x] support websocket clients
+  - we support websockets for the backends already, but we need them for the frontend too
 - [x] health check nodes by block height
 - [x] Dockerfile
 - [x] docker-compose.yml
 - [x] after connecting to a server, check that it gives the expected chainId
 - [x] the ethermine rpc is usually fastest. but its in the private tier. since we only allow synced rpcs, we are going to not have an rpc a lot of the time
 - [x] if not backends. return a 502 instead of delaying?
+- [x] move from warp to axum
+- [x] handle websocket disconnect and reconnect
+- [x] eth_sendRawTransaction should return the most common result, not the first
+- [x] use redis and redis-cell for rate limits
+- [x] it works for a few seconds and then gets stuck on something.
+  - [x] its working with one backend node, but multiple breaks. something to do with pending transactions
+  - [x] dashmap entry api is easy to deadlock! be careful with it!
+- [x] the web3proxyapp object gets cloned for every call. why do we need any arcs inside that? shouldn't they be able to connect to the app's? can we just use static lifetimes
+- [x] refactor Connection::spawn. have it return a handle to the spawned future of it running with block and transaction subscriptions
+- [x] refactor Connections::spawn. have it return a handle that is selecting on those handles?
+- [x] some production configs are occassionally stuck waiting at 100% cpu
+  - they stop processing new blocks. i'm guessing 2 blocks arrive at the same time, but i thought our locks would handle that
+  - even after removing a bunch of the locks, the deadlock still happens. i can't reliably reproduce. i just let it run for awhile and it happens.
+  - running gdb shows the thread at tokio tungstenite thread is spinning near 100% cpu and none of the rest of the program is proceeding
+  - fixed by https://github.com/gakonst/ethers-rs/pull/1287
+- [ ] quick requests/second timer until we have real stats
+- [ ] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more
+- [ ] if web3 proxy gets an http error back, retry another node
+- [ ] endpoint for health checks. if no synced servers, give a 502 error
+
+## V1
+
+- [ ] incoming rate limiting (by api key)
+- [ ] failsafe. if no blocks or transactions in the last second, warn and reset the connection
+- [ ] improved logging with useful instrumentation
+- [ ] add a subscription that returns the head block number and hash but nothing else
+- [ ] if we don't cache errors, then in-flight request caching is going to bottleneck 
+- [ ] improve caching
+  - [ ] if the eth_call (or similar) params include a block, we can cache for longer
+  - [ ] if the call is something simple like "symbol" or "decimals", cache that too
+  - [ ] when we receive a block, we should store it for later eth_getBlockByNumber, eth_blockNumber, and similar calls
+- [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
+- [ ] inspect any jsonrpc errors. if its something like "header not found" or "block with id $x not found" retry on another node (and add a negative score to that server)
+    - this error seems to happen when we use load balanced backend rpcs
+- [ ] when block subscribers receive blocks, store them in a cache. use this cache instead of querying eth_getBlock
+- [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
+    - thundering herd problem if we only allow a lag of 0 blocks
+    - we can fix this by only `publish`ing the sorted list once a threshold of total soft limits is passed 
+- [ ] emit stats for successes, failures, types of requests
+
+## V2
+
+- [ ] make it easy to add or remove providers while the server is running
+- [ ] ethers has a transactions_unsorted httprpc method that we should probably use. all rpcs probably don't support it, so make it okay for that to fail
+- [ ] if chain split detected, don't send transactions?
+- [ ] have a "backup" tier that is only used when the primary tier has no servers or is multiple blocks behind. we don't want the backup tier taking over with the head block if they happen to be fast at that (but overall low/expensive rps). only if the primary tier has fallen behind or gone entirely offline should we go to third parties
+- [ ] measure average latency of a node's responses and load balance on that
+
+## "Maybe some day" and other Miscellaneous Things
+
+- [ ] instead of giving a rate limit error code, delay the connection's response at the start. reject if incoming requests is super high?
+- [ ] add the backend server to the header?
+- [ ] think more about how multiple rpc tiers should work
+- maybe always try at least two servers in parallel? and then return the first? or only if the first one doesn't respond very quickly? this doubles our request load though.
+- [ ] one proxy for mulitple chains?
+- [ ] zero downtime deploys
+- [ ] are we using Acquire/Release/AcqRel properly? or do we need other modes?
+- [ ] subscription id should be per connection, not global
+- [ ] use https://github.com/ledgerwatch/interfaces to talk to erigon directly instead of through erigon's rpcdaemon (possible example code which uses ledgerwatch/interfaces: https://github.com/akula-bft/akula/tree/master)
+- [ ] subscribe to pending transactions and build an intelligent gas estimator

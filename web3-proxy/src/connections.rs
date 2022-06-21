@@ -121,6 +121,7 @@ impl Web3Connections {
                     handles.push(flatten_handle(connection_handle));
                     connections.push(connection)
                 }
+                // TODO: include the server url in this
                 Err(e) => warn!("Unable to connect to a server! {:?}", e),
             }
         }
