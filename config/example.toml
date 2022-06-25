@@ -16,9 +16,9 @@ chain_id = 1
     url = "https://rpc.flashbots.net"
     soft_limit = 1_000
 
-    [balanced_rpcs.linkpool-light]
-    url = "https://main-light.eth.linkpool.io"
-    soft_limit = 1_000
+    #[balanced_rpcs.linkpool-light]
+    #url = "https://main-light.eth.linkpool.io"
+    #soft_limit = 1_000
 
     [balanced_rpcs.blastapi]
     url = "https://eth-mainnet.public.blastapi.io"

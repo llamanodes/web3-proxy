@@ -36,9 +36,13 @@
 - [ ] endpoint for health checks. if no synced servers, give a 502 error
 - [ ] interval for http subscriptions should be based on block time.
 - [ ] todo: include private rpcs with regular queries? i don't want to overwhelm them, but they could be good for excess load
+- [ ] refactor so configs can change while running
+  - create the app without applying any config to it
+  - have a blocking future watching the config file and calling app.apply_config() on first load and on change
 
 ## V1
 
+- [ ] stats when forks are resolved (and what chain they were on?)
 - [ ] incoming rate limiting (by api key)
 - [ ] failsafe. if no blocks or transactions in the last second, warn and reset the connection
 - [ ] improved logging with useful instrumentation
@@ -55,7 +59,8 @@
 - [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
     - thundering herd problem if we only allow a lag of 0 blocks
     - we can fix this by only `publish`ing the sorted list once a threshold of total soft limits is passed 
-- [ ] emit stats for successes, failures, types of requests
+- [ ] emit stats for successes, retries, failures, with the types of requests, account, chain, rpc
+- [ ] automated soft limit
 
 ## V2
 
