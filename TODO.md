@@ -34,6 +34,8 @@
 - [ ] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more
 - [ ] if web3 proxy gets an http error back, retry another node
 - [ ] endpoint for health checks. if no synced servers, give a 502 error
+- [ ] interval for http subscriptions should be based on block time.
+- [ ] todo: include private rpcs with regular queries? i don't want to overwhelm them, but they could be good for excess load
 
 ## V1
 

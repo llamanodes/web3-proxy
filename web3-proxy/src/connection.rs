@@ -41,8 +41,9 @@ impl Web3Provider {
             let provider = ethers::providers::Http::new_with_client(url, http_client);
 
             // TODO: dry this up (needs https://github.com/gakonst/ethers-rs/issues/592)
+            // TODO: i don't think this interval matters, but it should probably come from config
             ethers::providers::Provider::new(provider)
-                .interval(Duration::from_secs(1))
+                .interval(Duration::from_secs(13))
                 .into()
         } else if url_str.starts_with("ws") {
             // TODO: wrapper automatically reconnect
@@ -342,7 +343,7 @@ impl Web3Connection {
                     // TODO: what should this interval be? probably some fraction of block time. set automatically?
                     // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
                     // TODO: if there are some websocket providers, maybe have a longer interval and a channel that tells the https to update when a websocket gets a new head? if they are slow this wouldn't work well though
-                    let mut interval = interval(Duration::from_secs(2));
+                    let mut interval = interval(Duration::from_secs(13));
                     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
                     let mut last_hash = Default::default();
