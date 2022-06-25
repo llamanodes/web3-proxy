@@ -526,6 +526,7 @@ impl Web3Connection {
                     // rate limit failed
                     // save the smallest retry_after. if nothing succeeds, return an Err with retry_after in it
                     // TODO: use tracing better
+                    // TODO: i'm seeing "Exhausted rate limit on moralis: 0ns". How is it getting 0?
                     warn!("Exhausted rate limit on {:?}: {:?}", self, retry_after);
 
                     return Err(retry_after);

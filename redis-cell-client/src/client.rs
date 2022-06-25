@@ -71,6 +71,9 @@ impl RedisCellClient {
 
         assert_eq!(x.len(), 5);
 
+        // TODO: trace log the result
+
+        // TODO: maybe we should do #4
         let retry_after = *x.get(3).unwrap();
 
         if retry_after == -1 {

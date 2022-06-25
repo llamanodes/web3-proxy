@@ -61,6 +61,7 @@
     - we can fix this by only `publish`ing the sorted list once a threshold of total soft limits is passed 
 - [ ] emit stats for successes, retries, failures, with the types of requests, account, chain, rpc
 - [ ] automated soft limit
+- [ ] if we send a transaction to private rpcs and then people query it on public rpcs things, some interfaces might think the transaction is dropped (i saw this happen in a brownie script of mine). how should we handle this?
 
 ## V2
 
