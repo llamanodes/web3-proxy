@@ -4,13 +4,6 @@ use std::sync::Arc;
 
 use crate::app::Web3ProxyApp;
 
-/// a page for configuring your wallet with all the rpcs
-/// TODO: check auth (from authp?) here
-/// TODO: return actual html
-pub async fn index() -> impl IntoResponse {
-    "Hello, World!"
-}
-
 /// Health check page for load balancers to use
 pub async fn health(app: Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     if app.get_balanced_rpcs().has_synced_rpcs() {
