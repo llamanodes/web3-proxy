@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tokio::task;
-use tokio::time::sleep;
+use tokio::time::{interval, sleep, MissedTickBehavior};
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
 
 use crate::app::{flatten_handle, AnyhowJoinHandle, TxState};
@@ -103,6 +103,39 @@ impl Web3Connections {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded();
 
+        let http_interval_sender = if http_client.is_some() {
+            let (sender, receiver) = broadcast::channel(1);
+
+            drop(receiver);
+
+            // TODO: what interval?
+            let mut interval = interval(Duration::from_secs(13));
+            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+            let sender = Arc::new(sender);
+
+            let f = {
+                let sender = sender.clone();
+
+                async move {
+                    loop {
+                        // TODO: every time a head_block arrives (maybe with a small delay), or on the interval.
+                        interval.tick().await;
+
+                        // errors are okay. they mean that all receivers have been dropped
+                        let _ = sender.send(());
+                    }
+                }
+            };
+
+            // TODO: do something with this handle?
+            tokio::spawn(f);
+
+            Some(sender)
+        } else {
+            None
+        };
+
         // turn configs into connections
         let mut connections = Vec::with_capacity(num_connections);
         for server_config in server_configs.into_iter() {
@@ -111,9 +144,9 @@ impl Web3Connections {
                     rate_limiter,
                     chain_id,
                     http_client,
+                    http_interval_sender.clone(),
                     Some(block_sender.clone()),
                     Some(pending_tx_id_sender.clone()),
-                    true,
                 )
                 .await
             {
@@ -316,7 +349,7 @@ impl Web3Connections {
     }
 
     pub fn has_synced_rpcs(&self) -> bool {
-        self.synced_connections.load().inner.len() > 0
+        !self.synced_connections.load().inner.is_empty()
     }
 
     /// Send the same request to all the handles. Returning the most common success or most common error.

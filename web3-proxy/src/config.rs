@@ -5,6 +5,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 
 use crate::app::AnyhowJoinHandle;
 use crate::connection::Web3Connection;
@@ -83,9 +84,9 @@ impl Web3ConnectionConfig {
         rate_limiter: Option<&redis_cell_client::MultiplexedConnection>,
         chain_id: usize,
         http_client: Option<&reqwest::Client>,
+        http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Web3Connection>)>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Web3Connection>)>>,
-        reconnect: bool,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_rate_limit = self.hard_limit.map(|x| (x, rate_limiter.unwrap()));
 
@@ -93,11 +94,12 @@ impl Web3ConnectionConfig {
             chain_id,
             self.url,
             http_client,
+            http_interval_sender,
             hard_rate_limit,
             self.soft_limit,
             block_sender,
             tx_id_sender,
-            reconnect,
+            true,
         )
         .await
     }
