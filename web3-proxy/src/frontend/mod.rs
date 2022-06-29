@@ -10,6 +10,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tracing::debug;
 
 use crate::app::Web3ProxyApp;
 
@@ -33,7 +34,7 @@ pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> 
     // run our app with hyper
     // `axum::Server` is a re-export of `hyper::Server`
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::info!("listening on port {}", addr);
+    debug!("listening on port {}", port);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await

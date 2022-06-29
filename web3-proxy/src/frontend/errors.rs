@@ -4,7 +4,6 @@ use tracing::warn;
 
 use crate::jsonrpc::JsonRpcForwardedResponse;
 
-/// TODO: pretty 404 page? or us a json error fine?
 pub async fn handler_404() -> impl IntoResponse {
     let err = anyhow::anyhow!("nothing to see here");
 
