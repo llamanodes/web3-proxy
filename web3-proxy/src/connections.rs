@@ -315,6 +315,10 @@ impl Web3Connections {
         *self.synced_connections.load().get_head_block_hash()
     }
 
+    pub fn has_synced_rpcs(&self) -> bool {
+        self.synced_connections.load().inner.len() > 0
+    }
+
     /// Send the same request to all the handles. Returning the most common success or most common error.
     #[instrument(skip_all)]
     pub async fn try_send_parallel_requests(

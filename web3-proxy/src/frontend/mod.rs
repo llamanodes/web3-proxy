@@ -21,8 +21,10 @@ pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> 
         .route("/", post(http_proxy::proxy_web3_rpc))
         // `websocket /` goes to `proxy_web3_ws`
         .route("/", get(ws_proxy::websocket_handler))
-        // `GET /index.html` goes to `index` (todo, somehow combine this with http_proxy::proxy_web3_rpc)
+        // `GET /index.html` goes to `index`
         .route("/index.html", get(http::index))
+        // `GET /health` goes to `health`
+        .route("/health", get(http::health))
         // `GET /status` goes to `status`
         .route("/status", get(http::status))
         .layer(Extension(proxy_app));

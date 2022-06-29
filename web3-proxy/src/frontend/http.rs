@@ -11,6 +11,15 @@ pub async fn index() -> impl IntoResponse {
     "Hello, World!"
 }
 
+/// Health check page for load balancers to use
+pub async fn health(app: Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
+    if app.get_balanced_rpcs().has_synced_rpcs() {
+        (StatusCode::OK, "OK")
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, ":(")
+    }
+}
+
 /// Very basic status page
 pub async fn status(app: Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     // TODO: what else should we include? uptime? prometheus?

@@ -30,7 +30,6 @@
   - even after removing a bunch of the locks, the deadlock still happens. i can't reliably reproduce. i just let it run for awhile and it happens.
   - running gdb shows the thread at tokio tungstenite thread is spinning near 100% cpu and none of the rest of the program is proceeding
   - fixed by https://github.com/gakonst/ethers-rs/pull/1287
-- [ ] quick requests/second timer until we have real stats
 - [ ] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more
 - [ ] if web3 proxy gets an http error back, retry another node
 - [ ] endpoint for health checks. if no synced servers, give a 502 error
