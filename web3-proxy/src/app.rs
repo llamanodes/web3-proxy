@@ -570,7 +570,10 @@ impl Web3ProxyApp {
             | "personal_unlockAccount"
             | "personal_sendTransaction"
             | "personal_sign"
-            | "personal_ecRecover" => Err(anyhow::anyhow!("unimplemented")),
+            | "personal_ecRecover" => {
+                // TODO: proper error code
+                Err(anyhow::anyhow!("unimplemented"))
+            }
             "eth_sendRawTransaction" => {
                 // there are private rpcs configured and the request is eth_sendSignedTransaction. send to all private rpcs
                 // TODO: think more about this lock. i think it won't actually help the herd. it probably makes it worse if we have a tight lag_limit
@@ -579,7 +582,7 @@ impl Web3ProxyApp {
                     .instrument(span)
                     .await
             }
-            _ => {
+            method => {
                 // this is not a private transaction (or no private relays are configured)
 
                 let (cache_key, response_cache) = match self.get_cached_response(&request) {
@@ -631,10 +634,20 @@ impl Web3ProxyApp {
                     }
                 }
 
-                let response = self
-                    .balanced_rpcs
-                    .try_send_best_upstream_server(request)
-                    .await?;
+                let response = match method {
+                    "eth_getTransactionByHash" | "eth_getTransactionReceipt" => {
+                        // TODO: try_send_all serially with retries instead of parallel
+                        self.private_rpcs
+                            .try_send_all_upstream_servers(request)
+                            .await?
+                    }
+                    _ => {
+                        // TODO: retries?
+                        self.balanced_rpcs
+                            .try_send_best_upstream_server(request)
+                            .await?
+                    }
+                };
 
                 // TODO: small race condidition here. parallel requests with the same query will both be saved to the cache
                 let mut response_cache = response_cache.write();

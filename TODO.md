@@ -30,6 +30,7 @@
   - even after removing a bunch of the locks, the deadlock still happens. i can't reliably reproduce. i just let it run for awhile and it happens.
   - running gdb shows the thread at tokio tungstenite thread is spinning near 100% cpu and none of the rest of the program is proceeding
   - fixed by https://github.com/gakonst/ethers-rs/pull/1287
+- [ ] when sending with private relays, brownie's tx.wait can think the transaction was dropped. smarter retry on eth_getTransactionByHash and eth_getTransactionReceipt (maybe only if we sent the transaction ourselves)
 - [ ] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more
 - [ ] if web3 proxy gets an http error back, retry another node
 - [ ] endpoint for health checks. if no synced servers, give a 502 error
@@ -41,6 +42,7 @@
 
 ## V1
 
+- [ ] some things that are cached locally should probably be in shared redis caches
 - [ ] stats when forks are resolved (and what chain they were on?)
 - [ ] incoming rate limiting (by api key)
 - [ ] failsafe. if no blocks or transactions in the last second, warn and reset the connection

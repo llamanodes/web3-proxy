@@ -715,6 +715,7 @@ impl Web3Connections {
                     warn!(?self, "No servers in sync!");
 
                     // TODO: sleep how long? until synced_connections changes or rate limits are available
+                    // TODO: subscribe to head_block_sender
                     sleep(Duration::from_millis(200)).await;
 
                     continue;
