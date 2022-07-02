@@ -181,7 +181,7 @@ impl JsonRpcForwardedResponse {
         }
     }
 
-    pub fn from_response_result(
+    pub fn try_from_response_result(
         result: Result<Box<RawValue>, ProviderError>,
         id: Box<RawValue>,
     ) -> anyhow::Result<Self> {

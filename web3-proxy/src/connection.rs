@@ -566,6 +566,10 @@ impl ActiveRequestHandle {
         Self(connection)
     }
 
+    pub fn clone_connection(&self) -> Arc<Web3Connection> {
+        self.0.clone()
+    }
+
     /// Send a web3 request
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// By taking self here, we ensure that this is dropped after the request is complete

@@ -550,7 +550,7 @@ impl Web3Connections {
 
             if synced_connections.inner.len() == total_rpcs {
                 // TODO: more metrics
-                debug!("all head: {}", new_block_hash);
+                trace!("all head: {}", new_block_hash);
             }
 
             trace!(
@@ -576,7 +576,6 @@ impl Web3Connections {
             }
 
             // TODO: only publish if there are x (default 2) nodes synced to this block?
-            // do the arcswap
             // TODO: do this before or after processing all the transactions in this block?
             self.synced_connections.swap(synced_connections);
         }
@@ -589,7 +588,10 @@ impl Web3Connections {
 
     /// get the best available rpc server
     #[instrument(skip_all)]
-    pub async fn next_upstream_server(&self) -> Result<ActiveRequestHandle, Option<Duration>> {
+    pub async fn next_upstream_server(
+        &self,
+        skip: &[Arc<Web3Connection>],
+    ) -> Result<ActiveRequestHandle, Option<Duration>> {
         let mut earliest_retry_after = None;
 
         let mut synced_rpcs: Vec<Arc<Web3Connection>> = self
@@ -597,8 +599,13 @@ impl Web3Connections {
             .load()
             .inner
             .iter()
+            .filter(|x| !skip.contains(x))
             .cloned()
             .collect();
+
+        if synced_rpcs.is_empty() {
+            return Err(None);
+        }
 
         let sort_cache: HashMap<Arc<Web3Connection>, (f32, u32)> = synced_rpcs
             .iter()
@@ -657,8 +664,8 @@ impl Web3Connections {
             // check rate limits and increment our connection counter
             match connection.try_request_handle().await {
                 Err(retry_after) => {
-                    earliest_retry_after = earliest_retry_after.min(Some(retry_after));
                     // this rpc is not available. skip it
+                    earliest_retry_after = earliest_retry_after.min(Some(retry_after));
                 }
                 Ok(handle) => selected_rpcs.push(handle),
             }
@@ -677,23 +684,44 @@ impl Web3Connections {
         &self,
         request: JsonRpcRequest,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
+        let mut skip_rpcs = vec![];
+
+        // TODO: maximum retries?
         loop {
-            match self.next_upstream_server().await {
+            if skip_rpcs.len() == self.inner.len() {
+                break;
+            }
+            match self.next_upstream_server(&skip_rpcs).await {
                 Ok(active_request_handle) => {
+                    // save the rpc in case we get an error and want to retry on another server
+                    skip_rpcs.push(active_request_handle.clone_connection());
+
                     let response_result = active_request_handle
                         .request(&request.method, &request.params)
                         .await;
 
-                    match JsonRpcForwardedResponse::from_response_result(
+                    match JsonRpcForwardedResponse::try_from_response_result(
                         response_result,
                         request.id.clone(),
                     ) {
                         Ok(response) => {
-                            if response.error.is_some() {
-                                trace!(?response, "Sending error reply",);
-                                // errors already sent false to the in_flight_tx
+                            if let Some(error) = &response.error {
+                                trace!(?response, "rpc error");
+
+                                // some errors should be retried
+                                if error.code == -32000
+                                    && [
+                                        "header not found",
+                                        "header for hash not found",
+                                        "node not started",
+                                        "RPC timeout",
+                                    ]
+                                    .contains(&error.message.as_str())
+                                {
+                                    continue;
+                                }
                             } else {
-                                trace!(?response, "Sending reply");
+                                trace!(?response, "rpc success");
                             }
 
                             return Ok(response);
@@ -714,8 +742,7 @@ impl Web3Connections {
                 Err(None) => {
                     warn!(?self, "No servers in sync!");
 
-                    // TODO: sleep how long? until synced_connections changes or rate limits are available
-                    // TODO: subscribe to head_block_sender
+                    // TODO: subscribe to something on synced connections. maybe it should just be a watch channel
                     sleep(Duration::from_millis(200)).await;
 
                     continue;
@@ -733,13 +760,15 @@ impl Web3Connections {
                 }
             }
         }
+
+        Err(anyhow::anyhow!("all retries exhausted"))
     }
 
+    /// be sure there is a timeout on this or it might loop forever
     pub async fn try_send_all_upstream_servers(
         &self,
         request: JsonRpcRequest,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
-        // TODO: timeout on this loop
         loop {
             match self.get_upstream_servers().await {
                 Ok(active_request_handles) => {

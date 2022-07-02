@@ -30,18 +30,17 @@
   - even after removing a bunch of the locks, the deadlock still happens. i can't reliably reproduce. i just let it run for awhile and it happens.
   - running gdb shows the thread at tokio tungstenite thread is spinning near 100% cpu and none of the rest of the program is proceeding
   - fixed by https://github.com/gakonst/ethers-rs/pull/1287
-- [ ] when sending with private relays, brownie's tx.wait can think the transaction was dropped. smarter retry on eth_getTransactionByHash and eth_getTransactionReceipt (maybe only if we sent the transaction ourselves)
-- [ ] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more
-- [ ] if web3 proxy gets an http error back, retry another node
-- [ ] endpoint for health checks. if no synced servers, give a 502 error
-- [ ] interval for http subscriptions should be based on block time.
-- [ ] todo: include private rpcs with regular queries? i don't want to overwhelm them, but they could be good for excess load
+- [x] when sending with private relays, brownie's tx.wait can think the transaction was dropped. smarter retry on eth_getTransactionByHash and eth_getTransactionReceipt (maybe only if we sent the transaction ourselves)
+- [x] if web3 proxy gets an http error back, retry another node
+- [x] endpoint for health checks. if no synced servers, give a 502 error
 - [ ] refactor so configs can change while running
   - create the app without applying any config to it
   - have a blocking future watching the config file and calling app.apply_config() on first load and on change
+- [ ] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more (might already be fixed)
 
 ## V1
 
+- [ ] interval for http subscriptions should be based on block time. load from config is easy, but 
 - [ ] some things that are cached locally should probably be in shared redis caches
 - [ ] stats when forks are resolved (and what chain they were on?)
 - [ ] incoming rate limiting (by api key)
@@ -85,3 +84,4 @@
 - [ ] subscription id should be per connection, not global
 - [ ] use https://github.com/ledgerwatch/interfaces to talk to erigon directly instead of through erigon's rpcdaemon (possible example code which uses ledgerwatch/interfaces: https://github.com/akula-bft/akula/tree/master)
 - [ ] subscribe to pending transactions and build an intelligent gas estimator
+- [ ] include private rpcs with regular queries? i don't want to overwhelm them, but they could be good for excess load
