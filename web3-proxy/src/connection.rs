@@ -444,8 +444,6 @@ impl Web3Connection {
                     let mut interval = interval(Duration::from_secs(60));
                     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-                    // TODO: create a filter
-
                     loop {
                         // TODO: actually do something here
                         /*

@@ -10,7 +10,7 @@ use futures::stream::StreamExt;
 use futures::Future;
 use linkedhashmap::LinkedHashMap;
 use parking_lot::RwLock;
-use redis_cell_client::{bb8, RedisCellClient, RedisClientPool, RedisConnectionManager};
+use redis_cell_client::{bb8, RedisCellClient, RedisConnectionManager};
 use serde_json::json;
 use std::fmt;
 use std::pin::Pin;

@@ -16,8 +16,10 @@ pub async fn proxy_web3_rpc(
         if rate_limiter.throttle_key(&rate_limiter_key).await.is_err() {
             // TODO: set headers so they know when they can retry
             // warn!(?ip, "public rate limit exceeded");
+            // TODO: use their id if possible
             return handle_anyhow_error(
                 Some(StatusCode::TOO_MANY_REQUESTS),
+                None,
                 anyhow::anyhow!("too many requests"),
             )
             .await
@@ -29,6 +31,6 @@ pub async fn proxy_web3_rpc(
 
     match app.proxy_web3_rpc(payload).await {
         Ok(response) => (StatusCode::OK, Json(&response)).into_response(),
-        Err(err) => handle_anyhow_error(None, err).await.into_response(),
+        Err(err) => handle_anyhow_error(None, None, err).await.into_response(),
     }
 }
