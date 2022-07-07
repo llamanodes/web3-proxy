@@ -62,11 +62,11 @@
   - [ ] when we receive a block, we should store it for later eth_getBlockByNumber, eth_blockNumber, and similar calls
 - [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
 - [ ] inspect any jsonrpc errors. if its something like "header not found" or "block with id $x not found" retry on another node (and add a negative score to that server)
-    - this error seems to happen when we use load balanced backend rpcs like pokt and ankr
+  - this error seems to happen when we use load balanced backend rpcs like pokt and ankr
 - [ ] when block subscribers receive blocks, store them in a cache. use this cache instead of querying eth_getBlock
 - [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
-    - thundering herd problem if we only allow a lag of 0 blocks
-    - we can fix this by only `publish`ing the sorted list once a threshold of total soft limits is passed 
+  - thundering herd problem if we only allow a lag of 0 blocks
+  - we can fix this by only `publish`ing the sorted list once a threshold of total soft limits is passed 
 - [ ] emit stats for successes, retries, failures, with the types of requests, account, chain, rpc
 - [ ] automated soft limit
   - look at average request time for getBlock? i'm not sure how good a proxy that will be for serving eth_call, but its a start
@@ -80,7 +80,8 @@
 - [ ] ethers has a transactions_unsorted httprpc method that we should probably use. all rpcs probably don't support it, so make it okay for that to fail
 - [ ] if chain split detected, don't send transactions?
 - [ ] have a "backup" tier that is only used when the primary tier has no servers or is multiple blocks behind. we don't want the backup tier taking over with the head block if they happen to be fast at that (but overall low/expensive rps). only if the primary tier has fallen behind or gone entirely offline should we go to third parties
-- [ ] measure average latency of a node's responses and load balance on that
+- [ ] more advanced automated soft limit
+  - measure average latency of a node's responses and load balance on that
 
 ## "Maybe some day" and other Miscellaneous Things
 
