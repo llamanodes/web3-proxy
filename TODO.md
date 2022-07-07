@@ -33,13 +33,16 @@
 - [x] when sending with private relays, brownie's tx.wait can think the transaction was dropped. smarter retry on eth_getTransactionByHash and eth_getTransactionReceipt (maybe only if we sent the transaction ourselves)
 - [x] if web3 proxy gets an http error back, retry another node
 - [x] endpoint for health checks. if no synced servers, give a 502 error
-- [ ] refactor so configs can change while running
-  - create the app without applying any config to it
-  - have a blocking future watching the config file and calling app.apply_config() on first load and on change
-- [ ] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more (might already be fixed)
+- [x] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more (might already be fixed)
+- [ ] incoming rate limiting (by ip)
+- [ ] automatically route to archive server when necessary
 
 ## V1
 
+- [ ] refactor so configs can change while running
+  - create the app without applying any config to it
+  - have a blocking future watching the config file and calling app.apply_config() on first load and on change
+  - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
 - [ ] interval for http subscriptions should be based on block time. load from config is easy, but 
 - [ ] some things that are cached locally should probably be in shared redis caches
 - [ ] stats when forks are resolved (and what chain they were on?)
@@ -54,14 +57,16 @@
   - [ ] when we receive a block, we should store it for later eth_getBlockByNumber, eth_blockNumber, and similar calls
 - [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
 - [ ] inspect any jsonrpc errors. if its something like "header not found" or "block with id $x not found" retry on another node (and add a negative score to that server)
-    - this error seems to happen when we use load balanced backend rpcs
+    - this error seems to happen when we use load balanced backend rpcs like pokt and ankr
 - [ ] when block subscribers receive blocks, store them in a cache. use this cache instead of querying eth_getBlock
 - [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
     - thundering herd problem if we only allow a lag of 0 blocks
     - we can fix this by only `publish`ing the sorted list once a threshold of total soft limits is passed 
 - [ ] emit stats for successes, retries, failures, with the types of requests, account, chain, rpc
 - [ ] automated soft limit
-- [ ] if we send a transaction to private rpcs and then people query it on public rpcs things, some interfaces might think the transaction is dropped (i saw this happen in a brownie script of mine). how should we handle this?
+  - look at average request time for getBlock? i'm not sure how good a proxy that will be for serving eth_call, but its a start
+- [x] if we send a transaction to private rpcs and then people query it on public rpcs things, some interfaces might think the transaction is dropped (i saw this happen in a brownie script of mine). how should we handle this?
+  - send getTransaction rpc requests to the private rpc tier
 - [ ] don't "unwrap" anywhere. give proper errors
 
 ## V2
