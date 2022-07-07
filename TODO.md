@@ -35,7 +35,7 @@
 - [x] endpoint for health checks. if no synced servers, give a 502 error
 - [x] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more (might already be fixed)
 - [x] incoming rate limiting (by ip)
-- [ ] connection pool for redis
+- [x] connection pool for redis
 - [ ] automatically route to archive server when necessary
 - [ ] handle log subscriptions
 - [ ] basic request method stats
