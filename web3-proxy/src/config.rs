@@ -40,6 +40,9 @@ pub struct RpcSharedConfig {
     /// TODO: what type for chain_id? TODO: this isn't at the right level. this is inside a "Config"
     pub chain_id: usize,
     pub rate_limit_redis: Option<String>,
+    // TODO: serde default for development?
+    // TODO: allow no limit?
+    pub public_rate_limit_per_minute: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +74,7 @@ impl RpcConfig {
             self.shared.rate_limit_redis,
             balanced_rpcs,
             private_rpcs,
+            self.shared.public_rate_limit_per_minute,
         )
         .await
     }
@@ -81,14 +85,14 @@ impl Web3ConnectionConfig {
     // #[instrument(name = "try_build_Web3ConnectionConfig", skip_all)]
     pub async fn spawn(
         self,
-        rate_limiter: Option<&redis_cell_client::MultiplexedConnection>,
+        redis_client_pool: Option<&redis_cell_client::RedisClientPool>,
         chain_id: usize,
         http_client: Option<&reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Web3Connection>)>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Web3Connection>)>>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
-        let hard_rate_limit = self.hard_limit.map(|x| (x, rate_limiter.unwrap()));
+        let hard_rate_limit = self.hard_limit.map(|x| (x, redis_client_pool.unwrap()));
 
         Web3Connection::spawn(
             chain_id,

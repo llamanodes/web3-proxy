@@ -1,5 +1,6 @@
 [shared]
 chain_id = 1
+public_rate_limit_per_minute = 60_000
 
 [balanced_rpcs]
 

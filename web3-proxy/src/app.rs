@@ -10,6 +10,7 @@ use futures::stream::StreamExt;
 use futures::Future;
 use linkedhashmap::LinkedHashMap;
 use parking_lot::RwLock;
+use redis_cell_client::{bb8, RedisCellClient, RedisClientPool, RedisConnectionManager};
 use serde_json::json;
 use std::fmt;
 use std::pin::Pin;
@@ -20,7 +21,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
+use tracing::{info, info_span, instrument, trace, warn, Instrument};
 
 use crate::config::Web3ConnectionConfig;
 use crate::connections::Web3Connections;
@@ -94,6 +95,7 @@ pub struct Web3ProxyApp {
     head_block_receiver: watch::Receiver<Block<TxHash>>,
     pending_tx_sender: broadcast::Sender<TxState>,
     pending_transactions: Arc<DashMap<TxHash, TxState>>,
+    public_rate_limiter: Option<RedisCellClient>,
     next_subscription_id: AtomicUsize,
 }
 
@@ -109,11 +111,16 @@ impl Web3ProxyApp {
         &self.pending_transactions
     }
 
+    pub fn get_public_rate_limiter(&self) -> Option<&RedisCellClient> {
+        self.public_rate_limiter.as_ref()
+    }
+
     pub async fn spawn(
         chain_id: usize,
         redis_address: Option<String>,
         balanced_rpcs: Vec<Web3ConnectionConfig>,
         private_rpcs: Vec<Web3ConnectionConfig>,
+        public_rate_limit_per_minute: u32,
     ) -> anyhow::Result<(
         Arc<Web3ProxyApp>,
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
@@ -132,15 +139,14 @@ impl Web3ProxyApp {
                 .build()?,
         );
 
-        let rate_limiter = match redis_address {
+        let rate_limiter_pool = match redis_address {
             Some(redis_address) => {
                 info!("Connecting to redis on {}", redis_address);
-                let redis_client = redis_cell_client::Client::open(redis_address)?;
 
-                // TODO: r2d2 connection pool?
-                let redis_conn = redis_client.get_multiplexed_tokio_connection().await?;
+                let manager = RedisConnectionManager::new(redis_address)?;
+                let pool = bb8::Pool::builder().build(manager).await?;
 
-                Some(redis_conn)
+                Some(pool)
             }
             None => {
                 info!("No redis address");
@@ -164,7 +170,7 @@ impl Web3ProxyApp {
             chain_id,
             balanced_rpcs,
             http_client.as_ref(),
-            rate_limiter.as_ref(),
+            rate_limiter_pool.as_ref(),
             Some(head_block_sender),
             Some(pending_tx_sender.clone()),
             pending_transactions.clone(),
@@ -182,7 +188,7 @@ impl Web3ProxyApp {
                 chain_id,
                 private_rpcs,
                 http_client.as_ref(),
-                rate_limiter.as_ref(),
+                rate_limiter_pool.as_ref(),
                 // subscribing to new heads here won't work well
                 None,
                 // TODO: subscribe to pending transactions on the private rpcs?
@@ -199,7 +205,20 @@ impl Web3ProxyApp {
         // TODO: use this? it could listen for confirmed transactions and then clear pending_transactions, but the head_block_sender is doing that
         drop(pending_tx_receiver);
 
-        let app = Web3ProxyApp {
+        // TODO: how much should we allow?
+        let public_max_burst = public_rate_limit_per_minute / 3;
+
+        let public_rate_limiter = rate_limiter_pool.as_ref().map(|redis_client_pool| {
+            RedisCellClient::new(
+                redis_client_pool.clone(),
+                "public".to_string(),
+                public_max_burst,
+                public_rate_limit_per_minute,
+                60,
+            )
+        });
+
+        let app = Self {
             balanced_rpcs,
             private_rpcs,
             incoming_requests: Default::default(),
@@ -207,6 +226,7 @@ impl Web3ProxyApp {
             head_block_receiver,
             pending_tx_sender,
             pending_transactions,
+            public_rate_limiter,
             next_subscription_id: 1.into(),
         };
 
@@ -431,7 +451,7 @@ impl Web3ProxyApp {
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         // TODO: i don't always see this in the logs. why?
-        debug!("Received request: {:?}", request);
+        trace!("Received request: {:?}", request);
 
         // even though we have timeouts on the requests to our backend providers,
         // we need a timeout for the incoming request so that delays from
@@ -447,7 +467,7 @@ impl Web3ProxyApp {
         };
 
         // TODO: i don't always see this in the logs. why?
-        debug!("Forwarding response: {:?}", response);
+        trace!("Forwarding response: {:?}", response);
 
         Ok(response)
     }

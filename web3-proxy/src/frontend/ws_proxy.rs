@@ -12,7 +12,7 @@ use hashbrown::HashMap;
 use serde_json::value::RawValue;
 use std::str::from_utf8_mut;
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::{
     app::Web3ProxyApp,
@@ -20,13 +20,13 @@ use crate::{
 };
 
 pub async fn websocket_handler(
-    app: Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     ws.on_upgrade(|socket| proxy_web3_socket(app, socket))
 }
 
-async fn proxy_web3_socket(app: Extension<Arc<Web3ProxyApp>>, socket: WebSocket) {
+async fn proxy_web3_socket(app: Arc<Web3ProxyApp>, socket: WebSocket) {
     // split the websocket so we can read and write concurrently
     let (ws_tx, ws_rx) = socket.split();
 
@@ -109,7 +109,7 @@ async fn handle_socket_payload(
 }
 
 async fn read_web3_socket(
-    app: Extension<Arc<Web3ProxyApp>>,
+    app: Arc<Web3ProxyApp>,
     mut ws_rx: SplitStream<WebSocket>,
     response_tx: flume::Sender<Message>,
 ) {
@@ -119,12 +119,11 @@ async fn read_web3_socket(
         // new message from our client. forward to a backend and then send it through response_tx
         let response_msg = match msg {
             Message::Text(payload) => {
-                handle_socket_payload(app.0.clone(), &payload, &response_tx, &mut subscriptions)
-                    .await
+                handle_socket_payload(app.clone(), &payload, &response_tx, &mut subscriptions).await
             }
             Message::Ping(x) => Message::Pong(x),
             Message::Pong(x) => {
-                debug!("pong: {:?}", x);
+                trace!("pong: {:?}", x);
                 continue;
             }
             Message::Close(_) => {
@@ -134,8 +133,7 @@ async fn read_web3_socket(
             Message::Binary(mut payload) => {
                 let payload = from_utf8_mut(&mut payload).unwrap();
 
-                handle_socket_payload(app.0.clone(), payload, &response_tx, &mut subscriptions)
-                    .await
+                handle_socket_payload(app.clone(), payload, &response_tx, &mut subscriptions).await
             }
         };
 

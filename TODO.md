@@ -34,8 +34,13 @@
 - [x] if web3 proxy gets an http error back, retry another node
 - [x] endpoint for health checks. if no synced servers, give a 502 error
 - [x] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more (might already be fixed)
-- [ ] incoming rate limiting (by ip)
+- [x] incoming rate limiting (by ip)
+- [ ] connection pool for redis
 - [ ] automatically route to archive server when necessary
+- [ ] handle log subscriptions
+- [ ] basic request method stats
+- [ ] http servers should check block at the very start
+- [ ] Got warning: "WARN subscribe_new_heads:send_block: web3_proxy::connection: unable to get block from https://rpc.ethermine.org: Deserialization Error: expected value at line 1 column 1. Response: error code: 1015". this is cloudflare rate limiting on fetching a block, but this is a private rpc. why is there a block subscription?
 
 ## V1
 
@@ -43,8 +48,8 @@
   - create the app without applying any config to it
   - have a blocking future watching the config file and calling app.apply_config() on first load and on change
   - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
-- [ ] interval for http subscriptions should be based on block time. load from config is easy, but 
-- [ ] some things that are cached locally should probably be in shared redis caches
+- [ ] interval for http subscriptions should be based on block time. load from config is easy, but better to query
+- [ ] most things that are cached locally should probably be in shared redis caches
 - [ ] stats when forks are resolved (and what chain they were on?)
 - [ ] incoming rate limiting (by api key)
 - [ ] failsafe. if no blocks or transactions in the last second, warn and reset the connection

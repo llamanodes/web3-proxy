@@ -89,7 +89,7 @@ impl Web3Connections {
         chain_id: usize,
         server_configs: Vec<Web3ConnectionConfig>,
         http_client: Option<&reqwest::Client>,
-        rate_limiter: Option<&redis_cell_client::MultiplexedConnection>,
+        redis_client_pool: Option<&redis_cell_client::RedisClientPool>,
         head_block_sender: Option<watch::Sender<Block<TxHash>>>,
         pending_tx_sender: Option<broadcast::Sender<TxState>>,
         pending_transactions: Arc<DashMap<TxHash, TxState>>,
@@ -141,7 +141,7 @@ impl Web3Connections {
         for server_config in server_configs.into_iter() {
             match server_config
                 .spawn(
-                    rate_limiter,
+                    redis_client_pool,
                     chain_id,
                     http_client,
                     http_interval_sender.clone(),

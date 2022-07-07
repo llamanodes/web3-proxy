@@ -131,7 +131,7 @@ impl Web3Connection {
         // optional because this is only used for http providers. websocket providers don't use it
         http_client: Option<&reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        hard_limit: Option<(u32, &redis_cell_client::MultiplexedConnection)>,
+        hard_limit: Option<(u32, &redis_cell_client::RedisClientPool)>,
         // TODO: think more about this type
         soft_limit: u32,
         block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Self>)>>,
@@ -356,10 +356,6 @@ impl Web3Connection {
                     let mut last_hash = Default::default();
 
                     loop {
-                        // wait for the interval
-                        // TODO: if error or rate limit, increase interval?
-                        http_interval_receiver.recv().await.unwrap();
-
                         match self.try_request_handle().await {
                             Ok(active_request_handle) => {
                                 // TODO: i feel like this should be easier. there is a provider.getBlock, but i don't know how to give it "latest"
@@ -384,6 +380,10 @@ impl Web3Connection {
                                 warn!("Failed getting latest block from {}: {:?}", self, e);
                             }
                         }
+
+                        // wait for the interval
+                        // TODO: if error or rate limit, increase interval?
+                        http_interval_receiver.recv().await.unwrap();
                     }
                 }
                 Web3Provider::Ws(provider) => {
@@ -447,10 +447,6 @@ impl Web3Connection {
                     // TODO: create a filter
 
                     loop {
-                        // wait for the interval
-                        // TODO: if error or rate limit, increase interval?
-                        interval.tick().await;
-
                         // TODO: actually do something here
                         /*
                         match self.try_request_handle().await {
@@ -463,6 +459,10 @@ impl Web3Connection {
                             }
                         }
                         */
+
+                        // wait for the interval
+                        // TODO: if error or rate limit, increase interval?
+                        interval.tick().await;
                     }
                 }
                 Web3Provider::Ws(provider) => {

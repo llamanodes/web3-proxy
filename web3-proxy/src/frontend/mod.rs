@@ -3,6 +3,7 @@ mod errors;
 mod http;
 mod http_proxy;
 mod ws_proxy;
+
 use axum::{
     handler::Handler,
     routing::{get, post},
@@ -35,8 +36,9 @@ pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> 
     // `axum::Server` is a re-export of `hyper::Server`
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     debug!("listening on port {}", port);
+    // TODO: into_make_service is enough if we always run behind a proxy. make into_make_service_with_connect_info optional?
     axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .map_err(Into::into)
 }

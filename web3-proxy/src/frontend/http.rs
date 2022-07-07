@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::app::Web3ProxyApp;
 
 /// Health check page for load balancers to use
-pub async fn health(app: Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
+pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     if app.get_balanced_rpcs().has_synced_rpcs() {
         (StatusCode::OK, "OK")
     } else {
@@ -14,7 +14,7 @@ pub async fn health(app: Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
 }
 
 /// Very basic status page
-pub async fn status(app: Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
+pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     // TODO: what else should we include? uptime? prometheus?
     let balanced_rpcs = app.get_balanced_rpcs();
     let private_rpcs = app.get_private_rpcs();

@@ -6,4 +6,4 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.58"
-redis = { version = "0.21.5", features = ["aio", "tokio", "tokio-comp"] }
+bb8-redis = "0.11.0"
