@@ -152,11 +152,11 @@ impl Web3ProxyApp {
 
                 let manager = RedisConnectionManager::new(redis_address)?;
 
-                // TODO: what min?
+                // TODO: min_idle?
+                // TODO: set max_size based on max expected concurrent connections? set based on num_workers?
                 let builder = bb8::Pool::builder()
                     .error_sink(bb8_helpers::RedisErrorSink.boxed_clone())
-                    .max_size(num_workers as u32)
-                    .min_idle(Some(1));
+                    .max_size(1024);
 
                 let pool = builder.build(manager).await?;
 
