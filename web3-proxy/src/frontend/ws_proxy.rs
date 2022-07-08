@@ -10,9 +10,9 @@ use futures::{
 };
 use hashbrown::HashMap;
 use serde_json::value::RawValue;
-use std::str::from_utf8_mut;
 use std::sync::Arc;
-use tracing::{error, info, trace, warn};
+use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
+use tracing::{error, info, trace};
 
 use crate::{
     app::Web3ProxyApp,
@@ -40,7 +40,8 @@ async fn proxy_web3_socket(app: Arc<Web3ProxyApp>, socket: WebSocket) {
 async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
     payload: &str,
-    response_tx: &flume::Sender<Message>,
+    response_sender: &flume::Sender<Message>,
+    subscription_count: &AtomicUsize,
     subscriptions: &mut HashMap<String, AbortHandle>,
 ) -> Message {
     let (id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
@@ -51,7 +52,7 @@ async fn handle_socket_payload(
                 "eth_subscribe" => {
                     let response = app
                         .clone()
-                        .eth_subscribe(payload, response_tx.clone())
+                        .eth_subscribe(payload, subscription_count, response_sender.clone())
                         .await;
 
                     match response {
@@ -111,15 +112,23 @@ async fn handle_socket_payload(
 async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
     mut ws_rx: SplitStream<WebSocket>,
-    response_tx: flume::Sender<Message>,
+    response_sender: flume::Sender<Message>,
 ) {
     let mut subscriptions = HashMap::new();
+    let subscription_count = AtomicUsize::new(1);
 
     while let Some(Ok(msg)) = ws_rx.next().await {
         // new message from our client. forward to a backend and then send it through response_tx
         let response_msg = match msg {
             Message::Text(payload) => {
-                handle_socket_payload(app.clone(), &payload, &response_tx, &mut subscriptions).await
+                handle_socket_payload(
+                    app.clone(),
+                    &payload,
+                    &response_sender,
+                    &subscription_count,
+                    &mut subscriptions,
+                )
+                .await
             }
             Message::Ping(x) => Message::Pong(x),
             Message::Pong(x) => {
@@ -133,11 +142,18 @@ async fn read_web3_socket(
             Message::Binary(mut payload) => {
                 let payload = from_utf8_mut(&mut payload).unwrap();
 
-                handle_socket_payload(app.clone(), payload, &response_tx, &mut subscriptions).await
+                handle_socket_payload(
+                    app.clone(),
+                    payload,
+                    &response_sender,
+                    &subscription_count,
+                    &mut subscriptions,
+                )
+                .await
             }
         };
 
-        match response_tx.send_async(response_msg).await {
+        match response_sender.send_async(response_msg).await {
             Ok(_) => {}
             Err(err) => {
                 error!("{}", err);
@@ -151,11 +167,16 @@ async fn write_web3_socket(
     response_rx: flume::Receiver<Message>,
     mut ws_tx: SplitSink<WebSocket, Message>,
 ) {
+    // TODO: increment counter for open websockets
+
     while let Ok(msg) = response_rx.recv_async().await {
         // a response is ready. write it to ws_tx
         if let Err(err) = ws_tx.send(msg).await {
-            warn!(?err, "unable to write to websocket");
+            // this isn't a problem. this is common and happens whenever a client disconnects
+            trace!(?err, "unable to write to websocket");
             break;
         };
     }
+
+    // TODO: decrement counter for open websockets
 }

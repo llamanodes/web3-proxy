@@ -13,7 +13,6 @@ use std::sync::atomic::{self, AtomicU32};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::RwLock;
-use tokio::task;
 use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
 use tracing::{error, info, instrument, trace, warn};
 
@@ -42,7 +41,7 @@ impl Web3Provider {
             let provider = ethers::providers::Http::new_with_client(url, http_client);
 
             // TODO: dry this up (needs https://github.com/gakonst/ethers-rs/issues/592)
-            // TODO: i don't think this interval matters, but it should probably come from config
+            // TODO: i don't think this interval matters for our uses, but we should probably set it to like `block time / 2`
             ethers::providers::Provider::new(provider)
                 .interval(Duration::from_secs(13))
                 .into()
@@ -50,9 +49,8 @@ impl Web3Provider {
             // TODO: wrapper automatically reconnect
             let provider = ethers::providers::Ws::connect(url_str).await?;
 
-            // TODO: make sure this automatically reconnects
-
             // TODO: dry this up (needs https://github.com/gakonst/ethers-rs/issues/592)
+            // TODO: i don't think this interval matters
             ethers::providers::Provider::new(provider)
                 .interval(Duration::from_secs(1))
                 .into()
@@ -376,8 +374,8 @@ impl Web3Connection {
 
                                 self.send_block(block, &block_sender).await?;
                             }
-                            Err(e) => {
-                                warn!("Failed getting latest block from {}: {:?}", self, e);
+                            Err(err) => {
+                                warn!(?err, "Rate limited on latest block from {}", self);
                             }
                         }
 
@@ -407,20 +405,11 @@ impl Web3Connection {
 
                     // TODO: should the stream have a timeout on it here?
                     // TODO: although reconnects will make this less of an issue
-                    loop {
-                        match stream.next().await {
-                            Some(new_block) => {
-                                self.send_block(Ok(new_block), &block_sender).await?;
-
-                                // TODO: really not sure about this
-                                task::yield_now().await;
-                            }
-                            None => {
-                                warn!("subscription ended");
-                                break;
-                            }
-                        }
+                    while let Some(new_block) = stream.next().await {
+                        self.send_block(Ok(new_block), &block_sender).await?;
                     }
+
+                    warn!(?self, "subscription ended");
                 }
             }
         }

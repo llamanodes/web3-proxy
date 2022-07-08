@@ -96,7 +96,6 @@ pub struct Web3ProxyApp {
     pending_tx_sender: broadcast::Sender<TxState>,
     pending_transactions: Arc<DashMap<TxHash, TxState>>,
     public_rate_limiter: Option<RedisCellClient>,
-    next_subscription_id: AtomicUsize,
 }
 
 impl fmt::Debug for Web3ProxyApp {
@@ -227,7 +226,6 @@ impl Web3ProxyApp {
             pending_tx_sender,
             pending_transactions,
             public_rate_limiter,
-            next_subscription_id: 1.into(),
         };
 
         let app = Arc::new(app);
@@ -242,21 +240,20 @@ impl Web3ProxyApp {
     pub async fn eth_subscribe(
         self: Arc<Self>,
         payload: JsonRpcRequest,
+        subscription_count: &AtomicUsize,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
-        subscription_tx: flume::Sender<Message>,
+        response_sender: flume::Sender<Message>,
     ) -> anyhow::Result<(AbortHandle, JsonRpcForwardedResponse)> {
         let (subscription_abort_handle, subscription_registration) = AbortHandle::new_pair();
 
         // TODO: this only needs to be unique per connection. we don't need it globably unique
-        let subscription_id = self
-            .next_subscription_id
-            .fetch_add(1, atomic::Ordering::SeqCst);
+        let subscription_id = subscription_count.fetch_add(1, atomic::Ordering::SeqCst);
         let subscription_id = format!("{:#x}", subscription_id);
 
         // save the id so we can use it in the response
         let id = payload.id.clone();
 
-        // TODO: calling json! on every request is not fast.
+        // TODO: calling json! on every request is probably not fast.
         match payload.params {
             Some(x) if x == json!(["newHeads"]) => {
                 let head_block_receiver = self.head_block_receiver.clone();
@@ -283,7 +280,7 @@ impl Web3ProxyApp {
 
                         let msg = Message::Text(serde_json::to_string(&msg).unwrap());
 
-                        if subscription_tx.send_async(msg).await.is_err() {
+                        if response_sender.send_async(msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
@@ -295,12 +292,12 @@ impl Web3ProxyApp {
             Some(x) if x == json!(["newPendingTransactions"]) => {
                 let pending_tx_receiver = self.pending_tx_sender.subscribe();
 
+                let subscription_id = subscription_id.clone();
+
                 let mut pending_tx_receiver = Abortable::new(
                     BroadcastStream::new(pending_tx_receiver),
                     subscription_registration,
                 );
-
-                let subscription_id = subscription_id.clone();
 
                 trace!(?subscription_id, "pending transactions subscription");
                 tokio::spawn(async move {
@@ -323,7 +320,7 @@ impl Web3ProxyApp {
 
                         let msg = Message::Text(serde_json::to_string(&msg).unwrap());
 
-                        if subscription_tx.send_async(msg).await.is_err() {
+                        if response_sender.send_async(msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
@@ -336,12 +333,12 @@ impl Web3ProxyApp {
                 // TODO: too much copy/pasta with newPendingTransactions
                 let pending_tx_receiver = self.pending_tx_sender.subscribe();
 
+                let subscription_id = subscription_id.clone();
+
                 let mut pending_tx_receiver = Abortable::new(
                     BroadcastStream::new(pending_tx_receiver),
                     subscription_registration,
                 );
-
-                let subscription_id = subscription_id.clone();
 
                 trace!(?subscription_id, "pending transactions subscription");
 
@@ -367,7 +364,7 @@ impl Web3ProxyApp {
 
                         let msg = Message::Text(serde_json::to_string(&msg).unwrap());
 
-                        if subscription_tx.send_async(msg).await.is_err() {
+                        if response_sender.send_async(msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
@@ -411,7 +408,7 @@ impl Web3ProxyApp {
 
                         let msg = Message::Text(serde_json::to_string(&msg).unwrap());
 
-                        if subscription_tx.send_async(msg).await.is_err() {
+                        if response_sender.send_async(msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };

@@ -89,10 +89,10 @@
 - [ ] add the backend server to the header?
 - [ ] think more about how multiple rpc tiers should work
 - maybe always try at least two servers in parallel? and then return the first? or only if the first one doesn't respond very quickly? this doubles our request load though.
-- [ ] one proxy for mulitple chains?
+- [ ] one proxy for multiple chains?
 - [ ] zero downtime deploys
 - [ ] are we using Acquire/Release/AcqRel properly? or do we need other modes?
-- [ ] subscription id should be per connection, not global
+- [x] subscription id should be per connection, not global
 - [ ] use https://github.com/ledgerwatch/interfaces to talk to erigon directly instead of through erigon's rpcdaemon (possible example code which uses ledgerwatch/interfaces: https://github.com/akula-bft/akula/tree/master)
 - [ ] subscribe to pending transactions and build an intelligent gas estimator
 - [ ] include private rpcs with regular queries? i don't want to overwhelm them, but they could be good for excess load
