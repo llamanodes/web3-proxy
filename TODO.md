@@ -76,7 +76,6 @@
 
 ## V2
 
-- [ ] make it easy to add or remove providers while the server is running
 - [ ] ethers has a transactions_unsorted httprpc method that we should probably use. all rpcs probably don't support it, so make it okay for that to fail
 - [ ] if chain split detected, don't send transactions?
 - [ ] have a "backup" tier that is only used when the primary tier has no servers or is multiple blocks behind. we don't want the backup tier taking over with the head block if they happen to be fast at that (but overall low/expensive rps). only if the primary tier has fallen behind or gone entirely offline should we go to third parties
