@@ -32,10 +32,13 @@ fn main() -> anyhow::Result<()> {
         .compact()
         .init();
 
+    // this probably won't matter for us in docker, but better safe than sorry
     fdlimit::raise_fd_limit();
 
+    // initial configuration from flags
     let cli_config: CliConfig = argh::from_env();
 
+    // advanced configuration
     info!("Loading rpc config @ {}", cli_config.config);
     let rpc_config: String = fs::read_to_string(cli_config.config)?;
     let rpc_config: RpcConfig = toml::from_str(&rpc_config)?;
@@ -45,10 +48,9 @@ fn main() -> anyhow::Result<()> {
     // TODO: this doesn't seem to do anything
     proctitle::set_title(format!("web3-proxy-{}", rpc_config.shared.chain_id));
 
-    let chain_id = rpc_config.shared.chain_id;
-
     let mut rt_builder = runtime::Builder::new_multi_thread();
 
+    let chain_id = rpc_config.shared.chain_id;
     rt_builder.enable_all().thread_name_fn(move || {
         static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
         // TODO: what ordering? i think we want seqcst so that these all happen in order, but that might be stricter than we really need
@@ -60,8 +62,6 @@ fn main() -> anyhow::Result<()> {
     if cli_config.workers > 0 {
         rt_builder.worker_threads(cli_config.workers);
     }
-
-    let rt = rt_builder.build()?;
 
     // spawn a thread for deadlock detection
     thread::spawn(move || loop {
@@ -81,7 +81,8 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    // spawn the root task
+    // start tokio's async runtime
+    let rt = rt_builder.build()?;
     rt.block_on(async {
         let (app, app_handle) = rpc_config.spawn().await?;
 
@@ -90,12 +91,20 @@ fn main() -> anyhow::Result<()> {
         // if everything is working, these should both run forever
         tokio::select! {
             x = app_handle => {
-                // TODO: error log if error
-                info!(?x, "app_handle exited");
+                match x {
+                    Ok(_) => info!("app_handle exited"),
+                    Err(e) => {
+                        return Err(e);
+                    }
+                }
             }
             x = flatten_handle(frontend_handle) => {
-                // TODO: error log if error
-                info!(?x, "frontend exited");
+                match x {
+                    Ok(_) => info!("frontend exited"),
+                    Err(e) => {
+                        return Err(e);
+                    }
+                }
             }
         };
 

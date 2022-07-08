@@ -440,7 +440,6 @@ impl Web3Connection {
                     // TODO: what should this interval be? probably automatically set to some fraction of block time
                     // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
                     // TODO: if there are some websocket providers, maybe have a longer interval and a channel that tells the https to update when a websocket gets a new head? if they are slow this wouldn't work well though
-                    // TODO:
                     let mut interval = interval(Duration::from_secs(60));
                     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -472,26 +471,17 @@ impl Web3Connection {
                     // TODO: maybe we can do provider.subscribe("newHeads") and then parse into a custom struct that only gets the number out?
                     let mut stream = provider.subscribe_pending_txs().await?;
 
+                    // TODO: maybe the subscribe_pending_txs function should be on the active_request_handle
                     drop(active_request_handle);
 
-                    // TODO: query existing pending txs?
-
-                    // TODO: should the stream have a timeout on it here?
-                    // TODO: i don't think loop match is what we want. i think while let would be better
-                    loop {
-                        match stream.next().await {
-                            Some(pending_tx_id) => {
-                                tx_id_sender
-                                    .send_async((pending_tx_id, self.clone()))
-                                    .await
-                                    .context("tx_id_sender")?;
-                            }
-                            None => {
-                                warn!("subscription ended");
-                                break;
-                            }
-                        }
+                    while let Some(pending_tx_id) = stream.next().await {
+                        tx_id_sender
+                            .send_async((pending_tx_id, self.clone()))
+                            .await
+                            .context("tx_id_sender")?;
                     }
+
+                    warn!("subscription ended");
                 }
             }
         }

@@ -39,7 +39,7 @@
 - [ ] automatically route to archive server when necessary
 - [ ] handle log subscriptions
 - [ ] basic request method stats
-- [ ] http servers should check block at the very start
+- [x] http servers should check block at the very start
 - [ ] Got warning: "WARN subscribe_new_heads:send_block: web3_proxy::connection: unable to get block from https://rpc.ethermine.org: Deserialization Error: expected value at line 1 column 1. Response: error code: 1015". this is cloudflare rate limiting on fetching a block, but this is a private rpc. why is there a block subscription?
 
 ## V1
