@@ -37,6 +37,7 @@
 - [x] incoming rate limiting (by ip)
 - [x] connection pool for redis
 - [ ] automatically route to archive server when necessary
+  - originally, no processing was done to params; they were just serde_json::RawValue. this is probably fastest, but we need to look for "latest" and count elements, so we have to use serde_json::Value
 - [ ] handle log subscriptions
 - [ ] basic request method stats
 - [x] http servers should check block at the very start

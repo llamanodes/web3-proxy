@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod bb8_helpers;
 mod config;
 mod connection;
 mod connections;
@@ -13,11 +14,11 @@ use std::sync::atomic::{self, AtomicUsize};
 use std::thread;
 use std::time::Duration;
 use tokio::runtime;
-use tracing::{info, trace};
+use tracing::{debug, info, trace};
 use tracing_subscriber::EnvFilter;
 
 use crate::app::{flatten_handle, Web3ProxyApp};
-use crate::config::{CliConfig, RpcConfig};
+use crate::config::{AppConfig, CliConfig};
 
 fn main() -> anyhow::Result<()> {
     // if RUST_LOG isn't set, configure a default
@@ -41,7 +42,7 @@ fn main() -> anyhow::Result<()> {
     // advanced configuration
     info!("Loading rpc config @ {}", cli_config.config);
     let rpc_config: String = fs::read_to_string(cli_config.config)?;
-    let rpc_config: RpcConfig = toml::from_str(&rpc_config)?;
+    let rpc_config: AppConfig = toml::from_str(&rpc_config)?;
 
     trace!("rpc_config: {:?}", rpc_config);
 
@@ -83,8 +84,14 @@ fn main() -> anyhow::Result<()> {
 
     // start tokio's async runtime
     let rt = rt_builder.build()?;
+
+    // we use this worker count to also set our redis connection pool size
+    // TODO: think about this more
+    let num_workers = rt.metrics().num_workers();
+    debug!(?num_workers);
+
     rt.block_on(async {
-        let (app, app_handle) = rpc_config.spawn().await?;
+        let (app, app_handle) = Web3ProxyApp::spawn(rpc_config, num_workers).await?;
 
         let frontend_handle = tokio::spawn(frontend::run(cli_config.port, app));
 

@@ -1,15 +1,12 @@
 use argh::FromArgs;
 use ethers::prelude::{Block, TxHash};
-use futures::Future;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use crate::app::AnyhowJoinHandle;
 use crate::connection::Web3Connection;
-use crate::Web3ProxyApp;
 
 #[derive(Debug, FromArgs)]
 /// Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
@@ -28,7 +25,7 @@ pub struct CliConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct RpcConfig {
+pub struct AppConfig {
     pub shared: RpcSharedConfig,
     pub balanced_rpcs: HashMap<String, Web3ConnectionConfig>,
     pub private_rpcs: Option<HashMap<String, Web3ConnectionConfig>>,
@@ -50,34 +47,6 @@ pub struct Web3ConnectionConfig {
     url: String,
     soft_limit: u32,
     hard_limit: Option<u32>,
-}
-
-impl RpcConfig {
-    /// Create a Web3ProxyApp from config
-    // #[instrument(name = "try_build_RpcConfig", skip_all)]
-    pub async fn spawn(
-        self,
-    ) -> anyhow::Result<(
-        Arc<Web3ProxyApp>,
-        Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
-    )> {
-        let balanced_rpcs = self.balanced_rpcs.into_values().collect();
-
-        let private_rpcs = if let Some(private_rpcs) = self.private_rpcs {
-            private_rpcs.into_values().collect()
-        } else {
-            vec![]
-        };
-
-        Web3ProxyApp::spawn(
-            self.shared.chain_id,
-            self.shared.rate_limit_redis,
-            balanced_rpcs,
-            private_rpcs,
-            self.shared.public_rate_limit_per_minute,
-        )
-        .await
-    }
 }
 
 impl Web3ConnectionConfig {

@@ -249,7 +249,7 @@ impl Web3Connection {
     }
 
     #[instrument(skip_all)]
-    async fn send_block(
+    async fn send_block_result(
         self: &Arc<Self>,
         block: Result<Block<TxHash>, ProviderError>,
         block_sender: &flume::Sender<(Block<TxHash>, Arc<Self>)>,
@@ -372,7 +372,7 @@ impl Web3Connection {
                                     last_hash = new_hash;
                                 }
 
-                                self.send_block(block, &block_sender).await?;
+                                self.send_block_result(block, &block_sender).await?;
                             }
                             Err(err) => {
                                 warn!(?err, "Rate limited on latest block from {}", self);
@@ -401,12 +401,10 @@ impl Web3Connection {
                         .request("eth_getBlockByNumber", ("latest", false))
                         .await;
 
-                    self.send_block(block, &block_sender).await?;
+                    self.send_block_result(block, &block_sender).await?;
 
-                    // TODO: should the stream have a timeout on it here?
-                    // TODO: although reconnects will make this less of an issue
                     while let Some(new_block) = stream.next().await {
-                        self.send_block(Ok(new_block), &block_sender).await?;
+                        self.send_block_result(Ok(new_block), &block_sender).await?;
                     }
 
                     warn!(?self, "subscription ended");
@@ -455,15 +453,11 @@ impl Web3Connection {
                     }
                 }
                 Web3Provider::Ws(provider) => {
-                    // rate limits
+                    // TODO: maybe the subscribe_pending_txs function should be on the active_request_handle
                     let active_request_handle = self.wait_for_request_handle().await;
 
-                    // TODO: automatically reconnect?
-                    // TODO: it would be faster to get the block number, but subscriptions don't provide that
-                    // TODO: maybe we can do provider.subscribe("newHeads") and then parse into a custom struct that only gets the number out?
                     let mut stream = provider.subscribe_pending_txs().await?;
 
-                    // TODO: maybe the subscribe_pending_txs function should be on the active_request_handle
                     drop(active_request_handle);
 
                     while let Some(pending_tx_id) = stream.next().await {
@@ -484,7 +478,7 @@ impl Web3Connection {
     /// be careful with this; it will wait forever!
     #[instrument(skip_all)]
     pub async fn wait_for_request_handle(self: &Arc<Self>) -> ActiveRequestHandle {
-        // TODO: maximum wait time?
+        // TODO: maximum wait time? i think timeouts in other parts of the code are probably best
 
         loop {
             match self.try_request_handle().await {

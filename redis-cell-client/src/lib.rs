@@ -1,5 +1,6 @@
 use bb8_redis::redis::cmd;
 
+pub use bb8_redis::redis::RedisError;
 pub use bb8_redis::{bb8, RedisConnectionManager};
 
 use std::time::Duration;

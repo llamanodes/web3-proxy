@@ -10,6 +10,7 @@ use futures::stream::StreamExt;
 use futures::Future;
 use linkedhashmap::LinkedHashMap;
 use parking_lot::RwLock;
+use redis_cell_client::bb8::ErrorSink;
 use redis_cell_client::{bb8, RedisCellClient, RedisConnectionManager};
 use serde_json::json;
 use std::fmt;
@@ -23,7 +24,8 @@ use tokio::time::timeout;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tracing::{info, info_span, instrument, trace, warn, Instrument};
 
-use crate::config::Web3ConnectionConfig;
+use crate::bb8_helpers;
+use crate::config::AppConfig;
 use crate::connections::Web3Connections;
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
@@ -37,7 +39,7 @@ static APP_USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
 );
 
-// TODO: put this in config? what size should we do?
+// TODO: put this in config? what size should we do? probably should structure this to be a size in MB
 const RESPONSE_CACHE_CAP: usize = 1024;
 
 /// TODO: these types are probably very bad keys and values. i couldn't get caching of warp::reply::Json to work
@@ -114,21 +116,27 @@ impl Web3ProxyApp {
         self.public_rate_limiter.as_ref()
     }
 
+    // TODO: should we just take the rpc config as the only arg instead?
     pub async fn spawn(
-        chain_id: usize,
-        redis_address: Option<String>,
-        balanced_rpcs: Vec<Web3ConnectionConfig>,
-        private_rpcs: Vec<Web3ConnectionConfig>,
-        public_rate_limit_per_minute: u32,
+        app_config: AppConfig,
+        num_workers: usize,
     ) -> anyhow::Result<(
         Arc<Web3ProxyApp>,
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
     )> {
-        // TODO: try_join_all instead
+        let balanced_rpcs = app_config.balanced_rpcs.into_values().collect();
+
+        let private_rpcs = if let Some(private_rpcs) = app_config.private_rpcs {
+            private_rpcs.into_values().collect()
+        } else {
+            vec![]
+        };
+
+        // TODO: try_join_all instead?
         let handles = FuturesUnordered::new();
 
         // make a http shared client
-        // TODO: how should we configure the connection pool?
+        // TODO: can we configure the connection pool? should we?
         // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something is wrong with the remote server
         let http_client = Some(
             reqwest::ClientBuilder::new()
@@ -138,12 +146,19 @@ impl Web3ProxyApp {
                 .build()?,
         );
 
-        let rate_limiter_pool = match redis_address {
+        let rate_limiter_pool = match app_config.shared.rate_limit_redis {
             Some(redis_address) => {
                 info!("Connecting to redis on {}", redis_address);
 
                 let manager = RedisConnectionManager::new(redis_address)?;
-                let pool = bb8::Pool::builder().build(manager).await?;
+
+                // TODO: what min?
+                let builder = bb8::Pool::builder()
+                    .error_sink(bb8_helpers::RedisErrorSink.boxed_clone())
+                    .max_size(num_workers as u32)
+                    .min_idle(Some(1));
+
+                let pool = builder.build(manager).await?;
 
                 Some(pool)
             }
@@ -166,7 +181,7 @@ impl Web3ProxyApp {
 
         // TODO: attach context to this error
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
-            chain_id,
+            app_config.shared.chain_id,
             balanced_rpcs,
             http_client.as_ref(),
             rate_limiter_pool.as_ref(),
@@ -184,7 +199,7 @@ impl Web3ProxyApp {
         } else {
             // TODO: attach context to this error
             let (private_rpcs, private_handle) = Web3Connections::spawn(
-                chain_id,
+                app_config.shared.chain_id,
                 private_rpcs,
                 http_client.as_ref(),
                 rate_limiter_pool.as_ref(),
@@ -205,14 +220,14 @@ impl Web3ProxyApp {
         drop(pending_tx_receiver);
 
         // TODO: how much should we allow?
-        let public_max_burst = public_rate_limit_per_minute / 3;
+        let public_max_burst = app_config.shared.public_rate_limit_per_minute / 3;
 
         let public_rate_limiter = rate_limiter_pool.as_ref().map(|redis_client_pool| {
             RedisCellClient::new(
                 redis_client_pool.clone(),
                 "public".to_string(),
                 public_max_burst,
-                public_rate_limit_per_minute,
+                app_config.shared.public_rate_limit_per_minute,
                 60,
             )
         });
