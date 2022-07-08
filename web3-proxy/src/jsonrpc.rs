@@ -12,8 +12,7 @@ pub struct JsonRpcRequest {
     // pub jsonrpc: Box<RawValue>,
     pub id: Box<RawValue>,
     pub method: String,
-    // TODO: should we have the default of [] here instead?
-    pub params: Option<Box<RawValue>>,
+    pub params: Option<serde_json::Value>,
 }
 
 impl fmt::Debug for JsonRpcRequest {
@@ -114,8 +113,8 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
                 let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
                 let method = method.ok_or_else(|| de::Error::missing_field("method"))?;
 
-                let params: Option<Box<RawValue>> = match params {
-                    None => Some(RawValue::from_string("[]".to_string()).unwrap()),
+                let params: Option<serde_json::Value> = match params {
+                    None => Some(serde_json::Value::Array(vec![])),
                     Some(x) => Some(x),
                 };
 

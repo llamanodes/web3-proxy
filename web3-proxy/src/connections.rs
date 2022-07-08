@@ -359,7 +359,7 @@ impl Web3Connections {
         active_request_handles: Vec<ActiveRequestHandle>,
         method: &str,
         // TODO: remove this box once i figure out how to do the options
-        params: Option<&RawValue>,
+        params: Option<&serde_json::Value>,
     ) -> Result<Box<RawValue>, ProviderError> {
         // TODO: if only 1 active_request_handles, do self.try_send_request
 
@@ -779,7 +779,7 @@ impl Web3Connections {
                         .try_send_parallel_requests(
                             active_request_handles,
                             request.method.as_ref(),
-                            request.params.as_deref(),
+                            request.params.as_ref(),
                         )
                         .await?;
 

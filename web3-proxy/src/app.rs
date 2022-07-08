@@ -256,8 +256,9 @@ impl Web3ProxyApp {
         // save the id so we can use it in the response
         let id = payload.id.clone();
 
-        match payload.params.as_deref().unwrap().get() {
-            r#"["newHeads"]"# => {
+        // TODO: calling json! on every request is not fast.
+        match payload.params {
+            Some(x) if x == json!(["newHeads"]) => {
                 let head_block_receiver = self.head_block_receiver.clone();
 
                 let subscription_id = subscription_id.clone();
@@ -291,7 +292,7 @@ impl Web3ProxyApp {
                     trace!(?subscription_id, "closed new heads subscription");
                 });
             }
-            r#"["newPendingTransactions"]"# => {
+            Some(x) if x == json!(["newPendingTransactions"]) => {
                 let pending_tx_receiver = self.pending_tx_sender.subscribe();
 
                 let mut pending_tx_receiver = Abortable::new(
@@ -331,7 +332,7 @@ impl Web3ProxyApp {
                     trace!(?subscription_id, "closed new heads subscription");
                 });
             }
-            r#"["newPendingFullTransactions"]"# => {
+            Some(x) if x == json!(["newPendingFullTransactions"]) => {
                 // TODO: too much copy/pasta with newPendingTransactions
                 let pending_tx_receiver = self.pending_tx_sender.subscribe();
 
@@ -375,7 +376,7 @@ impl Web3ProxyApp {
                     trace!(?subscription_id, "closed new heads subscription");
                 });
             }
-            r#"["newPendingRawTransactions"]"# => {
+            Some(x) if x == json!(["newPendingRawTransactions"]) => {
                 // TODO: too much copy/pasta with newPendingTransactions
                 let pending_tx_receiver = self.pending_tx_sender.subscribe();
 
@@ -403,7 +404,7 @@ impl Web3ProxyApp {
                             "method": "eth_subscription",
                             "params": {
                                 "subscription": subscription_id,
-                                // upstream just sends the txid, but we want to send the whole transaction
+                                // upstream just sends the txid, but we want to send the raw transaction
                                 "result": new_tx.rlp(),
                             },
                         });

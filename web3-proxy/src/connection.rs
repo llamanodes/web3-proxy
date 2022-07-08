@@ -383,7 +383,10 @@ impl Web3Connection {
 
                         // wait for the interval
                         // TODO: if error or rate limit, increase interval?
-                        http_interval_receiver.recv().await.unwrap();
+                        while let Err(err) = http_interval_receiver.recv().await {
+                            // querying the block was delayed. this can happen if tokio was busy.
+                            warn!(?err, ?self, "http interval lagging!")
+                        }
                     }
                 }
                 Web3Provider::Ws(provider) => {
