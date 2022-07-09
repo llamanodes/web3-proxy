@@ -603,6 +603,7 @@ impl Web3Connections {
     pub async fn next_upstream_server(
         &self,
         skip: &[Arc<Web3Connection>],
+        archive_needed: bool,
     ) -> Result<ActiveRequestHandle, Option<Duration>> {
         let mut earliest_retry_after = None;
 
@@ -667,7 +668,10 @@ impl Web3Connections {
 
     /// get all rpc servers that are not rate limited
     /// returns servers even if they aren't in sync. This is useful for broadcasting signed transactions
-    pub async fn get_upstream_servers(&self) -> Result<Vec<ActiveRequestHandle>, Option<Duration>> {
+    pub async fn get_upstream_servers(
+        &self,
+        archive_needed: bool,
+    ) -> Result<Vec<ActiveRequestHandle>, Option<Duration>> {
         let mut earliest_retry_after = None;
         // TODO: with capacity?
         let mut selected_rpcs = vec![];
@@ -704,7 +708,7 @@ impl Web3Connections {
             if skip_rpcs.len() == self.inner.len() {
                 break;
             }
-            match self.next_upstream_server(&skip_rpcs).await {
+            match self.next_upstream_server(&skip_rpcs, archive_needed).await {
                 Ok(active_request_handle) => {
                     // save the rpc in case we get an error and want to retry on another server
                     skip_rpcs.push(active_request_handle.clone_connection());
@@ -784,7 +788,7 @@ impl Web3Connections {
         archive_needed: bool,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
-            match self.get_upstream_servers().await {
+            match self.get_upstream_servers(archive_needed).await {
                 Ok(active_request_handles) => {
                     // TODO: benchmark this compared to waiting on unbounded futures
                     // TODO: do something with this handle?
