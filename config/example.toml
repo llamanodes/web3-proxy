@@ -1,7 +1,7 @@
 [shared]
 chain_id = 1
 # in prod, do `rate_limit_redis = "redis://redis:6379/"`
-rate_limit_redis = "redis://dev-redis:6379/"
+#rate_limit_redis = "redis://dev-redis:6379/"
 public_rate_limit_per_minute = 60_000
 
 [balanced_rpcs]

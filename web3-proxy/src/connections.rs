@@ -613,6 +613,7 @@ impl Web3Connections {
             .inner
             .iter()
             .filter(|x| !skip.contains(x))
+            .filter(|x| if archive_needed { x.is_archive() } else { true })
             .cloned()
             .collect();
 
@@ -677,6 +678,10 @@ impl Web3Connections {
         let mut selected_rpcs = vec![];
 
         for connection in self.inner.iter() {
+            if archive_needed && !connection.is_archive() {
+                continue;
+            }
+
             // check rate limits and increment our connection counter
             match connection.try_request_handle().await {
                 Err(retry_after) => {
@@ -725,17 +730,23 @@ impl Web3Connections {
                             if let Some(error) = &response.error {
                                 trace!(?response, "rpc error");
 
-                                // some errors should be retried
-                                if error.code == -32000
-                                    && [
+                                // some errors should be retried on other nodes
+                                if error.code == -32000 {
+                                    let error_msg = error.message.as_str();
+
+                                    // TODO: regex?
+                                    let retry_prefixes = [
                                         "header not found",
                                         "header for hash not found",
+                                        "missing trie node",
                                         "node not started",
                                         "RPC timeout",
-                                    ]
-                                    .contains(&error.message.as_str())
-                                {
-                                    continue;
+                                    ];
+                                    for retry_prefix in retry_prefixes {
+                                        if error_msg.starts_with(retry_prefix) {
+                                            continue;
+                                        }
+                                    }
                                 }
                             } else {
                                 trace!(?response, "rpc success");
