@@ -531,7 +531,7 @@ pub struct ActiveRequestHandle(Arc<Web3Connection>);
 
 impl ActiveRequestHandle {
     fn new(connection: Arc<Web3Connection>) -> Self {
-        // TODO: attach a unique id to this
+        // TODO: attach a unique id to this?
         // TODO: what ordering?!
         connection
             .active_requests
