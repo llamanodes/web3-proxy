@@ -740,7 +740,7 @@ impl Web3ProxyApp {
             }
             "eth_syncing" => {
                 // TODO: return a real response if all backends are syncing or if no servers in sync
-                let partial_response = serde_json::Value::Bool(false);
+                let partial_response = json!(false);
 
                 let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
 
@@ -748,7 +748,7 @@ impl Web3ProxyApp {
             }
             "net_listening" => {
                 // TODO: only if there are some backends on balanced_rpcs?
-                let partial_response = serde_json::Value::Bool(true);
+                let partial_response = json!(true);
 
                 let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
 
