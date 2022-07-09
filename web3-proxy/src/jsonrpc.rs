@@ -180,23 +180,14 @@ impl JsonRpcForwardedResponse {
         }
     }
 
-    pub fn try_from_response_result(
-        result: Result<Box<RawValue>, ProviderError>,
+    pub fn from_number<T: num::Integer + std::fmt::LowerHex>(
+        partial_response: T,
         id: Box<RawValue>,
-    ) -> anyhow::Result<Self> {
-        match result {
-            Ok(response) => Ok(Self::from_response(response, id)),
-            Err(e) => Self::from_ethers_error(e, id),
-        }
-    }
-
-    pub fn from_string(partial_response: String, id: Box<RawValue>) -> Self {
-        trace!("partial_response: {}", partial_response);
-        // TODO: anyhow result on this
+    ) -> Self {
         // TODO: proper escaping. this feels wrong. probably refactor to not need this at all
-        let partial_response = RawValue::from_string(format!(r#""{}""#, partial_response)).unwrap();
+        let partial_response = format!("0x{:x}", partial_response);
 
-        Self::from_response(partial_response, id)
+        Self::from_string(partial_response, id)
     }
 
     pub fn from_response(partial_response: Box<RawValue>, id: Box<RawValue>) -> Self {
@@ -207,6 +198,15 @@ impl JsonRpcForwardedResponse {
             result: Some(partial_response),
             error: None,
         }
+    }
+
+    pub fn from_string(partial_response: String, id: Box<RawValue>) -> Self {
+        trace!("partial_response: {}", partial_response);
+        // TODO: anyhow result on this
+        // TODO: proper escaping. this feels wrong. probably refactor to not need this at all
+        let partial_response = RawValue::from_string(format!(r#""{}""#, partial_response)).unwrap();
+
+        Self::from_response(partial_response, id)
     }
 
     pub fn from_value(partial_response: serde_json::Value, id: Box<RawValue>) -> Self {
@@ -281,6 +281,16 @@ impl JsonRpcForwardedResponse {
                 data,
             }),
         })
+    }
+
+    pub fn try_from_response_result(
+        result: Result<Box<RawValue>, ProviderError>,
+        id: Box<RawValue>,
+    ) -> anyhow::Result<Self> {
+        match result {
+            Ok(response) => Ok(Self::from_response(response, id)),
+            Err(e) => Self::from_ethers_error(e, id),
+        }
     }
 }
 

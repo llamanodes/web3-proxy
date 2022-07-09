@@ -693,10 +693,7 @@ impl Web3ProxyApp {
                     return Err(anyhow::anyhow!("no servers synced"));
                 }
 
-                // TODO: this seems pretty common. make a helper?
-                let partial_response = format!("{:x}", head_block_number);
-
-                let response = JsonRpcForwardedResponse::from_string(partial_response, request.id);
+                let response = JsonRpcForwardedResponse::from_number(head_block_number, request.id);
 
                 Ok(response)
             }
@@ -758,12 +755,10 @@ impl Web3ProxyApp {
                 Ok(response)
             }
             "net_peerCount" => {
-                let partial_response = serde_json::Value::String(format!(
-                    "{:x}",
-                    self.balanced_rpcs.num_synced_rpcs()
-                ));
-
-                let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
+                let response = JsonRpcForwardedResponse::from_number(
+                    self.balanced_rpcs.num_synced_rpcs(),
+                    request.id,
+                );
 
                 Ok(response)
             }

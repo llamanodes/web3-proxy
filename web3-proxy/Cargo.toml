@@ -25,6 +25,7 @@ futures = { version = "0.3.21", features = ["thread-pool"] }
 hashbrown = "0.12.1"
 linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }
 notify = "4.0.17"
+num = "0.4"
 redis-cell-client = { path = "../redis-cell-client" }
 # TODO: parking_lot has an "arc_lock" feature that we might want to use
 parking_lot = "0.12.1"
