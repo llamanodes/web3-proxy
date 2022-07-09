@@ -199,7 +199,7 @@ impl Web3Connection {
             .wait_for_request_handle()
             .await
             .request(
-                "eth_getBalance",
+                "eth_getCode",
                 ("0xdead00000000000000000000000000000000beef", "0x1"),
             )
             .await;

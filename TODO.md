@@ -100,3 +100,4 @@
 - [ ] flashbots specific methods
   - [ ] flashbots protect fast mode or not? probably fast matches most user's needs, but no reverts is nice.
   - [ ] https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#authentication maybe have per-user keys. or pass their header on if its set
+- [ ] if no redis set, but public rate limits are set, exit with an error
