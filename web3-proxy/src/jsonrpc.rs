@@ -209,6 +209,21 @@ impl JsonRpcForwardedResponse {
         }
     }
 
+    pub fn from_value(partial_response: serde_json::Value, id: Box<RawValue>) -> Self {
+        let partial_response =
+            serde_json::to_string(&partial_response).expect("this should always work");
+
+        let partial_response =
+            RawValue::from_string(partial_response).expect("this should always work");
+
+        JsonRpcForwardedResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: Some(partial_response),
+            error: None,
+        }
+    }
+
     pub fn from_ethers_error(e: ProviderError, id: Box<RawValue>) -> anyhow::Result<Self> {
         // TODO: move turning ClientError into json to a helper function?
         let code;

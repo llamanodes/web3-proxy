@@ -60,7 +60,8 @@
 - [ ] improve caching
   - [ ] if the eth_call (or similar) params include a block, we can cache for longer
   - [ ] if the call is something simple like "symbol" or "decimals", cache that too
-  - [ ] when we receive a block, we should store it for later eth_getBlockByNumber, eth_blockNumber, and similar calls
+  - [ ] when we receive a block, we should store it for later eth_getBlockByNumber and similar calls
+  - [x] eth_blockNumber without a backend request
 - [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
 - [ ] inspect any jsonrpc errors. if its something like "header not found" or "block with id $x not found" retry on another node (and add a negative score to that server)
   - this error seems to happen when we use load balanced backend rpcs like pokt and ankr
@@ -96,3 +97,6 @@
 - [ ] use https://github.com/ledgerwatch/interfaces to talk to erigon directly instead of through erigon's rpcdaemon (possible example code which uses ledgerwatch/interfaces: https://github.com/akula-bft/akula/tree/master)
 - [ ] subscribe to pending transactions and build an intelligent gas estimator
 - [ ] include private rpcs with regular queries? i don't want to overwhelm them, but they could be good for excess load
+- [ ] flashbots specific methods
+  - [ ] flashbots protect fast mode or not? probably fast matches most user's needs, but no reverts is nice.
+  - [ ] https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#authentication maybe have per-user keys. or pass their header on if its set

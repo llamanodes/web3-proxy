@@ -49,6 +49,10 @@ impl SyncedConnections {
     pub fn get_head_block_hash(&self) -> &H256 {
         &self.head_block_hash
     }
+
+    pub fn get_head_block_num(&self) -> u64 {
+        self.head_block_num
+    }
 }
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
@@ -344,12 +348,20 @@ impl Web3Connections {
         Ok(())
     }
 
+    pub fn get_head_block_num(&self) -> u64 {
+        self.synced_connections.load().get_head_block_num()
+    }
+
     pub fn get_head_block_hash(&self) -> H256 {
         *self.synced_connections.load().get_head_block_hash()
     }
 
     pub fn has_synced_rpcs(&self) -> bool {
         !self.synced_connections.load().inner.is_empty()
+    }
+
+    pub fn num_synced_rpcs(&self) -> usize {
+        self.synced_connections.load().inner.len()
     }
 
     /// Send the same request to all the handles. Returning the most common success or most common error.
@@ -683,6 +695,7 @@ impl Web3Connections {
     pub async fn try_send_best_upstream_server(
         &self,
         request: JsonRpcRequest,
+        archive_needed: bool,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         let mut skip_rpcs = vec![];
 
@@ -768,6 +781,7 @@ impl Web3Connections {
     pub async fn try_send_all_upstream_servers(
         &self,
         request: JsonRpcRequest,
+        archive_needed: bool,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
             match self.get_upstream_servers().await {

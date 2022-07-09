@@ -44,6 +44,7 @@ async fn handle_socket_payload(
     subscription_count: &AtomicUsize,
     subscriptions: &mut HashMap<String, AbortHandle>,
 ) -> Message {
+    // TODO: do any clients send batches over websockets?
     let (id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
         Ok(payload) => {
             let id = payload.id.clone();
@@ -90,7 +91,6 @@ async fn handle_socket_payload(
             (id, response)
         }
         Err(err) => {
-            // TODO: what should this id be?
             let id = RawValue::from_string("null".to_string()).unwrap();
             (id, Err(err.into()))
         }
