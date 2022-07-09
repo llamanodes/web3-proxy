@@ -146,17 +146,21 @@ impl Web3ProxyApp {
                 .build()?,
         );
 
-        let rate_limiter_pool = match app_config.shared.rate_limit_redis {
+        let redis_client_pool = match app_config.shared.rate_limit_redis {
             Some(redis_address) => {
                 info!("Connecting to redis on {}", redis_address);
 
                 let manager = RedisConnectionManager::new(redis_address)?;
 
+                let min_size = num_workers as u32;
+                let max_size = min_size * 4;
+
                 // TODO: min_idle?
                 // TODO: set max_size based on max expected concurrent connections? set based on num_workers?
                 let builder = bb8::Pool::builder()
                     .error_sink(bb8_helpers::RedisErrorSink.boxed_clone())
-                    .max_size(1024);
+                    .min_idle(Some(min_size))
+                    .max_size(max_size);
 
                 let pool = builder.build(manager).await?;
 
@@ -168,9 +172,8 @@ impl Web3ProxyApp {
             }
         };
 
-        // TODO: subscribe to pending transactions on the private rpcs, too?
         let (head_block_sender, head_block_receiver) = watch::channel(Block::default());
-        // TODO: will one receiver lagging be okay?
+        // TODO: will one receiver lagging be okay? how big should this be?
         let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(16);
 
         let pending_transactions = Arc::new(DashMap::new());
@@ -184,7 +187,7 @@ impl Web3ProxyApp {
             app_config.shared.chain_id,
             balanced_rpcs,
             http_client.as_ref(),
-            rate_limiter_pool.as_ref(),
+            redis_client_pool.as_ref(),
             Some(head_block_sender),
             Some(pending_tx_sender.clone()),
             pending_transactions.clone(),
@@ -202,7 +205,7 @@ impl Web3ProxyApp {
                 app_config.shared.chain_id,
                 private_rpcs,
                 http_client.as_ref(),
-                rate_limiter_pool.as_ref(),
+                redis_client_pool.as_ref(),
                 // subscribing to new heads here won't work well
                 None,
                 // TODO: subscribe to pending transactions on the private rpcs?
@@ -222,15 +225,19 @@ impl Web3ProxyApp {
         // TODO: how much should we allow?
         let public_max_burst = app_config.shared.public_rate_limit_per_minute / 3;
 
-        let public_rate_limiter = rate_limiter_pool.as_ref().map(|redis_client_pool| {
-            RedisCellClient::new(
-                redis_client_pool.clone(),
-                "public".to_string(),
-                public_max_burst,
-                app_config.shared.public_rate_limit_per_minute,
-                60,
-            )
-        });
+        let public_rate_limiter = if app_config.shared.public_rate_limit_per_minute == 0 {
+            None
+        } else {
+            redis_client_pool.as_ref().map(|redis_client_pool| {
+                RedisCellClient::new(
+                    redis_client_pool.clone(),
+                    "public".to_string(),
+                    public_max_burst,
+                    app_config.shared.public_rate_limit_per_minute,
+                    60,
+                )
+            })
+        };
 
         let app = Self {
             balanced_rpcs,

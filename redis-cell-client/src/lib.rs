@@ -91,7 +91,7 @@ impl RedisCellClient {
 
     #[inline]
     pub async fn throttle_key(&self, key: &str) -> Result<(), Duration> {
-        let key = format!("{}:{}", KEY_PREFIX, key);
+        let key = format!("{}:{}", self.key, key);
 
         self._throttle(key.as_ref(), 1).await
     }
