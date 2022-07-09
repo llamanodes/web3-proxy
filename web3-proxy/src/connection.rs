@@ -1,7 +1,7 @@
 ///! Rate-limited communication with a web3 provider
 use anyhow::Context;
 use derive_more::From;
-use ethers::prelude::{Block, Middleware, ProviderError, TxHash, U256};
+use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, U256};
 use futures::future::try_join_all;
 use futures::StreamExt;
 use redis_cell_client::RedisCellClient;
@@ -193,9 +193,8 @@ impl Web3Connection {
         }
 
         // we could take "archive" as a parameter, but we would want a safety check on it regardless
-        // so instead we just query it and use it
-        // TODO: this query is not correct. find one that fails on
-        let archive_result: Result<U256, _> = new_connection
+        // just query something very old and if we get an error, we don't have archive data
+        let archive_result: Result<Bytes, _> = new_connection
             .wait_for_request_handle()
             .await
             .request(
