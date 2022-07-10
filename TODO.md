@@ -38,10 +38,14 @@
 - [x] connection pool for redis
 - [ ] automatically route to archive server when necessary
   - originally, no processing was done to params; they were just serde_json::RawValue. this is probably fastest, but we need to look for "latest" and count elements, so we have to use serde_json::Value
+  - when getting the next server, filtering on "archive" isn't going to work well.
+  - [ ] we need a list of  "Arc<Web3Connection>" just of archive servers. we can route to any of them even if they are behind by many blocks
+  - [ ] if the requested block is ahead of the best block, return without querying any backend servers
 - [ ] handle log subscriptions
 - [ ] basic request method stats
 - [x] http servers should check block at the very start
 - [ ] Got warning: "WARN subscribe_new_heads:send_block: web3_proxy::connection: unable to get block from https://rpc.ethermine.org: Deserialization Error: expected value at line 1 column 1. Response: error code: 1015". this is cloudflare rate limiting on fetching a block, but this is a private rpc. why is there a block subscription?
+- [ ] if the fastest server is at rate limits, when it gets a new head block, we can't serve any requests. only publish our pending_synced_connections (and update head block) when a quorum with open requests is reached
 
 ## V1
 

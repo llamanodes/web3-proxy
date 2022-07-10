@@ -99,7 +99,7 @@ impl Serialize for Web3Connection {
 
         state.serialize_field(
             "active_requests",
-            &self.active_requests.load(atomic::Ordering::Acquire),
+            &self.active_requests.load(atomic::Ordering::Relaxed),
         )?;
 
         state.end()
