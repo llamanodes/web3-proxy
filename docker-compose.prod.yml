@@ -1,4 +1,5 @@
 ---
+# production config
 version: "3.4"
 
 services:

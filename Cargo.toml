@@ -2,6 +2,7 @@
 members = [
   "linkedhashmap",
   "redis-cell-client",
+  "web3-backend",
   "web3-proxy",
 ]
 
