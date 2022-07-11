@@ -90,7 +90,7 @@ impl Serialize for Web3Connection {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Connection", 1)?;
+        let mut state = serializer.serialize_struct("Web3Connection", 3)?;
 
         // TODO: sanitize any credentials in the url
         state.serialize_field("url", &self.url)?;
