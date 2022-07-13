@@ -1,7 +1,7 @@
 use axum::extract::ws::Message;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
-use ethers::prelude::{Address, Transaction};
+use ethers::prelude::{Address, Bytes, Transaction};
 use ethers::prelude::{Block, TxHash, H256};
 use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
@@ -15,6 +15,7 @@ use redis_cell_client::{bb8, RedisCellClient, RedisConnectionManager};
 use serde_json::json;
 use std::fmt;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,6 +28,7 @@ use tracing::{info, info_span, instrument, trace, warn, Instrument};
 use crate::bb8_helpers;
 use crate::config::AppConfig;
 use crate::connections::Web3Connections;
+use crate::firewall::check_firewall_raw;
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
@@ -732,12 +734,25 @@ impl Web3ProxyApp {
             }
             // TODO: eth_sendBundle (flashbots command)
             // broadcast transactions to all private rpcs at once
-            "eth_sendRawTransaction" => {
-                self.private_rpcs
-                    .try_send_all_upstream_servers(request, false)
-                    .instrument(span)
-                    .await
-            }
+            "eth_sendRawTransaction" => match &request.params {
+                Some(serde_json::Value::Array(params)) => {
+                    if params.len() != 1 || !params[0].is_string() {
+                        return Err(anyhow::anyhow!("invalid request"));
+                    }
+
+                    let raw_tx = Bytes::from_str(params[0].as_str().unwrap())?;
+
+                    if check_firewall_raw(&raw_tx).await? {
+                        self.private_rpcs
+                            .try_send_all_upstream_servers(request, false)
+                            .instrument(span)
+                            .await
+                    } else {
+                        Err(anyhow::anyhow!("transaction blocked by firewall"))
+                    }
+                }
+                _ => Err(anyhow::anyhow!("invalid request")),
+            },
             "eth_syncing" => {
                 // TODO: return a real response if all backends are syncing or if no servers in sync
                 let partial_response = json!(false);

@@ -1,7 +1,7 @@
 ///! Rate-limited communication with a web3 provider
 use anyhow::Context;
 use derive_more::From;
-use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, U256};
+use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash};
 use futures::future::try_join_all;
 use futures::StreamExt;
 use redis_cell_client::RedisCellClient;
@@ -14,7 +14,7 @@ use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::RwLock;
 use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{error, info, instrument, trace, warn};
 
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 
