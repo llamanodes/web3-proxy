@@ -5,6 +5,7 @@ mod bb8_helpers;
 mod config;
 mod connection;
 mod connections;
+mod firewall;
 mod frontend;
 mod jsonrpc;
 
@@ -49,21 +50,6 @@ fn main() -> anyhow::Result<()> {
     // TODO: this doesn't seem to do anything
     proctitle::set_title(format!("web3-proxy-{}", rpc_config.shared.chain_id));
 
-    let mut rt_builder = runtime::Builder::new_multi_thread();
-
-    let chain_id = rpc_config.shared.chain_id;
-    rt_builder.enable_all().thread_name_fn(move || {
-        static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
-        // TODO: what ordering? i think we want seqcst so that these all happen in order, but that might be stricter than we really need
-        let worker_id = ATOMIC_ID.fetch_add(1, atomic::Ordering::SeqCst);
-        // TODO: i think these max at 15 characters
-        format!("web3-{}-{}", chain_id, worker_id)
-    });
-
-    if cli_config.workers > 0 {
-        rt_builder.worker_threads(cli_config.workers);
-    }
-
     // spawn a thread for deadlock detection
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(10));
@@ -81,6 +67,22 @@ fn main() -> anyhow::Result<()> {
             }
         }
     });
+
+    // set up tokio's async runtime
+    let mut rt_builder = runtime::Builder::new_multi_thread();
+
+    let chain_id = rpc_config.shared.chain_id;
+    rt_builder.enable_all().thread_name_fn(move || {
+        static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
+        // TODO: what ordering? i think we want seqcst so that these all happen in order, but that might be stricter than we really need
+        let worker_id = ATOMIC_ID.fetch_add(1, atomic::Ordering::SeqCst);
+        // TODO: i think these max at 15 characters
+        format!("web3-{}-{}", chain_id, worker_id)
+    });
+
+    if cli_config.workers > 0 {
+        rt_builder.worker_threads(cli_config.workers);
+    }
 
     // start tokio's async runtime
     let rt = rt_builder.build()?;
