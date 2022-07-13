@@ -80,6 +80,27 @@
   - send getTransaction rpc requests to the private rpc tier
 - [ ] don't "unwrap" anywhere. give proper errors
 
+new endpoints for users:
+- [ ] GET /user/login/$address
+  - returns a JSON string for the user to sign
+- [ ] POST /user/login/$address
+  - returns a JSON string including the api key
+  - sets session cookie
+- [ ] GET /user/$address
+  - checks for api key in session cookie or header
+  - returns a JSON string including user stats
+- [ ] POST /user/$address
+  - opt-in link email address
+  - checks for api key in session cookie or header
+  - allows modifying user settings
+- [ ] GET /$api_key
+  - proxies to web3 websocket
+- [ ] POST /$api_key
+  - proxies to web3
+- [ ] GET /payment/$tx_hash
+  - checks a transaction to see if it modifies a user's balance
+
+
 ## V2
 
 - [ ] ethers has a transactions_unsorted httprpc method that we should probably use. all rpcs probably don't support it, so make it okay for that to fail

@@ -2,6 +2,7 @@
 mod errors;
 mod http;
 mod http_proxy;
+mod users;
 mod ws_proxy;
 
 use axum::{
@@ -27,6 +28,8 @@ pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> 
         .route("/health", get(http::health))
         // `GET /status` goes to `status`
         .route("/status", get(http::status))
+        // `POST /users` goes to `create_user`
+        .route("/users", post(users::create_user))
         .layer(Extension(proxy_app));
 
     // 404 for any unknown routes
