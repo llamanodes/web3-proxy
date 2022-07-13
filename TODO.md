@@ -89,6 +89,11 @@ new endpoints for users:
 - [ ] GET /user/$address
   - checks for api key in session cookie or header
   - returns a JSON string including user stats
+    - balance in USD 
+    - deposits history (currency, amounts, transaction id)
+    - number of requests used (so we can calculate average spending over a month, burn rate for a user etc, something like "Your balance will be depleted in xx days)
+    - the email address of a user if he opted in to get contacted via email
+    - all the success/retry/fail counts and latencies (but that may better come from somewhere else)
 - [ ] POST /user/$address
   - opt-in link email address
   - checks for api key in session cookie or header
@@ -97,9 +102,13 @@ new endpoints for users:
   - proxies to web3 websocket
 - [ ] POST /$api_key
   - proxies to web3
-- [ ] GET /payment/$tx_hash
-  - checks a transaction to see if it modifies a user's balance
+- [ ] POST /users/process_transaction
+  - checks a transaction to see if it modifies a user's balance. records results in a sql database
+  - we will have our own event subscriber watching for "deposit" events, but sometimes events get missed and users might incorrectly "transfer" the tokens directly to an address instead of using the dapp
 
+in another repo: event subscriber
+  - watch for transfer events to our contract and submit them to /payment/$tx_hash
+  - also have a command line script that support can run to manually check and submit a transaction
 
 ## V2
 
