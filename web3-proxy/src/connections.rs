@@ -41,7 +41,10 @@ struct SyncedConnections {
 impl fmt::Debug for SyncedConnections {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
-        f.debug_struct("SyncedConnections").finish_non_exhaustive()
+        f.debug_struct("SyncedConnections")
+            .field("head_block_num", &self.head_block_num)
+            .field("head_block_hash", &self.head_block_hash)
+            .finish_non_exhaustive()
     }
 }
 
@@ -201,7 +204,7 @@ impl Web3Connections {
         pending_tx_id: TxHash,
     ) -> Result<Option<TxState>, ProviderError> {
         // TODO: yearn devs have had better luck with batching these, but i think that's likely just adding a delay itself
-        // TODO: there is a race here sometimes the rpc isn't yet ready to serve the transaction (even though they told us about it!)
+        // TODO: there is a race here on geth. sometimes the rpc isn't yet ready to serve the transaction (even though they told us about it!)
         // TODO: maximum wait time
         let pending_transaction: Transaction = match rpc.try_request_handle().await {
             Ok(request_handle) => {
@@ -222,7 +225,6 @@ impl Web3Connections {
 
         trace!(?pending_transaction, "pending");
 
-        // TODO: do not unwrap. orphans might make this unsafe
         match &pending_transaction.block_hash {
             Some(_block_hash) => {
                 // the transaction is already confirmed. no need to save in the pending_transactions map
@@ -607,15 +609,25 @@ impl Web3Connections {
     ) -> Result<ActiveRequestHandle, Option<Duration>> {
         let mut earliest_retry_after = None;
 
-        let mut synced_rpcs: Vec<Arc<Web3Connection>> = self
-            .synced_connections
-            .load()
-            .inner
-            .iter()
-            .filter(|x| !skip.contains(x))
-            .filter(|x| if archive_needed { x.is_archive() } else { true })
-            .cloned()
-            .collect();
+        // filter the synced rpcs
+        let mut synced_rpcs: Vec<Arc<Web3Connection>> = if archive_needed {
+            // TODO: this includes ALL archive servers. but we only want them if they are on a somewhat recent block
+            // TODO: maybe instead of "archive_needed" bool it should be the minimum height. then even delayed servers might be fine. will need to track all heights then
+            self.inner
+                .iter()
+                .filter(|x| x.is_archive())
+                .filter(|x| !skip.contains(x))
+                .cloned()
+                .collect()
+        } else {
+            self.synced_connections
+                .load()
+                .inner
+                .iter()
+                .filter(|x| !skip.contains(x))
+                .cloned()
+                .collect()
+        };
 
         if synced_rpcs.is_empty() {
             return Err(None);

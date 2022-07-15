@@ -623,15 +623,7 @@ impl Eq for Web3Connection {}
 
 impl Ord for Web3Connection {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // TODO: what atomic ordering?!
-        let a = self.active_requests.load(atomic::Ordering::Acquire);
-        let b = other.active_requests.load(atomic::Ordering::Acquire);
-
-        // TODO: how should we include the soft limit? floats are slower than integer math
-        let a = (a + 1) as f32 / self.soft_limit as f32;
-        let b = (b + 1) as f32 / other.soft_limit as f32;
-
-        a.partial_cmp(&b).unwrap()
+        self.url.cmp(&other.url)
     }
 }
 
@@ -641,11 +633,8 @@ impl PartialOrd for Web3Connection {
     }
 }
 
-/// note that this is just comparing the active requests. two providers with different rpc urls are equal!
 impl PartialEq for Web3Connection {
     fn eq(&self, other: &Self) -> bool {
-        // TODO: what ordering?!
-        self.active_requests.load(atomic::Ordering::Acquire)
-            == other.active_requests.load(atomic::Ordering::Acquire)
+        self.url == other.url
     }
 }
