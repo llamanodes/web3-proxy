@@ -129,6 +129,8 @@ impl Web3Connections {
                         // TODO: every time a head_block arrives (maybe with a small delay), or on the interval.
                         interval.tick().await;
 
+                        info!("http interval ready");
+
                         // errors are okay. they mean that all receivers have been dropped
                         let _ = sender.send(());
                     }
@@ -243,12 +245,13 @@ impl Web3Connections {
         // TODO: how many retries? until some timestamp is hit is probably better. maybe just loop and call this with a timeout
         // TODO: after more investigation, i don't think retries will help. i think this is because chains of transactions get dropped from memory
         // TODO: also check the "confirmed transactions" mapping? maybe one shared mapping with TxState in it?
-        trace!(?pending_tx_id, "checking pending_transactions on {}", rpc);
 
         if pending_tx_sender.receiver_count() == 0 {
             // no receivers, so no point in querying to get the full transaction
             return Ok(());
         }
+
+        trace!(?pending_tx_id, "checking pending_transactions on {}", rpc);
 
         if self.pending_transactions.contains_key(&pending_tx_id) {
             // this transaction has already been processed

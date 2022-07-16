@@ -379,6 +379,16 @@ impl Web3Connection {
                     let mut last_hash = Default::default();
 
                     loop {
+                        // wait for the interval
+                        // TODO: if error or rate limit, increase interval?
+                        while let Err(err) = http_interval_receiver.recv().await {
+                            // TODO: if recverror is not Lagged, exit?
+                            // querying the block was delayed. this can happen if tokio was busy.
+                            warn!(?err, ?self, "http interval lagging!");
+                        }
+
+                        trace!(?self, "ok http interval");
+
                         match self.try_request_handle().await {
                             Ok(active_request_handle) => {
                                 // TODO: i feel like this should be easier. there is a provider.getBlock, but i don't know how to give it "latest"
@@ -402,13 +412,6 @@ impl Web3Connection {
                             Err(err) => {
                                 warn!(?err, "Rate limited on latest block from {}", self);
                             }
-                        }
-
-                        // wait for the interval
-                        // TODO: if error or rate limit, increase interval?
-                        while let Err(err) = http_interval_receiver.recv().await {
-                            // querying the block was delayed. this can happen if tokio was busy.
-                            warn!(?err, ?self, "http interval lagging!")
                         }
                     }
                 }
