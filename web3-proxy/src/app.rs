@@ -23,7 +23,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{info, info_span, instrument, trace, warn, Instrument};
+use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
 
 use crate::bb8_helpers;
 use crate::config::AppConfig;
@@ -130,7 +130,7 @@ fn get_or_set_block_number(
 
                 // if we changed "latest" to a number, update the params to match
                 if modified {
-                    *x = block_num.into();
+                    *x = format!("0x{:x}", block_num).into();
                 }
 
                 Ok(block_num)
@@ -139,6 +139,7 @@ fn get_or_set_block_number(
     }
 }
 
+// TODO: change this to return the height needed instead
 fn is_archive_needed(
     method: &str,
     params: Option<&mut serde_json::Value>,
@@ -164,7 +165,9 @@ fn is_archive_needed(
         "eth_getBlockByHash" => {
             return false;
         }
-        "eth_getBlockByNumber" => 0,
+        "eth_getBlockByNumber" => {
+            return false;
+        }
         "eth_getBlockTransactionCountByHash" => {
             // TODO: turn block hash into number and check. will need a linkedhashmap of recent hashes
             return false;
@@ -179,7 +182,7 @@ fn is_archive_needed(
                     let (modified, block_num) = block_num_to_u64(block_num, latest_block);
 
                     if modified {
-                        *x = block_num.into();
+                        *x = format!("0x{:x}", block_num).into();
                     }
 
                     if block_num < last_full_block {
@@ -193,7 +196,7 @@ fn is_archive_needed(
                     let (modified, block_num) = block_num_to_u64(block_num, latest_block);
 
                     if modified {
-                        *x = block_num.into();
+                        *x = format!("0x{:x}", block_num).into();
                     }
 
                     if block_num < last_full_block {
@@ -940,12 +943,17 @@ impl Web3ProxyApp {
                 let head_block_number = self.balanced_rpcs.get_head_block_num();
 
                 // we do this check before checking caches because it might modify the request params
+                // TODO: add a stat for archive vs full since they should probably cost different
                 let archive_needed =
                     is_archive_needed(method, request.params.as_mut(), head_block_number);
+
+                trace!(?archive_needed, ?method);
 
                 let (cache_key, response_cache) = match self.get_cached_response(&request) {
                     (cache_key, Ok(response)) => {
                         let _ = self.incoming_requests.remove(&cache_key);
+
+                        // TODO: if the response is cached, should it count less against the account's costs?
 
                         return Ok(response);
                     }

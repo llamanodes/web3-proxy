@@ -778,6 +778,7 @@ impl Web3Connections {
                     }
                 }
                 Err(None) => {
+                    // TODO: is there some way to check if no servers will ever be in sync?
                     warn!(?self, "No servers in sync!");
 
                     // TODO: subscribe to something on synced connections. maybe it should just be a watch channel
