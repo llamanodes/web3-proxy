@@ -14,10 +14,6 @@ public_rate_limit_per_minute = 60_000
     url = "https://cloudflare-eth.com"
     soft_limit = 1_000
 
-    [balanced_rpcs.flashbots]
-    url = "https://rpc.flashbots.net"
-    soft_limit = 1_000
-
     #[balanced_rpcs.linkpool-light]
     #url = "https://main-light.eth.linkpool.io"
     #soft_limit = 1_000
@@ -61,7 +57,7 @@ public_rate_limit_per_minute = 60_000
     soft_limit = 5_861
 
     [private_rpcs.flashbots]
-    url = "https://rpc.flashbots.net"
+    url = "https://rpc.flashbots.net/fast"
     soft_limit = 7074
 
     [private_rpcs.securerpc]
