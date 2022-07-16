@@ -1,7 +1,7 @@
 use axum::extract::ws::Message;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
-use ethers::prelude::{Address, Bytes, Transaction};
+use ethers::prelude::{Address, BlockNumber, Bytes, Transaction};
 use ethers::prelude::{Block, TxHash, H256};
 use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
@@ -79,34 +79,179 @@ pub async fn flatten_handles<T>(
     Ok(())
 }
 
-fn is_archive_needed(method: &str, params: Option<&mut serde_json::Value>) -> bool {
-    match method {
-        "eth_call" => unimplemented!(),
-        "eth_getBalance" => unimplemented!(),
-        "eth_getCode" => unimplemented!(),
-        "eth_getLogs" => unimplemented!(),
-        "eth_getStorageAt" => unimplemented!(),
-        "eth_getTransactionByBlockHashAndIndex" => unimplemented!(),
-        "eth_getTransactionByBlockNumberAndIndex" => unimplemented!(),
-        "eth_getTransactionCount" => unimplemented!(),
-        "eth_getTransactionReceipt" => unimplemented!(),
-        "eth_getUncleByBlockHashAndIndex" => unimplemented!(),
-        "eth_getUncleByBlockNumberAndIndex" => unimplemented!(),
-        _ => {
-            return false;
+fn value_to_block_num(x: &serde_json::Value) -> anyhow::Result<BlockNumber> {
+    let block_num = if x.is_string() {
+        BlockNumber::from_str(x.as_str().unwrap()).unwrap()
+    } else if x.is_number() {
+        BlockNumber::from(x.as_u64().unwrap())
+    } else {
+        return Err(anyhow::anyhow!("unexpected BlockNumber"));
+    };
+
+    Ok(block_num)
+}
+
+fn block_num_to_u64(block_num: BlockNumber, latest_block: u64) -> (bool, u64) {
+    match block_num {
+        BlockNumber::Earliest => (false, 0),
+        BlockNumber::Latest => {
+            // change "latest" to a number
+            (true, latest_block)
         }
+        BlockNumber::Number(x) => (false, x.as_u64()),
+        // TODO: think more about how to handle Pending
+        BlockNumber::Pending => (false, latest_block),
+    }
+}
+
+fn get_or_set_block_number(
+    params: &mut serde_json::Value,
+    block_param_id: usize,
+    latest_block: u64,
+) -> anyhow::Result<u64> {
+    match params.as_array_mut() {
+        None => Err(anyhow::anyhow!("params not an array")),
+        Some(params) => match params.get_mut(block_param_id) {
+            None => {
+                if params.len() != block_param_id - 1 {
+                    return Err(anyhow::anyhow!("unexpected params length"));
+                }
+
+                // add the latest block number to the end of the params
+                params.push(latest_block.into());
+
+                Ok(latest_block)
+            }
+            Some(x) => {
+                // convert the json value to a BlockNumber
+                let block_num = value_to_block_num(x)?;
+
+                let (modified, block_num) = block_num_to_u64(block_num, latest_block);
+
+                // if we changed "latest" to a number, update the params to match
+                if modified {
+                    *x = block_num.into();
+                }
+
+                Ok(block_num)
+            }
+        },
+    }
+}
+
+fn is_archive_needed(
+    method: &str,
+    params: Option<&mut serde_json::Value>,
+    latest_block: u64,
+) -> bool {
+    if params.is_none() {
+        return false;
     }
 
-    // TODO: find the given block number in params
+    // if the query's block is recent, return false
+    // geth: 128 blocks (or only 64 if you’re using fast/snap sync)
+    // TODO: apparently erigon keeps data for 90k blocks. so true/false isn't going to be enough. need per-server archive limits
+    // TODO: maybe give 1 block of headroom?
+    let last_full_block = latest_block.saturating_sub(64);
 
-    // TODO: if its "latest" (or not given), modify params to have the latest block. return false
+    let params = params.unwrap();
 
-    // TODO: if its "pending", do something special? return false
+    // TODO: double check these. i think some of the getBlock stuff will never need archive
+    let block_param_id = match method {
+        "eth_call" => 1,
+        "eth_estimateGas" => 1,
+        "eth_getBalance" => 1,
+        "eth_getBlockByHash" => {
+            return false;
+        }
+        "eth_getBlockByNumber" => 0,
+        "eth_getBlockTransactionCountByHash" => {
+            // TODO: turn block hash into number and check. will need a linkedhashmap of recent hashes
+            return false;
+        }
+        "eth_getBlockTransactionCountByNumber" => 0,
+        "eth_getCode" => 1,
+        "eth_getLogs" => {
+            let obj = params[0].as_object_mut().unwrap();
 
-    // TODO: we probably need a list of recent hashes/heights. if specified block is recent, return false
+            if let Some(x) = obj.get_mut("fromBlock") {
+                if let Ok(block_num) = value_to_block_num(x) {
+                    let (modified, block_num) = block_num_to_u64(block_num, latest_block);
 
-    // this command needs an archive server
-    true
+                    if modified {
+                        *x = block_num.into();
+                    }
+
+                    if block_num < last_full_block {
+                        return true;
+                    }
+                }
+            }
+
+            if let Some(x) = obj.get_mut("toBlock") {
+                if let Ok(block_num) = value_to_block_num(x) {
+                    let (modified, block_num) = block_num_to_u64(block_num, latest_block);
+
+                    if modified {
+                        *x = block_num.into();
+                    }
+
+                    if block_num < last_full_block {
+                        return true;
+                    }
+                }
+            }
+
+            if let Some(x) = obj.get("blockHash") {
+                // TODO: check a linkedhashmap of recent hashes
+                // TODO: error if fromBlock or toBlock were set
+            }
+
+            return false;
+        }
+        "eth_getStorageAt" => 2,
+        "eth_getTransactionByHash" => {
+            // TODO: not sure how best to look these up
+            // try full nodes first. retry will use archive
+            return false;
+        }
+        "eth_getTransactionByBlockHashAndIndex" => {
+            // TODO: check a linkedhashmap of recent hashes
+            // try full nodes first. retry will use archive
+            return false;
+        }
+        "eth_getTransactionByBlockNumberAndIndex" => 0,
+        "eth_getTransactionCount" => 1,
+        "eth_getTransactionReceipt" => {
+            // TODO: not sure how best to look these up
+            // try full nodes first. retry will use archive
+            return false;
+        }
+        "eth_getUncleByBlockHashAndIndex" => {
+            // TODO: check a linkedhashmap of recent hashes
+            // try full nodes first. retry will use archive
+            return false;
+        }
+        "eth_getUncleByBlockNumberAndIndex" => 0,
+        "eth_getUncleCountByBlockHash" => {
+            // TODO: check a linkedhashmap of recent hashes
+            // try full nodes first. retry will use archive
+            return false;
+        }
+        "eth_getUncleCountByBlockNumber" => 0,
+        _ => {
+            // some other command that doesn't take block numbers as an argument
+            return false;
+        }
+    };
+
+    if let Ok(block) = get_or_set_block_number(params, block_param_id, latest_block) {
+        block < last_full_block
+    } else {
+        // TODO: seems unlikely that we will get here. probably should log this error
+        // if this is incorrect, it should retry on an archive server
+        false
+    }
 }
 
 // TODO: think more about TxState. d
@@ -566,7 +711,7 @@ impl Web3ProxyApp {
         // TODO: inspect the request to pick the right cache
         // TODO: https://github.com/ethereum/web3.py/blob/master/web3/middleware/cache.py
 
-        // TODO: Some requests should skip caching on the head_block_hash
+        // TODO: Some requests should skip caching on an older block hash. take number as an argument. if its older than 64, use it as the key
         let head_block_hash = self.balanced_rpcs.get_head_block_hash();
 
         // TODO: better key? benchmark this
@@ -792,8 +937,11 @@ impl Web3ProxyApp {
                 // everything else is relayed to a backend
                 // this is not a private transaction
 
+                let head_block_number = self.balanced_rpcs.get_head_block_num();
+
                 // we do this check before checking caches because it might modify the request params
-                let archive_needed = is_archive_needed(method, request.params.as_mut());
+                let archive_needed =
+                    is_archive_needed(method, request.params.as_mut(), head_block_number);
 
                 let (cache_key, response_cache) = match self.get_cached_response(&request) {
                     (cache_key, Ok(response)) => {

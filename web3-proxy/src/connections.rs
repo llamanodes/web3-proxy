@@ -633,30 +633,25 @@ impl Web3Connections {
             return Err(None);
         }
 
-        let sort_cache: HashMap<Arc<Web3Connection>, (f32, u32)> = synced_rpcs
+        let sort_cache: HashMap<_, _> = synced_rpcs
             .iter()
             .map(|rpc| {
                 let active_requests = rpc.active_requests();
                 let soft_limit = rpc.soft_limit();
+                let is_archive = rpc.is_archive();
 
                 let utilization = active_requests as f32 / soft_limit as f32;
 
-                (rpc.clone(), (utilization, soft_limit))
+                (rpc.clone(), (is_archive, utilization, soft_limit))
             })
             .collect();
 
         synced_rpcs.sort_unstable_by(|a, b| {
-            let (a_utilization, a_soft_limit) = sort_cache.get(a).unwrap();
-            let (b_utilization, b_soft_limit) = sort_cache.get(b).unwrap();
+            let a_sorts = sort_cache.get(a).unwrap();
+            let b_sorts = sort_cache.get(b).unwrap();
 
             // TODO: i'm comparing floats. crap
-            match a_utilization
-                .partial_cmp(b_utilization)
-                .unwrap_or(cmp::Ordering::Equal)
-            {
-                cmp::Ordering::Equal => a_soft_limit.cmp(b_soft_limit),
-                x => x,
-            }
+            a_sorts.partial_cmp(b_sorts).unwrap_or(cmp::Ordering::Equal)
         });
 
         // now that the rpcs are sorted, try to get an active request handle for one of them
@@ -857,5 +852,16 @@ impl Web3Connections {
                 }
             }
         }
+    }
+}
+
+mod tests {
+    #[test]
+    fn test_false_before_true() {
+        let mut x = [true, false, true];
+
+        x.sort();
+
+        assert_eq!(x, [false, true, true])
     }
 }

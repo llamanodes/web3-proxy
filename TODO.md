@@ -36,11 +36,10 @@
 - [x] rpc errors propagate too far. one subscription failing ends the app. isolate the providers more (might already be fixed)
 - [x] incoming rate limiting (by ip)
 - [x] connection pool for redis
-- [ ] automatically route to archive server when necessary
+- [x] automatically route to archive server when necessary
   - originally, no processing was done to params; they were just serde_json::RawValue. this is probably fastest, but we need to look for "latest" and count elements, so we have to use serde_json::Value
-  - when getting the next server, filtering on "archive" isn't going to work well.
-  - [ ] we need a list of  "Arc<Web3Connection>" just of archive servers. we can route to any of them even if they are behind by many blocks
-  - [ ] if the requested block is ahead of the best block, return without querying any backend servers
+  - when getting the next server, filtering on "archive" isn't going to work well. need to check inner instead
+- [ ] if the requested block is ahead of the best block, return without querying any backend servers
 - [ ] handle log subscriptions
 - [ ] basic request method stats
 - [x] http servers should check block at the very start
@@ -61,10 +60,12 @@
 - [ ] improved logging with useful instrumentation
 - [ ] add a subscription that returns the head block number and hash but nothing else
 - [ ] if we don't cache errors, then in-flight request caching is going to bottleneck 
+  - i think now that we retry header not found and similar, caching errors should be fine
 - [ ] improve caching
-  - [ ] if the eth_call (or similar) params include a block, we can cache for longer
-  - [ ] if the call is something simple like "symbol" or "decimals", cache that too
-  - [ ] when we receive a block, we should store it for later eth_getBlockByNumber and similar calls
+  - [ ] if the eth_call (or similar) params include a block, we can cache for that. if its archive-age, itshould be fine to cache by number instead of hash
+  - [ ] add a "recent hashes" to synced connections with 64 parent blocks (maybe 128)
+  - [ ] if the call is something simple like "symbol" or "decimals", cache that too. though i think this could bite us
+- [ ] when we receive a block, we should store it for later eth_getBlockByNumber and similar calls
   - [x] eth_blockNumber without a backend request
 - [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
 - [ ] inspect any jsonrpc errors. if its something like "header not found" or "block with id $x not found" retry on another node (and add a negative score to that server)
@@ -135,3 +136,6 @@ in another repo: event subscriber
   - [ ] flashbots protect fast mode or not? probably fast matches most user's needs, but no reverts is nice.
   - [ ] https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#authentication maybe have per-user keys. or pass their header on if its set
 - [ ] if no redis set, but public rate limits are set, exit with an error
+- [ ] i saw "WebSocket connection closed unexpectedly" but no auto reconnect. need better logs on these
+- [ ] if archive servers are added to the rotation while they are still syncing, they might get requests too soon. keep archive servers out of the configs until they are done syncing. full nodes should be fine to add to the configs even while syncing, though its a wasted connection
+- [ ] when under load, i'm seeing "http interval lagging!". sometimes it happens when not loaded.
