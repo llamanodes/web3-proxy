@@ -115,7 +115,7 @@ impl Web3Connections {
 
             drop(receiver);
 
-            // TODO: what interval?
+            // TODO: what interval? follow a websocket instead?
             let mut interval = interval(Duration::from_secs(13));
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -129,7 +129,7 @@ impl Web3Connections {
                         // TODO: every time a head_block arrives (maybe with a small delay), or on the interval.
                         interval.tick().await;
 
-                        info!("http interval ready");
+                        trace!("http interval ready");
 
                         // errors are okay. they mean that all receivers have been dropped
                         let _ = sender.send(());
