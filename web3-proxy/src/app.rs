@@ -80,23 +80,21 @@ pub async fn flatten_handles<T>(
 }
 
 fn is_archive_needed(method: &str, params: Option<&mut serde_json::Value>) -> bool {
-    let methods_that_may_need_archive = [
-        "eth_call",
-        "eth_getBalance",
-        "eth_getCode",
-        "eth_getLogs",
-        "eth_getStorageAt",
-        "eth_getTransactionCount",
-        "eth_getTransactionByBlockHashAndIndex",
-        "eth_getTransactionByBlockNumberAndIndex",
-        "eth_getTransactionReceipt",
-        "eth_getUncleByBlockHashAndIndex",
-        "eth_getUncleByBlockNumberAndIndex",
-    ];
-
-    if !methods_that_may_need_archive.contains(&method) {
-        // this method is not known to require an archive node
-        return false;
+    match method {
+        "eth_call" => unimplemented!(),
+        "eth_getBalance" => unimplemented!(),
+        "eth_getCode" => unimplemented!(),
+        "eth_getLogs" => unimplemented!(),
+        "eth_getStorageAt" => unimplemented!(),
+        "eth_getTransactionByBlockHashAndIndex" => unimplemented!(),
+        "eth_getTransactionByBlockNumberAndIndex" => unimplemented!(),
+        "eth_getTransactionCount" => unimplemented!(),
+        "eth_getTransactionReceipt" => unimplemented!(),
+        "eth_getUncleByBlockHashAndIndex" => unimplemented!(),
+        "eth_getUncleByBlockNumberAndIndex" => unimplemented!(),
+        _ => {
+            return false;
+        }
     }
 
     // TODO: find the given block number in params
@@ -313,7 +311,8 @@ impl Web3ProxyApp {
         // save the id so we can use it in the response
         let id = payload.id.clone();
 
-        // TODO: calling json! on every request is probably not fast.
+        // TODO: calling json! on every request is probably not fast. but we can only match against
+        // TODO: i think we need a stricter EthSubscribeRequest type that JsonRpcRequest can turn into
         match payload.params {
             Some(x) if x == json!(["newHeads"]) => {
                 let head_block_receiver = self.head_block_receiver.clone();
