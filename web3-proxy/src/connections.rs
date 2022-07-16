@@ -840,6 +840,7 @@ impl Web3Connections {
                     // TODO: return a 502? if it does?
                     // return Err(anyhow::anyhow!("no available rpcs!"));
                     // TODO: sleep how long?
+                    // TODO: subscribe to something in SyncedConnections instead
                     sleep(Duration::from_millis(200)).await;
 
                     continue;

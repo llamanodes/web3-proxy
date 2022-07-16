@@ -48,12 +48,14 @@ const RESPONSE_CACHE_CAP: usize = 1024;
 // block hash, method, params
 type CacheKey = (H256, String, Option<String>);
 
+// TODO: make something more advanced that keeps track of cache size in bytes
 type ResponseLrcCache = RwLock<LinkedHashMap<CacheKey, JsonRpcForwardedResponse>>;
 
 type ActiveRequestsMap = DashMap<CacheKey, watch::Receiver<bool>>;
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
+/// flatten a JoinError into an anyhow error
 pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T> {
     match handle.await {
         Ok(Ok(result)) => Ok(result),
@@ -62,6 +64,7 @@ pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T>
     }
 }
 
+/// return the first error or okay if everything worked
 pub async fn flatten_handles<T>(
     mut handles: FuturesUnordered<AnyhowJoinHandle<T>>,
 ) -> anyhow::Result<()> {
@@ -69,7 +72,7 @@ pub async fn flatten_handles<T>(
         match x {
             Err(e) => return Err(e.into()),
             Ok(Err(e)) => return Err(e),
-            Ok(Ok(_)) => {}
+            Ok(Ok(_)) => continue,
         }
     }
 
