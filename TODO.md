@@ -39,12 +39,13 @@
 - [x] automatically route to archive server when necessary
   - originally, no processing was done to params; they were just serde_json::RawValue. this is probably fastest, but we need to look for "latest" and count elements, so we have to use serde_json::Value
   - when getting the next server, filtering on "archive" isn't going to work well. need to check inner instead
+  - [ ] this works well for local servers, but public nodes seem to give unreliable results. likely because of load balancers. maybe have a "max block data limit"
 - [ ] if the requested block is ahead of the best block, return without querying any backend servers
-- [ ] handle log subscriptions
 - [ ] basic request method stats
 - [x] http servers should check block at the very start
-- [ ] Got warning: "WARN subscribe_new_heads:send_block: web3_proxy::connection: unable to get block from https://rpc.ethermine.org: Deserialization Error: expected value at line 1 column 1. Response: error code: 1015". this is cloudflare rate limiting on fetching a block, but this is a private rpc. why is there a block subscription?
-- [ ] if the fastest server is at rate limits, when it gets a new head block, we can't serve any requests. only publish our pending_synced_connections (and update head block) when a quorum with open requests is reached
+- [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
+  - thundering herd problem if we only allow a lag of 0 blocks
+  - we can fix this by only `publish`ing the sorted list once a threshold of total soft limits is passed
 
 ## V1
 
@@ -52,33 +53,26 @@
   - create the app without applying any config to it
   - have a blocking future watching the config file and calling app.apply_config() on first load and on change
   - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
-- [ ] interval for http subscriptions should be based on block time. load from config is easy, but better to query
 - [ ] most things that are cached locally should probably be in shared redis caches
 - [ ] stats when forks are resolved (and what chain they were on?)
 - [ ] incoming rate limiting (by api key)
 - [ ] failsafe. if no blocks or transactions in the last second, warn and reset the connection
-- [ ] improved logging with useful instrumentation
-- [ ] add a subscription that returns the head block number and hash but nothing else
 - [ ] if we don't cache errors, then in-flight request caching is going to bottleneck 
   - i think now that we retry header not found and similar, caching errors should be fine
-- [ ] improve caching
-  - [ ] if the eth_call (or similar) params include a block, we can cache for that. if its archive-age, itshould be fine to cache by number instead of hash
-  - [ ] add a "recent hashes" to synced connections with 64 parent blocks (maybe 128)
-  - [ ] if the call is something simple like "symbol" or "decimals", cache that too. though i think this could bite us
-- [ ] when we receive a block, we should store it for later eth_getBlockByNumber and similar calls
-  - [x] eth_blockNumber without a backend request
+- [x] if the eth_call (or similar) params include a block, we can cache for that
+- [x] when block subscribers receive blocks, store them in a block_map
+- [ ] right now the block_map is unbounded. move this to redis and do some calculations to be sure about RAM usage
+- [x] eth_blockNumber without a backend request
+- [ ] eth_getBlockByNumber and similar calls served from the block map
 - [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
-- [ ] inspect any jsonrpc errors. if its something like "header not found" or "block with id $x not found" retry on another node (and add a negative score to that server)
+- [x] inspect any jsonrpc errors. if its something like "header not found" or "block with id $x not found" retry on another node (and add a negative score to that server)
   - this error seems to happen when we use load balanced backend rpcs like pokt and ankr
-- [ ] when block subscribers receive blocks, store them in a cache. use this cache instead of querying eth_getBlock
-- [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
-  - thundering herd problem if we only allow a lag of 0 blocks
-  - we can fix this by only `publish`ing the sorted list once a threshold of total soft limits is passed 
 - [ ] emit stats for successes, retries, failures, with the types of requests, account, chain, rpc
-- [ ] automated soft limit
-  - look at average request time for getBlock? i'm not sure how good a proxy that will be for serving eth_call, but its a start
+- [ ] handle log subscriptions
 - [x] if we send a transaction to private rpcs and then people query it on public rpcs things, some interfaces might think the transaction is dropped (i saw this happen in a brownie script of mine). how should we handle this?
-  - send getTransaction rpc requests to the private rpc tier
+  - [x] send getTransaction rpc requests to the private rpc tier
+  - [ ] right now we send too many to the private rpc tier and i think are being rate limited. change to be serially and weight by soft limit. 
+- [ ] improved logging with useful instrumentation
 - [ ] don't "unwrap" anywhere. give proper errors
 
 new endpoints for users:
@@ -113,6 +107,10 @@ in another repo: event subscriber
 
 ## V2
 
+- [ ] automated soft limit
+  - look at average request time for getBlock? i'm not sure how good a proxy that will be for serving eth_call, but its a start
+- [ ] add a subscription that returns the head block number and hash but nothing else
+- [ ] interval for http subscriptions should be based on block time. load from config is easy, but better to query
 - [ ] ethers has a transactions_unsorted httprpc method that we should probably use. all rpcs probably don't support it, so make it okay for that to fail
 - [ ] if chain split detected, don't send transactions?
 - [ ] have a "backup" tier that is only used when the primary tier has no servers or is multiple blocks behind. we don't want the backup tier taking over with the head block if they happen to be fast at that (but overall low/expensive rps). only if the primary tier has fallen behind or gone entirely offline should we go to third parties
@@ -140,4 +138,6 @@ in another repo: event subscriber
 - [ ] if archive servers are added to the rotation while they are still syncing, they might get requests too soon. keep archive servers out of the configs until they are done syncing. full nodes should be fine to add to the configs even while syncing, though its a wasted connection
 - [x] when under load, i'm seeing "http interval lagging!". sometimes it happens when not loaded.
   - we were skipping our delay interval when block hash wasn't changed. so if a block was ever slow, the http provider would get the same hash twice and then would try eth_getBlockByNumber a ton of times
-- [ ] load tests: docker run --rm --name spam shazow/ethspam --rpc http://$LOCAL_IP:8544 | versus --concurrency=100 --stop-after=10000 http://$LOCAL_IP:8544; docker stop spam
+- [x] document load tests: docker run --rm --name spam shazow/ethspam --rpc http://$LOCAL_IP:8544 | versus --concurrency=100 --stop-after=10000 http://$LOCAL_IP:8544; docker stop spam
+- [ ] if the call is something simple like "symbol" or "decimals", cache that too. though i think this could bite us.
+- [ ] Got warning: "WARN subscribe_new_heads:send_block: web3_proxy::connection: unable to get block from https://rpc.ethermine.org: Deserialization Error: expected value at line 1 column 1. Response: error code: 1015". this is cloudflare rate limiting on fetching a block, but this is a private rpc. why is there a block subscription?
