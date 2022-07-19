@@ -216,7 +216,7 @@ impl Web3Connection {
         sleep(Duration::from_millis(100)).await;
 
         // we could take "archive" as a parameter, but we would want a safety check on it regardless
-        // just query something very old and if we get an error, we don't have archive data
+        // check common archive thresholds
         for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
             let mut head_block_num = new_connection.head_block.read().1;
 
