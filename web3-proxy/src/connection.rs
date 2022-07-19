@@ -448,18 +448,19 @@ impl Web3Connection {
                                     .request("eth_getBlockByNumber", ("latest", false))
                                     .await;
 
-                                // don't send repeat blocks
-                                if let Ok(block) = &block {
+                                if let Ok(block) = block {
+                                    // don't send repeat blocks
                                     let new_hash = block.hash.unwrap();
 
-                                    if new_hash == last_hash {
-                                        continue;
+                                    if new_hash != last_hash {
+                                        last_hash = new_hash;
+
+                                        self.send_block_result(Ok(block), &block_sender).await?;
                                     }
-
-                                    last_hash = new_hash;
+                                } else {
+                                    // we got an empty block back. thats not good
+                                    self.send_block_result(block, &block_sender).await?;
                                 }
-
-                                self.send_block_result(block, &block_sender).await?;
                             }
                             Err(err) => {
                                 warn!(?err, "Rate limited on latest block from {}", self);
