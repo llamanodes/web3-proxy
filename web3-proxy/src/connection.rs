@@ -365,7 +365,7 @@ impl Web3Connection {
         reconnect: bool,
     ) -> anyhow::Result<()> {
         loop {
-            let http_interval_receiver = http_interval_sender.clone().map(|x| x.subscribe());
+            let http_interval_receiver = http_interval_sender.as_ref().map(|x| x.subscribe());
 
             let mut futures = vec![];
 
