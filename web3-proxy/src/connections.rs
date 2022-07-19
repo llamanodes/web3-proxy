@@ -5,7 +5,7 @@ use counter::Counter;
 use dashmap::DashMap;
 use derive_more::From;
 use ethers::prelude::{Block, ProviderError, Transaction, TxHash, H256, U64};
-use futures::future::try_join_all;
+use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
@@ -94,20 +94,14 @@ impl fmt::Debug for Web3Connections {
 impl Web3Connections {
     // #[instrument(name = "spawn_Web3Connections", skip_all)]
     pub async fn spawn(
-        chain_id: usize,
+        chain_id: u64,
         server_configs: Vec<Web3ConnectionConfig>,
-        http_client: Option<&reqwest::Client>,
-        redis_client_pool: Option<&redis_cell_client::RedisClientPool>,
+        http_client: Option<reqwest::Client>,
+        redis_client_pool: Option<redis_cell_client::RedisClientPool>,
         head_block_sender: Option<watch::Sender<Block<TxHash>>>,
         pending_tx_sender: Option<broadcast::Sender<TxState>>,
         pending_transactions: Arc<DashMap<TxHash, TxState>>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
-        let num_connections = server_configs.len();
-
-        // TODO: try_join_all
-        let mut handles = vec![];
-
-        // TODO: only create these if head_block_sender and pending_tx_sender are set
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded();
 
@@ -116,7 +110,7 @@ impl Web3Connections {
 
             drop(receiver);
 
-            // TODO: what interval? follow a websocket instead?
+            // TODO: what interval? follow a websocket also? maybe by watching synced connections with a timeout. will need debounce
             let mut interval = interval(Duration::from_secs(13));
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -146,26 +140,49 @@ impl Web3Connections {
             None
         };
 
-        // turn configs into connections
-        let mut connections = Vec::with_capacity(num_connections);
-        for server_config in server_configs.into_iter() {
-            match server_config
-                .spawn(
-                    redis_client_pool,
-                    chain_id,
-                    http_client,
-                    http_interval_sender.clone(),
-                    Some(block_sender.clone()),
-                    Some(pending_tx_id_sender.clone()),
-                )
-                .await
-            {
-                Ok((connection, connection_handle)) => {
-                    handles.push(flatten_handle(connection_handle));
-                    connections.push(connection)
+        // turn configs into connections (in parallel)
+        let spawn_handles: Vec<_> = server_configs
+            .into_iter()
+            .map(|server_config| {
+                let http_client = http_client.clone();
+                let redis_client_pool = redis_client_pool.clone();
+                let http_interval_sender = http_interval_sender.clone();
+                let block_sender = Some(block_sender.clone());
+                let pending_tx_id_sender = Some(pending_tx_id_sender.clone());
+
+                tokio::spawn(async move {
+                    server_config
+                        .spawn(
+                            redis_client_pool,
+                            chain_id,
+                            http_client,
+                            http_interval_sender,
+                            block_sender,
+                            pending_tx_id_sender,
+                        )
+                        .await
+                })
+            })
+            .collect();
+
+        let mut connections = vec![];
+        let mut handles = vec![];
+
+        // TODO: futures unordered?
+        for x in join_all(spawn_handles).await {
+            // TODO: how should we handle errors here? one rpc being down shouldn't cause the program to exit
+            match x {
+                Ok(Ok((connection, handle))) => {
+                    connections.push(connection);
+                    handles.push(handle);
                 }
-                // TODO: include the server url in this
-                Err(e) => warn!("Unable to connect to a server! {:?}", e),
+                Ok(Err(err)) => {
+                    // TODO: some of these are probably retry-able
+                    error!(?err);
+                }
+                Err(err) => {
+                    return Err(err.into());
+                }
             }
         }
 

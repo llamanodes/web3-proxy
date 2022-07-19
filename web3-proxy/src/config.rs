@@ -34,8 +34,8 @@ pub struct AppConfig {
 /// shared configuration between Web3Connections
 #[derive(Debug, Deserialize)]
 pub struct RpcSharedConfig {
-    /// TODO: what type for chain_id? TODO: this isn't at the right level. this is inside a "Config"
-    pub chain_id: usize,
+    // TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
+    pub chain_id: u64,
     pub rate_limit_redis: Option<String>,
     // TODO: serde default for development?
     // TODO: allow no limit?
@@ -54,9 +54,9 @@ impl Web3ConnectionConfig {
     // #[instrument(name = "try_build_Web3ConnectionConfig", skip_all)]
     pub async fn spawn(
         self,
-        redis_client_pool: Option<&redis_cell_client::RedisClientPool>,
-        chain_id: usize,
-        http_client: Option<&reqwest::Client>,
+        redis_client_pool: Option<redis_cell_client::RedisClientPool>,
+        chain_id: u64,
+        http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Web3Connection>)>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Web3Connection>)>>,

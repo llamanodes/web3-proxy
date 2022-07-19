@@ -346,8 +346,8 @@ impl Web3ProxyApp {
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
             app_config.shared.chain_id,
             balanced_rpcs,
-            http_client.as_ref(),
-            redis_client_pool.as_ref(),
+            http_client.clone(),
+            redis_client_pool.clone(),
             Some(head_block_sender),
             Some(pending_tx_sender.clone()),
             pending_transactions.clone(),
@@ -364,8 +364,8 @@ impl Web3ProxyApp {
             let (private_rpcs, private_handle) = Web3Connections::spawn(
                 app_config.shared.chain_id,
                 private_rpcs,
-                http_client.as_ref(),
-                redis_client_pool.as_ref(),
+                http_client.clone(),
+                redis_client_pool.clone(),
                 // subscribing to new heads here won't work well
                 None,
                 // TODO: subscribe to pending transactions on the private rpcs?

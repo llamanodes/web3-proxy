@@ -27,16 +27,11 @@ pub enum Web3Provider {
 
 impl Web3Provider {
     #[instrument]
-    async fn from_str(
-        url_str: &str,
-        http_client: Option<&reqwest::Client>,
-    ) -> anyhow::Result<Self> {
+    async fn from_str(url_str: &str, http_client: Option<reqwest::Client>) -> anyhow::Result<Self> {
         let provider = if url_str.starts_with("http") {
             let url: url::Url = url_str.parse()?;
 
-            let http_client = http_client
-                .ok_or_else(|| anyhow::anyhow!("no http_client"))?
-                .clone();
+            let http_client = http_client.ok_or_else(|| anyhow::anyhow!("no http_client"))?;
 
             let provider = ethers::providers::Http::new_with_client(url, http_client);
 
@@ -114,9 +109,9 @@ impl fmt::Debug for Web3Connection {
 
         let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
         if block_data_limit == u64::MAX {
-            f.field("limit", &"archive");
+            f.field("data", &"archive");
         } else {
-            f.field("limit", &block_data_limit);
+            f.field("data", &block_data_limit);
         }
 
         f.finish_non_exhaustive()
@@ -132,15 +127,15 @@ impl fmt::Display for Web3Connection {
 impl Web3Connection {
     /// Connect to a web3 rpc
     // #[instrument(name = "spawn_Web3Connection", skip(hard_limit, http_client))]
-    // TODO: have this take a builder (which will have senders attached)
+    // TODO: have this take a builder (which will have channels attached)
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
-        chain_id: usize,
+        chain_id: u64,
         url_str: String,
         // optional because this is only used for http providers. websocket providers don't use it
-        http_client: Option<&reqwest::Client>,
+        http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        hard_limit: Option<(u32, &redis_cell_client::RedisClientPool)>,
+        hard_limit: Option<(u32, redis_cell_client::RedisClientPool)>,
         // TODO: think more about this type
         soft_limit: u32,
         block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Self>)>>,
@@ -149,9 +144,10 @@ impl Web3Connection {
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_conection)| {
             // TODO: allow different max_burst and count_per_period and period
+            // TODO: if this url rate limits by IP instead of api key, we want to include our public ip in this key
             let period = 1;
             RedisCellClient::new(
-                redis_conection.clone(),
+                redis_conection,
                 format!("{},{}", chain_id, url_str),
                 hard_rate_limit,
                 hard_rate_limit,
@@ -177,7 +173,7 @@ impl Web3Connection {
         // TODO: move this outside the `new` function and into a `start` function or something. that way we can do retries from there
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
         // TODO: this will wait forever. do we want that?
-        let found_chain_id: Result<String, _> = new_connection
+        let found_chain_id: Result<U64, _> = new_connection
             .wait_for_request_handle()
             .await
             .request("eth_chainId", Option::None::<()>)
@@ -186,19 +182,18 @@ impl Web3Connection {
         match found_chain_id {
             Ok(found_chain_id) => {
                 // TODO: there has to be a cleaner way to do this
-                let found_chain_id =
-                    usize::from_str_radix(found_chain_id.trim_start_matches("0x"), 16).unwrap();
-
-                if chain_id != found_chain_id {
+                if chain_id != found_chain_id.as_u64() {
                     return Err(anyhow::anyhow!(
                         "incorrect chain id! Expected {}. Found {}",
                         chain_id,
                         found_chain_id
-                    ));
+                    )
+                    .context(format!("failed spawning {}", new_connection)));
                 }
             }
             Err(e) => {
-                let e = anyhow::Error::from(e).context(format!("{}", new_connection));
+                let e =
+                    anyhow::Error::from(e).context(format!("failed spawning {}", new_connection));
                 return Err(e);
             }
         }
@@ -225,7 +220,7 @@ impl Web3Connection {
         for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
             let mut head_block_num = new_connection.head_block.read().1;
 
-            // TODO: wait until head block is set outside the loop?
+            // TODO: wait until head block is set outside the loop? if we disconnect while starting we could actually get 0 though
             while head_block_num == U64::zero() {
                 info!(?new_connection, "no head block");
 
@@ -235,8 +230,9 @@ impl Web3Connection {
                 head_block_num = new_connection.head_block.read().1;
             }
 
+            // TODO: subtract 1 from block_data_limit for safety?
             let maybe_archive_block = head_block_num
-                .saturating_sub(block_data_limit.into())
+                .saturating_sub((block_data_limit).into())
                 .max(U64::one());
 
             let archive_result: Result<Bytes, _> = new_connection
