@@ -86,10 +86,13 @@ impl Serialize for Web3Connection {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Connection", 3)?;
+        let mut state = serializer.serialize_struct("Web3Connection", 4)?;
 
         // TODO: sanitize any credentials in the url
         state.serialize_field("url", &self.url)?;
+
+        let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
+        state.serialize_field("block_data_limit", &block_data_limit)?;
 
         state.serialize_field("soft_limit", &self.soft_limit)?;
 
@@ -120,6 +123,7 @@ impl fmt::Debug for Web3Connection {
 
 impl fmt::Display for Web3Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: filter basic auth and api keys
         write!(f, "{}", &self.url)
     }
 }
@@ -188,12 +192,11 @@ impl Web3Connection {
                         chain_id,
                         found_chain_id
                     )
-                    .context(format!("failed spawning {}", new_connection)));
+                    .context(format!("failed @ {}", new_connection)));
                 }
             }
             Err(e) => {
-                let e =
-                    anyhow::Error::from(e).context(format!("failed spawning {}", new_connection));
+                let e = anyhow::Error::from(e).context(format!("failed @ {}", new_connection));
                 return Err(e);
             }
         }

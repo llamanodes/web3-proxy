@@ -27,8 +27,8 @@ linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }
 notify = "4.0.17"
 num = "0.4.0"
 redis-cell-client = { path = "../redis-cell-client" }
-# TODO: parking_lot has an "arc_lock" feature that we might want to use
-parking_lot = "0.12.1"
+parking_lot = { version = "0.12.1", features = ["arc_lock"] }
+petgraph = "0.6.2"
 proctitle = "0.1.1"
 # TODO: regex has several "perf" features that we might want to use
 regex = "1.6.0"

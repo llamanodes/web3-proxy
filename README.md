@@ -28,11 +28,13 @@ Options:
   --help            display usage information
 ```
 
-Start the server with the defaults (listen on `http://localhost:8544` and use `./config/example.toml` which proxies to a local websocket on 8546 and ankr's public ETH node):
+Start the server with the defaults (listen on `http://localhost:8544` and use `./config/example.toml` which proxies to a bunch of public nodes:
 
 ```
-cargo run --release -p web3-proxy
+cargo run --release -p web3-proxy -- --config ./config/example.toml
 ```
+
+## Common commands
 
 Check that the proxy is working:
 
@@ -40,7 +42,21 @@ Check that the proxy is working:
 curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"web3_clientVersion","id":1}' 127.0.0.1:8544
 ```
 
-You can copy `config/example.toml` to `config/production-$CHAINNAME.toml` and then run `docker-compose up --build -d` start a proxies for many chains.
+Check that the websocket is working:
+
+```
+$ websocat ws://127.0.0.1:8544
+
+{"id": 1, "method": "eth_subscribe", "params": ["newHeads"]}
+
+{"id": 2, "method": "eth_subscribe", "params": ["newPendingTransactions"]}
+
+{"id": 3, "method": "eth_subscribe", "params": ["newPendingFullTransactions"]}
+
+{"id": 4, "method": "eth_subscribe", "params": ["newPendingRawTransactions"]}
+```
+
+You can copy `config/example.toml` to `config/production-$CHAINNAME.toml` and then run `docker-compose up --build -d` start proxies for many chains.
 
 ## Flame Graphs
 
@@ -67,15 +83,18 @@ Test the proxy:
     wrk -s ./data/wrk/getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8544
     wrk -s ./data/wrk/getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8544
 
-Test geth:
+Test geth (assuming it is on 8545):
 
     wrk -s ./data/wrk/getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8545
     wrk -s ./data/wrk/getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8545
 
-Test erigon:
+Test erigon (assuming it is on 8945):
 
     wrk -s ./data/wrk/getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8945
     wrk -s ./data/wrk/getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8945
 
-
 Note: Testing with `getLatestBlockByNumber.lua` is not great because the latest block changes and so one run is likely to be very different than another.
+
+Run ethspam for a more realistic load test:
+
+    docker run --rm --name spam shazow/ethspam --rpc http://$LOCAL_IP:8544 | versus --concurrency=100 --stop-after=10000 http://$LOCAL_IP:8544; docker stop spam

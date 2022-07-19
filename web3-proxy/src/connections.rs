@@ -9,6 +9,8 @@ use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
+// use parking_lot::RwLock;
+// use petgraph::graphmap::DiGraphMap;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
@@ -36,15 +38,14 @@ struct SyncedConnections {
     // TODO: this should be able to serialize, but it isn't
     #[serde(skip_serializing)]
     inner: BTreeSet<Arc<Web3Connection>>,
-    // TODO: use petgraph for keeping track of the chain so we can do better fork handling
 }
 
 impl fmt::Debug for SyncedConnections {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
         f.debug_struct("SyncedConnections")
-            .field("head_block_num", &self.head_block_num)
-            .field("head_block_hash", &self.head_block_hash)
+            .field("head_num", &self.head_block_num)
+            .field("head_hash", &self.head_block_hash)
             .finish_non_exhaustive()
     }
 }
@@ -65,6 +66,10 @@ pub struct Web3Connections {
     inner: Vec<Arc<Web3Connection>>,
     synced_connections: ArcSwap<SyncedConnections>,
     pending_transactions: Arc<DashMap<TxHash, TxState>>,
+    // TODO: i think chain is what we want, but i'm not sure how we'll use it yet
+    // TODO: this graph is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
+    // chain: Arc<RwLock<DiGraphMap<H256, Block<TxHash>>>>,
+    block_map: DashMap<u64, BTreeSet<H256>>,
 }
 
 impl Serialize for Web3Connections {
@@ -197,6 +202,7 @@ impl Web3Connections {
             inner: connections,
             synced_connections: ArcSwap::new(Arc::new(synced_connections)),
             pending_transactions,
+            block_map: Default::default(),
         });
 
         let handle = {
@@ -377,7 +383,13 @@ impl Web3Connections {
 
     pub async fn get_block_hash(&self, num: U64) -> anyhow::Result<H256> {
         // TODO: this definitely needs caching
-        warn!("this needs to be much more efficient");
+        // first, try to get the hash from petgraph. but how do we get all blocks with a given num and then pick the one on the correct chain?
+        if let Some(hash) = self.block_map.get(&num.as_u64()) {
+            // for now, just return the first seen block. we actually want the winning block!
+            return Ok(*hash.iter().next().unwrap());
+
+            unimplemented!("use petgraph to find the heaviest chain");
+        }
 
         // TODO: helper for this
         let request =
@@ -392,7 +404,11 @@ impl Web3Connections {
         let block = response.result.unwrap().to_string();
         let block: Block<TxHash> = serde_json::from_str(&block)?;
 
-        Ok(block.hash.unwrap())
+        let hash = block.hash.unwrap();
+
+        self.block_map.entry(num.as_u64()).or_default().insert(hash);
+
+        Ok(hash)
     }
 
     pub fn get_head_block_hash(&self) -> H256 {
@@ -478,6 +494,7 @@ impl Web3Connections {
         let mut connection_states: HashMap<Arc<Web3Connection>, _> =
             HashMap::with_capacity(total_rpcs);
 
+        // keep a pending one so that we can delay publishing a new head block until multiple servers are synced
         let mut pending_synced_connections = SyncedConnections::default();
 
         while let Ok((new_block, rpc)) = block_receiver.recv_async().await {
@@ -524,12 +541,18 @@ impl Web3Connections {
                     // TODO: if the parent hash isn't our previous best block, ignore it
                     pending_synced_connections.head_block_hash = new_block_hash;
 
+                    // TODO: wait to send this until we publish
                     head_block_sender
                         .send(new_block.clone())
                         .context("head_block_sender")?;
 
                     // TODO: mark all transactions as confirmed
                     // TODO: mark any orphaned transactions as unconfirmed
+
+                    self.block_map
+                        .entry(new_block_num)
+                        .or_default()
+                        .insert(new_block_hash);
                 }
                 cmp::Ordering::Equal => {
                     if new_block_hash == pending_synced_connections.head_block_hash {
@@ -540,6 +563,11 @@ impl Web3Connections {
                         pending_synced_connections.inner.insert(rpc);
                     } else {
                         // same height, but different chain
+
+                        self.block_map
+                            .entry(new_block_num)
+                            .or_default()
+                            .insert(new_block_hash);
 
                         // check connection_states to see which head block is more popular!
                         let mut rpc_ids_by_block: BTreeMap<H256, Vec<Arc<Web3Connection>>> =
@@ -596,23 +624,25 @@ impl Web3Connections {
                         // we didn't remove anything. nothing more to do
                         continue;
                     }
+
+                    // TODO: insert the hash if it isn't known?
+
                     // we removed. don't continue so that we update self.synced_connections
                 }
             }
 
             // the synced connections have changed
-            let synced_connections = Arc::new(pending_synced_connections.clone());
 
-            if synced_connections.inner.len() == total_rpcs {
+            if pending_synced_connections.inner.len() == total_rpcs {
                 // TODO: more metrics
                 trace!("all head: {}", new_block_hash);
+            } else {
+                trace!(
+                    "rpcs at {}: {:?}",
+                    pending_synced_connections.head_block_hash,
+                    pending_synced_connections.inner
+                );
             }
-
-            trace!(
-                "rpcs at {}: {:?}",
-                synced_connections.head_block_hash,
-                synced_connections.inner
-            );
 
             // TODO: what if the hashes don't match?
             if pending_synced_connections.head_block_hash == new_block_hash {
@@ -630,9 +660,10 @@ impl Web3Connections {
                 // TODO: mark any orphaned transactions as unconfirmed
             }
 
-            // TODO: only publish if there are x (default 2) nodes synced to this block?
+            // TODO: only publish if there are x (default 50%) nodes synced to this block?
             // TODO: do this before or after processing all the transactions in this block?
-            self.synced_connections.swap(synced_connections);
+            self.synced_connections
+                .swap(Arc::new(pending_synced_connections.clone()));
         }
 
         // TODO: if there was an error, we should return it
