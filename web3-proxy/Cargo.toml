@@ -15,14 +15,14 @@ arc-swap = "1.5.0"
 argh = "0.1.8"
 axum = { version = "0.5.13", features = ["serde_json", "tokio-tungstenite", "ws"] }
 axum-client-ip = "0.2.0"
-counter = "0.5.5"
+counter = "0.5.6"
 dashmap = "5.3.4"
 derive_more = "0.99.17"
 ethers = { git = "https://github.com/gakonst/ethers-rs", features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 flume = "0.10.13"
 futures = { version = "0.3.21", features = ["thread-pool"] }
-hashbrown = "0.12.2"
+hashbrown = "0.12.3"
 linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }
 notify = "4.0.17"
 num = "0.4.0"

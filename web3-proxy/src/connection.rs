@@ -1,7 +1,7 @@
 ///! Rate-limited communication with a web3 provider
 use anyhow::Context;
 use derive_more::From;
-use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash};
+use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
 use redis_cell_client::RedisCellClient;
@@ -9,7 +9,7 @@ use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{self, AtomicBool, AtomicU32};
+use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::RwLock;
@@ -81,7 +81,8 @@ pub struct Web3Connection {
     hard_limit: Option<redis_cell_client::RedisCellClient>,
     /// used for load balancing to the least loaded server
     soft_limit: u32,
-    archive: AtomicBool,
+    block_data_limit: AtomicU64,
+    head_block: parking_lot::RwLock<(H256, U64)>,
 }
 
 impl Serialize for Web3Connection {
@@ -107,10 +108,18 @@ impl Serialize for Web3Connection {
 }
 impl fmt::Debug for Web3Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Web3Connection")
-            .field("url", &self.url)
-            .field("archive", &self.is_archive())
-            .finish_non_exhaustive()
+        let mut f = f.debug_struct("Web3Connection");
+
+        f.field("url", &self.url);
+
+        let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
+        if block_data_limit == u64::MAX {
+            f.field("limit", &"archive");
+        } else {
+            f.field("limit", &block_data_limit);
+        }
+
+        f.finish_non_exhaustive()
     }
 }
 
@@ -123,6 +132,7 @@ impl fmt::Display for Web3Connection {
 impl Web3Connection {
     /// Connect to a web3 rpc
     // #[instrument(name = "spawn_Web3Connection", skip(hard_limit, http_client))]
+    // TODO: have this take a builder (which will have senders attached)
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         chain_id: usize,
@@ -157,13 +167,14 @@ impl Web3Connection {
             provider: RwLock::new(Some(Arc::new(provider))),
             hard_limit,
             soft_limit,
-            archive: Default::default(),
+            block_data_limit: Default::default(),
+            head_block: parking_lot::RwLock::new((H256::zero(), 0isize.into())),
         };
 
         let new_connection = Arc::new(new_connection);
 
         // check the server's chain_id here
-        // TODO: move this outside the `new` function and into a `start` function or something
+        // TODO: move this outside the `new` function and into a `start` function or something. that way we can do retries from there
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
         // TODO: this will wait forever. do we want that?
         let found_chain_id: Result<String, _> = new_connection
@@ -192,27 +203,8 @@ impl Web3Connection {
             }
         }
 
-        // we could take "archive" as a parameter, but we would want a safety check on it regardless
-        // just query something very old and if we get an error, we don't have archive data
-        let archive_result: Result<Bytes, _> = new_connection
-            .wait_for_request_handle()
-            .await
-            .request(
-                "eth_getCode",
-                ("0xdead00000000000000000000000000000000beef", "0x1"),
-            )
-            .await;
-
-        trace!(?archive_result, "{}", new_connection);
-
-        if archive_result.is_ok() {
-            new_connection
-                .archive
-                .store(true, atomic::Ordering::Relaxed);
-        }
-
-        info!(?new_connection, "success");
-
+        // subscribe to new blocks and new transactions
+        // TODO: make transaction subscription optional (just pass None for tx_id_sender)
         let handle = {
             let new_connection = new_connection.clone();
             tokio::spawn(async move {
@@ -222,11 +214,74 @@ impl Web3Connection {
             })
         };
 
+        // TODO: make sure the server isn't still syncing
+
+        // TODO: don't sleep. wait for new heads subscription instead
+        // TODO: i think instead of atomics, we could maybe use a watch channel
+        sleep(Duration::from_millis(100)).await;
+
+        // we could take "archive" as a parameter, but we would want a safety check on it regardless
+        // just query something very old and if we get an error, we don't have archive data
+        for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
+            let mut head_block_num = new_connection.head_block.read().1;
+
+            // TODO: wait until head block is set outside the loop?
+            while head_block_num == U64::zero() {
+                info!(?new_connection, "no head block");
+
+                // TODO: subscribe to a channel instead of polling? subscribe to http_interval_sender?
+                sleep(Duration::from_secs(1)).await;
+
+                head_block_num = new_connection.head_block.read().1;
+            }
+
+            let maybe_archive_block = head_block_num
+                .saturating_sub(block_data_limit.into())
+                .max(U64::one());
+
+            let archive_result: Result<Bytes, _> = new_connection
+                .wait_for_request_handle()
+                .await
+                .request(
+                    "eth_getCode",
+                    (
+                        "0xdead00000000000000000000000000000000beef",
+                        maybe_archive_block,
+                    ),
+                )
+                .await;
+
+            trace!(?archive_result, "{}", new_connection);
+
+            if archive_result.is_ok() {
+                new_connection
+                    .block_data_limit
+                    .store(block_data_limit, atomic::Ordering::Release);
+
+                break;
+            }
+        }
+
+        info!(?new_connection, "success");
+
         Ok((new_connection, handle))
     }
 
-    pub fn is_archive(&self) -> bool {
-        self.archive.load(atomic::Ordering::Relaxed)
+    /// TODO: this might be too simple. different nodes can prune differently
+    pub fn get_block_data_limit(&self) -> U64 {
+        self.block_data_limit.load(atomic::Ordering::Acquire).into()
+    }
+
+    pub fn has_block_data(&self, needed_block_num: U64) -> bool {
+        let block_data_limit: U64 = self.get_block_data_limit();
+
+        let newest_block_num = self.head_block.read().1;
+
+        let oldest_block_num = newest_block_num
+            .saturating_sub(block_data_limit)
+            .max(U64::one());
+
+        needed_block_num >= oldest_block_num && needed_block_num <= newest_block_num
     }
 
     #[instrument(skip_all)]
@@ -237,7 +292,10 @@ impl Web3Connection {
         // websocket doesn't need the http client
         let http_client = None;
 
+        info!(?self, "reconnecting");
+
         // since this lock is held open over an await, we use tokio's locking
+        // TODO: timeout on this lock. if its slow, something is wrong
         let mut provider = self.provider.write().await;
 
         *provider = None;
@@ -281,7 +339,15 @@ impl Web3Connection {
     ) -> anyhow::Result<()> {
         match block {
             Ok(block) => {
-                // TODO: i'm pretty sure we don't need send_async, but double check
+                {
+                    let hash = block.hash.unwrap();
+                    let num = block.number.unwrap();
+
+                    let mut head_block = self.head_block.write();
+
+                    *head_block = (hash, num);
+                }
+
                 block_sender
                     .send_async((block, self.clone()))
                     .await
@@ -376,19 +442,9 @@ impl Web3Connection {
 
                     let mut http_interval_receiver = http_interval_receiver.unwrap();
 
-                    let mut last_hash = Default::default();
+                    let mut last_hash = H256::zero();
 
                     loop {
-                        // wait for the interval
-                        // TODO: if error or rate limit, increase interval?
-                        while let Err(err) = http_interval_receiver.recv().await {
-                            // TODO: if recverror is not Lagged, exit?
-                            // querying the block was delayed. this can happen if tokio was busy.
-                            warn!(?err, ?self, "http interval lagging!");
-                        }
-
-                        trace!(?self, "ok http interval");
-
                         match self.try_request_handle().await {
                             Ok(active_request_handle) => {
                                 // TODO: i feel like this should be easier. there is a provider.getBlock, but i don't know how to give it "latest"
@@ -413,6 +469,22 @@ impl Web3Connection {
                                 warn!(?err, "Rate limited on latest block from {}", self);
                             }
                         }
+
+                        // wait for the interval
+                        // TODO: if error or rate limit, increase interval?
+                        while let Err(err) = http_interval_receiver.recv().await {
+                            match err {
+                                broadcast::error::RecvError::Closed => {
+                                    return Err(err.into());
+                                }
+                                broadcast::error::RecvError::Lagged(lagged) => {
+                                    // querying the block was delayed. this can happen if tokio is very busy.
+                                    warn!(?err, ?self, "http interval lagging by {}!", lagged);
+                                }
+                            }
+                        }
+
+                        trace!(?self, "ok http interval");
                     }
                 }
                 Web3Provider::Ws(provider) => {

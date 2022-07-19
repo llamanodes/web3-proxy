@@ -4,13 +4,14 @@ use arc_swap::ArcSwap;
 use counter::Counter;
 use dashmap::DashMap;
 use derive_more::From;
-use ethers::prelude::{Block, ProviderError, Transaction, TxHash, H256};
+use ethers::prelude::{Block, ProviderError, Transaction, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
+use serde_json::json;
 use serde_json::value::RawValue;
 use std::cmp;
 use std::collections::{BTreeMap, BTreeSet};
@@ -357,6 +358,26 @@ impl Web3Connections {
         self.synced_connections.load().get_head_block_num()
     }
 
+    pub async fn get_block_hash(&self, num: U64) -> anyhow::Result<H256> {
+        // TODO: this definitely needs caching
+        warn!("this needs to be much more efficient");
+
+        // TODO: helper for this
+        let request =
+            json!({ "id": "1", "method": "eth_getBlockByNumber", "params": (num, false) });
+        let request: JsonRpcRequest = serde_json::from_value(request)?;
+
+        // TODO: if error, retry
+        let response = self
+            .try_send_best_upstream_server(request, Some(num))
+            .await?;
+
+        let block = response.result.unwrap().to_string();
+        let block: Block<TxHash> = serde_json::from_str(&block)?;
+
+        Ok(block.hash.unwrap())
+    }
+
     pub fn get_head_block_hash(&self) -> H256 {
         *self.synced_connections.load().get_head_block_hash()
     }
@@ -608,29 +629,31 @@ impl Web3Connections {
     pub async fn next_upstream_server(
         &self,
         skip: &[Arc<Web3Connection>],
-        archive_needed: bool,
+        min_block_needed: Option<U64>,
     ) -> Result<ActiveRequestHandle, Option<Duration>> {
         let mut earliest_retry_after = None;
 
         // filter the synced rpcs
-        let mut synced_rpcs: Vec<Arc<Web3Connection>> = if archive_needed {
-            // TODO: this includes ALL archive servers. but we only want them if they are on a somewhat recent block
-            // TODO: maybe instead of "archive_needed" bool it should be the minimum height. then even delayed servers might be fine. will need to track all heights then
-            self.inner
-                .iter()
-                .filter(|x| x.is_archive())
-                .filter(|x| !skip.contains(x))
-                .cloned()
-                .collect()
-        } else {
-            self.synced_connections
-                .load()
-                .inner
-                .iter()
-                .filter(|x| !skip.contains(x))
-                .cloned()
-                .collect()
-        };
+        // TODO: we are going to be checking "has_block_data" a lot now. i think we pretty much always have min_block_needed now that we override "latest"
+        let mut synced_rpcs: Vec<Arc<Web3Connection>> =
+            if let Some(min_block_needed) = min_block_needed {
+                // TODO: this includes ALL archive servers. but we only want them if they are on a somewhat recent block
+                // TODO: maybe instead of "archive_needed" bool it should be the minimum height. then even delayed servers might be fine. will need to track all heights then
+                self.inner
+                    .iter()
+                    .filter(|x| x.has_block_data(min_block_needed))
+                    .filter(|x| !skip.contains(x))
+                    .cloned()
+                    .collect()
+            } else {
+                self.synced_connections
+                    .load()
+                    .inner
+                    .iter()
+                    .filter(|x| !skip.contains(x))
+                    .cloned()
+                    .collect()
+            };
 
         if synced_rpcs.is_empty() {
             return Err(None);
@@ -639,13 +662,15 @@ impl Web3Connections {
         let sort_cache: HashMap<_, _> = synced_rpcs
             .iter()
             .map(|rpc| {
+                // TODO: get active requests and the soft limit out of redis?
                 let active_requests = rpc.active_requests();
                 let soft_limit = rpc.soft_limit();
-                let is_archive = rpc.is_archive();
+                let block_data_limit = rpc.get_block_data_limit();
 
                 let utilization = active_requests as f32 / soft_limit as f32;
 
-                (rpc.clone(), (is_archive, utilization, soft_limit))
+                // TODO: double check this sorts how we want
+                (rpc.clone(), (block_data_limit, utilization, soft_limit))
             })
             .collect();
 
@@ -681,15 +706,17 @@ impl Web3Connections {
     /// returns servers even if they aren't in sync. This is useful for broadcasting signed transactions
     pub async fn get_upstream_servers(
         &self,
-        archive_needed: bool,
+        min_block_needed: Option<U64>,
     ) -> Result<Vec<ActiveRequestHandle>, Option<Duration>> {
         let mut earliest_retry_after = None;
         // TODO: with capacity?
         let mut selected_rpcs = vec![];
 
         for connection in self.inner.iter() {
-            if archive_needed && !connection.is_archive() {
-                continue;
+            if let Some(min_block_needed) = min_block_needed {
+                if !connection.has_block_data(min_block_needed) {
+                    continue;
+                }
             }
 
             // check rate limits and increment our connection counter
@@ -714,7 +741,7 @@ impl Web3Connections {
     pub async fn try_send_best_upstream_server(
         &self,
         request: JsonRpcRequest,
-        archive_needed: bool,
+        min_block_needed: Option<U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         let mut skip_rpcs = vec![];
 
@@ -723,7 +750,10 @@ impl Web3Connections {
             if skip_rpcs.len() == self.inner.len() {
                 break;
             }
-            match self.next_upstream_server(&skip_rpcs, archive_needed).await {
+            match self
+                .next_upstream_server(&skip_rpcs, min_block_needed)
+                .await
+            {
                 Ok(active_request_handle) => {
                     // save the rpc in case we get an error and want to retry on another server
                     skip_rpcs.push(active_request_handle.clone_connection());
@@ -807,10 +837,10 @@ impl Web3Connections {
     pub async fn try_send_all_upstream_servers(
         &self,
         request: JsonRpcRequest,
-        archive_needed: bool,
+        min_block_needed: Option<U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
-            match self.get_upstream_servers(archive_needed).await {
+            match self.get_upstream_servers(min_block_needed).await {
                 Ok(active_request_handles) => {
                     // TODO: benchmark this compared to waiting on unbounded futures
                     // TODO: do something with this handle?
@@ -864,7 +894,7 @@ mod tests {
     fn test_false_before_true() {
         let mut x = [true, false, true];
 
-        x.sort();
+        x.sort_unstable();
 
         assert_eq!(x, [false, true, true])
     }
