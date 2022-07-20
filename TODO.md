@@ -39,8 +39,8 @@
 - [x] automatically route to archive server when necessary
   - originally, no processing was done to params; they were just serde_json::RawValue. this is probably fastest, but we need to look for "latest" and count elements, so we have to use serde_json::Value
   - when getting the next server, filtering on "archive" isn't going to work well. need to check inner instead
-  - [ ] this works well for local servers, but public nodes seem to give unreliable results. likely because of load balancers. maybe have a "max block data limit"
-- [ ] if the requested block is ahead of the best block, return without querying any backend servers
+  - [ ] this works well for local servers, but public nodes (especially on other chains) seem to give unreliable results. likely because of load balancers. maybe have a "max block data limit"
+- [x] if the requested block is ahead of the best block, return without querying any backend servers
 - [ ] basic request method stats
 - [x] http servers should check block at the very start
 - [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
@@ -53,6 +53,7 @@
   - create the app without applying any config to it
   - have a blocking future watching the config file and calling app.apply_config() on first load and on change
   - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
+- [ ] have a "backup" tier that is only used when the primary tier has no servers or is multiple blocks behind. we don't want the backup tier taking over with the head block if they happen to be fast at that (but overall low/expensive rps). only if the primary tier has fallen behind or gone entirely offline should we go to third parties
 - [ ] most things that are cached locally should probably be in shared redis caches
 - [ ] stats when forks are resolved (and what chain they were on?)
 - [ ] incoming rate limiting (by api key)
@@ -76,6 +77,7 @@
 - [ ] don't "unwrap" anywhere. give proper errors
 
 new endpoints for users:
+- think about where to put this. a separate app might be better, especially so we don't get cloned too easily. open source code could just have a cli tool for managing users
 - [ ] GET /user/login/$address
   - returns a JSON string for the user to sign
 - [ ] POST /user/login/$address
@@ -109,11 +111,7 @@ in another repo: event subscriber
 
 - [ ] automated soft limit
   - look at average request time for getBlock? i'm not sure how good a proxy that will be for serving eth_call, but its a start
-- [ ] add a subscription that returns the head block number and hash but nothing else
-- [ ] interval for http subscriptions should be based on block time. load from config is easy, but better to query
-- [ ] ethers has a transactions_unsorted httprpc method that we should probably use. all rpcs probably don't support it, so make it okay for that to fail
-- [ ] if chain split detected, don't send transactions?
-- [ ] have a "backup" tier that is only used when the primary tier has no servers or is multiple blocks behind. we don't want the backup tier taking over with the head block if they happen to be fast at that (but overall low/expensive rps). only if the primary tier has fallen behind or gone entirely offline should we go to third parties
+- [ ] interval for http subscriptions should be based on block time. load from config is easy, but better to query. currently hard coded to 13 seconds
 - [ ] more advanced automated soft limit
   - measure average latency of a node's responses and load balance on that
 
@@ -141,3 +139,5 @@ in another repo: event subscriber
 - [x] document load tests: docker run --rm --name spam shazow/ethspam --rpc http://$LOCAL_IP:8544 | versus --concurrency=100 --stop-after=10000 http://$LOCAL_IP:8544; docker stop spam
 - [ ] if the call is something simple like "symbol" or "decimals", cache that too. though i think this could bite us.
 - [ ] Got warning: "WARN subscribe_new_heads:send_block: web3_proxy::connection: unable to get block from https://rpc.ethermine.org: Deserialization Error: expected value at line 1 column 1. Response: error code: 1015". this is cloudflare rate limiting on fetching a block, but this is a private rpc. why is there a block subscription?
+- [ ] add a subscription that returns the head block number and hash but nothing else
+- [ ] if chain split detected, what should we do? don't send transactions?

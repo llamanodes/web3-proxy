@@ -377,13 +377,9 @@ impl Web3Connections {
         Ok(())
     }
 
-    pub fn get_head_block_num(&self) -> u64 {
-        self.synced_connections.load().get_head_block_num()
-    }
-
     pub async fn get_block_hash(&self, num: U64) -> anyhow::Result<H256> {
-        // TODO: this definitely needs caching
-        // first, try to get the hash from petgraph. but how do we get all blocks with a given num and then pick the one on the correct chain?
+        // first, try to get the hash from our cache
+        // TODO: move this cache to redis?
         if let Some(hash) = self.block_map.get(&num.as_u64()) {
             // for now, just return the first seen block. we actually want the winning block!
             return Ok(*hash.iter().next().unwrap());
@@ -391,17 +387,28 @@ impl Web3Connections {
             unimplemented!("use petgraph to find the heaviest chain");
         }
 
-        // TODO: helper for this
+        let head_block_num = self.get_head_block_num();
+
+        if num.as_u64() > head_block_num {
+            return Err(anyhow::anyhow!(
+                "Head block is #{}, but #{} was requested",
+                head_block_num,
+                num
+            ));
+        }
+
+        // TODO: helper for method+params => JsonRpcRequest
         let request =
             json!({ "id": "1", "method": "eth_getBlockByNumber", "params": (num, false) });
         let request: JsonRpcRequest = serde_json::from_value(request)?;
 
-        // TODO: if error, retry
+        // TODO: if error, retry?
         let response = self
             .try_send_best_upstream_server(request, Some(num))
             .await?;
 
         let block = response.result.unwrap().to_string();
+
         let block: Block<TxHash> = serde_json::from_str(&block)?;
 
         let hash = block.hash.unwrap();
@@ -411,12 +418,28 @@ impl Web3Connections {
         Ok(hash)
     }
 
+    pub fn get_head_block(&self) -> (u64, H256) {
+        let synced_connections = self.synced_connections.load();
+
+        let num = synced_connections.get_head_block_num();
+        let hash = *synced_connections.get_head_block_hash();
+
+        (num, hash)
+    }
+
     pub fn get_head_block_hash(&self) -> H256 {
         *self.synced_connections.load().get_head_block_hash()
     }
 
+    pub fn get_head_block_num(&self) -> u64 {
+        self.synced_connections.load().get_head_block_num()
+    }
+
     pub fn has_synced_rpcs(&self) -> bool {
-        !self.synced_connections.load().inner.is_empty()
+        if self.synced_connections.load().inner.is_empty() {
+            return false;
+        }
+        self.get_head_block_num() > 0
     }
 
     pub fn num_synced_rpcs(&self) -> usize {

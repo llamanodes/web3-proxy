@@ -126,7 +126,7 @@ fn get_or_set_block_number(
     }
 }
 
-// TODO: change this to return the height needed (OR hash if recent)
+// TODO: change this to return also return the hash needed
 fn get_min_block_needed(
     method: &str,
     params: Option<&mut serde_json::Value>,
@@ -682,7 +682,7 @@ impl Web3ProxyApp {
 
     async fn get_cached_response(
         &self,
-        // TODO: accept a block hash here also
+        // TODO: accept a block hash here also?
         min_block_needed: Option<U64>,
         request: &JsonRpcRequest,
     ) -> anyhow::Result<(
@@ -693,10 +693,10 @@ impl Web3ProxyApp {
         // TODO: https://github.com/ethereum/web3.py/blob/master/web3/middleware/cache.py
 
         let request_block_hash = if let Some(min_block_needed) = min_block_needed {
-            let block_result = self.balanced_rpcs.get_block_hash(min_block_needed).await;
-
-            block_result?
+            // TODO: maybe this should be on the app and not on balanced_rpcs
+            self.balanced_rpcs.get_block_hash(min_block_needed).await?
         } else {
+            // TODO: maybe this should be on the app and not on balanced_rpcs
             self.balanced_rpcs.get_head_block_hash()
         };
 
