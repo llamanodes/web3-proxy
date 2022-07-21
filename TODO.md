@@ -64,6 +64,8 @@
 - [x] eth_blockNumber without a backend request
 - [x] if we send a transaction to private rpcs and then people query it on public rpcs things, some interfaces might think the transaction is dropped (i saw this happen in a brownie script of mine). how should we handle this?
   - [x] send getTransaction rpc requests to the private rpc tier
+- [x] I'm hitting infura rate limits very quickly. I feel like that means something is very inefficient
+  - whenever blocks were slow, we started checking as fast as possible
 - [ ] eth_getBlockByNumber and similar calls served from the block map
 - [ ] incoming rate limiting by api key
 - [ ] refactor so configs can change while running
@@ -84,6 +86,13 @@
   - this is part done, but we need to pick a database schema to check
 - [ ] cli for creating and editing api keys
 - [ ] cli for blocking malicious contracts with the firewall
+- [ ] Api keys need option to lock to IP, cors header, etc
+- [ ] Only subscribe to transactions when someone is listening and if the server has opted in to it
+- [ ] When sending eth_sendRawTransaction, retry errors
+- [ ] I think block limit should default to 1 or error if its still at 0 after archive checks
+  - [ ] Public bsc server got “0” for block data limit (ninicoin)
+- [ ] If we need an archive server and no servers in sync, exit immediately with an error instead of waiting 60 seconds
+- [ ] 60 second timeout is too short. Maybe do that for free tier and larger timeout for paid. Problem is that some queries can take over 1000 seconds
 
 new endpoints for users:
 - think about where to put this. a separate app might be better. this repo could just have a cli tool for managing users
@@ -118,11 +127,11 @@ new endpoints for users:
 - [ ] most things that are cached locally should probably be in shared redis caches
 - [ ] automated soft limit
   - look at average request time for getBlock? i'm not sure how good a proxy that will be for serving eth_call, but its a start
+  - https://crates.io/crates/histogram-sampler
 - [ ] interval for http subscriptions should be based on block time. load from config is easy, but better to query. currently hard coded to 13 seconds
-- [ ] more advanced automated soft limit
-  - measure average latency of a node's responses and load balance on that
 - [ ] improve transaction firewall
 - [ ] handle user payments
+- [ ] Load testing script so we can find optimal cost servers 
 
 in another repo: event subscriber
   - [ ] watch for transfer events to our contract and submit them to /payment/$tx_hash
@@ -137,6 +146,7 @@ in another repo: event subscriber
   - this doubles our request load though. maybe only if the first one doesn't respond very quickly? 
 - [ ] zero downtime deploys
 - [ ] graceful shutdown. stop taking new requests and don't stop until all outstanding queries are handled
+  - https://github.com/tokio-rs/mini-redis/blob/master/src/shutdown.rs
 - [ ] are we using Acquire/Release/AcqRel properly? or do we need other modes?
 - [ ] use https://github.com/ledgerwatch/interfaces to talk to erigon directly instead of through erigon's rpcdaemon (possible example code which uses ledgerwatch/interfaces: https://github.com/akula-bft/akula/tree/master)
 - [ ] subscribe to pending transactions and build an intelligent gas estimator
@@ -152,3 +162,11 @@ in another repo: event subscriber
 - [ ] add a subscription that returns the head block number and hash but nothing else
 - [ ] if chain split detected, what should we do? don't send transactions?
 - [ ] archive check works well for local servers, but public nodes (especially on other chains) seem to give unreliable results. likely because of load balancers. maybe have a "max block data limit"
+- [ ] https://docs.rs/derive_builder/latest/derive_builder/
+- [ ] Detect orphaned transactions
+- [ ] https://crates.io/crates/reqwest-middleware easy retry with exponential back off
+  - Though I think we want retries that go to other backends instead
+- [ ] Some of the pub things should probably be "pub(crate)"
+- [ ] Maybe storing pending txs on receipt in a dashmap is wrong. We want to store in a timer_heap (or similar) when we actually send. This way there's no lock contention until the race is over.
+- [ ] Support "safe" block height. It's planned for eth2 but we can kind of do it now but just doing head block num-3
+- [ ] Archive check on BSC gave “archive” when it isn’t. and FTM gave 90k for all servers even though they should be archive
