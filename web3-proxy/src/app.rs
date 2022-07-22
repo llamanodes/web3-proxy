@@ -714,13 +714,13 @@ impl Web3ProxyApp {
 
         if let Some(response) = self.response_cache.read().get(&key) {
             // TODO: emit a stat
-            debug!(?request.method, "cache hit!");
+            trace!(?request.method, "cache hit!");
 
             // TODO: can we make references work? maybe put them in an Arc?
             return Ok((key, Ok(response.to_owned())));
         } else {
             // TODO: emit a stat
-            debug!(?request.method, "cache miss!");
+            trace!(?request.method, "cache miss!");
         }
 
         // TODO: multiple caches. if head_block_hash is None, have a persistent cache (disk backed?)
