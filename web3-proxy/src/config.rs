@@ -1,7 +1,8 @@
 use argh::FromArgs;
+use derive_more::Constructor;
 use ethers::prelude::{Block, TxHash};
+use hashbrown::HashMap;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -55,7 +56,7 @@ fn default_response_cache_max_bytes() -> usize {
     10_usize.pow(8)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Constructor)]
 pub struct Web3ConnectionConfig {
     url: String,
     soft_limit: u32,

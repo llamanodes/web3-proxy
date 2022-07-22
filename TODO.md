@@ -51,13 +51,11 @@
   - i think now that we retry header not found and similar, caching errors should be fine
 - [x] RESPONSE_CACHE_CAP from config
 - [x] web3_sha3 rpc command
+- [ ] test that launches anvil and connects the proxy to it
 - [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
   - thundering herd problem if we only allow a lag of 0 blocks
   - we can improve this by only `publish`ing the sorted list once a threshold of total available soft and hard limits is passed. how can we do this without hammering redis? at least its only once per block per server
 - [ ] basic request method stats
-- [ ] fully test retrying when "header not found"
-  - i saw "header not found" on a simple eth_getCode query to a public load balanced bsc archive node on block 1
-- [ ] test that launches anvil and connects the proxy to it
 - [ ] nice output when cargo doc is run
 
 ## V1
@@ -178,3 +176,5 @@ in another repo: event subscriber
 - [ ] Archive check on BSC gave “archive” when it isn’t. and FTM gave 90k for all servers even though they should be archive
 - [ ] cache eth_getLogs in a database?
 - [ ] stats for "read amplification". how many backend requests do we send compared to frontend requests we received?
+- [ ] fully test retrying when "header not found"
+  - i saw "header not found" on a simple eth_getCode query to a public load balanced bsc archive node on block 1

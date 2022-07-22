@@ -19,7 +19,7 @@ use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
 
-/// TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
+/// TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit <https://github.com/gakonst/ethers-rs/issues/592>
 #[derive(From)]
 pub enum Web3Provider {
     Http(ethers::providers::Provider<ethers::providers::Http>),

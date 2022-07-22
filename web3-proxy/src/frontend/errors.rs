@@ -10,7 +10,7 @@ pub async fn handler_404() -> impl IntoResponse {
 }
 
 /// handle errors by converting them into something that implements `IntoResponse`
-/// TODO: use this. i can't get https://docs.rs/axum/latest/axum/error_handling/index.html to work
+/// TODO: use this. i can't get <https://docs.rs/axum/latest/axum/error_handling/index.html> to work
 /// TODO: i think we want a custom result type instead. put the anyhow result inside. then `impl IntoResponse for CustomResult`
 pub async fn handle_anyhow_error(
     code: Option<StatusCode>,
