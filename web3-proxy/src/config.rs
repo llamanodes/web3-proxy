@@ -8,6 +8,8 @@ use tokio::sync::broadcast;
 use crate::app::AnyhowJoinHandle;
 use crate::connection::Web3Connection;
 
+pub type BlockAndRpc = (Arc<Block<TxHash>>, Arc<Web3Connection>);
+
 #[derive(Debug, FromArgs)]
 /// Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
 pub struct CliConfig {
@@ -58,7 +60,7 @@ impl Web3ConnectionConfig {
         chain_id: u64,
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Web3Connection>)>>,
+        block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Web3Connection>)>>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_rate_limit = self.hard_limit.map(|x| (x, redis_client_pool.unwrap()));

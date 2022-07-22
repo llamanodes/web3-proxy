@@ -8,7 +8,7 @@ edition = "2018"
 inline-more = [ "hashbrown" ]
 
 [dependencies]
-slab = "0.4.6"
+slab = "0.4.7"
 hashbrown = { version = "0.12.3", optional = true }
 
 [dev-dependencies]

@@ -20,9 +20,10 @@ dashmap = "5.3.4"
 derive_more = "0.99.17"
 ethers = { git = "https://github.com/gakonst/ethers-rs", features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
-flume = "0.10.13"
+flume = "0.10.14"
 futures = { version = "0.3.21", features = ["thread-pool"] }
 hashbrown = "0.12.3"
+indexmap = "1.9.1"
 linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }
 notify = "4.0.17"
 num = "0.4.0"
@@ -34,14 +35,14 @@ proctitle = "0.1.1"
 regex = "1.6.0"
 reqwest = { version = "0.11.11", default-features = false, features = ["json", "tokio-rustls"] }
 rustc-hash = "1.1.0"
-siwe = "0.3.0"
-serde = { version = "1.0.139", features = [] }
+siwe = "0.4.0"
+serde = { version = "1.0.140", features = [] }
 serde_json = { version = "1.0.82", default-features = false, features = ["alloc", "raw_value"] }
 tokio = { version = "1.20.0", features = ["full", "tracing"] }
 toml = "0.5.9"
 tracing = "0.1.35"
 # TODO: tracing-subscriber has serde and serde_json features that we might want to use
-tracing-subscriber = { version = "0.3.14", features = ["env-filter", "parking_lot"] }
+tracing-subscriber = { version = "0.3.15", features = ["env-filter", "parking_lot"] }
 url = "2.2.2"
 tower = "0.4.13"
 tokio-stream = { version = "0.1.9", features = ["sync"] }

@@ -140,13 +140,15 @@ fn get_min_block_needed(
         "eth_estimateGas" => 1,
         "eth_getBalance" => 1,
         "eth_getBlockByHash" => {
+            // TODO: double check that any node can serve this
             return None;
         }
         "eth_getBlockByNumber" => {
+            // TODO: double check that any node can serve this
             return None;
         }
         "eth_getBlockTransactionCountByHash" => {
-            // TODO: turn block hash into number and check. will need a linkedhashmap of recent hashes
+            // TODO: double check that any node can serve this
             return None;
         }
         "eth_getBlockTransactionCountByNumber" => 0,
@@ -254,7 +256,7 @@ pub struct Web3ProxyApp {
     response_cache: ResponseLrcCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
-    head_block_receiver: watch::Receiver<Block<TxHash>>,
+    head_block_receiver: watch::Receiver<Arc<Block<TxHash>>>,
     pending_tx_sender: broadcast::Sender<TxState>,
     pending_transactions: Arc<DashMap<TxHash, TxState>>,
     public_rate_limiter: Option<RedisCellClient>,
@@ -332,10 +334,11 @@ impl Web3ProxyApp {
             }
         };
 
-        let (head_block_sender, head_block_receiver) = watch::channel(Block::default());
+        let (head_block_sender, head_block_receiver) = watch::channel(Arc::new(Block::default()));
         // TODO: will one receiver lagging be okay? how big should this be?
         let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(16);
 
+        // TODO: this will grow unbounded!! add some expiration to this. and probably move to redis
         let pending_transactions = Arc::new(DashMap::new());
 
         // TODO: don't drop the pending_tx_receiver. instead, read it to mark transactions as "seen". once seen, we won't re-send them
@@ -457,7 +460,7 @@ impl Web3ProxyApp {
                             "method":"eth_subscription",
                             "params": {
                                 "subscription": subscription_id,
-                                "result": new_head,
+                                "result": new_head.as_ref(),
                             },
                         });
 
@@ -846,6 +849,9 @@ impl Web3ProxyApp {
             // TODO: eth_estimateGas using anvil?
             // TODO: eth_gasPrice that does awesome magic to predict the future
             // TODO: eth_getBlockByHash from caches
+            "eth_getBlockByHash" => {
+                unimplemented!("wip")
+            }
             // TODO: eth_getBlockByNumber from caches
             // TODO: eth_getBlockTransactionCountByHash from caches
             // TODO: eth_getBlockTransactionCountByNumber from caches

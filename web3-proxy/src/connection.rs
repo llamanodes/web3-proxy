@@ -17,6 +17,7 @@ use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
 use tracing::{error, info, instrument, trace, warn};
 
 use crate::app::{flatten_handle, AnyhowJoinHandle};
+use crate::config::BlockAndRpc;
 
 /// TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit https://github.com/gakonst/ethers-rs/issues/592
 #[derive(From)]
@@ -142,7 +143,7 @@ impl Web3Connection {
         hard_limit: Option<(u32, redis_cell_client::RedisClientPool)>,
         // TODO: think more about this type
         soft_limit: u32,
-        block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Self>)>>,
+        block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
@@ -286,7 +287,7 @@ impl Web3Connection {
     #[instrument(skip_all)]
     pub async fn reconnect(
         self: &Arc<Self>,
-        block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Self>)>>,
+        block_sender: Option<flume::Sender<BlockAndRpc>>,
     ) -> anyhow::Result<()> {
         // websocket doesn't need the http client
         let http_client = None;
@@ -302,7 +303,7 @@ impl Web3Connection {
         // tell the block subscriber that we are at 0
         if let Some(block_sender) = block_sender {
             block_sender
-                .send_async((Block::default(), self.clone()))
+                .send_async((Arc::new(Block::default()), self.clone()))
                 .await
                 .context("block_sender at 0")?;
         }
@@ -334,7 +335,7 @@ impl Web3Connection {
     async fn send_block_result(
         self: &Arc<Self>,
         block: Result<Block<TxHash>, ProviderError>,
-        block_sender: &flume::Sender<(Block<TxHash>, Arc<Self>)>,
+        block_sender: &flume::Sender<BlockAndRpc>,
     ) -> anyhow::Result<()> {
         match block {
             Ok(block) => {
@@ -348,7 +349,7 @@ impl Web3Connection {
                 }
 
                 block_sender
-                    .send_async((block, self.clone()))
+                    .send_async((Arc::new(block), self.clone()))
                     .await
                     .context("block_sender")?;
             }
@@ -363,7 +364,7 @@ impl Web3Connection {
     async fn subscribe(
         self: Arc<Self>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        block_sender: Option<flume::Sender<(Block<TxHash>, Arc<Self>)>>,
+        block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
     ) -> anyhow::Result<()> {
@@ -428,7 +429,7 @@ impl Web3Connection {
     async fn subscribe_new_heads(
         self: Arc<Self>,
         http_interval_receiver: Option<broadcast::Receiver<()>>,
-        block_sender: flume::Sender<(Block<TxHash>, Arc<Self>)>,
+        block_sender: flume::Sender<BlockAndRpc>,
     ) -> anyhow::Result<()> {
         info!("watching {}", self);
 
@@ -446,7 +447,6 @@ impl Web3Connection {
                     loop {
                         match self.try_request_handle().await {
                             Ok(active_request_handle) => {
-                                // TODO: i feel like this should be easier. there is a provider.getBlock, but i don't know how to give it "latest"
                                 let block: Result<Block<TxHash>, _> = active_request_handle
                                     .request("eth_getBlockByNumber", ("latest", false))
                                     .await;

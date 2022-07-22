@@ -9,6 +9,7 @@ use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
+use indexmap::{IndexMap, IndexSet};
 // use parking_lot::RwLock;
 // use petgraph::graphmap::DiGraphMap;
 use serde::ser::{SerializeStruct, Serializer};
@@ -16,7 +17,6 @@ use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::cmp;
-use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,8 +36,9 @@ struct SyncedConnections {
     head_block_num: u64,
     head_block_hash: H256,
     // TODO: this should be able to serialize, but it isn't
+    // TODO: use linkedhashmap?
     #[serde(skip_serializing)]
-    inner: BTreeSet<Arc<Web3Connection>>,
+    inner: IndexSet<Arc<Web3Connection>>,
 }
 
 impl fmt::Debug for SyncedConnections {
@@ -60,6 +61,48 @@ impl SyncedConnections {
     }
 }
 
+#[derive(Default)]
+pub struct BlockChain {
+    /// only includes blocks on the main chain.
+    chain_map: DashMap<U64, Arc<Block<TxHash>>>,
+    /// all blocks, including orphans
+    block_map: DashMap<H256, Arc<Block<TxHash>>>,
+    // TODO: petgraph?
+}
+
+impl BlockChain {
+    pub fn add_block(&self, block: Arc<Block<TxHash>>, cannonical: bool) {
+        let hash = block.hash.unwrap();
+
+        if cannonical {
+            let num = block.number.unwrap();
+
+            let entry = self.chain_map.entry(num);
+
+            let mut is_new = false;
+
+            entry.or_insert_with(|| {
+                is_new = true;
+                block.clone()
+            });
+
+            if !is_new {
+                return;
+            }
+        }
+
+        self.block_map.entry(hash).or_insert(block);
+    }
+
+    pub fn get_block(&self, num: &U64) -> Option<Arc<Block<TxHash>>> {
+        self.chain_map.get(num).map(|x| x.clone())
+    }
+
+    pub fn get_block_from_hash(&self, hash: &H256) -> Option<Arc<Block<TxHash>>> {
+        self.block_map.get(hash).map(|x| x.clone())
+    }
+}
+
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
 pub struct Web3Connections {
@@ -69,7 +112,7 @@ pub struct Web3Connections {
     // TODO: i think chain is what we want, but i'm not sure how we'll use it yet
     // TODO: this graph is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     // chain: Arc<RwLock<DiGraphMap<H256, Block<TxHash>>>>,
-    block_map: DashMap<u64, BTreeSet<H256>>,
+    chain: BlockChain,
 }
 
 impl Serialize for Web3Connections {
@@ -103,12 +146,13 @@ impl Web3Connections {
         server_configs: Vec<Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
         redis_client_pool: Option<redis_cell_client::RedisClientPool>,
-        head_block_sender: Option<watch::Sender<Block<TxHash>>>,
+        head_block_sender: Option<watch::Sender<Arc<Block<TxHash>>>>,
         pending_tx_sender: Option<broadcast::Sender<TxState>>,
         pending_transactions: Arc<DashMap<TxHash, TxState>>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
-        let (block_sender, block_receiver) = flume::unbounded();
+        let (block_sender, block_receiver) =
+            flume::unbounded::<(Arc<Block<H256>>, Arc<Web3Connection>)>();
 
         let http_interval_sender = if http_client.is_some() {
             let (sender, receiver) = broadcast::channel(1);
@@ -202,7 +246,7 @@ impl Web3Connections {
             inner: connections,
             synced_connections: ArcSwap::new(Arc::new(synced_connections)),
             pending_transactions,
-            block_map: Default::default(),
+            chain: Default::default(),
         });
 
         let handle = {
@@ -314,8 +358,8 @@ impl Web3Connections {
     async fn subscribe(
         self: Arc<Self>,
         pending_tx_id_receiver: flume::Receiver<(TxHash, Arc<Web3Connection>)>,
-        block_receiver: flume::Receiver<(Block<TxHash>, Arc<Web3Connection>)>,
-        head_block_sender: Option<watch::Sender<Block<TxHash>>>,
+        block_receiver: flume::Receiver<(Arc<Block<TxHash>>, Arc<Web3Connection>)>,
+        head_block_sender: Option<watch::Sender<Arc<Block<TxHash>>>>,
         pending_tx_sender: Option<broadcast::Sender<TxState>>,
     ) -> anyhow::Result<()> {
         let mut futures = vec![];
@@ -377,14 +421,11 @@ impl Web3Connections {
         Ok(())
     }
 
-    pub async fn get_block_hash(&self, num: U64) -> anyhow::Result<H256> {
-        // first, try to get the hash from our cache
-        // TODO: move this cache to redis?
-        if let Some(hash) = self.block_map.get(&num.as_u64()) {
+    pub async fn get_block(&self, num: U64) -> anyhow::Result<Arc<Block<TxHash>>> {
+        if let Some(block) = self.chain.get_block(&num) {
             // for now, just return the first seen block. we actually want the winning block!
-            return Ok(*hash.iter().next().unwrap());
-
-            unimplemented!("use petgraph to find the heaviest chain");
+            // TODO: don't clone
+            return Ok(block);
         }
 
         let head_block_num = self.get_head_block_num();
@@ -407,13 +448,23 @@ impl Web3Connections {
             .try_send_best_upstream_server(request, Some(num))
             .await?;
 
-        let block = response.result.unwrap().to_string();
+        let block = response.result.unwrap();
 
-        let block: Block<TxHash> = serde_json::from_str(&block)?;
+        let block: Block<TxHash> = serde_json::from_str(block.get())?;
+
+        let block = Arc::new(block);
+
+        self.chain.add_block(block.clone(), true);
+
+        Ok(block)
+    }
+
+    pub async fn get_block_hash(&self, num: U64) -> anyhow::Result<H256> {
+        // first, try to get the hash from our cache
+        // TODO: move this cache to redis?
+        let block = self.get_block(num).await?;
 
         let hash = block.hash.unwrap();
-
-        self.block_map.entry(num.as_u64()).or_default().insert(hash);
 
         Ok(hash)
     }
@@ -507,8 +558,8 @@ impl Web3Connections {
     // we don't instrument here because we put a span inside the while loop
     async fn update_synced_rpcs(
         &self,
-        block_receiver: flume::Receiver<(Block<TxHash>, Arc<Web3Connection>)>,
-        head_block_sender: watch::Sender<Block<TxHash>>,
+        block_receiver: flume::Receiver<(Arc<Block<TxHash>>, Arc<Web3Connection>)>,
+        head_block_sender: watch::Sender<Arc<Block<TxHash>>>,
         // TODO: use pending_tx_sender
         pending_tx_sender: Option<broadcast::Sender<TxState>>,
     ) -> anyhow::Result<()> {
@@ -546,6 +597,8 @@ impl Web3Connections {
                 warn!("still syncing");
             }
 
+            let mut new_head_block = false;
+
             connection_states.insert(rpc.clone(), (new_block_num, new_block_hash));
 
             // TODO: do something to update the synced blocks
@@ -572,10 +625,10 @@ impl Web3Connections {
                     // TODO: mark all transactions as confirmed
                     // TODO: mark any orphaned transactions as unconfirmed
 
-                    self.block_map
-                        .entry(new_block_num)
-                        .or_default()
-                        .insert(new_block_hash);
+                    // TODO: do not mark cannonical until a threshold of RPCs have this block!
+                    new_head_block = true;
+
+                    self.chain.add_block(new_block.clone(), new_head_block);
                 }
                 cmp::Ordering::Equal => {
                     if new_block_hash == pending_synced_connections.head_block_hash {
@@ -587,14 +640,10 @@ impl Web3Connections {
                     } else {
                         // same height, but different chain
 
-                        self.block_map
-                            .entry(new_block_num)
-                            .or_default()
-                            .insert(new_block_hash);
-
                         // check connection_states to see which head block is more popular!
-                        let mut rpc_ids_by_block: BTreeMap<H256, Vec<Arc<Web3Connection>>> =
-                            BTreeMap::new();
+                        // TODO: i don't think btreemap is what we want. i think we want indexmap or linkedhashmap
+                        let mut rpc_ids_by_block =
+                            IndexMap::<H256, Vec<Arc<Web3Connection>>>::new();
 
                         let mut counted_rpcs = 0;
 
@@ -630,11 +679,11 @@ impl Web3Connections {
                             most_common_head_hash
                         );
 
+                        self.chain
+                            .add_block(new_block.clone(), new_block_hash == most_common_head_hash);
+
                         // TODO: do this more efficiently?
                         if pending_synced_connections.head_block_hash != most_common_head_hash {
-                            head_block_sender
-                                .send(new_block.clone())
-                                .context("head_block_sender")?;
                             pending_synced_connections.head_block_hash = most_common_head_hash;
                         }
 
@@ -687,6 +736,15 @@ impl Web3Connections {
             // TODO: do this before or after processing all the transactions in this block?
             self.synced_connections
                 .swap(Arc::new(pending_synced_connections.clone()));
+
+            if new_head_block {
+                // TODO: this will need a refactor to only send once a minmum threshold has this block
+                // TODO: move this onto self.chain
+                // TODO: pending_synced_connections isn't published yet. which means fast queries using this block will fail
+                head_block_sender
+                    .send(new_block.clone())
+                    .context("head_block_sender")?;
+            }
         }
 
         // TODO: if there was an error, we should return it
