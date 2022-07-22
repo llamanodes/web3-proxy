@@ -14,7 +14,7 @@ use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::RwLock;
 use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
-use tracing::{error, info, instrument, trace, warn};
+use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
 
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
@@ -42,14 +42,13 @@ impl Web3Provider {
                 .interval(Duration::from_secs(13))
                 .into()
         } else if url_str.starts_with("ws") {
-            // TODO: wrapper automatically reconnect
-            let provider = ethers::providers::Ws::connect(url_str).await?;
+            let provider = ethers::providers::Ws::connect(url_str)
+                .instrument(info_span!("Web3Provider", url_str = url_str))
+                .await?;
 
             // TODO: dry this up (needs https://github.com/gakonst/ethers-rs/issues/592)
             // TODO: i don't think this interval matters
-            ethers::providers::Provider::new(provider)
-                .interval(Duration::from_secs(1))
-                .into()
+            ethers::providers::Provider::new(provider).into()
         } else {
             return Err(anyhow::anyhow!("only http and ws servers are supported"));
         };
@@ -272,7 +271,7 @@ impl Web3Connection {
         self.block_data_limit.load(atomic::Ordering::Acquire).into()
     }
 
-    pub fn has_block_data(&self, needed_block_num: U64) -> bool {
+    pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
         let block_data_limit: U64 = self.get_block_data_limit();
 
         let newest_block_num = self.head_block.read().1;
@@ -281,7 +280,7 @@ impl Web3Connection {
             .saturating_sub(block_data_limit)
             .max(U64::one());
 
-        needed_block_num >= oldest_block_num && needed_block_num <= newest_block_num
+        needed_block_num >= &oldest_block_num && needed_block_num <= &newest_block_num
     }
 
     #[instrument(skip_all)]
@@ -539,7 +538,7 @@ impl Web3Connection {
                         match self.try_request_handle().await {
                             Ok(active_request_handle) => {
                                 // TODO: check the filter
-                                unimplemented!("actually send a request");
+                                todo!("actually send a request");
                             }
                             Err(e) => {
                                 warn!("Failed getting latest block from {}: {:?}", self, e);
@@ -622,6 +621,7 @@ impl Web3Connection {
 
 impl Hash for Web3Connection {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        // TODO: this is wrong. we might have two connections to the same provider
         self.url.hash(state);
     }
 }

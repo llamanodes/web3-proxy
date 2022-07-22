@@ -1,6 +1,7 @@
 use axum::extract::ws::Message;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
+use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, BlockNumber, Bytes, Transaction, TxHash, H256, U64};
 use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
@@ -13,6 +14,7 @@ use redis_cell_client::bb8::ErrorSink;
 use redis_cell_client::{bb8, RedisCellClient, RedisConnectionManager};
 use serde_json::json;
 use std::fmt;
+use std::mem::size_of_val;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::{self, AtomicUsize};
@@ -22,7 +24,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{info, info_span, instrument, trace, warn, Instrument};
+use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
 
 use crate::bb8_helpers;
 use crate::config::AppConfig;
@@ -40,9 +42,6 @@ static APP_USER_AGENT: &str = concat!(
     "/",
     env!("CARGO_PKG_VERSION"),
 );
-
-// TODO: put this in config? what size should we do? probably should structure this to be a size in MB
-const RESPONSE_CACHE_CAP: usize = 1024;
 
 // block hash, method, params
 type CacheKey = (H256, String, Option<String>);
@@ -130,7 +129,7 @@ fn get_or_set_block_number(
 fn get_min_block_needed(
     method: &str,
     params: Option<&mut serde_json::Value>,
-    latest_block: U64,
+    head_block: U64,
 ) -> Option<U64> {
     let params = params?;
 
@@ -159,7 +158,7 @@ fn get_min_block_needed(
             if let Some(x) = obj.get_mut("fromBlock") {
                 let block_num: BlockNumber = serde_json::from_value(x.clone()).ok()?;
 
-                let (modified, block_num) = block_num_to_u64(block_num, latest_block);
+                let (modified, block_num) = block_num_to_u64(block_num, head_block);
 
                 if modified {
                     *x = serde_json::to_value(block_num).unwrap();
@@ -171,7 +170,7 @@ fn get_min_block_needed(
             if let Some(x) = obj.get_mut("toBlock") {
                 let block_num: BlockNumber = serde_json::from_value(x.clone()).ok()?;
 
-                let (modified, block_num) = block_num_to_u64(block_num, latest_block);
+                let (modified, block_num) = block_num_to_u64(block_num, head_block);
 
                 if modified {
                     *x = serde_json::to_value(block_num).unwrap();
@@ -183,7 +182,7 @@ fn get_min_block_needed(
             if let Some(x) = obj.get("blockHash") {
                 // TODO: check a linkedhashmap of recent hashes
                 // TODO: error if fromBlock or toBlock were set
-                unimplemented!("handle blockHash {}", x);
+                todo!("handle blockHash {}", x);
             }
 
             return None;
@@ -224,7 +223,7 @@ fn get_min_block_needed(
         }
     };
 
-    match get_or_set_block_number(params, block_param_id, latest_block) {
+    match get_or_set_block_number(params, block_param_id, head_block) {
         Ok(block) => Some(block),
         Err(err) => {
             // TODO: seems unlikely that we will get here
@@ -253,6 +252,8 @@ pub struct Web3ProxyApp {
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     private_rpcs: Arc<Web3Connections>,
     incoming_requests: ActiveRequestsMap,
+    /// bytes available to response_cache (it will be slightly larger than this)
+    response_cache_max_bytes: AtomicUsize,
     response_cache: ResponseLrcCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
@@ -308,7 +309,7 @@ impl Web3ProxyApp {
                 .build()?,
         );
 
-        let redis_client_pool = match app_config.shared.rate_limit_redis {
+        let redis_client_pool = match app_config.shared.redis_url {
             Some(redis_address) => {
                 info!("Connecting to redis on {}", redis_address);
 
@@ -406,6 +407,7 @@ impl Web3ProxyApp {
             balanced_rpcs,
             private_rpcs,
             incoming_requests: Default::default(),
+            response_cache_max_bytes: AtomicUsize::new(app_config.shared.response_cache_max_bytes),
             response_cache: Default::default(),
             head_block_receiver,
             pending_tx_sender,
@@ -608,7 +610,7 @@ impl Web3ProxyApp {
 
         // TODO: do something with subscription_join_handle?
 
-        let response = JsonRpcForwardedResponse::from_string(subscription_id, id);
+        let response = JsonRpcForwardedResponse::from_value(json!(subscription_id), id);
 
         // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?
 
@@ -627,19 +629,20 @@ impl Web3ProxyApp {
         &self.incoming_requests
     }
 
-    /// send the request to the approriate RPCs
-    /// TODO: dry this up
+    /// send the request or batch of requests to the approriate RPCs
     #[instrument(skip_all)]
     pub async fn proxy_web3_rpc(
         &self,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
-        // TODO: i don't always see this in the logs. why?
-        trace!("Received request: {:?}", request);
+        debug!(?request, "proxy_web3_rpc");
 
         // even though we have timeouts on the requests to our backend providers,
-        // we need a timeout for the incoming request so that delays from
-        let max_time = Duration::from_secs(60);
+        // we need a timeout for the incoming request so that retries don't run forever
+        // TODO: take this as an optional argument. per user max? expiration time instead of duration?
+        let max_time = Duration::from_secs(120);
+
+        // TODO: instrument this with a unique id
 
         let response = match request {
             JsonRpcRequestEnum::Single(request) => JsonRpcForwardedResponseEnum::Single(
@@ -650,8 +653,7 @@ impl Web3ProxyApp {
             ),
         };
 
-        // TODO: i don't always see this in the logs. why?
-        trace!("Forwarding response: {:?}", response);
+        debug!(?response, "Forwarding response");
 
         Ok(response)
     }
@@ -686,7 +688,7 @@ impl Web3ProxyApp {
     async fn get_cached_response(
         &self,
         // TODO: accept a block hash here also?
-        min_block_needed: Option<U64>,
+        min_block_needed: Option<&U64>,
         request: &JsonRpcRequest,
     ) -> anyhow::Result<(
         CacheKey,
@@ -712,13 +714,13 @@ impl Web3ProxyApp {
 
         if let Some(response) = self.response_cache.read().get(&key) {
             // TODO: emit a stat
-            trace!(?request.method, "cache hit!");
+            debug!(?request.method, "cache hit!");
 
             // TODO: can we make references work? maybe put them in an Arc?
             return Ok((key, Ok(response.to_owned())));
         } else {
             // TODO: emit a stat
-            trace!(?request.method, "cache miss!");
+            debug!(?request.method, "cache miss!");
         }
 
         // TODO: multiple caches. if head_block_hash is None, have a persistent cache (disk backed?)
@@ -741,7 +743,8 @@ impl Web3ProxyApp {
         // // TODO: add more to this span such as
         let span = info_span!("rpc_request");
         // let _enter = span.enter(); // DO NOT ENTER! we can't use enter across awaits! (clippy lint soon)
-        match request.method.as_ref() {
+
+        let partial_response: serde_json::Value = match request.method.as_ref() {
             // lots of commands are blocked
             "admin_addPeer"
             | "admin_datadir"
@@ -807,7 +810,7 @@ impl Web3ProxyApp {
             | "shh_uninstallFilter"
             | "shh_version" => {
                 // TODO: proper error code
-                Err(anyhow::anyhow!("unsupported"))
+                return Err(anyhow::anyhow!("unsupported"));
             }
             // TODO: implement these commands
             "eth_getFilterChanges"
@@ -815,66 +818,39 @@ impl Web3ProxyApp {
             | "eth_newBlockFilter"
             | "eth_newFilter"
             | "eth_newPendingTransactionFilter"
-            | "eth_uninstallFilter" => Err(anyhow::anyhow!("not yet implemented")),
+            | "eth_uninstallFilter" => return Err(anyhow::anyhow!("not yet implemented")),
             // some commands can use local data or caches
-            "eth_accounts" => {
-                let partial_response = serde_json::Value::Array(vec![]);
-
-                let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
-
-                Ok(response)
-            }
+            "eth_accounts" => serde_json::Value::Array(vec![]),
             "eth_blockNumber" => {
                 let head_block_number = self.balanced_rpcs.get_head_block_num();
 
-                if head_block_number == 0 {
+                if head_block_number.as_u64() == 0 {
                     return Err(anyhow::anyhow!("no servers synced"));
                 }
 
-                let response = JsonRpcForwardedResponse::from_number(head_block_number, request.id);
-
-                Ok(response)
+                json!(head_block_number)
             }
             // TODO: eth_callBundle (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_callbundle)
             // TODO: eth_cancelPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_cancelprivatetransaction, but maybe just reject)
             // TODO: eth_sendPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_sendprivatetransaction)
             "eth_coinbase" => {
-                // no need for serving coinbase. we could return a per-user payment address here, but then we might leak that to dapps
-                let partial_response = json!(Address::zero());
-
-                let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
-
-                Ok(response)
+                // no need for serving coinbase
+                // we could return a per-user payment address here, but then we might leak that to dapps
+                json!(Address::zero())
             }
             // TODO: eth_estimateGas using anvil?
             // TODO: eth_gasPrice that does awesome magic to predict the future
-            // TODO: eth_getBlockByHash from caches
-            "eth_getBlockByHash" => {
-                unimplemented!("wip")
-            }
-            // TODO: eth_getBlockByNumber from caches
-            // TODO: eth_getBlockTransactionCountByHash from caches
-            // TODO: eth_getBlockTransactionCountByNumber from caches
-            // TODO: eth_getUncleCountByBlockHash from caches
-            // TODO: eth_getUncleCountByBlockNumber from caches
             "eth_hashrate" => {
-                let partial_response = json!("0x0");
-
-                let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
-
-                Ok(response)
+                json!(U64::zero())
             }
             "eth_mining" => {
-                let partial_response = json!(false);
-
-                let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
-
-                Ok(response)
+                json!(false)
             }
             // TODO: eth_sendBundle (flashbots command)
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => match &request.params {
                 Some(serde_json::Value::Array(params)) => {
+                    // parsing params like this is gross. make struct and use serde to do all these checks and error handling
                     if params.len() != 1 || !params[0].is_string() {
                         return Err(anyhow::anyhow!("invalid request"));
                     }
@@ -882,59 +858,56 @@ impl Web3ProxyApp {
                     let raw_tx = Bytes::from_str(params[0].as_str().unwrap())?;
 
                     if check_firewall_raw(&raw_tx).await? {
-                        self.private_rpcs
+                        return self
+                            .private_rpcs
                             .try_send_all_upstream_servers(request, None)
                             .instrument(span)
-                            .await
+                            .await;
                     } else {
-                        Err(anyhow::anyhow!("transaction blocked by firewall"))
+                        return Err(anyhow::anyhow!("transaction blocked by firewall"));
                     }
                 }
-                _ => Err(anyhow::anyhow!("invalid request")),
+                _ => return Err(anyhow::anyhow!("invalid request")),
             },
             "eth_syncing" => {
                 // TODO: return a real response if all backends are syncing or if no servers in sync
-                let partial_response = json!(false);
-
-                let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
-
-                Ok(response)
+                json!(false)
             }
             "net_listening" => {
                 // TODO: only if there are some backends on balanced_rpcs?
-                let partial_response = json!(true);
-
-                let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
-
-                Ok(response)
+                json!(true)
             }
-            "net_peerCount" => {
-                let response = JsonRpcForwardedResponse::from_number(
-                    self.balanced_rpcs.num_synced_rpcs(),
-                    request.id,
-                );
+            "net_peerCount" => self.balanced_rpcs.num_synced_rpcs().into(),
+            "web3_clientVersion" => serde_json::Value::String(APP_USER_AGENT.to_string()),
+            "web3_sha3" => {
+                // returns Keccak-256 (not the standardized SHA3-256) of the given data.
+                match &request.params {
+                    Some(serde_json::Value::Array(params)) => {
+                        if params.len() != 1 || !params[0].is_string() {
+                            return Err(anyhow::anyhow!("invalid request"));
+                        }
 
-                Ok(response)
+                        let param = Bytes::from_str(params[0].as_str().unwrap())?;
+
+                        let hash = H256::from(keccak256(param));
+
+                        json!(hash)
+                    }
+                    _ => return Err(anyhow::anyhow!("invalid request")),
+                }
             }
-            "web3_clientVersion" => {
-                // TODO: return a real response if all backends are syncing or if no servers in sync
-                let partial_response = serde_json::Value::String(APP_USER_AGENT.to_string());
 
-                let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
-
-                Ok(response)
-            }
             // TODO: web3_sha3?
+            // anything else gets sent to backend rpcs and cached
             method => {
-                // everything else is relayed to a backend
-                // this is not a private transaction
-
                 let head_block_number = self.balanced_rpcs.get_head_block_num();
 
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
                 let min_block_needed =
-                    get_min_block_needed(method, request.params.as_mut(), head_block_number.into());
+                    get_min_block_needed(method, request.params.as_mut(), head_block_number);
+
+                let min_block_needed = min_block_needed.as_ref();
 
                 trace!(?min_block_needed, ?method);
 
@@ -1007,24 +980,43 @@ impl Web3ProxyApp {
                     }
                 };
 
+                // TODO: move this caching outside this match and cache some of the other responses?
+                // TODO: cache the warp::reply to save us serializing every time?
                 {
                     let mut response_cache = response_cache.write();
 
-                    // TODO: cache the warp::reply to save us serializing every time?
-                    response_cache.insert(cache_key.clone(), response.clone());
+                    let response_cache_max_bytes = self
+                        .response_cache_max_bytes
+                        .load(atomic::Ordering::Acquire);
 
-                    // TODO: instead of checking length, check size in bytes
-                    if response_cache.len() >= RESPONSE_CACHE_CAP {
-                        // TODO: this isn't an LRU. it's a "least recently created". does that have a fancy name? should we make it an lru? these caches only live for one block
-                        response_cache.pop_front();
+                    // TODO: this might be too naive. not sure how much overhead the object has
+                    let new_size = size_of_val(&cache_key) + size_of_val(&response);
+
+                    // no item is allowed to take more than 1% of the cache
+                    // TODO: get this from config?
+                    if new_size < response_cache_max_bytes / 100 {
+                        // TODO: this probably has wildly variable timings
+                        while size_of_val(&response_cache) + new_size >= response_cache_max_bytes {
+                            // TODO: this isn't an LRU. it's a "least recently created". does that have a fancy name? should we make it an lru? these caches only live for one block
+                            response_cache.pop_front();
+                        }
+
+                        response_cache.insert(cache_key.clone(), response.clone());
+                    } else {
+                        // TODO: emit a stat instead?
+                        warn!(?new_size, "value too large for caching");
                     }
                 }
 
                 let _ = self.incoming_requests.remove(&cache_key);
                 let _ = incoming_tx.send(false);
 
-                Ok(response)
+                return Ok(response);
             }
-        }
+        };
+
+        let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
+
+        Ok(response)
     }
 }

@@ -46,8 +46,11 @@
   - we were skipping our delay interval when block hash wasn't changed. so if a block was ever slow, the http provider would get the same hash twice and then would try eth_getBlockByNumber a ton of times
 - [x] inspect any jsonrpc errors. if its something like "header not found" or "block with id $x not found" retry on another node (and add a negative score to that server)
   - this error seems to happen when we use load balanced backend rpcs like pokt and ankr
-- [ ] if we don't cache errors, then in-flight request caching is going to bottleneck 
+- [x] RESPONSE_CACHE_CAP in bytes instead of number of entries
+- [x] if we don't cache errors, then in-flight request caching is going to bottleneck 
   - i think now that we retry header not found and similar, caching errors should be fine
+- [x] RESPONSE_CACHE_CAP from config
+- [x] web3_sha3 rpc command
 - [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
   - thundering herd problem if we only allow a lag of 0 blocks
   - we can improve this by only `publish`ing the sorted list once a threshold of total available soft and hard limits is passed. how can we do this without hammering redis? at least its only once per block per server
@@ -66,7 +69,9 @@
   - [x] send getTransaction rpc requests to the private rpc tier
 - [x] I'm hitting infura rate limits very quickly. I feel like that means something is very inefficient
   - whenever blocks were slow, we started checking as fast as possible
-- [ ] eth_getBlockByNumber and similar calls served from the block map
+- [cancelled] eth_getBlockByNumber and similar calls served from the block map
+  - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
+  - so maybe we don't want this. we can just use the general request cache for these. they will only require 1 request and it means requests won't get in the way as much on writes as new blocks arrive.
 - [ ] incoming rate limiting by api key
 - [ ] refactor so configs can change while running
   - create the app without applying any config to it
@@ -75,6 +80,7 @@
 - [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
 - [ ] have a "backup" tier that is only used when the primary tier has no servers or is many blocks behind
   - we don't want the backup tier taking over with the head block if they happen to be fast at that (but overall low/expensive rps). only if the primary tier has fallen behind or gone entirely offline should we go to third parties
+  - [ ] until this is done, an alternative is for infra to have a "failover" script that changes the configs to include a bunch of third party servers manually.
 - [ ] stats when forks are resolved (and what chain they were on?)
 - [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
 - [ ] right now the block_map is unbounded. move this to redis and do some calculations to be sure about RAM usage
@@ -170,3 +176,5 @@ in another repo: event subscriber
 - [ ] Maybe storing pending txs on receipt in a dashmap is wrong. We want to store in a timer_heap (or similar) when we actually send. This way there's no lock contention until the race is over.
 - [ ] Support "safe" block height. It's planned for eth2 but we can kind of do it now but just doing head block num-3
 - [ ] Archive check on BSC gave “archive” when it isn’t. and FTM gave 90k for all servers even though they should be archive
+- [ ] cache eth_getLogs in a database?
+- [ ] stats for "read amplification". how many backend requests do we send compared to frontend requests we received?

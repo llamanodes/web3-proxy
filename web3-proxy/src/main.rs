@@ -15,7 +15,7 @@ use std::sync::atomic::{self, AtomicUsize};
 use std::thread;
 use std::time::Duration;
 use tokio::runtime;
-use tracing::{debug, info, trace};
+use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
 use crate::app::{flatten_handle, Web3ProxyApp};
@@ -45,7 +45,7 @@ fn main() -> anyhow::Result<()> {
     let rpc_config: String = fs::read_to_string(cli_config.config)?;
     let rpc_config: AppConfig = toml::from_str(&rpc_config)?;
 
-    trace!("rpc_config: {:?}", rpc_config);
+    debug!(?rpc_config);
 
     // TODO: this doesn't seem to do anything
     proctitle::set_title(format!("web3-proxy-{}", rpc_config.shared.chain_id));

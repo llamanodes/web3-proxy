@@ -56,8 +56,8 @@ impl SyncedConnections {
         &self.head_block_hash
     }
 
-    pub fn get_head_block_num(&self) -> u64 {
-        self.head_block_num
+    pub fn get_head_block_num(&self) -> U64 {
+        self.head_block_num.into()
     }
 }
 
@@ -94,11 +94,11 @@ impl BlockChain {
         self.block_map.entry(hash).or_insert(block);
     }
 
-    pub fn get_block(&self, num: &U64) -> Option<Arc<Block<TxHash>>> {
+    pub fn get_cannonical_block(&self, num: &U64) -> Option<Arc<Block<TxHash>>> {
         self.chain_map.get(num).map(|x| x.clone())
     }
 
-    pub fn get_block_from_hash(&self, hash: &H256) -> Option<Arc<Block<TxHash>>> {
+    pub fn get_block(&self, hash: &H256) -> Option<Arc<Block<TxHash>>> {
         self.block_map.get(hash).map(|x| x.clone())
     }
 }
@@ -304,6 +304,7 @@ impl Web3Connections {
         }
     }
 
+    /// dedupe transactions and send them to any listening clients
     async fn funnel_transaction(
         self: Arc<Self>,
         rpc: Arc<Web3Connection>,
@@ -354,7 +355,9 @@ impl Web3Connections {
         Ok(())
     }
 
-    /// subscribe to all the backend rpcs
+    /// subscribe to blocks and transactions from all the backend rpcs.
+    /// blocks are processed by all the `Web3Connection`s and then sent to the `block_receiver`
+    /// transaction ids from all the `Web3Connection`s are deduplicated and forwarded to `pending_tx_sender`
     async fn subscribe(
         self: Arc<Self>,
         pending_tx_id_receiver: flume::Receiver<(TxHash, Arc<Web3Connection>)>,
@@ -408,7 +411,7 @@ impl Web3Connections {
 
         if futures.is_empty() {
             // no transaction or block subscriptions.
-            unimplemented!("every second, check that the provider is still connected");
+            todo!("every second, check that the provider is still connected");
         }
 
         if let Err(e) = try_join_all(futures).await {
@@ -421,14 +424,44 @@ impl Web3Connections {
         Ok(())
     }
 
-    pub async fn get_block(&self, num: U64) -> anyhow::Result<Arc<Block<TxHash>>> {
-        if let Some(block) = self.chain.get_block(&num) {
+    pub async fn get_block(&self, hash: &H256) -> anyhow::Result<Arc<Block<TxHash>>> {
+        // first, try to get the hash from our cache
+        if let Some(block) = self.chain.get_block(hash) {
             return Ok(block);
         }
 
-        let head_block_num = self.get_head_block_num();
+        // block not in cache. we need to ask an rpc for it
 
-        if num.as_u64() > head_block_num {
+        // TODO: helper for method+params => JsonRpcRequest
+        // TODO: get block with the transactions?
+        let request = json!({ "id": "1", "method": "eth_getBlockByHash", "params": (hash, false) });
+        let request: JsonRpcRequest = serde_json::from_value(request)?;
+
+        // TODO: if error, retry?
+        let response = self.try_send_best_upstream_server(request, None).await?;
+
+        let block = response.result.unwrap();
+
+        let block: Block<TxHash> = serde_json::from_str(block.get())?;
+
+        let block = Arc::new(block);
+
+        self.chain.add_block(block.clone(), false);
+
+        Ok(block)
+    }
+
+    /// Get the heaviest chain's block from cache or backend rpc
+    pub async fn get_cannonical_block(&self, num: &U64) -> anyhow::Result<Arc<Block<TxHash>>> {
+        // first, try to get the hash from our cache
+        if let Some(block) = self.chain.get_cannonical_block(num) {
+            return Ok(block);
+        }
+
+        // block not in cache. we need to ask an rpc for it
+        // but before we do any queries, be sure the requested block num exists
+        let head_block_num = self.get_head_block_num();
+        if num > &head_block_num {
             return Err(anyhow::anyhow!(
                 "Head block is #{}, but #{} was requested",
                 head_block_num,
@@ -437,6 +470,7 @@ impl Web3Connections {
         }
 
         // TODO: helper for method+params => JsonRpcRequest
+        // TODO: get block with the transactions?
         let request =
             json!({ "id": "1", "method": "eth_getBlockByNumber", "params": (num, false) });
         let request: JsonRpcRequest = serde_json::from_value(request)?;
@@ -457,17 +491,16 @@ impl Web3Connections {
         Ok(block)
     }
 
-    pub async fn get_block_hash(&self, num: U64) -> anyhow::Result<H256> {
-        // first, try to get the hash from our cache
-        // TODO: move this cache to redis?
-        let block = self.get_block(num).await?;
+    /// Convenience method to get the cannonical block at a given block height.
+    pub async fn get_block_hash(&self, num: &U64) -> anyhow::Result<H256> {
+        let block = self.get_cannonical_block(num).await?;
 
         let hash = block.hash.unwrap();
 
         Ok(hash)
     }
 
-    pub fn get_head_block(&self) -> (u64, H256) {
+    pub fn get_head_block(&self) -> (U64, H256) {
         let synced_connections = self.synced_connections.load();
 
         let num = synced_connections.get_head_block_num();
@@ -480,7 +513,7 @@ impl Web3Connections {
         *self.synced_connections.load().get_head_block_hash()
     }
 
-    pub fn get_head_block_num(&self) -> u64 {
+    pub fn get_head_block_num(&self) -> U64 {
         self.synced_connections.load().get_head_block_num()
     }
 
@@ -488,7 +521,7 @@ impl Web3Connections {
         if self.synced_connections.load().inner.is_empty() {
             return false;
         }
-        self.get_head_block_num() > 0
+        self.get_head_block_num() > U64::zero()
     }
 
     pub fn num_synced_rpcs(&self) -> usize {
@@ -756,7 +789,7 @@ impl Web3Connections {
     pub async fn next_upstream_server(
         &self,
         skip: &[Arc<Web3Connection>],
-        min_block_needed: Option<U64>,
+        min_block_needed: Option<&U64>,
     ) -> Result<ActiveRequestHandle, Option<Duration>> {
         let mut earliest_retry_after = None;
 
@@ -833,7 +866,7 @@ impl Web3Connections {
     /// returns servers even if they aren't in sync. This is useful for broadcasting signed transactions
     pub async fn get_upstream_servers(
         &self,
-        min_block_needed: Option<U64>,
+        min_block_needed: Option<&U64>,
     ) -> Result<Vec<ActiveRequestHandle>, Option<Duration>> {
         let mut earliest_retry_after = None;
         // TODO: with capacity?
@@ -868,7 +901,7 @@ impl Web3Connections {
     pub async fn try_send_best_upstream_server(
         &self,
         request: JsonRpcRequest,
-        min_block_needed: Option<U64>,
+        min_block_needed: Option<&U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         let mut skip_rpcs = vec![];
 
@@ -964,7 +997,7 @@ impl Web3Connections {
     pub async fn try_send_all_upstream_servers(
         &self,
         request: JsonRpcRequest,
-        min_block_needed: Option<U64>,
+        min_block_needed: Option<&U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
             match self.get_upstream_servers(min_block_needed).await {

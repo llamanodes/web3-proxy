@@ -38,10 +38,21 @@ pub struct AppConfig {
 pub struct RpcSharedConfig {
     // TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
     pub chain_id: u64,
-    pub rate_limit_redis: Option<String>,
-    // TODO: serde default for development?
-    // TODO: allow no limit?
+    pub redis_url: Option<String>,
+    #[serde(default = "default_public_rate_limit_per_minute")]
     pub public_rate_limit_per_minute: u32,
+    #[serde(default = "default_response_cache_max_bytes")]
+    pub response_cache_max_bytes: usize,
+}
+
+fn default_public_rate_limit_per_minute() -> u32 {
+    0
+}
+
+fn default_response_cache_max_bytes() -> usize {
+    // TODO: default to some percentage of the system?
+    // 100 megabytes
+    10_usize.pow(8)
 }
 
 #[derive(Debug, Deserialize)]

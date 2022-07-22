@@ -9,7 +9,7 @@ use futures::{
     stream::{SplitSink, SplitStream, StreamExt},
 };
 use hashbrown::HashMap;
-use serde_json::value::RawValue;
+use serde_json::{json, value::RawValue};
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 use tracing::{error, info, trace};
@@ -78,10 +78,8 @@ async fn handle_socket_payload(
                         }
                     };
 
-                    let response = JsonRpcForwardedResponse::from_string(
-                        partial_response.to_string(),
-                        id.clone(),
-                    );
+                    let response =
+                        JsonRpcForwardedResponse::from_value(json!(partial_response), id.clone());
 
                     Ok(response.into())
                 }

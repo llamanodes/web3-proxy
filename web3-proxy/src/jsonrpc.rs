@@ -4,12 +4,12 @@ use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::Serialize;
 use serde_json::value::RawValue;
 use std::fmt;
-use tracing::trace;
 
 #[derive(Clone, serde::Deserialize)]
 pub struct JsonRpcRequest {
     // TODO: skip jsonrpc entireley?
     // pub jsonrpc: Box<RawValue>,
+    /// id could be a stricter type, but many rpcs do things against the spec
     pub id: Box<RawValue>,
     pub method: String,
     pub params: Option<serde_json::Value>,
@@ -180,16 +180,6 @@ impl JsonRpcForwardedResponse {
         }
     }
 
-    pub fn from_number<T: num::Integer + std::fmt::LowerHex>(
-        partial_response: T,
-        id: Box<RawValue>,
-    ) -> Self {
-        // TODO: proper escaping. this feels wrong. probably refactor to not need this at all
-        let partial_response = format!("0x{:x}", partial_response);
-
-        Self::from_string(partial_response, id)
-    }
-
     pub fn from_response(partial_response: Box<RawValue>, id: Box<RawValue>) -> Self {
         JsonRpcForwardedResponse {
             jsonrpc: "2.0".to_string(),
@@ -198,15 +188,6 @@ impl JsonRpcForwardedResponse {
             result: Some(partial_response),
             error: None,
         }
-    }
-
-    pub fn from_string(partial_response: String, id: Box<RawValue>) -> Self {
-        trace!("partial_response: {}", partial_response);
-        // TODO: anyhow result on this
-        // TODO: proper escaping. this feels wrong. probably refactor to not need this at all
-        let partial_response = RawValue::from_string(format!(r#""{}""#, partial_response)).unwrap();
-
-        Self::from_response(partial_response, id)
     }
 
     pub fn from_value(partial_response: serde_json::Value, id: Box<RawValue>) -> Self {
