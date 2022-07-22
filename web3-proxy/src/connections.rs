@@ -423,8 +423,6 @@ impl Web3Connections {
 
     pub async fn get_block(&self, num: U64) -> anyhow::Result<Arc<Block<TxHash>>> {
         if let Some(block) = self.chain.get_block(&num) {
-            // for now, just return the first seen block. we actually want the winning block!
-            // TODO: don't clone
             return Ok(block);
         }
 
