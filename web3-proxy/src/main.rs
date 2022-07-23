@@ -255,7 +255,7 @@ mod tests {
         shutdown_sender.send(()).unwrap();
 
         println!("waiting for shutdown...");
-        // TODO: timeout or panic
+        // TODO: panic if a timeout is reached
         handle.join().unwrap().unwrap();
     }
 }
