@@ -304,7 +304,7 @@ impl Web3Connections {
         }
     }
 
-    /// dedupe transactions and send them to any listening clients
+    /// dedupe transaction and send them to any listening clients
     async fn funnel_transaction(
         self: Arc<Self>,
         rpc: Arc<Web3Connection>,
@@ -376,13 +376,11 @@ impl Web3Connections {
             let clone = self.clone();
             let handle = task::spawn(async move {
                 while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv_async().await {
-                    // TODO: spawn this
                     let f = clone.clone().funnel_transaction(
                         rpc,
                         pending_tx_id,
                         pending_tx_sender.clone(),
                     );
-
                     tokio::spawn(f);
                 }
 

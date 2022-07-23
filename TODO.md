@@ -51,7 +51,8 @@
   - i think now that we retry header not found and similar, caching errors should be fine
 - [x] RESPONSE_CACHE_CAP from config
 - [x] web3_sha3 rpc command
-- [ ] test that launches anvil and connects the proxy to it
+- [x] test that launches anvil and connects the proxy to it and does some basic queries
+  - [x] need to have some sort of shutdown signaling. doesn't need to be graceful at this point, but should be eventually
 - [ ] if the fastest server has hit rate limits, we won't be able to serve any traffic until another server is synced.
   - thundering herd problem if we only allow a lag of 0 blocks
   - we can improve this by only `publish`ing the sorted list once a threshold of total available soft and hard limits is passed. how can we do this without hammering redis? at least its only once per block per server
@@ -178,3 +179,8 @@ in another repo: event subscriber
 - [ ] stats for "read amplification". how many backend requests do we send compared to frontend requests we received?
 - [ ] fully test retrying when "header not found"
   - i saw "header not found" on a simple eth_getCode query to a public load balanced bsc archive node on block 1
+- [ ] weird flapping fork could have more useful logs. like, howd we get to 1/1/4 and fork. geth changed its mind 3 times?
+  2022-07-22T23:52:18.593956Z  WARN block_receiver: web3_proxy::connections: chain is forked! 1 possible heads. 1/1/4 rpcs have 0xa906…5bc1 rpc=Web3Connection { url: "ws://127.0.0.1:8546", data: 64, .. } new_block_num=15195517
+  2022-07-22T23:52:18.983441Z  WARN block_receiver: web3_proxy::connections: chain is forked! 1 possible heads. 1/1/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "ws://127.0.0.1:8546", data: 64, .. } new_block_num=15195517
+  2022-07-22T23:52:19.350720Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 1/2/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "ws://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517
+  2022-07-22T23:52:26.041140Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 2/4/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "http://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517

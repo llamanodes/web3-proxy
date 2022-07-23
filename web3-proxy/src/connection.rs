@@ -220,6 +220,8 @@ impl Web3Connection {
 
         // we could take "archive" as a parameter, but we would want a safety check on it regardless
         // check common archive thresholds
+        // TODO: would be great if rpcs exposed this
+        // TODO: move this to a helper function so we can recheck on errors or as the chain grows
         for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
             let mut head_block_num = new_connection.head_block.read().1;
 

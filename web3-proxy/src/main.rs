@@ -142,7 +142,7 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use ethers::{
-        prelude::{Http, Provider, U256},
+        prelude::{Block, Http, Provider, TxHash, U256},
         utils::Anvil,
     };
     use hashbrown::HashMap;
@@ -176,12 +176,12 @@ mod tests {
 
         // mine a block because my code doesn't like being on block 0
         // TODO: make block 0 okay?
-        let head_block_num: U256 = provider.request("evm_mine", None::<()>).await.unwrap();
+        let _: U256 = provider.request("evm_mine", None::<()>).await.unwrap();
 
         // make a test CliConfig
         let cli_config = CliConfig {
             port: 0,
-            workers: 2,
+            workers: 4,
             config: "./does/not/exist/test.toml".to_string(),
         };
 
@@ -213,10 +213,43 @@ mod tests {
         let handle = thread::spawn(move || run(shutdown_receiver, cli_config, app_config));
 
         // TODO: do something to the node. query latest block, mine another block, query again
+        let proxy_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
+        let anvil_result: Block<TxHash> = proxy_provider
+            .request("eth_getBlockByNumber", ("latest", true))
+            .await
+            .unwrap();
+        let proxy_result: Block<TxHash> = proxy_provider
+            .request("eth_getBlockByNumber", ("latest", true))
+            .await
+            .unwrap();
+
+        assert_eq!(anvil_result, proxy_result);
+
+        let first_block_num = anvil_result.number.unwrap();
+
+        let _: U256 = provider.request("evm_mine", None::<()>).await.unwrap();
+
+        let anvil_result: Block<TxHash> = proxy_provider
+            .request("eth_getBlockByNumber", ("latest", true))
+            .await
+            .unwrap();
+        let proxy_result: Block<TxHash> = proxy_provider
+            .request("eth_getBlockByNumber", ("latest", true))
+            .await
+            .unwrap();
+
+        assert_eq!(anvil_result, proxy_result);
+
+        let second_block_num = anvil_result.number.unwrap();
+
+        assert_ne!(first_block_num, second_block_num);
+
+        // tell the test app to shut down
         shutdown_sender.send(()).unwrap();
 
         println!("waiting for shutdown...");
+        // TODO: timeout or panic
         handle.join().unwrap().unwrap();
     }
 }
