@@ -159,9 +159,9 @@ mod tests {
 
         println!("path: {}", path);
 
-        // TODO: opton for super verbose option
+        // TODO: how should we handle logs in this?
+        // TODO: option for super verbose logs
         std::env::set_var("RUST_LOG", "info,web3_proxy=debug");
-
         // install global collector configured based on RUST_LOG env var.
         tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
@@ -172,11 +172,14 @@ mod tests {
 
         println!("Anvil running at `{}`", anvil.endpoint());
 
-        let provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
+        let anvil_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
         // mine a block because my code doesn't like being on block 0
         // TODO: make block 0 okay?
-        let _: U256 = provider.request("evm_mine", None::<()>).await.unwrap();
+        let _: U256 = anvil_provider
+            .request("evm_mine", None::<()>)
+            .await
+            .unwrap();
 
         // make a test CliConfig
         let cli_config = CliConfig {
@@ -209,13 +212,13 @@ mod tests {
         let (shutdown_sender, shutdown_receiver) = flume::bounded(1);
 
         // spawn another thread for running the app
-        // TODO:
+        // TODO: allow launching into the local tokio runtime instead of creating a new one?
         let handle = thread::spawn(move || run(shutdown_receiver, cli_config, app_config));
 
         // TODO: do something to the node. query latest block, mine another block, query again
         let proxy_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
-        let anvil_result: Block<TxHash> = proxy_provider
+        let anvil_result: Block<TxHash> = anvil_provider
             .request("eth_getBlockByNumber", ("latest", true))
             .await
             .unwrap();
@@ -228,9 +231,12 @@ mod tests {
 
         let first_block_num = anvil_result.number.unwrap();
 
-        let _: U256 = provider.request("evm_mine", None::<()>).await.unwrap();
+        let _: U256 = anvil_provider
+            .request("evm_mine", None::<()>)
+            .await
+            .unwrap();
 
-        let anvil_result: Block<TxHash> = proxy_provider
+        let anvil_result: Block<TxHash> = anvil_provider
             .request("eth_getBlockByNumber", ("latest", true))
             .await
             .unwrap();
