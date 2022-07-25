@@ -37,6 +37,7 @@ async fn proxy_web3_socket(app: Arc<Web3ProxyApp>, socket: WebSocket) {
     tokio::spawn(read_web3_socket(app, ws_rx, response_tx));
 }
 
+/// websockets support a few more methods than http clients
 async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
     payload: &str,

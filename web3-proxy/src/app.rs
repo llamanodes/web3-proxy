@@ -824,6 +824,7 @@ impl Web3ProxyApp {
             "eth_blockNumber" => {
                 let head_block_number = self.balanced_rpcs.get_head_block_num();
 
+                // TODO: technically, block 0 is okay. i guess we should be using an option
                 if head_block_number.as_u64() == 0 {
                     return Err(anyhow::anyhow!("no servers synced"));
                 }

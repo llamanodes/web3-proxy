@@ -268,13 +268,17 @@ impl Web3Connection {
         Ok((new_connection, handle))
     }
 
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
     /// TODO: this might be too simple. different nodes can prune differently
-    pub fn get_block_data_limit(&self) -> U64 {
+    pub fn block_data_limit(&self) -> U64 {
         self.block_data_limit.load(atomic::Ordering::Acquire).into()
     }
 
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
-        let block_data_limit: U64 = self.get_block_data_limit();
+        let block_data_limit: U64 = self.block_data_limit();
 
         let newest_block_num = self.head_block.read().1;
 
@@ -301,7 +305,7 @@ impl Web3Connection {
 
         *provider = None;
 
-        // tell the block subscriber that we are at 0
+        // tell the block subscriber that we don't have any blocks
         if let Some(block_sender) = block_sender {
             block_sender
                 .send_async((Arc::new(Block::default()), self.clone()))

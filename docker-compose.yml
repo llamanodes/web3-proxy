@@ -5,6 +5,7 @@ version: "3.4"
 services:
   dev-redis:
     build: ./redis-cell-server/
+  # TODO: expose these ports?
 
   dev-eth:
     extends:
