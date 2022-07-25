@@ -58,6 +58,12 @@
   - we can improve this by only publishing the synced connections once a threshold of total available soft and hard limits is passed. how can we do this without hammering redis? at least its only once per block per server
   - [x] instead of tracking `pending_synced_connections`, have a mapping of where all connections are individually. then each change, re-check for consensus.
 - [x] synced connections swap threshold set to 1 so that it always serves something
+- [ ] if we request an old block, more servers can handle it than we currently use.
+    - [ ] instead of the one list of just heads, store our intermediate mappings (rpcs_by_hash, rpcs_by_num, blocks_by_hash) in SyncedConnections. this shouldn't be too much slower than what we have now
+    - [ ] remove the if/else where we optionally route to archive and refactor to require a BlockNumber enum
+    - [ ] then check syncedconnections for the blockNum. if num given, use the cannonical chain to figure out the winning hash
+    - [ ] this means if someone requests a recent but not ancient block, they can use all our servers, even the slower ones
+
 - [ ] nice output when cargo doc is run
 - [ ] basic request method stats
 
