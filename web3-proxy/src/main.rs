@@ -1,7 +1,21 @@
-//! Run the web3 proxy
+//! Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
+//!
+//! Signed transactions (eth_sendRawTransaction) are sent in parallel to the configured private RPCs (eden, ethermine, flashbots, etc.).
+//!
+//! All other requests are sent to an RPC server on the latest block (alchemy, moralis, rivet, your own node, or one of many other providers).
+//! If multiple servers are in sync, the fastest server is prioritized. Since the fastest server is most likely to serve requests, slow servers are unlikely to ever get any requests.
 
+//#![warn(missing_docs)]
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
+
+pub mod app;
+pub mod bb8_helpers;
+pub mod config;
+pub mod connection;
+pub mod connections;
+pub mod firewall;
+pub mod frontend;
+pub mod jsonrpc;
 
 use parking_lot::deadlock;
 use std::fs;
@@ -12,9 +26,8 @@ use tokio::runtime;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
-use web3_proxy::app::{flatten_handle, Web3ProxyApp};
-use web3_proxy::config::{AppConfig, CliConfig};
-use web3_proxy::frontend;
+use crate::app::{flatten_handle, Web3ProxyApp};
+use crate::config::{AppConfig, CliConfig};
 
 fn run(
     shutdown_receiver: flume::Receiver<()>,
