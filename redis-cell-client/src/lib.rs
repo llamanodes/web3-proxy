@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 use bb8_redis::redis::cmd;
 
 pub use bb8_redis::redis::RedisError;

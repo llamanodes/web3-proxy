@@ -44,9 +44,11 @@ struct SyncedConnections {
 impl fmt::Debug for SyncedConnections {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
+        // TODO: print the actual conns?
         f.debug_struct("SyncedConnections")
             .field("head_num", &self.head_block_num)
             .field("head_hash", &self.head_block_hash)
+            .field("num_conns", &self.conns.len())
             .finish_non_exhaustive()
     }
 }
@@ -702,6 +704,9 @@ impl Web3Connections {
             // TODO: default_min_soft_limit? without, we start serving traffic at the start too quickly
             // let min_soft_limit = total_soft_limit / 2;
             let min_soft_limit = 1;
+            let num_possible_heads = rpcs_by_hash.len();
+
+            trace!(?rpcs_by_hash);
 
             struct State<'a> {
                 block: &'a Arc<Block<TxHash>>,
@@ -723,8 +728,6 @@ impl Web3Connections {
                     (block_num, sum_soft_limit, conns, block_hash)
                 }
             }
-
-            trace!(?rpcs_by_hash);
 
             // TODO: i'm always getting None
             if let Some(x) = rpcs_by_hash
@@ -773,9 +776,11 @@ impl Web3Connections {
                         best_head_hash
                     );
                 } else {
+                    // TODO: this isn't necessarily a fork. this might just be an rpc being slow
+                    // TODO: log all the heads?
                     warn!(
                         "chain is forked! {} possible heads. {}/{}/{}/{} rpcs have {}",
-                        "?", // TODO: how should we get this?
+                        num_possible_heads,
                         best_rpcs.len(),
                         synced_rpcs.len(),
                         connection_heads.len(),
@@ -805,6 +810,7 @@ impl Web3Connections {
                 if new_head_block {
                     self.chain.add_block(new_block.clone(), true);
 
+                    // TODO: include the fastest rpc here?
                     info!(
                         "{}/{} rpcs at {} ({}). publishing new head!",
                         pending_synced_connections.conns.len(),

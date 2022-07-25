@@ -1,13 +1,7 @@
-#![forbid(unsafe_code)]
+//! Run the web3 proxy
 
-mod app;
-mod bb8_helpers;
-mod config;
-mod connection;
-mod connections;
-mod firewall;
-mod frontend;
-mod jsonrpc;
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 use parking_lot::deadlock;
 use std::fs;
@@ -18,8 +12,9 @@ use tokio::runtime;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
-use crate::app::{flatten_handle, Web3ProxyApp};
-use crate::config::{AppConfig, CliConfig};
+use web3_proxy::app::{flatten_handle, Web3ProxyApp};
+use web3_proxy::config::{AppConfig, CliConfig};
+use web3_proxy::frontend;
 
 fn run(
     shutdown_receiver: flume::Receiver<()>,
@@ -148,7 +143,7 @@ mod tests {
     use hashbrown::HashMap;
     use std::env;
 
-    use crate::config::{RpcSharedConfig, Web3ConnectionConfig};
+    use web3_proxy::config::{RpcSharedConfig, Web3ConnectionConfig};
 
     use super::*;
 

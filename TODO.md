@@ -58,8 +58,8 @@
   - we can improve this by only publishing the synced connections once a threshold of total available soft and hard limits is passed. how can we do this without hammering redis? at least its only once per block per server
   - [x] instead of tracking `pending_synced_connections`, have a mapping of where all connections are individually. then each change, re-check for consensus.
 - [x] synced connections swap threshold set to 1 so that it always serves something
-- [ ] basic request method stats
 - [ ] nice output when cargo doc is run
+- [ ] basic request method stats
 
 ## V1
 
