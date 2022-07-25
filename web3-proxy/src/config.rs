@@ -75,14 +75,23 @@ impl Web3ConnectionConfig {
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Web3Connection>)>>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
-        let hard_rate_limit = self.hard_limit.map(|x| (x, redis_client_pool.unwrap()));
+        let hard_limit = match (self.hard_limit, redis_client_pool) {
+            (None, None) => None,
+            (Some(hard_limit), Some(redis_client_pool)) => Some((hard_limit, redis_client_pool)),
+            (None, Some(_)) => None,
+            (Some(hard_limit), None) => {
+                return Err(anyhow::anyhow!(
+                    "no redis client pool! needed for hard limit"
+                ))
+            }
+        };
 
         Web3Connection::spawn(
             chain_id,
             self.url,
             http_client,
             http_interval_sender,
-            hard_rate_limit,
+            hard_limit,
             self.soft_limit,
             block_sender,
             tx_id_sender,

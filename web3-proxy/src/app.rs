@@ -330,7 +330,7 @@ impl Web3ProxyApp {
                 Some(pool)
             }
             None => {
-                info!("No redis address");
+                warn!("No redis address");
                 None
             }
         };

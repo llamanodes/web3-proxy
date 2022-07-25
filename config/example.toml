@@ -1,7 +1,7 @@
 [shared]
 chain_id = 1
-# in prod, do `rate_limit_redis = "redis://redis:6379/"`
-#rate_limit_redis = "redis://dev-redis:6379/"
+# in prod, do `redis_url = "redis://redis:6379/"`
+#redis_url = "redis://dev-redis:6379/"
 public_rate_limit_per_minute = 60_000
 # 1GB of cache
 response_cache_max_bytes = 10 ^ 9
