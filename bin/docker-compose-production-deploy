@@ -1,4 +1,4 @@
-#!/bin/bash -eux
+#!/bin/bash -eu
 
 # change to the project's root directory
 cd "${0%/*}/.."
