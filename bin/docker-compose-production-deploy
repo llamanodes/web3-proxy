@@ -10,7 +10,7 @@ export PATH="$(pwd)/bin:$PATH"
 docker-compose-production build --pull
 
 # run the image
-docker-compose-production up -d
+docker-compose-production up -d --remove-orphans
 
 sleep 3
 
