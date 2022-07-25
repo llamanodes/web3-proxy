@@ -57,7 +57,7 @@
   - thundering herd problem if we only allow a lag of 0 blocks
   - we can improve this by only publishing the synced connections once a threshold of total available soft and hard limits is passed. how can we do this without hammering redis? at least its only once per block per server
   - [x] instead of tracking `pending_synced_connections`, have a mapping of where all connections are individually. then each change, re-check for consensus.
-- [ ] synced connections swap threshold should come from config
+- [x] synced connections swap threshold set to 1 so that it always serves something
 - [ ] basic request method stats
 - [ ] nice output when cargo doc is run
 
@@ -79,6 +79,8 @@
   - have a blocking future watching the config file and calling app.apply_config() on first load and on change
   - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
 - [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
+- [ ] synced connections swap threshold should come from config
+  - if there are bad forks, we need to think about this more. keep backfilling until there is a common block, or just error? if the common block is old, i think we should error rather than serve data. that's kind of "downtime" but really its on the chain and not us. think about this more
 - [ ] have a "backup" tier that is only used when the primary tier has no servers or is many blocks behind
   - we don't want the backup tier taking over with the head block if they happen to be fast at that (but overall low/expensive rps). only if the primary tier has fallen behind or gone entirely offline should we go to third parties
   - [ ] until this is done, an alternative is for infra to have a "failover" script that changes the configs to include a bunch of third party servers manually.

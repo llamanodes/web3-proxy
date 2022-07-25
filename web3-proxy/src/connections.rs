@@ -699,10 +699,9 @@ impl Web3Connections {
                 }
             }
 
-            // TODO: configurable threshold. in test we have 4 servers so
-            // TODO:
-            // TODO: minimum total_soft_limit? without, when one server is in the loop
-            let min_soft_limit = total_soft_limit / 2;
+            // TODO: default_min_soft_limit? without, we start serving traffic at the start too quickly
+            // let min_soft_limit = total_soft_limit / 2;
+            let min_soft_limit = 1;
 
             struct State<'a> {
                 block: &'a Arc<Block<TxHash>>,
