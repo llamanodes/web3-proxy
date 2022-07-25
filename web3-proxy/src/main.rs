@@ -156,7 +156,7 @@ mod tests {
     use hashbrown::HashMap;
     use std::env;
 
-    use web3_proxy::config::{RpcSharedConfig, Web3ConnectionConfig};
+    use crate::config::{RpcSharedConfig, Web3ConnectionConfig};
 
     use super::*;
 

@@ -600,6 +600,13 @@ impl Web3Connections {
         let mut connection_heads = IndexMap::<String, Arc<Block<TxHash>>>::new();
 
         while let Ok((new_block, rpc)) = block_receiver.recv_async().await {
+            if let Some(current_block) = connection_heads.get(rpc.url()) {
+                if current_block.hash == new_block.hash {
+                    // duplicate block
+                    continue;
+                }
+            }
+
             let new_block_hash = if let Some(hash) = new_block.hash {
                 hash
             } else {
@@ -810,13 +817,17 @@ impl Web3Connections {
                 if new_head_block {
                     self.chain.add_block(new_block.clone(), true);
 
-                    // TODO: include the fastest rpc here?
                     info!(
-                        "{}/{} rpcs at {} ({}). publishing new head!",
+                        "{}/{} rpcs at {} ({}). head at {:?}",
                         pending_synced_connections.conns.len(),
                         self.conns.len(),
                         pending_synced_connections.head_block_hash,
                         pending_synced_connections.head_block_num,
+                        pending_synced_connections
+                            .conns
+                            .iter()
+                            .map(|x| format!("{}", x))
+                            .collect::<Vec<_>>(),
                     );
                     // TODO: what if the hashes don't match?
                     if pending_synced_connections.head_block_hash == new_block_hash {
@@ -833,12 +844,18 @@ impl Web3Connections {
 
                         // TODO: mark any orphaned transactions as unconfirmed
                     }
+                } else if num_best_rpcs == self.conns.len() {
+                    debug!(
+                        "all {} rpcs at {} ({})",
+                        num_best_rpcs,
+                        pending_synced_connections.head_block_hash,
+                        pending_synced_connections.head_block_num,
+                    );
                 } else {
-                    // TODO: i'm seeing 4/4 print twice. maybe because of http providers?
-                    // TODO: only do this log if there was a change
                     trace!(
+                        ?pending_synced_connections,
                         "{}/{} rpcs at {} ({})",
-                        pending_synced_connections.conns.len(),
+                        num_best_rpcs,
                         self.conns.len(),
                         pending_synced_connections.head_block_hash,
                         pending_synced_connections.head_block_num,

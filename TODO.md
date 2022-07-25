@@ -58,13 +58,6 @@
   - we can improve this by only publishing the synced connections once a threshold of total available soft and hard limits is passed. how can we do this without hammering redis? at least its only once per block per server
   - [x] instead of tracking `pending_synced_connections`, have a mapping of where all connections are individually. then each change, re-check for consensus.
 - [x] synced connections swap threshold set to 1 so that it always serves something
-- [ ] if we request an old block, more servers can handle it than we currently use.
-    - [ ] instead of the one list of just heads, store our intermediate mappings (rpcs_by_hash, rpcs_by_num, blocks_by_hash) in SyncedConnections. this shouldn't be too much slower than what we have now
-    - [ ] remove the if/else where we optionally route to archive and refactor to require a BlockNumber enum
-    - [ ] then check syncedconnections for the blockNum. if num given, use the cannonical chain to figure out the winning hash
-    - [ ] this means if someone requests a recent but not ancient block, they can use all our servers, even the slower ones
-
-- [ ] nice output when cargo doc is run
 - [ ] basic request method stats
 
 ## V1
@@ -79,7 +72,14 @@
 - [cancelled] eth_getBlockByNumber and similar calls served from the block map
   - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
   - so maybe we don't want this. we can just use the general request cache for these. they will only require 1 request and it means requests won't get in the way as much on writes as new blocks arrive.
+- [ ] cli tool for managing users and resetting api keys
 - [ ] incoming rate limiting by api key
+- [ ] nice output when cargo doc is run
+- [ ] if we request an old block, more servers can handle it than we currently use.
+    - [ ] instead of the one list of just heads, store our intermediate mappings (rpcs_by_hash, rpcs_by_num, blocks_by_hash) in SyncedConnections. this shouldn't be too much slower than what we have now
+    - [ ] remove the if/else where we optionally route to archive and refactor to require a BlockNumber enum
+    - [ ] then check syncedconnections for the blockNum. if num given, use the cannonical chain to figure out the winning hash
+    - [ ] this means if someone requests a recent but not ancient block, they can use all our servers, even the slower ones
 - [ ] refactor so configs can change while running
   - create the app without applying any config to it
   - have a blocking future watching the config file and calling app.apply_config() on first load and on change
@@ -110,7 +110,7 @@
 - [ ] 60 second timeout is too short. Maybe do that for free tier and larger timeout for paid. Problem is that some queries can take over 1000 seconds
 
 new endpoints for users:
-- think about where to put this. a separate app might be better. this repo could just have a cli tool for managing users
+- think about where to put this. a separate app might be better
 - [ ] GET /user/login/$address
   - returns a JSON string for the user to sign
 - [ ] POST /user/login/$address

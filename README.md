@@ -11,7 +11,7 @@ All other requests are sent to an RPC server on the latest block (alchemy, moral
 Each server has different limits to configure. The `soft_limit` is the number of parallel active requests where a server starts to slow down. The `hard_limit` is where a server starts giving rate limits or other errors.
 
 ```
-$ cargo run --release -p web3-proxy -- --help
+$ cargo run --release -- --help
 ```
 ```
    Compiling web3-proxy v0.1.0 (/home/bryan/src/web3-proxy/web3-proxy)
@@ -31,7 +31,7 @@ Options:
 Start the server with the defaults (listen on `http://localhost:8544` and use `./config/example.toml` which proxies to a bunch of public nodes:
 
 ```
-cargo run --release -p web3-proxy -- --config ./config/example.toml
+cargo run --release -- --config ./config/example.toml
 ```
 
 ## Common commands
@@ -75,6 +75,7 @@ Run the proxy under gdb for advanced debugging:
 
     cargo build --release && RUST_LOG=web3_proxy=debug rust-gdb --args target/debug/web3-proxy --listen-port 7503 --rpc-config-path ./config/production-eth.toml
 
+TODO: also enable debug symbols in the release build by modifying the root Cargo.toml
 
 ## Load Testing
 
