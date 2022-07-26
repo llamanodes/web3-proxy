@@ -174,6 +174,7 @@ mod tests {
         tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
             .compact()
+            .with_test_writer()
             .init();
 
         let anvil = Anvil::new().spawn();
@@ -200,6 +201,7 @@ mod tests {
         let app_config = AppConfig {
             shared: RpcSharedConfig {
                 chain_id: 31337,
+                db_url: None,
                 redis_url: None,
                 public_rate_limit_per_minute: 0,
                 response_cache_max_bytes: 10_usize.pow(7),

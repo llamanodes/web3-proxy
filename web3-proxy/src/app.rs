@@ -1,7 +1,7 @@
+use anyhow::Context;
 use axum::extract::ws::Message;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
-use diesel_migrations::embed_migrations;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, BlockNumber, Bytes, Transaction, TxHash, H256, U64};
 use futures::future::Abortable;
@@ -35,8 +35,6 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
-
-embed_migrations!("../migrations/");
 
 // TODO: make this customizable?
 static APP_USER_AGENT: &str = concat!(
@@ -264,6 +262,7 @@ pub struct Web3ProxyApp {
     pending_tx_sender: broadcast::Sender<TxState>,
     pending_transactions: Arc<DashMap<TxHash, TxState>>,
     public_rate_limiter: Option<RedisCellClient>,
+    db_conn: Option<sea_orm::DatabaseConnection>,
 }
 
 impl fmt::Debug for Web3ProxyApp {
@@ -295,6 +294,27 @@ impl Web3ProxyApp {
         // let connection = db_pool.get().await;
         // embedded_migrations::run_with_output(&connection, &mut std::io::stdout());
 
+        let db_conn = if let Some(db_url) = app_config.shared.db_url {
+            let mut db_opt = sea_orm::ConnectOptions::new(db_url);
+
+            // TODO: load all these options from the config file
+            db_opt
+                .max_connections(100)
+                .min_connections(num_workers.try_into()?)
+                .connect_timeout(Duration::from_secs(8))
+                .idle_timeout(Duration::from_secs(8))
+                .max_lifetime(Duration::from_secs(60))
+                .sqlx_logging(true);
+            // .sqlx_logging_level(log::LevelFilter::Info);
+
+            let db_conn = sea_orm::Database::connect(db_opt).await?;
+
+            Some(db_conn)
+        } else {
+            info!("no database");
+            None
+        };
+
         let balanced_rpcs = app_config.balanced_rpcs.into_values().collect();
 
         let private_rpcs = if let Some(private_rpcs) = app_config.private_rpcs {
@@ -318,14 +338,13 @@ impl Web3ProxyApp {
         );
 
         let redis_client_pool = match app_config.shared.redis_url {
-            Some(redis_address) => {
-                info!("Connecting to redis on {}", redis_address);
+            Some(redis_url) => {
+                info!("Connecting to redis on {}", redis_url);
 
-                let manager = RedisConnectionManager::new(redis_address)?;
+                let manager = RedisConnectionManager::new(redis_url)?;
 
                 let min_size = num_workers as u32;
                 let max_size = min_size * 4;
-
                 // TODO: min_idle?
                 // TODO: set max_size based on max expected concurrent connections? set based on num_workers?
                 let builder = bb8::Pool::builder()
@@ -338,14 +357,17 @@ impl Web3ProxyApp {
                 Some(pool)
             }
             None => {
-                warn!("No redis address");
+                warn!("no redis connection");
                 None
             }
         };
 
         let (head_block_sender, head_block_receiver) = watch::channel(Arc::new(Block::default()));
         // TODO: will one receiver lagging be okay? how big should this be?
-        let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(16);
+        let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
+
+        // TODO: use this? it could listen for confirmed transactions and then clear pending_transactions, but the head_block_sender is doing that
+        drop(pending_tx_receiver);
 
         // TODO: this will grow unbounded!! add some expiration to this. and probably move to redis
         let pending_transactions = Arc::new(DashMap::new());
@@ -364,7 +386,8 @@ impl Web3ProxyApp {
             Some(pending_tx_sender.clone()),
             pending_transactions.clone(),
         )
-        .await?;
+        .await
+        .context("balanced rpcs")?;
 
         handles.push(balanced_handle);
 
@@ -384,15 +407,13 @@ impl Web3ProxyApp {
                 Some(pending_tx_sender.clone()),
                 pending_transactions.clone(),
             )
-            .await?;
+            .await
+            .context("private_rpcs")?;
 
             handles.push(private_handle);
 
             private_rpcs
         };
-
-        // TODO: use this? it could listen for confirmed transactions and then clear pending_transactions, but the head_block_sender is doing that
-        drop(pending_tx_receiver);
 
         // TODO: how much should we allow?
         let public_max_burst = app_config.shared.public_rate_limit_per_minute / 3;
@@ -421,6 +442,7 @@ impl Web3ProxyApp {
             pending_tx_sender,
             pending_transactions,
             public_rate_limiter,
+            db_conn,
         };
 
         let app = Arc::new(app);

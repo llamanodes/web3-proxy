@@ -9,8 +9,13 @@ default-run = "web3-proxy"
 [features]
 default = ["deadlock_detection"]
 deadlock_detection = ["parking_lot/deadlock_detection"]
+verbose = ["sea-orm/debug-print"]
 
 [dependencies]
+redis-cell-client = { path = "../redis-cell-client" }
+entities = { path = "../entities" }
+migration = { path = "../migration" }
+
 anyhow = { version = "1.0.58", features = ["backtrace"] }
 arc-swap = "1.5.0"
 argh = "0.1.8"
@@ -19,7 +24,6 @@ axum-client-ip = "0.2.0"
 counter = "0.5.6"
 dashmap = "5.3.4"
 derive_more = "0.99.17"
-diesel_migrations = "1.4.0"
 dotenv = "0.15.0"
 ethers = { version = "0.15.0", features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
@@ -30,7 +34,6 @@ indexmap = "1.9.1"
 linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }
 notify = "4.0.17"
 num = "0.4.0"
-redis-cell-client = { path = "../redis-cell-client" }
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 petgraph = "0.6.2"
 proctitle = "0.1.1"
@@ -39,9 +42,11 @@ regex = "1.6.0"
 reqwest = { version = "0.11.11", default-features = false, features = ["json", "tokio-rustls"] }
 rustc-hash = "1.1.0"
 # siwe = "0.4.0"  # blocked by https://github.com/spruceid/siwe-rs/issues/36
+sea-orm = { version = "0.9.1", features = [ "macros" ] }
 serde = { version = "1.0.140", features = [] }
 serde_json = { version = "1.0.82", default-features = false, features = ["alloc", "raw_value"] }
 tokio = { version = "1.20.1", features = ["full", "tracing"] }
+async-std = { version = "^1", features = ["attributes", "tokio1"] }
 toml = "0.5.9"
 tracing = "0.1.35"
 # TODO: tracing-subscriber has serde and serde_json features that we might want to use

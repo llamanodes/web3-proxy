@@ -39,6 +39,7 @@ pub struct AppConfig {
 pub struct RpcSharedConfig {
     // TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
     pub chain_id: u64,
+    pub db_url: Option<String>,
     pub redis_url: Option<String>,
     #[serde(default = "default_public_rate_limit_per_minute")]
     pub public_rate_limit_per_minute: u32,
@@ -79,7 +80,7 @@ impl Web3ConnectionConfig {
             (None, None) => None,
             (Some(hard_limit), Some(redis_client_pool)) => Some((hard_limit, redis_client_pool)),
             (None, Some(_)) => None,
-            (Some(hard_limit), None) => {
+            (Some(_hard_limit), None) => {
                 return Err(anyhow::anyhow!(
                     "no redis client pool! needed for hard limit"
                 ))

@@ -1,3 +1,5 @@
+// TODO: move this into redis-cell-client
+
 use redis_cell_client::bb8;
 use tracing::warn;
 

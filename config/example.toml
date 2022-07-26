@@ -1,5 +1,6 @@
 [shared]
 chain_id = 1
+db_url = "mysql://root:dev_web3_proxy@dev-mysql:3306/dev_web3_proxy"
 redis_url = "redis://dev-redis:6379/"
 public_rate_limit_per_minute = 60_000
 # 1GB of cache

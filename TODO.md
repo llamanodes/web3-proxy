@@ -138,6 +138,7 @@ new endpoints for users:
 
 ## V2
 
+- [ ] sea-orm brings in async-std, but we are using tokio. benchmark switching 
 - [ ] jwt auth so people can easily switch from infura
 - [ ] handle log subscriptions
 - [ ] most things that are cached locally should probably be in shared redis caches

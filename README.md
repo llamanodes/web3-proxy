@@ -11,6 +11,7 @@ All other requests are sent to an RPC server on the latest block (alchemy, moral
 Each server has different limits to configure. The `soft_limit` is the number of parallel active requests where a server starts to slow down. The `hard_limit` is where a server starts giving rate limits or other errors.
 
 ```
+$ cargo install sea-orm-cli
 $ cargo run --release -- --help
 ```
 ```

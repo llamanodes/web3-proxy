@@ -517,6 +517,8 @@ impl Web3Connections {
     }
 
     pub fn has_synced_rpcs(&self) -> bool {
+        // TODO: require a minimum number of synced rpcs
+        // TODO: move this whole function to SyncedConnections
         if self.synced_connections.load().conns.is_empty() {
             return false;
         }

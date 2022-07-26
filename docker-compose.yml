@@ -11,18 +11,18 @@ services:
 
   dev-db:
     image: mysql
-    # NOTE: use of "mysql_native_password" is not recommended: https://dev.mysql.com/doc/refman/8.0/en/upgrading-from-previous-series.html#upgrade-caching-sha2-password
-    # (this is just an example, not intended to be a production configuration)
-    command: --default-authentication-plugin=mysql_native_password
     environment:
       MYSQL_ROOT_PASSWORD: dev_web3_proxy
+      MYSQL_DATABASE: dev_web3_proxy
     ports:
       - 127.0.0.1:3306:3306
+    volumes:
+      - ./data/dev_mysql:/var/lib/mysql
 
   dev-adminer:
     image: adminer
     ports:
-      - 127.0.0.1:8306:8080
+      - 8306:8080
     environment:
       ADMINER_DEFAULT_SERVER: dev-db
 
