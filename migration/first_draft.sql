@@ -6,7 +6,7 @@ CREATE TABLE users (
   email VARCHAR(320),
 )
 
--- TODO: foreign key
+-- TODO: foreign keys
 -- TODO: how should we store addresses?
 -- TODO: creation time?
 -- TODO: permissions. likely similar to infura
@@ -27,7 +27,7 @@ CREATE TABLE blocklist (
   reason TEXT,
 )
 
--- TODO: foreign key
+-- TODO: foreign keys
 -- TODO: index on api_key
 -- TODO: what size for api_key
 -- TODO: track active with a timestamp?
