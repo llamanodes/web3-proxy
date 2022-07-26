@@ -9,7 +9,7 @@ CREATE TABLE users (
 CREATE TABLE secondary_users (
   id SERIAL PRIMARY KEY,
   -- TODO: foreign key
-  user_id INT,
+  users_id BIGINT,
   -- TODO: how should we store addresses?
   secondary_address VARCHAR NOT NULL,
   chain INT NOT NULL,
@@ -29,10 +29,12 @@ CREATE TABLE blocklist (
 CREATE TABLE user_keys (
   id SERIAL PRIMARY KEY,
   -- TODO: foreign key
-  user_id BIGINT,
-  api_key VARCHAR,
-  name VARCHAR,
+  users_id BIGINT,
+  -- TODO: index on api_key
+  api_key VARCHAR NOT NULL,
+  description VARCHAR,
   private_txs BOOLEAN,
+  -- TODO: track active with a timestamp?
   active BOOLEAN,
   -- TODO: creation time?
   -- TODO: requests_per_second INT,
