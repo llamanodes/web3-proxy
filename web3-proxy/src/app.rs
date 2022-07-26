@@ -1,6 +1,7 @@
 use axum::extract::ws::Message;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
+use diesel_migrations::embed_migrations;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, BlockNumber, Bytes, Transaction, TxHash, H256, U64};
 use futures::future::Abortable;
@@ -34,6 +35,8 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
+
+embed_migrations!("../migrations/");
 
 // TODO: make this customizable?
 static APP_USER_AGENT: &str = concat!(
@@ -287,6 +290,11 @@ impl Web3ProxyApp {
         Arc<Web3ProxyApp>,
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
     )> {
+        // // first, we connect to mysql and make sure the latest migrations have run
+        // let db_pool = todo!(app_config.db_url).await;
+        // let connection = db_pool.get().await;
+        // embedded_migrations::run_with_output(&connection, &mut std::io::stdout());
+
         let balanced_rpcs = app_config.balanced_rpcs.into_values().collect();
 
         let private_rpcs = if let Some(private_rpcs) = app_config.private_rpcs {

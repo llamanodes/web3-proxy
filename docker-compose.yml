@@ -5,7 +5,26 @@ version: "3.4"
 services:
   dev-redis:
     build: ./redis-cell-server/
-  # TODO: expose these ports?
+    ports:
+      - 127.0.0.1:6379:6379
+      # TODO: expose these ports?
+
+  dev-db:
+    image: mysql
+    # NOTE: use of "mysql_native_password" is not recommended: https://dev.mysql.com/doc/refman/8.0/en/upgrading-from-previous-series.html#upgrade-caching-sha2-password
+    # (this is just an example, not intended to be a production configuration)
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: dev_web3_proxy
+    ports:
+      - 127.0.0.1:3306:3306
+
+  dev-adminer:
+    image: adminer
+    ports:
+      - 127.0.0.1:8306:8080
+    environment:
+      ADMINER_DEFAULT_SERVER: dev-db
 
   dev-eth:
     extends:
@@ -14,21 +33,4 @@ services:
     volumes:
       - ./config/example.toml:/config.toml
     ports:
-      - 8544:8544
-
-  dev-user-portal:
-
-  dev-db:
-    image: mysql
-    # NOTE: use of "mysql_native_password" is not recommended: https://dev.mysql.com/doc/refman/8.0/en/upgrading-from-previous-series.html#upgrade-caching-sha2-password
-    # (this is just an example, not intended to be a production configuration)
-    command: --default-authentication-plugin=mysql_native_password
-    environment:
-      MYSQL_ROOT_PASSWORD: example
-
-  dev-adminer:
-    image: adminer
-    ports:
-      - 8080:8080
-    environment:
-      ADMINER_DEFAULT_SERVER: dev-db
+      - 127.0.0.1:8544:8544

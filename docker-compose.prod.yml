@@ -3,9 +3,11 @@
 version: "3.4"
 
 services:
-  # TODO: configure persistence?
+  # TODO: configure persistence? its just caches, but cold caches can be slow
   redis:
     build: ./redis-cell-server/
+
+  # TODO: database and adminer
 
   arbitrum:
     extends:

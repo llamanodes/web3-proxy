@@ -1,10 +1,9 @@
 [shared]
 chain_id = 1
-# in prod, do `redis_url = "redis://redis:6379/"`
-#redis_url = "redis://dev-redis:6379/"
+redis_url = "redis://dev-redis:6379/"
 public_rate_limit_per_minute = 60_000
 # 1GB of cache
-response_cache_max_bytes = 10 ^ 9
+response_cache_max_bytes = 10000000000
 
 [balanced_rpcs]
 

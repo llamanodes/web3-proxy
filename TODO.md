@@ -138,6 +138,7 @@ new endpoints for users:
 
 ## V2
 
+- [ ] jwt auth so people can easily switch from infura
 - [ ] handle log subscriptions
 - [ ] most things that are cached locally should probably be in shared redis caches
 - [ ] automated soft limit
@@ -154,6 +155,7 @@ in another repo: event subscriber
 
 ## "Maybe some day" and other Miscellaneous Things
 
+- [ ] search for all the "TODO" items in the code and move them here
 - [ ] don't "unwrap" anywhere. give proper errors
 - [ ] instead of giving a rate limit error code, delay the connection's response at the start. reject if incoming requests is super high?
 - [ ] add the backend server to the header?
