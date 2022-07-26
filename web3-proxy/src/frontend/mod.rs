@@ -19,6 +19,7 @@ use crate::app::Web3ProxyApp;
 pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
     // TODO: check auth (from authp?) here
     // build our application with a route
+    // order most to least common
     let app = Router::new()
         // `POST /` goes to `proxy_web3_rpc`
         .route("/", post(http_proxy::proxy_web3_rpc))
