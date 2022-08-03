@@ -465,7 +465,7 @@ impl Web3ProxyApp {
 
         // TODO: this only needs to be unique per connection. we don't need it globably unique
         let subscription_id = subscription_count.fetch_add(1, atomic::Ordering::SeqCst);
-        let subscription_id = format!("{:#x}", subscription_id);
+        let subscription_id = U64::from(subscription_id);
 
         // save the id so we can use it in the response
         let id = payload.id.clone();
@@ -475,8 +475,6 @@ impl Web3ProxyApp {
         match payload.params {
             Some(x) if x == json!(["newHeads"]) => {
                 let head_block_receiver = self.head_block_receiver.clone();
-
-                let subscription_id = subscription_id.clone();
 
                 trace!(?subscription_id, "new heads subscription");
                 tokio::spawn(async move {
@@ -509,8 +507,6 @@ impl Web3ProxyApp {
             }
             Some(x) if x == json!(["newPendingTransactions"]) => {
                 let pending_tx_receiver = self.pending_tx_sender.subscribe();
-
-                let subscription_id = subscription_id.clone();
 
                 let mut pending_tx_receiver = Abortable::new(
                     BroadcastStream::new(pending_tx_receiver),
@@ -550,8 +546,6 @@ impl Web3ProxyApp {
             Some(x) if x == json!(["newPendingFullTransactions"]) => {
                 // TODO: too much copy/pasta with newPendingTransactions
                 let pending_tx_receiver = self.pending_tx_sender.subscribe();
-
-                let subscription_id = subscription_id.clone();
 
                 let mut pending_tx_receiver = Abortable::new(
                     BroadcastStream::new(pending_tx_receiver),
@@ -599,8 +593,6 @@ impl Web3ProxyApp {
                     BroadcastStream::new(pending_tx_receiver),
                     subscription_registration,
                 );
-
-                let subscription_id = subscription_id.clone();
 
                 trace!(?subscription_id, "pending transactions subscription");
 

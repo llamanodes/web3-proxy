@@ -10,7 +10,7 @@ pub struct Model {
     #[sea_orm(unique)]
     pub address: String,
     pub description: String,
-    pub email: String,
+    pub email: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -11,6 +11,10 @@ use axum::{http::StatusCode, response::IntoResponse, Json};
 use ethers::prelude::{Address, Bytes};
 use serde::{Deserialize, Serialize};
 
+use entities::user;
+
+// use entities::user::User;
+
 pub async fn create_user(
     // this argument tells axum to parse the request body
     // as JSON into a `CreateUser` type
@@ -18,28 +22,26 @@ pub async fn create_user(
 ) -> impl IntoResponse {
     // TODO: rate limit by ip
     // TODO: insert your application logic here
-    let user = User {
-        id: 1337,
-        eth_address: payload.eth_address,
+    let user = user::ActiveModel {
+        address: sea_orm::Set(payload.address.to_string()),
+        ..Default::default()
     };
+
+    // TODO: optional email
+
+    todo!();
 
     // this will be converted into a JSON response
     // with a status code of `201 Created`
-    (StatusCode::CREATED, Json(user))
+    // (StatusCode::CREATED, Json(user))
 }
 
 // the input to our `create_user` handler
 #[derive(Deserialize)]
 pub struct CreateUser {
-    eth_address: Address,
-    // TODO: validation
+    address: Address,
+    // TODO: make sure the email address is valid
     email: Option<String>,
     signature: Bytes,
-}
-
-// the output to our `create_user` handler
-#[derive(Serialize)]
-struct User {
-    id: u64,
-    eth_address: Address,
+    invite_code: String,
 }

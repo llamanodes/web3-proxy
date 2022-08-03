@@ -59,6 +59,14 @@ $ websocat ws://127.0.0.1:8544
 
 You can copy `config/example.toml` to `config/production-$CHAINNAME.toml` and then run `docker-compose up --build -d` start proxies for many chains.
 
+## Database entities
+
+Types for database entities are generated from a development database.
+
+```
+sea-orm-cli generate entity -u mysql://root:dev_web3_proxy@127.0.0.1:3306/dev_web3_proxy -o entities/src
+```
+
 ## Flame Graphs
 
 Flame graphs make finding slow code painless:

@@ -168,7 +168,6 @@ impl JsonRpcForwardedResponse {
 
         JsonRpcForwardedResponse {
             jsonrpc: "2.0".to_string(),
-            // TODO: what id can we use? how do we make sure the incoming id gets attached to this?
             id,
             result: None,
             error: Some(JsonRpcErrorData {

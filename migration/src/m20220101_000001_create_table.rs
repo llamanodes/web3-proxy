@@ -25,7 +25,7 @@ impl MigrationTrait for Migration {
                             .unique_key(),
                     )
                     .col(ColumnDef::new(User::Description).string().not_null())
-                    .col(ColumnDef::new(User::Email).string().not_null())
+                    .col(ColumnDef::new(User::Email).string())
                     .to_owned(),
             )
             .await?;
