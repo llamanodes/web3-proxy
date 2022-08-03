@@ -16,8 +16,8 @@ redis-cell-client = { path = "../redis-cell-client" }
 entities = { path = "../entities" }
 migration = { path = "../migration" }
 
-anyhow = { version = "1.0.58", features = ["backtrace"] }
-arc-swap = "1.5.0"
+anyhow = { version = "1.0.59", features = ["backtrace"] }
+arc-swap = "1.5.1"
 argh = "0.1.8"
 axum = { version = "0.5.13", features = ["serde_json", "tokio-tungstenite", "ws"] }
 axum-client-ip = "0.2.0"
@@ -43,12 +43,12 @@ reqwest = { version = "0.11.11", default-features = false, features = ["json", "
 rustc-hash = "1.1.0"
 siwe = "0.4.1"
 sea-orm = { version = "0.9.1", features = ["macros"] }
-serde = { version = "1.0.140", features = [] }
+serde = { version = "1.0.141", features = [] }
 serde_json = { version = "1.0.82", default-features = false, features = ["alloc", "raw_value"] }
 tokio = { version = "1.20.1", features = ["full", "tracing"] }
 async-std = { version = "1.12.0", features = ["attributes", "tokio1"] }
 toml = "0.5.9"
-tracing = "0.1.35"
+tracing = "0.1.36"
 # TODO: tracing-subscriber has serde and serde_json features that we might want to use
 tracing-subscriber = { version = "0.3.15", features = ["env-filter", "parking_lot"] }
 url = "2.2.2"
