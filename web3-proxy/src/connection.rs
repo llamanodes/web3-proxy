@@ -216,18 +216,19 @@ impl Web3Connection {
 
         // TODO: don't sleep. wait for new heads subscription instead
         // TODO: i think instead of atomics, we could maybe use a watch channel
-        sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(200)).await;
 
         // we could take "archive" as a parameter, but we would want a safety check on it regardless
         // check common archive thresholds
         // TODO: would be great if rpcs exposed this
         // TODO: move this to a helper function so we can recheck on errors or as the chain grows
+        // TODO: move this to a helper function that checks
         for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
             let mut head_block_num = new_connection.head_block.read().1;
 
             // TODO: wait until head block is set outside the loop? if we disconnect while starting we could actually get 0 though
             while head_block_num == U64::zero() {
-                info!(?new_connection, "no head block");
+                warn!(?new_connection, "no head block");
 
                 // TODO: subscribe to a channel instead of polling? subscribe to http_interval_sender?
                 sleep(Duration::from_secs(1)).await;

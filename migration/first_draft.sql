@@ -1,6 +1,6 @@
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
-  chain INT,
+  primary_chain INT,
   primary_address VARCHAR(42),
   description VARCHAR(255),
   email VARCHAR(320),
@@ -14,7 +14,7 @@ CREATE TABLE secondary_users (
   id SERIAL PRIMARY KEY,
   users_id BIGINT,
   secondary_address VARCHAR(42),
-  chain INT,
+  secondary_chain INT,
   description VARCHAR,
   email VARCHAR(320),
 )

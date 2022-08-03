@@ -10,6 +10,7 @@ use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use futures::Future;
 use linkedhashmap::LinkedHashMap;
+use migration::{Migrator, MigratorTrait};
 use parking_lot::RwLock;
 use redis_cell_client::bb8::ErrorSink;
 use redis_cell_client::{bb8, RedisCellClient, RedisConnectionManager};
@@ -289,11 +290,7 @@ impl Web3ProxyApp {
         Arc<Web3ProxyApp>,
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
     )> {
-        // // first, we connect to mysql and make sure the latest migrations have run
-        // let db_pool = todo!(app_config.db_url).await;
-        // let connection = db_pool.get().await;
-        // embedded_migrations::run_with_output(&connection, &mut std::io::stdout());
-
+        // first, we connect to mysql and make sure the latest migrations have run
         let db_conn = if let Some(db_url) = app_config.shared.db_url {
             let mut db_opt = sea_orm::ConnectOptions::new(db_url);
 
@@ -308,6 +305,9 @@ impl Web3ProxyApp {
             // .sqlx_logging_level(log::LevelFilter::Info);
 
             let db_conn = sea_orm::Database::connect(db_opt).await?;
+
+            // TODO: if error, roll back
+            Migrator::up(&db_conn, None).await?;
 
             Some(db_conn)
         } else {
