@@ -198,3 +198,5 @@ in another repo: event subscriber
   2022-07-22T23:52:19.350720Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 1/2/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "ws://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517
   2022-07-22T23:52:26.041140Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 2/4/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "http://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517
   - [ ] threshold should check actual available request limits (if any) instead of just the soft limit
+- [ ] foreign key on_update and on_delete
+- [ ] database creation timestamps

@@ -6,7 +6,7 @@ use crate::app::Web3ProxyApp;
 
 /// Health check page for load balancers to use
 pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
-    if app.get_balanced_rpcs().has_synced_rpcs() {
+    if app.balanced_rpcs().synced() {
         (StatusCode::OK, "OK")
     } else {
         (StatusCode::SERVICE_UNAVAILABLE, ":(")
@@ -16,10 +16,10 @@ pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoRe
 /// Very basic status page
 pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     // TODO: what else should we include? uptime? prometheus?
-    let balanced_rpcs = app.get_balanced_rpcs();
-    let private_rpcs = app.get_private_rpcs();
-    let num_active_requests = app.get_active_requests().len();
-    let num_pending_transactions = app.get_pending_transactions().len();
+    let balanced_rpcs = app.balanced_rpcs();
+    let private_rpcs = app.private_rpcs();
+    let num_active_requests = app.active_requests().len();
+    let num_pending_transactions = app.pending_transactions().len();
 
     let body = json!({
         "balanced_rpcs": balanced_rpcs,

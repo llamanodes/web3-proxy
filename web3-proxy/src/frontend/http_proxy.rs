@@ -10,7 +10,7 @@ pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
 ) -> impl IntoResponse {
-    if let Some(rate_limiter) = app.get_public_rate_limiter() {
+    if let Some(rate_limiter) = app.public_rate_limiter() {
         let rate_limiter_key = format!("{}", ip);
 
         if rate_limiter.throttle_key(&rate_limiter_key).await.is_err() {

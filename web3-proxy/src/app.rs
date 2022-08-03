@@ -92,7 +92,7 @@ fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> (bool, U64) {
     }
 }
 
-fn get_or_set_block_number(
+fn clean_block_number(
     params: &mut serde_json::Value,
     block_param_id: usize,
     latest_block: U64,
@@ -128,7 +128,7 @@ fn get_or_set_block_number(
 }
 
 // TODO: change this to return also return the hash needed
-fn get_min_block_needed(
+fn block_needed(
     method: &str,
     params: Option<&mut serde_json::Value>,
     head_block: U64,
@@ -225,7 +225,7 @@ fn get_min_block_needed(
         }
     };
 
-    match get_or_set_block_number(params, block_param_id, head_block) {
+    match clean_block_number(params, block_param_id, head_block) {
         Ok(block) => Some(block),
         Err(err) => {
             // TODO: seems unlikely that we will get here
@@ -253,7 +253,7 @@ pub struct Web3ProxyApp {
     balanced_rpcs: Arc<Web3Connections>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     private_rpcs: Arc<Web3Connections>,
-    incoming_requests: ActiveRequestsMap,
+    active_requests: ActiveRequestsMap,
     /// bytes available to response_cache (it will be slightly larger than this)
     response_cache_max_bytes: AtomicUsize,
     response_cache: ResponseLrcCache,
@@ -274,11 +274,11 @@ impl fmt::Debug for Web3ProxyApp {
 }
 
 impl Web3ProxyApp {
-    pub fn get_pending_transactions(&self) -> &DashMap<TxHash, TxState> {
+    pub fn pending_transactions(&self) -> &DashMap<TxHash, TxState> {
         &self.pending_transactions
     }
 
-    pub fn get_public_rate_limiter(&self) -> Option<&RedisCellClient> {
+    pub fn public_rate_limiter(&self) -> Option<&RedisCellClient> {
         self.public_rate_limiter.as_ref()
     }
 
@@ -435,7 +435,7 @@ impl Web3ProxyApp {
         let app = Self {
             balanced_rpcs,
             private_rpcs,
-            incoming_requests: Default::default(),
+            active_requests: Default::default(),
             response_cache_max_bytes: AtomicUsize::new(app_config.shared.response_cache_max_bytes),
             response_cache: Default::default(),
             head_block_receiver,
@@ -647,16 +647,16 @@ impl Web3ProxyApp {
         Ok((subscription_abort_handle, response))
     }
 
-    pub fn get_balanced_rpcs(&self) -> &Web3Connections {
+    pub fn balanced_rpcs(&self) -> &Web3Connections {
         &self.balanced_rpcs
     }
 
-    pub fn get_private_rpcs(&self) -> &Web3Connections {
+    pub fn private_rpcs(&self) -> &Web3Connections {
         &self.private_rpcs
     }
 
-    pub fn get_active_requests(&self) -> &ActiveRequestsMap {
-        &self.incoming_requests
+    pub fn active_requests(&self) -> &ActiveRequestsMap {
+        &self.active_requests
     }
 
     /// send the request or batch of requests to the approriate RPCs
@@ -715,7 +715,7 @@ impl Web3ProxyApp {
         Ok(collected)
     }
 
-    async fn get_cached_response(
+    async fn cached_response(
         &self,
         // TODO: accept a block hash here also?
         min_block_needed: Option<&U64>,
@@ -729,10 +729,10 @@ impl Web3ProxyApp {
 
         let request_block_hash = if let Some(min_block_needed) = min_block_needed {
             // TODO: maybe this should be on the app and not on balanced_rpcs
-            self.balanced_rpcs.get_block_hash(min_block_needed).await?
+            self.balanced_rpcs.block_hash(min_block_needed).await?
         } else {
             // TODO: maybe this should be on the app and not on balanced_rpcs
-            self.balanced_rpcs.get_head_block_hash()
+            self.balanced_rpcs.head_block_hash()
         };
 
         // TODO: better key? benchmark this
@@ -852,7 +852,7 @@ impl Web3ProxyApp {
             // some commands can use local data or caches
             "eth_accounts" => serde_json::Value::Array(vec![]),
             "eth_blockNumber" => {
-                let head_block_number = self.balanced_rpcs.get_head_block_num();
+                let head_block_number = self.balanced_rpcs.head_block_num();
 
                 // TODO: technically, block 0 is okay. i guess we should be using an option
                 if head_block_number.as_u64() == 0 {
@@ -931,23 +931,23 @@ impl Web3ProxyApp {
             // TODO: web3_sha3?
             // anything else gets sent to backend rpcs and cached
             method => {
-                let head_block_number = self.balanced_rpcs.get_head_block_num();
+                let head_block_number = self.balanced_rpcs.head_block_num();
 
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
                 let min_block_needed =
-                    get_min_block_needed(method, request.params.as_mut(), head_block_number);
+                    block_needed(method, request.params.as_mut(), head_block_number);
 
                 let min_block_needed = min_block_needed.as_ref();
 
                 trace!(?min_block_needed, ?method);
 
                 let (cache_key, cache_result) =
-                    self.get_cached_response(min_block_needed, &request).await?;
+                    self.cached_response(min_block_needed, &request).await?;
 
                 let response_cache = match cache_result {
                     Ok(response) => {
-                        let _ = self.incoming_requests.remove(&cache_key);
+                        let _ = self.active_requests.remove(&cache_key);
 
                         // TODO: if the response is cached, should it count less against the account's costs?
 
@@ -960,7 +960,7 @@ impl Web3ProxyApp {
                 // TODO: move this logic into an IncomingRequestHandler (ActiveRequestHandler has an rpc, but this won't)
                 let (incoming_tx, incoming_rx) = watch::channel(true);
                 let mut other_incoming_rx = None;
-                match self.incoming_requests.entry(cache_key.clone()) {
+                match self.active_requests.entry(cache_key.clone()) {
                     DashMapEntry::Occupied(entry) => {
                         other_incoming_rx = Some(entry.get().clone());
                     }
@@ -977,7 +977,7 @@ impl Web3ProxyApp {
 
                     // now that we've waited, lets check the cache again
                     if let Some(cached) = response_cache.read().get(&cache_key) {
-                        let _ = self.incoming_requests.remove(&cache_key);
+                        let _ = self.active_requests.remove(&cache_key);
                         let _ = incoming_tx.send(false);
 
                         // TODO: emit a stat
@@ -1039,7 +1039,7 @@ impl Web3ProxyApp {
                     }
                 }
 
-                let _ = self.incoming_requests.remove(&cache_key);
+                let _ = self.active_requests.remove(&cache_key);
                 let _ = incoming_tx.send(false);
 
                 return Ok(response);

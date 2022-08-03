@@ -54,11 +54,11 @@ impl fmt::Debug for SyncedConnections {
 }
 
 impl SyncedConnections {
-    pub fn get_head_block_hash(&self) -> &H256 {
+    pub fn head_block_hash(&self) -> &H256 {
         &self.head_block_hash
     }
 
-    pub fn get_head_block_num(&self) -> U64 {
+    pub fn head_block_num(&self) -> U64 {
         self.head_block_num.into()
     }
 }
@@ -96,11 +96,11 @@ impl BlockChain {
         self.block_map.entry(hash).or_insert(block);
     }
 
-    pub fn get_cannonical_block(&self, num: &U64) -> Option<Arc<Block<TxHash>>> {
+    pub fn cannonical_block(&self, num: &U64) -> Option<Arc<Block<TxHash>>> {
         self.chain_map.get(num).map(|x| x.clone())
     }
 
-    pub fn get_block(&self, hash: &H256) -> Option<Arc<Block<TxHash>>> {
+    pub fn block(&self, hash: &H256) -> Option<Arc<Block<TxHash>>> {
         self.block_map.get(hash).map(|x| x.clone())
     }
 }
@@ -423,9 +423,9 @@ impl Web3Connections {
         Ok(())
     }
 
-    pub async fn get_block(&self, hash: &H256) -> anyhow::Result<Arc<Block<TxHash>>> {
+    pub async fn block(&self, hash: &H256) -> anyhow::Result<Arc<Block<TxHash>>> {
         // first, try to get the hash from our cache
-        if let Some(block) = self.chain.get_block(hash) {
+        if let Some(block) = self.chain.block(hash) {
             return Ok(block);
         }
 
@@ -451,15 +451,15 @@ impl Web3Connections {
     }
 
     /// Get the heaviest chain's block from cache or backend rpc
-    pub async fn get_cannonical_block(&self, num: &U64) -> anyhow::Result<Arc<Block<TxHash>>> {
+    pub async fn cannonical_block(&self, num: &U64) -> anyhow::Result<Arc<Block<TxHash>>> {
         // first, try to get the hash from our cache
-        if let Some(block) = self.chain.get_cannonical_block(num) {
+        if let Some(block) = self.chain.cannonical_block(num) {
             return Ok(block);
         }
 
         // block not in cache. we need to ask an rpc for it
         // but before we do any queries, be sure the requested block num exists
-        let head_block_num = self.get_head_block_num();
+        let head_block_num = self.head_block_num();
         if num > &head_block_num {
             return Err(anyhow::anyhow!(
                 "Head block is #{}, but #{} was requested",
@@ -491,38 +491,38 @@ impl Web3Connections {
     }
 
     /// Convenience method to get the cannonical block at a given block height.
-    pub async fn get_block_hash(&self, num: &U64) -> anyhow::Result<H256> {
-        let block = self.get_cannonical_block(num).await?;
+    pub async fn block_hash(&self, num: &U64) -> anyhow::Result<H256> {
+        let block = self.cannonical_block(num).await?;
 
         let hash = block.hash.unwrap();
 
         Ok(hash)
     }
 
-    pub fn get_head_block(&self) -> (U64, H256) {
+    pub fn head_block(&self) -> (U64, H256) {
         let synced_connections = self.synced_connections.load();
 
-        let num = synced_connections.get_head_block_num();
-        let hash = *synced_connections.get_head_block_hash();
+        let num = synced_connections.head_block_num();
+        let hash = *synced_connections.head_block_hash();
 
         (num, hash)
     }
 
-    pub fn get_head_block_hash(&self) -> H256 {
-        *self.synced_connections.load().get_head_block_hash()
+    pub fn head_block_hash(&self) -> H256 {
+        *self.synced_connections.load().head_block_hash()
     }
 
-    pub fn get_head_block_num(&self) -> U64 {
-        self.synced_connections.load().get_head_block_num()
+    pub fn head_block_num(&self) -> U64 {
+        self.synced_connections.load().head_block_num()
     }
 
-    pub fn has_synced_rpcs(&self) -> bool {
+    pub fn synced(&self) -> bool {
         // TODO: require a minimum number of synced rpcs
         // TODO: move this whole function to SyncedConnections
         if self.synced_connections.load().conns.is_empty() {
             return false;
         }
-        self.get_head_block_num() > U64::zero()
+        self.head_block_num() > U64::zero()
     }
 
     pub fn num_synced_rpcs(&self) -> usize {
@@ -697,7 +697,7 @@ impl Web3Connections {
 
                         rpc_urls_by_num.push(rpc_url);
 
-                        if let Some(parent) = self.chain.get_block(&block.parent_hash) {
+                        if let Some(parent) = self.chain.block(&block.parent_hash) {
                             // save the parent block
                             blocks_by_hash.insert(block.parent_hash, parent.clone());
 
@@ -812,7 +812,7 @@ impl Web3Connections {
                     conns,
                 };
 
-                let current_head_block = self.get_head_block_hash();
+                let current_head_block = self.head_block_hash();
                 let new_head_block =
                     pending_synced_connections.head_block_hash != current_head_block;
 
@@ -971,7 +971,7 @@ impl Web3Connections {
 
     /// get all rpc servers that are not rate limited
     /// returns servers even if they aren't in sync. This is useful for broadcasting signed transactions
-    pub async fn get_upstream_servers(
+    pub async fn upstream_servers(
         &self,
         min_block_needed: Option<&U64>,
     ) -> Result<Vec<ActiveRequestHandle>, Option<Duration>> {
@@ -1107,7 +1107,7 @@ impl Web3Connections {
         min_block_needed: Option<&U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
-            match self.get_upstream_servers(min_block_needed).await {
+            match self.upstream_servers(min_block_needed).await {
                 Ok(active_request_handles) => {
                     // TODO: benchmark this compared to waiting on unbounded futures
                     // TODO: do something with this handle?
