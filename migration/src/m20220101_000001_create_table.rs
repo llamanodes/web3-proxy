@@ -6,11 +6,11 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // users
         manager
             .create_table(
                 Table::create()
                     .table(User::Table)
-                    .if_not_exists()
                     .col(
                         ColumnDef::new(User::Id)
                             .big_integer()
@@ -30,11 +30,11 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // secondary users
         manager
             .create_table(
                 Table::create()
                     .table(SecondaryUser::Table)
-                    .if_not_exists()
                     .col(
                         ColumnDef::new(SecondaryUser::Id)
                             .big_integer()
@@ -47,7 +47,11 @@ impl MigrationTrait for Migration {
                             .big_integer()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(SecondaryUser::Address).string().not_null())
+                    .col(
+                        ColumnDef::new(SecondaryUser::Address)
+                            .string_len(42)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(SecondaryUser::Description)
                             .string()
@@ -59,25 +63,25 @@ impl MigrationTrait for Migration {
                             .enumeration("role", ["owner", "admin", "collaborator"])
                             .not_null(),
                     )
+                    .index(
+                        sea_query::Index::create()
+                            .name("idx-secondary_user-address")
+                            .col(SecondaryUser::Address),
+                    )
+                    .foreign_key(
+                        sea_query::ForeignKey::create()
+                            .from(SecondaryUser::Table, SecondaryUser::UserId)
+                            .to(User::Table, User::Id),
+                    )
                     .to_owned(),
             )
             .await?;
 
-        // TODO: make sure from and to aren't backwards
-        manager
-            .create_foreign_key(
-                sea_query::ForeignKey::create()
-                    .from(SecondaryUser::Table, SecondaryUser::UserId)
-                    .to(User::Table, User::Id)
-                    .to_owned(),
-            )
-            .await?;
-
+        // block list for the transaction firewall
         manager
             .create_table(
                 Table::create()
                     .table(BlockList::Table)
-                    .if_not_exists()
                     .col(
                         ColumnDef::new(BlockList::Id)
                             .big_integer()
@@ -85,18 +89,22 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(BlockList::Address).string().not_null())
-                    .col(ColumnDef::new(BlockList::Chain).integer().not_null())
+                    .col(
+                        ColumnDef::new(BlockList::Address)
+                            .string()
+                            .not_null()
+                            .unique_key(),
+                    )
                     .col(ColumnDef::new(BlockList::Description).string().not_null())
                     .to_owned(),
             )
             .await?;
 
+        // api keys
         manager
             .create_table(
                 Table::create()
                     .table(UserKeys::Table)
-                    .if_not_exists()
                     .col(
                         ColumnDef::new(UserKeys::Id)
                             .big_integer()
@@ -105,7 +113,12 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(UserKeys::UserId).big_integer().not_null())
-                    .col(ColumnDef::new(UserKeys::ApiKey).string_len(32).not_null())
+                    .col(
+                        ColumnDef::new(UserKeys::ApiKey)
+                            .string_len(32)
+                            .not_null()
+                            .unique_key(),
+                    )
                     .col(ColumnDef::new(UserKeys::Description).string().not_null())
                     .col(
                         ColumnDef::new(UserKeys::PrivateTxs)
@@ -119,20 +132,21 @@ impl MigrationTrait for Migration {
                             .default(true)
                             .not_null(),
                     )
+                    .index(
+                        sea_query::Index::create()
+                            .name("idx-user_keys-active")
+                            .col(UserKeys::Active),
+                    )
+                    .foreign_key(
+                        sea_query::ForeignKey::create()
+                            .from(UserKeys::Table, UserKeys::UserId)
+                            .to(User::Table, User::Id),
+                    )
                     .to_owned(),
             )
             .await?;
 
-        // TODO: make sure from and to aren't backwards
-        manager
-            .create_foreign_key(
-                sea_query::ForeignKey::create()
-                    .from(UserKeys::Table, UserKeys::UserId)
-                    .to(User::Table, User::Id)
-                    .to_owned(),
-            )
-            .await?;
-
+        // it worked!
         Ok(())
     }
 
@@ -188,7 +202,6 @@ enum BlockList {
     Table,
     Id,
     Address,
-    Chain,
     Description,
 }
 
