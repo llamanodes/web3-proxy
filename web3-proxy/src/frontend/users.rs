@@ -7,32 +7,54 @@
 // I wonder how we handle payment
 // probably have to do manual withdrawals
 
-use axum::{http::StatusCode, response::IntoResponse, Json};
-use ethers::prelude::{Address, Bytes};
-use serde::{Deserialize, Serialize};
-
+use axum::{response::IntoResponse, Extension, Json};
+use axum_client_ip::ClientIp;
 use entities::user;
+use ethers::{prelude::Address, types::Bytes};
+use sea_orm::ActiveModelTrait;
+use serde::Deserialize;
+use std::sync::Arc;
 
-// use entities::user::User;
+use crate::{app::Web3ProxyApp, frontend::rate_limit_by_ip};
 
 pub async fn create_user(
     // this argument tells axum to parse the request body
     // as JSON into a `CreateUser` type
     Json(payload): Json<CreateUser>,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ClientIp(ip): ClientIp,
 ) -> impl IntoResponse {
-    // TODO: rate limit by ip
-    // TODO: insert your application logic here
+    if let Err(x) = rate_limit_by_ip(&app, &ip).await {
+        return x;
+    }
+
+    // TODO: check invite_code against the app's config
+    if payload.invite_code != "llam4n0des!" {
+        todo!("proper error message")
+    }
+
+    // TODO: dont unwrap. proper error
+    let signature: [u8; 65] = payload.signature.as_ref().try_into().unwrap();
+
+    // TODO: calculate the expected message for the current user. include domain and a nonce. let timestamp be automatic
+    let message: siwe::Message = "abc123".parse().unwrap();
+    if let Err(e) = message.verify(signature, None, None, None) {
+        // message cannot be correctly authenticated
+        todo!("proper error message: {}", e)
+    }
+
     let user = user::ActiveModel {
         address: sea_orm::Set(payload.address.to_string()),
+        email: sea_orm::Set(payload.email),
         ..Default::default()
     };
 
-    // TODO: optional email
+    let db = app.db_conn();
 
-    todo!();
+    // TODO: proper error message
+    let user = user.insert(db).await.unwrap();
 
-    // this will be converted into a JSON response
-    // with a status code of `201 Created`
+    todo!("serialize and return the user: {:?}", user)
     // (StatusCode::CREATED, Json(user))
 }
 

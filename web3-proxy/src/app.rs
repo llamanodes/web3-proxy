@@ -262,7 +262,7 @@ pub struct Web3ProxyApp {
     head_block_receiver: watch::Receiver<Arc<Block<TxHash>>>,
     pending_tx_sender: broadcast::Sender<TxState>,
     pending_transactions: Arc<DashMap<TxHash, TxState>>,
-    public_rate_limiter: Option<RedisCellClient>,
+    rate_limiter: Option<RedisCellClient>,
     db_conn: Option<sea_orm::DatabaseConnection>,
 }
 
@@ -274,12 +274,16 @@ impl fmt::Debug for Web3ProxyApp {
 }
 
 impl Web3ProxyApp {
+    pub fn db_conn(&self) -> &sea_orm::DatabaseConnection {
+        self.db_conn.as_ref().unwrap()
+    }
+
     pub fn pending_transactions(&self) -> &DashMap<TxHash, TxState> {
         &self.pending_transactions
     }
 
-    pub fn public_rate_limiter(&self) -> Option<&RedisCellClient> {
-        self.public_rate_limiter.as_ref()
+    pub fn rate_limiter(&self) -> Option<&RedisCellClient> {
+        self.rate_limiter.as_ref()
     }
 
     // TODO: should we just take the rpc config as the only arg instead?
@@ -441,7 +445,7 @@ impl Web3ProxyApp {
             head_block_receiver,
             pending_tx_sender,
             pending_transactions,
-            public_rate_limiter,
+            rate_limiter: public_rate_limiter,
             db_conn,
         };
 

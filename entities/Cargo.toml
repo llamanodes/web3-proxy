@@ -10,4 +10,4 @@ path = "src/mod.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sea-orm = { version = "0.9.1" }
+sea-orm = "0.9.1"

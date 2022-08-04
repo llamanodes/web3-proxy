@@ -3,6 +3,7 @@ use axum_client_ip::ClientIp;
 use std::sync::Arc;
 
 use super::errors::handle_anyhow_error;
+use super::{rate_limit_by_ip, rate_limit_by_key};
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 
 pub async fn proxy_web3_rpc(
@@ -10,23 +11,23 @@ pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
 ) -> impl IntoResponse {
-    if let Some(rate_limiter) = app.public_rate_limiter() {
-        let rate_limiter_key = format!("{}", ip);
+    if let Err(x) = rate_limit_by_ip(&app, &ip).await {
+        return x.into_response();
+    }
 
-        if rate_limiter.throttle_key(&rate_limiter_key).await.is_err() {
-            // TODO: set headers so they know when they can retry
-            // warn!(?ip, "public rate limit exceeded");
-            // TODO: use their id if possible
-            return handle_anyhow_error(
-                Some(StatusCode::TOO_MANY_REQUESTS),
-                None,
-                anyhow::anyhow!("too many requests"),
-            )
-            .await
-            .into_response();
-        }
-    } else {
-        // TODO: if no redis, rate limit with a local cache?
+    match app.proxy_web3_rpc(payload).await {
+        Ok(response) => (StatusCode::OK, Json(&response)).into_response(),
+        Err(err) => handle_anyhow_error(None, None, err).await.into_response(),
+    }
+}
+
+pub async fn user_proxy_web3_rpc(
+    Json(payload): Json<JsonRpcRequestEnum>,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    key: String,
+) -> impl IntoResponse {
+    if let Err(x) = rate_limit_by_key(&app, &key).await {
+        return x.into_response();
     }
 
     match app.proxy_web3_rpc(payload).await {

@@ -43,8 +43,8 @@ reqwest = { version = "0.11.11", default-features = false, features = ["json", "
 rustc-hash = "1.1.0"
 siwe = "0.4.1"
 sea-orm = { version = "0.9.1", features = ["macros"] }
-serde = { version = "1.0.141", features = [] }
-serde_json = { version = "1.0.82", default-features = false, features = ["alloc", "raw_value"] }
+serde = { version = "1.0.142", features = [] }
+serde_json = { version = "1.0.83", default-features = false, features = ["alloc", "raw_value"] }
 tokio = { version = "1.20.1", features = ["full", "tracing"] }
 async-std = { version = "1.12.0", features = ["attributes", "tokio1"] }
 toml = "0.5.9"

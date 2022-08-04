@@ -3,6 +3,7 @@ use axum::{
     response::IntoResponse,
     Extension,
 };
+use axum_client_ip::ClientIp;
 use futures::SinkExt;
 use futures::{
     future::AbortHandle,
@@ -19,10 +20,29 @@ use crate::{
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
 };
 
+use super::{rate_limit_by_ip, rate_limit_by_key};
+
 pub async fn websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ClientIp(ip): ClientIp,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    if let Err(x) = rate_limit_by_ip(&app, &ip).await {
+        return x.into_response();
+    }
+
+    ws.on_upgrade(|socket| proxy_web3_socket(app, socket))
+}
+
+pub async fn user_websocket_handler(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ws: WebSocketUpgrade,
+    key: String,
+) -> impl IntoResponse {
+    if let Err(x) = rate_limit_by_key(&app, &key).await {
+        return x.into_response();
+    }
+
     ws.on_upgrade(|socket| proxy_web3_socket(app, socket))
 }
 
