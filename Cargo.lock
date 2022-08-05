@@ -1876,6 +1876,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "fstrings"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7845a0f15da505ac36baad0486612dab57f8b8d34e19c5470a265bbcdd572ae6"
+dependencies = [
+ "fstrings-proc-macro",
+ "proc-macro-hack",
+]
+
+[[package]]
+name = "fstrings-proc-macro"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63b58c0e7581dc33478a32299182cbe5ae3b8c028be26728a47fb0a113c92d9d"
+dependencies = [
+ "proc-macro-hack",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "fuchsia-zircon"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5176,7 +5198,6 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "argh",
- "async-std",
  "axum",
  "axum-client-ip",
  "counter",
@@ -5187,6 +5208,7 @@ dependencies = [
  "ethers",
  "fdlimit",
  "flume",
+ "fstrings",
  "futures",
  "hashbrown",
  "indexmap",
@@ -5197,6 +5219,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "petgraph",
  "proctitle",
+ "rand",
  "redis-cell-client",
  "regex",
  "reqwest",
@@ -5212,6 +5235,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "uuid 1.1.2",
 ]
 
 [[package]]

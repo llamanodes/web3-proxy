@@ -107,7 +107,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(UserKeys::UserUuid).uuid().not_null())
                     .col(
                         ColumnDef::new(UserKeys::ApiKey)
-                            .string_len(32)
+                            .uuid()
                             .not_null()
                             .unique_key(),
                     )

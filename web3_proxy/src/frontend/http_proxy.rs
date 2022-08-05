@@ -6,7 +6,7 @@ use super::errors::handle_anyhow_error;
 use super::{rate_limit_by_ip, rate_limit_by_key};
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 
-pub async fn proxy_web3_rpc(
+pub async fn public_proxy_web3_rpc(
     Json(payload): Json<JsonRpcRequestEnum>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,

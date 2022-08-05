@@ -11,7 +11,9 @@ use axum::{
     routing::{get, post},
     Extension, Router,
 };
+use entities::user_keys;
 use reqwest::StatusCode;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tracing::debug;
@@ -26,13 +28,48 @@ pub async fn rate_limit_by_ip(app: &Web3ProxyApp, ip: &IpAddr) -> Result<(), imp
     rate_limit_by_key(app, &rate_limiter_key).await
 }
 
+/// if Ok(()), rate limits are acceptable
+/// if Err(response), rate limits exceeded
 pub async fn rate_limit_by_key(
     app: &Web3ProxyApp,
     user_key: &str,
 ) -> Result<(), impl IntoResponse> {
     let db = app.db_conn();
 
-    // TODO: query the db to make sure this key is active
+    // query the db to make sure this key is active
+    // TODO: probably want a cache on this
+    match user_keys::Entity::find()
+        .select_only()
+        .column(user_keys::Column::UserUuid)
+        .filter(user_keys::Column::ApiKey.eq(user_key))
+        .filter(user_keys::Column::Active.eq(true))
+        .one(db)
+        .await
+    {
+        Ok(Some(_)) => {
+            // user key is valid
+        }
+        Ok(None) => {
+            // invalid user key
+            // TODO: rate limit by ip here, too? maybe tarpit?
+            return Err(handle_anyhow_error(
+                Some(StatusCode::FORBIDDEN),
+                None,
+                anyhow::anyhow!("unknown api key"),
+            )
+            .await
+            .into_response());
+        }
+        Err(e) => {
+            return Err(handle_anyhow_error(
+                Some(StatusCode::INTERNAL_SERVER_ERROR),
+                None,
+                e.into(),
+            )
+            .await
+            .into_response());
+        }
+    }
 
     if let Some(rate_limiter) = app.rate_limiter() {
         if rate_limiter.throttle_key(user_key).await.is_err() {
@@ -55,23 +92,15 @@ pub async fn rate_limit_by_key(
 }
 
 pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
-    // TODO: check auth (from authp?) here
     // build our application with a route
     // order most to least common
     let app = Router::new()
-        // `POST /` goes to `proxy_web3_rpc`
-        .route("/", post(http_proxy::proxy_web3_rpc))
-        // `websocket /` goes to `proxy_web3_ws`
-        .route("/", get(ws_proxy::websocket_handler))
-        // `POST /rpc/:key` goes to `proxy_web3_rpc`
-        .route("/rpc/:key", post(http_proxy::user_proxy_web3_rpc))
-        // `websocket /` goes to `proxy_web3_ws`
-        .route("/rpc/:key", get(ws_proxy::user_websocket_handler))
-        // `GET /health` goes to `health`
+        .route("/", post(http_proxy::public_proxy_web3_rpc))
+        .route("/", get(ws_proxy::public_websocket_handler))
+        .route("/u/:key", post(http_proxy::user_proxy_web3_rpc))
+        .route("/u/:key", get(ws_proxy::user_websocket_handler))
         .route("/health", get(http::health))
-        // `GET /status` goes to `status`
         .route("/status", get(http::status))
-        // `POST /users` goes to `create_user`
         .route("/users", post(users::create_user))
         .layer(Extension(proxy_app));
 
@@ -80,6 +109,7 @@ pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> 
 
     // run our app with hyper
     // `axum::Server` is a re-export of `hyper::Server`
+    // TODO: allow only listening on localhost?
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     debug!("listening on port {}", port);
     // TODO: into_make_service is enough if we always run behind a proxy. make into_make_service_with_connect_info optional?

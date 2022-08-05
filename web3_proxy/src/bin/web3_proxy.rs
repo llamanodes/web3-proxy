@@ -8,15 +8,6 @@
 //#![warn(missing_docs)]
 #![forbid(unsafe_code)]
 
-pub mod app;
-pub mod bb8_helpers;
-pub mod config;
-pub mod connection;
-pub mod connections;
-pub mod firewall;
-pub mod frontend;
-pub mod jsonrpc;
-
 use parking_lot::deadlock;
 use std::fs;
 use std::sync::atomic::{self, AtomicUsize};
@@ -25,9 +16,9 @@ use std::time::Duration;
 use tokio::runtime;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
-
-use crate::app::{flatten_handle, Web3ProxyApp};
-use crate::config::{AppConfig, CliConfig};
+use web3_proxy::app::{flatten_handle, Web3ProxyApp};
+use web3_proxy::config::{AppConfig, CliConfig};
+use web3_proxy::frontend;
 
 fn run(
     shutdown_receiver: flume::Receiver<()>,
@@ -156,7 +147,7 @@ mod tests {
     use hashbrown::HashMap;
     use std::env;
 
-    use crate::config::{RpcSharedConfig, Web3ConnectionConfig};
+    use web3_proxy::config::{RpcSharedConfig, Web3ConnectionConfig};
 
     use super::*;
 

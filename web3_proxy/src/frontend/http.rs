@@ -14,6 +14,7 @@ pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoRe
 }
 
 /// Very basic status page
+/// TODO: replace this with proper stats and monitoring
 pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     // TODO: what else should we include? uptime? prometheus?
     let balanced_rpcs = app.balanced_rpcs();

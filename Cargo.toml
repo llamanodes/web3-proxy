@@ -4,7 +4,7 @@ members = [
   "migration",
   "linkedhashmap",
   "redis-cell-client",
-  "web3-proxy",
+  "web3_proxy",
 ]
 
 # TODO: enable lto (and maybe other things proven with benchmarks) once rapid development is done
