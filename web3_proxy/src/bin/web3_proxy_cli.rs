@@ -1,9 +1,7 @@
 use argh::FromArgs;
 use entities::{user, user_keys};
-use ethers::prelude::Bytes;
 use fstrings::{format_args_f, println_f};
-use rand::prelude::*;
-use sea_orm::{prelude::Uuid, ActiveModelTrait};
+use sea_orm::ActiveModelTrait;
 use web3_proxy::users::new_api_key;
 
 #[derive(Debug, FromArgs)]
@@ -56,14 +54,10 @@ impl CreateUserSubCommand {
 
         println_f!("user: {u:?}");
 
-        // TODO: use chacha20?
-        let api_key = new_api_key();
-
-        // TODO: create a key, too
-        // TODO: why are active and private_txs ints instead of bools?
+        // create a key for the new user
         let uk = user_keys::ActiveModel {
             user_uuid: sea_orm::Set(u.uuid),
-            // api_key: api_key,
+            api_key: sea_orm::Set(new_api_key()),
             ..Default::default()
         };
 

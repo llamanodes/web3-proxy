@@ -11,3 +11,5 @@ path = "src/mod.rs"
 
 [dependencies]
 sea-orm = "0.9.1"
+serde = "1.0.142"
+uuid = "1.1.2"

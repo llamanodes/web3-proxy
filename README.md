@@ -67,6 +67,8 @@ Types for database entities are generated from a development database.
 sea-orm-cli generate entity -u mysql://root:dev_web3_proxy@127.0.0.1:3306/dev_web3_proxy -o entities/src
 ```
 
+Then manually fix some columns: `Vec<u8>` -> `sea_orm::prelude::Uuid` and `i8` -> `bool`. Related: <https://github.com/SeaQL/sea-query/issues/375> <https://github.com/SeaQL/sea-orm/issues/924>
+
 ## Flame Graphs
 
 Flame graphs make finding slow code painless:

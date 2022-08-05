@@ -2,16 +2,18 @@
 
 use super::sea_orm_active_enums::Role;
 use sea_orm::entity::prelude::*;
+use sea_orm::prelude::Uuid;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "secondary_user")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub uuid: Vec<u8>,
-    pub user_id: Vec<u8>,
+    pub uuid: Uuid,
+    pub user_id: Uuid,
     pub address: String,
-    pub description: String,
-    pub email: String,
+    pub description: Option<String>,
+    pub email: Option<String>,
     pub role: Role,
 }
 

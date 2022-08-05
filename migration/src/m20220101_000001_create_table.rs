@@ -24,7 +24,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .unique_key(),
                     )
-                    .col(ColumnDef::new(User::Description).string().not_null())
+                    .col(ColumnDef::new(User::Description).string())
                     .col(ColumnDef::new(User::Email).string())
                     .to_owned(),
             )
@@ -48,12 +48,8 @@ impl MigrationTrait for Migration {
                             .string_len(42)
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(SecondaryUser::Description)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(ColumnDef::new(SecondaryUser::Email).string().not_null())
+                    .col(ColumnDef::new(SecondaryUser::Description).string())
+                    .col(ColumnDef::new(SecondaryUser::Email).string())
                     .col(
                         ColumnDef::new(SecondaryUser::Role)
                             .enumeration("role", ["owner", "admin", "collaborator"])
@@ -87,7 +83,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .unique_key(),
                     )
-                    .col(ColumnDef::new(BlockList::Description).string().not_null())
+                    .col(ColumnDef::new(BlockList::Description).string())
                     .to_owned(),
             )
             .await?;
@@ -111,7 +107,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .unique_key(),
                     )
-                    .col(ColumnDef::new(UserKeys::Description).string().not_null())
+                    .col(ColumnDef::new(UserKeys::Description).string())
                     .col(
                         ColumnDef::new(UserKeys::PrivateTxs)
                             .boolean()

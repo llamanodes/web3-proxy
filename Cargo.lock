@@ -1388,6 +1388,8 @@ name = "entities"
 version = "0.1.0"
 dependencies = [
  "sea-orm",
+ "serde",
+ "uuid 1.1.2",
 ]
 
 [[package]]
