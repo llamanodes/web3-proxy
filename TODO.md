@@ -73,9 +73,6 @@
   - [x] send getTransaction rpc requests to the private rpc tier
 - [x] I'm hitting infura rate limits very quickly. I feel like that means something is very inefficient
   - whenever blocks were slow, we started checking as fast as possible
-- [cancelled] eth_getBlockByNumber and similar calls served from the block map
-  - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
-  - so maybe we don't want this. we can just use the general request cache for these. they will only require 1 request and it means requests won't get in the way as much on writes as new blocks arrive.
 - [ ] cli tool for resetting api keys
 - [ ] nice output when cargo doc is run
 - [ ] if we request an old block, more servers can handle it than we currently use.
@@ -141,6 +138,10 @@ new endpoints for users:
 
 ## V2
 
+- [ ] eth_getBlockByNumber and similar calls served from the block map
+  - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
+  - so maybe we don't want this. we can just use the general request cache for these. they will only require 1 request and it means requests won't get in the way as much on writes as new blocks arrive.
+  - after looking at my request logs, i think its worth doing this. no point hitting the backends with requests for blocks multiple times. will also help with cache hit rates since we can keep recent blocks in a separate cache
 - [ ] sea-orm brings in async-std, but we are using tokio. benchmark switching 
 - [ ] jwt auth so people can easily switch from infura
 - [ ] handle log subscriptions
@@ -196,10 +197,12 @@ in another repo: event subscriber
 - [ ] fully test retrying when "header not found"
   - i saw "header not found" on a simple eth_getCode query to a public load balanced bsc archive node on block 1
 - [ ] weird flapping fork could have more useful logs. like, howd we get to 1/1/4 and fork. geth changed its mind 3 times?
-  2022-07-22T23:52:18.593956Z  WARN block_receiver: web3_proxy::connections: chain is forked! 1 possible heads. 1/1/4 rpcs have 0xa906…5bc1 rpc=Web3Connection { url: "ws://127.0.0.1:8546", data: 64, .. } new_block_num=15195517
-  2022-07-22T23:52:18.983441Z  WARN block_receiver: web3_proxy::connections: chain is forked! 1 possible heads. 1/1/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "ws://127.0.0.1:8546", data: 64, .. } new_block_num=15195517
-  2022-07-22T23:52:19.350720Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 1/2/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "ws://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517
-  2022-07-22T23:52:26.041140Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 2/4/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "http://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517
+  - should we change our code to follow the same consensus rules as geth? our first seen still seems like a reasonable choice
+  -  other chains might change all sorts of things about their fork choice rules
+    2022-07-22T23:52:18.593956Z  WARN block_receiver: web3_proxy::connections: chain is forked! 1 possible heads. 1/1/4 rpcs have 0xa906…5bc1 rpc=Web3Connection { url: "ws://127.0.0.1:8546", data: 64, .. } new_block_num=15195517
+    2022-07-22T23:52:18.983441Z  WARN block_receiver: web3_proxy::connections: chain is forked! 1 possible heads. 1/1/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "ws://127.0.0.1:8546", data: 64, .. } new_block_num=15195517
+    2022-07-22T23:52:19.350720Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 1/2/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "ws://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517
+    2022-07-22T23:52:26.041140Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 2/4/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "http://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517
   - [ ] threshold should check actual available request limits (if any) instead of just the soft limit
 - [ ] foreign key on_update and on_delete
 - [ ] database creation timestamps
@@ -211,3 +214,10 @@ in another repo: event subscriber
 - [ ] archive servers should be lowest priority
 - [ ] docker build context is really big. we must be including target or something
 - [ ] ip detection needs work so that everything doesnt show up as 172.x.x.x
+- [ ] status page leaks our urls which contain secrets. change that to use names
+- [ ] im seeing redis errors/warnings around unwrapping and invalid responses. need better logs to diagnose. probably need retries
+- [ ] PR to add this to sea orm prelude:
+  ```
+  #[cfg(feature = "with-uuid")]
+  pub use uuid::Builder as UuidBuilder;
+  ```

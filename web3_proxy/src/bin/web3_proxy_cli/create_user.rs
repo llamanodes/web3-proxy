@@ -21,6 +21,7 @@ pub struct CreateUserSubCommand {
 
 impl CreateUserSubCommand {
     pub async fn main(self, db: &sea_orm::DatabaseConnection) -> anyhow::Result<()> {
+        // TODO: would be nice to use the fixed array instead of a Vec in the entities
         let address = self
             .address
             .parse::<Address>()
