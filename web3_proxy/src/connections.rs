@@ -954,7 +954,7 @@ impl Web3Connections {
             // increment our connection counter
             match rpc.try_request_handle().await {
                 Err(retry_after) => {
-                    earliest_retry_after = earliest_retry_after.min(Some(retry_after));
+                    earliest_retry_after = earliest_retry_after.min(retry_after);
                 }
                 Ok(handle) => {
                     trace!("next server on {:?}: {:?}", self, rpc);
@@ -990,7 +990,7 @@ impl Web3Connections {
             match connection.try_request_handle().await {
                 Err(retry_after) => {
                     // this rpc is not available. skip it
-                    earliest_retry_after = earliest_retry_after.min(Some(retry_after));
+                    earliest_retry_after = earliest_retry_after.min(retry_after);
                 }
                 Ok(handle) => selected_rpcs.push(handle),
             }

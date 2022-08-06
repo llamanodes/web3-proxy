@@ -206,3 +206,5 @@ in another repo: event subscriber
 - [ ] better error handling. we warn too often for validation errors and use the same error code for most every request
 - [ ] use &str more instead of String. lifetime annotations get really annoying though
 - [ ] tarpit instead of reject requests (unless theres a lot)
+- [ ] tune database connection pool size. i think a single web3-proxy currently maxes out our server
+- [ ] subscribing to transactions should be configurable per server. listening to paid servers can get expensive

@@ -179,7 +179,7 @@ impl Web3Connection {
         // TODO: this will wait forever. do we want that?
         let found_chain_id: Result<U64, _> = new_connection
             .wait_for_request_handle()
-            .await
+            .await?
             .request("eth_chainId", Option::None::<()>)
             .await;
 
@@ -243,7 +243,7 @@ impl Web3Connection {
 
             let archive_result: Result<Bytes, _> = new_connection
                 .wait_for_request_handle()
-                .await
+                .await?
                 .request(
                     "eth_getCode",
                     (
@@ -503,7 +503,7 @@ impl Web3Connection {
                     // all it does is print "new block" for the same block as current block
                     let block: Result<Block<TxHash>, _> = self
                         .wait_for_request_handle()
-                        .await
+                        .await?
                         .request("eth_getBlockByNumber", ("latest", false))
                         .await;
 
@@ -583,24 +583,27 @@ impl Web3Connection {
 
     /// be careful with this; it will wait forever!
     #[instrument(skip_all)]
-    pub async fn wait_for_request_handle(self: &Arc<Self>) -> ActiveRequestHandle {
+    pub async fn wait_for_request_handle(self: &Arc<Self>) -> anyhow::Result<ActiveRequestHandle> {
         // TODO: maximum wait time? i think timeouts in other parts of the code are probably best
 
         loop {
             match self.try_request_handle().await {
-                Ok(pending_request_handle) => return pending_request_handle,
-                Err(retry_after) => {
+                Ok(pending_request_handle) => return Ok(pending_request_handle),
+                Err(Some(retry_after)) => {
                     sleep(retry_after).await;
                 }
+                Err(None) => return Err(anyhow::anyhow!("rate limit will never succeed")),
             }
         }
     }
 
-    pub async fn try_request_handle(self: &Arc<Self>) -> Result<ActiveRequestHandle, Duration> {
+    pub async fn try_request_handle(
+        self: &Arc<Self>,
+    ) -> Result<ActiveRequestHandle, Option<Duration>> {
         // check that we are connected
         if !self.has_provider().await {
             // TODO: how long? use the same amount as the exponential backoff on retry
-            return Err(Duration::from_secs(1));
+            return Err(Some(Duration::from_secs(1)));
         }
 
         // check rate limits

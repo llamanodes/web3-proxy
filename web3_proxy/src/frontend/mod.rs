@@ -30,14 +30,18 @@ pub async fn rate_limit_by_ip(app: &Web3ProxyApp, ip: &IpAddr) -> Result<(), imp
 
     // TODO: dry this up with rate_limit_by_key
     if let Some(rate_limiter) = app.rate_limiter() {
-        if rate_limiter.throttle_key(&rate_limiter_key).await.is_err() {
+        if rate_limiter
+            .throttle_key(&rate_limiter_key, None, None, None)
+            .await
+            .is_err()
+        {
             // TODO: set headers so they know when they can retry
             // warn!(?ip, "public rate limit exceeded");  // this is too verbose, but a stat might be good
             // TODO: use their id if possible
             return Err(handle_anyhow_error(
                 Some(StatusCode::TOO_MANY_REQUESTS),
                 None,
-                anyhow::anyhow!("too many requests"),
+                anyhow::anyhow!("too many requests from this ip"),
             )
             .await
             .into_response());
@@ -76,8 +80,19 @@ pub async fn rate_limit_by_key(
         Ok::<Option<i64>, _>(Some(_)) => {
             // user key is valid
             if let Some(rate_limiter) = app.rate_limiter() {
+                // TODO: check the db for this? maybe add to the find above with a join?
+                let user_count_per_period = 100_000;
+                // TODO: how does max burst actually work? what should it be?
+                let user_max_burst = user_count_per_period;
+                let user_period = 1;
+
                 if rate_limiter
-                    .throttle_key(&user_key.to_string())
+                    .throttle_key(
+                        &user_key.to_string(),
+                        Some(user_max_burst),
+                        Some(user_count_per_period),
+                        Some(user_period),
+                    )
                     .await
                     .is_err()
                 {
@@ -87,7 +102,7 @@ pub async fn rate_limit_by_key(
                     return Err(handle_anyhow_error(
                         Some(StatusCode::TOO_MANY_REQUESTS),
                         None,
-                        anyhow::anyhow!("too many requests"),
+                        anyhow::anyhow!("too many requests from this key"),
                     )
                     .await
                     .into_response());

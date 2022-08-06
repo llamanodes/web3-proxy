@@ -435,20 +435,16 @@ impl Web3ProxyApp {
         // TODO: how much should we allow?
         let public_max_burst = app_config.shared.public_rate_limit_per_minute / 3;
 
-        let public_rate_limiter = if app_config.shared.public_rate_limit_per_minute == 0 {
-            None
-        } else {
-            redis_client_pool.as_ref().map(|redis_client_pool| {
-                RedisCellClient::new(
-                    redis_client_pool.clone(),
-                    "web3-proxy",
-                    "ip",
-                    public_max_burst,
-                    app_config.shared.public_rate_limit_per_minute,
-                    60,
-                )
-            })
-        };
+        let frontend_rate_limiter = redis_client_pool.as_ref().map(|redis_client_pool| {
+            RedisCellClient::new(
+                redis_client_pool.clone(),
+                "web3-proxy",
+                "frontend",
+                public_max_burst,
+                app_config.shared.public_rate_limit_per_minute,
+                60,
+            )
+        });
 
         let app = Self {
             balanced_rpcs,
@@ -459,7 +455,7 @@ impl Web3ProxyApp {
             head_block_receiver,
             pending_tx_sender,
             pending_transactions,
-            rate_limiter: public_rate_limiter,
+            rate_limiter: frontend_rate_limiter,
             db_conn,
         };
 

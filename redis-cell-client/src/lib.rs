@@ -48,11 +48,16 @@ impl RedisCellClient {
         count_per_period: Option<u32>,
         period: Option<u32>,
         quantity: u32,
-    ) -> Result<(), Duration> {
+    ) -> Result<(), Option<Duration>> {
         let mut conn = self.pool.get().await.unwrap();
 
-        let max_burst = max_burst.unwrap_or(self.default_max_burst);
         let count_per_period = count_per_period.unwrap_or(self.default_count_per_period);
+
+        if count_per_period == 0 {
+            return Err(None);
+        }
+
+        let max_burst = max_burst.unwrap_or(self.default_max_burst);
         let period = period.unwrap_or(self.default_period);
 
         /*
@@ -85,24 +90,31 @@ impl RedisCellClient {
         if retry_after == -1 {
             Ok(())
         } else {
-            Err(Duration::from_secs(retry_after as u64))
+            Err(Some(Duration::from_secs(retry_after as u64)))
         }
     }
 
     #[inline]
-    pub async fn throttle(&self) -> Result<(), Duration> {
+    pub async fn throttle(&self) -> Result<(), Option<Duration>> {
         self._throttle(&self.key, None, None, None, 1).await
     }
 
     #[inline]
-    pub async fn throttle_key(&self, key: &str) -> Result<(), Duration> {
+    pub async fn throttle_key(
+        &self,
+        key: &str,
+        max_burst: Option<u32>,
+        count_per_period: Option<u32>,
+        period: Option<u32>,
+    ) -> Result<(), Option<Duration>> {
         let key = format!("{}:{}", self.key, key);
 
-        self._throttle(key.as_ref(), None, None, None, 1).await
+        self._throttle(key.as_ref(), max_burst, count_per_period, period, 1)
+            .await
     }
 
     #[inline]
-    pub async fn throttle_quantity(&self, quantity: u32) -> Result<(), Duration> {
+    pub async fn throttle_quantity(&self, quantity: u32) -> Result<(), Option<Duration>> {
         self._throttle(&self.key, None, None, None, quantity).await
     }
 }
