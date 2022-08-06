@@ -7,7 +7,22 @@ services:
   redis:
     build: ./redis-cell-server/
 
-  # TODO: database and adminer
+  db:
+    image: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: web3_proxy
+      MYSQL_DATABASE: web3_proxy
+    ports:
+      - 127.0.0.1:3306:3306
+    volumes:
+      - ./data/prod_mysql:/var/lib/mysql
+
+  adminer:
+    image: adminer
+    ports:
+      - 8306:8080
+    environment:
+      ADMINER_DEFAULT_SERVER: db
 
   arbitrum:
     extends:

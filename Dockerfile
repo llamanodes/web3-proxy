@@ -8,8 +8,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM debian:bullseye-slim
 
-COPY --from=builder /usr/local/cargo/bin/web3-proxy /usr/local/bin/web3-proxy
-ENTRYPOINT ["web3-proxy"]
+COPY --from=builder /usr/local/cargo/bin/web3_proxy /usr/local/bin/web3_proxy
+COPY --from=builder /usr/local/cargo/bin/web3_proxy_cli /usr/local/bin/web3_proxy_cli
+ENTRYPOINT ["web3_proxy"]
 
 # TODO: lower log level when done with prototyping
 ENV RUST_LOG "web3_proxy=debug"
