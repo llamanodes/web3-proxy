@@ -200,3 +200,4 @@ in another repo: event subscriber
   - [ ] threshold should check actual available request limits (if any) instead of just the soft limit
 - [ ] foreign key on_update and on_delete
 - [ ] database creation timestamps
+- [ ] better error handling. we warn too often for validation errors and use the same error code for most every request

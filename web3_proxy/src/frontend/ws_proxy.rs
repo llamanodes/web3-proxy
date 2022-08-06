@@ -1,5 +1,6 @@
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    extract::Path,
     response::IntoResponse,
     Extension,
 };
@@ -14,6 +15,7 @@ use serde_json::{json, value::RawValue};
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 use tracing::{error, info, trace};
+use uuid::Uuid;
 
 use crate::{
     app::Web3ProxyApp,
@@ -37,9 +39,9 @@ pub async fn public_websocket_handler(
 pub async fn user_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ws: WebSocketUpgrade,
-    key: String,
+    Path(user_key): Path<Uuid>,
 ) -> impl IntoResponse {
-    if let Err(x) = rate_limit_by_key(&app, &key).await {
+    if let Err(x) = rate_limit_by_key(&app, user_key).await {
         return x.into_response();
     }
 

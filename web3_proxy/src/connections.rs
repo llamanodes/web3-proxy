@@ -819,7 +819,7 @@ impl Web3Connections {
                 if new_head_block {
                     self.chain.add_block(new_block.clone(), true);
 
-                    info!(
+                    debug!(
                         "{}/{} rpcs at {} ({}). head at {:?}",
                         pending_synced_connections.conns.len(),
                         self.conns.len(),
@@ -847,7 +847,7 @@ impl Web3Connections {
                         // TODO: mark any orphaned transactions as unconfirmed
                     }
                 } else if num_best_rpcs == self.conns.len() {
-                    debug!(
+                    trace!(
                         "all {} rpcs at {} ({})",
                         num_best_rpcs,
                         pending_synced_connections.head_block_hash,

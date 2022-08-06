@@ -8,7 +8,7 @@ use web3_proxy::app::get_migrated_db;
 #[derive(Debug, FromArgs)]
 /// Command line interface for admins to interact with web3-proxy
 pub struct TopConfig {
-    /// what host the client should connect to
+    /// what database the client should connect to
     #[argh(
         option,
         default = "\"mysql://root:dev_web3_proxy@127.0.0.1:3306/dev_web3_proxy\".to_string()"

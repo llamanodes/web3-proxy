@@ -167,6 +167,7 @@ impl JsonRpcForwardedResponse {
     pub fn from_anyhow_error(err: anyhow::Error, id: Box<RawValue>) -> Self {
         let err = format!("{:?}", err);
 
+        // TODO: this is too verbose. plenty of errors are valid, like users giving an invalid address. no need to log that
         warn!("forwarding error. {:?}", err);
 
         JsonRpcForwardedResponse {
