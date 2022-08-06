@@ -441,7 +441,8 @@ impl Web3ProxyApp {
             redis_client_pool.as_ref().map(|redis_client_pool| {
                 RedisCellClient::new(
                     redis_client_pool.clone(),
-                    "ip".to_string(),
+                    "web3-proxy",
+                    "ip",
                     public_max_burst,
                     app_config.shared.public_rate_limit_per_minute,
                     60,

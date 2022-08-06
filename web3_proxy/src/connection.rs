@@ -147,12 +147,12 @@ impl Web3Connection {
         reconnect: bool,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_conection)| {
-            // TODO: allow different max_burst and count_per_period and period
-            // TODO: if this url rate limits by IP instead of api key, we want to include our public ip in this key
+            // TODO: allow configurable period and max_burst
             let period = 1;
             RedisCellClient::new(
                 redis_conection,
-                format!("{},{}", chain_id, url_str),
+                "web3-proxy",
+                &format!("{}:{}", chain_id, url_str),
                 hard_rate_limit,
                 hard_rate_limit,
                 period,

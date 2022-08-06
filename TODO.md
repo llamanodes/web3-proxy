@@ -58,7 +58,11 @@
   - we can improve this by only publishing the synced connections once a threshold of total available soft and hard limits is passed. how can we do this without hammering redis? at least its only once per block per server
   - [x] instead of tracking `pending_synced_connections`, have a mapping of where all connections are individually. then each change, re-check for consensus.
 - [x] synced connections swap threshold set to 1 so that it always serves something
+- [x] cli tool for creating new users
 - [ ] basic request method stats
+- [ ] incoming rate limiting by api key
+  - [ ] give users different rate limits looked up from the database 
+- [ ] allow blocking public requests
 
 ## V1
 
@@ -72,8 +76,7 @@
 - [cancelled] eth_getBlockByNumber and similar calls served from the block map
   - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
   - so maybe we don't want this. we can just use the general request cache for these. they will only require 1 request and it means requests won't get in the way as much on writes as new blocks arrive.
-- [ ] cli tool for managing users and resetting api keys
-- [ ] incoming rate limiting by api key
+- [ ] cli tool for resetting api keys
 - [ ] nice output when cargo doc is run
 - [ ] if we request an old block, more servers can handle it than we currently use.
     - [ ] instead of the one list of just heads, store our intermediate mappings (rpcs_by_hash, rpcs_by_num, blocks_by_hash) in SyncedConnections. this shouldn't be too much slower than what we have now
@@ -201,3 +204,5 @@ in another repo: event subscriber
 - [ ] foreign key on_update and on_delete
 - [ ] database creation timestamps
 - [ ] better error handling. we warn too often for validation errors and use the same error code for most every request
+- [ ] use &str more instead of String. lifetime annotations get really annoying though
+- [ ] tarpit instead of reject requests (unless theres a lot)

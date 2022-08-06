@@ -7,17 +7,14 @@ pub use bb8_redis::{bb8, RedisConnectionManager};
 
 use std::time::Duration;
 
-// TODO: take this as an argument to open?
-const KEY_PREFIX: &str = "rate-limit";
-
 pub type RedisClientPool = bb8::Pool<RedisConnectionManager>;
 
 pub struct RedisCellClient {
     pool: RedisClientPool,
     key: String,
-    max_burst: u32,
-    count_per_period: u32,
-    period: u32,
+    default_max_burst: u32,
+    default_count_per_period: u32,
+    default_period: u32,
 }
 
 impl RedisCellClient {
@@ -26,25 +23,37 @@ impl RedisCellClient {
     // TODO: use r2d2 for connection pooling?
     pub fn new(
         pool: bb8::Pool<RedisConnectionManager>,
-        default_key: String,
-        max_burst: u32,
-        count_per_period: u32,
-        period: u32,
+        app: &str,
+        key: &str,
+        default_max_burst: u32,
+        default_count_per_period: u32,
+        default_period: u32,
     ) -> Self {
-        let default_key = format!("{}:{}", KEY_PREFIX, default_key);
+        let key = format!("{}:redis-cell:{}", app, key);
 
         Self {
             pool,
-            key: default_key,
-            max_burst,
-            count_per_period,
-            period,
+            key,
+            default_max_burst,
+            default_count_per_period,
+            default_period,
         }
     }
 
     #[inline]
-    async fn _throttle(&self, key: &str, quantity: u32) -> Result<(), Duration> {
+    async fn _throttle(
+        &self,
+        key: &str,
+        max_burst: Option<u32>,
+        count_per_period: Option<u32>,
+        period: Option<u32>,
+        quantity: u32,
+    ) -> Result<(), Duration> {
         let mut conn = self.pool.get().await.unwrap();
+
+        let max_burst = max_burst.unwrap_or(self.default_max_burst);
+        let count_per_period = count_per_period.unwrap_or(self.default_count_per_period);
+        let period = period.unwrap_or(self.default_period);
 
         /*
         https://github.com/brandur/redis-cell#response
@@ -62,13 +71,7 @@ impl RedisCellClient {
         // TODO: don't unwrap. maybe return anyhow::Result<Result<(), Duration>>
         // TODO: should we return more error info?
         let x: Vec<isize> = cmd("CL.THROTTLE")
-            .arg(&(
-                key,
-                self.max_burst,
-                self.count_per_period,
-                self.period,
-                quantity,
-            ))
+            .arg(&(key, max_burst, count_per_period, period, quantity))
             .query_async(&mut *conn)
             .await
             .unwrap();
@@ -88,18 +91,18 @@ impl RedisCellClient {
 
     #[inline]
     pub async fn throttle(&self) -> Result<(), Duration> {
-        self._throttle(&self.key, 1).await
+        self._throttle(&self.key, None, None, None, 1).await
     }
 
     #[inline]
     pub async fn throttle_key(&self, key: &str) -> Result<(), Duration> {
         let key = format!("{}:{}", self.key, key);
 
-        self._throttle(key.as_ref(), 1).await
+        self._throttle(key.as_ref(), None, None, None, 1).await
     }
 
     #[inline]
     pub async fn throttle_quantity(&self, quantity: u32) -> Result<(), Duration> {
-        self._throttle(&self.key, quantity).await
+        self._throttle(&self.key, None, None, None, quantity).await
     }
 }
