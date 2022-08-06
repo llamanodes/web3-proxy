@@ -209,3 +209,4 @@ in another repo: event subscriber
 - [ ] tune database connection pool size. i think a single web3_proxy currently maxes out our server
 - [ ] subscribing to transactions should be configurable per server. listening to paid servers can get expensive
 - [ ] archive servers should be lowest priority
+- [ ] docker build context is really big. we must be including target or something
