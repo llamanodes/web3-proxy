@@ -151,7 +151,7 @@ impl Web3Connection {
             let period = 1;
             RedisCellClient::new(
                 redis_conection,
-                "web3-proxy",
+                "web3_proxy",
                 &format!("{}:{}", chain_id, url_str),
                 hard_rate_limit,
                 hard_rate_limit,

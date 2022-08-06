@@ -1,6 +1,6 @@
-# web3-proxy
+# web3_proxy
 
-Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
+Web3_proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
 
 **Under construction!** This code is under active development. The basics seem to work, but theres lots of tests and features to write still.
 
@@ -15,12 +15,12 @@ $ cargo install sea-orm-cli
 $ cargo run --release -- --help
 ```
 ```
-   Compiling web3-proxy v0.1.0 (/home/bryan/src/web3-proxy/web3-proxy)
+   Compiling web3_proxy v0.1.0 (/home/bryan/src/web3_proxy/web3_proxy)
     Finished release [optimized + debuginfo] target(s) in 17.69s
-     Running `target/release/web3-proxy --help`
-Usage: web3-proxy [--port <port>] [--workers <workers>] [--config <config>]
+     Running `target/release/web3_proxy --help`
+Usage: web3_proxy [--port <port>] [--workers <workers>] [--config <config>]
 
-Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
+web3_proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
 
 Options:
   --port            what port the proxy should listen on
@@ -84,7 +84,7 @@ Flame graphs make finding slow code painless:
 
 Run the proxy under gdb for advanced debugging:
 
-    cargo build --release && RUST_LOG=web3_proxy=debug rust-gdb --args target/debug/web3-proxy --listen-port 7503 --rpc-config-path ./config/production-eth.toml
+    cargo build --release && RUST_LOG=web3_proxy=debug rust-gdb --args target/debug/web3_proxy --listen-port 7503 --rpc-config-path ./config/production-eth.toml
 
 TODO: also enable debug symbols in the release build by modifying the root Cargo.toml
 

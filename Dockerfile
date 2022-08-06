@@ -1,9 +1,9 @@
 FROM rust:1-bullseye as builder
 
-WORKDIR /usr/src/web3-proxy
+WORKDIR /usr/src/web3_proxy
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/src/web3-proxy/target \
+    --mount=type=cache,target=/usr/src/web3_proxy/target \
     cargo install --locked --path ./web3_proxy
 
 FROM debian:bullseye-slim

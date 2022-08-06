@@ -12,7 +12,7 @@ use crate::connection::Web3Connection;
 pub type BlockAndRpc = (Arc<Block<TxHash>>, Arc<Web3Connection>);
 
 #[derive(Debug, FromArgs)]
-/// Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
+/// Web3_proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
 pub struct CliConfig {
     /// what port the proxy should listen on
     #[argh(option, default = "8544")]

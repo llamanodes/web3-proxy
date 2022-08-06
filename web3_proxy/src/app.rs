@@ -438,7 +438,7 @@ impl Web3ProxyApp {
         let frontend_rate_limiter = redis_client_pool.as_ref().map(|redis_client_pool| {
             RedisCellClient::new(
                 redis_client_pool.clone(),
-                "web3-proxy",
+                "web3_proxy",
                 "frontend",
                 public_max_burst,
                 app_config.shared.public_rate_limit_per_minute,

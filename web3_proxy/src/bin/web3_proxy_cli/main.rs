@@ -6,7 +6,7 @@ use tracing::info;
 use web3_proxy::app::get_migrated_db;
 
 #[derive(Debug, FromArgs)]
-/// Command line interface for admins to interact with web3-proxy
+/// Command line interface for admins to interact with web3_proxy
 pub struct TopConfig {
     /// what database the client should connect to
     #[argh(

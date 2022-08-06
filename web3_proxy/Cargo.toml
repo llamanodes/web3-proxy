@@ -1,5 +1,5 @@
 [package]
-name = "web3-proxy"
+name = "web3_proxy"
 version = "0.1.0"
 edition = "2021"
 default-run = "web3_proxy"

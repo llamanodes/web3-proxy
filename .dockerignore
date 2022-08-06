@@ -4,6 +4,6 @@
 /Dockerfile
 /redis-cell-server/
 /target
-/web3-proxy/flamegraph.svg
-/web3-proxy/perf.data
-/web3-proxy/perf.data.old
+/web3_proxy/flamegraph.svg
+/web3_proxy/perf.data
+/web3_proxy/perf.data.old
