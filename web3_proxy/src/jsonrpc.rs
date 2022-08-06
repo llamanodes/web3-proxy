@@ -177,6 +177,7 @@ impl JsonRpcForwardedResponse {
             error: Some(JsonRpcErrorData {
                 // TODO: set this jsonrpc error code to match the http status code
                 code: -32099,
+                // TODO: some errors should be included here. others should not. i think anyhow might not be the right choice
                 message: "internal server error".to_string(),
                 data: None,
             }),

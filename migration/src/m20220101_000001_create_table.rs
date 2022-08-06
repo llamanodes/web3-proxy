@@ -15,8 +15,8 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(User::Id)
                             .big_integer()
                             .not_null()
-                            .primary_key()
-                            .auto_increment(),
+                            .auto_increment()
+                            .primary_key(),
                     )
                     .col(
                         ColumnDef::new(User::Address)
@@ -39,8 +39,8 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(SecondaryUser::Id)
                             .big_integer()
                             .not_null()
-                            .primary_key()
-                            .auto_increment(),
+                            .auto_increment()
+                            .primary_key(),
                     )
                     .col(
                         ColumnDef::new(SecondaryUser::UserId)
@@ -78,8 +78,8 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(BlockList::Id)
                             .big_integer()
                             .not_null()
-                            .primary_key()
-                            .auto_increment(),
+                            .auto_increment()
+                            .primary_key(),
                     )
                     .col(
                         ColumnDef::new(BlockList::Address)
@@ -101,8 +101,8 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(UserKeys::Id)
                             .big_integer()
                             .not_null()
-                            .primary_key()
-                            .auto_increment(),
+                            .auto_increment()
+                            .primary_key(),
                     )
                     .col(ColumnDef::new(UserKeys::UserId).big_integer().not_null())
                     .col(
