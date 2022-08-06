@@ -13,10 +13,12 @@ use axum::{
 };
 use entities::user_keys;
 use reqwest::StatusCode;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{
+    ColumnTrait, DeriveColumn, EntityTrait, EnumIter, IdenStatic, QueryFilter, QuerySelect,
+};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use tracing::debug;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::app::Web3ProxyApp;
@@ -55,17 +57,23 @@ pub async fn rate_limit_by_key(
 ) -> Result<(), impl IntoResponse> {
     let db = app.db_conn();
 
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
+    enum QueryAs {
+        UserId,
+    }
+
     // query the db to make sure this key is active
     // TODO: probably want a cache on this
     match user_keys::Entity::find()
-        // .select_only()
-        // .column(user_keys::Column::UserId)
+        .select_only()
+        .column_as(user_keys::Column::UserId, QueryAs::UserId)
         .filter(user_keys::Column::ApiKey.eq(user_key))
         .filter(user_keys::Column::Active.eq(true))
+        .into_values::<_, QueryAs>()
         .one(db)
         .await
     {
-        Ok(Some(_)) => {
+        Ok::<Option<i64>, _>(Some(_)) => {
             // user key is valid
             if let Some(rate_limiter) = app.rate_limiter() {
                 if rate_limiter
