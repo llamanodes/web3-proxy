@@ -7,7 +7,7 @@ use sea_orm::ActiveModelTrait;
 use web3_proxy::users::new_api_key;
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// First subcommand.
+/// Create a new user and api key
 #[argh(subcommand, name = "create_user")]
 pub struct CreateUserSubCommand {
     #[argh(option)]

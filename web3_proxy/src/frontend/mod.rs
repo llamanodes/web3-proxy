@@ -41,6 +41,7 @@ pub async fn rate_limit_by_ip(app: &Web3ProxyApp, ip: &IpAddr) -> Result<(), imp
             return Err(handle_anyhow_error(
                 Some(StatusCode::TOO_MANY_REQUESTS),
                 None,
+                // TODO: include the ip here
                 anyhow::anyhow!("too many requests from this ip"),
             )
             .await
@@ -102,6 +103,7 @@ pub async fn rate_limit_by_key(
                     return Err(handle_anyhow_error(
                         Some(StatusCode::TOO_MANY_REQUESTS),
                         None,
+                        // TODO: include the user id (NOT THE API KEY!) here
                         anyhow::anyhow!("too many requests from this key"),
                     )
                     .await
