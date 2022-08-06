@@ -11,7 +11,7 @@ pub struct TopConfig {
     /// what database the client should connect to
     #[argh(
         option,
-        default = "\"mysql://root:dev_web3_proxy@127.0.0.1:3306/dev_web3_proxy\".to_string()"
+        default = "\"mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy\".to_string()"
     )]
     pub db_url: String,
 

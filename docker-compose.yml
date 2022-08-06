@@ -6,7 +6,7 @@ services:
   dev-redis:
     build: ./redis-cell-server/
     ports:
-      - 127.0.0.1:6379:6379
+      - 127.0.0.1:16379:6379
       # TODO: expose these ports?
 
   dev-db:
@@ -15,7 +15,7 @@ services:
       MYSQL_ROOT_PASSWORD: dev_web3_proxy
       MYSQL_DATABASE: dev_web3_proxy
     ports:
-      - 127.0.0.1:3306:3306
+      - 127.0.0.1:13306:3306
     volumes:
       - ./data/dev_mysql:/var/lib/mysql
 

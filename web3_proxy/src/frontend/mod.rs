@@ -1,4 +1,4 @@
-/// this should move into web3-proxy once the basics are working
+/// this should move into web3_proxy once the basics are working
 mod errors;
 mod http;
 mod http_proxy;

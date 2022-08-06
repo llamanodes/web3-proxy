@@ -1,4 +1,4 @@
-//! Web3-proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
+//! Web3_proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
 //!
 //! Signed transactions (eth_sendRawTransaction) are sent in parallel to the configured private RPCs (eden, ethermine, flashbots, etc.).
 //!
@@ -131,7 +131,7 @@ fn main() -> anyhow::Result<()> {
     let app_config: AppConfig = toml::from_str(&app_config)?;
 
     // TODO: this doesn't seem to do anything
-    proctitle::set_title(format!("web3-proxy-{}", app_config.shared.chain_id));
+    proctitle::set_title(format!("web3_proxy-{}", app_config.shared.chain_id));
 
     let (_shutdown_sender, shutdown_receiver) = flume::bounded(1);
 
