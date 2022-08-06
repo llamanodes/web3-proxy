@@ -41,8 +41,7 @@ pub async fn rate_limit_by_ip(app: &Web3ProxyApp, ip: &IpAddr) -> Result<(), imp
             return Err(handle_anyhow_error(
                 Some(StatusCode::TOO_MANY_REQUESTS),
                 None,
-                // TODO: include the ip here
-                anyhow::anyhow!("too many requests from this ip"),
+                anyhow::anyhow!(format!("too many requests from this ip: {}", ip)),
             )
             .await
             .into_response());
