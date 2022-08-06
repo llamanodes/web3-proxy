@@ -12,15 +12,15 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(User::Table)
                     .col(
-                        ColumnDef::new(User::Uuid)
-                            .uuid()
+                        ColumnDef::new(User::Id)
+                            .big_integer()
                             .not_null()
-                            .extra("DEFAULT (UUID_TO_BIN(UUID()))".to_string())
-                            .primary_key(),
+                            .primary_key()
+                            .auto_increment(),
                     )
                     .col(
                         ColumnDef::new(User::Address)
-                            .string_len(42)
+                            .binary_len(20)
                             .not_null()
                             .unique_key(),
                     )
@@ -36,16 +36,20 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(SecondaryUser::Table)
                     .col(
-                        ColumnDef::new(SecondaryUser::Uuid)
-                            .uuid()
+                        ColumnDef::new(SecondaryUser::Id)
+                            .big_integer()
                             .not_null()
-                            .extra("DEFAULT (UUID_TO_BIN(UUID()))".to_string())
-                            .primary_key(),
+                            .primary_key()
+                            .auto_increment(),
                     )
-                    .col(ColumnDef::new(SecondaryUser::UserId).uuid().not_null())
+                    .col(
+                        ColumnDef::new(SecondaryUser::UserId)
+                            .big_integer()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(SecondaryUser::Address)
-                            .string_len(42)
+                            .binary_len(20)
                             .not_null(),
                     )
                     .col(ColumnDef::new(SecondaryUser::Description).string())
@@ -59,7 +63,7 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         sea_query::ForeignKey::create()
                             .from(SecondaryUser::Table, SecondaryUser::UserId)
-                            .to(User::Table, User::Uuid),
+                            .to(User::Table, User::Id),
                     )
                     .to_owned(),
             )
@@ -71,15 +75,15 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(BlockList::Table)
                     .col(
-                        ColumnDef::new(BlockList::Uuid)
-                            .uuid()
+                        ColumnDef::new(BlockList::Id)
+                            .big_integer()
                             .not_null()
-                            .extra("DEFAULT (UUID_TO_BIN(UUID()))".to_string())
-                            .primary_key(),
+                            .primary_key()
+                            .auto_increment(),
                     )
                     .col(
                         ColumnDef::new(BlockList::Address)
-                            .string()
+                            .binary_len(20)
                             .not_null()
                             .unique_key(),
                     )
@@ -94,13 +98,13 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(UserKeys::Table)
                     .col(
-                        ColumnDef::new(UserKeys::Uuid)
-                            .uuid()
+                        ColumnDef::new(UserKeys::Id)
+                            .big_integer()
                             .not_null()
-                            .extra("DEFAULT (UUID_TO_BIN(UUID()))".to_string())
-                            .primary_key(),
+                            .primary_key()
+                            .auto_increment(),
                     )
-                    .col(ColumnDef::new(UserKeys::UserUuid).uuid().not_null())
+                    .col(ColumnDef::new(UserKeys::UserId).big_integer().not_null())
                     .col(
                         ColumnDef::new(UserKeys::ApiKey)
                             .uuid()
@@ -123,8 +127,8 @@ impl MigrationTrait for Migration {
                     .index(sea_query::Index::create().col(UserKeys::Active))
                     .foreign_key(
                         sea_query::ForeignKey::create()
-                            .from(UserKeys::Table, UserKeys::UserUuid)
-                            .to(User::Table, User::Uuid),
+                            .from(UserKeys::Table, UserKeys::UserId)
+                            .to(User::Table, User::Id),
                     )
                     .to_owned(),
             )
@@ -156,7 +160,7 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum User {
     Table,
-    Uuid,
+    Id,
     Address,
     Description,
     Email,
@@ -172,7 +176,7 @@ enum User {
 #[derive(Iden)]
 enum SecondaryUser {
     Table,
-    Uuid,
+    Id,
     UserId,
     Address,
     Description,
@@ -184,7 +188,7 @@ enum SecondaryUser {
 #[derive(Iden)]
 enum BlockList {
     Table,
-    Uuid,
+    Id,
     Address,
     Description,
 }
@@ -202,8 +206,8 @@ enum BlockList {
 #[derive(Iden)]
 enum UserKeys {
     Table,
-    Uuid,
-    UserUuid,
+    Id,
+    UserId,
     ApiKey,
     Description,
     PrivateTxs,

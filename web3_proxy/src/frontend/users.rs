@@ -44,7 +44,7 @@ pub async fn create_user(
     }
 
     let user = user::ActiveModel {
-        address: sea_orm::Set(payload.address.to_string()),
+        address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
         email: sea_orm::Set(payload.email),
         ..Default::default()
     };

@@ -4,6 +4,7 @@ use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::Serialize;
 use serde_json::value::RawValue;
 use std::fmt;
+use tracing::warn;
 
 #[derive(Clone, serde::Deserialize)]
 pub struct JsonRpcRequest {
@@ -166,6 +167,8 @@ impl JsonRpcForwardedResponse {
     pub fn from_anyhow_error(err: anyhow::Error, id: Box<RawValue>) -> Self {
         let err = format!("{:?}", err);
 
+        warn!("forwarding error. {:?}", err);
+
         JsonRpcForwardedResponse {
             jsonrpc: "2.0".to_string(),
             id,
@@ -173,7 +176,7 @@ impl JsonRpcForwardedResponse {
             error: Some(JsonRpcErrorData {
                 // TODO: set this jsonrpc error code to match the http status code
                 code: -32099,
-                message: err,
+                message: "internal server error".to_string(),
                 data: None,
             }),
         }

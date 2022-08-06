@@ -40,7 +40,7 @@ pub async fn rate_limit_by_key(
     // TODO: probably want a cache on this
     match user_keys::Entity::find()
         .select_only()
-        .column(user_keys::Column::UserUuid)
+        .column(user_keys::Column::UserId)
         .filter(user_keys::Column::ApiKey.eq(user_key))
         .filter(user_keys::Column::Active.eq(true))
         .one(db)

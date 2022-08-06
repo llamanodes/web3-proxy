@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "user_keys")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub uuid: Uuid,
-    pub user_uuid: Uuid,
+    #[sea_orm(primary_key)]
+    pub id: i64,
+    pub user_id: i64,
     #[sea_orm(unique)]
     pub api_key: Uuid,
     pub description: Option<String>,
@@ -21,8 +21,8 @@ pub struct Model {
 pub enum Relation {
     #[sea_orm(
         belongs_to = "super::user::Entity",
-        from = "Column::UserUuid",
-        to = "super::user::Column::Uuid",
+        from = "Column::UserId",
+        to = "super::user::Column::Id",
         on_update = "NoAction",
         on_delete = "NoAction"
     )]

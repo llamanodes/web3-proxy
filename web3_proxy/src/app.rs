@@ -14,6 +14,7 @@ use migration::{Migrator, MigratorTrait};
 use parking_lot::RwLock;
 use redis_cell_client::bb8::ErrorSink;
 use redis_cell_client::{bb8, RedisCellClient, RedisConnectionManager};
+use sea_orm::DatabaseConnection;
 use serde_json::json;
 use std::fmt;
 use std::mem::size_of_val;
@@ -236,6 +237,31 @@ fn block_needed(
     }
 }
 
+pub async fn get_migrated_db(
+    db_url: String,
+    min_connections: u32,
+) -> anyhow::Result<DatabaseConnection> {
+    let mut db_opt = sea_orm::ConnectOptions::new(db_url);
+
+    // TODO: load all these options from the config file
+    // TODO: sqlx logging only in debug. way too verbose for production
+    db_opt
+        .max_connections(100)
+        .min_connections(min_connections)
+        .connect_timeout(Duration::from_secs(8))
+        .idle_timeout(Duration::from_secs(8))
+        .max_lifetime(Duration::from_secs(60))
+        .sqlx_logging(false);
+    // .sqlx_logging_level(log::LevelFilter::Info);
+
+    let db = sea_orm::Database::connect(db_opt).await?;
+
+    // TODO: if error, roll back?
+    Migrator::up(&db, None).await?;
+
+    Ok(db)
+}
+
 // TODO: think more about TxState. d
 #[derive(Clone)]
 pub enum TxState {
@@ -296,24 +322,11 @@ impl Web3ProxyApp {
     )> {
         // first, we connect to mysql and make sure the latest migrations have run
         let db_conn = if let Some(db_url) = app_config.shared.db_url {
-            let mut db_opt = sea_orm::ConnectOptions::new(db_url);
+            let min_connections = num_workers.try_into()?;
 
-            // TODO: load all these options from the config file
-            db_opt
-                .max_connections(100)
-                .min_connections(num_workers.try_into()?)
-                .connect_timeout(Duration::from_secs(8))
-                .idle_timeout(Duration::from_secs(8))
-                .max_lifetime(Duration::from_secs(60))
-                .sqlx_logging(true);
-            // .sqlx_logging_level(log::LevelFilter::Info);
+            let db = get_migrated_db(db_url, min_connections).await?;
 
-            let db_conn = sea_orm::Database::connect(db_opt).await?;
-
-            // TODO: if error, roll back
-            Migrator::up(&db_conn, None).await?;
-
-            Some(db_conn)
+            Some(db)
         } else {
             info!("no database");
             None

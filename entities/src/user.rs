@@ -2,15 +2,14 @@
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use sea_orm::prelude::Uuid;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "user")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub uuid: Uuid,
+    #[sea_orm(primary_key)]
+    pub id: i64,
     #[sea_orm(unique)]
-    pub address: String,
+    pub address: Vec<u8>,
     pub description: Option<String>,
     pub email: Option<String>,
 }
