@@ -210,3 +210,4 @@ in another repo: event subscriber
 - [ ] subscribing to transactions should be configurable per server. listening to paid servers can get expensive
 - [ ] archive servers should be lowest priority
 - [ ] docker build context is really big. we must be including target or something
+- [ ] ip detection needs work so that everything doesnt show up as 172.x.x.x
