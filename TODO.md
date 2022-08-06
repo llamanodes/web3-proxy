@@ -221,3 +221,4 @@ in another repo: event subscriber
   #[cfg(feature = "with-uuid")]
   pub use uuid::Builder as UuidBuilder;
   ```
+- [ ] get to /, when not serving a websocket, should have a simple welcome page. maybe with a button to update your wallet. 
