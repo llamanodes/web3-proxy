@@ -1,8 +1,9 @@
-config/*.toml
-.git
-Dockerfile
-redis-cell-server/
-target
-web3-proxy/flamegraph.svg
-web3-proxy/perf.data
-web3-proxy/perf.data.old
+/config/*.toml
+/.git
+/data/
+/Dockerfile
+/redis-cell-server/
+/target
+/web3-proxy/flamegraph.svg
+/web3-proxy/perf.data
+/web3-proxy/perf.data.old
