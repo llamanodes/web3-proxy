@@ -208,3 +208,4 @@ in another repo: event subscriber
 - [ ] tarpit instead of reject requests (unless theres a lot)
 - [ ] tune database connection pool size. i think a single web3-proxy currently maxes out our server
 - [ ] subscribing to transactions should be configurable per server. listening to paid servers can get expensive
+- [ ] archive servers should be lowest priority
