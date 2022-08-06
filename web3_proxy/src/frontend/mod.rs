@@ -162,6 +162,7 @@ pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> 
     info!("listening on port {}", port);
     // TODO: into_make_service is enough if we always run behind a proxy. make into_make_service_with_connect_info optional?
     axum::Server::bind(&addr)
+        // TODO: option to use with_connect_info
         // .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .serve(app.into_make_service())
         .await
