@@ -226,3 +226,7 @@ in another repo: event subscriber
   pub use uuid::Builder as UuidBuilder;
   ```
 - [ ] get to /, when not serving a websocket, should have a simple welcome page. maybe with a button to update your wallet. 
+- [ ] rate limit thoughts:
+  - if someone subscribes to all pending transactions, how should that count against rate limits
+  - when those rate limits are hit, what should happen?
+  - missing pending transactions might be okay, but not missing confirmed blocks 
