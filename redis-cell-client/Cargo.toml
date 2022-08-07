@@ -5,5 +5,5 @@ authors = ["Bryan Stitt <bryan@stitthappens.com>"]
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0.59"
+anyhow = "1.0.60"
 bb8-redis = "0.11.0"

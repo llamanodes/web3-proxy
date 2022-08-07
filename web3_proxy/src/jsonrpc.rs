@@ -165,20 +165,19 @@ impl fmt::Debug for JsonRpcForwardedResponse {
 
 impl JsonRpcForwardedResponse {
     pub fn from_anyhow_error(err: anyhow::Error, id: Box<RawValue>) -> Self {
-        let err = format!("{:?}", err);
-
         // TODO: this is too verbose. plenty of errors are valid, like users giving an invalid address. no need to log that
-        warn!("forwarding error. {:?}", err);
+        warn!(?err, "forwarding error");
 
         JsonRpcForwardedResponse {
             jsonrpc: "2.0".to_string(),
             id,
             result: None,
             error: Some(JsonRpcErrorData {
-                // TODO: set this jsonrpc error code to match the http status code
+                // TODO: set this jsonrpc error code to match the http status code? or maybe the other way around?
                 code: -32099,
                 // TODO: some errors should be included here. others should not. i think anyhow might not be the right choice
-                message: "internal server error".to_string(),
+                // message: "internal server error".to_string(),
+                message: format!("{:?}", err),
                 data: None,
             }),
         }

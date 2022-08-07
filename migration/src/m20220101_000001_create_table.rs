@@ -124,6 +124,12 @@ impl MigrationTrait for Migration {
                             .default(true)
                             .not_null(),
                     )
+                    .col(
+                        ColumnDef::new(UserKeys::RequestsPerMinute)
+                            .unsigned()
+                            .default(true)
+                            .not_null(),
+                    )
                     .index(sea_query::Index::create().col(UserKeys::Active))
                     .foreign_key(
                         sea_query::ForeignKey::create()
@@ -199,8 +205,7 @@ enum BlockList {
 -- TODO: what size for api_key
 -- TODO: track active with a timestamp?
 -- TODO: creation time?
--- TODO: requests_per_second INT,
--- TODO: requests_per_day INT,
+-- TODO: requests_per_day? requests_per_second?,
 -- TODO: more security features. likely similar to infura
 */
 #[derive(Iden)]
@@ -212,4 +217,5 @@ enum UserKeys {
     Description,
     PrivateTxs,
     Active,
+    RequestsPerMinute,
 }

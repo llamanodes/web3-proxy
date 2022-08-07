@@ -4,7 +4,7 @@ use derive_more::From;
 use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
-use redis_cell_client::RedisCellClient;
+use redis_cell_client::{RedisCellClient, ThrottleResult};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use std::fmt;
@@ -13,11 +13,17 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::RwLock;
-use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
+use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
 
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
+
+pub enum HandleResult {
+    ActiveRequest(ActiveRequestHandle),
+    RetryAt(Instant),
+    None,
+}
 
 /// TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit <https://github.com/gakonst/ethers-rs/issues/592>
 #[derive(From)]
@@ -339,7 +345,7 @@ impl Web3Connection {
 
     #[instrument(skip_all)]
     async fn send_block_result(
-        self: &Arc<Self>,
+        self: Arc<Self>,
         block: Result<Block<TxHash>, ProviderError>,
         block_sender: &flume::Sender<BlockAndRpc>,
     ) -> anyhow::Result<()> {
@@ -355,12 +361,18 @@ impl Web3Connection {
                 }
 
                 block_sender
-                    .send_async((Arc::new(block), self.clone()))
+                    .send_async((Arc::new(block), self))
                     .await
                     .context("block_sender")?;
             }
             Err(e) => {
                 warn!("unable to get block from {}: {}", self, e);
+
+                // send an empty block to take this server out of rotation
+                block_sender
+                    .send_async((Arc::new(Block::default()), self))
+                    .await
+                    .context("block_sender")?;
             }
         }
 
@@ -452,24 +464,36 @@ impl Web3Connection {
 
                     loop {
                         match self.try_request_handle().await {
-                            Ok(active_request_handle) => {
+                            Ok(HandleResult::ActiveRequest(active_request_handle)) => {
                                 let block: Result<Block<TxHash>, _> = active_request_handle
                                     .request("eth_getBlockByNumber", ("latest", false))
                                     .await;
 
                                 if let Ok(block) = block {
                                     // don't send repeat blocks
-                                    let new_hash = block.hash.unwrap();
+                                    let new_hash =
+                                        block.hash.expect("blocks here should always have hashes");
 
                                     if new_hash != last_hash {
                                         last_hash = new_hash;
 
-                                        self.send_block_result(Ok(block), &block_sender).await?;
+                                        self.clone()
+                                            .send_block_result(Ok(block), &block_sender)
+                                            .await?;
                                     }
                                 } else {
-                                    // we got an empty block back. thats not good
-                                    self.send_block_result(block, &block_sender).await?;
+                                    // we did not get a block back. something is up with the server. take it out of rotation
+                                    self.clone().send_block_result(block, &block_sender).await?;
                                 }
+                            }
+                            Ok(HandleResult::RetryAt(retry_at)) => {
+                                warn!(?retry_at, "Rate limited on latest block from {}", self);
+                                sleep_until(retry_at).await;
+                                continue;
+                            }
+                            Ok(HandleResult::None) => {
+                                // TODO: what should we do?
+                                warn!("No handle for latest block from {}", self);
                             }
                             Err(err) => {
                                 warn!(?err, "Rate limited on latest block from {}", self);
@@ -507,10 +531,12 @@ impl Web3Connection {
                         .request("eth_getBlockByNumber", ("latest", false))
                         .await;
 
-                    self.send_block_result(block, &block_sender).await?;
+                    self.clone().send_block_result(block, &block_sender).await?;
 
                     while let Some(new_block) = stream.next().await {
-                        self.send_block_result(Ok(new_block), &block_sender).await?;
+                        self.clone()
+                            .send_block_result(Ok(new_block), &block_sender)
+                            .await?;
                     }
 
                     warn!(?self, "subscription ended");
@@ -588,44 +614,54 @@ impl Web3Connection {
 
         loop {
             match self.try_request_handle().await {
-                Ok(pending_request_handle) => return Ok(pending_request_handle),
-                Err(Some(retry_after)) => {
-                    sleep(retry_after).await;
+                Ok(HandleResult::ActiveRequest(handle)) => return Ok(handle),
+                Ok(HandleResult::RetryAt(retry_at)) => {
+                    // TODO: emit a stat?
+                    sleep_until(retry_at).await;
                 }
-                Err(None) => return Err(anyhow::anyhow!("rate limit will never succeed")),
+                Ok(HandleResult::None) => {
+                    // TODO: when can this happen? emit a stat?
+                    // TODO: instead of erroring, subscribe to the head block on this
+                    // TODO: sleep how long? maybe just error?
+                    sleep(Duration::from_secs(1)).await;
+                }
+                // Err(None) => return Err(anyhow::anyhow!("rate limit will never succeed")),
+                Err(err) => return Err(err),
             }
         }
     }
 
-    pub async fn try_request_handle(
-        self: &Arc<Self>,
-    ) -> Result<ActiveRequestHandle, Option<Duration>> {
+    pub async fn try_request_handle(self: &Arc<Self>) -> anyhow::Result<HandleResult> {
         // check that we are connected
         if !self.has_provider().await {
-            // TODO: how long? use the same amount as the exponential backoff on retry
-            return Err(Some(Duration::from_secs(1)));
+            // TODO: emit a stat?
+            return Ok(HandleResult::None);
         }
 
         // check rate limits
         if let Some(ratelimiter) = self.hard_limit.as_ref() {
             match ratelimiter.throttle().await {
-                Ok(_) => {
+                Ok(ThrottleResult::Allowed) => {
                     // rate limit succeeded
-                    return Ok(ActiveRequestHandle::new(self.clone()));
                 }
-                Err(retry_after) => {
+                Ok(ThrottleResult::RetryAt(retry_at)) => {
                     // rate limit failed
                     // save the smallest retry_after. if nothing succeeds, return an Err with retry_after in it
                     // TODO: use tracing better
                     // TODO: i'm seeing "Exhausted rate limit on moralis: 0ns". How is it getting 0?
-                    warn!("Exhausted rate limit on {:?}: {:?}", self, retry_after);
+                    warn!(?retry_at, ?self, "Exhausted rate limit");
 
-                    return Err(retry_after);
+                    return Ok(HandleResult::RetryAt(retry_at.into()));
+                }
+                Err(err) => {
+                    return Err(err);
                 }
             }
         };
 
-        Ok(ActiveRequestHandle::new(self.clone()))
+        let handle = ActiveRequestHandle::new(self.clone());
+
+        Ok(HandleResult::ActiveRequest(handle))
     }
 }
 

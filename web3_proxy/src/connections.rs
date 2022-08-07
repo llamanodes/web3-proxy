@@ -19,15 +19,15 @@ use serde_json::value::RawValue;
 use std::cmp;
 use std::fmt;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tokio::task;
-use tokio::time::{interval, sleep, MissedTickBehavior};
+use tokio::time::{interval, sleep, sleep_until, MissedTickBehavior};
+use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::app::{flatten_handle, AnyhowJoinHandle, TxState};
 use crate::config::Web3ConnectionConfig;
-use crate::connection::{ActiveRequestHandle, Web3Connection};
+use crate::connection::{ActiveRequestHandle, HandleResult, Web3Connection};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 
 // Serialize so we can print it on our debug endpoint
@@ -278,10 +278,14 @@ impl Web3Connections {
         // TODO: there is a race here on geth. sometimes the rpc isn't yet ready to serve the transaction (even though they told us about it!)
         // TODO: maximum wait time
         let pending_transaction: Transaction = match rpc.try_request_handle().await {
-            Ok(request_handle) => {
-                request_handle
+            Ok(HandleResult::ActiveRequest(handle)) => {
+                handle
                     .request("eth_getTransactionByHash", (pending_tx_id,))
                     .await?
+            }
+            Ok(_) => {
+                // TODO: actually retry?
+                return Ok(None);
             }
             Err(err) => {
                 trace!(
@@ -897,8 +901,8 @@ impl Web3Connections {
         &self,
         skip: &[Arc<Web3Connection>],
         min_block_needed: Option<&U64>,
-    ) -> Result<ActiveRequestHandle, Option<Duration>> {
-        let mut earliest_retry_after = None;
+    ) -> anyhow::Result<HandleResult> {
+        let mut earliest_retry_at = None;
 
         // filter the synced rpcs
         // TODO: we are going to be checking "has_block_data" a lot now. i think we pretty much always have min_block_needed now that we override "latest"
@@ -923,7 +927,8 @@ impl Web3Connections {
             };
 
         if synced_rpcs.is_empty() {
-            return Err(None);
+            // TODO: what should happen here? might be nicer to retry in a second
+            return Err(anyhow::anyhow!("not synced"));
         }
 
         let sort_cache: HashMap<_, _> = synced_rpcs
@@ -953,29 +958,39 @@ impl Web3Connections {
         for rpc in synced_rpcs.into_iter() {
             // increment our connection counter
             match rpc.try_request_handle().await {
-                Err(retry_after) => {
-                    earliest_retry_after = earliest_retry_after.min(retry_after);
-                }
-                Ok(handle) => {
+                Ok(HandleResult::ActiveRequest(handle)) => {
                     trace!("next server on {:?}: {:?}", self, rpc);
-                    return Ok(handle);
+                    return Ok(HandleResult::ActiveRequest(handle));
+                }
+                Ok(HandleResult::RetryAt(retry_at)) => {
+                    earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                }
+                Ok(HandleResult::None) => {
+                    // TODO: log a warning?
+                }
+                Err(err) => {
+                    // TODO: log a warning?
+                    warn!(?err, "No request handle for {}", rpc)
                 }
             }
         }
 
-        warn!("no servers on {:?}! {:?}", self, earliest_retry_after);
+        warn!("no servers on {:?}! {:?}", self, earliest_retry_at);
 
-        // this might be None
-        Err(earliest_retry_after)
+        match earliest_retry_at {
+            None => todo!(),
+            Some(earliest_retry_at) => Ok(HandleResult::RetryAt(earliest_retry_at)),
+        }
     }
 
     /// get all rpc servers that are not rate limited
     /// returns servers even if they aren't in sync. This is useful for broadcasting signed transactions
+    // TODO: better type on this that can return an anyhow::Result
     pub async fn upstream_servers(
         &self,
         min_block_needed: Option<&U64>,
-    ) -> Result<Vec<ActiveRequestHandle>, Option<Duration>> {
-        let mut earliest_retry_after = None;
+    ) -> Result<Vec<ActiveRequestHandle>, Option<Instant>> {
+        let mut earliest_retry_at = None;
         // TODO: with capacity?
         let mut selected_rpcs = vec![];
 
@@ -988,11 +1003,17 @@ impl Web3Connections {
 
             // check rate limits and increment our connection counter
             match connection.try_request_handle().await {
-                Err(retry_after) => {
+                Ok(HandleResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
-                    earliest_retry_after = earliest_retry_after.min(retry_after);
+                    earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                 }
-                Ok(handle) => selected_rpcs.push(handle),
+                Ok(HandleResult::ActiveRequest(handle)) => selected_rpcs.push(handle),
+                Ok(HandleResult::None) => {
+                    warn!("no request handle for {}", connection)
+                }
+                Err(err) => {
+                    warn!(?err, "error getting request handle for {}", connection)
+                }
             }
         }
 
@@ -1001,7 +1022,7 @@ impl Web3Connections {
         }
 
         // return the earliest retry_after (if no rpcs are synced, this will be None)
-        Err(earliest_retry_after)
+        Err(earliest_retry_at)
     }
 
     /// be sure there is a timeout on this or it might loop forever
@@ -1021,7 +1042,7 @@ impl Web3Connections {
                 .next_upstream_server(&skip_rpcs, min_block_needed)
                 .await
             {
-                Ok(active_request_handle) => {
+                Ok(HandleResult::ActiveRequest(active_request_handle)) => {
                     // save the rpc in case we get an error and want to retry on another server
                     skip_rpcs.push(active_request_handle.clone_connection());
 
@@ -1074,25 +1095,26 @@ impl Web3Connections {
                         }
                     }
                 }
-                Err(None) => {
-                    // TODO: is there some way to check if no servers will ever be in sync?
-                    warn!(?self, "No servers in sync!");
+                Ok(HandleResult::RetryAt(retry_at)) => {
+                    // TODO: move this to a helper function
+                    // sleep (TODO: with a lock?) until our rate limits should be available
+                    // TODO: if a server catches up sync while we are waiting, we could stop waiting
+                    warn!(?retry_at, "All rate limits exceeded. Sleeping");
+
+                    sleep_until(retry_at).await;
+
+                    continue;
+                }
+                Ok(HandleResult::None) => {
+                    warn!(?self, "No server handles!");
 
                     // TODO: subscribe to something on synced connections. maybe it should just be a watch channel
                     sleep(Duration::from_millis(200)).await;
 
                     continue;
-                    // return Err(anyhow::anyhow!("no servers in sync"));
                 }
-                Err(Some(retry_after)) => {
-                    // TODO: move this to a helper function
-                    // sleep (TODO: with a lock?) until our rate limits should be available
-                    // TODO: if a server catches up sync while we are waiting, we could stop waiting
-                    warn!(?retry_after, "All rate limits exceeded. Sleeping");
-
-                    sleep(retry_after).await;
-
-                    continue;
+                Err(err) => {
+                    return Err(err);
                 }
             }
         }
@@ -1141,13 +1163,13 @@ impl Web3Connections {
 
                     continue;
                 }
-                Err(Some(retry_after)) => {
+                Err(Some(retry_at)) => {
                     // TODO: move this to a helper function
                     // sleep (TODO: with a lock?) until our rate limits should be available
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
                     warn!("All rate limits exceeded. Sleeping");
 
-                    sleep(retry_after).await;
+                    sleep_until(retry_at).await;
 
                     continue;
                 }

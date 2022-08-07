@@ -5,7 +5,8 @@ use bb8_redis::redis::cmd;
 pub use bb8_redis::redis::RedisError;
 pub use bb8_redis::{bb8, RedisConnectionManager};
 
-use std::time::Duration;
+use std::ops::Add;
+use std::time::{Duration, Instant};
 
 pub type RedisClientPool = bb8::Pool<RedisConnectionManager>;
 
@@ -17,12 +18,17 @@ pub struct RedisCellClient {
     default_period: u32,
 }
 
+pub enum ThrottleResult {
+    Allowed,
+    RetryAt(Instant),
+}
+
 impl RedisCellClient {
     // todo: seems like this could be derived
     // TODO: take something generic for conn
     // TODO: use r2d2 for connection pooling?
     pub fn new(
-        pool: bb8::Pool<RedisConnectionManager>,
+        pool: RedisClientPool,
         app: &str,
         key: &str,
         default_max_burst: u32,
@@ -48,13 +54,13 @@ impl RedisCellClient {
         count_per_period: Option<u32>,
         period: Option<u32>,
         quantity: u32,
-    ) -> Result<(), Option<Duration>> {
-        let mut conn = self.pool.get().await.unwrap();
+    ) -> anyhow::Result<ThrottleResult> {
+        let mut conn = self.pool.get().await?;
 
         let count_per_period = count_per_period.unwrap_or(self.default_count_per_period);
 
         if count_per_period == 0 {
-            return Err(None);
+            return Ok(ThrottleResult::Allowed);
         }
 
         let max_burst = max_burst.unwrap_or(self.default_max_burst);
@@ -78,24 +84,28 @@ impl RedisCellClient {
         let x: Vec<isize> = cmd("CL.THROTTLE")
             .arg(&(key, max_burst, count_per_period, period, quantity))
             .query_async(&mut *conn)
-            .await
-            .unwrap();
+            .await?;
 
-        assert_eq!(x.len(), 5);
+        // TODO: trace log the result?
 
-        // TODO: trace log the result
+        if x.len() != 5 {
+            return Err(anyhow::anyhow!("unexpected redis result"));
+        }
 
-        let retry_after = *x.get(3).unwrap();
+        let retry_after = *x.get(3).expect("index exists above");
 
         if retry_after == -1 {
-            Ok(())
+            Ok(ThrottleResult::Allowed)
         } else {
-            Err(Some(Duration::from_secs(retry_after as u64)))
+            // don't return a duration, return an instant
+            let retry_at = Instant::now().add(Duration::from_secs(retry_after as u64));
+
+            Ok(ThrottleResult::RetryAt(retry_at))
         }
     }
 
     #[inline]
-    pub async fn throttle(&self) -> Result<(), Option<Duration>> {
+    pub async fn throttle(&self) -> anyhow::Result<ThrottleResult> {
         self._throttle(&self.key, None, None, None, 1).await
     }
 
@@ -106,7 +116,7 @@ impl RedisCellClient {
         max_burst: Option<u32>,
         count_per_period: Option<u32>,
         period: Option<u32>,
-    ) -> Result<(), Option<Duration>> {
+    ) -> anyhow::Result<ThrottleResult> {
         let key = format!("{}:{}", self.key, key);
 
         self._throttle(key.as_ref(), max_burst, count_per_period, period, 1)
@@ -114,7 +124,7 @@ impl RedisCellClient {
     }
 
     #[inline]
-    pub async fn throttle_quantity(&self, quantity: u32) -> Result<(), Option<Duration>> {
+    pub async fn throttle_quantity(&self, quantity: u32) -> anyhow::Result<ThrottleResult> {
         self._throttle(&self.key, None, None, None, quantity).await
     }
 }

@@ -15,6 +15,7 @@ pub struct Model {
     pub description: Option<String>,
     pub private_txs: bool,
     pub active: bool,
+    pub requests_per_second: u32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

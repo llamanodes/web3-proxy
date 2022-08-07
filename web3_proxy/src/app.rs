@@ -671,7 +671,7 @@ impl Web3ProxyApp {
         &self,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
-        debug!(?request, "proxy_web3_rpc");
+        trace!(?request, "proxy_web3_rpc");
 
         // even though we have timeouts on the requests to our backend providers,
         // we need a timeout for the incoming request so that retries don't run forever
@@ -689,7 +689,7 @@ impl Web3ProxyApp {
             ),
         };
 
-        debug!(?response, "Forwarding response");
+        trace!(?response, "Forwarding");
 
         Ok(response)
     }

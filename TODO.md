@@ -59,9 +59,10 @@
   - [x] instead of tracking `pending_synced_connections`, have a mapping of where all connections are individually. then each change, re-check for consensus.
 - [x] synced connections swap threshold set to 1 so that it always serves something
 - [x] cli tool for creating new users
+- [x] incoming rate limiting by api key
+- [ ] after a refactor, public rate limit isnt working anymore. i set to 0 but could still request
+- [ ] give users different rate limits looked up from the database 
 - [ ] basic request method stats
-- [ ] incoming rate limiting by api key
-  - [ ] give users different rate limits looked up from the database 
 - [ ] allow blocking public requests
 
 ## V1
@@ -108,6 +109,7 @@
   - [ ] Public bsc server got “0” for block data limit (ninicoin)
 - [ ] If we need an archive server and no servers in sync, exit immediately with an error instead of waiting 60 seconds
 - [ ] 60 second timeout is too short. Maybe do that for free tier and larger timeout for paid. Problem is that some queries can take over 1000 seconds
+- [ ] refactor from_anyhow_error to have consistent error codes and http codes
 
 new endpoints for users:
 - think about where to put this. a separate app might be better
