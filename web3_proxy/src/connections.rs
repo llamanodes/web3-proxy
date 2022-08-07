@@ -4,12 +4,13 @@ use arc_swap::ArcSwap;
 use counter::Counter;
 use dashmap::DashMap;
 use derive_more::From;
-use ethers::prelude::{Block, ProviderError, Transaction, TxHash, H256, U64};
+use ethers::prelude::{Block, ProviderError, Transaction, TxHash, H256, U256, U64};
 use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
 use indexmap::{IndexMap, IndexSet};
+use std::cmp::Reverse;
 // use parking_lot::RwLock;
 // use petgraph::graphmap::DiGraphMap;
 use serde::ser::{SerializeStruct, Serializer};
@@ -729,20 +730,32 @@ impl Web3Connections {
 
             impl<'a> State<'a> {
                 // TODO: there are sortable traits, but this seems simpler
-                fn sortable_values(&self) -> (&U64, &u32, usize, &H256) {
+                /// sort the blocks in descending height
+                fn sortable_values(&self) -> Reverse<(&U64, &u32, &U256, &H256)> {
+                    trace!(?self.block, ?self.conns);
+
+                    // first we care about the block number
                     let block_num = self.block.number.as_ref().unwrap();
 
+                    // if block_num ties, the block with the highest total difficulty *should* be the winner
+                    // TODO: sometimes i see a block with no total difficulty. websocket subscription doesn't get everything
+                    // let total_difficulty = self.block.total_difficulty.as_ref().expect("wat");
+
+                    // all the nodes should already be doing this fork priority logic themselves
+                    // so, it should be safe to just look at whatever our node majority thinks and go with that
                     let sum_soft_limit = &self.sum_soft_limit;
 
-                    let conns = self.conns.len();
+                    let difficulty = &self.block.difficulty;
 
+                    // if we are still tied (unlikely). this will definitely break the tie
+                    // TODO: what does geth do?
                     let block_hash = self.block.hash.as_ref().unwrap();
 
-                    (block_num, sum_soft_limit, conns, block_hash)
+                    Reverse((block_num, sum_soft_limit, difficulty, block_hash))
                 }
             }
 
-            // TODO: i'm always getting None
+            // TODO: this needs tests
             if let Some(x) = rpcs_by_hash
                 .into_iter()
                 .filter_map(|(hash, conns)| {

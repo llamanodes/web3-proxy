@@ -22,7 +22,7 @@ use crate::{
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
 };
 
-use super::{rate_limit_by_ip, rate_limit_by_key};
+use super::rate_limit::{rate_limit_by_ip, rate_limit_by_key};
 
 pub async fn public_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,

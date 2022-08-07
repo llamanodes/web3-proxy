@@ -60,10 +60,11 @@
 - [x] synced connections swap threshold set to 1 so that it always serves something
 - [x] cli tool for creating new users
 - [x] incoming rate limiting by api key
-- [ ] after a refactor, public rate limit isnt working anymore. i set to 0 but could still request
-- [ ] give users different rate limits looked up from the database 
-- [ ] basic request method stats
+- [x] sort forked blocks by total difficulty like geth does
+- [x] refactor result type on active handlers to use a cleaner success/error so we can use the try operator
+- [x] give users different rate limits looked up from the database 
 - [ ] allow blocking public requests
+- [ ] basic request method stats
 
 ## V1
 

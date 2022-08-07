@@ -15,7 +15,7 @@ use sea_orm::ActiveModelTrait;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::{app::Web3ProxyApp, frontend::rate_limit_by_ip};
+use crate::{app::Web3ProxyApp, frontend::rate_limit::rate_limit_by_ip};
 
 pub async fn create_user(
     // this argument tells axum to parse the request body

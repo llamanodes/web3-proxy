@@ -75,7 +75,7 @@ fn run(
         let frontend_handle = tokio::spawn(frontend::run(cli_config.port, app));
 
         // if everything is working, these should both run forever
-        // TODO: select on the shutdown marker, here?
+        // TODO: try_join these instead? use signal_shutdown here?
         tokio::select! {
             x = app_handle => {
                 match x {
@@ -94,7 +94,8 @@ fn run(
                 }
             }
             _ = shutdown_receiver.recv_async() => {
-                info!("shutdown signal");
+                // TODO: think more about this. we need some way for tests to tell the app to stop
+                info!("received shutdown signal");
 
                 // TODO: wait for outstanding requests to complete. graceful shutdown will make our users happier
 

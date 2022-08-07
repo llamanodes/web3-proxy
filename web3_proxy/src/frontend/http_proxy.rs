@@ -5,7 +5,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::errors::handle_anyhow_error;
-use super::{rate_limit_by_ip, rate_limit_by_key};
+use super::rate_limit::{rate_limit_by_ip, rate_limit_by_key};
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 
 pub async fn public_proxy_web3_rpc(
