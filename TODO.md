@@ -64,6 +64,7 @@
 - [x] refactor result type on active handlers to use a cleaner success/error so we can use the try operator
 - [x] give users different rate limits looked up from the database 
 - [ ] allow blocking public requests
+- [ ] use siwe messages and signatures for sign up and login
 - [ ] basic request method stats
 
 ## V1
@@ -81,7 +82,7 @@
     - [ ] instead of the one list of just heads, store our intermediate mappings (rpcs_by_hash, rpcs_by_num, blocks_by_hash) in SyncedConnections. this shouldn't be too much slower than what we have now
     - [ ] remove the if/else where we optionally route to archive and refactor to require a BlockNumber enum
     - [ ] then check syncedconnections for the blockNum. if num given, use the cannonical chain to figure out the winning hash
-    - [ ] this means if someone requests a recent but not ancient block, they can use all our servers, even the slower ones
+    - [ ] this means if someone requests a recent but not ancient block, they can use all our servers, even the slower ones. need smart sorting for priority here
 - [ ] refactor so configs can change while running
   - create the app without applying any config to it
   - have a blocking future watching the config file and calling app.apply_config() on first load and on change
@@ -131,9 +132,9 @@ new endpoints for users:
   - opt-in link email address
   - checks for api key in session cookie or header
   - allows modifying user settings
-- [ ] GET /$api_key
+- [x] GET /u/$api_key
   - proxies to web3 websocket
-- [ ] POST /$api_key
+- [x] POST /u/$api_key
   - proxies to web3
 - [ ] POST /users/process_transaction
   - checks a transaction to see if it modifies a user's balance. records results in a sql database
