@@ -43,6 +43,7 @@ impl CreateUserSubCommand {
         let uk = user_keys::ActiveModel {
             user_id: sea_orm::Set(u.id),
             api_key: sea_orm::Set(new_api_key()),
+            requests_per_minute: sea_orm::Set(6_000_000),
             ..Default::default()
         };
 

@@ -1,7 +1,7 @@
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::Path,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Extension,
 };
 use axum_client_ip::ClientIp;
@@ -27,20 +27,30 @@ use super::{rate_limit_by_ip, rate_limit_by_key};
 pub async fn public_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    if let Err(x) = rate_limit_by_ip(&app, &ip).await {
-        return x.into_response();
-    }
+    ws: Option<WebSocketUpgrade>,
+) -> Response {
+    match ws {
+        Some(ws) => {
+            if let Err(x) = rate_limit_by_ip(&app, &ip).await {
+                return x.into_response();
+            }
 
-    ws.on_upgrade(|socket| proxy_web3_socket(app, socket))
+            ws.on_upgrade(|socket| proxy_web3_socket(app, socket))
+                .into_response()
+        }
+        None => {
+            // this is not a websocket. give a friendly page
+            // TODO: make a friendly page
+            "hello, world".into_response()
+        }
+    }
 }
 
 pub async fn user_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ws: WebSocketUpgrade,
     Path(user_key): Path<Uuid>,
-) -> impl IntoResponse {
+) -> Response {
     if let Err(x) = rate_limit_by_key(&app, user_key).await {
         return x.into_response();
     }

@@ -27,7 +27,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
+use tracing::{info, info_span, instrument, trace, warn, Instrument};
 
 use crate::bb8_helpers;
 use crate::config::AppConfig;
