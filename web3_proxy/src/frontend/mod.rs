@@ -168,10 +168,9 @@ pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> 
         .route("/health", get(http::health))
         .route("/status", get(http::status))
         .route("/users", post(users::create_user))
-        .layer(Extension(proxy_app));
-
-    // 404 for any unknown routes
-    let app = app.fallback(errors::handler_404.into_service());
+        .layer(Extension(proxy_app))
+        // 404 for any unknown routes
+        .fallback(errors::handler_404.into_service());
 
     // run our app with hyper
     // `axum::Server` is a re-export of `hyper::Server`
