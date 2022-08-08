@@ -262,7 +262,7 @@ pub async fn get_migrated_db(
     Ok(db)
 }
 
-// TODO: think more about TxState. d
+// TODO: think more about TxState
 #[derive(Clone)]
 pub enum TxState {
     Pending(Transaction),
@@ -279,6 +279,8 @@ pub struct Web3ProxyApp {
     balanced_rpcs: Arc<Web3Connections>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     private_rpcs: Arc<Web3Connections>,
+    /// Track active requests so that we don't 66
+    ///
     active_requests: ActiveRequestsMap,
     /// bytes available to response_cache (it will be slightly larger than this)
     response_cache_max_bytes: AtomicUsize,

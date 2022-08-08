@@ -731,7 +731,7 @@ impl Web3Connections {
             impl<'a> State<'a> {
                 // TODO: there are sortable traits, but this seems simpler
                 /// sort the blocks in descending height
-                fn sortable_values(&self) -> Reverse<(&U64, &u32, &U256, &H256)> {
+                fn sortable_values(&self) -> (&U64, &u32, &U256, &H256) {
                     trace!(?self.block, ?self.conns);
 
                     // first we care about the block number
@@ -751,7 +751,7 @@ impl Web3Connections {
                     // TODO: what does geth do?
                     let block_hash = self.block.hash.as_ref().unwrap();
 
-                    Reverse((block_num, sum_soft_limit, difficulty, block_hash))
+                    (block_num, sum_soft_limit, difficulty, block_hash)
                 }
             }
 
@@ -784,7 +784,8 @@ impl Web3Connections {
                         })
                     }
                 })
-                .max_by(|a, b| a.sortable_values().cmp(&b.sortable_values()))
+                // sort b to a for descending order. sort a to b for ascending order
+                .max_by(|a, b| b.sortable_values().cmp(&a.sortable_values()))
             {
                 let best_head_num = x.block.number.unwrap();
                 let best_head_hash = x.block.hash.unwrap();
@@ -948,14 +949,14 @@ impl Web3Connections {
             .iter()
             .map(|rpc| {
                 // TODO: get active requests and the soft limit out of redis?
+                let weight = rpc.weight();
                 let active_requests = rpc.active_requests();
                 let soft_limit = rpc.soft_limit();
-                let block_data_limit = rpc.block_data_limit();
 
                 let utilization = active_requests as f32 / soft_limit as f32;
 
                 // TODO: double check this sorts how we want
-                (rpc.clone(), (block_data_limit, utilization, soft_limit))
+                (rpc.clone(), (weight, utilization, Reverse(soft_limit)))
             })
             .collect();
 

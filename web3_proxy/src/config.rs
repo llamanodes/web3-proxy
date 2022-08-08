@@ -62,6 +62,7 @@ pub struct Web3ConnectionConfig {
     url: String,
     soft_limit: u32,
     hard_limit: Option<u32>,
+    weight: u32,
 }
 
 impl Web3ConnectionConfig {
@@ -97,6 +98,7 @@ impl Web3ConnectionConfig {
             block_sender,
             tx_id_sender,
             true,
+            self.weight,
         )
         .await
     }

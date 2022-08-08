@@ -83,6 +83,7 @@ pub struct Web3Connection {
     /// used for load balancing to the least loaded server
     soft_limit: u32,
     block_data_limit: AtomicU64,
+    weight: u32,
     head_block: parking_lot::RwLock<(H256, U64)>,
 }
 
@@ -151,6 +152,7 @@ impl Web3Connection {
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
+        weight: u32,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_conection)| {
             // TODO: allow configurable period and max_burst
@@ -175,6 +177,7 @@ impl Web3Connection {
             soft_limit,
             block_data_limit: Default::default(),
             head_block: parking_lot::RwLock::new((H256::zero(), 0isize.into())),
+            weight,
         };
 
         let new_connection = Arc::new(new_connection);
@@ -662,6 +665,10 @@ impl Web3Connection {
         let handle = ActiveRequestHandle::new(self.clone());
 
         Ok(HandleResult::ActiveRequest(handle))
+    }
+
+    pub fn weight(&self) -> u32 {
+        self.weight
     }
 }
 

@@ -63,6 +63,7 @@
 - [x] sort forked blocks by total difficulty like geth does
 - [x] refactor result type on active handlers to use a cleaner success/error so we can use the try operator
 - [x] give users different rate limits looked up from the database 
+- [x] Add a "weight" key to the servers. Sort on that after block. keep most requests local
 - [ ] allow blocking public requests
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] basic request method stats
@@ -90,9 +91,7 @@
 - [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
 - [ ] synced connections swap threshold should come from config
   - if there are bad forks, we need to think about this more. keep backfilling until there is a common block, or just error? if the common block is old, i think we should error rather than serve data. that's kind of "downtime" but really its on the chain and not us. think about this more
-- [ ] have a "backup" tier that is only used when the primary tier has no servers or is many blocks behind
-  - we don't want the backup tier taking over with the head block if they happen to be fast at that (but overall low/expensive rps). only if the primary tier has fallen behind or gone entirely offline should we go to third parties
-  - [ ] until this is done, an alternative is for infra to have a "failover" script that changes the configs to include a bunch of third party servers manually.
+- [ ] improve rpc weights. i think theres still a potential thundering herd
 - [ ] stats when forks are resolved (and what chain they were on?)
 - [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
 - [ ] right now the block_map is unbounded. move this to redis and do some calculations to be sure about RAM usage

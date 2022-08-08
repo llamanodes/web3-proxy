@@ -11,38 +11,47 @@ response_cache_max_bytes = 10000000000
     [balanced_rpcs.ankr]
     url = "https://rpc.ankr.com/eth"
     soft_limit = 1_000
+    weight = 0
 
     [balanced_rpcs.cloudflare]
     url = "https://cloudflare-eth.com"
     soft_limit = 1_000
+    weight = 0
 
     #[balanced_rpcs.linkpool-light]
     #url = "https://main-light.eth.linkpool.io"
     #soft_limit = 1_000
+    weight = 1
 
     [balanced_rpcs.blastapi]
     url = "https://eth-mainnet.public.blastapi.io"
     soft_limit = 1_000
+    weight = 0
 
     #[balanced_rpcs.mycryptoapi]
     #url = "https://api.mycryptoapi.com/eth"
     #soft_limit = 1_000
+    weight = 0
 
     [balanced_rpcs.runonflux]
     url = "https://ethereumnodelight.app.runonflux.io"
     soft_limit = 1_000
+    weight = 1
 
     [balanced_rpcs.pokt-v1]
     url = "https://eth-mainnet.gateway.pokt.network/v1/5f3453978e354ab992c4da79"
     soft_limit = 1_000
+    weight = 1
 
     [balanced_rpcs.pokt]
     url = "https://eth-rpc.gateway.pokt.network"
     soft_limit = 1_000
+    weight = 1
 
     [balanced_rpcs.linkpool]
     url = "https://main-rpc.linkpool.io"
     soft_limit = 1_000
+    weight = 2
 
 [private_rpcs]
 

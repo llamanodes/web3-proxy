@@ -201,11 +201,11 @@ mod tests {
             balanced_rpcs: HashMap::from([
                 (
                     "anvil".to_string(),
-                    Web3ConnectionConfig::new(anvil.endpoint(), 100, None),
+                    Web3ConnectionConfig::new(anvil.endpoint(), 100, None, 1),
                 ),
                 (
                     "anvil_ws".to_string(),
-                    Web3ConnectionConfig::new(anvil.ws_endpoint(), 100, None),
+                    Web3ConnectionConfig::new(anvil.ws_endpoint(), 100, None, 0),
                 ),
             ]),
             private_rpcs: None,
