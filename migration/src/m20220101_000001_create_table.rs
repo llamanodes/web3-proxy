@@ -69,29 +69,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // block list for the transaction firewall
-        manager
-            .create_table(
-                Table::create()
-                    .table(BlockList::Table)
-                    .col(
-                        ColumnDef::new(BlockList::Id)
-                            .big_integer()
-                            .not_null()
-                            .auto_increment()
-                            .primary_key(),
-                    )
-                    .col(
-                        ColumnDef::new(BlockList::Address)
-                            .binary_len(20)
-                            .not_null()
-                            .unique_key(),
-                    )
-                    .col(ColumnDef::new(BlockList::Description).string())
-                    .to_owned(),
-            )
-            .await?;
-
         // api keys
         manager
             .create_table(
@@ -152,9 +129,6 @@ impl MigrationTrait for Migration {
             .drop_table(Table::drop().table(SecondaryUser::Table).to_owned())
             .await?;
         manager
-            .drop_table(Table::drop().table(BlockList::Table).to_owned())
-            .await?;
-        manager
             .drop_table(Table::drop().table(UserKeys::Table).to_owned())
             .await?;
 
@@ -188,15 +162,6 @@ enum SecondaryUser {
     Description,
     Email,
     Role,
-}
-
-// TODO: creation time?
-#[derive(Iden)]
-enum BlockList {
-    Table,
-    Id,
-    Address,
-    Description,
 }
 
 /*

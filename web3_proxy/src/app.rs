@@ -32,7 +32,6 @@ use tracing::{info, info_span, instrument, trace, warn, Instrument};
 use crate::bb8_helpers;
 use crate::config::AppConfig;
 use crate::connections::Web3Connections;
-use crate::firewall::check_firewall_raw;
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
@@ -887,27 +886,13 @@ impl Web3ProxyApp {
             }
             // TODO: eth_sendBundle (flashbots command)
             // broadcast transactions to all private rpcs at once
-            "eth_sendRawTransaction" => match &request.params {
-                Some(serde_json::Value::Array(params)) => {
-                    // parsing params like this is gross. make struct and use serde to do all these checks and error handling
-                    if params.len() != 1 || !params[0].is_string() {
-                        return Err(anyhow::anyhow!("invalid request"));
-                    }
-
-                    let raw_tx = Bytes::from_str(params[0].as_str().unwrap())?;
-
-                    if check_firewall_raw(&raw_tx).await? {
-                        return self
-                            .private_rpcs
-                            .try_send_all_upstream_servers(request, None)
-                            .instrument(span)
-                            .await;
-                    } else {
-                        return Err(anyhow::anyhow!("transaction blocked by firewall"));
-                    }
-                }
-                _ => return Err(anyhow::anyhow!("invalid request")),
-            },
+            "eth_sendRawTransaction" => {
+                return self
+                    .private_rpcs
+                    .try_send_all_upstream_servers(request, None)
+                    .instrument(span)
+                    .await;
+            }
             "eth_syncing" => {
                 // TODO: return a real response if all backends are syncing or if no servers in sync
                 json!(false)

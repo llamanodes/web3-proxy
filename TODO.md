@@ -99,10 +99,7 @@
 - [ ] right now we send too many getTransaction queries to the private rpc tier and i are being rate limited by some of them. change to be serial and weight by hard/soft limit.  
 - [ ] improved logging with useful instrumentation
 - [ ] Got warning: "WARN subscribe_new_heads:send_block: web3_proxy::connection: unable to get block from https://rpc.ethermine.org: Deserialization Error: expected value at line 1 column 1. Response: error code: 1015". this is cloudflare rate limiting on fetching a block, but this is a private rpc. why is there a block subscription?
-- [ ] basic transaction firewall
-  - this is part done, but we need to pick a database schema to check
 - [ ] cli for creating and editing api keys
-- [ ] cli for blocking malicious contracts with the firewall
 - [ ] Api keys need option to lock to IP, cors header, etc
 - [ ] Only subscribe to transactions when someone is listening and if the server has opted in to it
 - [ ] When sending eth_sendRawTransaction, retry errors
@@ -153,7 +150,6 @@ new endpoints for users:
   - look at average request time for getBlock? i'm not sure how good a proxy that will be for serving eth_call, but its a start
   - https://crates.io/crates/histogram-sampler
 - [ ] interval for http subscriptions should be based on block time. load from config is easy, but better to query. currently hard coded to 13 seconds
-- [ ] improve transaction firewall
 - [ ] handle user payments
 - [ ] Load testing script so we can find optimal cost servers 
 
