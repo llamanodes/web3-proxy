@@ -188,7 +188,13 @@ impl Web3Connections {
                 let http_client = http_client.clone();
                 let redis_client_pool = redis_client_pool.clone();
                 let http_interval_sender = http_interval_sender.clone();
-                let block_sender = Some(block_sender.clone());
+
+                let block_sender = if head_block_sender.is_some() {
+                    Some(block_sender.clone())
+                } else {
+                    None
+                };
+
                 let pending_tx_id_sender = Some(pending_tx_id_sender.clone());
 
                 tokio::spawn(async move {
@@ -877,7 +883,7 @@ impl Web3Connections {
 
                 // TODO: do this before or after processing all the transactions in this block?
                 // TODO: only swap if there is a change?
-                debug!(?pending_synced_connections, "swapping");
+                trace!(?pending_synced_connections, "swapping");
                 self.synced_connections
                     .swap(Arc::new(pending_synced_connections));
 

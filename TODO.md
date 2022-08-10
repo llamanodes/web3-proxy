@@ -66,11 +66,13 @@
 - [x] Add a "weight" key to the servers. Sort on that after block. keep most requests local
 - [x] cache db query results for user data. db is a big bottleneck right now
 - [x] allow blocking public requests
+- [x] Got warning: "WARN subscribe_new_heads:send_block: web3_proxy::connection: unable to get block from https://rpc.ethermine.org: Deserialization Error: expected value at line 1 column 1. Response: error code: 1015". this is cloudflare rate limiting on fetching a block, but this is a private rpc. why is there a block subscription?
+- [x] im seeing ethspam occasionally try to query a future block. something must be setting the head block too early
+  - [x] we were sorting best block the wrong direction. i flipped a.cmp(b) to b.cmp(a) so that the largest would be first, but then i used 'max_by' which looks at the end of the list
 - [ ] cache more things locally or in redis
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] basic request method stats
 - [ ] active requests on /status is always 0 even when i'm running requests through
-- [ ] im seeing ethspam occasionally try to query a future block. something must be setting the head block too early
 
 ## V1
 
@@ -103,7 +105,6 @@
 - [ ] emit stats for successes, retries, failures, with the types of requests, account, chain, rpc
 - [ ] right now we send too many getTransaction queries to the private rpc tier and i are being rate limited by some of them. change to be serial and weight by hard/soft limit.  
 - [ ] improved logging with useful instrumentation
-- [ ] Got warning: "WARN subscribe_new_heads:send_block: web3_proxy::connection: unable to get block from https://rpc.ethermine.org: Deserialization Error: expected value at line 1 column 1. Response: error code: 1015". this is cloudflare rate limiting on fetching a block, but this is a private rpc. why is there a block subscription?
 - [ ] cli for creating and editing api keys
 - [ ] Api keys need option to lock to IP, cors header, etc
 - [ ] Only subscribe to transactions when someone is listening and if the server has opted in to it

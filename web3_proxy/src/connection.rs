@@ -167,6 +167,8 @@ impl Web3Connection {
             }
         }
 
+        let will_subscribe_to_blocks = block_sender.is_some();
+
         // subscribe to new blocks and new transactions
         // TODO: make transaction subscription optional (just pass None for tx_id_sender)
         let handle = {
@@ -178,55 +180,57 @@ impl Web3Connection {
             })
         };
 
-        // TODO: make sure the server isn't still syncing
-
-        // TODO: don't sleep. wait for new heads subscription instead
-        // TODO: i think instead of atomics, we could maybe use a watch channel
-        sleep(Duration::from_millis(200)).await;
-
         // we could take "archive" as a parameter, but we would want a safety check on it regardless
         // check common archive thresholds
         // TODO: would be great if rpcs exposed this
         // TODO: move this to a helper function so we can recheck on errors or as the chain grows
         // TODO: move this to a helper function that checks
-        for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
-            let mut head_block_num = new_connection.head_block.read().1;
+        if will_subscribe_to_blocks {
+            // TODO: make sure the server isn't still syncing
 
-            // TODO: wait until head block is set outside the loop? if we disconnect while starting we could actually get 0 though
-            while head_block_num == U64::zero() {
-                warn!(?new_connection, "no head block");
+            // TODO: don't sleep. wait for new heads subscription instead
+            // TODO: i think instead of atomics, we could maybe use a watch channel
+            sleep(Duration::from_millis(250)).await;
 
-                // TODO: subscribe to a channel instead of polling? subscribe to http_interval_sender?
-                sleep(Duration::from_secs(1)).await;
+            for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
+                let mut head_block_num = new_connection.head_block.read().1;
 
-                head_block_num = new_connection.head_block.read().1;
-            }
+                // TODO: wait until head block is set outside the loop? if we disconnect while starting we could actually get 0 though
+                while head_block_num == U64::zero() {
+                    warn!(?new_connection, "no head block");
 
-            // TODO: subtract 1 from block_data_limit for safety?
-            let maybe_archive_block = head_block_num
-                .saturating_sub((block_data_limit).into())
-                .max(U64::one());
+                    // TODO: subscribe to a channel instead of polling? subscribe to http_interval_sender?
+                    sleep(Duration::from_secs(1)).await;
 
-            let archive_result: Result<Bytes, _> = new_connection
-                .wait_for_request_handle()
-                .await?
-                .request(
-                    "eth_getCode",
-                    (
-                        "0xdead00000000000000000000000000000000beef",
-                        maybe_archive_block,
-                    ),
-                )
-                .await;
+                    head_block_num = new_connection.head_block.read().1;
+                }
 
-            trace!(?archive_result, "{}", new_connection);
+                // TODO: subtract 1 from block_data_limit for safety?
+                let maybe_archive_block = head_block_num
+                    .saturating_sub((block_data_limit).into())
+                    .max(U64::one());
 
-            if archive_result.is_ok() {
-                new_connection
-                    .block_data_limit
-                    .store(block_data_limit, atomic::Ordering::Release);
+                let archive_result: Result<Bytes, _> = new_connection
+                    .wait_for_request_handle()
+                    .await?
+                    .request(
+                        "eth_getCode",
+                        (
+                            "0xdead00000000000000000000000000000000beef",
+                            maybe_archive_block,
+                        ),
+                    )
+                    .await;
 
-                break;
+                trace!(?archive_result, "{}", new_connection);
+
+                if archive_result.is_ok() {
+                    new_connection
+                        .block_data_limit
+                        .store(block_data_limit, atomic::Ordering::Release);
+
+                    break;
+                }
             }
         }
 
