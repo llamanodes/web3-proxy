@@ -65,7 +65,7 @@
 - [x] give users different rate limits looked up from the database 
 - [x] Add a "weight" key to the servers. Sort on that after block. keep most requests local
 - [x] cache db query results for user data. db is a big bottleneck right now
-- [ ] allow blocking public requests
+- [x] allow blocking public requests
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] basic request method stats
 
@@ -226,3 +226,4 @@ in another repo: event subscriber
   - if someone subscribes to all pending transactions, how should that count against rate limits
   - when those rate limits are hit, what should happen?
   - missing pending transactions might be okay, but not missing confirmed blocks 
+- [ ] for easier errors in the axum code, i think we need to have our own type that wraps anyhow::Result+Error
