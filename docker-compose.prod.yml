@@ -33,14 +33,14 @@ services:
     ports:
       - 7500:8544
 
-  avalanche-c:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-avalanche-c.toml:/config.toml
-    ports:
-      - 7501:8544
+  # avalanche-c:
+  #   extends:
+  #     file: docker-compose.common.yml
+  #     service: base
+  #   volumes:
+  #     - ./config/production-avalanche-c.toml:/config.toml
+  #   ports:
+  #     - 7501:8544
 
   bsc:
     extends:
@@ -69,23 +69,23 @@ services:
     ports:
       - 7504:8544
 
-  gnosis:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-gnosis.toml:/config.toml
-    ports:
-      - 7505:8544
+  # gnosis:
+  #   extends:
+  #     file: docker-compose.common.yml
+  #     service: base
+  #   volumes:
+  #     - ./config/production-gnosis.toml:/config.toml
+  #   ports:
+  #     - 7505:8544
 
-  goerli:
-    extends:
-      file: docker-compose.common.yml
-      service: base
-    volumes:
-      - ./config/production-goerli.toml:/config.toml
-    ports:
-      - 7506:8544
+  # goerli:
+  #   extends:
+  #     file: docker-compose.common.yml
+  #     service: base
+  #   volumes:
+  #     - ./config/production-goerli.toml:/config.toml
+  #   ports:
+  #     - 7506:8544
 
   optimism:
     extends:
