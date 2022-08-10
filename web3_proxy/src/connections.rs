@@ -31,10 +31,11 @@ use crate::config::Web3ConnectionConfig;
 use crate::connection::{ActiveRequestHandle, HandleResult, Web3Connection};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 
-// Serialize so we can print it on our debug endpoint
+/// A collection of Web3Connections that are on the same block
+/// Serialize is so we can print it on our debug endpoint
 #[derive(Clone, Default, Serialize)]
 struct SyncedConnections {
-    head_block_num: u64,
+    head_block_num: U64,
     head_block_hash: H256,
     // TODO: this should be able to serialize, but it isn't
     #[serde(skip_serializing)]
@@ -50,16 +51,6 @@ impl fmt::Debug for SyncedConnections {
             .field("head_hash", &self.head_block_hash)
             .field("num_conns", &self.conns.len())
             .finish_non_exhaustive()
-    }
-}
-
-impl SyncedConnections {
-    pub fn head_block_hash(&self) -> &H256 {
-        &self.head_block_hash
-    }
-
-    pub fn head_block_num(&self) -> U64 {
-        self.head_block_num.into()
     }
 }
 
@@ -144,7 +135,7 @@ impl Web3Connections {
     // #[instrument(name = "spawn_Web3Connections", skip_all)]
     pub async fn spawn(
         chain_id: u64,
-        server_configs: Vec<Web3ConnectionConfig>,
+        server_configs: HashMap<String, Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
         redis_client_pool: Option<redis_cell_client::RedisPool>,
         head_block_sender: Option<watch::Sender<Arc<Block<TxHash>>>>,
@@ -193,7 +184,7 @@ impl Web3Connections {
         // turn configs into connections (in parallel)
         let spawn_handles: Vec<_> = server_configs
             .into_iter()
-            .map(|server_config| {
+            .map(|(server_name, server_config)| {
                 let http_client = http_client.clone();
                 let redis_client_pool = redis_client_pool.clone();
                 let http_interval_sender = http_interval_sender.clone();
@@ -203,6 +194,7 @@ impl Web3Connections {
                 tokio::spawn(async move {
                     server_config
                         .spawn(
+                            server_name,
                             redis_client_pool,
                             chain_id,
                             http_client,
@@ -223,7 +215,7 @@ impl Web3Connections {
             // TODO: how should we handle errors here? one rpc being down shouldn't cause the program to exit
             match x {
                 Ok(Ok((connection, handle))) => {
-                    connections.insert(connection.url().to_string(), connection);
+                    connections.insert(connection.url.clone(), connection);
                     handles.push(handle);
                 }
                 Ok(Err(err)) => {
@@ -506,18 +498,18 @@ impl Web3Connections {
     pub fn head_block(&self) -> (U64, H256) {
         let synced_connections = self.synced_connections.load();
 
-        let num = synced_connections.head_block_num();
-        let hash = *synced_connections.head_block_hash();
-
-        (num, hash)
+        (
+            synced_connections.head_block_num,
+            synced_connections.head_block_hash,
+        )
     }
 
     pub fn head_block_hash(&self) -> H256 {
-        *self.synced_connections.load().head_block_hash()
+        self.synced_connections.load().head_block_hash
     }
 
     pub fn head_block_num(&self) -> U64 {
-        self.synced_connections.load().head_block_num()
+        self.synced_connections.load().head_block_num
     }
 
     pub fn synced(&self) -> bool {
@@ -606,7 +598,7 @@ impl Web3Connections {
         let mut connection_heads = IndexMap::<String, Arc<Block<TxHash>>>::new();
 
         while let Ok((new_block, rpc)) = block_receiver.recv_async().await {
-            if let Some(current_block) = connection_heads.get(rpc.url()) {
+            if let Some(current_block) = connection_heads.get(&rpc.url) {
                 if current_block.hash == new_block.hash {
                     // duplicate block
                     continue;
@@ -618,7 +610,7 @@ impl Web3Connections {
             } else {
                 warn!(%rpc, ?new_block, "Block without hash!");
 
-                connection_heads.remove(rpc.url());
+                connection_heads.remove(&rpc.url);
 
                 continue;
             };
@@ -631,7 +623,7 @@ impl Web3Connections {
                 // maybe when a node is syncing or reconnecting?
                 warn!(%rpc, ?new_block, "Block without number!");
 
-                connection_heads.remove(rpc.url());
+                connection_heads.remove(&rpc.url);
 
                 continue;
             };
@@ -646,10 +638,10 @@ impl Web3Connections {
             if new_block_num == U64::zero() {
                 warn!(%rpc, %new_block_num, "still syncing");
 
-                connection_heads.remove(rpc.url());
+                connection_heads.remove(&rpc.url);
             } else {
                 // TODO: no clone? we end up with different blocks for every rpc
-                connection_heads.insert(rpc.url().to_string(), new_block.clone());
+                connection_heads.insert(rpc.url.clone(), new_block.clone());
 
                 self.chain.add_block(new_block.clone(), false);
             }
@@ -675,7 +667,7 @@ impl Web3Connections {
             for (rpc_url, head_block) in connection_heads.iter() {
                 if let Some(rpc) = self.conns.get(rpc_url) {
                     // we need the total soft limit in order to know when its safe to update the backends
-                    total_soft_limit += rpc.soft_limit();
+                    total_soft_limit += rpc.soft_limit;
 
                     let head_hash = head_block.hash.unwrap();
 
@@ -763,7 +755,7 @@ impl Web3Connections {
                         .iter()
                         .map(|rpc_url| {
                             if let Some(rpc) = self.conns.get(*rpc_url) {
-                                rpc.soft_limit()
+                                rpc.soft_limit
                             } else {
                                 0
                             }
@@ -824,7 +816,7 @@ impl Web3Connections {
                     .collect();
 
                 let pending_synced_connections = SyncedConnections {
-                    head_block_num: best_head_num.as_u64(),
+                    head_block_num: best_head_num,
                     head_block_hash: best_head_hash,
                     conns,
                 };
@@ -948,9 +940,9 @@ impl Web3Connections {
             .iter()
             .map(|rpc| {
                 // TODO: get active requests and the soft limit out of redis?
-                let weight = rpc.weight();
+                let weight = rpc.weight;
                 let active_requests = rpc.active_requests();
-                let soft_limit = rpc.soft_limit();
+                let soft_limit = rpc.soft_limit;
 
                 let utilization = active_requests as f32 / soft_limit as f32;
 

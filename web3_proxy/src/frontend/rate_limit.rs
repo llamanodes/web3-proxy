@@ -25,7 +25,7 @@ impl Web3ProxyApp {
         let rate_limiter_key = format!("ip-{}", ip);
 
         // TODO: dry this up with rate_limit_by_key
-        if let Some(rate_limiter) = self.rate_limiter() {
+        if let Some(rate_limiter) = &self.rate_limiter {
             match rate_limiter
                 .throttle_key(&rate_limiter_key, None, None, None)
                 .await
@@ -52,10 +52,8 @@ impl Web3ProxyApp {
     }
 
     pub async fn rate_limit_by_key(&self, user_key: Uuid) -> anyhow::Result<RateLimitResult> {
-        let user_cache = self.user_cache();
-
         // check the local cache
-        let user_data = if let Some(cached_user) = user_cache.read().get(&user_key) {
+        let user_data = if let Some(cached_user) = self.user_cache.read().get(&user_key) {
             // TODO: also include the time this value was last checked! otherwise we cache forever!
             if cached_user.expires_at < Instant::now() {
                 // old record found
@@ -71,7 +69,7 @@ impl Web3ProxyApp {
 
         // if cache was empty, check the database
         let user_data = if user_data.is_none() {
-            if let Some(db) = self.db_conn() {
+            if let Some(db) = &self.db_conn {
                 /// helper enum for query just a few columns instead of the entire table
                 #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
                 enum QueryAs {
@@ -105,7 +103,7 @@ impl Web3ProxyApp {
                 };
 
                 //  save for the next run
-                user_cache.write().insert(user_key, user_data);
+                self.user_cache.write().insert(user_key, user_data);
 
                 user_data
             } else {
@@ -118,7 +116,7 @@ impl Web3ProxyApp {
         };
 
         // user key is valid. now check rate limits
-        if let Some(rate_limiter) = self.rate_limiter() {
+        if let Some(rate_limiter) = &self.rate_limiter {
             // TODO: how does max burst actually work? what should it be?
             let user_max_burst = user_data.user_count_per_period / 3;
             let user_period = 60;

@@ -66,6 +66,7 @@
 - [x] Add a "weight" key to the servers. Sort on that after block. keep most requests local
 - [x] cache db query results for user data. db is a big bottleneck right now
 - [x] allow blocking public requests
+- [ ] cache more things locally or in redis
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] basic request method stats
 

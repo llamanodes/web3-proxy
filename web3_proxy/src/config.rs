@@ -68,8 +68,10 @@ pub struct Web3ConnectionConfig {
 impl Web3ConnectionConfig {
     /// Create a Web3Connection from config
     // #[instrument(name = "try_build_Web3ConnectionConfig", skip_all)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         self,
+        name: String,
         redis_client_pool: Option<redis_cell_client::RedisPool>,
         chain_id: u64,
         http_client: Option<reqwest::Client>,
@@ -89,6 +91,7 @@ impl Web3ConnectionConfig {
         };
 
         Web3Connection::spawn(
+            name,
             chain_id,
             self.url,
             http_client,

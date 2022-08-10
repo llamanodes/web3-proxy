@@ -53,7 +53,7 @@ pub async fn create_user(
         ..Default::default()
     };
 
-    let db = app.db_conn().unwrap();
+    let db = app.db_conn.as_ref().unwrap();
 
     // TODO: proper error message
     let user = user.insert(db).await.unwrap();

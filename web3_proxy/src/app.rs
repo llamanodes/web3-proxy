@@ -58,6 +58,21 @@ type ActiveRequestsMap = DashMap<CacheKey, watch::Receiver<bool>>;
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
+// TODO: think more about TxState
+#[derive(Clone)]
+pub enum TxState {
+    Pending(Transaction),
+    Confirmed(Transaction),
+    Orphaned(Transaction),
+}
+
+#[derive(Clone, Copy, From)]
+pub struct UserCacheValue {
+    pub expires_at: Instant,
+    pub user_id: i64,
+    pub user_count_per_period: u32,
+}
+
 /// flatten a JoinError into an anyhow error
 /// Useful when joining multiple futures.
 pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T> {
@@ -109,42 +124,26 @@ pub async fn get_migrated_db(
     Ok(db)
 }
 
-// TODO: think more about TxState
-#[derive(Clone)]
-pub enum TxState {
-    Pending(Transaction),
-    Confirmed(Transaction),
-    Orphaned(Transaction),
-}
-
-#[derive(Clone, Copy, From)]
-pub struct UserCacheValue {
-    pub expires_at: Instant,
-    pub user_id: i64,
-    pub user_count_per_period: u32,
-}
-
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
-// TODO: if Web3ProxyApp is always in an Arc, i think we can avoid having at least some of these internal things in arcs
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
 pub struct Web3ProxyApp {
     /// Send requests to the best server available
-    balanced_rpcs: Arc<Web3Connections>,
+    pub balanced_rpcs: Arc<Web3Connections>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
-    private_rpcs: Arc<Web3Connections>,
+    pub private_rpcs: Arc<Web3Connections>,
     /// Track active requests so that we don't send the same query to multiple backends
-    active_requests: ActiveRequestsMap,
+    pub active_requests: ActiveRequestsMap,
     response_cache: ResponseLrcCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
     head_block_receiver: watch::Receiver<Arc<Block<TxHash>>>,
     pending_tx_sender: broadcast::Sender<TxState>,
-    pending_transactions: Arc<DashMap<TxHash, TxState>>,
-    user_cache: RwLock<FifoCountMap<Uuid, UserCacheValue>>,
-    redis_pool: Option<RedisPool>,
-    rate_limiter: Option<RedisCell>,
-    db_conn: Option<sea_orm::DatabaseConnection>,
+    pub pending_transactions: Arc<DashMap<TxHash, TxState>>,
+    pub user_cache: RwLock<FifoCountMap<Uuid, UserCacheValue>>,
+    pub redis_pool: Option<RedisPool>,
+    pub rate_limiter: Option<RedisCell>,
+    pub db_conn: Option<sea_orm::DatabaseConnection>,
 }
 
 impl fmt::Debug for Web3ProxyApp {
@@ -155,26 +154,6 @@ impl fmt::Debug for Web3ProxyApp {
 }
 
 impl Web3ProxyApp {
-    pub fn db_conn(&self) -> Option<&sea_orm::DatabaseConnection> {
-        self.db_conn.as_ref()
-    }
-
-    pub fn pending_transactions(&self) -> &DashMap<TxHash, TxState> {
-        &self.pending_transactions
-    }
-
-    pub fn rate_limiter(&self) -> Option<&RedisCell> {
-        self.rate_limiter.as_ref()
-    }
-
-    pub fn redis_pool(&self) -> Option<&RedisPool> {
-        self.redis_pool.as_ref()
-    }
-
-    pub fn user_cache(&self) -> &RwLock<FifoCountMap<Uuid, UserCacheValue>> {
-        &self.user_cache
-    }
-
     // TODO: should we just take the rpc config as the only arg instead?
     pub async fn spawn(
         app_config: AppConfig,
@@ -195,12 +174,12 @@ impl Web3ProxyApp {
             None
         };
 
-        let balanced_rpcs = app_config.balanced_rpcs.into_values().collect();
+        let balanced_rpcs = app_config.balanced_rpcs;
 
         let private_rpcs = if let Some(private_rpcs) = app_config.private_rpcs {
-            private_rpcs.into_values().collect()
+            private_rpcs
         } else {
-            vec![]
+            Default::default()
         };
 
         // TODO: try_join_all instead?
@@ -521,18 +500,6 @@ impl Web3ProxyApp {
         // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?
 
         Ok((subscription_abort_handle, response))
-    }
-
-    pub fn balanced_rpcs(&self) -> &Web3Connections {
-        &self.balanced_rpcs
-    }
-
-    pub fn private_rpcs(&self) -> &Web3Connections {
-        &self.private_rpcs
-    }
-
-    pub fn active_requests(&self) -> &ActiveRequestsMap {
-        &self.active_requests
     }
 
     /// send the request or batch of requests to the approriate RPCs

@@ -73,8 +73,9 @@ impl fmt::Debug for Web3Provider {
 
 /// An active connection to a Web3Rpc
 pub struct Web3Connection {
+    name: String,
     /// TODO: can we get this from the provider? do we even need it?
-    url: String,
+    pub url: String,
     /// keep track of currently open requests. We sort on this
     active_requests: AtomicU32,
     /// provider is in a RwLock so that we can replace it if re-connecting
@@ -83,58 +84,10 @@ pub struct Web3Connection {
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     hard_limit: Option<redis_cell_client::RedisCell>,
     /// used for load balancing to the least loaded server
-    soft_limit: u32,
+    pub soft_limit: u32,
     block_data_limit: AtomicU64,
-    weight: u32,
+    pub weight: u32,
     head_block: RwLock<(H256, U64)>,
-}
-
-impl Serialize for Web3Connection {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Connection", 4)?;
-
-        // TODO: sanitize any credentials in the url
-        state.serialize_field("url", &self.url)?;
-
-        let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
-        state.serialize_field("block_data_limit", &block_data_limit)?;
-
-        state.serialize_field("soft_limit", &self.soft_limit)?;
-
-        state.serialize_field(
-            "active_requests",
-            &self.active_requests.load(atomic::Ordering::Relaxed),
-        )?;
-
-        state.end()
-    }
-}
-impl fmt::Debug for Web3Connection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = f.debug_struct("Web3Connection");
-
-        f.field("url", &self.url);
-
-        let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
-        if block_data_limit == u64::MAX {
-            f.field("data", &"archive");
-        } else {
-            f.field("data", &block_data_limit);
-        }
-
-        f.finish_non_exhaustive()
-    }
-}
-
-impl fmt::Display for Web3Connection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: filter basic auth and api keys
-        write!(f, "{}", &self.url)
-    }
 }
 
 impl Web3Connection {
@@ -143,6 +96,7 @@ impl Web3Connection {
     // TODO: have this take a builder (which will have channels attached)
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
+        name: String,
         chain_id: u64,
         url_str: String,
         // optional because this is only used for http providers. websocket providers don't use it
@@ -172,6 +126,7 @@ impl Web3Connection {
         let provider = Web3Provider::from_str(&url_str, http_client).await?;
 
         let new_connection = Self {
+            name,
             url: url_str.clone(),
             active_requests: 0.into(),
             provider: AsyncRwLock::new(Some(Arc::new(provider))),
@@ -280,10 +235,6 @@ impl Web3Connection {
         Ok((new_connection, handle))
     }
 
-    pub fn url(&self) -> &str {
-        &self.url
-    }
-
     /// TODO: this might be too simple. different nodes can prune differently
     pub fn block_data_limit(&self) -> U64 {
         self.block_data_limit.load(atomic::Ordering::Acquire).into()
@@ -336,11 +287,6 @@ impl Web3Connection {
     #[inline]
     pub fn active_requests(&self) -> u32 {
         self.active_requests.load(atomic::Ordering::Acquire)
-    }
-
-    #[inline]
-    pub fn soft_limit(&self) -> u32 {
-        self.soft_limit
     }
 
     #[inline]
@@ -668,10 +614,6 @@ impl Web3Connection {
 
         Ok(HandleResult::ActiveRequest(handle))
     }
-
-    pub fn weight(&self) -> u32 {
-        self.weight
-    }
 }
 
 impl Hash for Web3Connection {
@@ -766,5 +708,54 @@ impl PartialOrd for Web3Connection {
 impl PartialEq for Web3Connection {
     fn eq(&self, other: &Self) -> bool {
         self.url == other.url
+    }
+}
+
+impl Serialize for Web3Connection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 3 is the number of fields in the struct.
+        let mut state = serializer.serialize_struct("Web3Connection", 4)?;
+
+        // the url is excluded because it likely includes private information. just show the name
+        state.serialize_field("name", &self.name)?;
+
+        let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
+        state.serialize_field("block_data_limit", &block_data_limit)?;
+
+        state.serialize_field("soft_limit", &self.soft_limit)?;
+
+        state.serialize_field(
+            "active_requests",
+            &self.active_requests.load(atomic::Ordering::Relaxed),
+        )?;
+
+        state.end()
+    }
+}
+
+impl fmt::Debug for Web3Connection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f.debug_struct("Web3Connection");
+
+        f.field("url", &self.url);
+
+        let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
+        if block_data_limit == u64::MAX {
+            f.field("data", &"archive");
+        } else {
+            f.field("data", &block_data_limit);
+        }
+
+        f.finish_non_exhaustive()
+    }
+}
+
+impl fmt::Display for Web3Connection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: filter basic auth and api keys
+        write!(f, "{}", &self.url)
     }
 }
