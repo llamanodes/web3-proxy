@@ -69,6 +69,8 @@
 - [ ] cache more things locally or in redis
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] basic request method stats
+- [ ] active requests on /status is always 0 even when i'm running requests through
+- [ ] im seeing ethspam occasionally try to query a future block. something must be setting the head block too early
 
 ## V1
 
