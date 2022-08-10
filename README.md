@@ -109,4 +109,4 @@ Note: Testing with `getLatestBlockByNumber.lua` is not great because the latest 
 
 Run ethspam for a more realistic load test:
 
-    LOCAL_IP=10.11.12.16 docker run --rm --name spam shazow/ethspam --rpc http://$LOCAL_IP:8544 | versus --concurrency=1 --stop-after=1 http://$LOCAL_IP:8544/u/someuserkey; docker stop spam
+    ethspam --rpc http://127.0.0.1:8544/u/someuserkey | versus --concurrency=100 --stop-after=10000 http://127.0.0.1:8544/u/someuserkey
