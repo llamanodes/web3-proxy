@@ -1,22 +1,26 @@
-use axum::{http::StatusCode, response::IntoResponse, Json};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
 use serde_json::value::RawValue;
 
 use crate::jsonrpc::JsonRpcForwardedResponse;
 
-pub async fn handler_404() -> impl IntoResponse {
+pub async fn handler_404() -> Response {
     let err = anyhow::anyhow!("nothing to see here");
 
-    handle_anyhow_error(Some(StatusCode::NOT_FOUND), None, err).await
+    handle_anyhow_error(Some(StatusCode::NOT_FOUND), None, err)
 }
 
 /// handle errors by converting them into something that implements `IntoResponse`
 /// TODO: use this. i can't get <https://docs.rs/axum/latest/axum/error_handling/index.html> to work
 /// TODO: i think we want a custom result type instead. put the anyhow result inside. then `impl IntoResponse for CustomResult`
-pub async fn handle_anyhow_error(
+pub fn handle_anyhow_error(
     http_code: Option<StatusCode>,
     id: Option<Box<RawValue>>,
     err: anyhow::Error,
-) -> impl IntoResponse {
+) -> Response {
     // TODO: we might have an id. like if this is for rate limiting, we can use it
     let id = id.unwrap_or_else(|| RawValue::from_string("null".to_string()).unwrap());
 
@@ -27,5 +31,5 @@ pub async fn handle_anyhow_error(
 
     let code = http_code.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
-    (code, Json(err))
+    (code, Json(err)).into_response()
 }

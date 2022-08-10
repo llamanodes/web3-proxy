@@ -3,7 +3,7 @@ services:
     # TODO: build in dev but use docker hub in prod?
     build: .
     restart: unless-stopped
-    command: --config /config.toml --workers 8
+    command: --config /config.toml --workers 32
     environment:
       #RUST_LOG: "info,web3_proxy=debug"
       RUST_LOG: info

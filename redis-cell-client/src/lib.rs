@@ -8,10 +8,10 @@ pub use bb8_redis::{bb8, RedisConnectionManager};
 use std::ops::Add;
 use std::time::{Duration, Instant};
 
-pub type RedisClientPool = bb8::Pool<RedisConnectionManager>;
+pub type RedisPool = bb8::Pool<RedisConnectionManager>;
 
-pub struct RedisCellClient {
-    pool: RedisClientPool,
+pub struct RedisCell {
+    pool: RedisPool,
     key: String,
     default_max_burst: u32,
     default_count_per_period: u32,
@@ -23,12 +23,12 @@ pub enum ThrottleResult {
     RetryAt(Instant),
 }
 
-impl RedisCellClient {
+impl RedisCell {
     // todo: seems like this could be derived
     // TODO: take something generic for conn
     // TODO: use r2d2 for connection pooling?
     pub fn new(
-        pool: RedisClientPool,
+        pool: RedisPool,
         app: &str,
         key: &str,
         default_max_burst: u32,

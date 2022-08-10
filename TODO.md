@@ -64,6 +64,7 @@
 - [x] refactor result type on active handlers to use a cleaner success/error so we can use the try operator
 - [x] give users different rate limits looked up from the database 
 - [x] Add a "weight" key to the servers. Sort on that after block. keep most requests local
+- [ ] cache db query results for user data. db is a big bottleneck right now
 - [ ] allow blocking public requests
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] basic request method stats

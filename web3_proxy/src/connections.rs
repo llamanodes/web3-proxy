@@ -37,7 +37,6 @@ struct SyncedConnections {
     head_block_num: u64,
     head_block_hash: H256,
     // TODO: this should be able to serialize, but it isn't
-    // TODO: use linkedhashmap?
     #[serde(skip_serializing)]
     conns: IndexSet<Arc<Web3Connection>>,
 }
@@ -147,7 +146,7 @@ impl Web3Connections {
         chain_id: u64,
         server_configs: Vec<Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
-        redis_client_pool: Option<redis_cell_client::RedisClientPool>,
+        redis_client_pool: Option<redis_cell_client::RedisPool>,
         head_block_sender: Option<watch::Sender<Arc<Block<TxHash>>>>,
         pending_tx_sender: Option<broadcast::Sender<TxState>>,
         pending_transactions: Arc<DashMap<TxHash, TxState>>,

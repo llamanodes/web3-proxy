@@ -1,35 +1,40 @@
+// TODO: this file is way too big now. move things into other modules
+
 use anyhow::Context;
 use axum::extract::ws::Message;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
+use derive_more::From;
 use ethers::core::utils::keccak256;
-use ethers::prelude::{Address, Block, BlockNumber, Bytes, Transaction, TxHash, H256, U64};
+use ethers::prelude::{Address, Block, Bytes, Transaction, TxHash, H256, U64};
+use fifomap::{FifoCountMap, FifoSizedMap};
 use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use futures::Future;
-use linkedhashmap::LinkedHashMap;
 use migration::{Migrator, MigratorTrait};
 use parking_lot::RwLock;
 use redis_cell_client::bb8::ErrorSink;
-use redis_cell_client::{bb8, RedisCellClient, RedisConnectionManager};
+use redis_cell_client::{bb8, RedisCell, RedisConnectionManager, RedisPool};
 use sea_orm::DatabaseConnection;
 use serde_json::json;
 use std::fmt;
-use std::mem::size_of_val;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
+use tokio::time::{timeout, Instant};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tracing::{info, info_span, instrument, trace, warn, Instrument};
+use uuid::Uuid;
 
 use crate::bb8_helpers;
+use crate::block_helpers::block_needed;
 use crate::config::AppConfig;
 use crate::connections::Web3Connections;
 use crate::jsonrpc::JsonRpcForwardedResponse;
@@ -48,14 +53,14 @@ static APP_USER_AGENT: &str = concat!(
 // block hash, method, params
 type CacheKey = (H256, String, Option<String>);
 
-// TODO: make something more advanced that keeps track of cache size in bytes
-type ResponseLrcCache = RwLock<LinkedHashMap<CacheKey, JsonRpcForwardedResponse>>;
+type ResponseLrcCache = RwLock<FifoSizedMap<CacheKey, JsonRpcForwardedResponse>>;
 
 type ActiveRequestsMap = DashMap<CacheKey, watch::Receiver<bool>>;
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
 /// flatten a JoinError into an anyhow error
+/// Useful when joining multiple futures.
 pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T> {
     match handle.await {
         Ok(Ok(result)) => Ok(result),
@@ -79,173 +84,17 @@ pub async fn flatten_handles<T>(
     Ok(())
 }
 
-fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> (bool, U64) {
-    match block_num {
-        BlockNumber::Earliest => (false, U64::zero()),
-        BlockNumber::Latest => {
-            // change "latest" to a number
-            (true, latest_block)
-        }
-        BlockNumber::Number(x) => (false, x),
-        // TODO: think more about how to handle Pending
-        BlockNumber::Pending => (false, latest_block),
-    }
-}
-
-fn clean_block_number(
-    params: &mut serde_json::Value,
-    block_param_id: usize,
-    latest_block: U64,
-) -> anyhow::Result<U64> {
-    match params.as_array_mut() {
-        None => Err(anyhow::anyhow!("params not an array")),
-        Some(params) => match params.get_mut(block_param_id) {
-            None => {
-                if params.len() != block_param_id - 1 {
-                    return Err(anyhow::anyhow!("unexpected params length"));
-                }
-
-                // add the latest block number to the end of the params
-                params.push(serde_json::to_value(latest_block)?);
-
-                Ok(latest_block)
-            }
-            Some(x) => {
-                // convert the json value to a BlockNumber
-                let block_num: BlockNumber = serde_json::from_value(x.clone())?;
-
-                let (modified, block_num) = block_num_to_u64(block_num, latest_block);
-
-                // if we changed "latest" to a number, update the params to match
-                if modified {
-                    *x = serde_json::to_value(block_num)?;
-                }
-
-                Ok(block_num)
-            }
-        },
-    }
-}
-
-// TODO: change this to return also return the hash needed
-fn block_needed(
-    method: &str,
-    params: Option<&mut serde_json::Value>,
-    head_block: U64,
-) -> Option<U64> {
-    let params = params?;
-
-    // TODO: double check these. i think some of the getBlock stuff will never need archive
-    let block_param_id = match method {
-        "eth_call" => 1,
-        "eth_estimateGas" => 1,
-        "eth_getBalance" => 1,
-        "eth_getBlockByHash" => {
-            // TODO: double check that any node can serve this
-            return None;
-        }
-        "eth_getBlockByNumber" => {
-            // TODO: double check that any node can serve this
-            return None;
-        }
-        "eth_getBlockTransactionCountByHash" => {
-            // TODO: double check that any node can serve this
-            return None;
-        }
-        "eth_getBlockTransactionCountByNumber" => 0,
-        "eth_getCode" => 1,
-        "eth_getLogs" => {
-            let obj = params[0].as_object_mut().unwrap();
-
-            if let Some(x) = obj.get_mut("fromBlock") {
-                let block_num: BlockNumber = serde_json::from_value(x.clone()).ok()?;
-
-                let (modified, block_num) = block_num_to_u64(block_num, head_block);
-
-                if modified {
-                    *x = serde_json::to_value(block_num).unwrap();
-                }
-
-                return Some(block_num);
-            }
-
-            if let Some(x) = obj.get_mut("toBlock") {
-                let block_num: BlockNumber = serde_json::from_value(x.clone()).ok()?;
-
-                let (modified, block_num) = block_num_to_u64(block_num, head_block);
-
-                if modified {
-                    *x = serde_json::to_value(block_num).unwrap();
-                }
-
-                return Some(block_num);
-            }
-
-            if let Some(x) = obj.get("blockHash") {
-                // TODO: check a linkedhashmap of recent hashes
-                // TODO: error if fromBlock or toBlock were set
-                todo!("handle blockHash {}", x);
-            }
-
-            return None;
-        }
-        "eth_getStorageAt" => 2,
-        "eth_getTransactionByHash" => {
-            // TODO: not sure how best to look these up
-            // try full nodes first. retry will use archive
-            return None;
-        }
-        "eth_getTransactionByBlockHashAndIndex" => {
-            // TODO: check a linkedhashmap of recent hashes
-            // try full nodes first. retry will use archive
-            return None;
-        }
-        "eth_getTransactionByBlockNumberAndIndex" => 0,
-        "eth_getTransactionCount" => 1,
-        "eth_getTransactionReceipt" => {
-            // TODO: not sure how best to look these up
-            // try full nodes first. retry will use archive
-            return None;
-        }
-        "eth_getUncleByBlockHashAndIndex" => {
-            // TODO: check a linkedhashmap of recent hashes
-            // try full nodes first. retry will use archive
-            return None;
-        }
-        "eth_getUncleByBlockNumberAndIndex" => 0,
-        "eth_getUncleCountByBlockHash" => {
-            // TODO: check a linkedhashmap of recent hashes
-            // try full nodes first. retry will use archive
-            return None;
-        }
-        "eth_getUncleCountByBlockNumber" => 0,
-        _ => {
-            // some other command that doesn't take block numbers as an argument
-            return None;
-        }
-    };
-
-    match clean_block_number(params, block_param_id, head_block) {
-        Ok(block) => Some(block),
-        Err(err) => {
-            // TODO: seems unlikely that we will get here
-            // if this is incorrect, it should retry on an archive server
-            warn!(?err, "could not get block from params");
-            None
-        }
-    }
-}
-
+/// Connect to the database and run migrations
 pub async fn get_migrated_db(
     db_url: String,
     min_connections: u32,
 ) -> anyhow::Result<DatabaseConnection> {
     let mut db_opt = sea_orm::ConnectOptions::new(db_url);
 
-    // TODO: load all these options from the config file
+    // TODO: load all these options from the config file. i think mysql default max is 100
     // TODO: sqlx logging only in debug. way too verbose for production
     db_opt
-        .max_connections(100)
+        .max_connections(99)
         .min_connections(min_connections)
         .connect_timeout(Duration::from_secs(8))
         .idle_timeout(Duration::from_secs(8))
@@ -269,6 +118,13 @@ pub enum TxState {
     Orphaned(Transaction),
 }
 
+#[derive(Clone, Copy, From)]
+pub struct UserCacheValue {
+    pub expires_at: Instant,
+    pub user_id: i64,
+    pub user_count_per_period: u32,
+}
+
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
 // TODO: if Web3ProxyApp is always in an Arc, i think we can avoid having at least some of these internal things in arcs
@@ -278,18 +134,17 @@ pub struct Web3ProxyApp {
     balanced_rpcs: Arc<Web3Connections>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     private_rpcs: Arc<Web3Connections>,
-    /// Track active requests so that we don't 66
-    ///
+    /// Track active requests so that we don't send the same query to multiple backends
     active_requests: ActiveRequestsMap,
-    /// bytes available to response_cache (it will be slightly larger than this)
-    response_cache_max_bytes: AtomicUsize,
     response_cache: ResponseLrcCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
     head_block_receiver: watch::Receiver<Arc<Block<TxHash>>>,
     pending_tx_sender: broadcast::Sender<TxState>,
     pending_transactions: Arc<DashMap<TxHash, TxState>>,
-    rate_limiter: Option<RedisCellClient>,
+    user_cache: AsyncRwLock<FifoCountMap<Uuid, UserCacheValue>>,
+    redis_pool: Option<RedisPool>,
+    rate_limiter: Option<RedisCell>,
     db_conn: Option<sea_orm::DatabaseConnection>,
 }
 
@@ -301,16 +156,24 @@ impl fmt::Debug for Web3ProxyApp {
 }
 
 impl Web3ProxyApp {
-    pub fn db_conn(&self) -> &sea_orm::DatabaseConnection {
-        self.db_conn.as_ref().unwrap()
+    pub fn db_conn(&self) -> Option<&sea_orm::DatabaseConnection> {
+        self.db_conn.as_ref()
     }
 
     pub fn pending_transactions(&self) -> &DashMap<TxHash, TxState> {
         &self.pending_transactions
     }
 
-    pub fn rate_limiter(&self) -> Option<&RedisCellClient> {
+    pub fn rate_limiter(&self) -> Option<&RedisCell> {
         self.rate_limiter.as_ref()
+    }
+
+    pub fn redis_pool(&self) -> Option<&RedisPool> {
+        self.redis_pool.as_ref()
+    }
+
+    pub fn user_cache(&self) -> &AsyncRwLock<FifoCountMap<Uuid, UserCacheValue>> {
+        &self.user_cache
     }
 
     // TODO: should we just take the rpc config as the only arg instead?
@@ -355,7 +218,7 @@ impl Web3ProxyApp {
                 .build()?,
         );
 
-        let redis_client_pool = match app_config.shared.redis_url {
+        let redis_pool = match app_config.shared.redis_url {
             Some(redis_url) => {
                 info!("Connecting to redis on {}", redis_url);
 
@@ -399,7 +262,7 @@ impl Web3ProxyApp {
             app_config.shared.chain_id,
             balanced_rpcs,
             http_client.clone(),
-            redis_client_pool.clone(),
+            redis_pool.clone(),
             Some(head_block_sender),
             Some(pending_tx_sender.clone()),
             pending_transactions.clone(),
@@ -418,7 +281,7 @@ impl Web3ProxyApp {
                 app_config.shared.chain_id,
                 private_rpcs,
                 http_client.clone(),
-                redis_client_pool.clone(),
+                redis_pool.clone(),
                 // subscribing to new heads here won't work well
                 None,
                 // TODO: subscribe to pending transactions on the private rpcs?
@@ -436,9 +299,9 @@ impl Web3ProxyApp {
         // TODO: how much should we allow?
         let public_max_burst = app_config.shared.public_rate_limit_per_minute / 3;
 
-        let frontend_rate_limiter = redis_client_pool.as_ref().map(|redis_client_pool| {
-            RedisCellClient::new(
-                redis_client_pool.clone(),
+        let frontend_rate_limiter = redis_pool.as_ref().map(|redis_pool| {
+            RedisCell::new(
+                redis_pool.clone(),
                 "web3_proxy",
                 "frontend",
                 public_max_burst,
@@ -451,13 +314,20 @@ impl Web3ProxyApp {
             balanced_rpcs,
             private_rpcs,
             active_requests: Default::default(),
-            response_cache_max_bytes: AtomicUsize::new(app_config.shared.response_cache_max_bytes),
-            response_cache: Default::default(),
+            // TODO: make the share configurable
+            response_cache: RwLock::new(FifoSizedMap::new(
+                app_config.shared.response_cache_max_bytes,
+                100,
+            )),
             head_block_receiver,
             pending_tx_sender,
             pending_transactions,
             rate_limiter: frontend_rate_limiter,
             db_conn,
+            redis_pool,
+            // TODO: make the size configurable
+            // TODO: why does this need to be async but the other one doesn't?
+            user_cache: AsyncRwLock::new(FifoCountMap::new(1_000)),
         };
 
         let app = Arc::new(app);
@@ -907,6 +777,7 @@ impl Web3ProxyApp {
                 // returns Keccak-256 (not the standardized SHA3-256) of the given data.
                 match &request.params {
                     Some(serde_json::Value::Array(params)) => {
+                        // TODO: make a struct and use serde conversion to clean this up
                         if params.len() != 1 || !params[0].is_string() {
                             return Err(anyhow::anyhow!("invalid request"));
                         }
@@ -1009,26 +880,10 @@ impl Web3ProxyApp {
                 {
                     let mut response_cache = response_cache.write();
 
-                    let response_cache_max_bytes = self
-                        .response_cache_max_bytes
-                        .load(atomic::Ordering::Acquire);
-
-                    // TODO: this might be too naive. not sure how much overhead the object has
-                    let new_size = size_of_val(&cache_key) + size_of_val(&response);
-
-                    // no item is allowed to take more than 1% of the cache
-                    // TODO: get this from config?
-                    if new_size < response_cache_max_bytes / 100 {
-                        // TODO: this probably has wildly variable timings
-                        while size_of_val(&response_cache) + new_size >= response_cache_max_bytes {
-                            // TODO: this isn't an LRU. it's a "least recently created". does that have a fancy name? should we make it an lru? these caches only live for one block
-                            response_cache.pop_front();
-                        }
-
-                        response_cache.insert(cache_key.clone(), response.clone());
+                    if response_cache.insert(cache_key.clone(), response.clone()) {
                     } else {
-                        // TODO: emit a stat instead?
-                        warn!(?new_size, "value too large for caching");
+                        // TODO: emit a stat instead? what else should be in the log
+                        trace!(?cache_key, "value too large for caching");
                     }
                 }
 

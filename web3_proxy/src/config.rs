@@ -70,7 +70,7 @@ impl Web3ConnectionConfig {
     // #[instrument(name = "try_build_Web3ConnectionConfig", skip_all)]
     pub async fn spawn(
         self,
-        redis_client_pool: Option<redis_cell_client::RedisClientPool>,
+        redis_client_pool: Option<redis_cell_client::RedisPool>,
         chain_id: u64,
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,

@@ -4,7 +4,8 @@ use derive_more::From;
 use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
-use redis_cell_client::{RedisCellClient, ThrottleResult};
+use parking_lot::RwLock;
+use redis_cell_client::{RedisCell, ThrottleResult};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use std::fmt;
@@ -12,7 +13,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::broadcast;
-use tokio::sync::RwLock;
+use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
 
@@ -77,14 +78,14 @@ pub struct Web3Connection {
     /// keep track of currently open requests. We sort on this
     active_requests: AtomicU32,
     /// provider is in a RwLock so that we can replace it if re-connecting
-    provider: RwLock<Option<Arc<Web3Provider>>>,
+    provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
-    hard_limit: Option<redis_cell_client::RedisCellClient>,
+    hard_limit: Option<redis_cell_client::RedisCell>,
     /// used for load balancing to the least loaded server
     soft_limit: u32,
     block_data_limit: AtomicU64,
     weight: u32,
-    head_block: parking_lot::RwLock<(H256, U64)>,
+    head_block: RwLock<(H256, U64)>,
 }
 
 impl Serialize for Web3Connection {
@@ -146,7 +147,7 @@ impl Web3Connection {
         // optional because this is only used for http providers. websocket providers don't use it
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        hard_limit: Option<(u32, redis_cell_client::RedisClientPool)>,
+        hard_limit: Option<(u32, redis_cell_client::RedisPool)>,
         // TODO: think more about this type
         soft_limit: u32,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
@@ -157,7 +158,7 @@ impl Web3Connection {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_conection)| {
             // TODO: allow configurable period and max_burst
             let period = 1;
-            RedisCellClient::new(
+            RedisCell::new(
                 redis_conection,
                 "web3_proxy",
                 &format!("{}:{}", chain_id, url_str),
@@ -172,11 +173,11 @@ impl Web3Connection {
         let new_connection = Self {
             url: url_str.clone(),
             active_requests: 0.into(),
-            provider: RwLock::new(Some(Arc::new(provider))),
+            provider: AsyncRwLock::new(Some(Arc::new(provider))),
             hard_limit,
             soft_limit,
             block_data_limit: Default::default(),
-            head_block: parking_lot::RwLock::new((H256::zero(), 0isize.into())),
+            head_block: RwLock::new((H256::zero(), 0isize.into())),
             weight,
         };
 

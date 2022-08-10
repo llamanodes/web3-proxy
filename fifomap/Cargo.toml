@@ -1,15 +1,9 @@
 [package]
-name = "entities"
+name = "fifomap"
 version = "0.1.0"
 edition = "2021"
-
-[lib]
-name = "entities"
-path = "src/mod.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sea-orm = "0.9.1"
-serde = "1.0.143"
-uuid = "1.1.2"
+linkedhashmap = { path = "../linkedhashmap", features = ["inline-more"] }

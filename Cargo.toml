@@ -2,6 +2,7 @@
 members = [
   "entities",
   "migration",
+  "fifomap",
   "linkedhashmap",
   "redis-cell-client",
   "web3_proxy",

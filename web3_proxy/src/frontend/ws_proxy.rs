@@ -22,17 +22,19 @@ use crate::{
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
 };
 
-use super::rate_limit::{rate_limit_by_ip, rate_limit_by_key};
+use super::rate_limit::handle_rate_limit_error_response;
 
 pub async fn public_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
-    ws: Option<WebSocketUpgrade>,
+    ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Response {
-    match ws {
+    match ws_upgrade {
         Some(ws) => {
-            if let Err(x) = rate_limit_by_ip(&app, &ip).await {
-                return x.into_response();
+            if let Some(err_response) =
+                handle_rate_limit_error_response(app.rate_limit_by_ip(&ip).await).await
+            {
+                return err_response.into_response();
             }
 
             ws.on_upgrade(|socket| proxy_web3_socket(app, socket))
@@ -41,6 +43,7 @@ pub async fn public_websocket_handler(
         None => {
             // this is not a websocket. give a friendly page
             // TODO: make a friendly page
+            // TODO: rate limit this?
             "hello, world".into_response()
         }
     }
@@ -51,8 +54,10 @@ pub async fn user_websocket_handler(
     ws: WebSocketUpgrade,
     Path(user_key): Path<Uuid>,
 ) -> Response {
-    if let Err(x) = rate_limit_by_key(&app, user_key).await {
-        return x.into_response();
+    if let Some(err_response) =
+        handle_rate_limit_error_response(app.rate_limit_by_key(user_key).await).await
+    {
+        return err_response;
     }
 
     ws.on_upgrade(|socket| proxy_web3_socket(app, socket))

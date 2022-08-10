@@ -15,7 +15,9 @@ use sea_orm::ActiveModelTrait;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::{app::Web3ProxyApp, frontend::rate_limit::rate_limit_by_ip};
+use crate::app::Web3ProxyApp;
+
+use super::rate_limit::handle_rate_limit_error_response;
 
 pub async fn create_user(
     // this argument tells axum to parse the request body
@@ -24,11 +26,13 @@ pub async fn create_user(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
 ) -> impl IntoResponse {
-    if let Err(x) = rate_limit_by_ip(&app, &ip).await {
-        return x;
+    if let Some(err_response) =
+        handle_rate_limit_error_response(app.rate_limit_by_ip(&ip).await).await
+    {
+        return err_response.into_response();
     }
 
-    // TODO: check invite_code against the app's config
+    // TODO: check invite_code against the app's config or database
     if payload.invite_code != "llam4n0des!" {
         todo!("proper error message")
     }
@@ -49,7 +53,7 @@ pub async fn create_user(
         ..Default::default()
     };
 
-    let db = app.db_conn();
+    let db = app.db_conn().unwrap();
 
     // TODO: proper error message
     let user = user.insert(db).await.unwrap();
