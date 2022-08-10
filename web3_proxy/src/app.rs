@@ -221,6 +221,7 @@ impl Web3ProxyApp {
             }
         };
 
+        // TODO: this should be a broadcast channel
         let (head_block_sender, head_block_receiver) = watch::channel(Arc::new(Block::default()));
         // TODO: will one receiver lagging be okay? how big should this be?
         let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
@@ -260,10 +261,10 @@ impl Web3ProxyApp {
                 private_rpcs,
                 http_client.clone(),
                 redis_pool.clone(),
-                // subscribing to new heads here won't work well
+                // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
                 None,
-                // TODO: subscribe to pending transactions on the private rpcs?
-                Some(pending_tx_sender.clone()),
+                // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits
+                None,
                 pending_transactions.clone(),
             )
             .await
@@ -353,11 +354,15 @@ impl Web3ProxyApp {
                             "method":"eth_subscription",
                             "params": {
                                 "subscription": subscription_id,
+                                // TODO: option to include full transaction objects instead of just the hashes?
                                 "result": new_head.as_ref(),
                             },
                         });
 
-                        let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+                        // TODO: do clients support binary messages?
+                        let msg = Message::Text(
+                            serde_json::to_string(&msg).expect("this should always be valid json"),
+                        );
 
                         if response_sender.send_async(msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?

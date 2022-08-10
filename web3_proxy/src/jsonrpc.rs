@@ -9,7 +9,7 @@ use tracing::warn;
 #[derive(Clone, serde::Deserialize)]
 pub struct JsonRpcRequest {
     // TODO: skip jsonrpc entireley?
-    // pub jsonrpc: Box<RawValue>,
+    pub jsonrpc: Box<RawValue>,
     /// id could be a stricter type, but many rpcs do things against the spec
     pub id: Box<RawValue>,
     pub method: String,
@@ -78,6 +78,7 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
                 A: MapAccess<'de>,
             {
                 // TODO: i feel like this should be easier
+                let mut jsonrpc = None;
                 let mut id = None;
                 let mut method = None;
                 let mut params = None;
@@ -88,7 +89,7 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
                             // throw away the value
                             // TODO: should we check that it's 2.0?
                             // TODO: how do we skip over this value entirely?
-                            let _: String = map.next_value()?;
+                            jsonrpc = Some(map.next_value()?);
                         }
                         Field::Id => {
                             if id.is_some() {
@@ -111,6 +112,7 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
                     }
                 }
 
+                let jsonrpc = jsonrpc.ok_or_else(|| de::Error::missing_field("jsonrpc"))?;
                 let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
                 let method = method.ok_or_else(|| de::Error::missing_field("method"))?;
 
@@ -119,7 +121,12 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
                     Some(x) => Some(x),
                 };
 
-                let single = JsonRpcRequest { id, method, params };
+                let single = JsonRpcRequest {
+                    jsonrpc,
+                    id,
+                    method,
+                    params,
+                };
 
                 Ok(JsonRpcRequestEnum::Single(single))
             }

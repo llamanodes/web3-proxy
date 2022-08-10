@@ -303,8 +303,11 @@ impl Web3Connection {
         match block {
             Ok(block) => {
                 {
-                    let hash = block.hash.unwrap();
-                    let num = block.number.unwrap();
+                    // TODO: is this true? Block::default probably doesn't
+                    let hash = block.hash.expect("blocks here should always have hashes");
+                    let num = block
+                        .number
+                        .expect("blocks here should always have numbers");
 
                     let mut head_block = self.head_block.write();
 
@@ -443,11 +446,12 @@ impl Web3Connection {
                                 continue;
                             }
                             Ok(HandleResult::None) => {
-                                // TODO: what should we do?
                                 warn!("No handle for latest block from {}", self);
+                                // TODO: what should we do?
                             }
                             Err(err) => {
-                                warn!(?err, "Rate limited on latest block from {}", self);
+                                warn!(?err, "Internal error on latest block from {}", self);
+                                // TODO: what should we do? sleep? extra time?
                             }
                         }
 
@@ -548,6 +552,8 @@ impl Web3Connection {
                             .send_async((pending_tx_id, self.clone()))
                             .await
                             .context("tx_id_sender")?;
+
+                        // TODO: periodically check for listeners. if no one is subscribed, unsubscribe and wait for a subscription
                     }
 
                     warn!("subscription ended");

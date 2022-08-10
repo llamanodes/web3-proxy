@@ -81,6 +81,7 @@
   - [x] send getTransaction rpc requests to the private rpc tier
 - [x] I'm hitting infura rate limits very quickly. I feel like that means something is very inefficient
   - whenever blocks were slow, we started checking as fast as possible
+- [ ] send logs to sentry
 - [ ] cli tool for resetting api keys
 - [ ] nice output when cargo doc is run
 - [ ] if we request an old block, more servers can handle it than we currently use.
