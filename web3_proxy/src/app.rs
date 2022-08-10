@@ -25,7 +25,6 @@ use std::str::FromStr;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
@@ -142,7 +141,7 @@ pub struct Web3ProxyApp {
     head_block_receiver: watch::Receiver<Arc<Block<TxHash>>>,
     pending_tx_sender: broadcast::Sender<TxState>,
     pending_transactions: Arc<DashMap<TxHash, TxState>>,
-    user_cache: AsyncRwLock<FifoCountMap<Uuid, UserCacheValue>>,
+    user_cache: RwLock<FifoCountMap<Uuid, UserCacheValue>>,
     redis_pool: Option<RedisPool>,
     rate_limiter: Option<RedisCell>,
     db_conn: Option<sea_orm::DatabaseConnection>,
@@ -172,7 +171,7 @@ impl Web3ProxyApp {
         self.redis_pool.as_ref()
     }
 
-    pub fn user_cache(&self) -> &AsyncRwLock<FifoCountMap<Uuid, UserCacheValue>> {
+    pub fn user_cache(&self) -> &RwLock<FifoCountMap<Uuid, UserCacheValue>> {
         &self.user_cache
     }
 
@@ -327,7 +326,7 @@ impl Web3ProxyApp {
             redis_pool,
             // TODO: make the size configurable
             // TODO: why does this need to be async but the other one doesn't?
-            user_cache: AsyncRwLock::new(FifoCountMap::new(1_000)),
+            user_cache: RwLock::new(FifoCountMap::new(1_000)),
         };
 
         let app = Arc::new(app);

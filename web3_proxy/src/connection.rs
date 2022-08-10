@@ -78,6 +78,7 @@ pub struct Web3Connection {
     /// keep track of currently open requests. We sort on this
     active_requests: AtomicU32,
     /// provider is in a RwLock so that we can replace it if re-connecting
+    /// it is an async lock because we hold it open across awaits
     provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     hard_limit: Option<redis_cell_client::RedisCell>,
