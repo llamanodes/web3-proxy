@@ -86,15 +86,15 @@ pub async fn flatten_handles<T>(
 /// Connect to the database and run migrations
 pub async fn get_migrated_db(
     db_url: String,
-    min_connections: u32,
+    max_connections: u32,
 ) -> anyhow::Result<DatabaseConnection> {
     let mut db_opt = sea_orm::ConnectOptions::new(db_url);
 
     // TODO: load all these options from the config file. i think mysql default max is 100
     // TODO: sqlx logging only in debug. way too verbose for production
     db_opt
-        .max_connections(99)
-        .min_connections(min_connections)
+        .min_connections(1)
+        .max_connections(max_connections)
         .connect_timeout(Duration::from_secs(8))
         .idle_timeout(Duration::from_secs(8))
         .max_lifetime(Duration::from_secs(60))
@@ -185,9 +185,9 @@ impl Web3ProxyApp {
     )> {
         // first, we connect to mysql and make sure the latest migrations have run
         let db_conn = if let Some(db_url) = app_config.shared.db_url {
-            let min_connections = num_workers.try_into()?;
+            let max_connections = num_workers.try_into()?;
 
-            let db = get_migrated_db(db_url, min_connections).await?;
+            let db = get_migrated_db(db_url, max_connections).await?;
 
             Some(db)
         } else {
