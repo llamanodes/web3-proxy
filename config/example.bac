@@ -27,7 +27,7 @@ public_rate_limit_per_minute = 60_000
     url = "https://rpc.ethermine.org"
     soft_limit = 5_861
 
-    [private_rpcs.flashbots]
+    [private_rpcs.flashbots_fast]
     url = "https://rpc.flashbots.net"
     soft_limit = 7074
 
