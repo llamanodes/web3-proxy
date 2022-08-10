@@ -154,6 +154,7 @@ pub async fn handle_rate_limit_error_response(
         Ok(RateLimitResult::RateLimitExceeded) => Some(handle_anyhow_error(
             Some(StatusCode::TOO_MANY_REQUESTS),
             None,
+            // TODO: how can we attach context here? maybe add a request id tracing field?
             anyhow::anyhow!("rate limit exceeded"),
         )),
         Ok(RateLimitResult::UnknownKey) => Some(handle_anyhow_error(

@@ -17,7 +17,8 @@ use tracing::info;
 
 use crate::app::Web3ProxyApp;
 
-pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
+///
+pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
     // build our application with a route
     // order most to least common
     let app = Router::new()
@@ -50,6 +51,7 @@ pub async fn run(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> 
 /// Tokio signal handler that will wait for a user to press CTRL+C.
 /// We use this in our hyper `Server` method `with_graceful_shutdown`.
 async fn signal_shutdown() {
+    info!("ctrl-c to quit");
     tokio::signal::ctrl_c()
         .await
         .expect("expect tokio signal ctrl-c");

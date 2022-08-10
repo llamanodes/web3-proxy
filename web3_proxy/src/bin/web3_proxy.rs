@@ -72,7 +72,7 @@ fn run(
     rt.block_on(async {
         let (app, app_handle) = Web3ProxyApp::spawn(app_config, num_workers).await?;
 
-        let frontend_handle = tokio::spawn(frontend::run(cli_config.port, app));
+        let frontend_handle = tokio::spawn(frontend::serve(cli_config.port, app));
 
         // if everything is working, these should both run forever
         // TODO: try_join these instead? use signal_shutdown here?
