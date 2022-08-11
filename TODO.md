@@ -71,9 +71,9 @@
   - [x] we were sorting best block the wrong direction. i flipped a.cmp(b) to b.cmp(a) so that the largest would be first, but then i used 'max_by' which looks at the end of the list
 - [x] HTTP GET to the websocket endpoints should redirect instead of giving an ugly error
 - [ ] load the redirected page from config
+- [ ] use config to decide if the app should use `into_make_service_with_connect_info` or `into_make_service`. with_connect_info is needed for getting the ip from docker
 - [ ] basic request method stats
 - [ ] use siwe messages and signatures for sign up and login
-- [ ] active requests on /status is always 0 even when i'm running requests through
 - [ ] fantom_1    | 2022-08-10T22:19:43.522465Z  WARN web3_proxy::jsonrpc: forwarding error err=missing field `jsonrpc` at line 1 column 60
   - [ ] i think the server isn't following the spec. we need a context attached to this error so we know which one
   - [ ] maybe make jsonrpc an Option
@@ -89,6 +89,7 @@
 - [x] I'm hitting infura rate limits very quickly. I feel like that means something is very inefficient
   - whenever blocks were slow, we started checking as fast as possible
 - [ ] send logs to sentry
+- [ ] active requests on /status is always 0 even when i'm running requests through
 - [ ] redis cell is giving errors under high load. maybe replace with https://redis.com/redis-best-practices/basic-rate-limiting/
 - [ ] cli tool for resetting api keys
 - [ ] nice output when cargo doc is run
