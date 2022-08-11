@@ -1,6 +1,6 @@
 [shared]
 chain_id = 1
-db_url = "mysql://root:dev_web3_proxy@dev-mysql:3306/dev_web3_proxy"
+db_url = "mysql://root:dev_web3_proxy@dev-db:3306/dev_web3_proxy"
 redis_url = "redis://dev-redis:6379/"
 public_rate_limit_per_minute = 0
 # 1GB of cache
@@ -21,7 +21,7 @@ response_cache_max_bytes = 10000000000
     #[balanced_rpcs.linkpool-light]
     #url = "https://main-light.eth.linkpool.io"
     #soft_limit = 1_000
-    weight = 1
+    #weight = 1
 
     [balanced_rpcs.blastapi]
     url = "https://eth-mainnet.public.blastapi.io"
@@ -31,7 +31,7 @@ response_cache_max_bytes = 10000000000
     #[balanced_rpcs.mycryptoapi]
     #url = "https://api.mycryptoapi.com/eth"
     #soft_limit = 1_000
-    weight = 0
+    #weight = 0
 
     [balanced_rpcs.runonflux]
     url = "https://ethereumnodelight.app.runonflux.io"
@@ -58,19 +58,24 @@ response_cache_max_bytes = 10000000000
     [private_rpcs.eden]
     url = "https://api.edennetwork.io/v1/"
     soft_limit = 1_805
+    weight = 0
 
     [private_rpcs.eden_beta]
     url = "https://api.edennetwork.io/v1/beta"
     soft_limit = 5_861
+    weight = 0
 
     [private_rpcs.ethermine]
     url = "https://rpc.ethermine.org"
     soft_limit = 5_861
+    weight = 0
 
     [private_rpcs.flashbots]
     url = "https://rpc.flashbots.net/fast"
     soft_limit = 7074
+    weight = 0
 
     [private_rpcs.securerpc]
     url = "https://gibson.securerpc.com/v1"
     soft_limit = 4560
+    weight = 0
