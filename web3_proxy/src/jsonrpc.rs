@@ -8,8 +8,8 @@ use tracing::warn;
 
 #[derive(Clone, serde::Deserialize)]
 pub struct JsonRpcRequest {
-    // TODO: skip jsonrpc entireley?
-    pub jsonrpc: Box<RawValue>,
+    // TODO: skip jsonrpc entirely? its against spec to drop it, but some servers bad
+    pub jsonrpc: Option<Box<RawValue>>,
     /// id could be a stricter type, but many rpcs do things against the spec
     pub id: Box<RawValue>,
     pub method: String,

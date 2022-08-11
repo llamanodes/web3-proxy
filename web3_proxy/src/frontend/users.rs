@@ -7,17 +7,21 @@
 // I wonder how we handle payment
 // probably have to do manual withdrawals
 
-use axum::{response::IntoResponse, Extension, Json};
+use axum::{
+    response::{IntoResponse, Response},
+    Extension, Json,
+};
 use axum_client_ip::ClientIp;
 use entities::user;
 use ethers::{prelude::Address, types::Bytes};
+use reqwest::StatusCode;
 use sea_orm::ActiveModelTrait;
 use serde::Deserialize;
 use std::sync::Arc;
 
 use crate::app::Web3ProxyApp;
 
-use super::rate_limit::handle_rate_limit_error_response;
+use super::{rate_limit::RateLimitResult, errors::anyhow_error_into_response};
 
 pub async fn create_user(
     // this argument tells axum to parse the request body
@@ -25,12 +29,15 @@ pub async fn create_user(
     Json(payload): Json<CreateUser>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
-) -> impl IntoResponse {
-    if let Some(err_response) =
-        handle_rate_limit_error_response(app.rate_limit_by_ip(&ip).await).await
-    {
-        return err_response.into_response();
-    }
+) -> Response {
+    let _ip = match app.rate_limit_by_ip(ip).await {
+        Ok(x) => match x.try_into_response().await {
+            Ok(RateLimitResult::AllowedIp(x)) => x,
+            Err(err_response) => return err_response,
+            _ => unimplemented!(),
+        },
+        Err(err) => return anyhow_error_into_response(None, None, err).into_response(),
+    };
 
     // TODO: check invite_code against the app's config or database
     if payload.invite_code != "llam4n0des!" {
@@ -58,8 +65,8 @@ pub async fn create_user(
     // TODO: proper error message
     let user = user.insert(db).await.unwrap();
 
-    todo!("serialize and return the user: {:?}", user)
-    // (StatusCode::CREATED, Json(user))
+    // TODO: do not expose user ids
+    (StatusCode::CREATED, Json(user)).into_response()
 }
 
 // the input to our `create_user` handler

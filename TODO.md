@@ -69,6 +69,8 @@
 - [x] Got warning: "WARN subscribe_new_heads:send_block: web3_proxy::connection: unable to get block from https://rpc.ethermine.org: Deserialization Error: expected value at line 1 column 1. Response: error code: 1015". this is cloudflare rate limiting on fetching a block, but this is a private rpc. why is there a block subscription?
 - [x] im seeing ethspam occasionally try to query a future block. something must be setting the head block too early
   - [x] we were sorting best block the wrong direction. i flipped a.cmp(b) to b.cmp(a) so that the largest would be first, but then i used 'max_by' which looks at the end of the list
+- [x] HTTP GET to the websocket endpoints should redirect instead of giving an ugly error
+- [ ] load the redirected page from config
 - [ ] basic request method stats
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] active requests on /status is always 0 even when i'm running requests through
@@ -76,7 +78,6 @@
   - [ ] i think the server isn't following the spec. we need a context attached to this error so we know which one
   - [ ] maybe make jsonrpc an Option
 - [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
-- [ ] disable redis persistence in dev
 
 ## V1
 
@@ -243,3 +244,4 @@ in another repo: event subscriber
   eth_1       | 2022-08-10T23:26:08.917603Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
   eth_1       | 2022-08-10T23:26:10.195014Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
   eth_1       | 2022-08-10T23:26:10.195658Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 2/3/5/5 rpcs have 0x0538…bfff
+- [ ] disable redis persistence in dev

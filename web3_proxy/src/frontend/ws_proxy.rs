@@ -1,10 +1,11 @@
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::Path,
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Redirect, Response},
     Extension,
 };
 use axum_client_ip::ClientIp;
+use fstrings::{format_args_f, format_f};
 use futures::SinkExt;
 use futures::{
     future::AbortHandle,
@@ -22,18 +23,21 @@ use crate::{
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
 };
 
-use super::rate_limit::handle_rate_limit_error_response;
+use super::{errors::anyhow_error_into_response, rate_limit::RateLimitResult};
 
 pub async fn public_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Response {
-    if let Some(err_response) =
-        handle_rate_limit_error_response(app.rate_limit_by_ip(&ip).await).await
-    {
-        return err_response.into_response();
-    }
+    let ip = match app.rate_limit_by_ip(ip).await {
+        Ok(x) => match x.try_into_response().await {
+            Ok(RateLimitResult::AllowedIp(x)) => x,
+            Err(err_response) => return err_response,
+            _ => unimplemented!(),
+        },
+        Err(err) => return anyhow_error_into_response(None, None, err).into_response(),
+    };
 
     match ws_upgrade {
         Some(ws) => ws
@@ -41,9 +45,8 @@ pub async fn public_websocket_handler(
             .into_response(),
         None => {
             // this is not a websocket. give a friendly page. maybe redirect to the llama nodes home
-            // TODO: make a friendly page
-            // TODO: rate limit this?
-            "hello, world".into_response()
+            // TODO: redirect to a configurable url
+            Redirect::to(&format_f!("https://www.etherscan.io/#userip={ip}")).into_response()
         }
     }
 }
@@ -53,19 +56,23 @@ pub async fn user_websocket_handler(
     Path(user_key): Path<Uuid>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Response {
-    if let Some(err_response) =
-        handle_rate_limit_error_response(app.rate_limit_by_key(user_key).await).await
-    {
-        return err_response;
-    }
+    // TODO: dry this up. maybe a rate_limit_by_key_response function?
+    let user_id = match app.rate_limit_by_key(user_key).await {
+        Ok(x) => match x.try_into_response().await {
+            Ok(RateLimitResult::AllowedUser(x)) => x,
+            Err(err_response) => return err_response,
+            _ => unimplemented!(),
+        },
+        Err(err) => return anyhow_error_into_response(None, None, err).into_response(),
+    };
 
     match ws_upgrade {
         Some(ws_upgrade) => ws_upgrade.on_upgrade(|socket| proxy_web3_socket(app, socket)),
         None => {
             // this is not a websocket. give a friendly page with stats for this user
-            // TODO: make a friendly page
-            // TODO: rate limit this?
-            "hello, world".into_response()
+            // TODO: redirect to a configurable url
+            // TODO: should this use user_key instead? or user's address?
+            Redirect::to(&format_f!("https://www.etherscan.io/#userid={user_id}")).into_response()
         }
     }
 }

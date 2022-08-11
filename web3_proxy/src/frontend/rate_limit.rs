@@ -12,16 +12,46 @@ use uuid::Uuid;
 
 use crate::app::{UserCacheValue, Web3ProxyApp};
 
-use super::errors::handle_anyhow_error;
+use super::errors::anyhow_error_into_response;
 
 pub enum RateLimitResult {
-    Allowed,
-    RateLimitExceeded,
+    AllowedIp(IpAddr),
+    AllowedUser(i64),
+    IpRateLimitExceeded(IpAddr),
+    UserRateLimitExceeded(i64),
     UnknownKey,
 }
 
+impl RateLimitResult {
+    // TODO: i think this should be a function on RateLimitResult
+    pub async fn try_into_response(self) -> Result<RateLimitResult, Response> {
+        match self {
+            RateLimitResult::AllowedIp(_) => Ok(self),
+            RateLimitResult::AllowedUser(_) => Ok(self),
+            RateLimitResult::IpRateLimitExceeded(ip) => Err(anyhow_error_into_response(
+                Some(StatusCode::TOO_MANY_REQUESTS),
+                None,
+                // TODO: how can we attach context here? maybe add a request id tracing field?
+                anyhow::anyhow!(format!("rate limit exceeded for {}", ip)),
+            )),
+            RateLimitResult::UserRateLimitExceeded(user) => Err(anyhow_error_into_response(
+                Some(StatusCode::TOO_MANY_REQUESTS),
+                None,
+                // TODO: don't expose numeric ids. show the address instead
+                // TODO: how can we attach context here? maybe add a request id tracing field?
+                anyhow::anyhow!(format!("rate limit exceeded for user {}", user)),
+            )),
+            RateLimitResult::UnknownKey => Err(anyhow_error_into_response(
+                Some(StatusCode::FORBIDDEN),
+                None,
+                anyhow::anyhow!("unknown key"),
+            )),
+        }
+    }
+}
+
 impl Web3ProxyApp {
-    pub async fn rate_limit_by_ip(&self, ip: &IpAddr) -> anyhow::Result<RateLimitResult> {
+    pub async fn rate_limit_by_ip(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
         let rate_limiter_key = format!("ip-{}", ip);
 
         // TODO: dry this up with rate_limit_by_key
@@ -35,7 +65,7 @@ impl Web3ProxyApp {
                     // TODO: set headers so they know when they can retry
                     debug!(?rate_limiter_key, "rate limit exceeded"); // this is too verbose, but a stat might be good
                                                                       // TODO: use their id if possible
-                    return Ok(RateLimitResult::RateLimitExceeded);
+                    return Ok(RateLimitResult::IpRateLimitExceeded(ip));
                 }
                 Err(err) => {
                     // internal error, not rate limit being hit
@@ -48,7 +78,7 @@ impl Web3ProxyApp {
             warn!("no rate limiter!");
         }
 
-        Ok(RateLimitResult::Allowed)
+        Ok(RateLimitResult::AllowedIp(ip))
     }
 
     pub async fn rate_limit_by_key(&self, user_key: Uuid) -> anyhow::Result<RateLimitResult> {
@@ -142,26 +172,6 @@ impl Web3ProxyApp {
             unimplemented!("no redis. cannot rate limit")
         }
 
-        Ok(RateLimitResult::Allowed)
-    }
-}
-
-pub async fn handle_rate_limit_error_response(
-    r: anyhow::Result<RateLimitResult>,
-) -> Option<Response> {
-    match r {
-        Ok(RateLimitResult::Allowed) => None,
-        Ok(RateLimitResult::RateLimitExceeded) => Some(handle_anyhow_error(
-            Some(StatusCode::TOO_MANY_REQUESTS),
-            None,
-            // TODO: how can we attach context here? maybe add a request id tracing field?
-            anyhow::anyhow!("rate limit exceeded"),
-        )),
-        Ok(RateLimitResult::UnknownKey) => Some(handle_anyhow_error(
-            Some(StatusCode::FORBIDDEN),
-            None,
-            anyhow::anyhow!("unknown key"),
-        )),
-        Err(err) => Some(handle_anyhow_error(None, None, err)),
+        Ok(RateLimitResult::AllowedUser(user_data.user_id))
     }
 }
