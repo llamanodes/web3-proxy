@@ -1,4 +1,5 @@
 use axum::extract::Path;
+use axum::response::Response;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_client_ip::ClientIp;
 use std::sync::Arc;
@@ -12,7 +13,7 @@ pub async fn public_proxy_web3_rpc(
     Json(payload): Json<JsonRpcRequestEnum>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
-) -> impl IntoResponse {
+) -> Response {
     if let Some(err_response) =
         handle_rate_limit_error_response(app.rate_limit_by_ip(&ip).await).await
     {
@@ -29,7 +30,7 @@ pub async fn user_proxy_web3_rpc(
     Json(payload): Json<JsonRpcRequestEnum>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Path(user_key): Path<Uuid>,
-) -> impl IntoResponse {
+) -> Response {
     // TODO: add a helper on this that turns RateLimitResult into error if its not allowed
     if let Some(err_response) =
         handle_rate_limit_error_response(app.rate_limit_by_key(user_key).await).await

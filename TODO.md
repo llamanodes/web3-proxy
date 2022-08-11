@@ -69,10 +69,14 @@
 - [x] Got warning: "WARN subscribe_new_heads:send_block: web3_proxy::connection: unable to get block from https://rpc.ethermine.org: Deserialization Error: expected value at line 1 column 1. Response: error code: 1015". this is cloudflare rate limiting on fetching a block, but this is a private rpc. why is there a block subscription?
 - [x] im seeing ethspam occasionally try to query a future block. something must be setting the head block too early
   - [x] we were sorting best block the wrong direction. i flipped a.cmp(b) to b.cmp(a) so that the largest would be first, but then i used 'max_by' which looks at the end of the list
-- [ ] cache more things locally or in redis
-- [ ] use siwe messages and signatures for sign up and login
 - [ ] basic request method stats
+- [ ] use siwe messages and signatures for sign up and login
 - [ ] active requests on /status is always 0 even when i'm running requests through
+- [ ] fantom_1    | 2022-08-10T22:19:43.522465Z  WARN web3_proxy::jsonrpc: forwarding error err=missing field `jsonrpc` at line 1 column 60
+  - [ ] i think the server isn't following the spec. we need a context attached to this error so we know which one
+  - [ ] maybe make jsonrpc an Option
+- [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
+- [ ] disable redis persistence in dev
 
 ## V1
 
@@ -84,6 +88,7 @@
 - [x] I'm hitting infura rate limits very quickly. I feel like that means something is very inefficient
   - whenever blocks were slow, we started checking as fast as possible
 - [ ] send logs to sentry
+- [ ] redis cell is giving errors under high load. maybe replace with https://redis.com/redis-best-practices/basic-rate-limiting/
 - [ ] cli tool for resetting api keys
 - [ ] nice output when cargo doc is run
 - [ ] if we request an old block, more servers can handle it than we currently use.
@@ -95,6 +100,7 @@
   - create the app without applying any config to it
   - have a blocking future watching the config file and calling app.apply_config() on first load and on change
   - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
+- [ ] cache more things locally or in redis
 - [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
 - [ ] synced connections swap threshold should come from config
   - if there are bad forks, we need to think about this more. keep backfilling until there is a common block, or just error? if the common block is old, i think we should error rather than serve data. that's kind of "downtime" but really its on the chain and not us. think about this more
@@ -232,3 +238,8 @@ in another repo: event subscriber
   - when those rate limits are hit, what should happen?
   - missing pending transactions might be okay, but not missing confirmed blocks 
 - [ ] for easier errors in the axum code, i think we need to have our own type that wraps anyhow::Result+Error
+- [ ] got a very large number of possible heads here. i think maybe a server was very far out of sync. we should drop servers behind by too much
+  eth_1       | 2022-08-10T23:26:06.377129Z  WARN web3_proxy::connections: chain is forked! 261 possible heads. 1/2/5/5 rpcs have 0xd403…3c5d
+  eth_1       | 2022-08-10T23:26:08.917603Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
+  eth_1       | 2022-08-10T23:26:10.195014Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
+  eth_1       | 2022-08-10T23:26:10.195658Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 2/3/5/5 rpcs have 0x0538…bfff

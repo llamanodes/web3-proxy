@@ -29,19 +29,18 @@ pub async fn public_websocket_handler(
     ClientIp(ip): ClientIp,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Response {
-    match ws_upgrade {
-        Some(ws) => {
-            if let Some(err_response) =
-                handle_rate_limit_error_response(app.rate_limit_by_ip(&ip).await).await
-            {
-                return err_response.into_response();
-            }
+    if let Some(err_response) =
+        handle_rate_limit_error_response(app.rate_limit_by_ip(&ip).await).await
+    {
+        return err_response.into_response();
+    }
 
-            ws.on_upgrade(|socket| proxy_web3_socket(app, socket))
-                .into_response()
-        }
+    match ws_upgrade {
+        Some(ws) => ws
+            .on_upgrade(|socket| proxy_web3_socket(app, socket))
+            .into_response(),
         None => {
-            // this is not a websocket. give a friendly page
+            // this is not a websocket. give a friendly page. maybe redirect to the llama nodes home
             // TODO: make a friendly page
             // TODO: rate limit this?
             "hello, world".into_response()
@@ -51,8 +50,8 @@ pub async fn public_websocket_handler(
 
 pub async fn user_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ws: WebSocketUpgrade,
     Path(user_key): Path<Uuid>,
+    ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Response {
     if let Some(err_response) =
         handle_rate_limit_error_response(app.rate_limit_by_key(user_key).await).await
@@ -60,7 +59,15 @@ pub async fn user_websocket_handler(
         return err_response;
     }
 
-    ws.on_upgrade(|socket| proxy_web3_socket(app, socket))
+    match ws_upgrade {
+        Some(ws_upgrade) => ws_upgrade.on_upgrade(|socket| proxy_web3_socket(app, socket)),
+        None => {
+            // this is not a websocket. give a friendly page with stats for this user
+            // TODO: make a friendly page
+            // TODO: rate limit this?
+            "hello, world".into_response()
+        }
+    }
 }
 
 async fn proxy_web3_socket(app: Arc<Web3ProxyApp>, socket: WebSocket) {
@@ -176,6 +183,7 @@ async fn read_web3_socket(
                 break;
             }
             Message::Binary(mut payload) => {
+                // TODO: poke rate limit for the user/ip
                 let payload = from_utf8_mut(&mut payload).unwrap();
 
                 handle_socket_payload(
@@ -206,7 +214,11 @@ async fn write_web3_socket(
     // TODO: increment counter for open websockets
 
     while let Ok(msg) = response_rx.recv_async().await {
-        // a response is ready. write it to ws_tx
+        // a response is ready
+
+        // TODO: poke rate limits for this user?
+
+        // forward the response to through the websocket
         if let Err(err) = ws_tx.send(msg).await {
             // this isn't a problem. this is common and happens whenever a client disconnects
             trace!(?err, "unable to write to websocket");

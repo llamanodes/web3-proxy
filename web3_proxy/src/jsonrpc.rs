@@ -112,6 +112,7 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
                     }
                 }
 
+                // TODO: some providers don't follow the spec and dont include the jsonrpc key
                 let jsonrpc = jsonrpc.ok_or_else(|| de::Error::missing_field("jsonrpc"))?;
                 let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
                 let method = method.ok_or_else(|| de::Error::missing_field("method"))?;
