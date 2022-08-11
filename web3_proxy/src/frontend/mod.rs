@@ -39,11 +39,23 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("listening on port {}", port);
     // TODO: into_make_service is enough if we always run behind a proxy. make into_make_service_with_connect_info optional?
+
+    /*
+    It sequentially looks for an IP in:
+      - x-forwarded-for header (de-facto standard)
+      - x-real-ip header
+      - forwarded header (new standard)
+      - axum::extract::ConnectInfo (if not behind proxy)
+
+    So we probably won't need into_make_service_with_connect_info, but it shouldn't hurt
+    */
+    let service = app.into_make_service_with_connect_info::<SocketAddr>();
+    // let service = app.into_make_service();
+
     axum::Server::bind(&addr)
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-        .with_graceful_shutdown(signal_shutdown())
-        // .serve(app.into_make_service())
+        .serve(service)
+        .with_graceful_shutdown(async { signal_shutdown().await })
         .await
         .map_err(Into::into)
 }

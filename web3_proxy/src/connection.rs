@@ -560,7 +560,7 @@ impl Web3Connection {
                         // TODO: periodically check for listeners. if no one is subscribed, unsubscribe and wait for a subscription
                     }
 
-                    warn!("subscription ended");
+                    warn!(?self, "subscription ended");
                 }
             }
         }

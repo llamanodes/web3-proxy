@@ -92,6 +92,7 @@
 - [ ] active requests on /status is always 0 even when i'm running requests through
 - [ ] redis cell is giving errors under high load. maybe replace with https://redis.com/redis-best-practices/basic-rate-limiting/
 - [ ] cli tool for resetting api keys
+- [ ] cli tool for checking config
 - [ ] nice output when cargo doc is run
 - [ ] if we request an old block, more servers can handle it than we currently use.
     - [ ] instead of the one list of just heads, store our intermediate mappings (rpcs_by_hash, rpcs_by_num, blocks_by_hash) in SyncedConnections. this shouldn't be too much slower than what we have now

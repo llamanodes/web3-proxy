@@ -33,4 +33,4 @@ services:
     volumes:
       - ./config/example.toml:/config.toml
     ports:
-      - 127.0.0.1:8544:8544
+      - 8544:8544
