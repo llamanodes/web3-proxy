@@ -19,7 +19,7 @@ migration = { path = "../migration" }
 anyhow = { version = "1.0.61", features = ["backtrace"] }
 arc-swap = "1.5.1"
 argh = "0.1.8"
-axum = { version = "0.5.15", features = ["serde_json", "tokio-tungstenite", "ws"] }
+axum = { version = "0.5.15", features = ["headers", "serde_json", "tokio-tungstenite", "ws"] }
 axum-client-ip = "0.2.0"
 counter = "0.5.6"
 dashmap = "5.3.4"
