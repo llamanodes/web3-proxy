@@ -46,7 +46,10 @@ pub async fn public_websocket_handler(
         None => {
             // this is not a websocket. give a friendly page. maybe redirect to the llama nodes home
             // TODO: redirect to a configurable url
-            Redirect::to(&format_f!("https://www.etherscan.io/#userip={ip}")).into_response()
+            Redirect::to(&format_f!(
+                "https://llamanodes.com/free-rpc-stats#userip={ip}"
+            ))
+            .into_response()
         }
     }
 }
@@ -71,8 +74,11 @@ pub async fn user_websocket_handler(
         None => {
             // this is not a websocket. give a friendly page with stats for this user
             // TODO: redirect to a configurable url
-            // TODO: should this use user_key instead? or user's address?
-            Redirect::to(&format_f!("https://www.etherscan.io/#userid={user_id}")).into_response()
+            // TODO: query to get the user's address. expose that instead of user_id
+            Redirect::to(&format_f!(
+                "https://llamanodes.com/user-rpc-stats#user_id={user_id}"
+            ))
+            .into_response()
         }
     }
 }
