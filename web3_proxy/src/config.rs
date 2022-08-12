@@ -28,15 +28,15 @@ pub struct CliConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AppConfig {
-    pub shared: RpcSharedConfig,
+pub struct TopConfig {
+    pub app: AppConfig,
     pub balanced_rpcs: HashMap<String, Web3ConnectionConfig>,
     pub private_rpcs: Option<HashMap<String, Web3ConnectionConfig>>,
 }
 
 /// shared configuration between Web3Connections
 #[derive(Debug, Deserialize)]
-pub struct RpcSharedConfig {
+pub struct AppConfig {
     // TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
     pub chain_id: u64,
     pub db_url: Option<String>,
@@ -45,6 +45,10 @@ pub struct RpcSharedConfig {
     pub public_rate_limit_per_minute: u32,
     #[serde(default = "default_response_cache_max_bytes")]
     pub response_cache_max_bytes: usize,
+    /// the stats page url for an anonymous user.
+    pub redirect_public_url: String,
+    /// the stats page url for a logged in user. it must contain "{user_id}"
+    pub redirect_user_url: String,
 }
 
 fn default_public_rate_limit_per_minute() -> u32 {

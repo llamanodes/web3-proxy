@@ -106,6 +106,7 @@ impl Web3ProxyApp {
                     UserId,
                     RequestsPerMinute,
                 }
+                // TODO: join the user table to this to return the User? we don't always need it
                 let user_data = match user_keys::Entity::find()
                     .select_only()
                     .column_as(user_keys::Column::UserId, QueryAs::UserId)

@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use crate::bb8_helpers;
 use crate::block_helpers::block_needed;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, TopConfig};
 use crate::connections::Web3Connections;
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
@@ -139,6 +139,7 @@ pub struct Web3ProxyApp {
     // TODO: broadcast channel instead?
     head_block_receiver: watch::Receiver<Arc<Block<TxHash>>>,
     pending_tx_sender: broadcast::Sender<TxState>,
+    pub config: AppConfig,
     pub pending_transactions: Arc<DashMap<TxHash, TxState>>,
     pub user_cache: RwLock<FifoCountMap<Uuid, UserCacheValue>>,
     pub redis_pool: Option<RedisPool>,
@@ -156,17 +157,23 @@ impl fmt::Debug for Web3ProxyApp {
 impl Web3ProxyApp {
     // TODO: should we just take the rpc config as the only arg instead?
     pub async fn spawn(
-        app_config: AppConfig,
+        top_config: TopConfig,
         num_workers: usize,
     ) -> anyhow::Result<(
         Arc<Web3ProxyApp>,
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
     )> {
+        // safety checks on the config
+        assert!(
+            top_config.app.redirect_user_url.contains("{{user_id}}"),
+            "redirect user url must contain \"{{user_id}}\""
+        );
+
         // first, we connect to mysql and make sure the latest migrations have run
-        let db_conn = if let Some(db_url) = app_config.shared.db_url {
+        let db_conn = if let Some(db_url) = &top_config.app.db_url {
             let max_connections = num_workers.try_into()?;
 
-            let db = get_migrated_db(db_url, max_connections).await?;
+            let db = get_migrated_db(db_url.clone(), max_connections).await?;
 
             Some(db)
         } else {
@@ -174,9 +181,9 @@ impl Web3ProxyApp {
             None
         };
 
-        let balanced_rpcs = app_config.balanced_rpcs;
+        let balanced_rpcs = top_config.balanced_rpcs;
 
-        let private_rpcs = if let Some(private_rpcs) = app_config.private_rpcs {
+        let private_rpcs = if let Some(private_rpcs) = top_config.private_rpcs {
             private_rpcs
         } else {
             Default::default()
@@ -196,11 +203,11 @@ impl Web3ProxyApp {
                 .build()?,
         );
 
-        let redis_pool = match app_config.shared.redis_url {
+        let redis_pool = match top_config.app.redis_url.as_ref() {
             Some(redis_url) => {
                 info!("Connecting to redis on {}", redis_url);
 
-                let manager = RedisConnectionManager::new(redis_url)?;
+                let manager = RedisConnectionManager::new(redis_url.as_ref())?;
 
                 let min_size = num_workers as u32;
                 let max_size = min_size * 4;
@@ -236,9 +243,8 @@ impl Web3ProxyApp {
         // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
         // TODO: we should still have some sort of expiration or maximum size limit for the map
 
-        // TODO: attach context to this error
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
-            app_config.shared.chain_id,
+            top_config.app.chain_id,
             balanced_rpcs,
             http_client.clone(),
             redis_pool.clone(),
@@ -257,7 +263,7 @@ impl Web3ProxyApp {
         } else {
             // TODO: attach context to this error
             let (private_rpcs, private_handle) = Web3Connections::spawn(
-                app_config.shared.chain_id,
+                top_config.app.chain_id,
                 private_rpcs,
                 http_client.clone(),
                 redis_pool.clone(),
@@ -276,7 +282,8 @@ impl Web3ProxyApp {
         };
 
         // TODO: how much should we allow?
-        let public_max_burst = app_config.shared.public_rate_limit_per_minute / 3;
+        // TODO: im seeing errors in redis. just use the redis FAQ on rate limiting. its really simple
+        let public_max_burst = top_config.app.public_rate_limit_per_minute / 3;
 
         let frontend_rate_limiter = redis_pool.as_ref().map(|redis_pool| {
             RedisCell::new(
@@ -284,20 +291,21 @@ impl Web3ProxyApp {
                 "web3_proxy",
                 "frontend",
                 public_max_burst,
-                app_config.shared.public_rate_limit_per_minute,
+                top_config.app.public_rate_limit_per_minute,
                 60,
             )
         });
 
+        // keep the borrow checker happy
+        let response_cache_max_bytes = top_config.app.response_cache_max_bytes;
+
         let app = Self {
+            config: top_config.app,
             balanced_rpcs,
             private_rpcs,
             active_requests: Default::default(),
             // TODO: make the share configurable
-            response_cache: RwLock::new(FifoSizedMap::new(
-                app_config.shared.response_cache_max_bytes,
-                100,
-            )),
+            response_cache: RwLock::new(FifoSizedMap::new(response_cache_max_bytes, 100)),
             head_block_receiver,
             pending_tx_sender,
             pending_transactions,

@@ -70,9 +70,9 @@
 - [x] im seeing ethspam occasionally try to query a future block. something must be setting the head block too early
   - [x] we were sorting best block the wrong direction. i flipped a.cmp(b) to b.cmp(a) so that the largest would be first, but then i used 'max_by' which looks at the end of the list
 - [x] HTTP GET to the websocket endpoints should redirect instead of giving an ugly error
-- [ ] load the redirected page from config
-- [ ] use config to decide if the app should use `into_make_service_with_connect_info` or `into_make_service`. with_connect_info is needed for getting the ip from docker
+- [x] load the redirected page from config
 - [ ] basic request method stats
+- [ ] prettier output for create_user command. need the key in hex
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] fantom_1    | 2022-08-10T22:19:43.522465Z  WARN web3_proxy::jsonrpc: forwarding error err=missing field `jsonrpc` at line 1 column 60
   - [ ] i think the server isn't following the spec. we need a context attached to this error so we know which one
@@ -247,3 +247,4 @@ in another repo: event subscriber
   eth_1       | 2022-08-10T23:26:10.195014Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
   eth_1       | 2022-08-10T23:26:10.195658Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 2/3/5/5 rpcs have 0x0538…bfff
 - [ ] disable redis persistence in dev
+- [ ] fix ip detection when running in dev

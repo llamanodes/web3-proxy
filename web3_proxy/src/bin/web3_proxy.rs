@@ -17,15 +17,15 @@ use tokio::time::Duration;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 use web3_proxy::app::{flatten_handle, Web3ProxyApp};
-use web3_proxy::config::{AppConfig, CliConfig};
+use web3_proxy::config::{CliConfig, TopConfig};
 use web3_proxy::frontend;
 
 fn run(
     shutdown_receiver: flume::Receiver<()>,
     cli_config: CliConfig,
-    app_config: AppConfig,
+    top_config: TopConfig,
 ) -> anyhow::Result<()> {
-    debug!(?cli_config, ?app_config);
+    debug!(?cli_config, ?top_config);
 
     // spawn a thread for deadlock detection
     thread::spawn(move || loop {
@@ -48,7 +48,7 @@ fn run(
     // set up tokio's async runtime
     let mut rt_builder = runtime::Builder::new_multi_thread();
 
-    let chain_id = app_config.shared.chain_id;
+    let chain_id = top_config.app.chain_id;
     rt_builder.enable_all().thread_name_fn(move || {
         static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
         // TODO: what ordering? i think we want seqcst so that these all happen in order, but that might be stricter than we really need
@@ -70,7 +70,7 @@ fn run(
     debug!(?num_workers);
 
     rt.block_on(async {
-        let (app, app_handle) = Web3ProxyApp::spawn(app_config, num_workers).await?;
+        let (app, app_handle) = Web3ProxyApp::spawn(top_config, num_workers).await?;
 
         let frontend_handle = tokio::spawn(frontend::serve(cli_config.port, app));
 
@@ -128,15 +128,17 @@ fn main() -> anyhow::Result<()> {
 
     // advanced configuration is on disk
     info!("Loading rpc config @ {}", cli_config.config);
-    let app_config: String = fs::read_to_string(cli_config.config.clone())?;
-    let app_config: AppConfig = toml::from_str(&app_config)?;
+    let top_config: String = fs::read_to_string(cli_config.config.clone())?;
+    let top_config: TopConfig = toml::from_str(&top_config)?;
 
     // TODO: this doesn't seem to do anything
-    proctitle::set_title(format!("web3_proxy-{}", app_config.shared.chain_id));
+    proctitle::set_title(format!("web3_proxy-{}", top_config.app.chain_id));
 
+    // tokio has code for catching ctrl+c so we use that
+    // this shutdown sender is currently only used in tests, but we might make a /shutdown endpoint or something
     let (_shutdown_sender, shutdown_receiver) = flume::bounded(1);
 
-    run(shutdown_receiver, cli_config, app_config)
+    run(shutdown_receiver, cli_config, top_config)
 }
 
 #[cfg(test)]
@@ -148,7 +150,7 @@ mod tests {
     use hashbrown::HashMap;
     use std::env;
 
-    use web3_proxy::config::{RpcSharedConfig, Web3ConnectionConfig};
+    use web3_proxy::config::{AppConfig, Web3ConnectionConfig};
 
     use super::*;
 
@@ -190,13 +192,15 @@ mod tests {
         };
 
         // make a test AppConfig
-        let app_config = AppConfig {
-            shared: RpcSharedConfig {
+        let app_config = TopConfig {
+            app: AppConfig {
                 chain_id: 31337,
                 db_url: None,
                 redis_url: None,
                 public_rate_limit_per_minute: 0,
                 response_cache_max_bytes: 10_usize.pow(7),
+                redirect_public_url: "example.com/".to_string(),
+                redirect_user_url: "example.com/users/{user_address}".to_string(),
             },
             balanced_rpcs: HashMap::from([
                 (

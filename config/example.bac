@@ -1,4 +1,4 @@
-[shared]
+[app]
 chain_id = 1
 public_rate_limit_per_minute = 60_000
 

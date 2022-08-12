@@ -5,12 +5,12 @@ use axum::{
     Extension,
 };
 use axum_client_ip::ClientIp;
-use fstrings::{format_args_f, format_f};
 use futures::SinkExt;
 use futures::{
     future::AbortHandle,
     stream::{SplitSink, SplitStream, StreamExt},
 };
+use handlebars::Handlebars;
 use hashbrown::HashMap;
 use serde_json::{json, value::RawValue};
 use std::sync::Arc;
@@ -30,7 +30,7 @@ pub async fn public_websocket_handler(
     ClientIp(ip): ClientIp,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Response {
-    let ip = match app.rate_limit_by_ip(ip).await {
+    let _ip = match app.rate_limit_by_ip(ip).await {
         Ok(x) => match x.try_into_response().await {
             Ok(RateLimitResult::AllowedIp(x)) => x,
             Err(err_response) => return err_response,
@@ -44,12 +44,8 @@ pub async fn public_websocket_handler(
             .on_upgrade(|socket| proxy_web3_socket(app, socket))
             .into_response(),
         None => {
-            // this is not a websocket. give a friendly page. maybe redirect to the llama nodes home
-            // TODO: redirect to a configurable url
-            Redirect::to(&format_f!(
-                "https://llamanodes.com/free-rpc-stats#userip={ip}"
-            ))
-            .into_response()
+            // this is not a websocket. redirect to a friendly page
+            Redirect::to(&app.config.redirect_public_url).into_response()
         }
     }
 }
@@ -72,13 +68,20 @@ pub async fn user_websocket_handler(
     match ws_upgrade {
         Some(ws_upgrade) => ws_upgrade.on_upgrade(|socket| proxy_web3_socket(app, socket)),
         None => {
-            // this is not a websocket. give a friendly page with stats for this user
-            // TODO: redirect to a configurable url
+            // TODO: store this on the app and use register_template?
+            let reg = Handlebars::new();
+
+            // TODO: show the user's address, not their id (remember to update the checks for {{user_id}} in app.rs)
             // TODO: query to get the user's address. expose that instead of user_id
-            Redirect::to(&format_f!(
-                "https://llamanodes.com/user-rpc-stats#user_id={user_id}"
-            ))
-            .into_response()
+            let user_url = reg
+                .render_template(
+                    &app.config.redirect_user_url,
+                    &json!({ "user_id": user_id }),
+                )
+                .unwrap();
+
+            // this is not a websocket. redirect to a page for this user
+            Redirect::to(&user_url).into_response()
         }
     }
 }

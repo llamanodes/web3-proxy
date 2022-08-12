@@ -182,6 +182,7 @@ impl Web3Connections {
         };
 
         // turn configs into connections (in parallel)
+        // TODO: move this into a helper function. then we can use it when configs change (will need a remove function too)
         let spawn_handles: Vec<_> = server_configs
             .into_iter()
             .map(|(server_name, server_config)| {
