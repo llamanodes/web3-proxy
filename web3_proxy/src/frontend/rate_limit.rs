@@ -16,9 +16,9 @@ use super::errors::anyhow_error_into_response;
 
 pub enum RateLimitResult {
     AllowedIp(IpAddr),
-    AllowedUser(i64),
+    AllowedUser(u64),
     IpRateLimitExceeded(IpAddr),
-    UserRateLimitExceeded(i64),
+    UserRateLimitExceeded(u64),
     UnknownKey,
 }
 

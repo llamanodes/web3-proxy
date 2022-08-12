@@ -6,4 +6,5 @@ pub mod connection;
 pub mod connections;
 pub mod frontend;
 pub mod jsonrpc;
+pub mod stats;
 pub mod users;

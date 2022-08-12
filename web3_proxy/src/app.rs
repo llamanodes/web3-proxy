@@ -40,6 +40,7 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
+use crate::stats::AppStats;
 
 // TODO: make this customizable?
 static APP_USER_AGENT: &str = concat!(
@@ -69,7 +70,7 @@ pub enum TxState {
 #[derive(Clone, Copy, From)]
 pub struct UserCacheValue {
     pub expires_at: Instant,
-    pub user_id: i64,
+    pub user_id: u64,
     pub user_count_per_period: u32,
 }
 
@@ -140,11 +141,12 @@ pub struct Web3ProxyApp {
     head_block_receiver: watch::Receiver<Arc<Block<TxHash>>>,
     pending_tx_sender: broadcast::Sender<TxState>,
     pub config: AppConfig,
-    pub pending_transactions: Arc<DashMap<TxHash, TxState>>,
-    pub user_cache: RwLock<FifoCountMap<Uuid, UserCacheValue>>,
-    pub redis_pool: Option<RedisPool>,
-    pub rate_limiter: Option<RedisCell>,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
+    pub pending_transactions: Arc<DashMap<TxHash, TxState>>,
+    pub rate_limiter: Option<RedisCell>,
+    pub redis_pool: Option<RedisPool>,
+    pub stats: AppStats,
+    pub user_cache: RwLock<FifoCountMap<Uuid, UserCacheValue>>,
 }
 
 impl fmt::Debug for Web3ProxyApp {
@@ -157,8 +159,9 @@ impl fmt::Debug for Web3ProxyApp {
 impl Web3ProxyApp {
     // TODO: should we just take the rpc config as the only arg instead?
     pub async fn spawn(
+        app_stats: AppStats,
         top_config: TopConfig,
-        num_workers: usize,
+        workers: usize,
     ) -> anyhow::Result<(
         Arc<Web3ProxyApp>,
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
@@ -171,7 +174,7 @@ impl Web3ProxyApp {
 
         // first, we connect to mysql and make sure the latest migrations have run
         let db_conn = if let Some(db_url) = &top_config.app.db_url {
-            let max_connections = num_workers.try_into()?;
+            let max_connections = workers.try_into()?;
 
             let db = get_migrated_db(db_url.clone(), max_connections).await?;
 
@@ -209,7 +212,7 @@ impl Web3ProxyApp {
 
                 let manager = RedisConnectionManager::new(redis_url.as_ref())?;
 
-                let min_size = num_workers as u32;
+                let min_size = workers as u32;
                 let max_size = min_size * 4;
                 // TODO: min_idle?
                 // TODO: set max_size based on max expected concurrent connections? set based on num_workers?
@@ -304,7 +307,7 @@ impl Web3ProxyApp {
             balanced_rpcs,
             private_rpcs,
             active_requests: Default::default(),
-            // TODO: make the share configurable
+            // TODO: make the share configurable. or maybe take a number as bytes?
             response_cache: RwLock::new(FifoSizedMap::new(response_cache_max_bytes, 100)),
             head_block_receiver,
             pending_tx_sender,
@@ -312,6 +315,7 @@ impl Web3ProxyApp {
             rate_limiter: frontend_rate_limiter,
             db_conn,
             redis_pool,
+            stats: app_stats,
             // TODO: make the size configurable
             // TODO: why does this need to be async but the other one doesn't?
             user_cache: RwLock::new(FifoCountMap::new(1_000)),

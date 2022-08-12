@@ -13,7 +13,7 @@ impl MigrationTrait for Migration {
                     .table(User::Table)
                     .col(
                         ColumnDef::new(User::Id)
-                            .big_integer()
+                            .big_unsigned()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
@@ -37,14 +37,14 @@ impl MigrationTrait for Migration {
                     .table(SecondaryUser::Table)
                     .col(
                         ColumnDef::new(SecondaryUser::Id)
-                            .big_integer()
+                            .big_unsigned()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
                     .col(
                         ColumnDef::new(SecondaryUser::UserId)
-                            .big_integer()
+                            .big_unsigned()
                             .not_null(),
                     )
                     .col(
@@ -76,12 +76,12 @@ impl MigrationTrait for Migration {
                     .table(UserKeys::Table)
                     .col(
                         ColumnDef::new(UserKeys::Id)
-                            .big_integer()
+                            .big_unsigned()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(UserKeys::UserId).big_integer().not_null())
+                    .col(ColumnDef::new(UserKeys::UserId).big_unsigned().not_null())
                     .col(
                         ColumnDef::new(UserKeys::ApiKey)
                             .uuid()

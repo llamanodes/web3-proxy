@@ -34,7 +34,6 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .fallback(errors::handler_404.into_service());
 
     // run our app with hyper
-    // `axum::Server` is a re-export of `hyper::Server`
     // TODO: allow only listening on localhost?
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("listening on port {}", port);
@@ -52,10 +51,11 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
     let service = app.into_make_service_with_connect_info::<SocketAddr>();
     // let service = app.into_make_service();
 
+    // `axum::Server` is a re-export of `hyper::Server`
     axum::Server::bind(&addr)
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .serve(service)
-        .with_graceful_shutdown(async { signal_shutdown().await })
+        .with_graceful_shutdown(signal_shutdown())
         .await
         .map_err(Into::into)
 }

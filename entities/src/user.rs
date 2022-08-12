@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "user")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i64,
+    pub id: u64,
     #[sea_orm(unique)]
     pub address: Vec<u8>,
     pub description: Option<String>,

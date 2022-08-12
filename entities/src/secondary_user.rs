@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "secondary_user")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i64,
-    pub user_id: i64,
+    pub id: u64,
+    pub user_id: u64,
     pub address: Vec<u8>,
     pub description: Option<String>,
     pub email: Option<String>,

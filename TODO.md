@@ -72,7 +72,7 @@
 - [x] HTTP GET to the websocket endpoints should redirect instead of giving an ugly error
 - [x] load the redirected page from config
 - [x] prettier output for create_user command. need the key in hex
-- [ ] basic request method stats
+- [-] basic request method stats
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] fantom_1    | 2022-08-10T22:19:43.522465Z  WARN web3_proxy::jsonrpc: forwarding error err=missing field `jsonrpc` at line 1 column 60
   - [ ] i think the server isn't following the spec. we need a context attached to this error so we know which one

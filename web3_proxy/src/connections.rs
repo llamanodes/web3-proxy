@@ -615,9 +615,6 @@ impl Web3Connections {
             let new_block_hash = if let Some(hash) = new_block.hash {
                 hash
             } else {
-                // TODO: i think this should just be debug, but maybe it is a warning
-                warn!(%rpc, ?new_block, "Block without hash!");
-
                 connection_heads.remove(&rpc.url);
 
                 continue;

@@ -33,4 +33,5 @@ services:
     volumes:
       - ./config/example.toml:/config.toml
     ports:
-      - 8544:8544
+      - 8544:8544 # proxy (should be behind something handling HTTPS)
+      - 8543:8543 # prometheus

@@ -14,17 +14,21 @@ pub type BlockAndRpc = (Arc<Block<TxHash>>, Arc<Web3Connection>);
 #[derive(Debug, FromArgs)]
 /// Web3_proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
 pub struct CliConfig {
+    /// path to a toml of rpc servers
+    #[argh(option, default = "\"./config/development.toml\".to_string()")]
+    pub config: String,
+
     /// what port the proxy should listen on
     #[argh(option, default = "8544")]
     pub port: u16,
 
+    /// what port the proxy should expose prometheus stats on
+    #[argh(option, default = "8543")]
+    pub prometheus_port: u16,
+
     /// number of worker threads. Defaults to the number of logical processors
     #[argh(option, default = "0")]
     pub workers: usize,
-
-    /// path to a toml of rpc servers
-    #[argh(option, default = "\"./config/development.toml\".to_string()")]
-    pub config: String,
 }
 
 #[derive(Debug, Deserialize)]

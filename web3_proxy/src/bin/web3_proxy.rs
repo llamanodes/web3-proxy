@@ -19,6 +19,7 @@ use tracing_subscriber::EnvFilter;
 use web3_proxy::app::{flatten_handle, Web3ProxyApp};
 use web3_proxy::config::{CliConfig, TopConfig};
 use web3_proxy::frontend;
+use web3_proxy::stats::AppStatsRegistry;
 
 fn run(
     shutdown_receiver: flume::Receiver<()>,
@@ -70,9 +71,18 @@ fn run(
     debug!(?num_workers);
 
     rt.block_on(async {
-        let (app, app_handle) = Web3ProxyApp::spawn(top_config, num_workers).await?;
+        let app_stats_registry = AppStatsRegistry::new();
 
-        let frontend_handle = tokio::spawn(frontend::serve(cli_config.port, app));
+        let app_stats = app_stats_registry.stats.clone();
+
+        let app_frontend_port = cli_config.port;
+        let app_prometheus_port = cli_config.prometheus_port;
+
+        let (app, app_handle) = Web3ProxyApp::spawn(app_stats, top_config, num_workers).await?;
+
+        let frontend_handle = tokio::spawn(frontend::serve(app_frontend_port, app));
+
+        let prometheus_handle = tokio::spawn(app_stats_registry.serve(app_prometheus_port));
 
         // if everything is working, these should both run forever
         // TODO: try_join these instead? use signal_shutdown here?
@@ -88,6 +98,14 @@ fn run(
             x = flatten_handle(frontend_handle) => {
                 match x {
                     Ok(_) => info!("frontend exited"),
+                    Err(e) => {
+                        return Err(e);
+                    }
+                }
+            }
+            x = flatten_handle(prometheus_handle) => {
+                match x {
+                    Ok(_) => info!("prometheus exited"),
                     Err(e) => {
                         return Err(e);
                     }
@@ -187,6 +205,7 @@ mod tests {
         // make a test CliConfig
         let cli_config = CliConfig {
             port: 0,
+            prometheus_port: 0,
             workers: 4,
             config: "./does/not/exist/test.toml".to_string(),
         };
