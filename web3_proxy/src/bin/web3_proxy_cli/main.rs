@@ -2,7 +2,6 @@ mod create_user;
 mod two;
 
 use argh::FromArgs;
-use tracing::info;
 use web3_proxy::app::get_migrated_db;
 
 #[derive(Debug, FromArgs)]
@@ -48,8 +47,6 @@ async fn main() -> anyhow::Result<()> {
     fdlimit::raise_fd_limit();
 
     let cli_config: TopConfig = argh::from_env();
-
-    info!("hello, {}", cli_config.db_url);
 
     match cli_config.sub_command {
         SubCommand::CreateUser(x) => {

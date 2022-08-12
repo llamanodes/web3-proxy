@@ -29,7 +29,6 @@ ethers = { version = "0.17.0", features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 flume = "0.10.14"
 futures = { version = "0.3.21", features = ["thread-pool"] }
-fstrings = "0.2.3"
 hashbrown = { version = "0.12.3", features = ["serde"] }
 indexmap = "1.9.1"
 fifomap = { path = "../fifomap" }

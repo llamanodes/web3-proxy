@@ -2,8 +2,8 @@ use anyhow::Context;
 use argh::FromArgs;
 use entities::{user, user_keys};
 use ethers::types::Address;
-use fstrings::{format_args_f, println_f};
 use sea_orm::ActiveModelTrait;
+use tracing::info;
 use web3_proxy::users::new_api_key;
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -37,7 +37,7 @@ impl CreateUserSubCommand {
 
         let u = u.insert(db).await.context("Failed saving new user")?;
 
-        println_f!("user: {u:?}");
+        info!("user #{}: {:?}", u.id, Address::from_slice(&u.address));
 
         // create a key for the new user
         let uk = user_keys::ActiveModel {
@@ -49,7 +49,7 @@ impl CreateUserSubCommand {
 
         let uk = uk.insert(db).await.context("Failed saving new user key")?;
 
-        println_f!("user key: {uk:?}");
+        info!("user key: {}", uk.api_key);
 
         Ok(())
     }
