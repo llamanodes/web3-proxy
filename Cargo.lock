@@ -76,9 +76,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.60"
+version = "1.0.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c794e162a5eff65c72ef524dfe393eb923c354e350bb78b9c7383df13f3bc142"
+checksum = "508b352bb5c066aac251f6daf6b36eccd03e8a88e8081cd44959ea277a3af9a8"
 dependencies = [
  "backtrace",
 ]
@@ -1314,6 +1314,12 @@ name = "dtoa"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56899898ce76aaf4a0f24d914c97ea6ed976d42fec6ad33fcbb0a1103e07b2b0"
+
+[[package]]
+name = "dtoa"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6053ff46b5639ceb91756a85a4c8914668393a03170efd79c8884a529d80656"
 
 [[package]]
 name = "dunce"
@@ -2988,6 +2994,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "owning_ref"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ff55baddef9e4ad00f88b6c743a2a8062d4c6ade126c2a528644b8e444d52ce"
+dependencies = [
+ "stable_deref_trait",
+]
+
+[[package]]
 name = "parity-scale-codec"
 version = "3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3488,6 +3503,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus-client"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fe21d29a3d5c97c2ae9bcae7b944bfb71dbc281e3035e301085086f9bc83611"
+dependencies = [
+ "dtoa 1.0.3",
+ "itoa 1.0.2",
+ "owning_ref",
+ "prometheus-client-derive-text-encode",
+]
+
+[[package]]
+name = "prometheus-client-derive-text-encode"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66a455fbcb954c1a7decf3c586e860fd7889cddf4b8e164be736dbac95a953cd"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3571,7 +3609,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "combine",
- "dtoa",
+ "dtoa 0.4.8",
  "futures-util",
  "itoa 0.4.8",
  "percent-encoding",
@@ -5270,6 +5308,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "petgraph",
  "proctitle",
+ "prometheus-client",
  "rand",
  "redis-cell-client",
  "regex",
