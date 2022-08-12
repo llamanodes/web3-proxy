@@ -524,6 +524,7 @@ impl Web3ProxyApp {
     pub async fn proxy_web3_rpc(
         &self,
         request: JsonRpcRequestEnum,
+        user_id: u64,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         trace!(?request, "proxy_web3_rpc");
 
@@ -536,10 +537,10 @@ impl Web3ProxyApp {
 
         let response = match request {
             JsonRpcRequestEnum::Single(request) => JsonRpcForwardedResponseEnum::Single(
-                timeout(max_time, self.proxy_web3_rpc_request(request)).await??,
+                timeout(max_time, self.proxy_web3_rpc_request(request, user_id)).await??,
             ),
             JsonRpcRequestEnum::Batch(requests) => JsonRpcForwardedResponseEnum::Batch(
-                timeout(max_time, self.proxy_web3_rpc_requests(requests)).await??,
+                timeout(max_time, self.proxy_web3_rpc_requests(requests, user_id)).await??,
             ),
         };
 
@@ -552,6 +553,7 @@ impl Web3ProxyApp {
     async fn proxy_web3_rpc_requests(
         &self,
         requests: Vec<JsonRpcRequest>,
+        user_id: u64,
     ) -> anyhow::Result<Vec<JsonRpcForwardedResponse>> {
         // TODO: we should probably change ethers-rs to support this directly
         // we cut up the request and send to potentually different servers. this could be a problem.
@@ -561,7 +563,7 @@ impl Web3ProxyApp {
         let responses = join_all(
             requests
                 .into_iter()
-                .map(|request| self.proxy_web3_rpc_request(request))
+                .map(|request| self.proxy_web3_rpc_request(request, user_id))
                 .collect::<Vec<_>>(),
         )
         .await;
@@ -623,6 +625,7 @@ impl Web3ProxyApp {
     async fn proxy_web3_rpc_request(
         &self,
         mut request: JsonRpcRequest,
+        user_id: u64,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         trace!("Received request: {:?}", request);
 
@@ -699,6 +702,7 @@ impl Web3ProxyApp {
             | "shh_post"
             | "shh_uninstallFilter"
             | "shh_version" => {
+                // TODO: client error stat
                 // TODO: proper error code
                 return Err(anyhow::anyhow!("unsupported"));
             }
@@ -708,10 +712,18 @@ impl Web3ProxyApp {
             | "eth_newBlockFilter"
             | "eth_newFilter"
             | "eth_newPendingTransactionFilter"
-            | "eth_uninstallFilter" => return Err(anyhow::anyhow!("not yet implemented")),
+            | "eth_uninstallFilter" => {
+                // TODO: unsupported command stat
+                return Err(anyhow::anyhow!("not yet implemented"));
+            }
             // some commands can use local data or caches
-            "eth_accounts" => serde_json::Value::Array(vec![]),
+            "eth_accounts" => {
+                // no stats on this. its cheap
+                serde_json::Value::Array(vec![])
+            }
             "eth_blockNumber" => {
+                // TODO: emit stats
+
                 let head_block_number = self.balanced_rpcs.head_block_num();
 
                 // TODO: technically, block 0 is okay. i guess we should be using an option
@@ -727,19 +739,23 @@ impl Web3ProxyApp {
             "eth_coinbase" => {
                 // no need for serving coinbase
                 // we could return a per-user payment address here, but then we might leak that to dapps
+                // no stats on this. its cheap
                 json!(Address::zero())
             }
             // TODO: eth_estimateGas using anvil?
             // TODO: eth_gasPrice that does awesome magic to predict the future
             "eth_hashrate" => {
+                // no stats on this. its cheap
                 json!(U64::zero())
             }
             "eth_mining" => {
+                // no stats on this. its cheap
                 json!(false)
             }
             // TODO: eth_sendBundle (flashbots command)
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => {
+                // emit stats
                 return self
                     .private_rpcs
                     .try_send_all_upstream_servers(request, None)
@@ -747,16 +763,25 @@ impl Web3ProxyApp {
                     .await;
             }
             "eth_syncing" => {
+                // no stats on this. its cheap
                 // TODO: return a real response if all backends are syncing or if no servers in sync
                 json!(false)
             }
             "net_listening" => {
+                // no stats on this. its cheap
                 // TODO: only if there are some backends on balanced_rpcs?
                 json!(true)
             }
-            "net_peerCount" => self.balanced_rpcs.num_synced_rpcs().into(),
-            "web3_clientVersion" => serde_json::Value::String(APP_USER_AGENT.to_string()),
+            "net_peerCount" => {
+                // emit stats
+                self.balanced_rpcs.num_synced_rpcs().into()
+            }
+            "web3_clientVersion" => {
+                // no stats on this. its cheap
+                serde_json::Value::String(APP_USER_AGENT.to_string())
+            }
             "web3_sha3" => {
+                // emit stats
                 // returns Keccak-256 (not the standardized SHA3-256) of the given data.
                 match &request.params {
                     Some(serde_json::Value::Array(params)) => {
@@ -778,6 +803,8 @@ impl Web3ProxyApp {
             // TODO: web3_sha3?
             // anything else gets sent to backend rpcs and cached
             method => {
+                // emit stats
+
                 let head_block_number = self.balanced_rpcs.head_block_num();
 
                 // we do this check before checking caches because it might modify the request params
@@ -789,6 +816,7 @@ impl Web3ProxyApp {
 
                 trace!(?min_block_needed, ?method);
 
+                // TODO: emit a stat on error. maybe with .map_err?
                 let (cache_key, cache_result) =
                     self.cached_response(min_block_needed, &request).await?;
 

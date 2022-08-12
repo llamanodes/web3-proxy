@@ -1,7 +1,7 @@
-use axum::headers::{ContentType, HeaderName};
+use axum::headers::HeaderName;
 use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response};
-use axum::{routing::get, Extension, Router, TypedHeader};
+use axum::{routing::get, Extension, Router};
 use prometheus_client::encoding::text::encode;
 use prometheus_client::encoding::text::Encode;
 use prometheus_client::metrics::counter::Counter;
@@ -13,10 +13,10 @@ use tracing::info;
 
 #[derive(Clone, Hash, PartialEq, Eq, Encode)]
 pub struct ProxyRequestLabels {
-    protocol: Protocol,
-    rpc_method: String,
+    pub protocol: Protocol,
+    pub rpc_method: String,
     /// anonymous is user 0
-    user_id: u64,
+    pub user_id: u64,
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Encode)]

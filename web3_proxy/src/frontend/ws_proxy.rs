@@ -41,7 +41,7 @@ pub async fn public_websocket_handler(
 
     match ws_upgrade {
         Some(ws) => ws
-            .on_upgrade(|socket| proxy_web3_socket(app, socket))
+            .on_upgrade(|socket| proxy_web3_socket(app, socket, 0))
             .into_response(),
         None => {
             // this is not a websocket. redirect to a friendly page
@@ -66,7 +66,9 @@ pub async fn user_websocket_handler(
     };
 
     match ws_upgrade {
-        Some(ws_upgrade) => ws_upgrade.on_upgrade(|socket| proxy_web3_socket(app, socket)),
+        Some(ws_upgrade) => {
+            ws_upgrade.on_upgrade(move |socket| proxy_web3_socket(app, socket, user_id))
+        }
         None => {
             // TODO: store this on the app and use register_template?
             let reg = Handlebars::new();
@@ -86,15 +88,15 @@ pub async fn user_websocket_handler(
     }
 }
 
-async fn proxy_web3_socket(app: Arc<Web3ProxyApp>, socket: WebSocket) {
+async fn proxy_web3_socket(app: Arc<Web3ProxyApp>, socket: WebSocket, user_id: u64) {
     // split the websocket so we can read and write concurrently
     let (ws_tx, ws_rx) = socket.split();
 
     // create a channel for our reader and writer can communicate. todo: benchmark different channels
-    let (response_tx, response_rx) = flume::unbounded::<Message>();
+    let (response_sender, response_receiver) = flume::unbounded::<Message>();
 
-    tokio::spawn(write_web3_socket(response_rx, ws_tx));
-    tokio::spawn(read_web3_socket(app, ws_rx, response_tx));
+    tokio::spawn(write_web3_socket(response_receiver, user_id, ws_tx));
+    tokio::spawn(read_web3_socket(app, user_id, ws_rx, response_sender));
 }
 
 /// websockets support a few more methods than http clients
@@ -104,6 +106,7 @@ async fn handle_socket_payload(
     response_sender: &flume::Sender<Message>,
     subscription_count: &AtomicUsize,
     subscriptions: &mut HashMap<String, AbortHandle>,
+    user_id: u64,
 ) -> Message {
     // TODO: do any clients send batches over websockets?
     let (id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
@@ -129,13 +132,15 @@ async fn handle_socket_payload(
                     }
                 }
                 "eth_unsubscribe" => {
+                    // TODO: how should handle rate limits and stats on this?
+
                     let subscription_id = payload.params.unwrap().to_string();
 
                     let partial_response = match subscriptions.remove(&subscription_id) {
-                        None => "false",
+                        None => false,
                         Some(handle) => {
                             handle.abort();
-                            "true"
+                            true
                         }
                     };
 
@@ -144,7 +149,7 @@ async fn handle_socket_payload(
 
                     Ok(response.into())
                 }
-                _ => app.proxy_web3_rpc(payload.into()).await,
+                _ => app.proxy_web3_rpc(payload.into(), user_id).await,
             };
 
             (id, response)
@@ -170,6 +175,7 @@ async fn handle_socket_payload(
 
 async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
+    user_id: u64,
     mut ws_rx: SplitStream<WebSocket>,
     response_sender: flume::Sender<Message>,
 ) {
@@ -186,6 +192,7 @@ async fn read_web3_socket(
                     &response_sender,
                     &subscription_count,
                     &mut subscriptions,
+                    user_id,
                 )
                 .await
             }
@@ -208,6 +215,7 @@ async fn read_web3_socket(
                     &response_sender,
                     &subscription_count,
                     &mut subscriptions,
+                    user_id,
                 )
                 .await
             }
@@ -225,6 +233,7 @@ async fn read_web3_socket(
 
 async fn write_web3_socket(
     response_rx: flume::Receiver<Message>,
+    user_id: u64,
     mut ws_tx: SplitSink<WebSocket, Message>,
 ) {
     // TODO: increment counter for open websockets
