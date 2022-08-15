@@ -1,5 +1,4 @@
 pub mod app;
-pub mod bb8_helpers;
 pub mod block_helpers;
 pub mod config;
 pub mod connection;

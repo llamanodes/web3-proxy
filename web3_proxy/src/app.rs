@@ -15,8 +15,10 @@ use futures::stream::StreamExt;
 use futures::Future;
 use migration::{Migrator, MigratorTrait};
 use parking_lot::RwLock;
-use redis_cell_client::bb8::ErrorSink;
-use redis_cell_client::{bb8, RedisCell, RedisConnectionManager, RedisPool};
+use redis_rate_limit::{
+    bb8::{self, ErrorSink},
+    RedisConnectionManager, RedisErrorSink, RedisPool, RedisRateLimit,
+};
 use sea_orm::DatabaseConnection;
 use serde_json::json;
 use std::fmt;
@@ -32,7 +34,6 @@ use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tracing::{info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
 
-use crate::bb8_helpers;
 use crate::block_helpers::block_needed;
 use crate::config::{AppConfig, TopConfig};
 use crate::connections::Web3Connections;
@@ -71,7 +72,7 @@ pub enum TxState {
 pub struct UserCacheValue {
     pub expires_at: Instant,
     pub user_id: u64,
-    pub user_count_per_period: u32,
+    pub user_count_per_period: u64,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -143,7 +144,7 @@ pub struct Web3ProxyApp {
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
     pub pending_transactions: Arc<DashMap<TxHash, TxState>>,
-    pub rate_limiter: Option<RedisCell>,
+    pub rate_limiter: Option<RedisRateLimit>,
     pub redis_pool: Option<RedisPool>,
     pub stats: AppStats,
     pub user_cache: RwLock<FifoCountMap<Uuid, UserCacheValue>>,
@@ -217,7 +218,7 @@ impl Web3ProxyApp {
                 // TODO: min_idle?
                 // TODO: set max_size based on max expected concurrent connections? set based on num_workers?
                 let builder = bb8::Pool::builder()
-                    .error_sink(bb8_helpers::RedisErrorSink.boxed_clone())
+                    .error_sink(RedisErrorSink.boxed_clone())
                     .min_idle(Some(min_size))
                     .max_size(max_size);
 
@@ -284,16 +285,11 @@ impl Web3ProxyApp {
             private_rpcs
         };
 
-        // TODO: how much should we allow?
-        // TODO: im seeing errors in redis. just use the redis FAQ on rate limiting. its really simple
-        let public_max_burst = top_config.app.public_rate_limit_per_minute / 3;
-
         let frontend_rate_limiter = redis_pool.as_ref().map(|redis_pool| {
-            RedisCell::new(
+            RedisRateLimit::new(
                 redis_pool.clone(),
                 "web3_proxy",
                 "frontend",
-                public_max_burst,
                 top_config.app.public_rate_limit_per_minute,
                 60,
             )

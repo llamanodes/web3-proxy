@@ -145,7 +145,7 @@ fn main() -> anyhow::Result<()> {
     let cli_config: CliConfig = argh::from_env();
 
     // advanced configuration is on disk
-    info!("Loading rpc config @ {}", cli_config.config);
+    info!("Loading config @ {}", cli_config.config);
     let top_config: String = fs::read_to_string(cli_config.config.clone())?;
     let top_config: TopConfig = toml::from_str(&top_config)?;
 

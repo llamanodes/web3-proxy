@@ -137,7 +137,7 @@ impl Web3Connections {
         chain_id: u64,
         server_configs: HashMap<String, Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
-        redis_client_pool: Option<redis_cell_client::RedisPool>,
+        redis_client_pool: Option<redis_rate_limit::RedisPool>,
         head_block_sender: Option<watch::Sender<Arc<Block<TxHash>>>>,
         pending_tx_sender: Option<broadcast::Sender<TxState>>,
         pending_transactions: Arc<DashMap<TxHash, TxState>>,

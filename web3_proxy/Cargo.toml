@@ -12,9 +12,9 @@ deadlock_detection = ["parking_lot/deadlock_detection"]
 verbose_db = ["sea-orm/debug-print"]
 
 [dependencies]
-redis-cell-client = { path = "../redis-cell-client" }
 entities = { path = "../entities" }
 migration = { path = "../migration" }
+redis-rate-limit = { path = "../redis-rate-limit" }
 
 anyhow = { version = "1.0.61", features = ["backtrace"] }
 arc-swap = "1.5.1"
@@ -28,7 +28,7 @@ dotenv = "0.15.0"
 ethers = { version = "0.17.0", features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 flume = "0.10.14"
-futures = { version = "0.3.21", features = ["thread-pool"] }
+futures = { version = "0.3.23", features = ["thread-pool"] }
 hashbrown = { version = "0.12.3", features = ["serde"] }
 indexmap = "1.9.1"
 fifomap = { path = "../fifomap" }

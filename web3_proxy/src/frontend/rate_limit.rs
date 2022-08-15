@@ -1,6 +1,6 @@
 use axum::response::Response;
 use entities::user_keys;
-use redis_cell_client::ThrottleResult;
+use redis_rate_limit::ThrottleResult;
 use reqwest::StatusCode;
 use sea_orm::{
     ColumnTrait, DeriveColumn, EntityTrait, EnumIter, IdenStatic, QueryFilter, QuerySelect,
@@ -52,20 +52,23 @@ impl RateLimitResult {
 
 impl Web3ProxyApp {
     pub async fn rate_limit_by_ip(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
-        let rate_limiter_key = format!("ip-{}", ip);
+        let rate_limiter_label = format!("ip-{}", ip);
 
         // TODO: dry this up with rate_limit_by_key
         if let Some(rate_limiter) = &self.rate_limiter {
             match rate_limiter
-                .throttle_key(&rate_limiter_key, None, None, None)
+                .throttle_label(&rate_limiter_label, None, 1)
                 .await
             {
                 Ok(ThrottleResult::Allowed) => {}
                 Ok(ThrottleResult::RetryAt(_retry_at)) => {
                     // TODO: set headers so they know when they can retry
-                    debug!(?rate_limiter_key, "rate limit exceeded"); // this is too verbose, but a stat might be good
-                                                                      // TODO: use their id if possible
+                    debug!(?rate_limiter_label, "rate limit exceeded"); // this is too verbose, but a stat might be good
+                                                                        // TODO: use their id if possible
                     return Ok(RateLimitResult::IpRateLimitExceeded(ip));
+                }
+                Ok(ThrottleResult::RetryNever) => {
+                    return Err(anyhow::anyhow!("blocked by rate limiter"))
                 }
                 Err(err) => {
                     // internal error, not rate limit being hit
@@ -148,16 +151,11 @@ impl Web3ProxyApp {
 
         // user key is valid. now check rate limits
         if let Some(rate_limiter) = &self.rate_limiter {
-            // TODO: how does max burst actually work? what should it be?
-            let user_max_burst = user_data.user_count_per_period / 3;
-            let user_period = 60;
-
             if rate_limiter
-                .throttle_key(
+                .throttle_label(
                     &user_key.to_string(),
-                    Some(user_max_burst),
                     Some(user_data.user_count_per_period),
-                    Some(user_period),
+                    1,
                 )
                 .await
                 .is_err()

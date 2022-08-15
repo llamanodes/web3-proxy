@@ -5,7 +5,7 @@ use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64
 use futures::future::try_join_all;
 use futures::StreamExt;
 use parking_lot::RwLock;
-use redis_cell_client::{RedisCell, ThrottleResult};
+use redis_rate_limit::{RedisPool, RedisRateLimit, ThrottleResult};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use std::fmt;
@@ -82,7 +82,7 @@ pub struct Web3Connection {
     /// it is an async lock because we hold it open across awaits
     provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
-    hard_limit: Option<redis_cell_client::RedisCell>,
+    hard_limit: Option<RedisRateLimit>,
     /// used for load balancing to the least loaded server
     pub soft_limit: u32,
     block_data_limit: AtomicU64,
@@ -102,7 +102,8 @@ impl Web3Connection {
         // optional because this is only used for http providers. websocket providers don't use it
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        hard_limit: Option<(u32, redis_cell_client::RedisPool)>,
+        // TODO: have a builder struct for this.
+        hard_limit: Option<(u64, RedisPool)>,
         // TODO: think more about this type
         soft_limit: u32,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
@@ -113,11 +114,10 @@ impl Web3Connection {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_conection)| {
             // TODO: allow configurable period and max_burst
             let period = 1;
-            RedisCell::new(
+            RedisRateLimit::new(
                 redis_conection,
                 "web3_proxy",
                 &format!("{}:{}", chain_id, url_str),
-                hard_rate_limit,
                 hard_rate_limit,
                 period,
             )
@@ -613,6 +613,9 @@ impl Web3Connection {
                     warn!(?retry_at, ?self, "Exhausted rate limit");
 
                     return Ok(HandleResult::RetryAt(retry_at.into()));
+                }
+                Ok(ThrottleResult::RetryNever) => {
+                    return Err(anyhow::anyhow!("Rate limit failed."));
                 }
                 Err(err) => {
                     return Err(err);

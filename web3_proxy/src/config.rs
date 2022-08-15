@@ -46,7 +46,7 @@ pub struct AppConfig {
     pub db_url: Option<String>,
     pub redis_url: Option<String>,
     #[serde(default = "default_public_rate_limit_per_minute")]
-    pub public_rate_limit_per_minute: u32,
+    pub public_rate_limit_per_minute: u64,
     #[serde(default = "default_response_cache_max_bytes")]
     pub response_cache_max_bytes: usize,
     /// the stats page url for an anonymous user.
@@ -55,7 +55,7 @@ pub struct AppConfig {
     pub redirect_user_url: String,
 }
 
-fn default_public_rate_limit_per_minute() -> u32 {
+fn default_public_rate_limit_per_minute() -> u64 {
     0
 }
 
@@ -69,7 +69,7 @@ fn default_response_cache_max_bytes() -> usize {
 pub struct Web3ConnectionConfig {
     url: String,
     soft_limit: u32,
-    hard_limit: Option<u32>,
+    hard_limit: Option<u64>,
     weight: u32,
 }
 
@@ -80,14 +80,14 @@ impl Web3ConnectionConfig {
     pub async fn spawn(
         self,
         name: String,
-        redis_client_pool: Option<redis_cell_client::RedisPool>,
+        redis_pool: Option<redis_rate_limit::RedisPool>,
         chain_id: u64,
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Web3Connection>)>>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
-        let hard_limit = match (self.hard_limit, redis_client_pool) {
+        let hard_limit = match (self.hard_limit, redis_pool) {
             (None, None) => None,
             (Some(hard_limit), Some(redis_client_pool)) => Some((hard_limit, redis_client_pool)),
             (None, Some(_)) => None,

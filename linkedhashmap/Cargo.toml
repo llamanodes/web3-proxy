@@ -2,7 +2,7 @@
 name = "linkedhashmap"
 version = "0.2.0"
 authors = ["quininer <quininer@live.com>"]
-edition = "2018"
+edition = "2021"
 
 [features]
 inline-more = [ "hashbrown" ]
