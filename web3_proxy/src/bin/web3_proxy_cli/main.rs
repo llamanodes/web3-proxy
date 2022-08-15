@@ -54,6 +54,6 @@ async fn main() -> anyhow::Result<()> {
 
             x.main(&db).await
         }
-        SubCommand::Two(x) => x.main().await,
+        SubCommand::CheckConfig(x) => x.main().await,
     }
 }

@@ -1,12 +1,13 @@
 use anyhow::Context;
 use argh::FromArgs;
 use entities::{user, user_keys};
-use ethers::types::Address;
+use ethers::prelude::Address;
 use sea_orm::ActiveModelTrait;
 use tracing::info;
+use uuid::Uuid;
 use web3_proxy::users::new_api_key;
 
-#[derive(FromArgs, PartialEq, Debug)]
+#[derive(FromArgs, PartialEq, Debug, Eq)]
 /// Create a new user and api key
 #[argh(subcommand, name = "create_user")]
 pub struct CreateUserSubCommand {
@@ -17,6 +18,11 @@ pub struct CreateUserSubCommand {
     #[argh(option)]
     /// the user's optional email
     email: Option<String>,
+
+    #[argh(option)]
+    /// the user's first api key.
+    /// If none given, one will be generated randomly
+    api_key: Option<Uuid>,
 }
 
 impl CreateUserSubCommand {
@@ -39,10 +45,12 @@ impl CreateUserSubCommand {
 
         info!("user #{}: {:?}", u.id, Address::from_slice(&u.address));
 
+        let api_key = self.api_key.unwrap_or_else(new_api_key);
+
         // create a key for the new user
         let uk = user_keys::ActiveModel {
             user_id: sea_orm::Set(u.id),
-            api_key: sea_orm::Set(new_api_key()),
+            api_key: sea_orm::Set(api_key),
             requests_per_minute: sea_orm::Set(6_000_000),
             ..Default::default()
         };

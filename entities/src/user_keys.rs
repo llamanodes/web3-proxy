@@ -4,7 +4,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "user_keys")]
 pub struct Model {
     #[sea_orm(primary_key)]

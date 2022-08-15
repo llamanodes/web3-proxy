@@ -1,6 +1,6 @@
 use argh::FromArgs;
 
-#[derive(FromArgs, PartialEq, Debug)]
+#[derive(FromArgs, PartialEq, Eq, Debug)]
 /// Second subcommand.
 #[argh(subcommand, name = "check_config")]
 pub struct CheckConfigSubCommand {
