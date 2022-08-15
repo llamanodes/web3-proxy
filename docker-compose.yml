@@ -4,7 +4,8 @@ version: "3.4"
 
 services:
   dev-redis:
-    build: ./redis-cell-server/
+    image: redis
+    command: [ "redis-server", "--save", "", "--appendonly", "no" ]
     ports:
       - 127.0.0.1:16379:6379
       # TODO: expose these ports?
