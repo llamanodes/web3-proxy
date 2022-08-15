@@ -7,6 +7,10 @@ use tracing::info;
 use uuid::Uuid;
 use web3_proxy::users::new_api_key;
 
+fn default_rpm() -> usize {
+    6_000_000
+}
+
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 /// Create a new user and api key
 #[argh(subcommand, name = "create_user")]
@@ -19,10 +23,14 @@ pub struct CreateUserSubCommand {
     /// the user's optional email
     email: Option<String>,
 
-    #[argh(option)]
+    #[argh(option, default = "new_api_key()")]
     /// the user's first api key.
-    /// If none given, one will be generated randomly
-    api_key: Option<Uuid>,
+    /// If none given, one will be generated randomly.
+    api_key: Uuid,
+
+    #[argh(option, default = "default_rpm()")]
+    /// maximum requests per minute
+    rpm: usize,
 }
 
 impl CreateUserSubCommand {
@@ -45,16 +53,16 @@ impl CreateUserSubCommand {
 
         info!("user #{}: {:?}", u.id, Address::from_slice(&u.address));
 
-        let api_key = self.api_key.unwrap_or_else(new_api_key);
-
         // create a key for the new user
+        // TODO: requests_per_minute should be configurable
         let uk = user_keys::ActiveModel {
             user_id: sea_orm::Set(u.id),
-            api_key: sea_orm::Set(api_key),
+            api_key: sea_orm::Set(self.api_key),
             requests_per_minute: sea_orm::Set(6_000_000),
             ..Default::default()
         };
 
+        // TODO: if this fails, rever adding the user, too
         let uk = uk.insert(db).await.context("Failed saving new user key")?;
 
         info!("user key: {}", uk.api_key);
