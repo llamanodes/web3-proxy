@@ -248,3 +248,5 @@ in another repo: event subscriber
   eth_1       | 2022-08-10T23:26:10.195658Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 2/3/5/5 rpcs have 0x0538…bfff
 - [ ] disable redis persistence in dev
 - [ ] fix ip detection when running in dev
+- [ ] cache api keys that are not in the database?
+- [ ] double check weight sorting code

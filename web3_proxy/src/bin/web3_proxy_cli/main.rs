@@ -1,5 +1,5 @@
+mod check_config;
 mod create_user;
-mod two;
 
 use argh::FromArgs;
 use web3_proxy::app::get_migrated_db;
@@ -23,7 +23,7 @@ pub struct TopConfig {
 #[argh(subcommand)]
 enum SubCommand {
     CreateUser(create_user::CreateUserSubCommand),
-    Two(two::SubCommandTwo),
+    CheckConfig(check_config::CheckConfigSubCommand),
     // TODO: sub command to downgrade migrations?
     // TODO: sub command to add new api keys to an existing user?
 }
