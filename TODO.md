@@ -256,4 +256,6 @@ in another repo: event subscriber
 - [ ] cache api keys that are not in the database?
 - [ ] double check weight sorting code
 - [ ] sea-orm brings in async-std, but we are using tokio. benchmark switching 
-- [ ] this query always times out: `curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.9da0e466a16f4798aed70965d61be7cbumber","params":["0xE4D849"],"id":1}' 127.0.0.1:8544`
+- [ ] this query always times out, but erigon can serve it quickly: `curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["latest"],"id":1}' 127.0.0.1:8544' 127.0.0.1:8544`
+  {"jsonrpc":"2.0","id":null,"error":{"code":-32099,"message":"deadline has elapsed"}}
+
