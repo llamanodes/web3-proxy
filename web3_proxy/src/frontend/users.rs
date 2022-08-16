@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use crate::app::Web3ProxyApp;
 
-use super::{rate_limit::RateLimitResult, errors::anyhow_error_into_response};
+use super::{errors::anyhow_error_into_response, rate_limit::RateLimitResult};
 
 pub async fn create_user(
     // this argument tells axum to parse the request body
@@ -64,6 +64,8 @@ pub async fn create_user(
 
     // TODO: proper error message
     let user = user.insert(db).await.unwrap();
+
+    //
 
     // TODO: do not expose user ids
     (StatusCode::CREATED, Json(user)).into_response()
