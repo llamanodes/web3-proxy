@@ -89,6 +89,7 @@
 - [x] I'm hitting infura rate limits very quickly. I feel like that means something is very inefficient
   - whenever blocks were slow, we started checking as fast as possible
 - [x] create user script should allow setting requests per minute
+- [x] cache api keys that are not in the database
 - [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
@@ -254,7 +255,6 @@ in another repo: event subscriber
   eth_1       | 2022-08-10T23:26:10.195014Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
   eth_1       | 2022-08-10T23:26:10.195658Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 2/3/5/5 rpcs have 0x0538…bfff
 - [ ] fix ip detection when running in dev
-- [ ] cache api keys that are not in the database?
 - [ ] double check weight sorting code
 - [ ] sea-orm brings in async-std, but we are using tokio. benchmark switching 
 - [ ] this query always times out, but erigon can serve it quickly: `curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["latest"],"id":1}' 127.0.0.1:8544' 127.0.0.1:8544`

@@ -10,7 +10,7 @@
 use super::{errors::anyhow_error_into_response, rate_limit::RateLimitResult};
 use crate::app::Web3ProxyApp;
 use axum::{
-    response::{IntoResponse, Response},
+    response::{ErrorResponse, IntoResponse, Response},
     Extension, Json,
 };
 use axum_client_ip::ClientIp;
@@ -22,8 +22,11 @@ use sea_orm::ActiveModelTrait;
 use serde::Deserialize;
 use std::sync::Arc;
 
+// TODO: how do we customize axum's error response? I think we probably want an enum that implements IntoResponse instead
 #[debug_handler]
-pub async fn get_login(Extension(app): Extension<Arc<Web3ProxyApp>>) -> Result<Response, Response> {
+pub async fn get_login(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+) -> Result<Response, ErrorResponse> {
     // let redis: RedisPool = app...;
     let redis_pool = app.redis_pool.as_ref().unwrap();
 
@@ -32,6 +35,7 @@ pub async fn get_login(Extension(app): Extension<Arc<Web3ProxyApp>>) -> Result<R
     todo!("how should this work? probably keep stuff in redis ")
 }
 
+#[debug_handler]
 pub async fn create_user(
     // this argument tells axum to parse the request body
     // as JSON into a `CreateUser` type

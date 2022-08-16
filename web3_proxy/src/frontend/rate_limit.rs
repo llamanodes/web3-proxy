@@ -130,7 +130,12 @@ impl Web3ProxyApp {
                         ))
                     }
                     None => {
-                        return Err(anyhow::anyhow!("unknown api key"));
+                        UserCacheValue::from((
+                            // TODO: how long should this cache last? get this from config
+                            Instant::now() + Duration::from_secs(60),
+                            0,
+                            0,
+                        ))
                     }
                 };
 
@@ -146,6 +151,10 @@ impl Web3ProxyApp {
             // unwrap the cache's result
             user_data.unwrap()
         };
+
+        if user_data.user_id == 0 {
+            return Err(anyhow::anyhow!("unknown key!"));
+        }
 
         // user key is valid. now check rate limits
         if let Some(rate_limiter) = &self.rate_limiter {

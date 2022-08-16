@@ -5,6 +5,7 @@ use axum::{
     Extension,
 };
 use axum_client_ip::ClientIp;
+use axum_macros::debug_handler;
 use futures::SinkExt;
 use futures::{
     future::AbortHandle,
@@ -26,6 +27,7 @@ use crate::{
 
 use super::{errors::anyhow_error_into_response, rate_limit::RateLimitResult};
 
+#[debug_handler]
 pub async fn public_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -56,6 +58,7 @@ pub async fn public_websocket_handler(
     }
 }
 
+#[debug_handler]
 pub async fn user_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Path(user_key): Path<Uuid>,
