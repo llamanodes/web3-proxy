@@ -61,17 +61,19 @@ You can copy `config/example.toml` to `config/production-$CHAINNAME.toml` and th
 
 ## Database entities
 
-Types for database entities are generated from a development database.
+This command only needs to be run during development. Production should use the already generated entities.
+
+When developing new database migrations, **after you migrate**, run this command to generate updated entity files. It's best to keep the migration and entity changes in the same commit.
 
 ```
 sea-orm-cli generate entity -u mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy -o entities/src
 ```
 
-Then manually fix some columns: `Vec<u8>` -> `sea_orm::prelude::Uuid` and `i8` -> `bool`. Related: <https://github.com/SeaQL/sea-query/issues/375> <https://github.com/SeaQL/sea-orm/issues/924>
+After running the above, you will need to manually fix some columns: `Vec<u8>` -> `sea_orm::prelude::Uuid` and `i8` -> `bool`. Related: <https://github.com/SeaQL/sea-query/issues/375> <https://github.com/SeaQL/sea-orm/issues/924>
 
 ## Flame Graphs
 
-Flame graphs make finding slow code painless:
+Flame graphs make a developer's join of finding slow code painless:
 
     $ cat /proc/sys/kernel/kptr_restrict
     1
@@ -82,7 +84,7 @@ Flame graphs make finding slow code painless:
 
 ## GDB
 
-Run the proxy under gdb for advanced debugging:
+Developers can run the proxy under gdb for advanced debugging:
 
     cargo build --release && RUST_LOG=web3_proxy=debug rust-gdb --args target/debug/web3_proxy --listen-port 7503 --rpc-config-path ./config/production-eth.toml
 
