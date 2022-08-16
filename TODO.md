@@ -75,6 +75,8 @@
 - [x] drop redis-cell in favor of a simpler (and faster) implementation. 
   - redis-cell was giving me weird errors and it isn't worth debugging it right now.
 - [x] create user script should allow setting the api key
+- [x] attach a request id to every web request
+- [ ] attach user id (not IP!) to each request
 - [-] basic request method stats
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] fantom_1    | 2022-08-10T22:19:43.522465Z  WARN web3_proxy::jsonrpc: forwarding error err=missing field `jsonrpc` at line 1 column 60

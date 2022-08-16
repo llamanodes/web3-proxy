@@ -149,7 +149,7 @@ async fn handle_socket_payload(
 
                     Ok(response.into())
                 }
-                _ => app.proxy_web3_rpc(payload.into(), user_id).await,
+                _ => app.proxy_web3_rpc(payload.into()).await,
             };
 
             (id, response)

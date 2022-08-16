@@ -520,7 +520,6 @@ impl Web3ProxyApp {
     pub async fn proxy_web3_rpc(
         &self,
         request: JsonRpcRequestEnum,
-        user_id: u64,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         trace!(?request, "proxy_web3_rpc");
 
@@ -533,10 +532,10 @@ impl Web3ProxyApp {
 
         let response = match request {
             JsonRpcRequestEnum::Single(request) => JsonRpcForwardedResponseEnum::Single(
-                timeout(max_time, self.proxy_web3_rpc_request(request, user_id)).await??,
+                timeout(max_time, self.proxy_web3_rpc_request(request)).await??,
             ),
             JsonRpcRequestEnum::Batch(requests) => JsonRpcForwardedResponseEnum::Batch(
-                timeout(max_time, self.proxy_web3_rpc_requests(requests, user_id)).await??,
+                timeout(max_time, self.proxy_web3_rpc_requests(requests)).await??,
             ),
         };
 
@@ -549,7 +548,6 @@ impl Web3ProxyApp {
     async fn proxy_web3_rpc_requests(
         &self,
         requests: Vec<JsonRpcRequest>,
-        user_id: u64,
     ) -> anyhow::Result<Vec<JsonRpcForwardedResponse>> {
         // TODO: we should probably change ethers-rs to support this directly
         // we cut up the request and send to potentually different servers. this could be a problem.
@@ -559,7 +557,7 @@ impl Web3ProxyApp {
         let responses = join_all(
             requests
                 .into_iter()
-                .map(|request| self.proxy_web3_rpc_request(request, user_id))
+                .map(|request| self.proxy_web3_rpc_request(request))
                 .collect::<Vec<_>>(),
         )
         .await;
@@ -621,7 +619,6 @@ impl Web3ProxyApp {
     async fn proxy_web3_rpc_request(
         &self,
         mut request: JsonRpcRequest,
-        user_id: u64,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         trace!("Received request: {:?}", request);
 

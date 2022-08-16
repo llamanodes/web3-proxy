@@ -30,6 +30,7 @@ fdlimit = "0.2.1"
 flume = "0.10.14"
 futures = { version = "0.3.23", features = ["thread-pool"] }
 hashbrown = { version = "0.12.3", features = ["serde"] }
+http = "0.2.8"
 indexmap = "1.9.1"
 fifomap = { path = "../fifomap" }
 notify = "4.0.17"
@@ -50,11 +51,15 @@ serde = { version = "1.0.143", features = [] }
 serde_json = { version = "1.0.83", default-features = false, features = ["alloc", "raw_value"] }
 tokio = { version = "1.20.1", features = ["full", "tracing"] }
 # TODO: make sure this uuid version matches what is in sea orm. PR on sea orm to put builder into prelude
-uuid = "1.1.2"
+tokio-stream = { version = "0.1.9", features = ["sync"] }
 toml = "0.5.9"
+tower = "0.4.13"
+tower-request-id = "0.2.0"
+tower-http = { version = "0.3.4", features = ["trace"] }
 tracing = "0.1.36"
 # TODO: tracing-subscriber has serde and serde_json features that we might want to use
 tracing-subscriber = { version = "0.3.15", features = ["env-filter", "parking_lot"] }
 url = "2.2.2"
-tower = "0.4.13"
-tokio-stream = { version = "0.1.9", features = ["sync"] }
+uuid = "1.1.2"
+
+# TODO: https://github.com/ulid/spec instead of uuid

@@ -3,6 +3,7 @@ use axum::response::Response;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_client_ip::ClientIp;
 use std::sync::Arc;
+use tracing::{error_span, Instrument};
 use uuid::Uuid;
 
 use super::errors::anyhow_error_into_response;
@@ -21,15 +22,15 @@ pub async fn public_proxy_web3_rpc(
             Err(err_response) => return err_response,
             _ => unimplemented!(),
         },
-        Err(err) => return anyhow_error_into_response(None, None, err).into_response(),
+        Err(err) => return anyhow_error_into_response(None, None, err),
     };
 
-    let user_id = 0;
     let protocol = Protocol::HTTP;
+    let user_id = 0;
 
     match &payload {
         JsonRpcRequestEnum::Batch(batch) => {
-            // TODO: use inc_by if possible?
+            // TODO: use inc_by if possible? need to group them by rpc_method
             for single in batch {
                 let rpc_method = single.method.clone();
 
@@ -37,8 +38,8 @@ pub async fn public_proxy_web3_rpc(
                     .stats
                     .proxy_requests
                     .get_or_create(&ProxyRequestLabels {
-                        protocol: protocol.clone(),
                         rpc_method,
+                        protocol: protocol.clone(),
                         user_id,
                     })
                     .inc();
@@ -59,7 +60,11 @@ pub async fn public_proxy_web3_rpc(
         }
     };
 
-    match app.proxy_web3_rpc(payload, user_id).await {
+    let user_id = 0;
+
+    let user_span = error_span!("user", user_id);
+
+    match app.proxy_web3_rpc(payload).instrument(user_span).await {
         Ok(response) => (StatusCode::OK, Json(&response)).into_response(),
         Err(err) => anyhow_error_into_response(None, None, err).into_response(),
     }
@@ -79,7 +84,7 @@ pub async fn user_proxy_web3_rpc(
         Err(err) => return anyhow_error_into_response(None, None, err).into_response(),
     };
 
-    match app.proxy_web3_rpc(payload, user_id).await {
+    match app.proxy_web3_rpc(payload).await {
         Ok(response) => (StatusCode::OK, Json(&response)).into_response(),
         Err(err) => anyhow_error_into_response(None, None, err),
     }

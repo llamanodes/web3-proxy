@@ -13,7 +13,9 @@ use tracing::info;
 
 #[derive(Clone, Hash, PartialEq, Eq, Encode)]
 pub struct ProxyRequestLabels {
+    /// GET is websocket, POST is http
     pub protocol: Protocol,
+    /// jsonrpc 2.0 method
     pub rpc_method: String,
     /// anonymous is user 0
     pub user_id: u64,

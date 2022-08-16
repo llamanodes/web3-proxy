@@ -6,19 +6,42 @@ mod rate_limit;
 mod users;
 mod ws_proxy;
 
+use ::http::Request;
 use axum::{
+    body::Body,
     handler::Handler,
     routing::{get, post},
     Extension, Router,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::info;
+use tower_http::trace::TraceLayer;
+use tower_request_id::{RequestId, RequestIdLayer};
+use tracing::{error_span, info};
 
 use crate::app::Web3ProxyApp;
 
-///
+/// http and websocket frontend for customers
 pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
+    // create a tracing span for each request
+    let request_tracing_layer =
+        TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+            // We get the request id from the extensions
+            let request_id = request
+                .extensions()
+                .get::<RequestId>()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "unknown".into());
+            // And then we put it along with other information into the `request` span
+            error_span!(
+                "http_request",
+                id = %request_id,
+                // TODO: do we want these?
+                method = %request.method(),
+                // uri = %request.uri(),
+            )
+        });
+
     // build our application with a route
     // order most to least common
     let app = Router::new()
@@ -30,11 +53,14 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/status", get(http::status))
         .route("/users", post(users::create_user))
         .layer(Extension(proxy_app))
+        // create a unique id for each request and add it to our tracing logs
+        .layer(request_tracing_layer)
+        .layer(RequestIdLayer)
         // 404 for any unknown routes
         .fallback(errors::handler_404.into_service());
 
     // run our app with hyper
-    // TODO: allow only listening on localhost?
+    // TODO: allow only listening on localhost? top_config.app.host.parse()?
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("listening on port {}", port);
     // TODO: into_make_service is enough if we always run behind a proxy. make into_make_service_with_connect_info optional?
