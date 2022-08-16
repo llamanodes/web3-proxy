@@ -7,32 +7,73 @@
 // I wonder how we handle payment
 // probably have to do manual withdrawals
 
-use super::{errors::anyhow_error_into_response, rate_limit::RateLimitResult};
+use super::{
+    errors::{anyhow_error_into_response, FrontendResult},
+    rate_limit::RateLimitResult,
+};
 use crate::app::Web3ProxyApp;
 use axum::{
-    response::{ErrorResponse, IntoResponse, Response},
+    extract::Path,
+    response::{IntoResponse, Response},
     Extension, Json,
 };
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
 use entities::user;
 use ethers::{prelude::Address, types::Bytes};
+use redis_rate_limit::redis::{pipe, AsyncCommands};
 use reqwest::StatusCode;
 use sea_orm::ActiveModelTrait;
 use serde::Deserialize;
 use std::sync::Arc;
+use uuid::Uuid;
 
 // TODO: how do we customize axum's error response? I think we probably want an enum that implements IntoResponse instead
 #[debug_handler]
 pub async fn get_login(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-) -> Result<Response, ErrorResponse> {
-    // let redis: RedisPool = app...;
-    let redis_pool = app.redis_pool.as_ref().unwrap();
+    ClientIp(ip): ClientIp,
+    // TODO: what does axum's error handling look like?
+    Path(user_address): Path<Address>,
+) -> FrontendResult {
+    // TODO: refactor this to use the try operator
+    let _ip = match app.rate_limit_by_ip(ip).await {
+        Ok(x) => match x.try_into_response().await {
+            Ok(RateLimitResult::AllowedIp(x)) => x,
+            Err(err_response) => return Ok(err_response),
+            _ => unimplemented!(),
+        },
+        Err(err) => return Ok(anyhow_error_into_response(None, None, err)),
+    };
 
-    let redis_conn = redis_pool.get().await.unwrap();
+    // at first i thought about checking that user_address is in our db
+    // but theres no need to separate the create_user and login flows
+    // its a better UX to just click "login with ethereum" and have the account created if it doesn't exist
+    // we can prompt for an email and and payment after they log in
 
-    todo!("how should this work? probably keep stuff in redis ")
+    let session_id = uuid::Uuid::new_v4();
+
+    // TODO: if no redis, store in local cache?
+    let redis_pool = app
+        .redis_pool
+        .as_ref()
+        .expect("login requires a redis server");
+
+    let mut redis_conn = redis_pool.get().await.unwrap();
+
+    // TODO: how many seconds? get from config?
+    let session_expiration_seconds = 300;
+
+    let reply: String = redis_conn
+        .set_ex(
+            session_id.to_string(),
+            user_address.to_string(),
+            session_expiration_seconds,
+        )
+        .await
+        .unwrap();
+
+    todo!("how should this work? probably keep stuff in redis")
 }
 
 #[debug_handler]

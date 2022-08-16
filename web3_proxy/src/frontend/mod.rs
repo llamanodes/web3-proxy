@@ -68,13 +68,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/u/:user_key", get(ws_proxy::user_websocket_handler))
         .route("/health", get(http::health))
         .route("/status", get(http::status))
-        // .route(
-        //     "/login",
-        //     HandleError::new(
-        //         move |app| async { users::get_login(app).await },
-        //         handle_anyhow_error,
-        //     ),
-        // )
+        .route("/login", get(users::get_login))
         .route("/users", post(users::create_user))
         .route(
             "/foo",

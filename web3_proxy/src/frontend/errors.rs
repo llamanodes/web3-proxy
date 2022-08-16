@@ -4,14 +4,20 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use derive_more::From;
 use serde_json::value::RawValue;
 use std::error::Error;
 
-pub struct ErrorResponse {
-    pub inner: Box<dyn Error>,
+// TODO: take "IntoResult" instead?
+pub type FrontendResult = Result<Response, FrontendErrorResponse>;
+
+#[derive(From)]
+pub enum FrontendErrorResponse {
+    Anyhow(anyhow::Error),
+    BoxError(Box<dyn Error>),
 }
 
-impl IntoResponse for ErrorResponse {
+impl IntoResponse for FrontendErrorResponse {
     fn into_response(self) -> Response {
         todo!("into_response based on the error type")
     }

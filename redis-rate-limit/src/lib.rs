@@ -7,7 +7,7 @@ use std::ops::Add;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub use crate::errors::{RedisError, RedisErrorSink};
-pub use bb8_redis::{bb8, RedisConnectionManager};
+pub use bb8_redis::{bb8, redis, RedisConnectionManager};
 
 pub type RedisPool = bb8::Pool<RedisConnectionManager>;
 
