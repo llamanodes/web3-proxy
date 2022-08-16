@@ -19,7 +19,7 @@ use axum::{
 };
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
-use entities::user;
+use entities::{user, user_keys};
 use ethers::{prelude::Address, types::Bytes};
 use redis_rate_limit::redis::AsyncCommands;
 use reqwest::StatusCode;
@@ -58,7 +58,7 @@ pub async fn get_login(
     // TODO: how many seconds? get from config?
     let expire_seconds: usize = 300;
 
-    // create a session id and save it in redis
+    // create a message and save it in redis
     let nonce = Uuid::new_v4();
 
     let issued_at = OffsetDateTime::now_utc();
@@ -124,11 +124,23 @@ pub async fn create_user(
         todo!("proper error message")
     }
 
+    let redis_pool = app
+        .redis_pool
+        .as_ref()
+        .expect("login requires a redis server");
+
+    let mut redis_conn = redis_pool.get().await.unwrap();
+
+    // TODO: use getdel
+    // TODO: do not unwrap. make this function return a FrontendResult
+    let message: String = redis_conn.get(payload.nonce.to_string()).await.unwrap();
+
+    let message: Message = message.parse().unwrap();
+
     // TODO: dont unwrap. proper error
     let signature: [u8; 65] = payload.signature.as_ref().try_into().unwrap();
 
     // TODO: calculate the expected message for the current user. include domain and a nonce. let timestamp be automatic
-    let message: siwe::Message = "abc123".parse().unwrap();
     if let Err(e) = message.verify(signature, None, None, None) {
         // message cannot be correctly authenticated
         todo!("proper error message: {}", e)
@@ -146,9 +158,26 @@ pub async fn create_user(
     let user = user.insert(db).await.unwrap();
 
     // TODO: create
+    let api_key = todo!();
+
+    /*
+    let rpm = app.config.something;
+
+    // create a key for the new user
+    // TODO: requests_per_minute should be configurable
+    let uk = user_keys::ActiveModel {
+        user_id: u.id,
+        api_key: sea_orm::Set(api_key),
+        requests_per_minute: sea_orm::Set(rpm),
+        ..Default::default()
+    };
+
+    // TODO: if this fails, rever adding the user, too
+    let uk = uk.save(&txn).await.context("Failed saving new user key")?;
 
     // TODO: do not expose user ids
     (StatusCode::CREATED, Json(user)).into_response()
+     */
 }
 
 // the input to our `create_user` handler
@@ -158,5 +187,6 @@ pub struct CreateUser {
     // TODO: make sure the email address is valid
     email: Option<String>,
     signature: Bytes,
+    nonce: Uuid,
     invite_code: String,
 }

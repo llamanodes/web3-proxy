@@ -53,11 +53,12 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
             )
         });
 
-    // create user endpoint needs some work sothat
+    /*
     let some_fallible_service = tower::service_fn(|_req| async {
         // thing_that_might_fail().await?;
         Ok::<_, anyhow::Error>(Response::new(Body::empty()))
     });
+    */
 
     // build our application with a route
     // order most to least common
@@ -70,10 +71,10 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/status", get(http::status))
         .route("/login/:user_address", get(users::get_login))
         .route("/users", post(users::create_user))
-        .route(
-            "/foo",
-            HandleError::new(some_fallible_service, handle_anyhow_error),
-        )
+        // .route(
+        //     "/foo",
+        //     HandleError::new(some_fallible_service, handle_anyhow_error),
+        // )
         .layer(Extension(proxy_app))
         // create a unique id for each request and add it to our tracing logs
         .layer(request_tracing_layer)
