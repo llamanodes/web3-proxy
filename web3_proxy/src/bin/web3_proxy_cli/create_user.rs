@@ -17,7 +17,7 @@ fn default_rpm() -> u32 {
 pub struct CreateUserSubCommand {
     #[argh(option)]
     /// the user's ethereum address
-    address: String,
+    address: Address,
 
     #[argh(option)]
     /// the user's optional email
@@ -38,12 +38,8 @@ impl CreateUserSubCommand {
         let txn = db.begin().await?;
 
         // TODO: would be nice to use the fixed array instead of a Vec in the entities
-        let address = self
-            .address
-            .parse::<Address>()
-            .context("Failed parsing new user address")?
-            .to_fixed_bytes()
-            .into();
+        // TODO: how can we use custom types with
+        let address = self.address.to_fixed_bytes().into();
 
         let u = user::ActiveModel {
             address: sea_orm::Set(address),

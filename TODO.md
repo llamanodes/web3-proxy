@@ -88,6 +88,7 @@
   - [x] send getTransaction rpc requests to the private rpc tier
 - [x] I'm hitting infura rate limits very quickly. I feel like that means something is very inefficient
   - whenever blocks were slow, we started checking as fast as possible
+- [x] create user script should allow setting requests per minute
 - [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
