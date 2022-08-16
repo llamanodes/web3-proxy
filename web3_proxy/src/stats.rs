@@ -21,7 +21,7 @@ pub struct ProxyRequestLabels {
     pub user_id: u64,
 }
 
-#[derive(Clone, Hash, PartialEq, Eq, Encode)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Encode)]
 pub enum Protocol {
     HTTP,
     Websocket,

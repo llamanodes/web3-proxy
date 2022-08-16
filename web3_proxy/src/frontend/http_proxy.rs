@@ -28,6 +28,10 @@ pub async fn public_proxy_web3_rpc(
     let protocol = Protocol::HTTP;
     let user_id = 0;
 
+    let user_span = error_span!("user", user_id, ?protocol);
+
+    /*
+    // TODO: move this to a helper function (or two). have it fetch method, protocol, etc. from tracing?
     match &payload {
         JsonRpcRequestEnum::Batch(batch) => {
             // TODO: use inc_by if possible? need to group them by rpc_method
@@ -59,14 +63,11 @@ pub async fn public_proxy_web3_rpc(
                 .inc();
         }
     };
-
-    let user_id = 0;
-
-    let user_span = error_span!("user", user_id);
+    */
 
     match app.proxy_web3_rpc(payload).instrument(user_span).await {
         Ok(response) => (StatusCode::OK, Json(&response)).into_response(),
-        Err(err) => anyhow_error_into_response(None, None, err).into_response(),
+        Err(err) => anyhow_error_into_response(None, None, err),
     }
 }
 
@@ -81,10 +82,14 @@ pub async fn user_proxy_web3_rpc(
             Err(err_response) => return err_response,
             _ => unimplemented!(),
         },
-        Err(err) => return anyhow_error_into_response(None, None, err).into_response(),
+        Err(err) => return anyhow_error_into_response(None, None, err),
     };
 
-    match app.proxy_web3_rpc(payload).await {
+    let protocol = Protocol::HTTP;
+
+    let user_span = error_span!("user", user_id, ?protocol);
+
+    match app.proxy_web3_rpc(payload).instrument(user_span).await {
         Ok(response) => (StatusCode::OK, Json(&response)).into_response(),
         Err(err) => anyhow_error_into_response(None, None, err),
     }

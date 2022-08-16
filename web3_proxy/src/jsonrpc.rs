@@ -6,10 +6,17 @@ use serde_json::value::RawValue;
 use std::fmt;
 use tracing::warn;
 
+// this is used by serde
+#[allow(dead_code)]
+fn default_jsonrpc() -> String {
+    "2.0".to_string()
+}
+
 #[derive(Clone, serde::Deserialize)]
 pub struct JsonRpcRequest {
     // TODO: skip jsonrpc entirely? its against spec to drop it, but some servers bad
-    pub jsonrpc: Option<Box<RawValue>>,
+    #[serde(default = "default_jsonrpc")]
+    pub jsonrpc: String,
     /// id could be a stricter type, but many rpcs do things against the spec
     pub id: Box<RawValue>,
     pub method: String,
@@ -112,8 +119,10 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
                     }
                 }
 
-                // TODO: some providers don't follow the spec and dont include the jsonrpc key
-                let jsonrpc = jsonrpc.ok_or_else(|| de::Error::missing_field("jsonrpc"))?;
+                // some providers don't follow the spec and dont include the jsonrpc key
+                // i think "2.0" should be a fine default to handle these incompatible clones
+                let jsonrpc = jsonrpc.unwrap_or_else(|| "2.0".to_string());
+                // TODO: Errors returned by the try operator get shown in an ugly way
                 let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
                 let method = method.ok_or_else(|| de::Error::missing_field("method"))?;
 
@@ -139,6 +148,7 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
     }
 }
 
+// TODO: impl Error on this?
 /// All jsonrpc errors use this structure
 #[derive(Serialize, Clone)]
 pub struct JsonRpcErrorData {
@@ -154,6 +164,8 @@ pub struct JsonRpcErrorData {
 /// A complete response
 #[derive(Clone, Serialize)]
 pub struct JsonRpcForwardedResponse {
+    // TODO: jsonrpc a &str?
+    #[serde(default = "default_jsonrpc")]
     pub jsonrpc: String,
     pub id: Box<RawValue>,
     #[serde(skip_serializing_if = "Option::is_none")]

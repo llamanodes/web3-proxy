@@ -76,13 +76,14 @@
   - redis-cell was giving me weird errors and it isn't worth debugging it right now.
 - [x] create user script should allow setting the api key
 - [x] attach a request id to every web request
-- [ ] attach user id (not IP!) to each request
-- [-] basic request method stats
+- [x] attach user id (not IP!) to each request
+- [x] fantom_1    | 2022-08-10T22:19:43.522465Z  WARN web3_proxy::jsonrpc: forwarding error err=missing field `jsonrpc` at line 1 column 60
+  - [x] i think the server isn't following the spec. we need a context attached to more errors so we know which one
+  - [x] make jsonrpc default to "2.0" (including the custom deserializer that handles the RawValues)
+- [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
 - [ ] use siwe messages and signatures for sign up and login
-- [ ] fantom_1    | 2022-08-10T22:19:43.522465Z  WARN web3_proxy::jsonrpc: forwarding error err=missing field `jsonrpc` at line 1 column 60
-  - [ ] i think the server isn't following the spec. we need a context attached to this error so we know which one
-  - [ ] maybe make jsonrpc an Option
 - [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
+  - i think there is also a bug because 0xllam4 ran a benchmark and get a bunch of errors back
 
 ## V1
 
@@ -127,7 +128,8 @@
   - [ ] Public bsc server got “0” for block data limit (ninicoin)
 - [ ] If we need an archive server and no servers in sync, exit immediately with an error instead of waiting 60 seconds
 - [ ] 60 second timeout is too short. Maybe do that for free tier and larger timeout for paid. Problem is that some queries can take over 1000 seconds
-- [ ] refactor from_anyhow_error to have consistent error codes and http codes
+- [ ] refactor from_anyhow_error to have consistent error codes and http codes. maybe implement the Error trait
+- [ ] when handling errors from axum parsing the Json...Enum, the errors don't get wrapped in json. i think we need a Layer
 
 new endpoints for users:
 - think about where to put this. a separate app might be better

@@ -511,6 +511,7 @@ impl Web3Connection {
         self: Arc<Self>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
     ) -> anyhow::Result<()> {
+        // TODO: move this data into a span?
         info!("watching {}", self);
 
         // TODO: is a RwLock of an Option<Arc> the right thing here?

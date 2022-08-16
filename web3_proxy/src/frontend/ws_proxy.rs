@@ -15,12 +15,13 @@ use hashbrown::HashMap;
 use serde_json::{json, value::RawValue};
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
-use tracing::{error, info, trace};
+use tracing::{error, error_span, info, trace, Instrument};
 use uuid::Uuid;
 
 use crate::{
     app::Web3ProxyApp,
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
+    stats::Protocol,
 };
 
 use super::{errors::anyhow_error_into_response, rate_limit::RateLimitResult};
@@ -39,9 +40,14 @@ pub async fn public_websocket_handler(
         Err(err) => return anyhow_error_into_response(None, None, err).into_response(),
     };
 
+    let user_id = 0;
+    let protocol = Protocol::Websocket;
+
+    let user_span = error_span!("user", user_id, ?protocol);
+
     match ws_upgrade {
         Some(ws) => ws
-            .on_upgrade(|socket| proxy_web3_socket(app, socket, 0))
+            .on_upgrade(|socket| proxy_web3_socket(app, socket).instrument(user_span))
             .into_response(),
         None => {
             // this is not a websocket. redirect to a friendly page
@@ -65,10 +71,15 @@ pub async fn user_websocket_handler(
         Err(err) => return anyhow_error_into_response(None, None, err).into_response(),
     };
 
+    let protocol = Protocol::Websocket;
+
+    // log the id, not the address. we don't want to expose the user's address
+    // TODO: type that wraps Address and have it censor? would protect us from accidently logging addresses
+    let user_span = error_span!("user", user_id, ?protocol);
+
     match ws_upgrade {
-        Some(ws_upgrade) => {
-            ws_upgrade.on_upgrade(move |socket| proxy_web3_socket(app, socket, user_id))
-        }
+        Some(ws_upgrade) => ws_upgrade
+            .on_upgrade(move |socket| proxy_web3_socket(app, socket).instrument(user_span)),
         None => {
             // TODO: store this on the app and use register_template?
             let reg = Handlebars::new();
@@ -88,15 +99,15 @@ pub async fn user_websocket_handler(
     }
 }
 
-async fn proxy_web3_socket(app: Arc<Web3ProxyApp>, socket: WebSocket, user_id: u64) {
+async fn proxy_web3_socket(app: Arc<Web3ProxyApp>, socket: WebSocket) {
     // split the websocket so we can read and write concurrently
     let (ws_tx, ws_rx) = socket.split();
 
     // create a channel for our reader and writer can communicate. todo: benchmark different channels
     let (response_sender, response_receiver) = flume::unbounded::<Message>();
 
-    tokio::spawn(write_web3_socket(response_receiver, user_id, ws_tx));
-    tokio::spawn(read_web3_socket(app, user_id, ws_rx, response_sender));
+    tokio::spawn(write_web3_socket(response_receiver, ws_tx));
+    tokio::spawn(read_web3_socket(app, ws_rx, response_sender));
 }
 
 /// websockets support a few more methods than http clients
@@ -106,18 +117,22 @@ async fn handle_socket_payload(
     response_sender: &flume::Sender<Message>,
     subscription_count: &AtomicUsize,
     subscriptions: &mut HashMap<String, AbortHandle>,
-    user_id: u64,
 ) -> Message {
     // TODO: do any clients send batches over websockets?
     let (id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
         Ok(payload) => {
+            // TODO: should we use this id for the subscription id? it should be unique and means we dont need an atomic
             let id = payload.id.clone();
 
             let response: anyhow::Result<JsonRpcForwardedResponseEnum> = match &payload.method[..] {
                 "eth_subscribe" => {
+                    // TODO: what should go in this span?
+                    let span = error_span!("eth_subscribe");
+
                     let response = app
                         .clone()
                         .eth_subscribe(payload, subscription_count, response_sender.clone())
+                        .instrument(span)
                         .await;
 
                     match response {
@@ -175,7 +190,6 @@ async fn handle_socket_payload(
 
 async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
-    user_id: u64,
     mut ws_rx: SplitStream<WebSocket>,
     response_sender: flume::Sender<Message>,
 ) {
@@ -192,7 +206,6 @@ async fn read_web3_socket(
                     &response_sender,
                     &subscription_count,
                     &mut subscriptions,
-                    user_id,
                 )
                 .await
             }
@@ -215,7 +228,6 @@ async fn read_web3_socket(
                     &response_sender,
                     &subscription_count,
                     &mut subscriptions,
-                    user_id,
                 )
                 .await
             }
@@ -233,7 +245,6 @@ async fn read_web3_socket(
 
 async fn write_web3_socket(
     response_rx: flume::Receiver<Message>,
-    user_id: u64,
     mut ws_tx: SplitSink<WebSocket, Message>,
 ) {
     // TODO: increment counter for open websockets
