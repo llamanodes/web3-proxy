@@ -81,13 +81,6 @@
 - [x] fantom_1    | 2022-08-10T22:19:43.522465Z  WARN web3_proxy::jsonrpc: forwarding error err=missing field `jsonrpc` at line 1 column 60
   - [x] i think the server isn't following the spec. we need a context attached to more errors so we know which one
   - [x] make jsonrpc default to "2.0" (including the custom deserializer that handles the RawValues)
-- [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
-- [ ] use siwe messages and signatures for sign up and login
-- [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
-  - i think there is also a bug because 0xllam4 ran a benchmark and get a bunch of errors back
-
-## V1
-
 - [x] if the eth_call (or similar) params include a block, we can cache for that
 - [x] when block subscribers receive blocks, store them in a block_map
 - [x] eth_blockNumber without a backend request
@@ -95,6 +88,13 @@
   - [x] send getTransaction rpc requests to the private rpc tier
 - [x] I'm hitting infura rate limits very quickly. I feel like that means something is very inefficient
   - whenever blocks were slow, we started checking as fast as possible
+- [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
+- [ ] use siwe messages and signatures for sign up and login
+- [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
+  - i think there is also a bug because 0xllam4 ran a benchmark and get a bunch of errors back. and i've seen "server not synced" a couple times
+
+## V1
+
 - [ ] send logs to sentry
 - [ ] active requests on /status is always 0 even when i'm running requests through
 - [ ] redis cell is giving errors under high load. maybe replace with https://redis.com/redis-best-practices/basic-rate-limiting/
@@ -133,7 +133,10 @@
 - [ ] when handling errors from axum parsing the Json...Enum, the errors don't get wrapped in json. i think we need a Layer
 
 new endpoints for users:
-- think about where to put this. a separate app might be better
+- [x] GET /u/:api_key
+  - proxies to web3 websocket
+- [x] POST /u/:api_key
+  - proxies to web3
 - [ ] GET /user/login/$address
   - returns a JSON string for the user to sign
 - [ ] POST /user/login/$address
@@ -151,10 +154,6 @@ new endpoints for users:
   - opt-in link email address
   - checks for api key in session cookie or header
   - allows modifying user settings
-- [x] GET /u/$api_key
-  - proxies to web3 websocket
-- [x] POST /u/$api_key
-  - proxies to web3
 - [ ] POST /users/process_transaction
   - checks a transaction to see if it modifies a user's balance. records results in a sql database
   - we will have our own event subscriber watching for "deposit" events, but sometimes events get missed and users might incorrectly "transfer" the tokens directly to an address instead of using the dapp
@@ -165,7 +164,6 @@ new endpoints for users:
   - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
   - so maybe we don't want this. we can just use the general request cache for these. they will only require 1 request and it means requests won't get in the way as much on writes as new blocks arrive.
   - after looking at my request logs, i think its worth doing this. no point hitting the backends with requests for blocks multiple times. will also help with cache hit rates since we can keep recent blocks in a separate cache
-- [ ] sea-orm brings in async-std, but we are using tokio. benchmark switching 
 - [ ] jwt auth so people can easily switch from infura
 - [ ] handle log subscriptions
 - [ ] most things that are cached locally should probably be in shared redis caches
@@ -257,3 +255,4 @@ in another repo: event subscriber
 - [ ] fix ip detection when running in dev
 - [ ] cache api keys that are not in the database?
 - [ ] double check weight sorting code
+- [ ] sea-orm brings in async-std, but we are using tokio. benchmark switching 
