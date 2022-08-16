@@ -7,11 +7,14 @@
 // I wonder how we handle payment
 // probably have to do manual withdrawals
 
+use super::{errors::anyhow_error_into_response, rate_limit::RateLimitResult};
+use crate::app::Web3ProxyApp;
 use axum::{
     response::{IntoResponse, Response},
     Extension, Json,
 };
 use axum_client_ip::ClientIp;
+use axum_macros::debug_handler;
 use entities::user;
 use ethers::{prelude::Address, types::Bytes};
 use reqwest::StatusCode;
@@ -19,9 +22,15 @@ use sea_orm::ActiveModelTrait;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::app::Web3ProxyApp;
+#[debug_handler]
+pub async fn get_login(Extension(app): Extension<Arc<Web3ProxyApp>>) -> Result<Response, Response> {
+    // let redis: RedisPool = app...;
+    let redis_pool = app.redis_pool.as_ref().unwrap();
 
-use super::{errors::anyhow_error_into_response, rate_limit::RateLimitResult};
+    let redis_conn = redis_pool.get().await.unwrap();
+
+    todo!("how should this work? probably keep stuff in redis ")
+}
 
 pub async fn create_user(
     // this argument tells axum to parse the request body
@@ -30,13 +39,14 @@ pub async fn create_user(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
 ) -> Response {
+    // TODO: return a Result instead
     let _ip = match app.rate_limit_by_ip(ip).await {
         Ok(x) => match x.try_into_response().await {
             Ok(RateLimitResult::AllowedIp(x)) => x,
             Err(err_response) => return err_response,
             _ => unimplemented!(),
         },
-        Err(err) => return anyhow_error_into_response(None, None, err).into_response(),
+        Err(err) => return anyhow_error_into_response(None, None, err),
     };
 
     // TODO: check invite_code against the app's config or database
@@ -65,7 +75,7 @@ pub async fn create_user(
     // TODO: proper error message
     let user = user.insert(db).await.unwrap();
 
-    //
+    // TODO: create
 
     // TODO: do not expose user ids
     (StatusCode::CREATED, Json(user)).into_response()

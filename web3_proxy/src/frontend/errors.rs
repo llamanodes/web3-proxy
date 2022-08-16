@@ -1,11 +1,21 @@
+use crate::jsonrpc::JsonRpcForwardedResponse;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
 use serde_json::value::RawValue;
+use std::error::Error;
 
-use crate::jsonrpc::JsonRpcForwardedResponse;
+pub struct ErrorResponse {
+    pub inner: Box<dyn Error>,
+}
+
+impl IntoResponse for ErrorResponse {
+    fn into_response(self) -> Response {
+        todo!("into_response based on the error type")
+    }
+}
 
 pub async fn handler_404() -> Response {
     let err = anyhow::anyhow!("nothing to see here");
@@ -13,6 +23,7 @@ pub async fn handler_404() -> Response {
     anyhow_error_into_response(Some(StatusCode::NOT_FOUND), None, err)
 }
 
+/// TODO: generic error?
 /// handle errors by converting them into something that implements `IntoResponse`
 /// TODO: use this. i can't get <https://docs.rs/axum/latest/axum/error_handling/index.html> to work
 /// TODO: i think we want a custom result type instead. put the anyhow result inside. then `impl IntoResponse for CustomResult`

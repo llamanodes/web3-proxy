@@ -21,6 +21,7 @@ arc-swap = "1.5.1"
 argh = "0.1.8"
 axum = { version = "0.5.15", features = ["headers", "serde_json", "tokio-tungstenite", "ws"] }
 axum-client-ip = "0.2.0"
+axum-macros = "*"
 counter = "0.5.6"
 dashmap = "5.3.4"
 derive_more = "0.99.17"

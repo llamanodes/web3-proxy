@@ -1,3 +1,7 @@
+use super::errors::anyhow_error_into_response;
+use super::rate_limit::RateLimitResult;
+use crate::stats::{Protocol, ProxyRequestLabels};
+use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::Path;
 use axum::response::Response;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
@@ -5,11 +9,6 @@ use axum_client_ip::ClientIp;
 use std::sync::Arc;
 use tracing::{error_span, Instrument};
 use uuid::Uuid;
-
-use super::errors::anyhow_error_into_response;
-use super::rate_limit::RateLimitResult;
-use crate::stats::{Protocol, ProxyRequestLabels};
-use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 
 pub async fn public_proxy_web3_rpc(
     Json(payload): Json<JsonRpcRequestEnum>,

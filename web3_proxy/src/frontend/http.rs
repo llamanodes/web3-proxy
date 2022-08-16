@@ -1,8 +1,7 @@
+use crate::app::Web3ProxyApp;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use serde_json::json;
 use std::sync::Arc;
-
-use crate::app::Web3ProxyApp;
 
 /// Health check page for load balancers to use
 pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {

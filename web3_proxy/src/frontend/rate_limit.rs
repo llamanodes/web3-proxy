@@ -1,3 +1,5 @@
+use super::errors::anyhow_error_into_response;
+use crate::app::{UserCacheValue, Web3ProxyApp};
 use axum::response::Response;
 use entities::user_keys;
 use redis_rate_limit::ThrottleResult;
@@ -9,10 +11,6 @@ use std::{net::IpAddr, time::Duration};
 use tokio::time::Instant;
 use tracing::{debug, warn};
 use uuid::Uuid;
-
-use crate::app::{UserCacheValue, Web3ProxyApp};
-
-use super::errors::anyhow_error_into_response;
 
 pub enum RateLimitResult {
     AllowedIp(IpAddr),
