@@ -4,11 +4,11 @@ version: "3.4"
 
 services:
   dev-redis:
-    image: redis
-    command: [ "redis-server", "--save", "", "--appendonly", "no" ]
+    extends:
+      file: docker-compose.common.yml
+      service: volatile_redis
     ports:
       - 127.0.0.1:16379:6379
-      # TODO: expose these ports?
 
   dev-db:
     image: mysql

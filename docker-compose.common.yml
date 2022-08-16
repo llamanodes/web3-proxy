@@ -7,3 +7,7 @@ services:
     environment:
       #RUST_LOG: "info,web3_proxy=debug"
       RUST_LOG: info
+
+  volatile_redis:
+    image: redis
+    command: [ "redis-server", "--save", "", "--appendonly", "no" ]

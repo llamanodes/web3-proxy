@@ -75,6 +75,7 @@
 - [x] drop redis-cell in favor of a simpler (and faster) implementation. 
   - redis-cell was giving me weird errors and it isn't worth debugging it right now.
 - [x] create user script should allow setting the api key
+- [x] disable redis persistence in dev
 - [x] attach a request id to every web request
 - [x] attach user id (not IP!) to each request
 - [x] fantom_1    | 2022-08-10T22:19:43.522465Z  WARN web3_proxy::jsonrpc: forwarding error err=missing field `jsonrpc` at line 1 column 60
@@ -253,7 +254,6 @@ in another repo: event subscriber
   eth_1       | 2022-08-10T23:26:08.917603Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
   eth_1       | 2022-08-10T23:26:10.195014Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
   eth_1       | 2022-08-10T23:26:10.195658Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 2/3/5/5 rpcs have 0x0538…bfff
-- [x] disable redis persistence in dev
 - [ ] fix ip detection when running in dev
 - [ ] cache api keys that are not in the database?
 - [ ] double check weight sorting code
