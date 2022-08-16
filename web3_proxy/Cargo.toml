@@ -50,8 +50,10 @@ siwe = "0.4.1"
 sea-orm = { version = "0.9.1", features = ["macros"] }
 serde = { version = "1.0.143", features = [] }
 serde_json = { version = "1.0.83", default-features = false, features = ["alloc", "raw_value"] }
+# TODO: make sure this time version matches siwe. PR to put this in their prelude
+time = "0.3.11"
 tokio = { version = "1.20.1", features = ["full", "tracing"] }
-# TODO: make sure this uuid version matches what is in sea orm. PR on sea orm to put builder into prelude
+# TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.9", features = ["sync"] }
 toml = "0.5.9"
 tower = "0.4.13"

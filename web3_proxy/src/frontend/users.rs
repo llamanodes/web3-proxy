@@ -21,11 +21,14 @@ use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
 use entities::user;
 use ethers::{prelude::Address, types::Bytes};
-use redis_rate_limit::redis::{pipe, AsyncCommands};
+use redis_rate_limit::redis::AsyncCommands;
 use reqwest::StatusCode;
 use sea_orm::ActiveModelTrait;
 use serde::Deserialize;
+use siwe::Message;
+use std::ops::Add;
 use std::sync::Arc;
+use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 // TODO: how do we customize axum's error response? I think we probably want an enum that implements IntoResponse instead
@@ -33,7 +36,8 @@ use uuid::Uuid;
 pub async fn get_login(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
-    // TODO: what does axum's error handling look like?
+    // TODO: what does axum's error handling look like if the path fails to parse?
+    // TODO: allow ENS names here?
     Path(user_address): Path<Address>,
 ) -> FrontendResult {
     // TODO: refactor this to use the try operator
@@ -51,29 +55,50 @@ pub async fn get_login(
     // its a better UX to just click "login with ethereum" and have the account created if it doesn't exist
     // we can prompt for an email and and payment after they log in
 
-    let session_id = uuid::Uuid::new_v4();
+    // TODO: how many seconds? get from config?
+    let expire_seconds: usize = 300;
 
-    // TODO: if no redis, store in local cache?
+    // create a session id and save it in redis
+    let nonce = Uuid::new_v4();
+
+    let issued_at = OffsetDateTime::now_utc();
+
+    let expiration_time = issued_at.add(Duration::new(expire_seconds as i64, 0));
+
+    // TODO: get request_id out of the trace? do we need that when we have a none?
+
+    // TODO: get most of these from the app config
+    let message = Message {
+        domain: "staging.llamanodes.com".parse().unwrap(),
+        address: user_address.to_fixed_bytes(),
+        statement: Some("🦙🦙🦙🦙🦙".to_string()),
+        uri: "https://staging.llamanodes.com/".parse().unwrap(),
+        version: siwe::Version::V1,
+        chain_id: 1,
+        expiration_time: Some(expiration_time.into()),
+        issued_at: issued_at.into(),
+        nonce: nonce.to_string(),
+        not_before: None,
+        request_id: None,
+        resources: vec![],
+    };
+
+    let session_key = format!("pending:{}", nonce);
+
+    // TODO: if no redis server, store in local cache?
     let redis_pool = app
         .redis_pool
         .as_ref()
         .expect("login requires a redis server");
 
-    let mut redis_conn = redis_pool.get().await.unwrap();
+    let mut redis_conn = redis_pool.get().await?;
 
-    // TODO: how many seconds? get from config?
-    let session_expiration_seconds = 300;
+    // TODO: the address isn't enough. we need to save the actual message
+    redis_conn
+        .set_ex(session_key, message.to_string(), expire_seconds)
+        .await?;
 
-    let reply: String = redis_conn
-        .set_ex(
-            session_id.to_string(),
-            user_address.to_string(),
-            session_expiration_seconds,
-        )
-        .await
-        .unwrap();
-
-    todo!("how should this work? probably keep stuff in redis")
+    Ok(message.to_string().into_response())
 }
 
 #[debug_handler]

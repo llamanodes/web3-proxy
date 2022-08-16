@@ -15,6 +15,7 @@ pub async fn public_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
 ) -> Response {
+    // TODO: dry this up a lot
     let _ip = match app.rate_limit_by_ip(ip).await {
         Ok(x) => match x.try_into_response().await {
             Ok(RateLimitResult::AllowedIp(x)) => x,

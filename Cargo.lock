@@ -5525,6 +5525,7 @@ dependencies = [
  "serde",
  "serde_json",
  "siwe",
+ "time 0.3.11",
  "tokio",
  "tokio-stream",
  "toml",
