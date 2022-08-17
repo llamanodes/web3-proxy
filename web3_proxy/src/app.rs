@@ -865,7 +865,8 @@ impl Web3ProxyApp {
                 }
 
                 let response = match method {
-                    "eth_getTransactionByHash" | "eth_getTransactionReceipt" => {
+                    "temporarily disabled" => {
+                        // "eth_getTransactionByHash" | "eth_getTransactionReceipt" => {
                         // TODO: try_send_all serially with retries instead of parallel
                         self.private_rpcs
                             .try_send_all_upstream_servers(request, min_block_needed)

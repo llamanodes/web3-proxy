@@ -90,6 +90,11 @@
   - whenever blocks were slow, we started checking as fast as possible
 - [x] create user script should allow setting requests per minute
 - [x] cache api keys that are not in the database
+- [ ] requests for "Get transactions receipts" are routed to the private_rpcs and not the balanced_rpcs. do this better.
+  - [x] quick fix, send to balanced_rpcs for now. we will just live with errors on new transactions. 
+  - this was intentional so that recently confirmed transactions go to a server that is more likely to have the tx.
+  - but under heavy load, we hit their rate limits. need a "retry_until_success" function that goes to balanced_rpcs. or maybe store in redis the txids that we broadcast privately and use that to route.
+  - [ ] figure out rate limits for private rpcs. eden v1 gives 500 error instead of a code for rate limits
 - [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
 - [ ] use siwe messages and signatures for sign up and login
 - [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
