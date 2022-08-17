@@ -3,8 +3,10 @@ mod errors;
 
 use anyhow::Context;
 use bb8_redis::redis::pipe;
+use num::Integer;
 use std::ops::Add;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tracing::info;
 
 pub use crate::errors::{RedisError, RedisErrorSink};
 pub use bb8_redis::{bb8, redis, RedisConnectionManager};
@@ -60,7 +62,8 @@ impl RedisRateLimit {
             .context("cannot tell the time")?
             .as_secs();
 
-        let period_id = now % self.period;
+        // if self.period is 60, period_id will be the minute of the current time
+        let period_id = (now / self.period) % self.period;
 
         let throttle_key = format!("{}:{}:{}", self.key_prefix, label, period_id);
 
@@ -71,7 +74,7 @@ impl RedisRateLimit {
             .incr(&throttle_key, count)
             // set expiration the first time we set the key. ignore the result
             .expire(&throttle_key, self.period.try_into().unwrap())
-            .arg("NX")
+            // .arg("NX")  // TODO: this works in redis, but not elasticache
             .ignore()
             // do the query
             .query_async(&mut *conn)
