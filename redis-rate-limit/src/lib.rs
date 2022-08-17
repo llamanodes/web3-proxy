@@ -3,10 +3,8 @@ mod errors;
 
 use anyhow::Context;
 use bb8_redis::redis::pipe;
-use num::Integer;
 use std::ops::Add;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tracing::info;
 
 pub use crate::errors::{RedisError, RedisErrorSink};
 pub use bb8_redis::{bb8, redis, RedisConnectionManager};
