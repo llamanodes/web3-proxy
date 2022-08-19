@@ -90,18 +90,23 @@
   - whenever blocks were slow, we started checking as fast as possible
 - [x] create user script should allow setting requests per minute
 - [x] cache api keys that are not in the database
-- [ ] requests for "Get transactions receipts" are routed to the private_rpcs and not the balanced_rpcs. do this better.
+- [-] use siwe messages and signatures for sign up and login
+- [-] requests for "Get transactions receipts" are routed to the private_rpcs and not the balanced_rpcs. do this better.
   - [x] quick fix, send to balanced_rpcs for now. we will just live with errors on new transactions. 
   - this was intentional so that recently confirmed transactions go to a server that is more likely to have the tx.
   - but under heavy load, we hit their rate limits. need a "retry_until_success" function that goes to balanced_rpcs. or maybe store in redis the txids that we broadcast privately and use that to route.
   - [ ] figure out rate limits for private rpcs. eden v1 gives 500 error instead of a code for rate limits
+  - [ ] write a function for receipts that tries balanced_rpcs and only on error of all balanced tries privates
 - [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
-- [ ] use siwe messages and signatures for sign up and login
 - [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
-  - i think there is also a bug because 0xllam4 ran a benchmark and get a bunch of errors back. and i've seen "server not synced" a couple times
+  - i think there is also a bug because i've seen "server not synced" a couple times
+  - [ ] i saw a fork of like 300 blocks. probably just because a node was restarted and had fallen behind. need some checks to ignore things that are far behind
 
 ## V1
 
+- [ ] benchmarks from https://github.com/llamafolio/llamafolio-api/
+- [ ] benchmarks from ethspam and versus
+- [ ] benchmarks from other things
 - [ ] send logs to sentry
 - [ ] active requests on /status is always 0 even when i'm running requests through
 - [ ] redis cell is giving errors under high load. maybe replace with https://redis.com/redis-best-practices/basic-rate-limiting/
