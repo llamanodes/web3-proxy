@@ -143,6 +143,7 @@
 - [ ] 60 second timeout is too short. Maybe do that for free tier and larger timeout for paid. Problem is that some queries can take over 1000 seconds
 - [ ] refactor from_anyhow_error to have consistent error codes and http codes. maybe implement the Error trait
 - [ ] when handling errors from axum parsing the Json...Enum, the errors don't get wrapped in json. i think we need a Layer
+- [ ] don't "unwrap" anywhere. give proper errors
 
 new endpoints for users:
 - [x] GET /u/:api_key
@@ -193,7 +194,6 @@ in another repo: event subscriber
 ## "Maybe some day" and other Miscellaneous Things
 
 - [ ] search for all the "TODO" items in the code and move them here
-- [ ] don't "unwrap" anywhere. give proper errors
 - [ ] instead of giving a rate limit error code, delay the connection's response at the start. reject if incoming requests is super high?
 - [ ] add the backend server to the header?
 - [ ] have a low-latency option that always tries at least two servers in parallel and then returns the first success?
