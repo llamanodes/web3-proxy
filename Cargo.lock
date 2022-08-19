@@ -76,9 +76,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.61"
+version = "1.0.62"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "508b352bb5c066aac251f6daf6b36eccd03e8a88e8081cd44959ea277a3af9a8"
+checksum = "1485d4d2cc45e7b201ee3767015c96faa5904387c9d87c6efdd0fb511f12d305"
 dependencies = [
  "backtrace",
 ]
@@ -3058,15 +3058,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "owning_ref"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ff55baddef9e4ad00f88b6c743a2a8062d4c6ade126c2a528644b8e444d52ce"
-dependencies = [
- "stable_deref_trait",
-]
-
-[[package]]
 name = "parity-scale-codec"
 version = "3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3477,7 +3468,7 @@ dependencies = [
  "postgres-protocol",
  "serde",
  "serde_json",
- "time 0.3.11",
+ "time 0.3.13",
  "uuid 1.1.2",
 ]
 
@@ -3568,13 +3559,13 @@ dependencies = [
 
 [[package]]
 name = "prometheus-client"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fe21d29a3d5c97c2ae9bcae7b944bfb71dbc281e3035e301085086f9bc83611"
+checksum = "3c473049631c233933d6286c88bbb7be30e62ec534cf99a9ae0079211f7fa603"
 dependencies = [
  "dtoa 1.0.3",
  "itoa 1.0.2",
- "owning_ref",
+ "parking_lot 0.12.1",
  "prometheus-client-derive-text-encode",
 ]
 
@@ -4117,7 +4108,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "time 0.3.11",
+ "time 0.3.13",
  "tracing",
  "url",
  "uuid 1.1.2",
@@ -4181,7 +4172,7 @@ dependencies = [
  "sea-query-derive",
  "sea-query-driver",
  "serde_json",
- "time 0.3.11",
+ "time 0.3.13",
  "uuid 1.1.2",
 ]
 
@@ -4473,7 +4464,7 @@ dependencies = [
  "rand 0.8.5",
  "sha3 0.9.1",
  "thiserror",
- "time 0.3.11",
+ "time 0.3.13",
 ]
 
 [[package]]
@@ -4617,7 +4608,7 @@ dependencies = [
  "sqlx-rt",
  "stringprep",
  "thiserror",
- "time 0.3.11",
+ "time 0.3.13",
  "tokio-stream",
  "url",
  "uuid 1.1.2",
@@ -4889,9 +4880,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.11"
+version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72c91f41dcb2f096c05f0873d667dceec1087ce5bcf984ec8ffb19acddbb3217"
+checksum = "db76ff9fa4b1458b3c7f077f3ff9887394058460d21e634355b273aaf11eea45"
 dependencies = [
  "itoa 1.0.2",
  "libc",
@@ -5525,7 +5516,7 @@ dependencies = [
  "serde",
  "serde_json",
  "siwe",
- "time 0.3.11",
+ "time 0.3.13",
  "tokio",
  "tokio-stream",
  "toml",
@@ -5720,7 +5711,7 @@ dependencies = [
  "hmac",
  "pbkdf2 0.10.1",
  "sha1",
- "time 0.3.11",
+ "time 0.3.13",
  "zstd",
 ]
 
