@@ -34,7 +34,9 @@ async fn handle_anyhow_error(err: anyhow::Error) -> (StatusCode, String) {
 
 /// http and websocket frontend for customers
 pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
-    // create a tracing span for each request
+    // create a tracing span for each request with a random request id and the method
+    // GET: websocket or static pages
+    // POST: http rpc or login
     let request_tracing_layer =
         TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
             // We get the request id from the extensions
@@ -70,6 +72,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/health", get(http::health))
         .route("/status", get(http::status))
         .route("/login/:user_address", get(users::get_login))
+        .route("/login/:user_address/:message_eip", get(users::get_login))
         .route("/users", post(users::create_user))
         // .route(
         //     "/foo",

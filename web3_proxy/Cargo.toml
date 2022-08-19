@@ -16,12 +16,12 @@ entities = { path = "../entities" }
 migration = { path = "../migration" }
 redis-rate-limit = { path = "../redis-rate-limit" }
 
-anyhow = { version = "1.0.61", features = ["backtrace"] }
+anyhow = { version = "1.0.62", features = ["backtrace"] }
 arc-swap = "1.5.1"
 argh = "0.1.8"
 axum = { version = "0.5.15", features = ["headers", "serde_json", "tokio-tungstenite", "ws"] }
 axum-client-ip = "0.2.0"
-axum-macros = "*"
+axum-macros = "0.2.3"
 counter = "0.5.6"
 dashmap = "5.3.4"
 derive_more = "0.99.17"
@@ -39,7 +39,7 @@ num = "0.4.0"
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 petgraph = "0.6.2"
 proctitle = "0.1.1"
-prometheus-client = "0.17.0"
+prometheus-client = "0.18.0"
 rand = "0.8.5"
 # TODO: regex has several "perf" features that we might want to use
 regex = "1.6.0"
@@ -51,7 +51,7 @@ sea-orm = { version = "0.9.1", features = ["macros"] }
 serde = { version = "1.0.143", features = [] }
 serde_json = { version = "1.0.83", default-features = false, features = ["alloc", "raw_value"] }
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
-time = "0.3.11"
+time = "0.3.13"
 tokio = { version = "1.20.1", features = ["full", "tracing"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.9", features = ["sync"] }

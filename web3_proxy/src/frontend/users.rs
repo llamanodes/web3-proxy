@@ -21,6 +21,7 @@ use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
 use entities::{user, user_keys};
 use ethers::{prelude::Address, types::Bytes};
+use hashbrown::HashMap;
 use redis_rate_limit::redis::AsyncCommands;
 use reqwest::StatusCode;
 use sea_orm::ActiveModelTrait;
@@ -38,7 +39,7 @@ pub async fn get_login(
     ClientIp(ip): ClientIp,
     // TODO: what does axum's error handling look like if the path fails to parse?
     // TODO: allow ENS names here?
-    Path(user_address): Path<Address>,
+    Path(mut params): Path<HashMap<String, String>>,
 ) -> FrontendResult {
     // TODO: refactor this to use the try operator
     let _ip = match app.rate_limit_by_ip(ip).await {
@@ -65,7 +66,8 @@ pub async fn get_login(
 
     let expiration_time = issued_at.add(Duration::new(expire_seconds as i64, 0));
 
-    // TODO: get request_id out of the trace? do we need that when we have a none?
+    // TODO: proper errors. the first unwrap should be impossible, but the second will happen with bad input
+    let user_address: Address = params.remove("user_address").unwrap().parse().unwrap();
 
     // TODO: get most of these from the app config
     let message = Message {
@@ -98,7 +100,20 @@ pub async fn get_login(
         .set_ex(session_key, message.to_string(), expire_seconds)
         .await?;
 
-    Ok(message.to_string().into_response())
+    // there are multiple ways to sign messages and not all wallets support them
+    let message_eip = params
+        .remove("message_eip")
+        .unwrap_or_else(|| "eip4361".to_string());
+
+    let message: String = match message_eip.as_str() {
+        "eip4361" => message.to_string(),
+        // https://github.com/spruceid/siwe/issues/98
+        "eip191_string" => Bytes::from(message.eip191_string().unwrap()).to_string(),
+        "eip191_hash" => Bytes::from(&message.eip191_hash().unwrap()).to_string(),
+        _ => todo!("return a proper error"),
+    };
+
+    Ok(message.into_response())
 }
 
 #[debug_handler]
