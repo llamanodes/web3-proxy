@@ -13,7 +13,7 @@ use super::{
 };
 use crate::app::Web3ProxyApp;
 use axum::{
-    extract::Path,
+    extract::{Path, Query},
     response::{IntoResponse, Response},
     Extension, Json,
 };
@@ -30,7 +30,10 @@ use siwe::Message;
 use std::ops::Add;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
-use uuid::Uuid;
+use ulid::Ulid;
+
+#[allow(unused)]
+use super::axum_ext::empty_string_as_none;
 
 // TODO: how do we customize axum's error response? I think we probably want an enum that implements IntoResponse instead
 #[debug_handler]
@@ -52,15 +55,16 @@ pub async fn get_login(
     };
 
     // at first i thought about checking that user_address is in our db
-    // but theres no need to separate the create_user and login flows
+    // but theres no need to separate the registration and login flows
     // its a better UX to just click "login with ethereum" and have the account created if it doesn't exist
     // we can prompt for an email and and payment after they log in
+
+    // create a message and save it in redis
 
     // TODO: how many seconds? get from config?
     let expire_seconds: usize = 300;
 
-    // create a message and save it in redis
-    let nonce = Uuid::new_v4();
+    let nonce = Ulid::new();
 
     let issued_at = OffsetDateTime::now_utc();
 
@@ -88,17 +92,20 @@ pub async fn get_login(
     let session_key = format!("pending:{}", nonce);
 
     // TODO: if no redis server, store in local cache?
-    let redis_pool = app
+    let mut redis_conn = app
         .redis_pool
         .as_ref()
-        .expect("login requires a redis server");
+        .expect("login requires a redis server")
+        .get()
+        .await?;
 
-    let mut redis_conn = redis_pool.get().await?;
-
-    // TODO: the address isn't enough. we need to save the actual message
+    // the address isn't enough. we need to save the actual message so we can read the nonce
+    // TODO: what message format is the most efficient to store in redis? probably eip191_string
     redis_conn
         .set_ex(session_key, message.to_string(), expire_seconds)
         .await?;
+
+    drop(redis_conn);
 
     // there are multiple ways to sign messages and not all wallets support them
     let message_eip = params
@@ -110,21 +117,38 @@ pub async fn get_login(
         // https://github.com/spruceid/siwe/issues/98
         "eip191_string" => Bytes::from(message.eip191_string().unwrap()).to_string(),
         "eip191_hash" => Bytes::from(&message.eip191_hash().unwrap()).to_string(),
-        _ => todo!("return a proper error"),
+        _ => return Err(anyhow::anyhow!("invalid message eip given").into()),
     };
 
     Ok(message.into_response())
 }
 
+/// Query params to our `post_login` handler.
+#[derive(Debug, Deserialize)]
+pub struct PostLoginQuery {
+    invite_code: Option<String>,
+}
+
+/// JSON body to our `post_login` handler.
+#[derive(Deserialize)]
+pub struct PostLogin {
+    address: Address,
+    msg: String,
+    sig: Bytes,
+    version: String,
+    signer: String,
+}
+
 #[debug_handler]
-pub async fn create_user(
-    // this argument tells axum to parse the request body
-    // as JSON into a `CreateUser` type
-    Json(payload): Json<CreateUser>,
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+/// Post to the user endpoint to register or login.
+pub async fn post_login(
     ClientIp(ip): ClientIp,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Json(payload): Json<PostLogin>,
+    Query(query): Query<PostLoginQuery>,
 ) -> Response {
     // TODO: return a Result instead
+    // TODO: dry this up ip checking up
     let _ip = match app.rate_limit_by_ip(ip).await {
         Ok(x) => match x.try_into_response().await {
             Ok(RateLimitResult::AllowedIp(x)) => x,
@@ -134,11 +158,22 @@ pub async fn create_user(
         Err(err) => return anyhow_error_into_response(None, None, err),
     };
 
-    // TODO: check invite_code against the app's config or database
-    if payload.invite_code != "llam4n0des!" {
-        todo!("proper error message")
+    let mut new_user = true; // TODO: check the database
+
+    if let Some(invite_code) = &app.config.invite_code {
+        // we don't do per-user referral codes because we shouldn't collect what we don't need.
+        // we don't need to build a social graph between addresses like that.
+        if query.invite_code.as_ref() != Some(invite_code) {
+            todo!("if address is already registered, allow login! else, error")
+        }
     }
 
+    // we can't trust that they didn't tamper with the message in some way
+    let their_msg: siwe::Message = payload.msg.parse().unwrap();
+
+    let their_sig: [u8; 65] = payload.sig.as_ref().try_into().unwrap();
+
+    // fetch the message we gave them from our redis
     let redis_pool = app
         .redis_pool
         .as_ref()
@@ -148,60 +183,76 @@ pub async fn create_user(
 
     // TODO: use getdel
     // TODO: do not unwrap. make this function return a FrontendResult
-    let message: String = redis_conn.get(payload.nonce.to_string()).await.unwrap();
+    let our_msg: String = redis_conn.get(&their_msg.nonce).await.unwrap();
 
-    let message: Message = message.parse().unwrap();
+    let our_msg: siwe::Message = our_msg.parse().unwrap();
 
-    // TODO: dont unwrap. proper error
-    let signature: [u8; 65] = payload.signature.as_ref().try_into().unwrap();
-
-    // TODO: calculate the expected message for the current user. include domain and a nonce. let timestamp be automatic
-    if let Err(e) = message.verify(signature, None, None, None) {
+    // check the domain and a nonce. let timestamp be automatic
+    if let Err(e) = their_msg.verify(their_sig, Some(&our_msg.domain), Some(&our_msg.nonce), None) {
         // message cannot be correctly authenticated
         todo!("proper error message: {}", e)
     }
 
-    let user = user::ActiveModel {
-        address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
-        email: sea_orm::Set(payload.email),
-        ..Default::default()
-    };
+    if new_user {
+        // the only thing we need from them is an address
+        // everything else is optional
+        let user = user::ActiveModel {
+            address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
+            ..Default::default()
+        };
 
-    let db = app.db_conn.as_ref().unwrap();
+        let db = app.db_conn.as_ref().unwrap();
 
-    // TODO: proper error message
-    let user = user.insert(db).await.unwrap();
+        let user = user.insert(db).await.unwrap();
 
-    // TODO: create
-    let api_key = todo!();
+        let api_key = todo!("create an api key");
 
-    /*
-    let rpm = app.config.something;
+        /*
+        let rpm = app.config.something;
 
-    // create a key for the new user
-    // TODO: requests_per_minute should be configurable
-    let uk = user_keys::ActiveModel {
-        user_id: u.id,
-        api_key: sea_orm::Set(api_key),
-        requests_per_minute: sea_orm::Set(rpm),
-        ..Default::default()
-    };
+        // create a key for the new user
+        // TODO: requests_per_minute should be configurable
+        let uk = user_keys::ActiveModel {
+            user_id: u.id,
+            api_key: sea_orm::Set(api_key),
+            requests_per_minute: sea_orm::Set(rpm),
+            ..Default::default()
+        };
 
-    // TODO: if this fails, rever adding the user, too
-    let uk = uk.save(&txn).await.context("Failed saving new user key")?;
+        // TODO: if this fails, rever adding the user, too
+        let uk = uk.save(&txn).await.context("Failed saving new user key")?;
 
-    // TODO: do not expose user ids
-    (StatusCode::CREATED, Json(user)).into_response()
-     */
+        // TODO: set a cookie?
+
+        // TODO: do not expose user ids
+        (StatusCode::CREATED, Json(user)).into_response()
+        */
+    } else {
+        todo!("load existing user from the database");
+    }
 }
 
-// the input to our `create_user` handler
+/// the JSON input to the `post_user` handler
 #[derive(Deserialize)]
-pub struct CreateUser {
+pub struct PostUser {
     address: Address,
-    // TODO: make sure the email address is valid
+    // TODO: make sure the email address is valid. probably have a "verified" column in the database
     email: Option<String>,
-    signature: Bytes,
-    nonce: Uuid,
-    invite_code: String,
+    // TODO: make them sign this JSON? cookie in session id is hard because its on a different domain
+}
+
+#[debug_handler]
+/// post to the user endpoint to modify your account
+pub async fn post_user(
+    Json(payload): Json<PostUser>,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ClientIp(ip): ClientIp,
+) -> FrontendResult {
+    todo!("finish post_login");
+
+    // let user = user::ActiveModel {
+    //     address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
+    //     email: sea_orm::Set(payload.email),
+    //     ..Default::default()
+    // };
 }

@@ -5090,7 +5090,7 @@ dependencies = [
  "http",
  "tower-layer",
  "tower-service",
- "ulid",
+ "ulid 0.4.1",
 ]
 
 [[package]]
@@ -5233,6 +5233,15 @@ dependencies = [
  "chrono",
  "lazy_static",
  "rand 0.6.5",
+]
+
+[[package]]
+name = "ulid"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13a3aaa69b04e5b66cc27309710a569ea23593612387d67daaf102e73aa974fd"
+dependencies = [
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -5525,6 +5534,7 @@ dependencies = [
  "tower-request-id",
  "tracing",
  "tracing-subscriber",
+ "ulid 1.0.0",
  "url",
  "uuid 1.1.2",
 ]

@@ -1,4 +1,4 @@
-/// this should move into web3_proxy once the basics are working
+mod axum_ext;
 mod errors;
 mod http;
 mod http_proxy;
@@ -55,32 +55,25 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
             )
         });
 
-    /*
-    let some_fallible_service = tower::service_fn(|_req| async {
-        // thing_that_might_fail().await?;
-        Ok::<_, anyhow::Error>(Response::new(Body::empty()))
-    });
-    */
-
-    // build our application with a route
-    // order most to least common
+    // build our axum Router
     let app = Router::new()
+        // routes should be order most to least common
         .route("/", post(http_proxy::public_proxy_web3_rpc))
         .route("/", get(ws_proxy::public_websocket_handler))
         .route("/u/:user_key", post(http_proxy::user_proxy_web3_rpc))
         .route("/u/:user_key", get(ws_proxy::user_websocket_handler))
         .route("/health", get(http::health))
+        // TODO: we probably want to remove /status in favor of the separate prometheus thread
         .route("/status", get(http::status))
         .route("/login/:user_address", get(users::get_login))
         .route("/login/:user_address/:message_eip", get(users::get_login))
-        .route("/users", post(users::create_user))
-        // .route(
-        //     "/foo",
-        //     HandleError::new(some_fallible_service, handle_anyhow_error),
-        // )
+        .route("/users", post(users::post_user))
+        // layers are ordered bottom up
+        // the last layer is first for requests and last for responses
         .layer(Extension(proxy_app))
-        // create a unique id for each request and add it to our tracing logs
+        // add the request id to our tracing logs
         .layer(request_tracing_layer)
+        // create a unique id for each request
         .layer(RequestIdLayer)
         // 404 for any unknown routes
         .fallback(errors::handler_404.into_service());

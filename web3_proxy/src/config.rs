@@ -44,6 +44,7 @@ pub struct AppConfig {
     // TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
     pub chain_id: u64,
     pub db_url: Option<String>,
+    pub invite_code: Option<String>,
     pub redis_url: Option<String>,
     #[serde(default = "default_public_rate_limit_per_minute")]
     pub public_rate_limit_per_minute: u64,

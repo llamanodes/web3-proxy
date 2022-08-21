@@ -215,6 +215,7 @@ mod tests {
             app: AppConfig {
                 chain_id: 31337,
                 db_url: None,
+                invite_code: None,
                 redis_url: None,
                 public_rate_limit_per_minute: 0,
                 response_cache_max_bytes: 10_usize.pow(7),
