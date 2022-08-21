@@ -1,4 +1,3 @@
-mod axum_ext;
 mod errors;
 mod http;
 mod http_proxy;
@@ -7,12 +6,10 @@ mod users;
 mod ws_proxy;
 
 use crate::app::Web3ProxyApp;
-use ::http::{Request, StatusCode};
+use ::http::Request;
 use axum::{
     body::Body,
-    error_handling::HandleError,
     handler::Handler,
-    response::Response,
     routing::{get, post},
     Extension, Router,
 };
@@ -21,16 +18,6 @@ use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tower_request_id::{RequestId, RequestIdLayer};
 use tracing::{error_span, info};
-
-// handle errors by converting them into something that implements
-// `IntoResponse`
-async fn handle_anyhow_error(err: anyhow::Error) -> (StatusCode, String) {
-    // TODO: i dont like this, but lets see if it works. need to moved to the errors module and replace the version that is there
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        format!("Something went wrong: {}", err),
-    )
-}
 
 /// http and websocket frontend for customers
 pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
@@ -67,6 +54,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/status", get(http::status))
         .route("/login/:user_address", get(users::get_login))
         .route("/login/:user_address/:message_eip", get(users::get_login))
+        .route("/login", post(users::post_login))
         .route("/users", post(users::post_user))
         // layers are ordered bottom up
         // the last layer is first for requests and last for responses

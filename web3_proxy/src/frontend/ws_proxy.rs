@@ -3,7 +3,7 @@ use super::rate_limit::{rate_limit_by_ip, rate_limit_by_user_key};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::Path,
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Redirect},
     Extension,
 };
 use axum_client_ip::ClientIp;

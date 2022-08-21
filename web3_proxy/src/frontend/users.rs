@@ -7,15 +7,12 @@
 // I wonder how we handle payment
 // probably have to do manual withdrawals
 
+use super::errors::FrontendResult;
 use super::rate_limit::rate_limit_by_ip;
-use super::{
-    errors::{anyhow_error_into_response, FrontendResult},
-    rate_limit::RateLimitResult,
-};
 use crate::app::Web3ProxyApp;
 use axum::{
     extract::{Path, Query},
-    response::{IntoResponse, Response},
+    response::IntoResponse,
     Extension, Json,
 };
 use axum_client_ip::ClientIp;
@@ -24,7 +21,6 @@ use entities::{user, user_keys};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use redis_rate_limit::redis::AsyncCommands;
-use reqwest::StatusCode;
 use sea_orm::ActiveModelTrait;
 use serde::Deserialize;
 use siwe::Message;
@@ -32,9 +28,6 @@ use std::sync::Arc;
 use std::{net::IpAddr, ops::Add};
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
-
-#[allow(unused)]
-use super::axum_ext::empty_string_as_none;
 
 // TODO: how do we customize axum's error response? I think we probably want an enum that implements IntoResponse instead
 #[debug_handler]
@@ -233,7 +226,7 @@ pub async fn post_user(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
 ) -> FrontendResult {
-    todo!("finish post_login");
+    todo!("finish post_user");
 
     // let user = user::ActiveModel {
     //     address: sea_orm::Set(payload.address.to_fixed_bytes().into()),

@@ -1,7 +1,7 @@
-use super::errors::{anyhow_error_into_response, FrontendErrorResponse, FrontendResult};
+use super::errors::{anyhow_error_into_response, FrontendErrorResponse};
 use crate::app::{UserCacheValue, Web3ProxyApp};
 use axum::response::Response;
-use derive_more::{From, TryInto};
+use derive_more::From;
 use entities::user_keys;
 use redis_rate_limit::ThrottleResult;
 use reqwest::StatusCode;
@@ -71,10 +71,10 @@ pub async fn rate_limit_by_user_key(
     // TODO: change this to a Ulid
     user_key: Uuid,
 ) -> RateLimitFrontendResult {
-    let rate_limit_result = app.rate_limit_by_key(user_key).await?.into();
+    let rate_limit_result = app.rate_limit_by_key(user_key).await?;
 
     match rate_limit_result {
-        RateLimitResult::AllowedIp(x) => panic!("only user keys or errors are expected here"),
+        RateLimitResult::AllowedIp(_) => panic!("only user keys or errors are expected here"),
         RateLimitResult::AllowedUser(x) => Ok(x.into()),
         rate_limit_result => {
             let _: RequestFrom = rate_limit_result.try_into()?;

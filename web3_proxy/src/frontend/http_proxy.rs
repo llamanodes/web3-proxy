@@ -1,9 +1,8 @@
-use super::errors::{anyhow_error_into_response, FrontendResult};
-use super::rate_limit::{rate_limit_by_ip, rate_limit_by_user_key, RateLimitResult};
+use super::errors::FrontendResult;
+use super::rate_limit::{rate_limit_by_ip, rate_limit_by_user_key};
 use crate::stats::{Protocol, ProxyRequestLabels};
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::Path;
-use axum::response::Response;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_client_ip::ClientIp;
 use std::net::IpAddr;
