@@ -15,7 +15,7 @@ pub async fn public_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
 ) -> FrontendResult {
-    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?.try_into()?;
+    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?;
 
     let protocol = Protocol::HTTP;
     let user_id = 0;
@@ -67,7 +67,7 @@ pub async fn user_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Path(user_key): Path<Uuid>,
 ) -> FrontendResult {
-    let user_id: u64 = rate_limit_by_user_key(&app, user_key).await?.try_into()?;
+    let user_id: u64 = rate_limit_by_user_key(&app, user_key).await?;
 
     let protocol = Protocol::HTTP;
 

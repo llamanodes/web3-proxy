@@ -33,7 +33,7 @@ pub async fn public_websocket_handler(
     ClientIp(ip): ClientIp,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?.try_into()?;
+    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?;
 
     let user_id = 0;
     let protocol = Protocol::Websocket;
@@ -57,7 +57,7 @@ pub async fn user_websocket_handler(
     Path(user_key): Path<Uuid>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    let user_id: u64 = rate_limit_by_user_key(&app, user_key).await?.try_into()?;
+    let user_id: u64 = rate_limit_by_user_key(&app, user_key).await?;
 
     let protocol = Protocol::Websocket;
 

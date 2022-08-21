@@ -52,11 +52,14 @@ impl TryFrom<RequestFrom> for u64 {
     }
 }
 
-pub async fn rate_limit_by_ip(app: &Web3ProxyApp, ip: IpAddr) -> RateLimitFrontendResult {
+pub async fn rate_limit_by_ip(
+    app: &Web3ProxyApp,
+    ip: IpAddr,
+) -> Result<IpAddr, FrontendErrorResponse> {
     let rate_limit_result = app.rate_limit_by_ip(ip).await?;
 
     match rate_limit_result {
-        RateLimitResult::AllowedIp(x) => Ok(x.into()),
+        RateLimitResult::AllowedIp(x) => Ok(x),
         RateLimitResult::AllowedUser(_) => panic!("only ips or errors are expected here"),
         rate_limit_result => {
             let _: RequestFrom = rate_limit_result.try_into()?;
@@ -70,12 +73,12 @@ pub async fn rate_limit_by_user_key(
     app: &Web3ProxyApp,
     // TODO: change this to a Ulid
     user_key: Uuid,
-) -> RateLimitFrontendResult {
+) -> Result<u64, FrontendErrorResponse> {
     let rate_limit_result = app.rate_limit_by_key(user_key).await?;
 
     match rate_limit_result {
         RateLimitResult::AllowedIp(_) => panic!("only user keys or errors are expected here"),
-        RateLimitResult::AllowedUser(x) => Ok(x.into()),
+        RateLimitResult::AllowedUser(x) => Ok(x),
         rate_limit_result => {
             let _: RequestFrom = rate_limit_result.try_into()?;
 
