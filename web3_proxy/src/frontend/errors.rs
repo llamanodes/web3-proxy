@@ -19,6 +19,7 @@ pub enum FrontendErrorResponse {
     // TODO: should we box these instead?
     Redis(RedisError),
     RedisRunError(RunError<RedisError>),
+    Response(Response),
 }
 
 impl IntoResponse for FrontendErrorResponse {
@@ -31,6 +32,9 @@ impl IntoResponse for FrontendErrorResponse {
             Self::Box(err) => anyhow::anyhow!("Boxed error: {:?}", err),
             Self::Redis(err) => err.into(),
             Self::RedisRunError(err) => err.into(),
+            Self::Response(r) => {
+                return r;
+            }
         };
 
         let err = JsonRpcForwardedResponse::from_anyhow_error(err, null_id);

@@ -7,6 +7,7 @@
 // I wonder how we handle payment
 // probably have to do manual withdrawals
 
+use super::rate_limit::rate_limit_by_ip;
 use super::{
     errors::{anyhow_error_into_response, FrontendResult},
     rate_limit::RateLimitResult,
@@ -27,8 +28,8 @@ use reqwest::StatusCode;
 use sea_orm::ActiveModelTrait;
 use serde::Deserialize;
 use siwe::Message;
-use std::ops::Add;
 use std::sync::Arc;
+use std::{net::IpAddr, ops::Add};
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
 
@@ -44,15 +45,7 @@ pub async fn get_login(
     // TODO: allow ENS names here?
     Path(mut params): Path<HashMap<String, String>>,
 ) -> FrontendResult {
-    // TODO: refactor this to use the try operator
-    let _ip = match app.rate_limit_by_ip(ip).await {
-        Ok(x) => match x.try_into_response().await {
-            Ok(RateLimitResult::AllowedIp(x)) => x,
-            Err(err_response) => return Ok(err_response),
-            _ => unimplemented!(),
-        },
-        Err(err) => return Ok(anyhow_error_into_response(None, None, err)),
-    };
+    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?.try_into()?;
 
     // at first i thought about checking that user_address is in our db
     // but theres no need to separate the registration and login flows
@@ -135,8 +128,9 @@ pub struct PostLogin {
     address: Address,
     msg: String,
     sig: Bytes,
-    version: String,
-    signer: String,
+    // TODO: do we care about these? we should probably check the version is something we expect
+    // version: String,
+    // signer: String,
 }
 
 #[debug_handler]
@@ -146,17 +140,8 @@ pub async fn post_login(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Json(payload): Json<PostLogin>,
     Query(query): Query<PostLoginQuery>,
-) -> Response {
-    // TODO: return a Result instead
-    // TODO: dry this up ip checking up
-    let _ip = match app.rate_limit_by_ip(ip).await {
-        Ok(x) => match x.try_into_response().await {
-            Ok(RateLimitResult::AllowedIp(x)) => x,
-            Err(err_response) => return err_response,
-            _ => unimplemented!(),
-        },
-        Err(err) => return anyhow_error_into_response(None, None, err),
-    };
+) -> FrontendResult {
+    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?.try_into()?;
 
     let mut new_user = true; // TODO: check the database
 

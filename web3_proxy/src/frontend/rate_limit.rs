@@ -1,6 +1,7 @@
-use super::errors::anyhow_error_into_response;
+use super::errors::{anyhow_error_into_response, FrontendErrorResponse, FrontendResult};
 use crate::app::{UserCacheValue, Web3ProxyApp};
 use axum::response::Response;
+use derive_more::{From, TryInto};
 use entities::user_keys;
 use redis_rate_limit::ThrottleResult;
 use reqwest::StatusCode;
@@ -20,12 +21,77 @@ pub enum RateLimitResult {
     UnknownKey,
 }
 
-impl RateLimitResult {
-    // TODO: i think this should be a function on RateLimitResult
-    pub async fn try_into_response(self) -> Result<RateLimitResult, Response> {
-        match self {
-            RateLimitResult::AllowedIp(_) => Ok(self),
-            RateLimitResult::AllowedUser(_) => Ok(self),
+#[derive(From)]
+pub enum RequestFrom {
+    Ip(IpAddr),
+    // TODO: fetch the actual user?
+    User(u64),
+}
+
+pub type RateLimitFrontendResult = Result<RequestFrom, FrontendErrorResponse>;
+
+impl TryFrom<RequestFrom> for IpAddr {
+    type Error = anyhow::Error;
+
+    fn try_from(value: RequestFrom) -> Result<Self, Self::Error> {
+        match value {
+            RequestFrom::Ip(x) => Ok(x),
+            _ => Err(anyhow::anyhow!("not an ip")),
+        }
+    }
+}
+
+impl TryFrom<RequestFrom> for u64 {
+    type Error = anyhow::Error;
+
+    fn try_from(value: RequestFrom) -> Result<Self, Self::Error> {
+        match value {
+            RequestFrom::User(x) => Ok(x),
+            _ => Err(anyhow::anyhow!("not a user")),
+        }
+    }
+}
+
+pub async fn rate_limit_by_ip(app: &Web3ProxyApp, ip: IpAddr) -> RateLimitFrontendResult {
+    let rate_limit_result = app.rate_limit_by_ip(ip).await?;
+
+    match rate_limit_result {
+        RateLimitResult::AllowedIp(x) => Ok(x.into()),
+        RateLimitResult::AllowedUser(_) => panic!("only ips or errors are expected here"),
+        rate_limit_result => {
+            let _: RequestFrom = rate_limit_result.try_into()?;
+
+            panic!("try_into should have failed")
+        }
+    }
+}
+
+pub async fn rate_limit_by_user_key(
+    app: &Web3ProxyApp,
+    // TODO: change this to a Ulid
+    user_key: Uuid,
+) -> RateLimitFrontendResult {
+    let rate_limit_result = app.rate_limit_by_key(user_key).await?.into();
+
+    match rate_limit_result {
+        RateLimitResult::AllowedIp(x) => panic!("only user keys or errors are expected here"),
+        RateLimitResult::AllowedUser(x) => Ok(x.into()),
+        rate_limit_result => {
+            let _: RequestFrom = rate_limit_result.try_into()?;
+
+            panic!("try_into should have failed")
+        }
+    }
+}
+
+impl TryFrom<RateLimitResult> for RequestFrom {
+    // TODO: return an error that has its own IntoResponse?
+    type Error = Response;
+
+    fn try_from(value: RateLimitResult) -> Result<Self, Self::Error> {
+        match value {
+            RateLimitResult::AllowedIp(x) => Ok(RequestFrom::Ip(x)),
+            RateLimitResult::AllowedUser(x) => Ok(RequestFrom::User(x)),
             RateLimitResult::IpRateLimitExceeded(ip) => Err(anyhow_error_into_response(
                 Some(StatusCode::TOO_MANY_REQUESTS),
                 None,

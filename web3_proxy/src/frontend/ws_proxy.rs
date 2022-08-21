@@ -1,3 +1,5 @@
+use super::errors::FrontendResult;
+use super::rate_limit::{rate_limit_by_ip, rate_limit_by_user_key};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::Path,
@@ -14,7 +16,7 @@ use futures::{
 use handlebars::Handlebars;
 use hashbrown::HashMap;
 use serde_json::{json, value::RawValue};
-use std::sync::Arc;
+use std::{net::IpAddr, sync::Arc};
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 use tracing::{error, error_span, info, trace, Instrument};
 use uuid::Uuid;
@@ -25,22 +27,13 @@ use crate::{
     stats::Protocol,
 };
 
-use super::{errors::anyhow_error_into_response, rate_limit::RateLimitResult};
-
 #[debug_handler]
 pub async fn public_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> Response {
-    let _ip = match app.rate_limit_by_ip(ip).await {
-        Ok(x) => match x.try_into_response().await {
-            Ok(RateLimitResult::AllowedIp(x)) => x,
-            Err(err_response) => return err_response,
-            _ => unimplemented!(),
-        },
-        Err(err) => return anyhow_error_into_response(None, None, err).into_response(),
-    };
+) -> FrontendResult {
+    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?.try_into()?;
 
     let user_id = 0;
     let protocol = Protocol::Websocket;
@@ -48,12 +41,12 @@ pub async fn public_websocket_handler(
     let user_span = error_span!("user", user_id, ?protocol);
 
     match ws_upgrade {
-        Some(ws) => ws
+        Some(ws) => Ok(ws
             .on_upgrade(|socket| proxy_web3_socket(app, socket).instrument(user_span))
-            .into_response(),
+            .into_response()),
         None => {
             // this is not a websocket. redirect to a friendly page
-            Redirect::to(&app.config.redirect_public_url).into_response()
+            Ok(Redirect::to(&app.config.redirect_public_url).into_response())
         }
     }
 }
@@ -63,16 +56,8 @@ pub async fn user_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Path(user_key): Path<Uuid>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> Response {
-    // TODO: dry this up. maybe a rate_limit_by_key_response function?
-    let user_id = match app.rate_limit_by_key(user_key).await {
-        Ok(x) => match x.try_into_response().await {
-            Ok(RateLimitResult::AllowedUser(x)) => x,
-            Err(err_response) => return err_response,
-            _ => unimplemented!(),
-        },
-        Err(err) => return anyhow_error_into_response(None, None, err).into_response(),
-    };
+) -> FrontendResult {
+    let user_id: u64 = rate_limit_by_user_key(&app, user_key).await?.try_into()?;
 
     let protocol = Protocol::Websocket;
 
@@ -81,8 +66,8 @@ pub async fn user_websocket_handler(
     let user_span = error_span!("user", user_id, ?protocol);
 
     match ws_upgrade {
-        Some(ws_upgrade) => ws_upgrade
-            .on_upgrade(move |socket| proxy_web3_socket(app, socket).instrument(user_span)),
+        Some(ws_upgrade) => Ok(ws_upgrade
+            .on_upgrade(move |socket| proxy_web3_socket(app, socket).instrument(user_span))),
         None => {
             // TODO: store this on the app and use register_template?
             let reg = Handlebars::new();
@@ -97,7 +82,7 @@ pub async fn user_websocket_handler(
                 .unwrap();
 
             // this is not a websocket. redirect to a page for this user
-            Redirect::to(&user_url).into_response()
+            Ok(Redirect::to(&user_url).into_response())
         }
     }
 }
