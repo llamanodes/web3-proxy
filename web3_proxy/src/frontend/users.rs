@@ -18,6 +18,7 @@ use axum::{
 use axum_auth::AuthBearer;
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
+use entities::sea_orm_active_enums::Role;
 use entities::{user, user_keys};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
@@ -208,7 +209,6 @@ pub async fn post_login(
 #[derive(Deserialize)]
 pub struct PostUser {
     primary_address: Address,
-    secondary_address: Option<Address>,
     // TODO: make sure the email address is valid. probably have a "verified" column in the database
     email: Option<String>,
     // TODO: make them sign this JSON? cookie in session id is hard because its on a different domain
@@ -224,13 +224,9 @@ pub async fn post_user(
 ) -> FrontendResult {
     let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?;
 
-    verify_auth_token(
-        app.as_ref(),
-        auth_token,
-        &payload.primary_address,
-        payload.secondary_address.as_ref(),
-    )
-    .await?;
+    ProtectedAction::PostUser
+        .verify(app.as_ref(), auth_token, &payload.primary_address)
+        .await?;
 
     // let user = user::ActiveModel {
     //     address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
@@ -241,15 +237,21 @@ pub async fn post_user(
     todo!("finish post_user");
 }
 
-pub async fn verify_auth_token(
-    app: &Web3ProxyApp,
-    auth_token: String,
-    primary_address: &Address,
-    secondary_address: Option<&Address>,
-) -> anyhow::Result<()> {
-    let auth_user = secondary_address.unwrap_or(primary_address);
+// TODO: what roles should exist?
+enum ProtectedAction {
+    PostUser,
+}
 
-    // TODO: Role-based access control?
-
-    todo!("verify_auth_token")
+impl ProtectedAction {
+    async fn verify(
+        self,
+        app: &Web3ProxyApp,
+        auth_token: String,
+        primary_address: &Address,
+    ) -> anyhow::Result<()> {
+        // TODO: get the attached address from redis for the given auth_token.
+        // TODO: if auth_address == primary_address, allow
+        // TODO: if auth_address != primary_address, only allow if they are a secondary user with the correct role
+        todo!("verify token for the given user");
+    }
 }
