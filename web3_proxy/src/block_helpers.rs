@@ -3,15 +3,22 @@ use tracing::warn;
 
 pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> (bool, U64) {
     match block_num {
-        BlockNumber::Earliest => (false, U64::zero()),
+        BlockNumber::Earliest => {
+            // modified is false because we want the backend to see "pending"
+            (false, U64::zero())
+        }
         BlockNumber::Latest => {
             // change "latest" to a number
+            // modified is true because we want the backend to see the height and not "latest"
             (true, latest_block)
         }
-        BlockNumber::Number(x) => (false, x),
+        BlockNumber::Number(x) => {
+            // we already have a number
+            (false, x)
+        }
         BlockNumber::Pending => {
             // TODO: think more about how to handle Pending
-            // modified is false because we probably want the backend to see "pending"
+            // modified is false because we want the backend to see "pending"
             (false, latest_block)
         }
     }
@@ -59,8 +66,11 @@ pub fn block_needed(
     params: Option<&mut serde_json::Value>,
     head_block: U64,
 ) -> Option<U64> {
+    // if no params, no block is needed
     let params = params?;
 
+    // get the index for the BlockNumber or return None to say no block is needed.
+    // The BlockNumber is usually the last element.
     // TODO: double check these. i think some of the getBlock stuff will never need archive
     let block_param_id = match method {
         "eth_call" => 1,
