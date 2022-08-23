@@ -158,7 +158,7 @@ pub async fn post_login(
         todo!("proper error message: {}", e)
     }
 
-    if new_user {
+    let response = if new_user {
         // the only thing we need from them is an address
         // everything else is optional
         let user = user::ActiveModel {
@@ -195,7 +195,11 @@ pub async fn post_login(
         */
     } else {
         todo!("load existing user from the database");
-    }
+    };
+
+    // TODO: create a new auth bearer token and save it in redis with a long (7 or 30 day?) expiry.
+
+    // TODO: return the response
 }
 
 /// the JSON input to the `post_user` handler
@@ -210,17 +214,20 @@ pub struct PostUser {
 #[debug_handler]
 /// post to the user endpoint to modify your account
 pub async fn post_user(
-    Json(payload): Json<PostUser>,
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
     AuthBearer(auth_token): AuthBearer,
+    ClientIp(ip): ClientIp,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Json(payload): Json<PostUser>,
 ) -> FrontendResult {
-    todo!("finish post_user");
+    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?;
 
-    // TODO: check the auth_token is valid for the user in PostUser
+    // TODO: check the auth_token is valid for the user in PostUser (in a helper function)
 
     // let user = user::ActiveModel {
     //     address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
     //     email: sea_orm::Set(payload.email),
     //     ..Default::default()
     // };
+
+    todo!("finish post_user");
 }
