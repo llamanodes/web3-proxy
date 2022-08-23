@@ -207,7 +207,8 @@ pub async fn post_login(
 /// the JSON input to the `post_user` handler
 #[derive(Deserialize)]
 pub struct PostUser {
-    address: Address,
+    primary_address: Address,
+    secondary_address: Option<Address>,
     // TODO: make sure the email address is valid. probably have a "verified" column in the database
     email: Option<String>,
     // TODO: make them sign this JSON? cookie in session id is hard because its on a different domain
@@ -223,7 +224,13 @@ pub async fn post_user(
 ) -> FrontendResult {
     let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?;
 
-    // TODO: check the auth_token is valid for the user in PostUser (in a helper function)
+    verify_auth_token(
+        app.as_ref(),
+        auth_token,
+        &payload.primary_address,
+        payload.secondary_address.as_ref(),
+    )
+    .await?;
 
     // let user = user::ActiveModel {
     //     address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
@@ -232,4 +239,17 @@ pub async fn post_user(
     // };
 
     todo!("finish post_user");
+}
+
+pub async fn verify_auth_token(
+    app: &Web3ProxyApp,
+    auth_token: String,
+    primary_address: &Address,
+    secondary_address: Option<&Address>,
+) -> anyhow::Result<()> {
+    let auth_user = secondary_address.unwrap_or(primary_address);
+
+    // TODO: Role-based access control?
+
+    todo!("verify_auth_token")
 }
