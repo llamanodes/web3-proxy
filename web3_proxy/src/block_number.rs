@@ -1,3 +1,4 @@
+//! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
 use ethers::prelude::{BlockNumber, U64};
 use tracing::warn;
 

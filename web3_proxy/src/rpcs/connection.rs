@@ -1,6 +1,8 @@
 ///! Rate-limited communication with a web3 provider
+use super::provider::Web3Provider;
+use crate::app::{flatten_handle, AnyhowJoinHandle};
+use crate::config::BlockAndRpc;
 use anyhow::Context;
-use derive_more::From;
 use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
@@ -17,21 +19,11 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
 
-use crate::app::{flatten_handle, AnyhowJoinHandle};
-use crate::config::BlockAndRpc;
-
 // TODO: rename this
 pub enum HandleResult {
     ActiveRequest(ActiveRequestHandle),
     RetryAt(Instant),
     None,
-}
-
-/// TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit <https://github.com/gakonst/ethers-rs/issues/592>
-#[derive(From)]
-pub enum Web3Provider {
-    Http(ethers::providers::Provider<ethers::providers::Http>),
-    Ws(ethers::providers::Provider<ethers::providers::Ws>),
 }
 
 /// An active connection to a Web3Rpc
@@ -52,6 +44,9 @@ pub struct Web3Connection {
     pub weight: u32,
     head_block: RwLock<(H256, U64)>,
 }
+
+/// Drop this once a connection completes
+pub struct ActiveRequestHandle(Arc<Web3Connection>);
 
 impl Web3Provider {
     #[instrument]
@@ -637,9 +632,6 @@ impl Hash for Web3Connection {
         self.url.hash(state);
     }
 }
-
-/// Drop this once a connection completes
-pub struct ActiveRequestHandle(Arc<Web3Connection>);
 
 impl ActiveRequestHandle {
     fn new(connection: Arc<Web3Connection>) -> Self {

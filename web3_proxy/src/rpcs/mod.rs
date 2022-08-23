@@ -1,5 +1,7 @@
+mod blockchain;
 mod connection;
 mod connections;
+mod provider;
 mod synced_connections;
 
 pub use connection::{ActiveRequestHandle, HandleResult, Web3Connection};

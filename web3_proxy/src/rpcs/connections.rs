@@ -1,28 +1,24 @@
 ///! Load balanced communication with a group of web3 providers
-use anyhow::Context;
-use arc_swap::ArcSwap;
-use counter::Counter;
-use dashmap::DashMap;
-use derive_more::From;
-use ethers::prelude::{Block, ProviderError, Transaction, TxHash, H256, U256, U64};
-use futures::future::{join_all, try_join_all};
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
-use hashbrown::HashMap;
-use indexmap::{IndexMap, IndexSet};
-use std::cmp::Reverse;
-// use parking_lot::RwLock;
-// use petgraph::graphmap::DiGraphMap;
 use super::SyncedConnections;
 use super::{ActiveRequestHandle, HandleResult, Web3Connection};
 use crate::app::{flatten_handle, AnyhowJoinHandle, TxState};
 use crate::config::Web3ConnectionConfig;
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
+use arc_swap::ArcSwap;
+use counter::Counter;
+use dashmap::DashMap;
+use derive_more::From;
+use ethers::prelude::{Block, ProviderError, Transaction, TxHash, H256, U64};
+use futures::future::{join_all, try_join_all};
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
+use hashbrown::HashMap;
+use indexmap::IndexMap;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
-use serde_json::json;
 use serde_json::value::RawValue;
 use std::cmp;
+use std::cmp::Reverse;
 use std::fmt;
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch};
@@ -31,85 +27,23 @@ use tokio::time::{interval, sleep, sleep_until, MissedTickBehavior};
 use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info, instrument, trace, warn};
 
-#[derive(Default)]
-pub struct BlockChain {
-    /// only includes blocks on the main chain.
-    chain_map: DashMap<U64, Arc<Block<TxHash>>>,
-    /// all blocks, including orphans
-    block_map: DashMap<H256, Arc<Block<TxHash>>>,
-    // TODO: petgraph?
-}
-
-impl BlockChain {
-    pub fn add_block(&self, block: Arc<Block<TxHash>>, cannonical: bool) {
-        let hash = block.hash.unwrap();
-
-        if cannonical {
-            let num = block.number.unwrap();
-
-            let entry = self.chain_map.entry(num);
-
-            let mut is_new = false;
-
-            entry.or_insert_with(|| {
-                is_new = true;
-                block.clone()
-            });
-
-            if !is_new {
-                return;
-            }
-        }
-
-        self.block_map.entry(hash).or_insert(block);
-    }
-
-    pub fn cannonical_block(&self, num: &U64) -> Option<Arc<Block<TxHash>>> {
-        self.chain_map.get(num).map(|x| x.clone())
-    }
-
-    pub fn block(&self, hash: &H256) -> Option<Arc<Block<TxHash>>> {
-        self.block_map.get(hash).map(|x| x.clone())
-    }
-}
-
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
 pub struct Web3Connections {
-    conns: IndexMap<String, Arc<Web3Connection>>,
-    synced_connections: ArcSwap<SyncedConnections>,
-    pending_transactions: Arc<DashMap<TxHash, TxState>>,
-    // TODO: i think chain is what we want, but i'm not sure how we'll use it yet
-    // TODO: this graph is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
-    // chain: Arc<RwLock<DiGraphMap<H256, Block<TxHash>>>>,
-    chain: BlockChain,
-}
-
-impl Serialize for Web3Connections {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let conns: Vec<&Web3Connection> = self.conns.iter().map(|x| x.1.as_ref()).collect();
-
-        let mut state = serializer.serialize_struct("Web3Connections", 2)?;
-        state.serialize_field("conns", &conns)?;
-        state.serialize_field("synced_connections", &**self.synced_connections.load())?;
-        state.end()
-    }
-}
-
-impl fmt::Debug for Web3Connections {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: the default formatter takes forever to write. this is too quiet though
-        f.debug_struct("Web3Connections")
-            .field("conns", &self.conns)
-            .finish_non_exhaustive()
-    }
+    pub(super) conns: IndexMap<String, Arc<Web3Connection>>,
+    pub(super) synced_connections: ArcSwap<SyncedConnections>,
+    pub(super) pending_transactions: Arc<DashMap<TxHash, TxState>>,
+    /// only includes blocks on the main chain.
+    /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
+    pub(super) chain_map: DashMap<U64, Arc<Block<TxHash>>>,
+    /// all blocks, including orphans
+    /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
+    pub(super) block_map: DashMap<H256, Arc<Block<TxHash>>>,
+    // TODO: petgraph? might help with pruning the maps
 }
 
 impl Web3Connections {
-    // #[instrument(name = "spawn_Web3Connections", skip_all)]
+    /// Spawn durable connections to multiple Web3 providers.
     pub async fn spawn(
         chain_id: u64,
         server_configs: HashMap<String, Web3ConnectionConfig>,
@@ -223,7 +157,8 @@ impl Web3Connections {
             conns: connections,
             synced_connections: ArcSwap::new(Arc::new(synced_connections)),
             pending_transactions,
-            chain: Default::default(),
+            chain_map: Default::default(),
+            block_map: Default::default(),
         });
 
         let handle = {
@@ -409,113 +344,6 @@ impl Web3Connections {
         Ok(())
     }
 
-    pub async fn block(&self, hash: &H256) -> anyhow::Result<Arc<Block<TxHash>>> {
-        // first, try to get the hash from our cache
-        if let Some(block) = self.chain.block(hash) {
-            return Ok(block);
-        }
-
-        // block not in cache. we need to ask an rpc for it
-
-        // TODO: helper for method+params => JsonRpcRequest
-        // TODO: get block with the transactions?
-        let request = json!({ "id": "1", "method": "eth_getBlockByHash", "params": (hash, false) });
-        let request: JsonRpcRequest = serde_json::from_value(request)?;
-
-        // TODO: if error, retry?
-        let response = self.try_send_best_upstream_server(request, None).await?;
-
-        let block = response.result.unwrap();
-
-        let block: Block<TxHash> = serde_json::from_str(block.get())?;
-
-        let block = Arc::new(block);
-
-        self.chain.add_block(block.clone(), false);
-
-        Ok(block)
-    }
-
-    /// Get the heaviest chain's block from cache or backend rpc
-    pub async fn cannonical_block(&self, num: &U64) -> anyhow::Result<Arc<Block<TxHash>>> {
-        // first, try to get the hash from our cache
-        if let Some(block) = self.chain.cannonical_block(num) {
-            return Ok(block);
-        }
-
-        // block not in cache. we need to ask an rpc for it
-        // but before we do any queries, be sure the requested block num exists
-        let head_block_num = self.head_block_num();
-        if num > &head_block_num {
-            // TODO: i'm seeing this a lot when using ethspam. i dont know why though. i thought we delayed publishing
-            // TODO: instead of error, maybe just sleep and try again?
-            return Err(anyhow::anyhow!(
-                "Head block is #{}, but #{} was requested",
-                head_block_num,
-                num
-            ));
-        }
-
-        // TODO: helper for method+params => JsonRpcRequest
-        // TODO: get block with the transactions?
-        let request = json!({ "jsonrpc": "2.0", "id": "1", "method": "eth_getBlockByNumber", "params": (num, false) });
-        let request: JsonRpcRequest = serde_json::from_value(request)?;
-
-        // TODO: if error, retry?
-        let response = self
-            .try_send_best_upstream_server(request, Some(num))
-            .await?;
-
-        let block = response.result.unwrap();
-
-        let block: Block<TxHash> = serde_json::from_str(block.get())?;
-
-        let block = Arc::new(block);
-
-        self.chain.add_block(block.clone(), true);
-
-        Ok(block)
-    }
-
-    /// Convenience method to get the cannonical block at a given block height.
-    pub async fn block_hash(&self, num: &U64) -> anyhow::Result<H256> {
-        let block = self.cannonical_block(num).await?;
-
-        let hash = block.hash.unwrap();
-
-        Ok(hash)
-    }
-
-    pub fn head_block(&self) -> (U64, H256) {
-        let synced_connections = self.synced_connections.load();
-
-        (
-            synced_connections.head_block_num,
-            synced_connections.head_block_hash,
-        )
-    }
-
-    pub fn head_block_hash(&self) -> H256 {
-        self.synced_connections.load().head_block_hash
-    }
-
-    pub fn head_block_num(&self) -> U64 {
-        self.synced_connections.load().head_block_num
-    }
-
-    pub fn synced(&self) -> bool {
-        // TODO: require a minimum number of synced rpcs
-        // TODO: move this whole function to SyncedConnections
-        if self.synced_connections.load().conns.is_empty() {
-            return false;
-        }
-        self.head_block_num() > U64::zero()
-    }
-
-    pub fn num_synced_rpcs(&self) -> usize {
-        self.synced_connections.load().conns.len()
-    }
-
     /// Send the same request to all the handles. Returning the most common success or most common error.
     #[instrument(skip_all)]
     pub async fn try_send_parallel_requests(
@@ -577,303 +405,23 @@ impl Web3Connections {
     async fn update_synced_rpcs(
         &self,
         block_receiver: flume::Receiver<(Arc<Block<TxHash>>, Arc<Web3Connection>)>,
+        // TODO: head_block_sender should be a broadcast_sender like pending_tx_sender
         head_block_sender: watch::Sender<Arc<Block<TxHash>>>,
-        // TODO: use pending_tx_sender
         pending_tx_sender: Option<broadcast::Sender<TxState>>,
     ) -> anyhow::Result<()> {
-        let total_rpcs = self.conns.len();
-
-        // TODO: rpc name instead of url (will do this with config reload revamp)
         // TODO: indexmap or hashmap? what hasher? with_capacity?
         // TODO: this will grow unbounded. prune old heads automatically
         let mut connection_heads = IndexMap::<String, Arc<Block<TxHash>>>::new();
 
         while let Ok((new_block, rpc)) = block_receiver.recv_async().await {
-            let new_block_hash = if let Some(hash) = new_block.hash {
-                hash
-            } else {
-                connection_heads.remove(&rpc.url);
-
-                continue;
-            };
-
-            // TODO: dry this with the code above
-            let new_block_num = if let Some(num) = new_block.number {
-                num
-            } else {
-                // this seems unlikely, but i'm pretty sure we have seen it
-                // maybe when a node is syncing or reconnecting?
-                warn!(%rpc, ?new_block, "Block without number!");
-
-                connection_heads.remove(&rpc.url);
-
-                continue;
-            };
-
-            // TODO: span with more in it?
-            // TODO: make sure i'm doing this span right
-            // TODO: show the actual rpc url?
-            // TODO: clippy lint to make sure we don't hold this across an awaited future
-            // TODO: what level?
-            // let _span = info_span!("block_receiver", %rpc, %new_block_num).entered();
-
-            if new_block_num == U64::zero() {
-                warn!(%rpc, %new_block_num, "still syncing");
-
-                connection_heads.remove(&rpc.url);
-            } else {
-                connection_heads.insert(rpc.url.clone(), new_block.clone());
-
-                self.chain.add_block(new_block.clone(), false);
-            }
-
-            // iterate connection_heads to find the oldest block
-            let lowest_block_num = if let Some(lowest_block) = connection_heads
-                .values()
-                .min_by(|a, b| a.number.cmp(&b.number))
-            {
-                lowest_block
-                    .number
-                    .expect("all blocks here should have a number")
-            } else {
-                continue;
-            };
-
-            // iterate connection_heads to find the consensus block
-            let mut rpcs_by_num = IndexMap::<U64, Vec<&str>>::new();
-            let mut blocks_by_hash = IndexMap::<H256, Arc<Block<TxHash>>>::new();
-            // block_hash => soft_limit, rpcs
-            // TODO: proper type for this?
-            let mut rpcs_by_hash = IndexMap::<H256, Vec<&str>>::new();
-            let mut total_soft_limit = 0;
-
-            for (rpc_url, head_block) in connection_heads.iter() {
-                if let Some(rpc) = self.conns.get(rpc_url) {
-                    // we need the total soft limit in order to know when its safe to update the backends
-                    total_soft_limit += rpc.soft_limit;
-
-                    let head_hash = head_block.hash.unwrap();
-
-                    // save the block
-                    blocks_by_hash
-                        .entry(head_hash)
-                        .or_insert_with(|| head_block.clone());
-
-                    // add the rpc to all relevant block heights
-                    let mut block = head_block.clone();
-                    while block.number.unwrap() >= lowest_block_num {
-                        let block_hash = block.hash.unwrap();
-                        let block_num = block.number.unwrap();
-
-                        // save the rpcs and the sum of their soft limit by their head hash
-                        let rpc_urls_by_hash =
-                            rpcs_by_hash.entry(block_hash).or_insert_with(Vec::new);
-
-                        rpc_urls_by_hash.push(rpc_url);
-
-                        // save the rpcs by their number
-                        let rpc_urls_by_num = rpcs_by_num.entry(block_num).or_insert_with(Vec::new);
-
-                        rpc_urls_by_num.push(rpc_url);
-
-                        if let Some(parent) = self.chain.block(&block.parent_hash) {
-                            // save the parent block
-                            blocks_by_hash.insert(block.parent_hash, parent.clone());
-
-                            block = parent
-                        } else {
-                            // log this? eventually we will hit a block we don't have, so it's not an error
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // TODO: default_min_soft_limit? without, we start serving traffic at the start too quickly
-            // let min_soft_limit = total_soft_limit / 2;
-            let min_soft_limit = 1;
-            let num_possible_heads = rpcs_by_hash.len();
-
-            trace!(?rpcs_by_hash);
-
-            struct State<'a> {
-                block: &'a Arc<Block<TxHash>>,
-                sum_soft_limit: u32,
-                conns: Vec<&'a str>,
-            }
-
-            impl<'a> State<'a> {
-                // TODO: there are sortable traits, but this seems simpler
-                /// sort the blocks in descending height
-                fn sortable_values(&self) -> (&U64, &u32, &U256, &H256) {
-                    // trace!(?self.block, ?self.conns);
-
-                    // first we care about the block number
-                    let block_num = self.block.number.as_ref().unwrap();
-
-                    // if block_num ties, the block with the highest total difficulty *should* be the winner
-                    // TODO: sometimes i see a block with no total difficulty. websocket subscription doesn't get everything
-                    // let total_difficulty = self.block.total_difficulty.as_ref().expect("wat");
-
-                    // all the nodes should already be doing this fork priority logic themselves
-                    // so, it should be safe to just look at whatever our node majority thinks and go with that
-                    let sum_soft_limit = &self.sum_soft_limit;
-
-                    let difficulty = &self.block.difficulty;
-
-                    // if we are still tied (unlikely). this will definitely break the tie
-                    // TODO: what does geth do?
-                    let block_hash = self.block.hash.as_ref().unwrap();
-
-                    (block_num, sum_soft_limit, difficulty, block_hash)
-                }
-            }
-
-            // TODO: this needs tests
-            if let Some(x) = rpcs_by_hash
-                .into_iter()
-                .filter_map(|(hash, conns)| {
-                    // TODO: move this to `State::new` function on
-                    let sum_soft_limit = conns
-                        .iter()
-                        .map(|rpc_url| {
-                            if let Some(rpc) = self.conns.get(*rpc_url) {
-                                rpc.soft_limit
-                            } else {
-                                0
-                            }
-                        })
-                        .sum();
-
-                    if sum_soft_limit < min_soft_limit {
-                        trace!(?sum_soft_limit, ?min_soft_limit, "sum_soft_limit too low");
-                        None
-                    } else {
-                        let block = blocks_by_hash.get(&hash).unwrap();
-
-                        Some(State {
-                            block,
-                            sum_soft_limit,
-                            conns,
-                        })
-                    }
-                })
-                // sort b to a for descending order. sort a to b for ascending order? maybe not "max_by" is smart
-                .max_by(|a, b| a.sortable_values().cmp(&b.sortable_values()))
-            {
-                let best_head_num = x.block.number.unwrap();
-                let best_head_hash = x.block.hash.unwrap();
-                let best_rpcs = x.conns;
-
-                let synced_rpcs = rpcs_by_num.remove(&best_head_num).unwrap();
-
-                if best_rpcs.len() == synced_rpcs.len() {
-                    trace!(
-                        "{}/{}/{}/{} rpcs have {}",
-                        best_rpcs.len(),
-                        synced_rpcs.len(),
-                        connection_heads.len(),
-                        total_rpcs,
-                        best_head_hash
-                    );
-                } else {
-                    // TODO: this isn't necessarily a fork. this might just be an rpc being slow
-                    // TODO: log all the heads?
-                    warn!(
-                        "chain is forked! {} possible heads. {}/{}/{}/{} rpcs have {}",
-                        num_possible_heads,
-                        best_rpcs.len(),
-                        synced_rpcs.len(),
-                        connection_heads.len(),
-                        total_rpcs,
-                        best_head_hash
-                    );
-                }
-
-                let num_best_rpcs = best_rpcs.len();
-
-                // TODOL: do this without clone?
-                let conns = best_rpcs
-                    .into_iter()
-                    .map(|x| self.conns.get(x).unwrap().clone())
-                    .collect();
-
-                let pending_synced_connections = SyncedConnections {
-                    head_block_num: best_head_num,
-                    head_block_hash: best_head_hash,
-                    conns,
-                };
-
-                let current_head_block = self.head_block_hash();
-                let new_head_block =
-                    pending_synced_connections.head_block_hash != current_head_block;
-
-                if new_head_block {
-                    self.chain.add_block(new_block.clone(), true);
-
-                    debug!(
-                        "{}/{} rpcs at {} ({}). head at {:?}",
-                        pending_synced_connections.conns.len(),
-                        self.conns.len(),
-                        pending_synced_connections.head_block_num,
-                        pending_synced_connections.head_block_hash,
-                        pending_synced_connections
-                            .conns
-                            .iter()
-                            .map(|x| format!("{}", x))
-                            .collect::<Vec<_>>(),
-                    );
-                    // TODO: what if the hashes don't match?
-                    if pending_synced_connections.head_block_hash == new_block_hash {
-                        // mark all transactions in the block as confirmed
-                        if pending_tx_sender.is_some() {
-                            for tx_hash in &new_block.transactions {
-                                // TODO: should we mark as confirmed via pending_tx_sender?
-                                // TODO: possible deadlock here!
-                                // trace!("removing {}...", tx_hash);
-                                let _ = self.pending_transactions.remove(tx_hash);
-                                // trace!("removed {}", tx_hash);
-                            }
-                        };
-
-                        // TODO: mark any orphaned transactions as unconfirmed
-                    }
-                } else if num_best_rpcs == self.conns.len() {
-                    trace!(
-                        "all {} rpcs at {} ({})",
-                        num_best_rpcs,
-                        pending_synced_connections.head_block_num,
-                        pending_synced_connections.head_block_hash,
-                    );
-                } else {
-                    trace!(
-                        ?pending_synced_connections,
-                        "{}/{} rpcs at {} ({})",
-                        num_best_rpcs,
-                        self.conns.len(),
-                        pending_synced_connections.head_block_num,
-                        pending_synced_connections.head_block_hash,
-                    );
-                }
-
-                // TODO: do this before or after processing all the transactions in this block?
-                // TODO: only swap if there is a change?
-                trace!(?pending_synced_connections, "swapping");
-                self.synced_connections
-                    .swap(Arc::new(pending_synced_connections));
-
-                if new_head_block {
-                    // TODO: is new_head_block accurate?
-                    // TODO: move this onto self.chain?
-                    head_block_sender
-                        .send(new_block.clone())
-                        .context("head_block_sender")?;
-                }
-            } else {
-                // TODO: is this expected when we first start?
-                // TODO: make sure self.synced_connections is empty
-                warn!("not enough rpcs in sync");
-            }
+            self.recv_block_from_rpc(
+                &mut connection_heads,
+                new_block,
+                rpc,
+                &head_block_sender,
+                &pending_tx_sender,
+            )
+            .await?;
         }
 
         // TODO: if there was an error, we should return it
@@ -1165,25 +713,25 @@ impl Web3Connections {
     }
 }
 
-mod tests {
-    #[test]
-    fn test_false_before_true() {
-        let mut x = [true, false, true];
-
-        x.sort_unstable();
-
-        assert_eq!(x, [false, true, true])
+impl fmt::Debug for Web3Connections {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        f.debug_struct("Web3Connections")
+            .field("conns", &self.conns)
+            .finish_non_exhaustive()
     }
 }
 
-impl fmt::Debug for SyncedConnections {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: the default formatter takes forever to write. this is too quiet though
-        // TODO: print the actual conns?
-        f.debug_struct("SyncedConnections")
-            .field("head_num", &self.head_block_num)
-            .field("head_hash", &self.head_block_hash)
-            .field("num_conns", &self.conns.len())
-            .finish_non_exhaustive()
+impl Serialize for Web3Connections {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let conns: Vec<&Web3Connection> = self.conns.iter().map(|x| x.1.as_ref()).collect();
+
+        let mut state = serializer.serialize_struct("Web3Connections", 2)?;
+        state.serialize_field("conns", &conns)?;
+        state.serialize_field("synced_connections", &**self.synced_connections.load())?;
+        state.end()
     }
 }

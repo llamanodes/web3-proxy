@@ -35,7 +35,7 @@ use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tracing::{info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
 
-use crate::block_helpers::block_needed;
+use crate::block_number::block_needed;
 use crate::config::{AppConfig, TopConfig};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
