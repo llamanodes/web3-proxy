@@ -18,8 +18,8 @@ use axum::{
 use axum_auth::AuthBearer;
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
-use entities::sea_orm_active_enums::Role;
-use entities::{user, user_keys};
+// use entities::sea_orm_active_enums::Role;
+use entities::user;
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use redis_rate_limit::redis::AsyncCommands;

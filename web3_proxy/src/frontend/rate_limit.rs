@@ -28,8 +28,6 @@ pub enum RequestFrom {
     User(u64),
 }
 
-pub type RateLimitFrontendResult = Result<RequestFrom, FrontendErrorResponse>;
-
 impl TryFrom<RequestFrom> for IpAddr {
     type Error = anyhow::Error;
 

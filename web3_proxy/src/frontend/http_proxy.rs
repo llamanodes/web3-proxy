@@ -1,6 +1,6 @@
 use super::errors::FrontendResult;
 use super::rate_limit::{rate_limit_by_ip, rate_limit_by_user_key};
-use crate::stats::{Protocol, ProxyRequestLabels};
+use crate::stats::Protocol;
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::Path;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};

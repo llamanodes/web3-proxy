@@ -20,6 +20,7 @@ use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
 
+// TODO: rename this
 pub enum HandleResult {
     ActiveRequest(ActiveRequestHandle),
     RetryAt(Instant),
@@ -31,6 +32,25 @@ pub enum HandleResult {
 pub enum Web3Provider {
     Http(ethers::providers::Provider<ethers::providers::Http>),
     Ws(ethers::providers::Provider<ethers::providers::Ws>),
+}
+
+/// An active connection to a Web3Rpc
+pub struct Web3Connection {
+    name: String,
+    /// TODO: can we get this from the provider? do we even need it?
+    pub url: String,
+    /// keep track of currently open requests. We sort on this
+    active_requests: AtomicU32,
+    /// provider is in a RwLock so that we can replace it if re-connecting
+    /// it is an async lock because we hold it open across awaits
+    provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
+    /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
+    hard_limit: Option<RedisRateLimit>,
+    /// used for load balancing to the least loaded server
+    pub soft_limit: u32,
+    block_data_limit: AtomicU64,
+    pub weight: u32,
+    head_block: RwLock<(H256, U64)>,
 }
 
 impl Web3Provider {
@@ -69,25 +89,6 @@ impl fmt::Debug for Web3Provider {
         // TODO: the default Debug takes forever to write. this is too quiet though. we at least need the url
         f.debug_struct("Web3Provider").finish_non_exhaustive()
     }
-}
-
-/// An active connection to a Web3Rpc
-pub struct Web3Connection {
-    name: String,
-    /// TODO: can we get this from the provider? do we even need it?
-    pub url: String,
-    /// keep track of currently open requests. We sort on this
-    active_requests: AtomicU32,
-    /// provider is in a RwLock so that we can replace it if re-connecting
-    /// it is an async lock because we hold it open across awaits
-    provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
-    /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
-    hard_limit: Option<RedisRateLimit>,
-    /// used for load balancing to the least loaded server
-    pub soft_limit: u32,
-    block_data_limit: AtomicU64,
-    pub weight: u32,
-    head_block: RwLock<(H256, U64)>,
 }
 
 impl Web3Connection {

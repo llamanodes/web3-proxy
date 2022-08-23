@@ -13,6 +13,11 @@ use indexmap::{IndexMap, IndexSet};
 use std::cmp::Reverse;
 // use parking_lot::RwLock;
 // use petgraph::graphmap::DiGraphMap;
+use super::SyncedConnections;
+use super::{ActiveRequestHandle, HandleResult, Web3Connection};
+use crate::app::{flatten_handle, AnyhowJoinHandle, TxState};
+use crate::config::Web3ConnectionConfig;
+use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
@@ -25,34 +30,6 @@ use tokio::task;
 use tokio::time::{interval, sleep, sleep_until, MissedTickBehavior};
 use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info, instrument, trace, warn};
-
-use crate::app::{flatten_handle, AnyhowJoinHandle, TxState};
-use crate::config::Web3ConnectionConfig;
-use crate::connection::{ActiveRequestHandle, HandleResult, Web3Connection};
-use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
-
-/// A collection of Web3Connections that are on the same block.
-/// Serialize is so we can print it on our debug endpoint
-#[derive(Clone, Default, Serialize)]
-struct SyncedConnections {
-    head_block_num: U64,
-    head_block_hash: H256,
-    // TODO: this should be able to serialize, but it isn't
-    #[serde(skip_serializing)]
-    conns: IndexSet<Arc<Web3Connection>>,
-}
-
-impl fmt::Debug for SyncedConnections {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: the default formatter takes forever to write. this is too quiet though
-        // TODO: print the actual conns?
-        f.debug_struct("SyncedConnections")
-            .field("head_num", &self.head_block_num)
-            .field("head_hash", &self.head_block_hash)
-            .field("num_conns", &self.conns.len())
-            .finish_non_exhaustive()
-    }
-}
 
 #[derive(Default)]
 pub struct BlockChain {
@@ -1196,5 +1173,17 @@ mod tests {
         x.sort_unstable();
 
         assert_eq!(x, [false, true, true])
+    }
+}
+
+impl fmt::Debug for SyncedConnections {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        // TODO: print the actual conns?
+        f.debug_struct("SyncedConnections")
+            .field("head_num", &self.head_block_num)
+            .field("head_hash", &self.head_block_hash)
+            .field("num_conns", &self.conns.len())
+            .finish_non_exhaustive()
     }
 }

@@ -37,11 +37,11 @@ use uuid::Uuid;
 
 use crate::block_helpers::block_needed;
 use crate::config::{AppConfig, TopConfig};
-use crate::connections::Web3Connections;
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
+use crate::rpcs::Web3Connections;
 use crate::stats::AppStats;
 
 // TODO: make this customizable?
