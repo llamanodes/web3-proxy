@@ -15,6 +15,7 @@ use axum::{
     response::IntoResponse,
     Extension, Json,
 };
+use axum_auth::AuthBearer;
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
 use entities::{user, user_keys};
@@ -48,7 +49,8 @@ pub async fn get_login(
     // create a message and save it in redis
 
     // TODO: how many seconds? get from config?
-    let expire_seconds: usize = 300;
+    // TODO: while developing, we put a giant number here
+    let expire_seconds: usize = 28800;
 
     let nonce = Ulid::new();
 
@@ -78,20 +80,13 @@ pub async fn get_login(
     let session_key = format!("pending:{}", nonce);
 
     // TODO: if no redis server, store in local cache?
-    let mut redis_conn = app
-        .redis_pool
-        .as_ref()
-        .expect("login requires a redis server")
-        .get()
-        .await?;
-
     // the address isn't enough. we need to save the actual message so we can read the nonce
     // TODO: what message format is the most efficient to store in redis? probably eip191_string
-    redis_conn
-        .set_ex(session_key, message.to_string(), expire_seconds)
+    // we add 1 to expire_seconds just to be sure redis has the key for the full expiration_time
+    app.redis_conn()
+        .await?
+        .set_ex(session_key, message.to_string(), expire_seconds + 1)
         .await?;
-
-    drop(redis_conn);
 
     // there are multiple ways to sign messages and not all wallets support them
     let message_eip = params
@@ -152,16 +147,8 @@ pub async fn post_login(
     let their_sig: [u8; 65] = payload.sig.as_ref().try_into().unwrap();
 
     // fetch the message we gave them from our redis
-    let redis_pool = app
-        .redis_pool
-        .as_ref()
-        .expect("login requires a redis server");
-
-    let mut redis_conn = redis_pool.get().await.unwrap();
-
     // TODO: use getdel
-    // TODO: do not unwrap. make this function return a FrontendResult
-    let our_msg: String = redis_conn.get(&their_msg.nonce).await.unwrap();
+    let our_msg: String = app.redis_conn().await?.get(&their_msg.nonce).await?;
 
     let our_msg: siwe::Message = our_msg.parse().unwrap();
 
@@ -203,6 +190,7 @@ pub async fn post_login(
         // TODO: set a cookie?
 
         // TODO: do not expose user ids
+        // TODO: return an api key and a bearer token
         (StatusCode::CREATED, Json(user)).into_response()
         */
     } else {
@@ -224,9 +212,11 @@ pub struct PostUser {
 pub async fn post_user(
     Json(payload): Json<PostUser>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ClientIp(ip): ClientIp,
+    AuthBearer(auth_token): AuthBearer,
 ) -> FrontendResult {
     todo!("finish post_user");
+
+    // TODO: check the auth_token is valid for the user in PostUser
 
     // let user = user::ActiveModel {
     //     address: sea_orm::Set(payload.address.to_fixed_bytes().into()),

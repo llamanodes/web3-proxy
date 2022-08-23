@@ -15,6 +15,7 @@ use futures::stream::StreamExt;
 use futures::Future;
 use migration::{Migrator, MigratorTrait};
 use parking_lot::RwLock;
+use redis_rate_limit::bb8::PooledConnection;
 use redis_rate_limit::{
     bb8::{self, ErrorSink},
     RedisConnectionManager, RedisErrorSink, RedisPool, RedisRateLimit,
@@ -158,6 +159,17 @@ impl fmt::Debug for Web3ProxyApp {
 }
 
 impl Web3ProxyApp {
+    pub async fn redis_conn(&self) -> anyhow::Result<PooledConnection<RedisConnectionManager>> {
+        match self.redis_pool.as_ref() {
+            None => Err(anyhow::anyhow!("no redis server configured")),
+            Some(redis_pool) => {
+                let redis_conn = redis_pool.get().await?;
+
+                Ok(redis_conn)
+            }
+        }
+    }
+
     // TODO: should we just take the rpc config as the only arg instead?
     pub async fn spawn(
         app_stats: AppStats,
