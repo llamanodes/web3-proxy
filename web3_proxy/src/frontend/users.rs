@@ -158,6 +158,8 @@ pub async fn post_login(
         todo!("proper error message: {}", e)
     }
 
+    // TODO: create a new auth bearer token (ULID?)
+
     let response = if new_user {
         // the only thing we need from them is an address
         // everything else is optional
@@ -197,9 +199,9 @@ pub async fn post_login(
         todo!("load existing user from the database");
     };
 
-    // TODO: create a new auth bearer token and save it in redis with a long (7 or 30 day?) expiry.
+    // TODO: save the auth bearer token in redis with a long (7 or 30 day?) expiry.
 
-    // TODO: return the response
+    Ok(response)
 }
 
 /// the JSON input to the `post_user` handler
