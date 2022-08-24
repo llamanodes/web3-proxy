@@ -1,5 +1,7 @@
-///! Rate-limited communication with a web3 provider
+///! Rate-limited communication with a web3 provider.
 use super::provider::Web3Provider;
+use super::request::PendingRequestHandle;
+use super::request::RequestHandleResult;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
 use anyhow::Context;
@@ -19,23 +21,16 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
 
-// TODO: rename this
-pub enum HandleResult {
-    ActiveRequest(ActiveRequestHandle),
-    RetryAt(Instant),
-    None,
-}
-
 /// An active connection to a Web3Rpc
 pub struct Web3Connection {
-    name: String,
+    pub name: String,
     /// TODO: can we get this from the provider? do we even need it?
     pub url: String,
     /// keep track of currently open requests. We sort on this
-    active_requests: AtomicU32,
+    pub(super) active_requests: AtomicU32,
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
-    provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
+    pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     hard_limit: Option<RedisRateLimit>,
     /// used for load balancing to the least loaded server
@@ -43,47 +38,6 @@ pub struct Web3Connection {
     block_data_limit: AtomicU64,
     pub weight: u32,
     head_block: RwLock<(H256, U64)>,
-}
-
-/// Drop this once a connection completes
-pub struct ActiveRequestHandle(Arc<Web3Connection>);
-
-impl Web3Provider {
-    #[instrument]
-    async fn from_str(url_str: &str, http_client: Option<reqwest::Client>) -> anyhow::Result<Self> {
-        let provider = if url_str.starts_with("http") {
-            let url: url::Url = url_str.parse()?;
-
-            let http_client = http_client.ok_or_else(|| anyhow::anyhow!("no http_client"))?;
-
-            let provider = ethers::providers::Http::new_with_client(url, http_client);
-
-            // TODO: dry this up (needs https://github.com/gakonst/ethers-rs/issues/592)
-            // TODO: i don't think this interval matters for our uses, but we should probably set it to like `block time / 2`
-            ethers::providers::Provider::new(provider)
-                .interval(Duration::from_secs(13))
-                .into()
-        } else if url_str.starts_with("ws") {
-            let provider = ethers::providers::Ws::connect(url_str)
-                .instrument(info_span!("Web3Provider", url_str = url_str))
-                .await?;
-
-            // TODO: dry this up (needs https://github.com/gakonst/ethers-rs/issues/592)
-            // TODO: i don't think this interval matters
-            ethers::providers::Provider::new(provider).into()
-        } else {
-            return Err(anyhow::anyhow!("only http and ws servers are supported"));
-        };
-
-        Ok(provider)
-    }
-}
-
-impl fmt::Debug for Web3Provider {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: the default Debug takes forever to write. this is too quiet though. we at least need the url
-        f.debug_struct("Web3Provider").finish_non_exhaustive()
-    }
 }
 
 impl Web3Connection {
@@ -418,7 +372,7 @@ impl Web3Connection {
 
                     loop {
                         match self.try_request_handle().await {
-                            Ok(HandleResult::ActiveRequest(active_request_handle)) => {
+                            Ok(RequestHandleResult::ActiveRequest(active_request_handle)) => {
                                 let block: Result<Block<TxHash>, _> = active_request_handle
                                     .request("eth_getBlockByNumber", ("latest", false))
                                     .await;
@@ -440,12 +394,12 @@ impl Web3Connection {
                                     self.clone().send_block_result(block, &block_sender).await?;
                                 }
                             }
-                            Ok(HandleResult::RetryAt(retry_at)) => {
+                            Ok(RequestHandleResult::RetryAt(retry_at)) => {
                                 warn!(?retry_at, "Rate limited on latest block from {}", self);
                                 sleep_until(retry_at).await;
                                 continue;
                             }
-                            Ok(HandleResult::None) => {
+                            Ok(RequestHandleResult::None) => {
                                 warn!("No handle for latest block from {}", self);
                                 // TODO: what should we do?
                             }
@@ -567,17 +521,17 @@ impl Web3Connection {
 
     /// be careful with this; it will wait forever!
     #[instrument(skip_all)]
-    pub async fn wait_for_request_handle(self: &Arc<Self>) -> anyhow::Result<ActiveRequestHandle> {
+    pub async fn wait_for_request_handle(self: &Arc<Self>) -> anyhow::Result<PendingRequestHandle> {
         // TODO: maximum wait time? i think timeouts in other parts of the code are probably best
 
         loop {
             match self.try_request_handle().await {
-                Ok(HandleResult::ActiveRequest(handle)) => return Ok(handle),
-                Ok(HandleResult::RetryAt(retry_at)) => {
+                Ok(RequestHandleResult::ActiveRequest(handle)) => return Ok(handle),
+                Ok(RequestHandleResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
                     sleep_until(retry_at).await;
                 }
-                Ok(HandleResult::None) => {
+                Ok(RequestHandleResult::None) => {
                     // TODO: when can this happen? emit a stat?
                     // TODO: instead of erroring, subscribe to the head block on this
                     // TODO: sleep how long? maybe just error?
@@ -589,11 +543,11 @@ impl Web3Connection {
         }
     }
 
-    pub async fn try_request_handle(self: &Arc<Self>) -> anyhow::Result<HandleResult> {
+    pub async fn try_request_handle(self: &Arc<Self>) -> anyhow::Result<RequestHandleResult> {
         // check that we are connected
         if !self.has_provider().await {
             // TODO: emit a stat?
-            return Ok(HandleResult::None);
+            return Ok(RequestHandleResult::None);
         }
 
         // check rate limits
@@ -609,7 +563,7 @@ impl Web3Connection {
                     // TODO: i'm seeing "Exhausted rate limit on moralis: 0ns". How is it getting 0?
                     warn!(?retry_at, ?self, "Exhausted rate limit");
 
-                    return Ok(HandleResult::RetryAt(retry_at.into()));
+                    return Ok(RequestHandleResult::RetryAt(retry_at.into()));
                 }
                 Ok(ThrottleResult::RetryNever) => {
                     return Err(anyhow::anyhow!("Rate limit failed."));
@@ -620,9 +574,16 @@ impl Web3Connection {
             }
         };
 
-        let handle = ActiveRequestHandle::new(self.clone());
+        let handle = PendingRequestHandle::new(self.clone());
 
-        Ok(HandleResult::ActiveRequest(handle))
+        Ok(RequestHandleResult::ActiveRequest(handle))
+    }
+}
+
+impl fmt::Debug for Web3Provider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default Debug takes forever to write. this is too quiet though. we at least need the url
+        f.debug_struct("Web3Provider").finish_non_exhaustive()
     }
 }
 
@@ -630,71 +591,6 @@ impl Hash for Web3Connection {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // TODO: this is wrong. we might have two connections to the same provider
         self.url.hash(state);
-    }
-}
-
-impl ActiveRequestHandle {
-    fn new(connection: Arc<Web3Connection>) -> Self {
-        // TODO: attach a unique id to this?
-        // TODO: what ordering?!
-        connection
-            .active_requests
-            .fetch_add(1, atomic::Ordering::AcqRel);
-
-        Self(connection)
-    }
-
-    pub fn clone_connection(&self) -> Arc<Web3Connection> {
-        self.0.clone()
-    }
-
-    /// Send a web3 request
-    /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
-    /// By taking self here, we ensure that this is dropped after the request is complete
-    #[instrument(skip_all)]
-    pub async fn request<T, R>(
-        &self,
-        method: &str,
-        params: T,
-    ) -> Result<R, ethers::prelude::ProviderError>
-    where
-        T: fmt::Debug + serde::Serialize + Send + Sync,
-        R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug,
-    {
-        // TODO: use tracing spans properly
-        // TODO: it would be nice to have the request id on this
-        // TODO: including params in this is way too verbose
-        trace!("Sending {} to {}", method, self.0);
-
-        let mut provider = None;
-
-        while provider.is_none() {
-            // TODO: if no provider, don't unwrap. wait until there is one.
-            match self.0.provider.read().await.as_ref() {
-                None => {}
-                Some(found_provider) => provider = Some(found_provider.clone()),
-            }
-        }
-
-        let response = match &*provider.unwrap() {
-            Web3Provider::Http(provider) => provider.request(method, params).await,
-            Web3Provider::Ws(provider) => provider.request(method, params).await,
-        };
-
-        // TODO: i think ethers already has trace logging (and does it much more fancy)
-        // TODO: at least instrument this with more useful information
-        // trace!("Reply from {}: {:?}", self.0, response);
-        trace!("Reply from {}", self.0);
-
-        response
-    }
-}
-
-impl Drop for ActiveRequestHandle {
-    fn drop(&mut self) {
-        self.0
-            .active_requests
-            .fetch_sub(1, atomic::Ordering::AcqRel);
     }
 }
 

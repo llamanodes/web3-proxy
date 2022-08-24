@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use crate::app::AnyhowJoinHandle;
-use crate::rpcs::Web3Connection;
+use crate::rpcs::connection::Web3Connection;
 
 pub type BlockAndRpc = (Arc<Block<TxHash>>, Arc<Web3Connection>);
 

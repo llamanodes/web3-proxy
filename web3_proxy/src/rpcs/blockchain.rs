@@ -1,7 +1,7 @@
 ///! Keep track of the blockchain as seen by a Web3Connections.
-use super::SyncedConnections;
-use super::Web3Connection;
-use super::Web3Connections;
+use super::connection::Web3Connection;
+use super::connections::Web3Connections;
+use super::synced_connections::SyncedConnections;
 use crate::app::TxState;
 use crate::jsonrpc::JsonRpcRequest;
 use anyhow::Context;

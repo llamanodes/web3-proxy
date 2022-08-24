@@ -1,6 +1,7 @@
 ///! Load balanced communication with a group of web3 providers
-use super::SyncedConnections;
-use super::{ActiveRequestHandle, HandleResult, Web3Connection};
+use super::connection::Web3Connection;
+use super::request::{PendingRequestHandle, RequestHandleResult};
+use super::synced_connections::SyncedConnections;
 use crate::app::{flatten_handle, AnyhowJoinHandle, TxState};
 use crate::config::Web3ConnectionConfig;
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
@@ -189,7 +190,7 @@ impl Web3Connections {
         // TODO: there is a race here on geth. sometimes the rpc isn't yet ready to serve the transaction (even though they told us about it!)
         // TODO: maximum wait time
         let pending_transaction: Transaction = match rpc.try_request_handle().await {
-            Ok(HandleResult::ActiveRequest(handle)) => {
+            Ok(RequestHandleResult::ActiveRequest(handle)) => {
                 handle
                     .request("eth_getTransactionByHash", (pending_tx_id,))
                     .await?
@@ -348,7 +349,7 @@ impl Web3Connections {
     #[instrument(skip_all)]
     pub async fn try_send_parallel_requests(
         &self,
-        active_request_handles: Vec<ActiveRequestHandle>,
+        active_request_handles: Vec<PendingRequestHandle>,
         method: &str,
         // TODO: remove this box once i figure out how to do the options
         params: Option<&serde_json::Value>,
@@ -436,7 +437,7 @@ impl Web3Connections {
         &self,
         skip: &[Arc<Web3Connection>],
         min_block_needed: Option<&U64>,
-    ) -> anyhow::Result<HandleResult> {
+    ) -> anyhow::Result<RequestHandleResult> {
         let mut earliest_retry_at = None;
 
         // filter the synced rpcs
@@ -493,14 +494,14 @@ impl Web3Connections {
         for rpc in synced_rpcs.into_iter() {
             // increment our connection counter
             match rpc.try_request_handle().await {
-                Ok(HandleResult::ActiveRequest(handle)) => {
+                Ok(RequestHandleResult::ActiveRequest(handle)) => {
                     trace!("next server on {:?}: {:?}", self, rpc);
-                    return Ok(HandleResult::ActiveRequest(handle));
+                    return Ok(RequestHandleResult::ActiveRequest(handle));
                 }
-                Ok(HandleResult::RetryAt(retry_at)) => {
+                Ok(RequestHandleResult::RetryAt(retry_at)) => {
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                 }
-                Ok(HandleResult::None) => {
+                Ok(RequestHandleResult::None) => {
                     // TODO: log a warning?
                 }
                 Err(err) => {
@@ -514,7 +515,7 @@ impl Web3Connections {
 
         match earliest_retry_at {
             None => todo!(),
-            Some(earliest_retry_at) => Ok(HandleResult::RetryAt(earliest_retry_at)),
+            Some(earliest_retry_at) => Ok(RequestHandleResult::RetryAt(earliest_retry_at)),
         }
     }
 
@@ -524,7 +525,7 @@ impl Web3Connections {
     pub async fn upstream_servers(
         &self,
         min_block_needed: Option<&U64>,
-    ) -> Result<Vec<ActiveRequestHandle>, Option<Instant>> {
+    ) -> Result<Vec<PendingRequestHandle>, Option<Instant>> {
         let mut earliest_retry_at = None;
         // TODO: with capacity?
         let mut selected_rpcs = vec![];
@@ -538,12 +539,12 @@ impl Web3Connections {
 
             // check rate limits and increment our connection counter
             match connection.try_request_handle().await {
-                Ok(HandleResult::RetryAt(retry_at)) => {
+                Ok(RequestHandleResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                 }
-                Ok(HandleResult::ActiveRequest(handle)) => selected_rpcs.push(handle),
-                Ok(HandleResult::None) => {
+                Ok(RequestHandleResult::ActiveRequest(handle)) => selected_rpcs.push(handle),
+                Ok(RequestHandleResult::None) => {
                     warn!("no request handle for {}", connection)
                 }
                 Err(err) => {
@@ -577,7 +578,7 @@ impl Web3Connections {
                 .next_upstream_server(&skip_rpcs, min_block_needed)
                 .await
             {
-                Ok(HandleResult::ActiveRequest(active_request_handle)) => {
+                Ok(RequestHandleResult::ActiveRequest(active_request_handle)) => {
                     // save the rpc in case we get an error and want to retry on another server
                     skip_rpcs.push(active_request_handle.clone_connection());
 
@@ -630,7 +631,7 @@ impl Web3Connections {
                         }
                     }
                 }
-                Ok(HandleResult::RetryAt(retry_at)) => {
+                Ok(RequestHandleResult::RetryAt(retry_at)) => {
                     // TODO: move this to a helper function
                     // sleep (TODO: with a lock?) until our rate limits should be available
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
@@ -640,7 +641,7 @@ impl Web3Connections {
 
                     continue;
                 }
-                Ok(HandleResult::None) => {
+                Ok(RequestHandleResult::None) => {
                     warn!(?self, "No server handles!");
 
                     // TODO: subscribe to something on synced connections. maybe it should just be a watch channel

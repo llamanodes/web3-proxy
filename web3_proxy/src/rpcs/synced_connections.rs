@@ -1,4 +1,5 @@
-use super::{Web3Connection, Web3Connections};
+use super::connection::Web3Connection;
+use super::connections::Web3Connections;
 use ethers::prelude::{H256, U64};
 use indexmap::IndexSet;
 use serde::Serialize;

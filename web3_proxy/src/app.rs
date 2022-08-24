@@ -41,7 +41,7 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
-use crate::rpcs::Web3Connections;
+use crate::rpcs::connections::Web3Connections;
 use crate::stats::AppStats;
 
 // TODO: make this customizable?
