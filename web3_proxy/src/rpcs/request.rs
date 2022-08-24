@@ -1,35 +1,22 @@
 use super::connection::Web3Connection;
 use super::provider::Web3Provider;
-use crate::app::{flatten_handle, AnyhowJoinHandle};
-use crate::config::BlockAndRpc;
-use anyhow::Context;
-use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64};
-use futures::future::try_join_all;
-use futures::StreamExt;
-use parking_lot::RwLock;
-use redis_rate_limit::{RedisPool, RedisRateLimit, ThrottleResult};
-use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
 use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::sync::atomic::{self, AtomicU32, AtomicU64};
-use std::{cmp::Ordering, sync::Arc};
-use tokio::sync::broadcast;
-use tokio::sync::RwLock as AsyncRwLock;
-use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
-use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
+use std::sync::atomic;
+use std::sync::Arc;
+use tokio::time::Instant;
+use tracing::{instrument, trace};
 
 // TODO: rename this
-pub enum RequestHandleResult {
-    ActiveRequest(PendingRequestHandle),
+pub enum OpenRequestResult {
+    ActiveRequest(OpenRequestHandle),
     RetryAt(Instant),
     None,
 }
 
 /// Drop this once a connection completes
-pub struct PendingRequestHandle(Arc<Web3Connection>);
+pub struct OpenRequestHandle(Arc<Web3Connection>);
 
-impl PendingRequestHandle {
+impl OpenRequestHandle {
     pub fn new(connection: Arc<Web3Connection>) -> Self {
         // TODO: attach a unique id to this?
         // TODO: what ordering?!
@@ -86,7 +73,7 @@ impl PendingRequestHandle {
     }
 }
 
-impl Drop for PendingRequestHandle {
+impl Drop for OpenRequestHandle {
     fn drop(&mut self) {
         self.0
             .active_requests

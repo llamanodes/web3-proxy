@@ -1,7 +1,7 @@
 ///! Rate-limited communication with a web3 provider.
 use super::provider::Web3Provider;
-use super::request::PendingRequestHandle;
-use super::request::RequestHandleResult;
+use super::request::OpenRequestHandle;
+use super::request::OpenRequestResult;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
 use anyhow::Context;
@@ -18,8 +18,8 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::RwLock as AsyncRwLock;
-use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
-use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
+use tokio::time::{interval, sleep, sleep_until, Duration, MissedTickBehavior};
+use tracing::{error, info, instrument, trace, warn};
 
 /// An active connection to a Web3Rpc
 pub struct Web3Connection {
@@ -372,7 +372,7 @@ impl Web3Connection {
 
                     loop {
                         match self.try_request_handle().await {
-                            Ok(RequestHandleResult::ActiveRequest(active_request_handle)) => {
+                            Ok(OpenRequestResult::ActiveRequest(active_request_handle)) => {
                                 let block: Result<Block<TxHash>, _> = active_request_handle
                                     .request("eth_getBlockByNumber", ("latest", false))
                                     .await;
@@ -394,12 +394,12 @@ impl Web3Connection {
                                     self.clone().send_block_result(block, &block_sender).await?;
                                 }
                             }
-                            Ok(RequestHandleResult::RetryAt(retry_at)) => {
+                            Ok(OpenRequestResult::RetryAt(retry_at)) => {
                                 warn!(?retry_at, "Rate limited on latest block from {}", self);
                                 sleep_until(retry_at).await;
                                 continue;
                             }
-                            Ok(RequestHandleResult::None) => {
+                            Ok(OpenRequestResult::None) => {
                                 warn!("No handle for latest block from {}", self);
                                 // TODO: what should we do?
                             }
@@ -521,17 +521,17 @@ impl Web3Connection {
 
     /// be careful with this; it will wait forever!
     #[instrument(skip_all)]
-    pub async fn wait_for_request_handle(self: &Arc<Self>) -> anyhow::Result<PendingRequestHandle> {
+    pub async fn wait_for_request_handle(self: &Arc<Self>) -> anyhow::Result<OpenRequestHandle> {
         // TODO: maximum wait time? i think timeouts in other parts of the code are probably best
 
         loop {
             match self.try_request_handle().await {
-                Ok(RequestHandleResult::ActiveRequest(handle)) => return Ok(handle),
-                Ok(RequestHandleResult::RetryAt(retry_at)) => {
+                Ok(OpenRequestResult::ActiveRequest(handle)) => return Ok(handle),
+                Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
                     sleep_until(retry_at).await;
                 }
-                Ok(RequestHandleResult::None) => {
+                Ok(OpenRequestResult::None) => {
                     // TODO: when can this happen? emit a stat?
                     // TODO: instead of erroring, subscribe to the head block on this
                     // TODO: sleep how long? maybe just error?
@@ -543,11 +543,11 @@ impl Web3Connection {
         }
     }
 
-    pub async fn try_request_handle(self: &Arc<Self>) -> anyhow::Result<RequestHandleResult> {
+    pub async fn try_request_handle(self: &Arc<Self>) -> anyhow::Result<OpenRequestResult> {
         // check that we are connected
         if !self.has_provider().await {
             // TODO: emit a stat?
-            return Ok(RequestHandleResult::None);
+            return Ok(OpenRequestResult::None);
         }
 
         // check rate limits
@@ -563,7 +563,7 @@ impl Web3Connection {
                     // TODO: i'm seeing "Exhausted rate limit on moralis: 0ns". How is it getting 0?
                     warn!(?retry_at, ?self, "Exhausted rate limit");
 
-                    return Ok(RequestHandleResult::RetryAt(retry_at.into()));
+                    return Ok(OpenRequestResult::RetryAt(retry_at.into()));
                 }
                 Ok(ThrottleResult::RetryNever) => {
                     return Err(anyhow::anyhow!("Rate limit failed."));
@@ -574,9 +574,9 @@ impl Web3Connection {
             }
         };
 
-        let handle = PendingRequestHandle::new(self.clone());
+        let handle = OpenRequestHandle::new(self.clone());
 
-        Ok(RequestHandleResult::ActiveRequest(handle))
+        Ok(OpenRequestResult::ActiveRequest(handle))
     }
 }
 
