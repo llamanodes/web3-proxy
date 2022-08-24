@@ -1,12 +1,21 @@
 // TODO: this file is way too big now. move things into other modules
 
+use crate::block_number::block_needed;
+use crate::config::{AppConfig, TopConfig};
+use crate::jsonrpc::JsonRpcForwardedResponse;
+use crate::jsonrpc::JsonRpcForwardedResponseEnum;
+use crate::jsonrpc::JsonRpcRequest;
+use crate::jsonrpc::JsonRpcRequestEnum;
+use crate::rpcs::connections::Web3Connections;
+use crate::rpcs::transactions::TxStatus;
+use crate::stats::AppStats;
 use anyhow::Context;
 use axum::extract::ws::Message;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
 use derive_more::From;
 use ethers::core::utils::keccak256;
-use ethers::prelude::{Address, Block, Bytes, Transaction, TxHash, H256, U64};
+use ethers::prelude::{Address, Block, Bytes, TxHash, H256, U64};
 use fifomap::{FifoCountMap, FifoSizedMap};
 use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
@@ -35,15 +44,6 @@ use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tracing::{info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
 
-use crate::block_number::block_needed;
-use crate::config::{AppConfig, TopConfig};
-use crate::jsonrpc::JsonRpcForwardedResponse;
-use crate::jsonrpc::JsonRpcForwardedResponseEnum;
-use crate::jsonrpc::JsonRpcRequest;
-use crate::jsonrpc::JsonRpcRequestEnum;
-use crate::rpcs::connections::Web3Connections;
-use crate::stats::AppStats;
-
 // TODO: make this customizable?
 static APP_USER_AGENT: &str = concat!(
     "satoshiandkin/",
@@ -52,7 +52,8 @@ static APP_USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
 );
 
-// block hash, method, params
+/// block hash, method, params
+// TODO: better name
 type CacheKey = (H256, String, Option<String>);
 
 type ResponseLrcCache = RwLock<FifoSizedMap<CacheKey, JsonRpcForwardedResponse>>;
@@ -61,19 +62,35 @@ type ActiveRequestsMap = DashMap<CacheKey, watch::Receiver<bool>>;
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
-// TODO: think more about TxState
-#[derive(Clone)]
-pub enum TxState {
-    Pending(Transaction),
-    Confirmed(Transaction),
-    Orphaned(Transaction),
-}
-
 #[derive(Clone, Copy, From)]
 pub struct UserCacheValue {
     pub expires_at: Instant,
     pub user_id: u64,
     pub user_count_per_period: u64,
+}
+
+/// The application
+// TODO: this debug impl is way too verbose. make something smaller
+// TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
+pub struct Web3ProxyApp {
+    /// Send requests to the best server available
+    pub balanced_rpcs: Arc<Web3Connections>,
+    /// Send private requests (like eth_sendRawTransaction) to all these servers
+    pub private_rpcs: Arc<Web3Connections>,
+    /// Track active requests so that we don't send the same query to multiple backends
+    pub active_requests: ActiveRequestsMap,
+    response_cache: ResponseLrcCache,
+    // don't drop this or the sender will stop working
+    // TODO: broadcast channel instead?
+    head_block_receiver: watch::Receiver<Arc<Block<TxHash>>>,
+    pending_tx_sender: broadcast::Sender<TxStatus>,
+    pub config: AppConfig,
+    pub db_conn: Option<sea_orm::DatabaseConnection>,
+    pub pending_transactions: Arc<DashMap<TxHash, TxStatus>>,
+    pub rate_limiter: Option<RedisRateLimit>,
+    pub redis_pool: Option<RedisPool>,
+    pub stats: AppStats,
+    pub user_cache: RwLock<FifoCountMap<Uuid, UserCacheValue>>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -125,37 +142,6 @@ pub async fn get_migrated_db(
     Migrator::up(&db, None).await?;
 
     Ok(db)
-}
-
-/// The application
-// TODO: this debug impl is way too verbose. make something smaller
-// TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
-pub struct Web3ProxyApp {
-    /// Send requests to the best server available
-    pub balanced_rpcs: Arc<Web3Connections>,
-    /// Send private requests (like eth_sendRawTransaction) to all these servers
-    pub private_rpcs: Arc<Web3Connections>,
-    /// Track active requests so that we don't send the same query to multiple backends
-    pub active_requests: ActiveRequestsMap,
-    response_cache: ResponseLrcCache,
-    // don't drop this or the sender will stop working
-    // TODO: broadcast channel instead?
-    head_block_receiver: watch::Receiver<Arc<Block<TxHash>>>,
-    pending_tx_sender: broadcast::Sender<TxState>,
-    pub config: AppConfig,
-    pub db_conn: Option<sea_orm::DatabaseConnection>,
-    pub pending_transactions: Arc<DashMap<TxHash, TxState>>,
-    pub rate_limiter: Option<RedisRateLimit>,
-    pub redis_pool: Option<RedisPool>,
-    pub stats: AppStats,
-    pub user_cache: RwLock<FifoCountMap<Uuid, UserCacheValue>>,
-}
-
-impl fmt::Debug for Web3ProxyApp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: the default formatter takes forever to write. this is too quiet though
-        f.debug_struct("Web3ProxyApp").finish_non_exhaustive()
-    }
 }
 
 impl Web3ProxyApp {
@@ -405,9 +391,9 @@ impl Web3ProxyApp {
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
                         let new_tx = match new_tx_state {
-                            TxState::Pending(tx) => tx,
-                            TxState::Confirmed(..) => continue,
-                            TxState::Orphaned(tx) => tx,
+                            TxStatus::Pending(tx) => tx,
+                            TxStatus::Confirmed(..) => continue,
+                            TxStatus::Orphaned(tx) => tx,
                         };
 
                         // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
@@ -446,9 +432,9 @@ impl Web3ProxyApp {
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
                         let new_tx = match new_tx_state {
-                            TxState::Pending(tx) => tx,
-                            TxState::Confirmed(..) => continue,
-                            TxState::Orphaned(tx) => tx,
+                            TxStatus::Pending(tx) => tx,
+                            TxStatus::Confirmed(..) => continue,
+                            TxStatus::Orphaned(tx) => tx,
                         };
 
                         // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
@@ -488,9 +474,9 @@ impl Web3ProxyApp {
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
                         let new_tx = match new_tx_state {
-                            TxState::Pending(tx) => tx,
-                            TxState::Confirmed(..) => continue,
-                            TxState::Orphaned(tx) => tx,
+                            TxStatus::Pending(tx) => tx,
+                            TxStatus::Confirmed(..) => continue,
+                            TxStatus::Orphaned(tx) => tx,
                         };
 
                         // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
@@ -914,5 +900,12 @@ impl Web3ProxyApp {
         let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
 
         Ok(response)
+    }
+}
+
+impl fmt::Debug for Web3ProxyApp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: the default formatter takes forever to write. this is too quiet though
+        f.debug_struct("Web3ProxyApp").finish_non_exhaustive()
     }
 }

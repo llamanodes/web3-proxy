@@ -8,12 +8,14 @@ use tracing::{instrument, trace};
 
 // TODO: rename this
 pub enum OpenRequestResult {
-    ActiveRequest(OpenRequestHandle),
+    Handle(OpenRequestHandle),
+    /// Unable to start a request. Retry at the given time.
     RetryAt(Instant),
+    /// Unable to start a request. Retrying will not succeed.
     None,
 }
 
-/// Drop this once a connection completes
+/// Make RPC requests through this handle and drop it when you are done.
 pub struct OpenRequestHandle(Arc<Web3Connection>);
 
 impl OpenRequestHandle {

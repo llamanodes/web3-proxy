@@ -2,7 +2,7 @@
 use super::connection::Web3Connection;
 use super::connections::Web3Connections;
 use super::synced_connections::SyncedConnections;
-use crate::app::TxState;
+use super::transactions::TxStatus;
 use crate::jsonrpc::JsonRpcRequest;
 use anyhow::Context;
 use ethers::prelude::{Block, TxHash, H256, U256, U64};
@@ -151,13 +151,42 @@ impl Web3Connections {
         Ok(block)
     }
 
+    // TODO: rename this?
+    pub(super) async fn update_synced_rpcs(
+        &self,
+        block_receiver: flume::Receiver<(Arc<Block<TxHash>>, Arc<Web3Connection>)>,
+        // TODO: head_block_sender should be a broadcast_sender like pending_tx_sender
+        head_block_sender: watch::Sender<Arc<Block<TxHash>>>,
+        pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
+    ) -> anyhow::Result<()> {
+        // TODO: indexmap or hashmap? what hasher? with_capacity?
+        // TODO: this will grow unbounded. prune old heads automatically
+        let mut connection_heads = IndexMap::<String, Arc<Block<TxHash>>>::new();
+
+        while let Ok((new_block, rpc)) = block_receiver.recv_async().await {
+            self.recv_block_from_rpc(
+                &mut connection_heads,
+                new_block,
+                rpc,
+                &head_block_sender,
+                &pending_tx_sender,
+            )
+            .await?;
+        }
+
+        // TODO: if there was an error, we should return it
+        warn!("block_receiver exited!");
+
+        Ok(())
+    }
+
     pub async fn recv_block_from_rpc(
         &self,
         connection_heads: &mut IndexMap<String, Arc<Block<TxHash>>>,
         new_block: Arc<Block<TxHash>>,
         rpc: Arc<Web3Connection>,
         head_block_sender: &watch::Sender<Arc<Block<TxHash>>>,
-        pending_tx_sender: &Option<broadcast::Sender<TxState>>,
+        pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         let new_block_hash = if let Some(hash) = new_block.hash {
             hash

@@ -371,8 +371,8 @@ impl Web3Connection {
                     let mut last_hash = H256::zero();
 
                     loop {
-                        match self.try_request_handle().await {
-                            Ok(OpenRequestResult::ActiveRequest(active_request_handle)) => {
+                        match self.try_open_request().await {
+                            Ok(OpenRequestResult::Handle(active_request_handle)) => {
                                 let block: Result<Block<TxHash>, _> = active_request_handle
                                     .request("eth_getBlockByNumber", ("latest", false))
                                     .await;
@@ -520,30 +520,30 @@ impl Web3Connection {
     }
 
     /// be careful with this; it will wait forever!
+    // TODO: maximum wait time?
     #[instrument(skip_all)]
     pub async fn wait_for_request_handle(self: &Arc<Self>) -> anyhow::Result<OpenRequestHandle> {
         // TODO: maximum wait time? i think timeouts in other parts of the code are probably best
 
         loop {
-            match self.try_request_handle().await {
-                Ok(OpenRequestResult::ActiveRequest(handle)) => return Ok(handle),
+            match self.try_open_request().await {
+                Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
                     sleep_until(retry_at).await;
                 }
                 Ok(OpenRequestResult::None) => {
-                    // TODO: when can this happen? emit a stat?
-                    // TODO: instead of erroring, subscribe to the head block on this
+                    // TODO: when can this happen? log? emit a stat?
+                    // TODO: subscribe to the head block on this
                     // TODO: sleep how long? maybe just error?
                     sleep(Duration::from_secs(1)).await;
                 }
-                // Err(None) => return Err(anyhow::anyhow!("rate limit will never succeed")),
                 Err(err) => return Err(err),
             }
         }
     }
 
-    pub async fn try_request_handle(self: &Arc<Self>) -> anyhow::Result<OpenRequestResult> {
+    pub async fn try_open_request(self: &Arc<Self>) -> anyhow::Result<OpenRequestResult> {
         // check that we are connected
         if !self.has_provider().await {
             // TODO: emit a stat?
@@ -576,7 +576,7 @@ impl Web3Connection {
 
         let handle = OpenRequestHandle::new(self.clone());
 
-        Ok(OpenRequestResult::ActiveRequest(handle))
+        Ok(OpenRequestResult::Handle(handle))
     }
 }
 
