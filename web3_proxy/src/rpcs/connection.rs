@@ -589,8 +589,8 @@ impl fmt::Debug for Web3Provider {
 
 impl Hash for Web3Connection {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // TODO: this is wrong. we might have two connections to the same provider
-        self.url.hash(state);
+        // TODO: is this enough?
+        self.name.hash(state);
     }
 }
 
@@ -598,7 +598,7 @@ impl Eq for Web3Connection {}
 
 impl Ord for Web3Connection {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.url.cmp(&other.url)
+        self.name.cmp(&other.name)
     }
 }
 
@@ -610,7 +610,7 @@ impl PartialOrd for Web3Connection {
 
 impl PartialEq for Web3Connection {
     fn eq(&self, other: &Self) -> bool {
-        self.url == other.url
+        self.name == other.name
     }
 }
 
@@ -643,7 +643,7 @@ impl fmt::Debug for Web3Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut f = f.debug_struct("Web3Connection");
 
-        f.field("url", &self.url);
+        f.field("name", &self.name);
 
         let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
         if block_data_limit == u64::MAX {
@@ -659,6 +659,6 @@ impl fmt::Debug for Web3Connection {
 impl fmt::Display for Web3Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: filter basic auth and api keys
-        write!(f, "{}", &self.url)
+        write!(f, "{}", &self.name)
     }
 }

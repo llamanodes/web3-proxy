@@ -126,6 +126,7 @@ impl Web3Connections {
             })
             .collect();
 
+        // map of connection names to their connection
         let mut connections = IndexMap::new();
         let mut handles = vec![];
 
@@ -134,7 +135,7 @@ impl Web3Connections {
             // TODO: how should we handle errors here? one rpc being down shouldn't cause the program to exit
             match x {
                 Ok(Ok((connection, handle))) => {
-                    connections.insert(connection.url.clone(), connection);
+                    connections.insert(connection.name.clone(), connection);
                     handles.push(handle);
                 }
                 Ok(Err(err)) => {

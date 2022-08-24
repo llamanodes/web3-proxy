@@ -163,7 +163,7 @@ impl Web3Connections {
             hash
         } else {
             // TODO: rpc name instead of url (will do this with config reload revamp)
-            connection_heads.remove(&rpc.url);
+            connection_heads.remove(&rpc.name);
 
             // TODO: return here is wrong. synced rpcs needs an update
             return Ok(());
@@ -178,7 +178,7 @@ impl Web3Connections {
             warn!(%rpc, ?new_block, "Block without number!");
 
             // TODO: rpc name instead of url (will do this with config reload revamp)
-            connection_heads.remove(&rpc.url);
+            connection_heads.remove(&rpc.name);
 
             // TODO: return here is wrong. synced rpcs needs an update
             return Ok(());
@@ -194,9 +194,9 @@ impl Web3Connections {
         if new_block_num == U64::zero() {
             warn!(%rpc, %new_block_num, "still syncing");
 
-            connection_heads.remove(&rpc.url);
+            connection_heads.remove(&rpc.name);
         } else {
-            connection_heads.insert(rpc.url.clone(), new_block.clone());
+            connection_heads.insert(rpc.name.clone(), new_block.clone());
 
             self.add_block(new_block.clone(), false);
         }
