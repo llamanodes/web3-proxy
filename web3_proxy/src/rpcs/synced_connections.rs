@@ -10,6 +10,7 @@ use std::sync::Arc;
 /// Serialize is so we can print it on our debug endpoint
 #[derive(Clone, Default, Serialize)]
 pub struct SyncedConnections {
+    // TODO: store Arc<Block<TxHash>> instead?
     pub(super) head_block_num: U64,
     pub(super) head_block_hash: H256,
     // TODO: this should be able to serialize, but it isn't
@@ -48,12 +49,7 @@ impl Web3Connections {
     }
 
     pub fn synced(&self) -> bool {
-        // TODO: require a minimum number of synced rpcs
-        // TODO: move this whole function to SyncedConnections
-        if self.synced_connections.load().conns.is_empty() {
-            return false;
-        }
-        self.head_block_num() > U64::zero()
+        !self.synced_connections.load().conns.is_empty()
     }
 
     pub fn num_synced_rpcs(&self) -> usize {

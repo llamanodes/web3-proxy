@@ -1,6 +1,6 @@
+///! Rate-limited communication with a web3 provider.
 use super::blockchain::BlockId;
 use super::connections::BlockMap;
-///! Rate-limited communication with a web3 provider.
 use super::provider::Web3Provider;
 use super::request::OpenRequestHandle;
 use super::request::OpenRequestResult;
@@ -8,7 +8,6 @@ use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
 use anyhow::Context;
 use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
 use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
@@ -23,7 +22,6 @@ use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::{interval, sleep, sleep_until, Duration, MissedTickBehavior};
-use tracing::debug;
 use tracing::{error, info, instrument, trace, warn};
 
 /// An active connection to a Web3Rpc

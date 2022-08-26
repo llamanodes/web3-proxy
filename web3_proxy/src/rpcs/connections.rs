@@ -32,15 +32,11 @@ use tracing::{error, info, instrument, trace, warn};
 
 pub type BlockMap = Arc<DashMap<H256, Arc<Block<TxHash>>>>;
 
-pub struct BlockchainAndHeads {
-    pub(super) graph: DiGraphMap<H256, Arc<Block<TxHash>>>,
-    pub(super) heads: HashMap<String, H256>,
-}
-
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
 pub struct Web3Connections {
     pub(super) conns: HashMap<String, Arc<Web3Connection>>,
+    /// any requests will be forwarded to one (or more) of these connections
     pub(super) synced_connections: ArcSwap<SyncedConnections>,
     pub(super) pending_transactions: Arc<DashMap<TxHash, TxStatus>>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
@@ -48,7 +44,7 @@ pub struct Web3Connections {
     pub(super) block_map: BlockMap,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// TODO: what should we use for edges?
-    pub(super) blockchain_map: RwLock<DiGraphMap<H256, u32>>,
+    pub(super) blockchain_graphmap: RwLock<DiGraphMap<H256, u32>>,
 }
 
 impl Web3Connections {
@@ -172,7 +168,7 @@ impl Web3Connections {
             synced_connections: ArcSwap::new(Arc::new(synced_connections)),
             pending_transactions,
             block_map: Default::default(),
-            blockchain_map: Default::default(),
+            blockchain_graphmap: Default::default(),
         });
 
         let handle = {
