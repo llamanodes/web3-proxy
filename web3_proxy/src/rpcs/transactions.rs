@@ -24,7 +24,7 @@ impl Web3Connections {
         // TODO: there is a race here on geth. sometimes the rpc isn't yet ready to serve the transaction (even though they told us about it!)
         // TODO: yearn devs have had better luck with batching these, but i think that's likely just adding a delay itself
         // TODO: if one rpc fails, try another?
-        let tx: Transaction = match rpc.try_open_request().await {
+        let tx: Transaction = match rpc.try_request_handle().await {
             Ok(OpenRequestResult::Handle(handle)) => {
                 handle
                     .request("eth_getTransactionByHash", (pending_tx_id,))
@@ -55,7 +55,7 @@ impl Web3Connections {
     }
 
     /// dedupe transaction and send them to any listening clients
-    pub(super) async fn funnel_transaction(
+    pub(super) async fn process_incoming_tx_id(
         self: Arc<Self>,
         rpc: Arc<Web3Connection>,
         pending_tx_id: TxHash,

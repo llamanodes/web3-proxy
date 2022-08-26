@@ -6,7 +6,7 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
-use crate::rpcs::connections::Web3Connections;
+use crate::rpcs::connections::{BlockMap, Web3Connections};
 use crate::rpcs::transactions::TxStatus;
 use crate::stats::AppStats;
 use anyhow::Context;
@@ -245,11 +245,15 @@ impl Web3ProxyApp {
         // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
         // TODO: we should still have some sort of expiration or maximum size limit for the map
 
+        // this block map is shared between balanced_rpcs and private_rpcs.
+        let block_map = BlockMap::default();
+
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
             top_config.app.chain_id,
             balanced_rpcs,
             http_client.clone(),
             redis_pool.clone(),
+            block_map.clone(),
             Some(head_block_sender),
             Some(pending_tx_sender.clone()),
             pending_transactions.clone(),
@@ -269,6 +273,7 @@ impl Web3ProxyApp {
                 private_rpcs,
                 http_client.clone(),
                 redis_pool.clone(),
+                block_map,
                 // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
                 None,
                 // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits

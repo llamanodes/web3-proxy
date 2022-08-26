@@ -1,21 +1,119 @@
 ///! Keep track of the blockchain as seen by a Web3Connections.
 use super::connection::Web3Connection;
 use super::connections::Web3Connections;
-use super::synced_connections::SyncedConnections;
 use super::transactions::TxStatus;
-use crate::jsonrpc::JsonRpcRequest;
-use anyhow::Context;
+use crate::{config::BlockAndRpc, jsonrpc::JsonRpcRequest};
+use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U256, U64};
-use indexmap::IndexMap;
+use hashbrown::HashMap;
+use petgraph::prelude::DiGraphMap;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch};
-use tracing::{debug, trace, warn};
+use tracing::{debug, warn};
 
+#[derive(Default, From)]
+pub struct BlockId {
+    pub(super) hash: H256,
+    pub(super) num: U64,
+}
+
+/// TODO: do we need this? probably big refactor still to do
 pub(super) struct BlockMetadata<'a> {
     pub(super) block: &'a Arc<Block<TxHash>>,
+    pub(super) rpc_names: Vec<&'a str>,
     pub(super) sum_soft_limit: u32,
-    pub(super) conns: Vec<&'a str>,
+}
+
+/// TODO: do we need this? probably big refactor still to do
+/// The RPCs grouped by number and hash.
+#[derive(Default)]
+struct BlockchainAndRpcs<'a> {
+    // TODO: fifomap? or just manually remove once we add too much
+    rpcs_by_num: HashMap<U64, Vec<&'a str>>,
+    rpcs_by_hash: HashMap<H256, Vec<&'a str>>,
+    blocks_by_hash: HashMap<H256, Arc<Block<TxHash>>>,
+    /// Node is the blockhash.
+    /// You can get the blocks from block_map on the Web3Connections
+    /// TODO: what should the edge weight be? difficulty?
+    blockchain: DiGraphMap<H256, u8>,
+    total_soft_limit: u32,
+}
+
+impl<'a> BlockchainAndRpcs<'a> {
+    /// group the RPCs by their current head block
+    pub async fn new(
+        // TODO: think more about this key. maybe it should be an Arc?
+        connection_heads: &'a HashMap<String, Arc<Block<TxHash>>>,
+        web3_conns: &Web3Connections,
+    ) -> Option<BlockchainAndRpcs<'a>> {
+        let mut new = Self::default();
+
+        let lowest_block_num = if let Some(lowest_block) = connection_heads
+            .values()
+            .min_by(|a, b| a.number.cmp(&b.number))
+        {
+            lowest_block
+                .number
+                .expect("all blocks here should have a number")
+        } else {
+            // if no lowest block number, then no servers are in sync
+            return None;
+        };
+
+        // TODO: what if lowest_block_num is far from the highest head block num?
+
+        for (rpc_name, head_block) in connection_heads.iter() {
+            if let Some(rpc) = web3_conns.get(rpc_name) {
+                // we need the total soft limit in order to know when its safe to update the backends
+                new.total_soft_limit += rpc.soft_limit;
+
+                let head_hash = head_block.hash.unwrap();
+
+                // save the block
+                new.blocks_by_hash
+                    .entry(head_hash)
+                    .or_insert_with(|| head_block.clone());
+
+                // add the rpc to all relevant block heights
+                // TODO: i feel like we should be able to do this with a graph
+                let mut block = head_block.clone();
+                while block.number.unwrap() >= lowest_block_num {
+                    let block_hash = block.hash.unwrap();
+                    let block_num = block.number.unwrap();
+
+                    // save the rpc by the head hash
+                    let rpc_urls_by_hash =
+                        new.rpcs_by_hash.entry(block_hash).or_insert_with(Vec::new);
+                    rpc_urls_by_hash.push(rpc_name);
+
+                    // save the rpc by the head number
+                    let rpc_names_by_num =
+                        new.rpcs_by_num.entry(block_num).or_insert_with(Vec::new);
+                    rpc_names_by_num.push(rpc_name);
+
+                    if let Ok(parent) = web3_conns
+                        .block(&block.parent_hash, Some(rpc.as_ref()))
+                        .await
+                    {
+                        // save the parent block
+                        new.blocks_by_hash.insert(block.parent_hash, parent.clone());
+
+                        block = parent
+                    } else {
+                        // log this? eventually we will hit a block we don't have, so it's not an error
+                        break;
+                    }
+                }
+            }
+        }
+
+        Some(new)
+    }
+
+    fn consensus_head() {
+        todo!()
+    }
 }
 
 impl<'a> BlockMetadata<'a> {
@@ -46,35 +144,44 @@ impl<'a> BlockMetadata<'a> {
 }
 
 impl Web3Connections {
-    pub fn add_block(&self, block: Arc<Block<TxHash>>, cannonical: bool) {
-        let hash = block.hash.unwrap();
+    /// adds a block to our map of the blockchain
+    pub fn add_block_to_chain(&self, block: Arc<Block<TxHash>>) -> anyhow::Result<()> {
+        let hash = block.hash.ok_or_else(|| anyhow::anyhow!("no block hash"))?;
 
-        if cannonical {
-            let num = block.number.unwrap();
-
-            let entry = self.chain_map.entry(num);
-
-            let mut is_new = false;
-
-            // TODO: this might be wrong. we might need to update parents, too
-            entry.or_insert_with(|| {
-                is_new = true;
-                block.clone()
-            });
-
-            // TODO: prune chain_map?
-
-            if !is_new {
-                return;
-            }
+        if self.blockchain_map.read().contains_node(hash) {
+            // this block is already included
+            return Ok(());
         }
 
-        // TODO: prune block_map?
+        // theres a small race having the read and then the write
+        let mut blockchain = self.blockchain_map.write();
 
-        self.block_map.entry(hash).or_insert(block);
+        if blockchain.contains_node(hash) {
+            // this hash is already included. we must have hit that race condition
+            // return now since this work was already done.
+            return Ok(());
+        }
+
+        // TODO: prettier log? or probably move the log somewhere else
+        debug!(%hash, "new block");
+
+        // TODO: prune block_map to only keep a configurable (256 on ETH?) number of blocks?
+
+        blockchain.add_node(hash);
+
+        // what should edge weight be? and should the nodes be the blocks instead?
+        // maybe the weight should be the height
+        // we store parent_hash -> hash because the block already stores the parent_hash
+        blockchain.add_edge(block.parent_hash, hash, 0);
+
+        Ok(())
     }
 
-    pub async fn block(&self, hash: &H256) -> anyhow::Result<Arc<Block<TxHash>>> {
+    pub async fn block(
+        &self,
+        hash: &H256,
+        rpc: Option<&Web3Connection>,
+    ) -> anyhow::Result<Arc<Block<TxHash>>> {
         // first, try to get the hash from our cache
         if let Some(block) = self.block_map.get(hash) {
             return Ok(block.clone());
@@ -84,11 +191,17 @@ impl Web3Connections {
 
         // TODO: helper for method+params => JsonRpcRequest
         // TODO: get block with the transactions?
+        // TODO: does this id matter?
         let request = json!({ "id": "1", "method": "eth_getBlockByHash", "params": (hash, false) });
         let request: JsonRpcRequest = serde_json::from_value(request)?;
 
         // TODO: if error, retry?
-        let response = self.try_send_best_upstream_server(request, None).await?;
+        let response = match rpc {
+            Some(rpc) => {
+                todo!("send request to this rpc")
+            }
+            None => self.try_send_best_upstream_server(request, None).await?,
+        };
 
         let block = response.result.unwrap();
 
@@ -96,7 +209,7 @@ impl Web3Connections {
 
         let block = Arc::new(block);
 
-        self.add_block(block.clone(), false);
+        self.add_block_to_chain(block.clone())?;
 
         Ok(block)
     }
@@ -112,6 +225,9 @@ impl Web3Connections {
 
     /// Get the heaviest chain's block from cache or backend rpc
     pub async fn cannonical_block(&self, num: &U64) -> anyhow::Result<Arc<Block<TxHash>>> {
+        todo!();
+
+        /*
         // first, try to get the hash from our cache
         if let Some(block) = self.chain_map.get(num) {
             return Ok(block.clone());
@@ -149,19 +265,19 @@ impl Web3Connections {
         self.add_block(block.clone(), true);
 
         Ok(block)
+        */
     }
 
-    // TODO: rename this?
-    pub(super) async fn update_synced_rpcs(
+    pub(super) async fn process_incoming_blocks(
         &self,
-        block_receiver: flume::Receiver<(Arc<Block<TxHash>>, Arc<Web3Connection>)>,
+        block_receiver: flume::Receiver<BlockAndRpc>,
         // TODO: head_block_sender should be a broadcast_sender like pending_tx_sender
         head_block_sender: watch::Sender<Arc<Block<TxHash>>>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         // TODO: indexmap or hashmap? what hasher? with_capacity?
-        // TODO: this will grow unbounded. prune old heads automatically
-        let mut connection_heads = IndexMap::<String, Arc<Block<TxHash>>>::new();
+        // TODO: this will grow unbounded. prune old heads on this at the same time we prune the graph?
+        let mut connection_heads = HashMap::new();
 
         while let Ok((new_block, rpc)) = block_receiver.recv_async().await {
             self.recv_block_from_rpc(
@@ -180,127 +296,52 @@ impl Web3Connections {
         Ok(())
     }
 
-    pub async fn recv_block_from_rpc(
+    /// `connection_heads` is a mapping of rpc_names to head block hashes.
+    /// self.blockchain_map is a mapping of hashes to the complete Block<TxHash>.
+    ///
+    async fn recv_block_from_rpc(
         &self,
-        connection_heads: &mut IndexMap<String, Arc<Block<TxHash>>>,
+        connection_heads: &mut HashMap<String, H256>,
         new_block: Arc<Block<TxHash>>,
         rpc: Arc<Web3Connection>,
         head_block_sender: &watch::Sender<Arc<Block<TxHash>>>,
         pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
-        let new_block_hash = if let Some(hash) = new_block.hash {
-            hash
-        } else {
-            // TODO: rpc name instead of url (will do this with config reload revamp)
-            connection_heads.remove(&rpc.name);
+        // add the block to connection_heads
+        match (new_block.hash, new_block.number) {
+            (Some(hash), Some(num)) => {
+                if num == U64::zero() {
+                    debug!(%rpc, "still syncing");
 
-            // TODO: return here is wrong. synced rpcs needs an update
-            return Ok(());
-        };
+                    connection_heads.remove(&rpc.name);
+                } else {
+                    connection_heads.insert(rpc.name.clone(), hash);
 
-        // TODO: dry this with the code above
-        let new_block_num = if let Some(num) = new_block.number {
-            num
-        } else {
-            // this seems unlikely, but i'm pretty sure we have seen it
-            // maybe when a node is syncing or reconnecting?
-            warn!(%rpc, ?new_block, "Block without number!");
-
-            // TODO: rpc name instead of url (will do this with config reload revamp)
-            connection_heads.remove(&rpc.name);
-
-            // TODO: return here is wrong. synced rpcs needs an update
-            return Ok(());
-        };
-
-        // TODO: span with more in it?
-        // TODO: make sure i'm doing this span right
-        // TODO: show the actual rpc url?
-        // TODO: clippy lint to make sure we don't hold this across an awaited future
-        // TODO: what level?
-        // let _span = info_span!("block_receiver", %rpc, %new_block_num).entered();
-
-        if new_block_num == U64::zero() {
-            warn!(%rpc, %new_block_num, "still syncing");
-
-            connection_heads.remove(&rpc.name);
-        } else {
-            connection_heads.insert(rpc.name.clone(), new_block.clone());
-
-            self.add_block(new_block.clone(), false);
-        }
-
-        // iterate connection_heads to find the oldest block
-        let lowest_block_num = if let Some(lowest_block) = connection_heads
-            .values()
-            .min_by(|a, b| a.number.cmp(&b.number))
-        {
-            lowest_block
-                .number
-                .expect("all blocks here should have a number")
-        } else {
-            // TODO: return here is wrong. synced rpcs needs an update
-            return Ok(());
-        };
-
-        // iterate connection_heads to find the consensus block
-        let mut rpcs_by_num = IndexMap::<U64, Vec<&str>>::new();
-        let mut blocks_by_hash = IndexMap::<H256, Arc<Block<TxHash>>>::new();
-        // block_hash => soft_limit, rpcs
-        // TODO: proper type for this?
-        let mut rpcs_by_hash = IndexMap::<H256, Vec<&str>>::new();
-        let mut total_soft_limit = 0;
-
-        for (rpc_url, head_block) in connection_heads.iter() {
-            if let Some(rpc) = self.conns.get(rpc_url) {
-                // we need the total soft limit in order to know when its safe to update the backends
-                total_soft_limit += rpc.soft_limit;
-
-                let head_hash = head_block.hash.unwrap();
-
-                // save the block
-                blocks_by_hash
-                    .entry(head_hash)
-                    .or_insert_with(|| head_block.clone());
-
-                // add the rpc to all relevant block heights
-                let mut block = head_block.clone();
-                while block.number.unwrap() >= lowest_block_num {
-                    let block_hash = block.hash.unwrap();
-                    let block_num = block.number.unwrap();
-
-                    // save the rpcs and the sum of their soft limit by their head hash
-                    let rpc_urls_by_hash = rpcs_by_hash.entry(block_hash).or_insert_with(Vec::new);
-
-                    rpc_urls_by_hash.push(rpc_url);
-
-                    // save the rpcs by their number
-                    let rpc_urls_by_num = rpcs_by_num.entry(block_num).or_insert_with(Vec::new);
-
-                    rpc_urls_by_num.push(rpc_url);
-
-                    if let Ok(parent) = self.block(&block.parent_hash).await {
-                        // save the parent block
-                        blocks_by_hash.insert(block.parent_hash, parent.clone());
-
-                        block = parent
-                    } else {
-                        // log this? eventually we will hit a block we don't have, so it's not an error
-                        break;
-                    }
+                    self.add_block_to_chain(new_block.clone())?;
                 }
             }
+            _ => {
+                warn!(%rpc, ?new_block, "Block without number or hash!");
+
+                connection_heads.remove(&rpc.name);
+
+                // don't return yet! self.synced_connections likely needs an update
+            }
         }
+
+        let mut chain_and_rpcs = BlockchainAndRpcs::default();
 
         // TODO: default_min_soft_limit? without, we start serving traffic at the start too quickly
         // let min_soft_limit = total_soft_limit / 2;
         let min_soft_limit = 1;
-        let num_possible_heads = rpcs_by_hash.len();
 
-        trace!(?rpcs_by_hash);
+        let num_possible_heads = chain_and_rpcs.rpcs_by_hash.len();
+
+        // trace!(?rpcs_by_hash);
 
         let total_rpcs = self.conns.len();
 
+        /*
         // TODO: this needs tests
         if let Some(x) = rpcs_by_hash
             .into_iter()
@@ -395,7 +436,7 @@ impl Web3Connections {
                         .collect::<Vec<_>>(),
                 );
                 // TODO: what if the hashes don't match?
-                if pending_synced_connections.head_block_hash == new_block_hash {
+                if Some(pending_synced_connections.head_block_hash) == new_block.hash {
                     // mark all transactions in the block as confirmed
                     if pending_tx_sender.is_some() {
                         for tx_hash in &new_block.transactions {
@@ -447,6 +488,7 @@ impl Web3Connections {
             warn!("not enough rpcs in sync");
         }
 
+        */
         Ok(())
     }
 }

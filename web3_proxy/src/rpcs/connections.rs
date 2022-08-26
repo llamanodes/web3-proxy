@@ -3,7 +3,7 @@ use super::connection::Web3Connection;
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use super::synced_connections::SyncedConnections;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
-use crate::config::Web3ConnectionConfig;
+use crate::config::{BlockAndRpc, Web3ConnectionConfig};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
 use arc_swap::ArcSwap;
@@ -15,7 +15,8 @@ use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
-use indexmap::IndexMap;
+use parking_lot::RwLock;
+use petgraph::graphmap::DiGraphMap;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::value::RawValue;
@@ -29,28 +30,36 @@ use tokio::time::{interval, sleep, sleep_until, MissedTickBehavior};
 use tokio::time::{Duration, Instant};
 use tracing::{error, info, instrument, trace, warn};
 
+pub type BlockMap = Arc<DashMap<H256, Arc<Block<TxHash>>>>;
+
+pub struct BlockchainAndHeads {
+    pub(super) graph: DiGraphMap<H256, Arc<Block<TxHash>>>,
+    pub(super) heads: HashMap<String, H256>,
+}
+
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
 pub struct Web3Connections {
-    pub(super) conns: IndexMap<String, Arc<Web3Connection>>,
+    pub(super) conns: HashMap<String, Arc<Web3Connection>>,
     pub(super) synced_connections: ArcSwap<SyncedConnections>,
     pub(super) pending_transactions: Arc<DashMap<TxHash, TxStatus>>,
-    /// only includes blocks on the main chain.
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
-    pub(super) chain_map: DashMap<U64, Arc<Block<TxHash>>>,
     /// all blocks, including orphans
+    pub(super) block_map: BlockMap,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
-    pub(super) block_map: DashMap<H256, Arc<Block<TxHash>>>,
-    // TODO: petgraph? might help with pruning the maps
+    /// TODO: what should we use for edges?
+    pub(super) blockchain_map: RwLock<DiGraphMap<H256, u32>>,
 }
 
 impl Web3Connections {
     /// Spawn durable connections to multiple Web3 providers.
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         chain_id: u64,
         server_configs: HashMap<String, Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
         redis_client_pool: Option<redis_rate_limit::RedisPool>,
+        block_map: BlockMap,
         head_block_sender: Option<watch::Sender<Arc<Block<TxHash>>>>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         pending_transactions: Arc<DashMap<TxHash, TxStatus>>,
@@ -110,6 +119,7 @@ impl Web3Connections {
                 };
 
                 let pending_tx_id_sender = Some(pending_tx_id_sender.clone());
+                let block_map = block_map.clone();
 
                 tokio::spawn(async move {
                     server_config
@@ -119,6 +129,7 @@ impl Web3Connections {
                             chain_id,
                             http_client,
                             http_interval_sender,
+                            block_map,
                             block_sender,
                             pending_tx_id_sender,
                         )
@@ -128,7 +139,7 @@ impl Web3Connections {
             .collect();
 
         // map of connection names to their connection
-        let mut connections = IndexMap::new();
+        let mut connections = HashMap::new();
         let mut handles = vec![];
 
         // TODO: futures unordered?
@@ -160,8 +171,8 @@ impl Web3Connections {
             conns: connections,
             synced_connections: ArcSwap::new(Arc::new(synced_connections)),
             pending_transactions,
-            chain_map: Default::default(),
             block_map: Default::default(),
+            blockchain_map: Default::default(),
         });
 
         let handle = {
@@ -183,13 +194,17 @@ impl Web3Connections {
         Ok((connections, handle))
     }
 
+    pub fn get(&self, conn_name: &str) -> Option<&Arc<Web3Connection>> {
+        self.conns.get(conn_name)
+    }
+
     /// subscribe to blocks and transactions from all the backend rpcs.
     /// blocks are processed by all the `Web3Connection`s and then sent to the `block_receiver`
     /// transaction ids from all the `Web3Connection`s are deduplicated and forwarded to `pending_tx_sender`
     async fn subscribe(
         self: Arc<Self>,
         pending_tx_id_receiver: flume::Receiver<(TxHash, Arc<Web3Connection>)>,
-        block_receiver: flume::Receiver<(Arc<Block<TxHash>>, Arc<Web3Connection>)>,
+        block_receiver: flume::Receiver<BlockAndRpc>,
         head_block_sender: Option<watch::Sender<Arc<Block<TxHash>>>>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
@@ -200,11 +215,11 @@ impl Web3Connections {
         // fetches new transactions from the notifying rpc
         // forwards new transacitons to pending_tx_receipt_sender
         if let Some(pending_tx_sender) = pending_tx_sender.clone() {
-            // TODO: do something with the handle so we can catch any errors
             let clone = self.clone();
             let handle = task::spawn(async move {
+                // TODO: set up this future the same as the block funnel
                 while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv_async().await {
-                    let f = clone.clone().funnel_transaction(
+                    let f = clone.clone().process_incoming_tx_id(
                         rpc,
                         pending_tx_id,
                         pending_tx_sender.clone(),
@@ -223,10 +238,14 @@ impl Web3Connections {
             let connections = Arc::clone(&self);
             let pending_tx_sender = pending_tx_sender.clone();
             let handle = task::Builder::default()
-                .name("update_synced_rpcs")
+                .name("process_incoming_blocks")
                 .spawn(async move {
                     connections
-                        .update_synced_rpcs(block_receiver, head_block_sender, pending_tx_sender)
+                        .process_incoming_blocks(
+                            block_receiver,
+                            head_block_sender,
+                            pending_tx_sender,
+                        )
                         .await
                 });
 
@@ -235,11 +254,11 @@ impl Web3Connections {
 
         if futures.is_empty() {
             // no transaction or block subscriptions.
-            // todo!("every second, check that the provider is still connected");?
 
             let handle = task::Builder::default().name("noop").spawn(async move {
                 loop {
                     sleep(Duration::from_secs(600)).await;
+                    // TODO: "every interval, check that the provider is still connected"
                 }
             });
 
@@ -265,7 +284,7 @@ impl Web3Connections {
         // TODO: remove this box once i figure out how to do the options
         params: Option<&serde_json::Value>,
     ) -> Result<Box<RawValue>, ProviderError> {
-        // TODO: if only 1 active_request_handles, do self.try_send_request
+        // TODO: if only 1 active_request_handles, do self.try_send_request?
 
         let responses = active_request_handles
             .into_iter()
@@ -283,6 +302,8 @@ impl Web3Connections {
         let mut counts: Counter<String> = Counter::new();
         let mut any_ok = false;
         for response in responses {
+            // TODO: i think we need to do something smarter with provider error. we at least need to wrap it up as JSON
+            // TODO: emit stats errors?
             let s = format!("{:?}", response);
 
             if count_map.get(&s).is_none() {
@@ -325,12 +346,10 @@ impl Web3Connections {
         // TODO: we are going to be checking "has_block_data" a lot now. i think we pretty much always have min_block_needed now that we override "latest"
         let mut synced_rpcs: Vec<Arc<Web3Connection>> =
             if let Some(min_block_needed) = min_block_needed {
-                // TODO: this includes ALL archive servers. but we only want them if they are on a somewhat recent block
-                // TODO: maybe instead of "archive_needed" bool it should be the minimum height. then even delayed servers might be fine. will need to track all heights then
                 self.conns
                     .values()
-                    .filter(|x| x.has_block_data(min_block_needed))
                     .filter(|x| !skip.contains(x))
+                    .filter(|x| x.has_block_data(min_block_needed))
                     .cloned()
                     .collect()
             } else {
@@ -344,7 +363,8 @@ impl Web3Connections {
             };
 
         if synced_rpcs.is_empty() {
-            // TODO: what should happen here? might be nicer to retry in a second
+            // TODO: what should happen here? automatic retry?
+            // TODO: more detailed error
             return Err(anyhow::anyhow!("not synced"));
         }
 
@@ -375,7 +395,7 @@ impl Web3Connections {
         // now that the rpcs are sorted, try to get an active request handle for one of them
         for rpc in synced_rpcs.into_iter() {
             // increment our connection counter
-            match rpc.try_open_request().await {
+            match rpc.try_request_handle().await {
                 Ok(OpenRequestResult::Handle(handle)) => {
                     trace!("next server on {:?}: {:?}", self, rpc);
                     return Ok(OpenRequestResult::Handle(handle));
@@ -420,7 +440,7 @@ impl Web3Connections {
             }
 
             // check rate limits and increment our connection counter
-            match connection.try_open_request().await {
+            match connection.try_request_handle().await {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));

@@ -1,3 +1,5 @@
+use super::blockchain::BlockId;
+use super::connections::BlockMap;
 ///! Rate-limited communication with a web3 provider.
 use super::provider::Web3Provider;
 use super::request::OpenRequestHandle;
@@ -5,6 +7,8 @@ use super::request::OpenRequestResult;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
 use anyhow::Context;
+use dashmap::mapref::entry::Entry;
+use dashmap::DashMap;
 use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
@@ -19,13 +23,14 @@ use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::{interval, sleep, sleep_until, Duration, MissedTickBehavior};
+use tracing::debug;
 use tracing::{error, info, instrument, trace, warn};
 
 /// An active connection to a Web3Rpc
 pub struct Web3Connection {
     pub name: String,
     /// TODO: can we get this from the provider? do we even need it?
-    pub url: String,
+    url: String,
     /// keep track of currently open requests. We sort on this
     pub(super) active_requests: AtomicU32,
     /// provider is in a RwLock so that we can replace it if re-connecting
@@ -34,10 +39,12 @@ pub struct Web3Connection {
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     hard_limit: Option<RedisRateLimit>,
     /// used for load balancing to the least loaded server
-    pub soft_limit: u32,
+    pub(super) soft_limit: u32,
     block_data_limit: AtomicU64,
-    pub weight: u32,
-    head_block: RwLock<(H256, U64)>,
+    /// Lower weight are higher priority when sending requests
+    pub(super) weight: u32,
+    // TODO: async lock?
+    pub(super) head_block: RwLock<BlockId>,
 }
 
 impl Web3Connection {
@@ -56,6 +63,7 @@ impl Web3Connection {
         hard_limit: Option<(u64, RedisPool)>,
         // TODO: think more about this type
         soft_limit: u32,
+        block_map: BlockMap,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
@@ -83,7 +91,7 @@ impl Web3Connection {
             hard_limit,
             soft_limit,
             block_data_limit: Default::default(),
-            head_block: RwLock::new((H256::zero(), 0isize.into())),
+            head_block: RwLock::new(Default::default()),
             weight,
         };
 
@@ -125,7 +133,13 @@ impl Web3Connection {
             let new_connection = new_connection.clone();
             tokio::spawn(async move {
                 new_connection
-                    .subscribe(http_interval_sender, block_sender, tx_id_sender, reconnect)
+                    .subscribe(
+                        http_interval_sender,
+                        block_map,
+                        block_sender,
+                        tx_id_sender,
+                        reconnect,
+                    )
                     .await
             })
         };
@@ -143,7 +157,7 @@ impl Web3Connection {
             sleep(Duration::from_millis(250)).await;
 
             for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
-                let mut head_block_num = new_connection.head_block.read().1;
+                let mut head_block_num = new_connection.head_block.read().num;
 
                 // TODO: wait until head block is set outside the loop? if we disconnect while starting we could actually get 0 though
                 while head_block_num == U64::zero() {
@@ -152,7 +166,7 @@ impl Web3Connection {
                     // TODO: subscribe to a channel instead of polling? subscribe to http_interval_sender?
                     sleep(Duration::from_secs(1)).await;
 
-                    head_block_num = new_connection.head_block.read().1;
+                    head_block_num = new_connection.head_block.read().num;
                 }
 
                 // TODO: subtract 1 from block_data_limit for safety?
@@ -197,7 +211,7 @@ impl Web3Connection {
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
         let block_data_limit: U64 = self.block_data_limit();
 
-        let newest_block_num = self.head_block.read().1;
+        let newest_block_num = self.head_block.read().num;
 
         let oldest_block_num = newest_block_num
             .saturating_sub(block_data_limit)
@@ -249,36 +263,59 @@ impl Web3Connection {
     }
 
     #[instrument(skip_all)]
-    async fn send_block_result(
-        self: Arc<Self>,
-        block: Result<Block<TxHash>, ProviderError>,
+    async fn send_head_block_result(
+        self: &Arc<Self>,
+        new_head_block: Result<Arc<Block<TxHash>>, ProviderError>,
         block_sender: &flume::Sender<BlockAndRpc>,
+        block_map: BlockMap,
     ) -> anyhow::Result<()> {
-        match block {
-            Ok(block) => {
-                {
-                    // TODO: is this true? Block::default probably doesn't
-                    let hash = block.hash.expect("blocks here should always have hashes");
-                    let num = block
-                        .number
-                        .expect("blocks here should always have numbers");
+        match new_head_block {
+            Ok(new_head_block) => {
+                // TODO: is unwrap_or_default ok? we might have an empty block
+                let new_hash = new_head_block.hash.unwrap_or_default();
 
+                // if we already have this block saved, we don't need to store this copy
+                let new_head_block = match block_map.entry(new_hash) {
+                    Entry::Occupied(x) => x.get().clone(),
+                    Entry::Vacant(x) => {
+                        // TODO: remove this once https://github.com/ledgerwatch/erigon/issues/5190 is closed
+                        // TODO: include transactions?
+                        let new_head_block = if new_head_block.total_difficulty.is_none() {
+                            self.wait_for_request_handle()
+                                .await?
+                                .request("eth_getBlockByHash", (new_hash, false))
+                                .await?
+                        } else {
+                            new_head_block
+                        };
+
+                        x.insert(new_head_block).clone()
+                    }
+                };
+
+                let new_num = new_head_block.number.unwrap_or_default();
+
+                // save the block so we don't send the same one multiple times
+                // also save so that archive checks can know how far back to query
+                {
                     let mut head_block = self.head_block.write();
 
-                    *head_block = (hash, num);
+                    head_block.hash = new_hash;
+                    head_block.num = new_num;
                 }
 
                 block_sender
-                    .send_async((Arc::new(block), self))
+                    .send_async((new_head_block, self.clone()))
                     .await
                     .context("block_sender")?;
             }
             Err(e) => {
                 warn!("unable to get block from {}: {}", self, e);
+                // TODO: do something to rpc_chain?
 
                 // send an empty block to take this server out of rotation
                 block_sender
-                    .send_async((Arc::new(Block::default()), self))
+                    .send_async((Arc::new(Block::default()), self.clone()))
                     .await
                     .context("block_sender")?;
             }
@@ -290,6 +327,7 @@ impl Web3Connection {
     async fn subscribe(
         self: Arc<Self>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
+        block_map: BlockMap,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
@@ -300,9 +338,11 @@ impl Web3Connection {
             let mut futures = vec![];
 
             if let Some(block_sender) = &block_sender {
-                let f = self
-                    .clone()
-                    .subscribe_new_heads(http_interval_receiver, block_sender.clone());
+                let f = self.clone().subscribe_new_heads(
+                    http_interval_receiver,
+                    block_sender.clone(),
+                    block_map.clone(),
+                );
 
                 futures.push(flatten_handle(tokio::spawn(f)));
             }
@@ -356,8 +396,9 @@ impl Web3Connection {
         self: Arc<Self>,
         http_interval_receiver: Option<broadcast::Receiver<()>>,
         block_sender: flume::Sender<BlockAndRpc>,
+        block_map: BlockMap,
     ) -> anyhow::Result<()> {
-        info!("watching {}", self);
+        info!(?self, "watching new_heads");
 
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
@@ -371,37 +412,42 @@ impl Web3Connection {
                     let mut last_hash = H256::zero();
 
                     loop {
-                        match self.try_open_request().await {
-                            Ok(OpenRequestResult::Handle(active_request_handle)) => {
+                        // TODO: try, or wait_for?
+                        match self.wait_for_request_handle().await {
+                            Ok(active_request_handle) => {
                                 let block: Result<Block<TxHash>, _> = active_request_handle
                                     .request("eth_getBlockByNumber", ("latest", false))
                                     .await;
 
-                                if let Ok(block) = block {
-                                    // don't send repeat blocks
-                                    let new_hash =
-                                        block.hash.expect("blocks here should always have hashes");
+                                match block {
+                                    Ok(block) => {
+                                        // don't send repeat blocks
+                                        let new_hash = block
+                                            .hash
+                                            .expect("blocks here should always have hashes");
 
-                                    if new_hash != last_hash {
-                                        last_hash = new_hash;
+                                        if new_hash != last_hash {
+                                            // new hash!
+                                            last_hash = new_hash;
 
-                                        self.clone()
-                                            .send_block_result(Ok(block), &block_sender)
+                                            self.send_head_block_result(
+                                                Ok(Arc::new(block)),
+                                                &block_sender,
+                                                block_map.clone(),
+                                            )
                                             .await?;
+                                        }
                                     }
-                                } else {
-                                    // we did not get a block back. something is up with the server. take it out of rotation
-                                    self.clone().send_block_result(block, &block_sender).await?;
+                                    Err(err) => {
+                                        // we did not get a block back. something is up with the server. take it out of rotation
+                                        self.send_head_block_result(
+                                            Err(err),
+                                            &block_sender,
+                                            block_map.clone(),
+                                        )
+                                        .await?;
+                                    }
                                 }
-                            }
-                            Ok(OpenRequestResult::RetryAt(retry_at)) => {
-                                warn!(?retry_at, "Rate limited on latest block from {}", self);
-                                sleep_until(retry_at).await;
-                                continue;
-                            }
-                            Ok(OpenRequestResult::None) => {
-                                warn!("No handle for latest block from {}", self);
-                                // TODO: what should we do?
                             }
                             Err(err) => {
                                 warn!(?err, "Internal error on latest block from {}", self);
@@ -409,15 +455,17 @@ impl Web3Connection {
                             }
                         }
 
-                        // wait for the interval
+                        // wait for the next interval
                         // TODO: if error or rate limit, increase interval?
                         while let Err(err) = http_interval_receiver.recv().await {
                             match err {
                                 broadcast::error::RecvError::Closed => {
+                                    // channel is closed! that's not good. bubble the error up
                                     return Err(err.into());
                                 }
                                 broadcast::error::RecvError::Lagged(lagged) => {
-                                    // querying the block was delayed. this can happen if tokio is very busy.
+                                    // querying the block was delayed
+                                    // this can happen if tokio is very busy or waiting for requests limits took too long
                                     warn!(?err, ?self, "http interval lagging by {}!", lagged);
                                 }
                             }
@@ -434,18 +482,23 @@ impl Web3Connection {
                     // query the block once since the subscription doesn't send the current block
                     // there is a very small race condition here where the stream could send us a new block right now
                     // all it does is print "new block" for the same block as current block
-                    let block: Result<Block<TxHash>, _> = self
+                    let block: Result<Arc<Block<TxHash>>, _> = self
                         .wait_for_request_handle()
                         .await?
                         .request("eth_getBlockByNumber", ("latest", false))
-                        .await;
+                        .await
+                        .map(Arc::new);
 
-                    self.clone().send_block_result(block, &block_sender).await?;
+                    self.send_head_block_result(block, &block_sender, block_map.clone())
+                        .await?;
 
                     while let Some(new_block) = stream.next().await {
-                        self.clone()
-                            .send_block_result(Ok(new_block), &block_sender)
-                            .await?;
+                        self.send_head_block_result(
+                            Ok(Arc::new(new_block)),
+                            &block_sender,
+                            block_map.clone(),
+                        )
+                        .await?;
                     }
 
                     warn!(?self, "subscription ended");
@@ -526,7 +579,7 @@ impl Web3Connection {
         // TODO: maximum wait time? i think timeouts in other parts of the code are probably best
 
         loop {
-            match self.try_open_request().await {
+            match self.try_request_handle().await {
                 Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
@@ -543,7 +596,7 @@ impl Web3Connection {
         }
     }
 
-    pub async fn try_open_request(self: &Arc<Self>) -> anyhow::Result<OpenRequestResult> {
+    pub async fn try_request_handle(self: &Arc<Self>) -> anyhow::Result<OpenRequestResult> {
         // check that we are connected
         if !self.has_provider().await {
             // TODO: emit a stat?

@@ -90,6 +90,28 @@
   - whenever blocks were slow, we started checking as fast as possible
 - [x] create user script should allow setting requests per minute
 - [x] cache api keys that are not in the database
+- [ ] improve consensus block selection. Our goal is to find the highest work chain with a block over a minimum threshold of sum_soft_limit.
+    - [x] A new block arrives at a connection.
+    - [x] It checks that it isn't the same that it already has (which is a problem with polling nodes)
+    - [x] If its new to this node...
+        - [x] if the block does not have total work, check our cache. otherwise, query the node
+        - [x] save the block num and hash so that http polling doesn't send duplicates
+        - [x] send the deduped block through a channel to be handled by the connections grouping.
+    - [ ] The connections group...
+        - [x] input = rpc, new_block
+        - [ ] adds the block and rpc to it's internal BlockchainMap (this persists).
+            - [x] connection_heads: HashMap<rpc_name, blockhash>
+            - [x] block_map: DashMap<blockhash, Arc<Block>>
+            - [x] blockchain: DiGraphMap<blockhash, ?>
+        - [ ] iterate the rpc_map to find the highest_work_block
+        - [ ] oldest_block_num = highest_work_block.number - 256
+            - think more about this. if we have to go back more than a couple blocks, we will serve very stale data
+        - [ ] while sum_soft_limit < min_sum_soft_limit:
+            - [ ] consensus_head_hash = block.parent_hash
+            - [ ] sum_soft_limit = ??? (something with iterating rpc_map, caches, and petgraph's all_simple_paths)
+                - if all_simple_paths returns no paths, warn about a chain split?
+            - [ ] error if this is too old? sucks to have downtime, but its the chain thats having problems
+        - [ ] now that we have a consensus head with enough soft limit, update SyncedConnections
 - [-] use siwe messages and signatures for sign up and login
 - [-] requests for "Get transactions receipts" are routed to the private_rpcs and not the balanced_rpcs. do this better.
   - [x] quick fix, send to balanced_rpcs for now. we will just live with errors on new transactions. 

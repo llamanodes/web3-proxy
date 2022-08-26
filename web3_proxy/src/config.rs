@@ -1,3 +1,6 @@
+use crate::app::AnyhowJoinHandle;
+use crate::rpcs::connection::Web3Connection;
+use crate::rpcs::connections::BlockMap;
 use argh::FromArgs;
 use derive_more::Constructor;
 use ethers::prelude::{Block, TxHash};
@@ -5,9 +8,6 @@ use hashbrown::HashMap;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-
-use crate::app::AnyhowJoinHandle;
-use crate::rpcs::connection::Web3Connection;
 
 pub type BlockAndRpc = (Arc<Block<TxHash>>, Arc<Web3Connection>);
 
@@ -85,6 +85,7 @@ impl Web3ConnectionConfig {
         chain_id: u64,
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
+        block_map: BlockMap,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Web3Connection>)>>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
@@ -107,6 +108,7 @@ impl Web3ConnectionConfig {
             http_interval_sender,
             hard_limit,
             self.soft_limit,
+            block_map,
             block_sender,
             tx_id_sender,
             true,
