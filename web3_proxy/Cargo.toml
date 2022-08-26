@@ -52,7 +52,7 @@ sea-orm = { version = "0.9.2", features = ["macros"] }
 serde = { version = "1.0.144", features = [] }
 serde_json = { version = "1.0.85", default-features = false, features = ["alloc", "raw_value"] }
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
-time = "0.3.13"
+time = "0.3.14"
 tokio = { version = "1.20.1", features = ["full", "tracing"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.9", features = ["sync"] }
