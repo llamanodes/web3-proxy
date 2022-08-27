@@ -1,6 +1,6 @@
 use crate::app::AnyhowJoinHandle;
 use crate::rpcs::connection::Web3Connection;
-use crate::rpcs::connections::BlockMap;
+use crate::rpcs::connections::BlockHashesMap;
 use argh::FromArgs;
 use derive_more::Constructor;
 use ethers::prelude::{Block, TxHash};
@@ -105,7 +105,7 @@ impl Web3ConnectionConfig {
         chain_id: u64,
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        block_map: BlockMap,
+        block_map: BlockHashesMap,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Web3Connection>)>>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {

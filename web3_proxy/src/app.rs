@@ -6,7 +6,7 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
-use crate::rpcs::connections::{BlockMap, Web3Connections};
+use crate::rpcs::connections::{BlockHashesMap, Web3Connections};
 use crate::rpcs::transactions::TxStatus;
 use crate::stats::AppStats;
 use anyhow::Context;
@@ -246,7 +246,7 @@ impl Web3ProxyApp {
         // TODO: we should still have some sort of expiration or maximum size limit for the map
 
         // this block map is shared between balanced_rpcs and private_rpcs.
-        let block_map = BlockMap::default();
+        let block_map = BlockHashesMap::default();
 
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
             top_config.app.chain_id,

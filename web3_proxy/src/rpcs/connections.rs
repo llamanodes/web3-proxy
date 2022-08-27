@@ -30,7 +30,7 @@ use tokio::time::{interval, sleep, sleep_until, MissedTickBehavior};
 use tokio::time::{Duration, Instant};
 use tracing::{error, info, instrument, trace, warn};
 
-pub type BlockMap = Arc<DashMap<H256, Arc<Block<TxHash>>>>;
+pub type BlockHashesMap = Arc<DashMap<H256, Arc<Block<TxHash>>>>;
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
@@ -41,7 +41,8 @@ pub struct Web3Connections {
     pub(super) pending_transactions: Arc<DashMap<TxHash, TxStatus>>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
-    pub(super) block_map: BlockMap,
+    pub(super) block_hashes: BlockHashesMap,
+    pub(super) block_numbers: DashMap<U64, Vec<H256>>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// TODO: what should we use for edges?
     pub(super) blockchain_graphmap: RwLock<DiGraphMap<H256, u32>>,
@@ -57,7 +58,7 @@ impl Web3Connections {
         server_configs: HashMap<String, Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
         redis_client_pool: Option<redis_rate_limit::RedisPool>,
-        block_map: BlockMap,
+        block_map: BlockHashesMap,
         head_block_sender: Option<watch::Sender<Arc<Block<TxHash>>>>,
         min_sum_soft_limit: u32,
         min_synced_rpcs: u32,
@@ -171,7 +172,8 @@ impl Web3Connections {
             conns: connections,
             synced_connections: ArcSwap::new(Arc::new(synced_connections)),
             pending_transactions,
-            block_map: Default::default(),
+            block_hashes: Default::default(),
+            block_numbers: Default::default(),
             blockchain_graphmap: Default::default(),
             min_sum_soft_limit,
             min_synced_rpcs,

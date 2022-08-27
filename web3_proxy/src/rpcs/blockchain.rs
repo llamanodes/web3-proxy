@@ -5,7 +5,7 @@ use super::transactions::TxStatus;
 use crate::{
     config::BlockAndRpc, jsonrpc::JsonRpcRequest, rpcs::synced_connections::SyncedConnections,
 };
-use dashmap::mapref::one::Ref;
+use dashmap::mapref::{entry::Entry, one::Ref};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use hashbrown::{HashMap, HashSet};
@@ -25,39 +25,52 @@ pub struct BlockId {
 impl Web3Connections {
     /// add a block to our map and it's hash to our graphmap of the blockchain
     pub fn save_block(&self, block: &Arc<Block<TxHash>>) -> anyhow::Result<()> {
-        let hash = block.hash.ok_or_else(|| anyhow::anyhow!("no block hash"))?;
+        let block_hash = block.hash.ok_or_else(|| anyhow::anyhow!("no block hash"))?;
+        let block_num = block
+            .number
+            .ok_or_else(|| anyhow::anyhow!("no block num"))?;
 
-        if self.block_map.contains_key(&hash) {
+        if self.block_hashes.contains_key(&block_hash) {
             // this block is already included. no need to continue
             return Ok(());
         }
 
         let mut blockchain = self.blockchain_graphmap.write();
 
-        // TODO: theres a small race between contains_key and insert
-        if let Some(overwritten) = self.block_map.insert(hash, block.clone()) {
-            // there was a race and another thread wrote this block
-            // no need to continue because that other thread would have written (or soon will) write the
-            return Ok(());
-        }
-
-        if blockchain.contains_node(hash) {
-            // this hash is already included. we must have hit another race condition
+        if blockchain.contains_node(block_hash) {
+            // this hash is already included. we must have hit that race condition
             // return now since this work was already done.
             return Ok(());
         }
 
+        // TODO: theres a small race between contains_key and insert
+        if let Some(_overwritten) = self.block_hashes.insert(block_hash, block.clone()) {
+            // there was a race and another thread wrote this block
+            // i don't think this will happen. the blockchain.conains_node above should be enough
+            // no need to continue because that other thread would have written (or soon will) write the
+            return Ok(());
+        }
+
+        match self.block_numbers.entry(block_num) {
+            Entry::Occupied(mut x) => {
+                x.get_mut().push(block_hash);
+            }
+            Entry::Vacant(x) => {
+                x.insert(vec![block_hash]);
+            }
+        }
+
         // TODO: prettier log? or probably move the log somewhere else
-        trace!(%hash, "new block");
+        trace!(%block_hash, "new block");
 
-        // TODO: prune block_map to only keep a configurable (256 on ETH?) number of blocks?
-
-        blockchain.add_node(hash);
+        blockchain.add_node(block_hash);
 
         // what should edge weight be? and should the nodes be the blocks instead?
         // TODO: maybe the weight should be the block?
         // we store parent_hash -> hash because the block already stores the parent_hash
-        blockchain.add_edge(block.parent_hash, hash, 0);
+        blockchain.add_edge(block.parent_hash, block_hash, 0);
+
+        // TODO: prune block_numbers and block_map to only keep a configurable (256 on ETH?) number of blocks?
 
         Ok(())
     }
@@ -70,7 +83,7 @@ impl Web3Connections {
         rpc: Option<&Arc<Web3Connection>>,
     ) -> anyhow::Result<Arc<Block<TxHash>>> {
         // first, try to get the hash from our cache
-        if let Some(block) = self.block_map.get(hash) {
+        if let Some(block) = self.block_hashes.get(hash) {
             return Ok(block.clone());
         }
 
@@ -121,12 +134,31 @@ impl Web3Connections {
 
     /// Get the heaviest chain's block from cache or backend rpc
     pub async fn cannonical_block(&self, num: &U64) -> anyhow::Result<Arc<Block<TxHash>>> {
-        todo!();
+        // we only have blocks by hash now
+        // maybe save them during save_block in a blocks_by_number DashMap<U64, Vec<Arc<Block<TxHash>>>>
+        // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
 
-        /*
         // first, try to get the hash from our cache
-        if let Some(block) = self.chain_map.get(num) {
-            return Ok(block.clone());
+        if let Some(block_hash) = self.block_numbers.get(num) {
+            match block_hash.len() {
+                0 => {
+                    unimplemented!("block_numbers is broken")
+                }
+                1 => {
+                    let block_hash = block_hash.get(0).expect("length was checked");
+
+                    let block = self
+                        .block_hashes
+                        .get(block_hash)
+                        .expect("block_numbers gave us this hash");
+
+                    return Ok(block.clone());
+                }
+                _ => {
+                    // TODO: maybe the vec should be sorted by total difficulty.
+                    todo!("pick the block on the current consensus chain")
+                }
+            }
         }
 
         // block not in cache. we need to ask an rpc for it
@@ -143,7 +175,6 @@ impl Web3Connections {
         }
 
         // TODO: helper for method+params => JsonRpcRequest
-        // TODO: get block with the transactions?
         let request = json!({ "jsonrpc": "2.0", "id": "1", "method": "eth_getBlockByNumber", "params": (num, false) });
         let request: JsonRpcRequest = serde_json::from_value(request)?;
 
@@ -158,10 +189,9 @@ impl Web3Connections {
 
         let block = Arc::new(block);
 
-        self.add_block(block.clone(), true);
+        self.save_block(&block)?;
 
         Ok(block)
-        */
     }
 
     pub(super) async fn process_incoming_blocks(
@@ -236,7 +266,7 @@ impl Web3Connections {
 
             checked_heads.insert(rpc_head_hash);
 
-            let rpc_head_block = self.block_map.get(rpc_head_hash).unwrap();
+            let rpc_head_block = self.block_hashes.get(rpc_head_hash).unwrap();
 
             if highest_work_block.is_none()
                 || rpc_head_block.total_difficulty
@@ -322,7 +352,7 @@ impl Web3Connections {
             // we give known stale data just because we don't have enough capacity to serve the latest.
             // TODO: maybe we should delay serving requests if this happens.
             // TODO: don't unwrap. break if none?
-            match self.block_map.get(&highest_work_block.parent_hash) {
+            match self.block_hashes.get(&highest_work_block.parent_hash) {
                 None => {
                     warn!(
                         "ran out of parents to check. soft limit only {}/{}: {}%",
@@ -385,8 +415,10 @@ impl Web3Connections {
 
         let old_head_hash = old_synced_connections.head_block_hash;
 
-        if Some(consensus_block_hash) != rpc_head_block.hash {
-            info!("non consensus block")
+        if rpc_head_block.hash.is_some() && Some(consensus_block_hash) != rpc_head_block.hash {
+            info!(new=%rpc_head_block.hash.unwrap(), new_num=?rpc_head_block.number.unwrap(), consensus=%consensus_block_hash, num=%consensus_block_num, %rpc, "non consensus head");
+            // TODO: anything else to do? maybe warn if these blocks are very far apart or forked for an extended period of time
+            // TODO: if there is any non-consensus head log how many nodes are on it
         }
 
         if consensus_block_hash == old_head_hash {
