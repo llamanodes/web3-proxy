@@ -134,6 +134,8 @@
 - [ ] cli tool for resetting api keys
 - [ ] cli tool for checking config
 - [ ] nice output when cargo doc is run
+- [ ] Ulid instead of Uuid
+    - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
 - [ ] if we request an old block, more servers can handle it than we currently use.
     - [ ] instead of the one list of just heads, store our intermediate mappings (rpcs_by_hash, rpcs_by_num, blocks_by_hash) in SyncedConnections. this shouldn't be too much slower than what we have now
     - [ ] remove the if/else where we optionally route to archive and refactor to require a BlockNumber enum

@@ -9,7 +9,8 @@
 
 use super::errors::FrontendResult;
 use super::rate_limit::rate_limit_by_ip;
-use crate::app::Web3ProxyApp;
+use crate::{app::Web3ProxyApp, users::new_api_key};
+use anyhow::Context;
 use axum::{
     extract::{Path, Query},
     response::IntoResponse,
@@ -18,13 +19,15 @@ use axum::{
 use axum_auth::AuthBearer;
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
+use http::StatusCode;
+use uuid::Uuid;
 // use entities::sea_orm_active_enums::Role;
-use entities::user;
+use entities::{user, user_keys};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use redis_rate_limit::redis::AsyncCommands;
-use sea_orm::ActiveModelTrait;
-use serde::Deserialize;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
+use serde::{Deserialize, Serialize};
 use siwe::Message;
 use std::ops::Add;
 use std::sync::Arc;
@@ -122,6 +125,13 @@ pub struct PostLogin {
     // signer: String,
 }
 
+#[derive(Serialize)]
+pub struct PostLoginResponse {
+    bearer_token: Ulid,
+    // TODO: change this Ulid
+    api_key: Uuid,
+}
+
 #[debug_handler]
 /// Post to the user endpoint to register or login.
 pub async fn post_login(
@@ -131,8 +141,6 @@ pub async fn post_login(
     Query(query): Query<PostLoginQuery>,
 ) -> FrontendResult {
     let _ip = rate_limit_by_ip(&app, ip).await?;
-
-    let mut new_user = true; // TODO: check the database
 
     if let Some(invite_code) = &app.config.invite_code {
         // we don't do per-user referral codes because we shouldn't collect what we don't need.
@@ -159,48 +167,82 @@ pub async fn post_login(
         todo!("proper error message: {}", e)
     }
 
-    // TODO: create a new auth bearer token (ULID?)
+    let bearer_token = Ulid::new();
 
-    let response = if new_user {
-        // the only thing we need from them is an address
-        // everything else is optional
-        let user = user::ActiveModel {
-            address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
-            ..Default::default()
-        };
+    let db = app.db_conn.as_ref().unwrap();
 
-        let db = app.db_conn.as_ref().unwrap();
+    // TODO: limit columns or load whole user?
+    let u = user::Entity::find()
+        .filter(user::Column::Address.eq(our_msg.address.as_ref()))
+        .one(db)
+        .await
+        .unwrap();
 
-        let user = user.insert(db).await.unwrap();
+    let (u_id, response) = match u {
+        None => {
+            let txn = db.begin().await?;
 
-        let api_key = todo!("create an api key");
+            // the only thing we need from them is an address
+            // everything else is optional
+            let u = user::ActiveModel {
+                address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
+                ..Default::default()
+            };
 
-        /*
-        let rpm = app.config.something;
+            let u = u.insert(&txn).await?;
 
-        // create a key for the new user
-        // TODO: requests_per_minute should be configurable
-        let uk = user_keys::ActiveModel {
-            user_id: u.id,
-            api_key: sea_orm::Set(api_key),
-            requests_per_minute: sea_orm::Set(rpm),
-            ..Default::default()
-        };
+            let uk = user_keys::ActiveModel {
+                user_id: sea_orm::Set(u.id),
+                api_key: sea_orm::Set(new_api_key()),
+                requests_per_minute: sea_orm::Set(app.config.default_requests_per_minute),
+                ..Default::default()
+            };
 
-        // TODO: if this fails, rever adding the user, too
-        let uk = uk.save(&txn).await.context("Failed saving new user key")?;
+            // TODO: if this fails, revert adding the user, too
+            let uk = uk
+                .insert(&txn)
+                .await
+                .context("Failed saving new user key")?;
 
-        // TODO: set a cookie?
+            txn.commit().await?;
 
-        // TODO: do not expose user ids
-        // TODO: return an api key and a bearer token
-        (StatusCode::CREATED, Json(user)).into_response()
-        */
-    } else {
-        todo!("load existing user from the database");
+            let response_json = PostLoginResponse {
+                bearer_token,
+                api_key: uk.api_key,
+            };
+
+            let response = (StatusCode::CREATED, Json(response_json)).into_response();
+
+            (u.id, response)
+        }
+        Some(u) => {
+            // the user is already registered
+            // TODO: what if the user has multiple keys?
+            let uk = user_keys::Entity::find()
+                .filter(user_keys::Column::UserId.eq(u.id))
+                .one(db)
+                .await
+                .context("failed loading user's key")?
+                .unwrap();
+
+            let response_json = PostLoginResponse {
+                bearer_token,
+                api_key: uk.api_key,
+            };
+
+            let response = (StatusCode::OK, Json(response_json)).into_response();
+
+            (u.id, response)
+        }
     };
 
-    // TODO: save the auth bearer token in redis with a long (7 or 30 day?) expiry.
+    // TODO: set a session cookie with the bearer token?
+    // save the bearer token in redis with a long (7 or 30 day?) expiry. or in database?
+    let mut redis_conn = app.redis_conn().await?;
+
+    let bearer_key = format!("bearer:{}", bearer_token);
+
+    redis_conn.set(bearer_key, u_id.to_string()).await?;
 
     Ok(response)
 }
@@ -217,7 +259,7 @@ pub struct PostUser {
 #[debug_handler]
 /// post to the user endpoint to modify your account
 pub async fn post_user(
-    AuthBearer(auth_token): AuthBearer,
+    AuthBearer(bearer_token): AuthBearer,
     ClientIp(ip): ClientIp,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Json(payload): Json<PostUser>,
@@ -225,7 +267,7 @@ pub async fn post_user(
     let _ip = rate_limit_by_ip(&app, ip).await?;
 
     ProtectedAction::PostUser
-        .verify(app.as_ref(), auth_token, &payload.primary_address)
+        .verify(app.as_ref(), bearer_token, &payload.primary_address)
         .await?;
 
     // let user = user::ActiveModel {
@@ -246,10 +288,17 @@ impl ProtectedAction {
     async fn verify(
         self,
         app: &Web3ProxyApp,
-        auth_token: String,
+        bearer_token: String,
         primary_address: &Address,
     ) -> anyhow::Result<()> {
-        // TODO: get the attached address from redis for the given auth_token.
+        // get the attached address from redis for the given auth_token.
+        let bearer_key = format!("bearer:{}", bearer_token);
+
+        let mut redis_conn = app.redis_conn().await?;
+
+        // TODO: is this type correct?
+        let u_id: Option<u64> = redis_conn.get(bearer_key).await?;
+
         // TODO: if auth_address == primary_address, allow
         // TODO: if auth_address != primary_address, only allow if they are a secondary user with the correct role
         todo!("verify token for the given user");

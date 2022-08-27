@@ -63,8 +63,6 @@ tower-http = { version = "0.3.4", features = ["trace"] }
 tracing = "0.1.36"
 # TODO: tracing-subscriber has serde and serde_json features that we might want to use
 tracing-subscriber = { version = "0.3.15", features = ["env-filter", "parking_lot"] }
-ulid = "1.0.0"
+ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.2.2"
 uuid = "1.1.2"
-
-# TODO: https://github.com/ulid/spec instead of uuid

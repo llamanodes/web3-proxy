@@ -45,6 +45,8 @@ pub struct AppConfig {
     pub chain_id: u64,
     pub db_url: Option<String>,
     pub invite_code: Option<String>,
+    #[serde(default = "default_default_requests_per_minute")]
+    pub default_requests_per_minute: u32,
     #[serde(default = "default_min_sum_soft_limit")]
     pub min_sum_soft_limit: u32,
     #[serde(default = "default_min_synced_rpcs")]
@@ -58,6 +60,11 @@ pub struct AppConfig {
     pub redirect_public_url: String,
     /// the stats page url for a logged in user. it must contain "{user_id}"
     pub redirect_user_url: String,
+}
+
+// TODO: what should we default to? have different tiers for different paid amounts?
+fn default_default_requests_per_minute() -> u32 {
+    1_000_000 * 60
 }
 
 fn default_min_sum_soft_limit() -> u32 {

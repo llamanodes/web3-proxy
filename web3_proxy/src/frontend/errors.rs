@@ -6,6 +6,7 @@ use axum::{
 };
 use derive_more::From;
 use redis_rate_limit::{bb8::RunError, RedisError};
+use sea_orm::DbErr;
 use serde_json::value::RawValue;
 use std::error::Error;
 
@@ -18,8 +19,9 @@ pub enum FrontendErrorResponse {
     Box(Box<dyn Error>),
     // TODO: should we box these instead?
     Redis(RedisError),
-    RedisRunError(RunError<RedisError>),
+    RedisRun(RunError<RedisError>),
     Response(Response),
+    Database(DbErr),
 }
 
 impl IntoResponse for FrontendErrorResponse {
@@ -31,10 +33,11 @@ impl IntoResponse for FrontendErrorResponse {
             Self::Anyhow(err) => err,
             Self::Box(err) => anyhow::anyhow!("Boxed error: {:?}", err),
             Self::Redis(err) => err.into(),
-            Self::RedisRunError(err) => err.into(),
+            Self::RedisRun(err) => err.into(),
             Self::Response(r) => {
                 return r;
             }
+            Self::Database(err) => err.into(),
         };
 
         let err = JsonRpcForwardedResponse::from_anyhow_error(err, null_id);
