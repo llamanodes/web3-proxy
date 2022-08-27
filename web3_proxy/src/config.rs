@@ -45,6 +45,8 @@ pub struct AppConfig {
     pub chain_id: u64,
     pub db_url: Option<String>,
     pub invite_code: Option<String>,
+    #[serde(default = "default_min_synced_rpcs")]
+    pub min_synced_rpcs: usize,
     pub redis_url: Option<String>,
     #[serde(default = "default_public_rate_limit_per_minute")]
     pub public_rate_limit_per_minute: u64,
@@ -54,6 +56,10 @@ pub struct AppConfig {
     pub redirect_public_url: String,
     /// the stats page url for a logged in user. it must contain "{user_id}"
     pub redirect_user_url: String,
+}
+
+fn default_min_synced_rpcs() -> usize {
+    1
 }
 
 fn default_public_rate_limit_per_minute() -> u64 {

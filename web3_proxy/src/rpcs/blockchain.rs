@@ -366,16 +366,14 @@ impl Web3Connections {
         drop(blockchain_guard);
 
         let soft_limit_met = consensus_soft_limit >= min_sum_soft_limit;
-        let num_synced_rpcs = consensus_rpcs.len();
-        // TODO: put this in config
-        let min_synced_rpcs = 2;
 
         let new_synced_connections = if soft_limit_met {
             // we have a consensus large enough to serve traffic
             let head_block_hash = highest_work_block.hash.unwrap();
             let head_block_num = highest_work_block.number.unwrap();
+            let num_synced_rpcs = consensus_rpcs.len();
 
-            if num_synced_rpcs < min_synced_rpcs {
+            if num_synced_rpcs < self.min_synced_rpcs {
                 trace!(hash=%head_block_hash, num=?head_block_num, "not enough rpcs are synced to advance");
 
                 return Ok(());

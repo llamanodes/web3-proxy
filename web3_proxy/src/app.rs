@@ -255,6 +255,7 @@ impl Web3ProxyApp {
             redis_pool.clone(),
             block_map.clone(),
             Some(head_block_sender),
+            top_config.app.min_synced_rpcs,
             Some(pending_tx_sender.clone()),
             pending_transactions.clone(),
         )
@@ -276,6 +277,8 @@ impl Web3ProxyApp {
                 block_map,
                 // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
                 None,
+                // minimum doesn't really matter on private rpcs
+                1,
                 // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits
                 None,
                 pending_transactions.clone(),
