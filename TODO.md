@@ -117,7 +117,6 @@
   - [x] quick fix, send to balanced_rpcs for now. we will just live with errors on new transactions. 
   - this was intentional so that recently confirmed transactions go to a server that is more likely to have the tx.
   - but under heavy load, we hit their rate limits. need a "retry_until_success" function that goes to balanced_rpcs. or maybe store in redis the txids that we broadcast privately and use that to route.
-  - [ ] figure out rate limits for private rpcs. eden v1 gives 500 error instead of a code for rate limits
   - [ ] write a function for receipts that tries balanced_rpcs and only on error of all balanced tries privates
 - [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
 - [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
@@ -292,3 +291,4 @@ in another repo: event subscriber
 - [ ] this query always times out, but erigon can serve it quickly: `curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["latest"],"id":1}' 127.0.0.1:8544' 127.0.0.1:8544`
   {"jsonrpc":"2.0","id":null,"error":{"code":-32099,"message":"deadline has elapsed"}}
 
+  - [ ] figure out rate limits for private rpcs. eden v1 gives 500 error instead of a code for rate limits
