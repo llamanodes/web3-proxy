@@ -45,8 +45,10 @@ pub struct AppConfig {
     pub chain_id: u64,
     pub db_url: Option<String>,
     pub invite_code: Option<String>,
+    #[serde(default = "default_min_sum_soft_limit")]
+    pub min_sum_soft_limit: u32,
     #[serde(default = "default_min_synced_rpcs")]
-    pub min_synced_rpcs: usize,
+    pub min_synced_rpcs: u32,
     pub redis_url: Option<String>,
     #[serde(default = "default_public_rate_limit_per_minute")]
     pub public_rate_limit_per_minute: u64,
@@ -58,10 +60,15 @@ pub struct AppConfig {
     pub redirect_user_url: String,
 }
 
-fn default_min_synced_rpcs() -> usize {
+fn default_min_sum_soft_limit() -> u32 {
     1
 }
 
+fn default_min_synced_rpcs() -> u32 {
+    1
+}
+
+/// 0 blocks public requests by default.
 fn default_public_rate_limit_per_minute() -> u64 {
     0
 }

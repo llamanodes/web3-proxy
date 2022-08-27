@@ -217,6 +217,7 @@ mod tests {
                 db_url: None,
                 invite_code: None,
                 redis_url: None,
+                min_sum_soft_limit: 1,
                 min_synced_rpcs: 1,
                 public_rate_limit_per_minute: 0,
                 response_cache_max_bytes: 10_usize.pow(7),

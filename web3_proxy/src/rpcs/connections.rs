@@ -45,7 +45,8 @@ pub struct Web3Connections {
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// TODO: what should we use for edges?
     pub(super) blockchain_graphmap: RwLock<DiGraphMap<H256, u32>>,
-    pub(super) min_synced_rpcs: usize,
+    pub(super) min_synced_rpcs: u32,
+    pub(super) min_sum_soft_limit: u32,
 }
 
 impl Web3Connections {
@@ -58,7 +59,8 @@ impl Web3Connections {
         redis_client_pool: Option<redis_rate_limit::RedisPool>,
         block_map: BlockMap,
         head_block_sender: Option<watch::Sender<Arc<Block<TxHash>>>>,
-        min_synced_rpcs: usize,
+        min_sum_soft_limit: u32,
+        min_synced_rpcs: u32,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         pending_transactions: Arc<DashMap<TxHash, TxStatus>>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
@@ -171,6 +173,7 @@ impl Web3Connections {
             pending_transactions,
             block_map: Default::default(),
             blockchain_graphmap: Default::default(),
+            min_sum_soft_limit,
             min_synced_rpcs,
         });
 

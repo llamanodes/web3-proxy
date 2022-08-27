@@ -7,7 +7,7 @@ use crate::{
 };
 use dashmap::mapref::one::Ref;
 use derive_more::From;
-use ethers::prelude::{Block, TxHash, H256, U256, U64};
+use ethers::prelude::{Block, TxHash, H256, U64};
 use hashbrown::{HashMap, HashSet};
 use petgraph::algo::all_simple_paths;
 use serde_json::json;
@@ -15,44 +15,11 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, info, trace, warn};
 
+/// A block's hash and number.
 #[derive(Default, From)]
 pub struct BlockId {
     pub(super) hash: H256,
     pub(super) num: U64,
-}
-
-/// TODO: do we need this? probably big refactor still to do
-pub(super) struct BlockMetadata<'a> {
-    pub(super) block: &'a Arc<Block<TxHash>>,
-    pub(super) rpc_names: Vec<&'a str>,
-    pub(super) sum_soft_limit: u32,
-}
-
-impl<'a> BlockMetadata<'a> {
-    // TODO: there are sortable traits, but this seems simpler
-    /// sort the blocks in descending height
-    pub fn sortable_values(&self) -> (&U64, &u32, &U256, &H256) {
-        // trace!(?self.block, ?self.conns);
-
-        // first we care about the block number
-        let block_num = self.block.number.as_ref().unwrap();
-
-        // if block_num ties, the block with the highest total difficulty *should* be the winner
-        // TODO: sometimes i see a block with no total difficulty. websocket subscription doesn't get everything
-        // let total_difficulty = self.block.total_difficulty.as_ref().expect("wat");
-
-        // all the nodes should already be doing this fork priority logic themselves
-        // so, it should be safe to just look at whatever our node majority thinks and go with that
-        let sum_soft_limit = &self.sum_soft_limit;
-
-        let difficulty = &self.block.difficulty;
-
-        // if we are still tied (unlikely). this will definitely break the tie
-        // TODO: what does geth do?
-        let block_hash = self.block.hash.as_ref().unwrap();
-
-        (block_num, sum_soft_limit, difficulty, block_hash)
-    }
 }
 
 impl Web3Connections {
@@ -231,26 +198,26 @@ impl Web3Connections {
     async fn process_block_from_rpc(
         &self,
         connection_heads: &mut HashMap<String, H256>,
-        new_block: Arc<Block<TxHash>>,
+        rpc_head_block: Arc<Block<TxHash>>,
         rpc: Arc<Web3Connection>,
         head_block_sender: &watch::Sender<Arc<Block<TxHash>>>,
         pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         // add the block to connection_heads
-        match (new_block.hash, new_block.number) {
-            (Some(hash), Some(num)) => {
-                if num == U64::zero() {
+        match (rpc_head_block.hash, rpc_head_block.number) {
+            (Some(rpc_head_hash), Some(rpc_head_num)) => {
+                if rpc_head_num == U64::zero() {
                     debug!(%rpc, "still syncing");
 
                     connection_heads.remove(&rpc.name);
                 } else {
-                    connection_heads.insert(rpc.name.clone(), hash);
+                    connection_heads.insert(rpc.name.to_owned(), rpc_head_hash);
 
-                    self.save_block(&new_block)?;
+                    self.save_block(&rpc_head_block)?;
                 }
             }
             _ => {
-                warn!(%rpc, ?new_block, "Block without number or hash!");
+                warn!(%rpc, ?rpc_head_block, "Block without number or hash!");
 
                 connection_heads.remove(&rpc.name);
 
@@ -282,11 +249,6 @@ impl Web3Connections {
         // clone to release the read lock
         let highest_work_block = highest_work_block.map(|x| x.clone());
 
-        // TODO: default min_soft_limit? without, we start serving traffic at the start too quickly
-        // let min_sum_soft_limit = total_soft_limit / 2;
-        // TODO: this should be configurable
-        let min_sum_soft_limit = 1;
-
         let mut highest_work_block = match highest_work_block {
             None => todo!("no servers are in sync"),
             Some(highest_work_block) => highest_work_block,
@@ -297,7 +259,7 @@ impl Web3Connections {
         // track rpcs so we can build a new SyncedConnections
         let mut consensus_rpcs: Vec<&Arc<Web3Connection>> = vec![];
         // a running total of the soft limits covered by the rpcs
-        let mut consensus_soft_limit = 0;
+        let mut consensus_sum_soft_limit: u32 = 0;
 
         // check the highest work block and its parents for a set of rpcs that can serve our request load
         // TODO: loop for how many parent blocks? we don't want to serve blocks that are too far behind
@@ -316,7 +278,7 @@ impl Web3Connections {
                     if let Some(rpc) = self.conns.get(rpc_name) {
                         consensus_names.insert(rpc_name);
                         consensus_rpcs.push(rpc);
-                        consensus_soft_limit += rpc.soft_limit;
+                        consensus_sum_soft_limit += rpc.soft_limit;
                     }
                     continue;
                 }
@@ -338,18 +300,20 @@ impl Web3Connections {
                 if is_connected {
                     if let Some(rpc) = self.conns.get(rpc_name) {
                         consensus_rpcs.push(rpc);
-                        consensus_soft_limit += rpc.soft_limit;
+                        consensus_sum_soft_limit += rpc.soft_limit;
                     }
                 }
             }
 
-            if consensus_soft_limit >= min_sum_soft_limit {
+            // TODO: min_sum_soft_limit as a percentage of total_soft_limit?
+            // let min_sum_soft_limit = total_soft_limit / self.min_sum_soft_limit;
+            if consensus_sum_soft_limit >= self.min_sum_soft_limit {
                 // success! this block has enough nodes on it
                 break;
             }
             // else, we need to try the parent block
 
-            trace!(%consensus_soft_limit, ?highest_work_hash, "avoiding thundering herd");
+            trace!(%consensus_sum_soft_limit, ?highest_work_hash, "avoiding thundering herd");
 
             // // TODO: this automatically queries for parents, but need to rearrange lifetimes to make an await work here
             // highest_work_block = self
@@ -362,9 +326,9 @@ impl Web3Connections {
                 None => {
                     warn!(
                         "ran out of parents to check. soft limit only {}/{}: {}%",
-                        consensus_soft_limit,
-                        min_sum_soft_limit,
-                        consensus_soft_limit * 100 / min_sum_soft_limit
+                        consensus_sum_soft_limit,
+                        self.min_sum_soft_limit,
+                        consensus_sum_soft_limit * 100 / self.min_sum_soft_limit
                     );
                     break;
                 }
@@ -376,8 +340,8 @@ impl Web3Connections {
         // unlock self.blockchain_graphmap
         drop(blockchain_guard);
 
-        let soft_limit_met = consensus_soft_limit >= min_sum_soft_limit;
-        let num_synced_rpcs = consensus_rpcs.len();
+        let soft_limit_met = consensus_sum_soft_limit >= self.min_sum_soft_limit;
+        let num_synced_rpcs = consensus_rpcs.len() as u32;
 
         let new_synced_connections = if soft_limit_met {
             // we have a consensus large enough to serve traffic
@@ -411,27 +375,31 @@ impl Web3Connections {
             SyncedConnections::default()
         };
 
-        let new_head_hash = new_synced_connections.head_block_hash;
-        let new_head_num = new_synced_connections.head_block_num;
+        let consensus_block_hash = new_synced_connections.head_block_hash;
+        let consensus_block_num = new_synced_connections.head_block_num;
         let new_synced_connections = Arc::new(new_synced_connections);
         let num_connection_heads = connection_heads.len();
+        let total_rpcs = self.conns.len();
 
         let old_synced_connections = self.synced_connections.swap(new_synced_connections);
 
         let old_head_hash = old_synced_connections.head_block_hash;
-        let total_rpcs = self.conns.len();
 
-        if new_head_hash == old_head_hash {
-            trace!(hash=%new_head_hash, num=%new_head_num, limit=%consensus_soft_limit, "cur consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs);
+        if Some(consensus_block_hash) != rpc_head_block.hash {
+            info!("non consensus block")
+        }
+
+        if consensus_block_hash == old_head_hash {
+            debug!(hash=%consensus_block_hash, num=%consensus_block_num, limit=%consensus_sum_soft_limit, "cur consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs);
         } else if soft_limit_met {
             // TODO: if new's parent is not old, warn?
 
-            debug!(hash=%new_head_hash, num=%new_head_num, limit=%consensus_soft_limit, "new consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs);
+            debug!(hash=%consensus_block_hash, num=%consensus_block_num, limit=%consensus_sum_soft_limit, "new consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs);
 
             // the head hash changed. forward to any subscribers
             head_block_sender.send(highest_work_block)?;
         } else {
-            warn!(?soft_limit_met, %new_head_hash, %old_head_hash, "no consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs)
+            warn!(?soft_limit_met, %consensus_block_hash, %old_head_hash, "no consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs)
         }
 
         Ok(())
