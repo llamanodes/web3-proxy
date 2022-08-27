@@ -26,8 +26,8 @@ use redis_rate_limit::redis::AsyncCommands;
 use sea_orm::ActiveModelTrait;
 use serde::Deserialize;
 use siwe::Message;
+use std::ops::Add;
 use std::sync::Arc;
-use std::{net::IpAddr, ops::Add};
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
 
@@ -40,7 +40,7 @@ pub async fn get_login(
     // TODO: allow ENS names here?
     Path(mut params): Path<HashMap<String, String>>,
 ) -> FrontendResult {
-    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?;
+    let _ip = rate_limit_by_ip(&app, ip).await?;
 
     // at first i thought about checking that user_address is in our db
     // but theres no need to separate the registration and login flows
@@ -130,7 +130,7 @@ pub async fn post_login(
     Json(payload): Json<PostLogin>,
     Query(query): Query<PostLoginQuery>,
 ) -> FrontendResult {
-    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?;
+    let _ip = rate_limit_by_ip(&app, ip).await?;
 
     let mut new_user = true; // TODO: check the database
 
@@ -222,7 +222,7 @@ pub async fn post_user(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Json(payload): Json<PostUser>,
 ) -> FrontendResult {
-    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?;
+    let _ip = rate_limit_by_ip(&app, ip).await?;
 
     ProtectedAction::PostUser
         .verify(app.as_ref(), auth_token, &payload.primary_address)

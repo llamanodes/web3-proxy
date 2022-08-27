@@ -5,7 +5,6 @@ use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::Path;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_client_ip::ClientIp;
-use std::net::IpAddr;
 use std::sync::Arc;
 use tracing::{error_span, Instrument};
 use uuid::Uuid;
@@ -15,7 +14,7 @@ pub async fn public_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
 ) -> FrontendResult {
-    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?;
+    let _ip = rate_limit_by_ip(&app, ip).await?;
 
     let protocol = Protocol::HTTP;
     let user_id = 0;

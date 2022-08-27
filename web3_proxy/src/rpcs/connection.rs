@@ -154,51 +154,61 @@ impl Web3Connection {
             // TODO: i think instead of atomics, we could maybe use a watch channel
             sleep(Duration::from_millis(250)).await;
 
-            for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
-                let mut head_block_num = new_connection.head_block.read().num;
+            new_connection.check_block_data_limit().await?;
+        }
 
-                // TODO: wait until head block is set outside the loop? if we disconnect while starting we could actually get 0 though
-                while head_block_num == U64::zero() {
-                    warn!(?new_connection, "no head block");
+        Ok((new_connection, handle))
+    }
 
-                    // TODO: subscribe to a channel instead of polling? subscribe to http_interval_sender?
-                    sleep(Duration::from_secs(1)).await;
+    #[instrument]
+    async fn check_block_data_limit(self: &Arc<Self>) -> anyhow::Result<Option<u64>> {
+        let mut limit = None;
 
-                    head_block_num = new_connection.head_block.read().num;
-                }
+        for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
+            let mut head_block_num = self.head_block.read().num;
 
-                // TODO: subtract 1 from block_data_limit for safety?
-                let maybe_archive_block = head_block_num
-                    .saturating_sub((block_data_limit).into())
-                    .max(U64::one());
+            // TODO: wait until head block is set outside the loop? if we disconnect while starting we could actually get 0 though
+            while head_block_num == U64::zero() {
+                warn!("no head block");
 
-                let archive_result: Result<Bytes, _> = new_connection
-                    .wait_for_request_handle()
-                    .await?
-                    .request(
-                        "eth_getCode",
-                        (
-                            "0xdead00000000000000000000000000000000beef",
-                            maybe_archive_block,
-                        ),
-                    )
-                    .await;
+                // TODO: subscribe to a channel instead of polling? subscribe to http_interval_sender?
+                sleep(Duration::from_secs(1)).await;
 
-                trace!(?archive_result, "{}", new_connection);
+                head_block_num = self.head_block.read().num;
+            }
 
-                if archive_result.is_ok() {
-                    new_connection
-                        .block_data_limit
-                        .store(block_data_limit, atomic::Ordering::Release);
+            // TODO: subtract 1 from block_data_limit for safety?
+            let maybe_archive_block = head_block_num
+                .saturating_sub((block_data_limit).into())
+                .max(U64::one());
 
-                    break;
-                }
+            let archive_result: Result<Bytes, _> = self
+                .wait_for_request_handle()
+                .await?
+                .request(
+                    "eth_getCode",
+                    (
+                        "0xdead00000000000000000000000000000000beef",
+                        maybe_archive_block,
+                    ),
+                )
+                .await;
+
+            trace!(?archive_result, %self);
+
+            if archive_result.is_ok() {
+                limit = Some(block_data_limit);
+
+                break;
             }
         }
 
-        info!(?new_connection, "success");
+        if let Some(limit) = limit {
+            self.block_data_limit
+                .store(limit, atomic::Ordering::Release);
+        }
 
-        Ok((new_connection, handle))
+        Ok(limit)
     }
 
     /// TODO: this might be too simple. different nodes can prune differently

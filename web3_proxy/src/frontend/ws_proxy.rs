@@ -16,7 +16,7 @@ use futures::{
 use handlebars::Handlebars;
 use hashbrown::HashMap;
 use serde_json::{json, value::RawValue};
-use std::{net::IpAddr, sync::Arc};
+use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 use tracing::{error, error_span, info, trace, Instrument};
 use uuid::Uuid;
@@ -33,7 +33,7 @@ pub async fn public_websocket_handler(
     ClientIp(ip): ClientIp,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    let _ip: IpAddr = rate_limit_by_ip(&app, ip).await?;
+    let _ip = rate_limit_by_ip(&app, ip).await?;
 
     let user_id = 0;
     let protocol = Protocol::Websocket;

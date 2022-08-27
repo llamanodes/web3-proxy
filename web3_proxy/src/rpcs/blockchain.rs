@@ -56,8 +56,8 @@ impl<'a> BlockMetadata<'a> {
 }
 
 impl Web3Connections {
-    /// adds a block to our map of the blockchain
-    pub fn add_block_to_chain(&self, block: &Arc<Block<TxHash>>) -> anyhow::Result<()> {
+    /// add a block to our map and it's hash to our graphmap of the blockchain
+    pub fn save_block(&self, block: &Arc<Block<TxHash>>) -> anyhow::Result<()> {
         let hash = block.hash.ok_or_else(|| anyhow::anyhow!("no block hash"))?;
 
         if self.block_map.contains_key(&hash) {
@@ -95,10 +95,12 @@ impl Web3Connections {
         Ok(())
     }
 
+    /// Get a block from caches with fallback.
+    /// Will query a specific node or the best available.
     pub async fn block(
         &self,
         hash: &H256,
-        rpc: Option<&Web3Connection>,
+        rpc: Option<&Arc<Web3Connection>>,
     ) -> anyhow::Result<Arc<Block<TxHash>>> {
         // first, try to get the hash from our cache
         if let Some(block) = self.block_map.get(hash) {
@@ -110,24 +112,33 @@ impl Web3Connections {
         // TODO: helper for method+params => JsonRpcRequest
         // TODO: get block with the transactions?
         // TODO: does this id matter?
-        let request = json!({ "id": "1", "method": "eth_getBlockByHash", "params": (hash, false) });
-        let request: JsonRpcRequest = serde_json::from_value(request)?;
+
+        let request_params = (hash, false);
 
         // TODO: if error, retry?
-        let response = match rpc {
+        let block: Block<TxHash> = match rpc {
             Some(rpc) => {
-                todo!("send request to this rpc")
+                rpc.wait_for_request_handle()
+                    .await?
+                    .request("eth_getBlockByHash", request_params)
+                    .await?
             }
-            None => self.try_send_best_upstream_server(request, None).await?,
+            None => {
+                let request =
+                    json!({ "id": "1", "method": "eth_getBlockByHash", "params": request_params });
+                let request: JsonRpcRequest = serde_json::from_value(request)?;
+
+                let response = self.try_send_best_upstream_server(request, None).await?;
+
+                let block = response.result.unwrap();
+
+                serde_json::from_str(block.get())?
+            }
         };
-
-        let block = response.result.unwrap();
-
-        let block: Block<TxHash> = serde_json::from_str(block.get())?;
 
         let block = Arc::new(block);
 
-        self.add_block_to_chain(&block)?;
+        self.save_block(&block)?;
 
         Ok(block)
     }
@@ -235,7 +246,7 @@ impl Web3Connections {
                 } else {
                     connection_heads.insert(rpc.name.clone(), hash);
 
-                    self.add_block_to_chain(&new_block)?;
+                    self.save_block(&new_block)?;
                 }
             }
             _ => {
@@ -366,12 +377,12 @@ impl Web3Connections {
         drop(blockchain_guard);
 
         let soft_limit_met = consensus_soft_limit >= min_sum_soft_limit;
+        let num_synced_rpcs = consensus_rpcs.len();
 
         let new_synced_connections = if soft_limit_met {
             // we have a consensus large enough to serve traffic
             let head_block_hash = highest_work_block.hash.unwrap();
             let head_block_num = highest_work_block.number.unwrap();
-            let num_synced_rpcs = consensus_rpcs.len();
 
             if num_synced_rpcs < self.min_synced_rpcs {
                 trace!(hash=%head_block_hash, num=?head_block_num, "not enough rpcs are synced to advance");
@@ -381,9 +392,6 @@ impl Web3Connections {
                 // TODO: wait until at least most of the rpcs have given their initial block?
                 // otherwise, if there is a syncing node that is fast, our first head block might not be good
                 // TODO: have a configurable "minimum rpcs" number that we can set
-
-                // TODO: this logs too much. only log when the hash is first updated?
-                debug!(hash=%head_block_hash, num=%head_block_num, rpcs=%num_synced_rpcs, limit=%consensus_soft_limit, "consensus head");
 
                 // TODO: sort by weight and soft limit? do we need an IndexSet, or is a Vec fine?
                 let conns = consensus_rpcs.into_iter().cloned().collect();
@@ -403,12 +411,27 @@ impl Web3Connections {
             SyncedConnections::default()
         };
 
-        let old_synced_connections = Arc::new(new_synced_connections);
+        let new_head_hash = new_synced_connections.head_block_hash;
+        let new_head_num = new_synced_connections.head_block_num;
+        let new_synced_connections = Arc::new(new_synced_connections);
+        let num_connection_heads = connection_heads.len();
 
-        if soft_limit_met && Some(old_synced_connections.head_block_hash) != highest_work_block.hash
-        {
+        let old_synced_connections = self.synced_connections.swap(new_synced_connections);
+
+        let old_head_hash = old_synced_connections.head_block_hash;
+        let total_rpcs = self.conns.len();
+
+        if new_head_hash == old_head_hash {
+            trace!(hash=%new_head_hash, num=%new_head_num, limit=%consensus_soft_limit, "cur consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs);
+        } else if soft_limit_met {
+            // TODO: if new's parent is not old, warn?
+
+            debug!(hash=%new_head_hash, num=%new_head_num, limit=%consensus_soft_limit, "new consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs);
+
             // the head hash changed. forward to any subscribers
             head_block_sender.send(highest_work_block)?;
+        } else {
+            warn!(?soft_limit_met, %new_head_hash, %old_head_hash, "no consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs)
         }
 
         Ok(())
