@@ -1,3 +1,8 @@
 [build]
-# potentially faster. https://nnethercote.github.io/perf-book/build-configuration.html
-rustflags = ["-C", "target-cpu=native", "--cfg", "tokio_unstable"]
+rustflags = [
+    # potentially faster. https://nnethercote.github.io/perf-book/build-configuration.html
+    "-C", "target-cpu=native",
+    # tokio unstable is needed for tokio-console
+    "--cfg", "tokio_unstable"
+]
+rustdocflags = ["--cfg", "tokio_unstable"]

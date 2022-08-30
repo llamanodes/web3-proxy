@@ -1,9 +1,7 @@
 ///! Rate-limited communication with a web3 provider.
-use super::blockchain::BlockId;
-use super::connections::BlockHashesMap;
+use super::blockchain::{ArcBlock, BlockHashesMap, BlockId};
 use super::provider::Web3Provider;
-use super::request::OpenRequestHandle;
-use super::request::OpenRequestResult;
+use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
 use anyhow::Context;
@@ -69,13 +67,12 @@ impl Web3Connection {
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_conection)| {
             // TODO: allow configurable period and max_burst
-            let period = 1;
             RedisRateLimit::new(
                 redis_conection,
                 "web3_proxy",
                 &format!("{}:{}", chain_id, url_str),
                 hard_rate_limit,
-                period,
+                60.0,
             )
         });
 
@@ -273,33 +270,67 @@ impl Web3Connection {
     #[instrument(skip_all)]
     async fn send_head_block_result(
         self: &Arc<Self>,
-        new_head_block: Result<Arc<Block<TxHash>>, ProviderError>,
+        new_head_block: Result<ArcBlock, ProviderError>,
         block_sender: &flume::Sender<BlockAndRpc>,
         block_map: BlockHashesMap,
     ) -> anyhow::Result<()> {
         match new_head_block {
-            Ok(new_head_block) => {
+            Ok(mut new_head_block) => {
                 // TODO: is unwrap_or_default ok? we might have an empty block
                 let new_hash = new_head_block.hash.unwrap_or_default();
 
+                let mut td_is_needed = new_head_block.total_difficulty.is_none();
+
                 // if we already have this block saved, we don't need to store this copy
-                let new_head_block = match block_map.entry(new_hash) {
-                    Entry::Occupied(x) => x.get().clone(),
+                // be careful with the entry api! awaits during this are a very bad idea.
+                new_head_block = match block_map.entry(new_hash) {
                     Entry::Vacant(x) => {
-                        // TODO: remove this once https://github.com/ledgerwatch/erigon/issues/5190 is closed
-                        // TODO: include transactions?
-                        let new_head_block = if new_head_block.total_difficulty.is_none() {
-                            self.wait_for_request_handle()
-                                .await?
-                                .request("eth_getBlockByHash", (new_hash, false))
-                                .await?
+                        // only save the block if it has a total difficulty!
+                        if !td_is_needed {
+                            x.insert(new_head_block).clone()
                         } else {
                             new_head_block
-                        };
+                        }
+                    }
+                    Entry::Occupied(x) => {
+                        let existing_block = x.get().clone();
 
-                        x.insert(new_head_block).clone()
+                        // we only save blocks with a total difficulty
+                        debug_assert!(existing_block.total_difficulty.is_some());
+                        td_is_needed = false;
+
+                        existing_block
                     }
                 };
+
+                if td_is_needed {
+                    // self got the head block first. unfortunately its missing a necessary field
+                    // keep this even after https://github.com/ledgerwatch/erigon/issues/5190 is closed.
+                    // there are other clients and we might have to use a third party without the td fix.
+                    trace!(rpc=?self, ?new_hash, "total_difficulty missing");
+                    // todo: this can wait forever
+                    let complete_head_block: Block<TxHash> = self
+                        .wait_for_request_handle()
+                        .await?
+                        .request("eth_getBlockByHash", (new_hash, false))
+                        .await?;
+
+                    new_head_block = match block_map.entry(new_hash) {
+                        Entry::Vacant(x) => {
+                            // still vacant! self is still the leader
+                            // now we definitely have total difficulty, so save
+                            x.insert(Arc::new(complete_head_block)).clone()
+                        }
+                        Entry::Occupied(x) => {
+                            let existing_block = x.get().clone();
+
+                            // we only save blocks with a total difficulty
+                            debug_assert!(existing_block.total_difficulty.is_some());
+
+                            existing_block
+                        }
+                    };
+                }
 
                 let new_num = new_head_block.number.unwrap_or_default();
 
@@ -483,6 +514,7 @@ impl Web3Connection {
                     }
                 }
                 Web3Provider::Ws(provider) => {
+                    // todo: move subscribe_blocks onto the request handle?
                     let active_request_handle = self.wait_for_request_handle().await;
                     let mut stream = provider.subscribe_blocks().await?;
                     drop(active_request_handle);
@@ -490,7 +522,7 @@ impl Web3Connection {
                     // query the block once since the subscription doesn't send the current block
                     // there is a very small race condition here where the stream could send us a new block right now
                     // all it does is print "new block" for the same block as current block
-                    let block: Result<Arc<Block<TxHash>>, _> = self
+                    let block: Result<ArcBlock, _> = self
                         .wait_for_request_handle()
                         .await?
                         .request("eth_getBlockByNumber", ("latest", false))
@@ -580,42 +612,48 @@ impl Web3Connection {
         Ok(())
     }
 
-    /// be careful with this; it will wait forever!
+    /// be careful with this; it might wait forever!
     // TODO: maximum wait time?
-    #[instrument(skip_all)]
+    #[instrument]
     pub async fn wait_for_request_handle(self: &Arc<Self>) -> anyhow::Result<OpenRequestHandle> {
         // TODO: maximum wait time? i think timeouts in other parts of the code are probably best
 
         loop {
-            match self.try_request_handle().await {
+            let x = self.try_request_handle().await;
+
+            trace!(?x, "try_request_handle");
+
+            match x {
                 Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
+                    trace!(?retry_at);
                     sleep_until(retry_at).await;
                 }
-                Ok(OpenRequestResult::None) => {
+                Ok(OpenRequestResult::RetryNever) => {
                     // TODO: when can this happen? log? emit a stat?
                     // TODO: subscribe to the head block on this
                     // TODO: sleep how long? maybe just error?
-                    sleep(Duration::from_secs(1)).await;
+                    return Err(anyhow::anyhow!("unable to retry"));
                 }
                 Err(err) => return Err(err),
             }
         }
     }
 
+    #[instrument]
     pub async fn try_request_handle(self: &Arc<Self>) -> anyhow::Result<OpenRequestResult> {
         // check that we are connected
         if !self.has_provider().await {
             // TODO: emit a stat?
-            return Ok(OpenRequestResult::None);
+            return Ok(OpenRequestResult::RetryNever);
         }
 
         // check rate limits
         if let Some(ratelimiter) = self.hard_limit.as_ref() {
             match ratelimiter.throttle().await {
                 Ok(ThrottleResult::Allowed) => {
-                    // rate limit succeeded
+                    trace!("rate limit succeeded")
                 }
                 Ok(ThrottleResult::RetryAt(retry_at)) => {
                     // rate limit failed

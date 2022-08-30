@@ -1,9 +1,9 @@
 mod errors;
 mod http;
-mod http_proxy;
 mod rate_limit;
+mod rpc_proxy_http;
+mod rpc_proxy_ws;
 mod users;
-mod ws_proxy;
 
 use crate::app::Web3ProxyApp;
 use ::http::Request;
@@ -45,10 +45,10 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
     // build our axum Router
     let app = Router::new()
         // routes should be order most to least common
-        .route("/", post(http_proxy::public_proxy_web3_rpc))
-        .route("/", get(ws_proxy::public_websocket_handler))
-        .route("/u/:user_key", post(http_proxy::user_proxy_web3_rpc))
-        .route("/u/:user_key", get(ws_proxy::user_websocket_handler))
+        .route("/", post(rpc_proxy_http::public_proxy_web3_rpc))
+        .route("/", get(rpc_proxy_ws::public_websocket_handler))
+        .route("/u/:user_key", post(rpc_proxy_http::user_proxy_web3_rpc))
+        .route("/u/:user_key", get(rpc_proxy_ws::user_websocket_handler))
         .route("/health", get(http::health))
         // TODO: we probably want to remove /status in favor of the separate prometheus thread
         .route("/status", get(http::status))

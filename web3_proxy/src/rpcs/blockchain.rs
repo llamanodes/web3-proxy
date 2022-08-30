@@ -5,7 +5,10 @@ use super::transactions::TxStatus;
 use crate::{
     config::BlockAndRpc, jsonrpc::JsonRpcRequest, rpcs::synced_connections::SyncedConnections,
 };
-use dashmap::mapref::{entry::Entry, one::Ref};
+use dashmap::{
+    mapref::{entry::Entry, one::Ref},
+    DashMap,
+};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use hashbrown::{HashMap, HashSet};
@@ -14,6 +17,10 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, info, trace, warn};
+
+pub type ArcBlock = Arc<Block<TxHash>>;
+
+pub type BlockHashesMap = Arc<DashMap<H256, ArcBlock>>;
 
 /// A block's hash and number.
 #[derive(Default, From)]
@@ -24,51 +31,59 @@ pub struct BlockId {
 
 impl Web3Connections {
     /// add a block to our map and it's hash to our graphmap of the blockchain
-    pub fn save_block(&self, block: &Arc<Block<TxHash>>) -> anyhow::Result<()> {
-        let block_hash = block.hash.ok_or_else(|| anyhow::anyhow!("no block hash"))?;
+    pub fn save_block(&self, block: &ArcBlock) -> anyhow::Result<()> {
+        let block_hash = block
+            .hash
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no block hash"))?;
         let block_num = block
             .number
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no block num"))?;
+        let _block_td = block
+            .total_difficulty
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no block total difficulty"))?;
 
-        if self.block_hashes.contains_key(&block_hash) {
+        if self.block_hashes.contains_key(block_hash) {
             // this block is already included. no need to continue
             return Ok(());
         }
 
         let mut blockchain = self.blockchain_graphmap.write();
 
-        if blockchain.contains_node(block_hash) {
+        if blockchain.contains_node(*block_hash) {
             // this hash is already included. we must have hit that race condition
             // return now since this work was already done.
             return Ok(());
         }
 
         // TODO: theres a small race between contains_key and insert
-        if let Some(_overwritten) = self.block_hashes.insert(block_hash, block.clone()) {
+        if let Some(_overwritten) = self.block_hashes.insert(*block_hash, block.clone()) {
             // there was a race and another thread wrote this block
             // i don't think this will happen. the blockchain.conains_node above should be enough
             // no need to continue because that other thread would have written (or soon will) write the
             return Ok(());
         }
 
-        match self.block_numbers.entry(block_num) {
+        match self.block_numbers.entry(*block_num) {
             Entry::Occupied(mut x) => {
-                x.get_mut().push(block_hash);
+                x.get_mut().push(*block_hash);
             }
             Entry::Vacant(x) => {
-                x.insert(vec![block_hash]);
+                x.insert(vec![*block_hash]);
             }
         }
 
         // TODO: prettier log? or probably move the log somewhere else
         trace!(%block_hash, "new block");
 
-        blockchain.add_node(block_hash);
+        blockchain.add_node(*block_hash);
 
         // what should edge weight be? and should the nodes be the blocks instead?
         // TODO: maybe the weight should be the block?
         // we store parent_hash -> hash because the block already stores the parent_hash
-        blockchain.add_edge(block.parent_hash, block_hash, 0);
+        blockchain.add_edge(block.parent_hash, *block_hash, 0);
 
         // TODO: prune block_numbers and block_map to only keep a configurable (256 on ETH?) number of blocks?
 
@@ -77,11 +92,12 @@ impl Web3Connections {
 
     /// Get a block from caches with fallback.
     /// Will query a specific node or the best available.
+    /// WARNING! This may wait forever. be sure this runs with your own timeout
     pub async fn block(
         &self,
         hash: &H256,
         rpc: Option<&Arc<Web3Connection>>,
-    ) -> anyhow::Result<Arc<Block<TxHash>>> {
+    ) -> anyhow::Result<ArcBlock> {
         // first, try to get the hash from our cache
         if let Some(block) = self.block_hashes.get(hash) {
             return Ok(block.clone());
@@ -118,6 +134,7 @@ impl Web3Connections {
 
         let block = Arc::new(block);
 
+        // the block was fetched using eth_getBlockByHash, so it should have all fields
         self.save_block(&block)?;
 
         Ok(block)
@@ -133,9 +150,9 @@ impl Web3Connections {
     }
 
     /// Get the heaviest chain's block from cache or backend rpc
-    pub async fn cannonical_block(&self, num: &U64) -> anyhow::Result<Arc<Block<TxHash>>> {
+    pub async fn cannonical_block(&self, num: &U64) -> anyhow::Result<ArcBlock> {
         // we only have blocks by hash now
-        // maybe save them during save_block in a blocks_by_number DashMap<U64, Vec<Arc<Block<TxHash>>>>
+        // maybe save them during save_block in a blocks_by_number DashMap<U64, Vec<ArcBlock>>
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
 
         // first, try to get the hash from our cache
@@ -189,6 +206,7 @@ impl Web3Connections {
 
         let block = Arc::new(block);
 
+        // the block was fetched using eth_getBlockByNumber, so it should have all fields
         self.save_block(&block)?;
 
         Ok(block)
@@ -198,7 +216,7 @@ impl Web3Connections {
         &self,
         block_receiver: flume::Receiver<BlockAndRpc>,
         // TODO: head_block_sender should be a broadcast_sender like pending_tx_sender
-        head_block_sender: watch::Sender<Arc<Block<TxHash>>>,
+        head_block_sender: watch::Sender<ArcBlock>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         // TODO: indexmap or hashmap? what hasher? with_capacity?
@@ -228,9 +246,9 @@ impl Web3Connections {
     async fn process_block_from_rpc(
         &self,
         connection_heads: &mut HashMap<String, H256>,
-        rpc_head_block: Arc<Block<TxHash>>,
+        rpc_head_block: ArcBlock,
         rpc: Arc<Web3Connection>,
-        head_block_sender: &watch::Sender<Arc<Block<TxHash>>>,
+        head_block_sender: &watch::Sender<ArcBlock>,
         pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         // add the block to connection_heads
@@ -257,7 +275,7 @@ impl Web3Connections {
 
         // iterate the rpc_map to find the highest_work_block
         let mut checked_heads = HashSet::new();
-        let mut highest_work_block: Option<Ref<H256, Arc<Block<TxHash>>>> = None;
+        let mut highest_work_block: Option<Ref<H256, ArcBlock>> = None;
 
         for (_rpc_name, rpc_head_hash) in connection_heads.iter() {
             if checked_heads.contains(rpc_head_hash) {
@@ -268,11 +286,26 @@ impl Web3Connections {
 
             let rpc_head_block = self.block_hashes.get(rpc_head_hash).unwrap();
 
-            if highest_work_block.is_none()
-                || rpc_head_block.total_difficulty
-                    > highest_work_block.as_ref().unwrap().total_difficulty
-            {
-                highest_work_block = Some(rpc_head_block);
+            match &rpc_head_block.total_difficulty {
+                None => {
+                    // no total difficulty
+                    // TODO: should we fetch the block here? I think this shouldn't happen
+                    warn!(?rpc, %rpc_head_hash, "block is missing total difficulty");
+                    continue;
+                }
+                Some(td) => {
+                    if highest_work_block.is_none()
+                        || td
+                            > highest_work_block
+                                .as_ref()
+                                .expect("there should always be a block here")
+                                .total_difficulty
+                                .as_ref()
+                                .expect("there should always be total difficulty here")
+                    {
+                        highest_work_block = Some(rpc_head_block);
+                    }
+                }
             }
         }
 
@@ -422,16 +455,18 @@ impl Web3Connections {
         }
 
         if consensus_block_hash == old_head_hash {
-            debug!(hash=%consensus_block_hash, num=%consensus_block_num, limit=%consensus_sum_soft_limit, "cur consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs);
+            debug!(hash=%consensus_block_hash, num=%consensus_block_num, limit=%consensus_sum_soft_limit, %rpc, "cur consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs);
         } else if soft_limit_met {
             // TODO: if new's parent is not old, warn?
 
-            debug!(hash=%consensus_block_hash, num=%consensus_block_num, limit=%consensus_sum_soft_limit, "new consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs);
+            debug!(hash=%consensus_block_hash, num=%consensus_block_num, limit=%consensus_sum_soft_limit, %rpc, "NEW consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs);
 
             // the head hash changed. forward to any subscribers
             head_block_sender.send(highest_work_block)?;
+
+            // TODO: do something with pending_tx_sender
         } else {
-            warn!(?soft_limit_met, %consensus_block_hash, %old_head_hash, "no consensus head {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs)
+            warn!(?soft_limit_met, %consensus_block_hash, %old_head_hash, %rpc, "NO consensus head  {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs)
         }
 
         Ok(())

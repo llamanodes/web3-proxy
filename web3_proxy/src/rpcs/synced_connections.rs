@@ -10,7 +10,7 @@ use std::sync::Arc;
 /// Serialize is so we can print it on our debug endpoint
 #[derive(Clone, Default, Serialize)]
 pub struct SyncedConnections {
-    // TODO: store Arc<Block<TxHash>> instead?
+    // TODO: store ArcBlock instead?
     pub(super) head_block_num: U64,
     pub(super) head_block_hash: H256,
     // TODO: this should be able to serialize, but it isn't

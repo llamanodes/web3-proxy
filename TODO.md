@@ -114,6 +114,7 @@
     - [x] now that we have a consensus head with enough soft limit (or an empty set), update SyncedConnections
     - [x] send the block through new head_block_sender
   - [x] rewrite cannonical_block
+- [ ] bug around eth_getBlockByHash sometimes causes tokio to lock up
 - [-] use siwe messages and signatures for sign up and login
 - [-] requests for "Get transactions receipts" are routed to the private_rpcs and not the balanced_rpcs. do this better.
   - [x] quick fix, send to balanced_rpcs for now. we will just live with errors on new transactions. 
@@ -123,7 +124,10 @@
 - [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
 - [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
   - i think there is also a bug because i've seen "server not synced" a couple times
-  - [ ] i saw a fork of like 300 blocks. probably just because a node was restarted and had fallen behind. need some checks to ignore things that are far behind
+  - [x] i saw a fork of like 300 blocks. probably just because a node was restarted and had fallen behind. need some checks to ignore things that are far behind
+- [ ] todo!("pick the block on the current consensus chain")
+- [ ] web3connection3.block(...) might wait forever. be sure to do it safely
+- [ ] search for all "todo!"
 
 ## V1
 

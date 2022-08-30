@@ -6,7 +6,8 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
-use crate::rpcs::connections::{BlockHashesMap, Web3Connections};
+use crate::rpcs::blockchain::{ArcBlock, BlockHashesMap};
+use crate::rpcs::connections::Web3Connections;
 use crate::rpcs::transactions::TxStatus;
 use crate::stats::AppStats;
 use anyhow::Context;
@@ -82,7 +83,7 @@ pub struct Web3ProxyApp {
     response_cache: ResponseLrcCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
-    head_block_receiver: watch::Receiver<Arc<Block<TxHash>>>,
+    head_block_receiver: watch::Receiver<ArcBlock>,
     pending_tx_sender: broadcast::Sender<TxStatus>,
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
@@ -299,7 +300,7 @@ impl Web3ProxyApp {
                 "web3_proxy",
                 "frontend",
                 top_config.app.public_rate_limit_per_minute,
-                60,
+                60.0,
             )
         });
 

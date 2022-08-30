@@ -23,6 +23,7 @@ axum = { version = "0.5.15", features = ["headers", "serde_json", "tokio-tungste
 axum-auth = "0.3.0"
 axum-client-ip = "0.2.0"
 axum-macros = "0.2.3"
+# TODO: turn tokio-console on with a feature. console-subscriber = { version = "0.1.7" }
 counter = "0.5.6"
 dashmap = "5.3.4"
 derive_more = "0.99.17"
@@ -30,12 +31,12 @@ dotenv = "0.15.0"
 ethers = { version = "0.17.0", features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 flume = "0.10.14"
-futures = { version = "0.3.23", features = ["thread-pool"] }
+futures = { version = "0.3.24", features = ["thread-pool"] }
 hashbrown = { version = "0.12.3", features = ["serde"] }
 http = "0.2.8"
 indexmap = "1.9.1"
 fifomap = { path = "../fifomap" }
-notify = "4.0.17"
+notify = "5.0.0"
 num = "0.4.0"
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 petgraph = "0.6.2"

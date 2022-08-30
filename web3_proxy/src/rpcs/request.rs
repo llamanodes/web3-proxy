@@ -3,19 +3,21 @@ use super::provider::Web3Provider;
 use std::fmt;
 use std::sync::atomic;
 use std::sync::Arc;
-use tokio::time::Instant;
+use tokio::time::{sleep, Duration, Instant};
+use tracing::warn;
 use tracing::{instrument, trace};
 
-// TODO: rename this
+#[derive(Debug)]
 pub enum OpenRequestResult {
     Handle(OpenRequestHandle),
     /// Unable to start a request. Retry at the given time.
     RetryAt(Instant),
     /// Unable to start a request. Retrying will not succeed.
-    None,
+    RetryNever,
 }
 
 /// Make RPC requests through this handle and drop it when you are done.
+#[derive(Debug)]
 pub struct OpenRequestHandle(Arc<Web3Connection>);
 
 impl OpenRequestHandle {
@@ -47,16 +49,20 @@ impl OpenRequestHandle {
         R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug,
     {
         // TODO: use tracing spans properly
-        // TODO: it would be nice to have the request id on this
+        // TODO: requests from customers have request ids, but we should add
         // TODO: including params in this is way too verbose
         trace!("Sending {} to {}", method, self.0);
 
         let mut provider = None;
 
         while provider.is_none() {
-            // TODO: if no provider, don't unwrap. wait until there is one.
             match self.0.provider.read().await.as_ref() {
-                None => {}
+                None => {
+                    warn!(rpc=?self.0, "no provider!");
+                    // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
+                    // TODO: sleep how long? subscribe to something instead?
+                    sleep(Duration::from_millis(100)).await
+                }
                 Some(found_provider) => provider = Some(found_provider.clone()),
             }
         }

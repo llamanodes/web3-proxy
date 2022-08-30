@@ -1,9 +1,10 @@
 ///! Load balanced communication with a group of web3 providers
+use super::blockchain::{ArcBlock, BlockHashesMap};
 use super::connection::Web3Connection;
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use super::synced_connections::SyncedConnections;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
-use crate::config::{BlockAndRpc, Web3ConnectionConfig};
+use crate::config::{BlockAndRpc, TxHashAndRpc, Web3ConnectionConfig};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
 use arc_swap::ArcSwap;
@@ -29,8 +30,6 @@ use tokio::task;
 use tokio::time::{interval, sleep, sleep_until, MissedTickBehavior};
 use tokio::time::{Duration, Instant};
 use tracing::{error, info, instrument, trace, warn};
-
-pub type BlockHashesMap = Arc<DashMap<H256, Arc<Block<TxHash>>>>;
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
@@ -59,7 +58,7 @@ impl Web3Connections {
         http_client: Option<reqwest::Client>,
         redis_client_pool: Option<redis_rate_limit::RedisPool>,
         block_map: BlockHashesMap,
-        head_block_sender: Option<watch::Sender<Arc<Block<TxHash>>>>,
+        head_block_sender: Option<watch::Sender<ArcBlock>>,
         min_sum_soft_limit: u32,
         min_synced_rpcs: u32,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
@@ -207,9 +206,9 @@ impl Web3Connections {
     /// transaction ids from all the `Web3Connection`s are deduplicated and forwarded to `pending_tx_sender`
     async fn subscribe(
         self: Arc<Self>,
-        pending_tx_id_receiver: flume::Receiver<(TxHash, Arc<Web3Connection>)>,
+        pending_tx_id_receiver: flume::Receiver<TxHashAndRpc>,
         block_receiver: flume::Receiver<BlockAndRpc>,
-        head_block_sender: Option<watch::Sender<Arc<Block<TxHash>>>>,
+        head_block_sender: Option<watch::Sender<ArcBlock>>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         let mut futures = vec![];
@@ -407,7 +406,7 @@ impl Web3Connections {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                 }
-                Ok(OpenRequestResult::None) => {
+                Ok(OpenRequestResult::RetryNever) => {
                     // TODO: log a warning?
                 }
                 Err(err) => {
@@ -450,7 +449,7 @@ impl Web3Connections {
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                 }
                 Ok(OpenRequestResult::Handle(handle)) => selected_rpcs.push(handle),
-                Ok(OpenRequestResult::None) => {
+                Ok(OpenRequestResult::RetryNever) => {
                     warn!("no request handle for {}", connection)
                 }
                 Err(err) => {
@@ -547,7 +546,7 @@ impl Web3Connections {
 
                     continue;
                 }
-                Ok(OpenRequestResult::None) => {
+                Ok(OpenRequestResult::RetryNever) => {
                     warn!(?self, "No server handles!");
 
                     // TODO: subscribe to something on synced connections. maybe it should just be a watch channel

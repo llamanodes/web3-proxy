@@ -1,15 +1,16 @@
-use crate::app::AnyhowJoinHandle;
+use crate::rpcs::blockchain::BlockHashesMap;
 use crate::rpcs::connection::Web3Connection;
-use crate::rpcs::connections::BlockHashesMap;
+use crate::{app::AnyhowJoinHandle, rpcs::blockchain::ArcBlock};
 use argh::FromArgs;
 use derive_more::Constructor;
-use ethers::prelude::{Block, TxHash};
+use ethers::prelude::TxHash;
 use hashbrown::HashMap;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-pub type BlockAndRpc = (Arc<Block<TxHash>>, Arc<Web3Connection>);
+pub type BlockAndRpc = (ArcBlock, Arc<Web3Connection>);
+pub type TxHashAndRpc = (TxHash, Arc<Web3Connection>);
 
 #[derive(Debug, FromArgs)]
 /// Web3_proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
@@ -96,6 +97,7 @@ pub struct Web3ConnectionConfig {
 
 impl Web3ConnectionConfig {
     /// Create a Web3Connection from config
+    /// TODO: move this into Web3Connection (just need to make things pub(crate))
     // #[instrument(name = "try_build_Web3ConnectionConfig", skip_all)]
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
@@ -107,7 +109,7 @@ impl Web3ConnectionConfig {
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         block_map: BlockHashesMap,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
-        tx_id_sender: Option<flume::Sender<(TxHash, Arc<Web3Connection>)>>,
+        tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = match (self.hard_limit, redis_pool) {
             (None, None) => None,
