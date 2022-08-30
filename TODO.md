@@ -114,7 +114,10 @@
     - [x] now that we have a consensus head with enough soft limit (or an empty set), update SyncedConnections
     - [x] send the block through new head_block_sender
   - [x] rewrite cannonical_block
-- [ ] bug around eth_getBlockByHash sometimes causes tokio to lock up
+- [x] bug around eth_getBlockByHash sometimes causes tokio to lock up
+  - i keep a mapping of blocks so that i can go from hash -> block. it has some consistent hashing it does to split them up across multiple maps each with their own lock. so a lot of the time reads dont block writes because they are in different internal maps. this was fine.
+  - but after changing my fork detection logic to use the same rules as erigon, i discovered that when you get blocks from a websocket subscription in erigon and geth, theres a missing field (https://github.com/ledgerwatch/erigon/issues/5190). so i added a query to get the block that includes the missing field.
+  - but i did this in a way where i was holding the write lock open while doing the query. the "new" block that has the missing field ends up in the same bucket and it also wants a write lock. oops. entry api has very sharp edges. don't ever await inside a match on DashMap::entry
 - [-] use siwe messages and signatures for sign up and login
 - [-] requests for "Get transactions receipts" are routed to the private_rpcs and not the balanced_rpcs. do this better.
   - [x] quick fix, send to balanced_rpcs for now. we will just live with errors on new transactions. 
