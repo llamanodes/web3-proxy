@@ -16,7 +16,7 @@ entities = { path = "../entities" }
 migration = { path = "../migration" }
 redis-rate-limit = { path = "../redis-rate-limit" }
 
-anyhow = { version = "1.0.62", features = ["backtrace"] }
+anyhow = { version = "1.0.63", features = ["backtrace"] }
 arc-swap = "1.5.1"
 argh = "0.1.8"
 axum = { version = "0.5.15", features = ["headers", "serde_json", "tokio-tungstenite", "ws"] }
@@ -25,7 +25,7 @@ axum-client-ip = "0.2.0"
 axum-macros = "0.2.3"
 # TODO: turn tokio-console on with a feature. console-subscriber = { version = "0.1.7" }
 counter = "0.5.6"
-dashmap = "5.3.4"
+dashmap = "5.4.0"
 derive_more = "0.99.17"
 dotenv = "0.15.0"
 ethers = { version = "0.17.0", features = ["rustls", "ws"] }

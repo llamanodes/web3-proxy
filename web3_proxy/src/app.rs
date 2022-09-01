@@ -597,7 +597,9 @@ impl Web3ProxyApp {
             self.balanced_rpcs.block_hash(min_block_needed).await?
         } else {
             // TODO: maybe this should be on the app and not on balanced_rpcs
-            self.balanced_rpcs.head_block_hash()
+            self.balanced_rpcs
+                .head_block_hash()
+                .context("no servers in sync")?
         };
 
         // TODO: better key? benchmark this
@@ -724,16 +726,15 @@ impl Web3ProxyApp {
                 serde_json::Value::Array(vec![])
             }
             "eth_blockNumber" => {
-                // TODO: emit stats
-
-                let head_block_number = self.balanced_rpcs.head_block_num();
-
-                // TODO: technically, block 0 is okay. i guess we should be using an option
-                if head_block_number.as_u64() == 0 {
-                    return Err(anyhow::anyhow!("no servers synced"));
+                match self.balanced_rpcs.head_block_num() {
+                    Some(head_block_num) => {
+                        json!(head_block_num)
+                    }
+                    None => {
+                        // TODO: what does geth do if this happens?
+                        return Err(anyhow::anyhow!("no servers synced"));
+                    }
                 }
-
-                json!(head_block_number)
             }
             // TODO: eth_callBundle (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_callbundle)
             // TODO: eth_cancelPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_cancelprivatetransaction, but maybe just reject)
@@ -807,7 +808,10 @@ impl Web3ProxyApp {
             method => {
                 // emit stats
 
-                let head_block_number = self.balanced_rpcs.head_block_num();
+                let head_block_number = self
+                    .balanced_rpcs
+                    .head_block_num()
+                    .context("no servers synced")?;
 
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different

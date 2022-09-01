@@ -1,3 +1,4 @@
+use super::blockchain::BlockId;
 use super::connection::Web3Connection;
 use super::connections::Web3Connections;
 use ethers::prelude::{H256, U64};
@@ -11,8 +12,7 @@ use std::sync::Arc;
 #[derive(Clone, Default, Serialize)]
 pub struct SyncedConnections {
     // TODO: store ArcBlock instead?
-    pub(super) head_block_num: U64,
-    pub(super) head_block_hash: H256,
+    pub(super) head_block_id: Option<BlockId>,
     // TODO: this should be able to serialize, but it isn't
     #[serde(skip_serializing)]
     pub(super) conns: IndexSet<Arc<Web3Connection>>,
@@ -23,29 +23,31 @@ impl fmt::Debug for SyncedConnections {
         // TODO: the default formatter takes forever to write. this is too quiet though
         // TODO: print the actual conns?
         f.debug_struct("SyncedConnections")
-            .field("head_num", &self.head_block_num)
-            .field("head_hash", &self.head_block_hash)
+            .field("head_block_id", &self.head_block_id)
             .field("num_conns", &self.conns.len())
             .finish_non_exhaustive()
     }
 }
 
 impl Web3Connections {
-    pub fn head_block(&self) -> (U64, H256) {
-        let synced_connections = self.synced_connections.load();
-
-        (
-            synced_connections.head_block_num,
-            synced_connections.head_block_hash,
-        )
+    pub fn head_block_id(&self) -> Option<BlockId> {
+        self.synced_connections.load().head_block_id.clone()
     }
 
-    pub fn head_block_hash(&self) -> H256 {
-        self.synced_connections.load().head_block_hash
+    pub fn head_block_hash(&self) -> Option<H256> {
+        self.synced_connections
+            .load()
+            .head_block_id
+            .as_ref()
+            .map(|head_block_id| head_block_id.hash)
     }
 
-    pub fn head_block_num(&self) -> U64 {
-        self.synced_connections.load().head_block_num
+    pub fn head_block_num(&self) -> Option<U64> {
+        self.synced_connections
+            .load()
+            .head_block_id
+            .as_ref()
+            .map(|head_block_id| head_block_id.num)
     }
 
     pub fn synced(&self) -> bool {

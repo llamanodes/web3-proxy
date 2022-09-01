@@ -34,14 +34,15 @@ use tracing::{error, info, instrument, trace, warn};
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
 pub struct Web3Connections {
-    pub(super) conns: HashMap<String, Arc<Web3Connection>>,
+    pub(super) inner: HashMap<String, Arc<Web3Connection>>,
     /// any requests will be forwarded to one (or more) of these connections
     pub(super) synced_connections: ArcSwap<SyncedConnections>,
     pub(super) pending_transactions: Arc<DashMap<TxHash, TxStatus>>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
     pub(super) block_hashes: BlockHashesMap,
-    pub(super) block_numbers: DashMap<U64, Vec<H256>>,
+    /// blocks on the heaviest chain
+    pub(super) block_numbers: DashMap<U64, H256>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// TODO: what should we use for edges?
     pub(super) blockchain_graphmap: RwLock<DiGraphMap<H256, u32>>,
@@ -168,7 +169,7 @@ impl Web3Connections {
         let synced_connections = SyncedConnections::default();
 
         let connections = Arc::new(Self {
-            conns: connections,
+            inner: connections,
             synced_connections: ArcSwap::new(Arc::new(synced_connections)),
             pending_transactions,
             block_hashes: Default::default(),
@@ -198,7 +199,7 @@ impl Web3Connections {
     }
 
     pub fn get(&self, conn_name: &str) -> Option<&Arc<Web3Connection>> {
-        self.conns.get(conn_name)
+        self.inner.get(conn_name)
     }
 
     /// subscribe to blocks and transactions from all the backend rpcs.
@@ -349,7 +350,7 @@ impl Web3Connections {
         // TODO: we are going to be checking "has_block_data" a lot now. i think we pretty much always have min_block_needed now that we override "latest"
         let mut synced_rpcs: Vec<Arc<Web3Connection>> =
             if let Some(min_block_needed) = min_block_needed {
-                self.conns
+                self.inner
                     .values()
                     .filter(|x| !skip.contains(x))
                     .filter(|x| x.has_block_data(min_block_needed))
@@ -435,7 +436,7 @@ impl Web3Connections {
         // TODO: with capacity?
         let mut selected_rpcs = vec![];
 
-        for connection in self.conns.values() {
+        for connection in self.inner.values() {
             if let Some(min_block_needed) = min_block_needed {
                 if !connection.has_block_data(min_block_needed) {
                     continue;
@@ -476,7 +477,7 @@ impl Web3Connections {
 
         // TODO: maximum retries?
         loop {
-            if skip_rpcs.len() == self.conns.len() {
+            if skip_rpcs.len() == self.inner.len() {
                 break;
             }
             match self
@@ -623,7 +624,7 @@ impl fmt::Debug for Web3Connections {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
         f.debug_struct("Web3Connections")
-            .field("conns", &self.conns)
+            .field("conns", &self.inner)
             .finish_non_exhaustive()
     }
 }
@@ -633,7 +634,7 @@ impl Serialize for Web3Connections {
     where
         S: Serializer,
     {
-        let conns: Vec<&Web3Connection> = self.conns.iter().map(|x| x.1.as_ref()).collect();
+        let conns: Vec<&Web3Connection> = self.inner.iter().map(|x| x.1.as_ref()).collect();
 
         let mut state = serializer.serialize_struct("Web3Connections", 2)?;
         state.serialize_field("conns", &conns)?;

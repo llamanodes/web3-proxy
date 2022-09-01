@@ -90,7 +90,8 @@
   - whenever blocks were slow, we started checking as fast as possible
 - [x] create user script should allow setting requests per minute
 - [x] cache api keys that are not in the database
-- [x] improve consensus block selection. Our goal is to find the highest work chain with a block over a minimum threshold of sum_soft_limit.
+- [ ] improve consensus block selection. Our goal is to find the highest work chain with a block over a minimum threshold of sum_soft_limit.
+  - [x] i saw a fork of like 300 blocks. probably just because a node was restarted and had fallen behind. need some checks to ignore things that are far behind. this improvement should fix this problem
   - [x] A new block arrives at a connection.
   - [x] It checks that it isn't the same that it already has (which is a problem with polling nodes)
   - [x] If its new to this node...
@@ -113,7 +114,12 @@
         - if all_simple_paths returns no paths, warn about a chain split?
     - [x] now that we have a consensus head with enough soft limit (or an empty set), update SyncedConnections
     - [x] send the block through new head_block_sender
-  - [x] rewrite cannonical_block
+  - [x] rewrite cannonical_block to work as long as there are no forks
+  - [ ] rewrite cannonical_block (again) and related functions to handle forks
+    - [ ] todo!("do something with the old hash. we need to update a bunch more block numbers")
+    - [ ] todo!("handle equal") and also less and greater
+    - [x] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
+      - i think there is also a bug because i've seen "server not synced" a couple times
 - [x] bug around eth_getBlockByHash sometimes causes tokio to lock up
   - i keep a mapping of blocks so that i can go from hash -> block. it has some consistent hashing it does to split them up across multiple maps each with their own lock. so a lot of the time reads dont block writes because they are in different internal maps. this was fine.
   - but after changing my fork detection logic to use the same rules as erigon, i discovered that when you get blocks from a websocket subscription in erigon and geth, theres a missing field (https://github.com/ledgerwatch/erigon/issues/5190). so i added a query to get the block that includes the missing field.
@@ -125,12 +131,9 @@
   - but under heavy load, we hit their rate limits. need a "retry_until_success" function that goes to balanced_rpcs. or maybe store in redis the txids that we broadcast privately and use that to route.
   - [ ] write a function for receipts that tries balanced_rpcs and only on error of all balanced tries privates
 - [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
-- [ ] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
-  - i think there is also a bug because i've seen "server not synced" a couple times
-  - [x] i saw a fork of like 300 blocks. probably just because a node was restarted and had fallen behind. need some checks to ignore things that are far behind
-- [ ] todo!("pick the block on the current consensus chain")
 - [ ] web3connection3.block(...) might wait forever. be sure to do it safely
 - [ ] search for all "todo!"
+- [ ] replace all `.context("no servers in sync")` with proper error type
 
 ## V1
 

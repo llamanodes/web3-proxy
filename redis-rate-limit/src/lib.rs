@@ -84,9 +84,7 @@ impl RedisRateLimit {
             .await
             .context("increment rate limit")?;
 
-        let new_count = x
-            .first()
-            .ok_or_else(|| anyhow::anyhow!("check rate limit result"))?;
+        let new_count = x.first().context("check rate limit result")?;
 
         if new_count > &max_per_period {
             let seconds_left_in_period = self.period - (now % self.period);
