@@ -363,6 +363,7 @@ impl Web3Connection {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn subscribe(
         self: Arc<Self>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
@@ -429,7 +430,6 @@ impl Web3Connection {
     }
 
     /// Subscribe to new blocks. If `reconnect` is true, this runs forever.
-    /// TODO: instrument with the url
     #[instrument(skip_all)]
     async fn subscribe_new_heads(
         self: Arc<Self>,
@@ -437,7 +437,7 @@ impl Web3Connection {
         block_sender: flume::Sender<BlockAndRpc>,
         block_map: BlockHashesMap,
     ) -> anyhow::Result<()> {
-        info!(?self, "watching new_heads");
+        info!(?self, "watching new heads");
 
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
@@ -554,8 +554,7 @@ impl Web3Connection {
         self: Arc<Self>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
     ) -> anyhow::Result<()> {
-        // TODO: move this data into a span?
-        info!("watching {}", self);
+        info!(?self, "watching pending transactions");
 
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
