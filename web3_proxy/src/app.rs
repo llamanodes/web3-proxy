@@ -122,6 +122,7 @@ pub async fn flatten_handles<T>(
 /// Connect to the database and run migrations
 pub async fn get_migrated_db(
     db_url: String,
+    min_connections: u32,
     max_connections: u32,
 ) -> anyhow::Result<DatabaseConnection> {
     let mut db_opt = sea_orm::ConnectOptions::new(db_url);
@@ -129,7 +130,7 @@ pub async fn get_migrated_db(
     // TODO: load all these options from the config file. i think mysql default max is 100
     // TODO: sqlx logging only in debug. way too verbose for production
     db_opt
-        .min_connections(1)
+        .min_connections(min_connections)
         .max_connections(max_connections)
         .connect_timeout(Duration::from_secs(8))
         .idle_timeout(Duration::from_secs(8))
@@ -149,7 +150,6 @@ impl Web3ProxyApp {
     pub async fn spawn(
         app_stats: AppStats,
         top_config: TopConfig,
-        workers: usize,
     ) -> anyhow::Result<(
         Arc<Web3ProxyApp>,
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
@@ -162,9 +162,16 @@ impl Web3ProxyApp {
 
         // first, we connect to mysql and make sure the latest migrations have run
         let db_conn = if let Some(db_url) = &top_config.app.db_url {
-            let max_connections = workers.try_into()?;
+            let db_min_connections = top_config.app.db_min_connections;
 
-            let db = get_migrated_db(db_url.clone(), max_connections).await?;
+            // TODO: what default multiple?
+            let redis_max_connections = top_config
+                .app
+                .db_max_connections
+                .unwrap_or(db_min_connections * 4);
+
+            let db =
+                get_migrated_db(db_url.clone(), db_min_connections, redis_max_connections).await?;
 
             Some(db)
         } else {
@@ -200,14 +207,19 @@ impl Web3ProxyApp {
 
                 let manager = RedisConnectionManager::new(redis_url.as_ref())?;
 
-                let min_size = workers as u32;
-                let max_size = min_size * 4;
+                let redis_min_connections = top_config.app.redis_min_connections;
+
+                let redis_max_connections = top_config
+                    .app
+                    .redis_max_connections
+                    .unwrap_or(redis_min_connections * 4);
+
                 // TODO: min_idle?
                 // TODO: set max_size based on max expected concurrent connections? set based on num_workers?
                 let builder = bb8::Pool::builder()
                     .error_sink(RedisErrorSink.boxed_clone())
-                    .min_idle(Some(min_size))
-                    .max_size(max_size);
+                    .min_idle(Some(redis_min_connections))
+                    .max_size(redis_max_connections);
 
                 let pool = builder.build(manager).await?;
 

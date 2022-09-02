@@ -251,7 +251,7 @@ impl Web3Connections {
                             pending_tx_sender,
                         )
                         .await
-                });
+                })?;
 
             futures.push(flatten_handle(handle));
         }
@@ -264,7 +264,7 @@ impl Web3Connections {
                     sleep(Duration::from_secs(600)).await;
                     // TODO: "every interval, check that the provider is still connected"
                 }
-            });
+            })?;
 
             futures.push(flatten_handle(handle));
         }

@@ -76,7 +76,7 @@ fn run(
         let app_frontend_port = cli_config.port;
         let app_prometheus_port = cli_config.prometheus_port;
 
-        let (app, app_handle) = Web3ProxyApp::spawn(app_stats, top_config, num_workers).await?;
+        let (app, app_handle) = Web3ProxyApp::spawn(app_stats, top_config).await?;
 
         let frontend_handle = tokio::spawn(frontend::serve(app_frontend_port, app));
 
@@ -212,25 +212,23 @@ mod tests {
         let app_config = TopConfig {
             app: AppConfig {
                 chain_id: 31337,
-                db_url: None,
                 default_requests_per_minute: 6_000_000,
-                invite_code: None,
-                redis_url: None,
                 min_sum_soft_limit: 1,
                 min_synced_rpcs: 1,
                 public_rate_limit_per_minute: 0,
                 response_cache_max_bytes: 10_usize.pow(7),
                 redirect_public_url: "example.com/".to_string(),
                 redirect_user_url: "example.com/users/{user_address}".to_string(),
+                ..Default::default()
             },
             balanced_rpcs: HashMap::from([
                 (
                     "anvil".to_string(),
-                    Web3ConnectionConfig::new(anvil.endpoint(), 100, None, 1),
+                    Web3ConnectionConfig::new(anvil.endpoint(), 100, None, 1, Some(false)),
                 ),
                 (
                     "anvil_ws".to_string(),
-                    Web3ConnectionConfig::new(anvil.ws_endpoint(), 100, None, 0),
+                    Web3ConnectionConfig::new(anvil.ws_endpoint(), 100, None, 0, Some(true)),
                 ),
             ]),
             private_rpcs: None,

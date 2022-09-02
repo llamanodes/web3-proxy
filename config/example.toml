@@ -1,6 +1,7 @@
 [shared]
 chain_id = 1
 db_url = "mysql://root:dev_web3_proxy@dev-db:3306/dev_web3_proxy"
+db_max_connections = 99
 min_sum_soft_limit = 2000
 min_synced_rpcs = 2
 redis_url = "redis://dev-redis:6379/"

@@ -5,6 +5,7 @@ use argh::FromArgs;
 use derive_more::Constructor;
 use ethers::prelude::TxHash;
 use hashbrown::HashMap;
+use num::One;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -40,21 +41,32 @@ pub struct TopConfig {
 }
 
 /// shared configuration between Web3Connections
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct AppConfig {
     // TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
     pub chain_id: u64,
     pub db_url: Option<String>,
-    pub invite_code: Option<String>,
+    /// minimum size of the connection pool for the database
+    #[serde(default = "u32::one")]
+    pub db_min_connections: u32,
+    /// minimum size of the connection pool for the database
+    pub db_max_connections: Option<u32>,
     #[serde(default = "default_default_requests_per_minute")]
     pub default_requests_per_minute: u32,
+    pub invite_code: Option<String>,
     #[serde(default = "default_min_sum_soft_limit")]
     pub min_sum_soft_limit: u32,
     #[serde(default = "default_min_synced_rpcs")]
     pub min_synced_rpcs: usize,
-    pub redis_url: Option<String>,
+    /// Set to 0 to block all anonymous requests
     #[serde(default = "default_public_rate_limit_per_minute")]
     pub public_rate_limit_per_minute: u64,
+    pub redis_url: Option<String>,
+    /// minimum size of the connection pool for the cache
+    #[serde(default = "u32::one")]
+    pub redis_min_connections: u32,
+    /// maximum size of the connection pool for the cache
+    pub redis_max_connections: Option<u32>,
     #[serde(default = "default_response_cache_max_bytes")]
     pub response_cache_max_bytes: usize,
     /// the stats page url for an anonymous user.
@@ -93,12 +105,12 @@ pub struct Web3ConnectionConfig {
     soft_limit: u32,
     hard_limit: Option<u64>,
     weight: u32,
+    subscribe_txs: Option<bool>,
 }
 
 impl Web3ConnectionConfig {
     /// Create a Web3Connection from config
     /// TODO: move this into Web3Connection (just need to make things pub(crate))
-    // #[instrument(name = "try_build_Web3ConnectionConfig", skip_all)]
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         self,
@@ -120,6 +132,12 @@ impl Web3ConnectionConfig {
                     "no redis client pool! needed for hard limit"
                 ))
             }
+        };
+
+        let tx_id_sender = if self.subscribe_txs.unwrap_or(false) {
+            tx_id_sender
+        } else {
+            None
         };
 
         Web3Connection::spawn(
