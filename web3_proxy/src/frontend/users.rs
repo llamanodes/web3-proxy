@@ -85,7 +85,7 @@ pub async fn get_login(
 
     // TODO: if no redis server, store in local cache?
     // the address isn't enough. we need to save the actual message so we can read the nonce
-    // TODO: what message format is the most efficient to store in redis? probably eip191_string
+    // TODO: what message format is the most efficient to store in redis? probably eip191_bytes
     // we add 1 to expire_seconds just to be sure redis has the key for the full expiration_time
     app.redis_conn()
         .await?
@@ -100,7 +100,7 @@ pub async fn get_login(
     let message: String = match message_eip.as_str() {
         "eip4361" => message.to_string(),
         // https://github.com/spruceid/siwe/issues/98
-        "eip191_string" => Bytes::from(message.eip191_string().unwrap()).to_string(),
+        "eip191_bytes" => Bytes::from(message.eip191_bytes().unwrap()).to_string(),
         "eip191_hash" => Bytes::from(&message.eip191_hash().unwrap()).to_string(),
         _ => return Err(anyhow::anyhow!("invalid message eip given").into()),
     };

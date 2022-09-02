@@ -4403,9 +4403,9 @@ checksum = "7bd3e3206899af3f8b12af284fafc038cc1dc2b41d1b89dd17297221c5d225de"
 
 [[package]]
 name = "siwe"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a35b706108fb328661325c3b6882f6b1d62da47d533da0b87fca36ac769877db"
+checksum = "f24fe2b646c33a670e7d79a232bffb41821fed28b1870a8bd1a47e6ae686ace6"
 dependencies = [
  "hex",
  "http",

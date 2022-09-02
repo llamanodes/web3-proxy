@@ -146,18 +146,6 @@ pub async fn get_migrated_db(
 }
 
 impl Web3ProxyApp {
-    pub async fn redis_conn(&self) -> anyhow::Result<PooledConnection<RedisConnectionManager>> {
-        match self.redis_pool.as_ref() {
-            None => Err(anyhow::anyhow!("no redis server configured")),
-            Some(redis_pool) => {
-                let redis_conn = redis_pool.get().await?;
-
-                Ok(redis_conn)
-            }
-        }
-    }
-
-    // TODO: should we just take the rpc config as the only arg instead?
     pub async fn spawn(
         app_stats: AppStats,
         top_config: TopConfig,
@@ -553,7 +541,6 @@ impl Web3ProxyApp {
         Ok(response)
     }
 
-    // #[instrument(skip_all)]
     async fn proxy_web3_rpc_requests(
         &self,
         requests: Vec<JsonRpcRequest>,
@@ -578,6 +565,17 @@ impl Web3ProxyApp {
         }
 
         Ok(collected)
+    }
+
+    pub async fn redis_conn(&self) -> anyhow::Result<PooledConnection<RedisConnectionManager>> {
+        match self.redis_pool.as_ref() {
+            None => Err(anyhow::anyhow!("no redis server configured")),
+            Some(redis_pool) => {
+                let redis_conn = redis_pool.get().await?;
+
+                Ok(redis_conn)
+            }
+        }
     }
 
     async fn cached_response(
@@ -620,13 +618,11 @@ impl Web3ProxyApp {
             trace!(?request.method, "cache miss!");
         }
 
-        // TODO: multiple caches. if head_block_hash is None, have a persistent cache (disk backed?)
         let cache = &self.response_cache;
 
         Ok((key, Err(cache)))
     }
 
-    // #[instrument(skip_all)]
     async fn proxy_web3_rpc_request(
         &self,
         mut request: JsonRpcRequest,

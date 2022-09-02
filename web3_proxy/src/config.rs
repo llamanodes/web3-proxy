@@ -51,7 +51,7 @@ pub struct AppConfig {
     #[serde(default = "default_min_sum_soft_limit")]
     pub min_sum_soft_limit: u32,
     #[serde(default = "default_min_synced_rpcs")]
-    pub min_synced_rpcs: u32,
+    pub min_synced_rpcs: usize,
     pub redis_url: Option<String>,
     #[serde(default = "default_public_rate_limit_per_minute")]
     pub public_rate_limit_per_minute: u64,
@@ -72,7 +72,7 @@ fn default_min_sum_soft_limit() -> u32 {
     1
 }
 
-fn default_min_synced_rpcs() -> u32 {
+fn default_min_synced_rpcs() -> usize {
     1
 }
 

@@ -13,7 +13,6 @@ use dashmap::{
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use hashbrown::{HashMap, HashSet};
-use petgraph::algo::all_simple_paths;
 use serde::Serialize;
 use serde_json::json;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
@@ -39,13 +38,29 @@ impl Display for BlockId {
 
 impl Web3Connections {
     /// add a block to our map and it's hash to our graphmap of the blockchain
-    pub fn save_block(&self, block: &ArcBlock) -> anyhow::Result<()> {
+    pub fn save_block(&self, block: &ArcBlock, heaviest_chain: bool) -> anyhow::Result<()> {
         let block_hash = block.hash.as_ref().context("no block hash")?;
         let block_num = block.number.as_ref().context("no block num")?;
         let _block_td = block
             .total_difficulty
             .as_ref()
             .context("no block total difficulty")?;
+
+        if heaviest_chain {
+            match self.block_numbers.entry(*block_num) {
+                Entry::Occupied(mut x) => {
+                    let old = x.insert(*block_hash);
+
+                    // TODO: what should we do?
+                    warn!(
+                        "do something with the old hash. we may need to update a bunch more block numbers"
+                    )
+                }
+                Entry::Vacant(x) => {
+                    x.insert(*block_hash);
+                }
+            }
+        }
 
         if self.block_hashes.contains_key(block_hash) {
             // this block is already included. no need to continue
@@ -66,19 +81,6 @@ impl Web3Connections {
             // i don't think this will happen. the blockchain.conains_node above should be enough
             // no need to continue because that other thread would have written (or soon will) write the
             return Ok(());
-        }
-
-        match self.block_numbers.entry(*block_num) {
-            Entry::Occupied(mut x) => {
-                let old = x.insert(*block_hash);
-
-                todo!(
-                    "do something with the old hash. we need to update a bunch more block numbers"
-                )
-            }
-            Entry::Vacant(x) => {
-                x.insert(*block_hash);
-            }
         }
 
         // TODO: prettier log? or probably move the log somewhere else
@@ -110,13 +112,7 @@ impl Web3Connections {
         }
 
         // block not in cache. we need to ask an rpc for it
-
-        // TODO: helper for method+params => JsonRpcRequest
-        // TODO: get block with the transactions?
-        // TODO: does this id matter?
-
         let request_params = (hash, false);
-
         // TODO: if error, retry?
         let block: Block<TxHash> = match rpc {
             Some(rpc) => {
@@ -126,6 +122,8 @@ impl Web3Connections {
                     .await?
             }
             None => {
+                // TODO: helper for method+params => JsonRpcRequest
+                // TODO: does this id matter?
                 let request =
                     json!({ "id": "1", "method": "eth_getBlockByHash", "params": request_params });
                 let request: JsonRpcRequest = serde_json::from_value(request)?;
@@ -141,7 +139,10 @@ impl Web3Connections {
         let block = Arc::new(block);
 
         // the block was fetched using eth_getBlockByHash, so it should have all fields
-        self.save_block(&block)?;
+        // TODO: how should we set this? all_simple_paths on the map?
+        let heaviest_chain = false;
+
+        self.save_block(&block, heaviest_chain)?;
 
         Ok(block)
     }
@@ -202,8 +203,10 @@ impl Web3Connections {
 
         let block = Arc::new(block);
 
-        // the block was fetched using eth_getBlockByNumber, so it should have all fields
-        self.save_block(&block)?;
+        // the block was fetched using eth_getBlockByNumber, so it should have all fields and be on the heaviest chain
+        let heaviest_chain = true;
+
+        self.save_block(&block, heaviest_chain)?;
 
         Ok(block)
     }
@@ -259,7 +262,8 @@ impl Web3Connections {
                 } else {
                     connection_heads.insert(rpc.name.to_owned(), rpc_head_hash);
 
-                    self.save_block(&rpc_head_block)?;
+                    // we don't know if its on the heaviest chain yet
+                    self.save_block(&rpc_head_block, false)?;
 
                     Some(BlockId {
                         hash: rpc_head_hash,
@@ -277,27 +281,27 @@ impl Web3Connections {
             }
         };
 
-        // iterate the rpc_map to find the highest_work_block
+        // iterate the known heads to find the highest_work_block
         let mut checked_heads = HashSet::new();
         let mut highest_work_block: Option<Ref<H256, ArcBlock>> = None;
-
         for rpc_head_hash in connection_heads.values() {
             if checked_heads.contains(rpc_head_hash) {
+                // we already checked this head from another rpc
                 continue;
             }
-
+            // don't check the same hash multiple times
             checked_heads.insert(rpc_head_hash);
 
             let rpc_head_block = self.block_hashes.get(rpc_head_hash).unwrap();
 
             match &rpc_head_block.total_difficulty {
                 None => {
-                    // no total difficulty
-                    // TODO: should we fetch the block here? I think this shouldn't happen
-                    warn!(?rpc, %rpc_head_hash, "block is missing total difficulty");
-                    continue;
+                    // no total difficulty. this is a bug
+                    unimplemented!("block is missing total difficulty");
                 }
                 Some(td) => {
+                    // if this is the first block we've tried
+                    // or if this rpc's newest block has a higher total difficulty
                     if highest_work_block.is_none()
                         || td
                             > highest_work_block
@@ -313,100 +317,149 @@ impl Web3Connections {
             }
         }
 
-        // clone to release the read lock
-        let highest_work_block = highest_work_block.map(|x| x.clone());
+        // clone to release the read lock on self.block_hashes
+        if let Some(mut maybe_head_block) = highest_work_block.map(|x| x.clone()) {
+            // track rpcs on this heaviest chain so we can build a new SyncedConnections
+            let mut heavy_rpcs: Vec<&Arc<Web3Connection>> = vec![];
+            // a running total of the soft limits covered by the heavy rpcs
+            let mut heavy_sum_soft_limit: u32 = 0;
+            // TODO: also track heavy_sum_hard_limit?
 
-        let mut highest_work_block = match highest_work_block {
-            None => todo!("no servers are in sync"),
-            Some(highest_work_block) => highest_work_block,
-        };
+            // check the highest work block for a set of rpcs that can serve our request load
+            // if it doesn't have enough rpcs for our request load, check the parent block
+            // TODO: loop for how many parent blocks? we don't want to serve blocks that are too far behind. probably different per chain
+            // TODO: this loop is pretty long. any way to clean up this code?
+            for _ in 0..3 {
+                let maybe_head_hash = maybe_head_block
+                    .hash
+                    .as_ref()
+                    .expect("blocks here always need hashes");
 
-        // track names so we don't check the same node multiple times
-        let mut heavy_names: HashSet<&String> = HashSet::new();
-        // track rpcs so we can build a new SyncedConnections
-        let mut heavy_rpcs: Vec<&Arc<Web3Connection>> = vec![];
-        // a running total of the soft limits covered by the rpcs
-        let mut heavy_sum_soft_limit: u32 = 0;
+                // find all rpcs with maybe_head_block as their current head
+                for (conn_name, conn_head_hash) in connection_heads.iter() {
+                    if conn_head_hash != maybe_head_hash {
+                        continue;
+                    }
 
-        // check the highest work block and its parents for a set of rpcs that can serve our request load
-        // TODO: loop for how many parent blocks? we don't want to serve blocks that are too far behind
-        let blockchain_guard = self.blockchain_graphmap.read();
-        for _ in 0..3 {
-            let highest_work_hash = highest_work_block.hash.as_ref().unwrap();
-
-            for (rpc_name, rpc_head_hash) in connection_heads.iter() {
-                if heavy_names.contains(rpc_name) {
-                    // this block is already included
-                    continue;
-                }
-
-                // TODO: does all_simple_paths make this check?
-                if rpc_head_hash == highest_work_hash {
-                    if let Some(rpc) = self.conns.get(rpc_name) {
-                        heavy_names.insert(rpc_name);
+                    if let Some(rpc) = self.conns.get(conn_name) {
                         heavy_rpcs.push(rpc);
                         heavy_sum_soft_limit += rpc.soft_limit;
-                    }
-                    continue;
-                }
-
-                // TODO: cache all_simple_paths. there should be a high hit rate
-                // TODO: use an algo that saves scratch space?
-                // TODO: how slow is this?
-                let is_connected = all_simple_paths::<Vec<H256>, _>(
-                    &*blockchain_guard,
-                    *highest_work_hash,
-                    *rpc_head_hash,
-                    0,
-                    // TODO: what should this max be? probably configurable per chain
-                    Some(10),
-                )
-                .next()
-                .is_some();
-
-                if is_connected {
-                    if let Some(rpc) = self.conns.get(rpc_name) {
-                        heavy_rpcs.push(rpc);
-                        heavy_sum_soft_limit += rpc.soft_limit;
+                    } else {
+                        warn!("connection missing")
                     }
                 }
-            }
 
-            // TODO: min_sum_soft_limit as a percentage of total_soft_limit?
-            // let min_sum_soft_limit = total_soft_limit / self.min_sum_soft_limit;
-            if heavy_sum_soft_limit >= self.min_sum_soft_limit {
-                // success! this block has enough nodes on it
-                break;
-            }
-            // else, we need to try the parent block
+                if heavy_sum_soft_limit < self.min_sum_soft_limit
+                    || heavy_rpcs.len() < self.min_synced_rpcs
+                {
+                    // not enough rpcs yet. check the parent
+                    if let Some(parent_block) = self.block_hashes.get(&maybe_head_block.parent_hash)
+                    {
+                        trace!(
+                            child=%maybe_head_hash, parent=%parent_block.hash.unwrap(), "avoiding thundering herd",
+                        );
 
-            trace!(%heavy_sum_soft_limit, ?highest_work_hash, "avoiding thundering herd");
-
-            // // TODO: this automatically queries for parents, but need to rearrange lifetimes to make an await work here
-            // highest_work_block = self
-            //     .block(&highest_work_block.parent_hash, Some(&rpc))
-            //     .await?;
-            // we give known stale data just because we don't have enough capacity to serve the latest.
-            // TODO: maybe we should delay serving requests if this happens.
-            // TODO: don't unwrap. break if none?
-            match self.block_hashes.get(&highest_work_block.parent_hash) {
-                None => {
-                    warn!(
-                        "ran out of parents to check. soft limit only {}/{}: {}%",
-                        heavy_sum_soft_limit,
-                        self.min_sum_soft_limit,
-                        heavy_sum_soft_limit * 100 / self.min_sum_soft_limit
-                    );
-                    break;
+                        maybe_head_block = parent_block.clone();
+                        continue;
+                    } else {
+                        warn!(
+                            "no parent to check. soft limit only {}/{} from {}/{} rpcs: {}%",
+                            heavy_sum_soft_limit,
+                            self.min_sum_soft_limit,
+                            heavy_rpcs.len(),
+                            self.min_synced_rpcs,
+                            heavy_sum_soft_limit * 100 / self.min_sum_soft_limit
+                        );
+                        break;
+                    }
                 }
-                Some(parent_block) => {
-                    highest_work_block = parent_block.clone();
+
+                // success! this block has enough soft limit and nodes on it (or on later blocks)
+                let conns = heavy_rpcs.into_iter().cloned().collect();
+
+                let heavy_block = maybe_head_block;
+
+                let heavy_hash = heavy_block.hash.expect("head blocks always have hashes");
+                let heavy_num = heavy_block.number.expect("head blocks always have numbers");
+
+                debug_assert_ne!(heavy_num, U64::zero());
+
+                let heavy_block_id = BlockId {
+                    hash: heavy_hash,
+                    num: heavy_num,
+                };
+
+                let new_synced_connections = SyncedConnections {
+                    head_block_id: Some(heavy_block_id.clone()),
+                    conns,
+                };
+
+                let old_synced_connections = self
+                    .synced_connections
+                    .swap(Arc::new(new_synced_connections));
+
+                let num_connection_heads = connection_heads.len();
+                let total_conns = self.conns.len();
+
+                // TODO: if the rpc_head_block != heavy, log something somewhere in here
+                match &old_synced_connections.head_block_id {
+                    None => {
+                        debug!(block=%heavy_block_id, %rpc, "first consensus head");
+                        head_block_sender.send(heavy_block)?;
+                    }
+                    Some(old_block_id) => {
+                        match heavy_block_id.num.cmp(&old_block_id.num) {
+                            Ordering::Equal => {
+                                // multiple blocks with the same fork!
+                                if heavy_block_id.hash == old_block_id.hash {
+                                    // no change in hash. no need to use head_block_sender
+                                    debug!(heavy=%heavy_block_id, %rpc, "consensus head block")
+                                } else {
+                                    // hash changed
+                                    // TODO: better log
+                                    warn!(heavy=%heavy_block_id, %rpc, "fork detected");
+
+                                    // todo!("handle equal by updating the cannonical chain");
+
+                                    head_block_sender.send(heavy_block)?;
+                                }
+                            }
+                            Ordering::Less => {
+                                // this is unlikely but possible
+                                // TODO: better log
+                                debug!("chain rolled back");
+                                // todo!("handle less by removing higher blocks from the cannonical chain");
+                                head_block_sender.send(heavy_block)?;
+                            }
+                            Ordering::Greater => {
+                                debug!(heavy=%heavy_block_id, %rpc, "new head block");
+
+                                // todo!("handle greater by adding this block to and any missing parents to the cannonical chain");
+
+                                head_block_sender.send(heavy_block)?;
+                            }
+                        }
+                    }
                 }
+
+                return Ok(());
             }
+
+            // if we get here, something is wrong. clear synced connections
+            let empty_synced_connections = SyncedConnections::default();
+
+            let old_synced_connections = self
+                .synced_connections
+                .swap(Arc::new(empty_synced_connections));
+
+            // TODO: log different things depending on old_synced_connections
         }
-        // unlock self.blockchain_graphmap
-        drop(blockchain_guard);
 
+        return Ok(());
+
+        todo!("double check everything under this");
+
+        /*
         let soft_limit_met = heavy_sum_soft_limit >= self.min_sum_soft_limit;
         let num_synced_rpcs = heavy_rpcs.len() as u32;
 
@@ -419,11 +472,10 @@ impl Web3Connections {
                 // TODO: warn is too loud. if we are first starting, this is expected to happen
                 warn!(hash=%head_block_hash, num=?head_block_num, "not enough rpcs are synced to advance");
 
-                SyncedConnections::default()
+                None
             } else {
                 // TODO: wait until at least most of the rpcs have given their initial block?
                 // otherwise, if there is a syncing node that is fast, our first head block might not be good
-                // TODO: have a configurable "minimum rpcs" number that we can set
 
                 // TODO: sort by weight and soft limit? do we need an IndexSet, or is a Vec fine?
                 let conns = heavy_rpcs.into_iter().cloned().collect();
@@ -433,47 +485,62 @@ impl Web3Connections {
                     num: head_block_num,
                 };
 
-                SyncedConnections {
+                let new_synced_connections = SyncedConnections {
                     head_block_id: Some(head_block_id),
                     conns,
-                }
+                };
+
+                Some(new_synced_connections)
             }
         } else {
             // failure even after checking parent heads!
             // not enough servers are in sync to server traffic
             // TODO: at startup this is fine, but later its a problem
-            warn!("empty SyncedConnections");
-
-            SyncedConnections::default()
+            None
         };
 
-        let heavy_block_id = new_synced_connections.head_block_id.clone();
-        let new_synced_connections = Arc::new(new_synced_connections);
-        let num_connection_heads = connection_heads.len();
-        let total_conns = self.conns.len();
+        if let Some(new_synced_connections) = new_synced_connections {
+            let heavy_block_id = new_synced_connections.head_block_id.clone();
 
-        let old_synced_connections = self.synced_connections.swap(new_synced_connections);
+            let new_synced_connections = Arc::new(new_synced_connections);
 
-        match (&old_synced_connections.head_block_id, &heavy_block_id) {
-            (None, None) => warn!("no servers synced"),
-            (None, Some(heavy_block_id)) => {
-                debug!(block=%heavy_block_id, %rpc, "first consensus head");
-            }
-            (Some(_), None) => warn!("no longer synced!"),
-            (Some(old_block_id), Some(heavy_block_id)) => {
-                match heavy_block_id.num.cmp(&old_block_id.num) {
-                    Ordering::Equal => {
-                        todo!("handle equal")
-                    }
-                    Ordering::Less => {
-                        todo!("handle less")
-                    }
-                    Ordering::Greater => {
-                        todo!("handle greater")
+            let old_synced_connections = self.synced_connections.swap(new_synced_connections);
+
+            let num_connection_heads = connection_heads.len();
+            let total_conns = self.conns.len();
+
+            match (&old_synced_connections.head_block_id, &heavy_block_id) {
+                (None, None) => warn!("no servers synced"),
+                (None, Some(heavy_block_id)) => {
+                    debug!(block=%heavy_block_id, %rpc, "first consensus head");
+                }
+                (Some(_), None) => warn!("no longer synced!"),
+                (Some(old_block_id), Some(heavy_block_id)) => {
+                    debug_assert_ne!(heavy_block_id.num, U64::zero());
+
+                    match heavy_block_id.num.cmp(&old_block_id.num) {
+                        Ordering::Equal => {
+                            // multiple blocks with the same fork!
+                            debug!("fork detected");
+                            todo!("handle equal");
+                        }
+                        Ordering::Less => {
+                            // this seems unlikely
+                            warn!("chain rolled back");
+                            todo!("handle less");
+                        }
+                        Ordering::Greater => {
+                            info!(heavy=%heavy_block_id, %rpc, "new head block");
+
+                            todo!("handle greater");
+                        }
                     }
                 }
             }
+        } else {
+            todo!()
         }
+         */
         /*
         if old_synced_connections.head_block_id.is_none() && rpc_head_block.hash.is_some() {
             // this is fine. we have our first hash
@@ -509,10 +576,5 @@ impl Web3Connections {
             warn!(?soft_limit_met, %heavy_block_id, %old_head_hash, %rpc, "NO heavy head  {}/{}/{}", num_synced_rpcs, num_connection_heads, total_rpcs)
         }
         */
-
-        // TODO: the head hash changed. forward to any subscribers
-        head_block_sender.send(highest_work_block)?;
-
-        Ok(())
     }
 }

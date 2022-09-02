@@ -65,8 +65,6 @@ fn run(
     // start tokio's async runtime
     let rt = rt_builder.build()?;
 
-    // we use this worker count to also set our redis connection pool size
-    // TODO: think about this more
     let num_workers = rt.metrics().num_workers();
     debug!(?num_workers);
 
