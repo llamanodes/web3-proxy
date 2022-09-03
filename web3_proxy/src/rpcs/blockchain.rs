@@ -17,7 +17,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::{broadcast, watch};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 pub type ArcBlock = Arc<Block<TxHash>>;
 
@@ -272,7 +272,7 @@ impl Web3Connections {
             }
             _ => {
                 // TODO: warn is too verbose. this is expected if a node disconnects and has to reconnect
-                info!(%rpc, "Block without number or hash!");
+                trace!(%rpc, "Block without number or hash!");
 
                 connection_heads.remove(&rpc.name);
 

@@ -1,10 +1,13 @@
 [shared]
 chain_id = 1
 db_url = "mysql://root:dev_web3_proxy@dev-db:3306/dev_web3_proxy"
+# TODO: how do we find the optimal db_max_connections? too high actually ends up being slower
 db_max_connections = 99
 min_sum_soft_limit = 2000
 min_synced_rpcs = 2
 redis_url = "redis://dev-redis:6379/"
+# TODO: how do we find the optimal redis_max_connections? too high actually ends up being slower
+redis_max_connections = 99
 redirect_public_url = "https://llamanodes.com/free-rpc-stats"
 redirect_user_url = "https://llamanodes.com/user-rpc-stats/{{user_id}}"
 public_rate_limit_per_minute = 0

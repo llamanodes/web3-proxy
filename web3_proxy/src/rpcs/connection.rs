@@ -233,7 +233,7 @@ impl Web3Connection {
         // websocket doesn't need the http client
         let http_client = None;
 
-        info!(?self, "reconnecting");
+        info!(%self, "reconnecting");
 
         // since this lock is held open over an await, we use tokio's locking
         // TODO: timeout on this lock. if its slow, something is wrong
@@ -437,7 +437,7 @@ impl Web3Connection {
         block_sender: flume::Sender<BlockAndRpc>,
         block_map: BlockHashesMap,
     ) -> anyhow::Result<()> {
-        info!(?self, "watching new heads");
+        info!(%self, "watching new heads");
 
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
@@ -554,7 +554,7 @@ impl Web3Connection {
         self: Arc<Self>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
     ) -> anyhow::Result<()> {
-        info!(?self, "watching pending transactions");
+        info!(%self, "watching pending transactions");
 
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {

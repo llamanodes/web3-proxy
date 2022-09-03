@@ -42,7 +42,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{info, info_span, instrument, trace, warn, Instrument};
+use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
 
 // TODO: make this customizable?
@@ -322,7 +322,7 @@ impl Web3ProxyApp {
             redis_pool,
             stats: app_stats,
             // TODO: make the size configurable
-            // TODO: why does this need to be async but the other one doesn't?
+            // TODO: better type for this?
             user_cache: RwLock::new(FifoCountMap::new(1_000)),
         };
 
@@ -530,14 +530,12 @@ impl Web3ProxyApp {
         &self,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
-        trace!(?request, "proxy_web3_rpc");
+        debug!(?request, "proxy_web3_rpc");
 
         // even though we have timeouts on the requests to our backend providers,
         // we need a timeout for the incoming request so that retries don't run forever
         // TODO: take this as an optional argument. per user max? expiration time instead of duration?
         let max_time = Duration::from_secs(120);
-
-        // TODO: instrument this with a unique id
 
         let response = match request {
             JsonRpcRequestEnum::Single(request) => JsonRpcForwardedResponseEnum::Single(
@@ -548,7 +546,7 @@ impl Web3ProxyApp {
             ),
         };
 
-        trace!(?response, "Forwarding");
+        debug!(?response, "Forwarding");
 
         Ok(response)
     }
@@ -835,10 +833,13 @@ impl Web3ProxyApp {
                     self.cached_response(min_block_needed, &request).await?;
 
                 let response_cache = match cache_result {
-                    Ok(response) => {
+                    Ok(mut response) => {
                         let _ = self.active_requests.remove(&cache_key);
 
                         // TODO: if the response is cached, should it count less against the account's costs?
+
+                        // TODO: cache just the result part of the response?
+                        response.id = request.id;
 
                         return Ok(response);
                     }

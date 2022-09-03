@@ -10,7 +10,7 @@ use sea_orm::{
 };
 use std::{net::IpAddr, time::Duration};
 use tokio::time::Instant;
-use tracing::{debug, warn};
+use tracing::debug;
 use uuid::Uuid;
 
 pub enum RateLimitResult {
@@ -117,10 +117,11 @@ impl TryFrom<RateLimitResult> for RequestFrom {
 
 impl Web3ProxyApp {
     pub async fn rate_limit_by_ip(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
-        let rate_limiter_label = format!("ip-{}", ip);
-
         // TODO: dry this up with rate_limit_by_key
         if let Some(rate_limiter) = &self.rate_limiter {
+            let rate_limiter_label = format!("ip-{}", ip);
+
+            // TODO: query redis in the background so that users don't have to wait on this network request
             match rate_limiter
                 .throttle_label(&rate_limiter_label, None, 1)
                 .await
@@ -133,7 +134,8 @@ impl Web3ProxyApp {
                     return Ok(RateLimitResult::IpRateLimitExceeded(ip));
                 }
                 Ok(ThrottleResult::RetryNever) => {
-                    return Err(anyhow::anyhow!("blocked by rate limiter"))
+                    // TODO: prettier error for the user
+                    return Err(anyhow::anyhow!("blocked by rate limiter"));
                 }
                 Err(err) => {
                     // internal error, not rate limit being hit
@@ -142,8 +144,8 @@ impl Web3ProxyApp {
                 }
             }
         } else {
-            // TODO: if no redis, rate limit with a local cache?
-            warn!("no rate limiter!");
+            // TODO: if no redis, rate limit with a local cache? "warn!" probably isn't right
+            todo!("no rate limiter");
         }
 
         Ok(RateLimitResult::AllowedIp(ip))
@@ -197,6 +199,7 @@ impl Web3ProxyApp {
                         ))
                     }
                     None => {
+                        // TODO: think about this more
                         UserCacheValue::from((
                             // TODO: how long should this cache last? get this from config
                             Instant::now() + Duration::from_secs(60),
@@ -225,6 +228,7 @@ impl Web3ProxyApp {
 
         // user key is valid. now check rate limits
         if let Some(rate_limiter) = &self.rate_limiter {
+            // TODO: query redis in the background so that users don't have to wait on this network request
             if rate_limiter
                 .throttle_label(
                     &user_key.to_string(),
@@ -242,7 +246,7 @@ impl Web3ProxyApp {
             }
         } else {
             // TODO: if no redis, rate limit with a local cache?
-            unimplemented!("no redis. cannot rate limit")
+            todo!("no redis. cannot rate limit")
         }
 
         Ok(RateLimitResult::AllowedUser(user_data.user_id))

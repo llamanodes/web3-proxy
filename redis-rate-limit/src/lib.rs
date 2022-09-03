@@ -103,4 +103,8 @@ impl RedisRateLimit {
     pub async fn throttle(&self) -> anyhow::Result<ThrottleResult> {
         self.throttle_label("", None, 1).await
     }
+
+    pub fn max_requests_per_period(&self) -> u64 {
+        self.max_requests_per_period
+    }
 }
