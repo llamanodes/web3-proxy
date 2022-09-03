@@ -1,5 +1,6 @@
 use super::errors::{anyhow_error_into_response, FrontendErrorResponse};
 use crate::app::{UserCacheValue, Web3ProxyApp};
+use anyhow::Context;
 use axum::response::Response;
 use derive_more::From;
 use entities::user_keys;
@@ -151,6 +152,54 @@ impl Web3ProxyApp {
         Ok(RateLimitResult::AllowedIp(ip))
     }
 
+    pub(crate) async fn cache_user_data(&self, user_key: Uuid) -> anyhow::Result<UserCacheValue> {
+        let db = self.db_conn.as_ref().context("no database")?;
+
+        /// helper enum for query just a few columns instead of the entire table
+        #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
+        enum QueryAs {
+            UserId,
+            RequestsPerMinute,
+        }
+        // TODO: join the user table to this to return the User? we don't always need it
+        let user_data = match user_keys::Entity::find()
+            .select_only()
+            .column_as(user_keys::Column::UserId, QueryAs::UserId)
+            .column_as(
+                user_keys::Column::RequestsPerMinute,
+                QueryAs::RequestsPerMinute,
+            )
+            .filter(user_keys::Column::ApiKey.eq(user_key))
+            .filter(user_keys::Column::Active.eq(true))
+            .into_values::<_, QueryAs>()
+            .one(db)
+            .await?
+        {
+            Some((user_id, requests_per_minute)) => {
+                UserCacheValue::from((
+                    // TODO: how long should this cache last? get this from config
+                    Instant::now() + Duration::from_secs(60),
+                    user_id,
+                    requests_per_minute,
+                ))
+            }
+            None => {
+                // TODO: think about this more
+                UserCacheValue::from((
+                    // TODO: how long should this cache last? get this from config
+                    Instant::now() + Duration::from_secs(60),
+                    0,
+                    0,
+                ))
+            }
+        };
+
+        //  save for the next run
+        self.user_cache.write().insert(user_key, user_data);
+
+        Ok(user_data)
+    }
+
     pub async fn rate_limit_by_key(&self, user_key: Uuid) -> anyhow::Result<RateLimitResult> {
         // check the local cache
         let user_data = if let Some(cached_user) = self.user_cache.read().get(&user_key) {
@@ -168,58 +217,14 @@ impl Web3ProxyApp {
         };
 
         // if cache was empty, check the database
+        // TODO: i think there is a cleaner way to do this
         let user_data = if user_data.is_none() {
-            if let Some(db) = &self.db_conn {
-                /// helper enum for query just a few columns instead of the entire table
-                #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
-                enum QueryAs {
-                    UserId,
-                    RequestsPerMinute,
-                }
-                // TODO: join the user table to this to return the User? we don't always need it
-                let user_data = match user_keys::Entity::find()
-                    .select_only()
-                    .column_as(user_keys::Column::UserId, QueryAs::UserId)
-                    .column_as(
-                        user_keys::Column::RequestsPerMinute,
-                        QueryAs::RequestsPerMinute,
-                    )
-                    .filter(user_keys::Column::ApiKey.eq(user_key))
-                    .filter(user_keys::Column::Active.eq(true))
-                    .into_values::<_, QueryAs>()
-                    .one(db)
-                    .await?
-                {
-                    Some((user_id, requests_per_minute)) => {
-                        UserCacheValue::from((
-                            // TODO: how long should this cache last? get this from config
-                            Instant::now() + Duration::from_secs(60),
-                            user_id,
-                            requests_per_minute,
-                        ))
-                    }
-                    None => {
-                        // TODO: think about this more
-                        UserCacheValue::from((
-                            // TODO: how long should this cache last? get this from config
-                            Instant::now() + Duration::from_secs(60),
-                            0,
-                            0,
-                        ))
-                    }
-                };
-
-                //  save for the next run
-                self.user_cache.write().insert(user_key, user_data);
-
-                user_data
-            } else {
-                // TODO: rate limit with only local caches?
-                unimplemented!("no cache hit and no database connection")
-            }
+            self.cache_user_data(user_key)
+                .await
+                .context("no user data")?
         } else {
             // unwrap the cache's result
-            user_data.unwrap()
+            user_data.context("no user data")?
         };
 
         if user_data.user_id == 0 {

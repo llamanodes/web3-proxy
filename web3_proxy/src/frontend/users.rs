@@ -178,7 +178,7 @@ pub async fn post_login(
         .await
         .unwrap();
 
-    let (u_id, response) = match u {
+    let (u, uk, response) = match u {
         None => {
             let txn = db.begin().await?;
 
@@ -213,7 +213,7 @@ pub async fn post_login(
 
             let response = (StatusCode::CREATED, Json(response_json)).into_response();
 
-            (u.id, response)
+            (u, uk, response)
         }
         Some(u) => {
             // the user is already registered
@@ -232,17 +232,22 @@ pub async fn post_login(
 
             let response = (StatusCode::OK, Json(response_json)).into_response();
 
-            (u.id, response)
+            (u, uk, response)
         }
     };
 
     // TODO: set a session cookie with the bearer token?
+
     // save the bearer token in redis with a long (7 or 30 day?) expiry. or in database?
     let mut redis_conn = app.redis_conn().await?;
 
     let bearer_key = format!("bearer:{}", bearer_token);
 
-    redis_conn.set(bearer_key, u_id.to_string()).await?;
+    redis_conn.set(bearer_key, u.id.to_string()).await?;
+
+    // save the user data in redis with a short expiry
+    // TODO: we already have uk, so this could be more efficient. it works for now
+    app.cache_user_data(uk.api_key).await?;
 
     Ok(response)
 }

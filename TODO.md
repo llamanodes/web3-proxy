@@ -134,6 +134,9 @@
 - [ ] web3connection3.block(...) might wait forever. be sure to do it safely
 - [ ] search for all "todo!"
 - [ ] replace all `.context("no servers in sync")` with proper error type
+- [ ] when using a bunch of slow public servers, i see "no servers in sync" even when things should be right
+  - [ ] i think checking the parents of the heaviest chain works most of the time, but not always
+  - maybe iterate connection heads by total weight? i still think we need to include parent hashes
 
 ## V1
 
@@ -179,6 +182,7 @@
 - [ ] refactor from_anyhow_error to have consistent error codes and http codes. maybe implement the Error trait
 - [ ] when handling errors from axum parsing the Json...Enum, the errors don't get wrapped in json. i think we need a Layer
 - [ ] don't "unwrap" anywhere. give proper errors
+- [ ] tool to revoke bearer tokens that also clears redis
 
 new endpoints for users:
 - [x] GET /u/:api_key
