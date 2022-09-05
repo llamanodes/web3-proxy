@@ -12,19 +12,16 @@ use crate::rpcs::transactions::TxStatus;
 use crate::stats::AppStats;
 use anyhow::Context;
 use axum::extract::ws::Message;
-use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::DashMap;
 use derive_more::From;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, Bytes, TxHash, H256, U64};
-use fifomap::{FifoCountMap, FifoSizedMap};
 use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use futures::Future;
 use migration::{Migrator, MigratorTrait};
-use parking_lot::RwLock;
 use redis_rate_limit::bb8::PooledConnection;
 use redis_rate_limit::{
     bb8::{self, ErrorSink},
@@ -55,11 +52,10 @@ static APP_USER_AGENT: &str = concat!(
 
 /// block hash, method, params
 // TODO: better name
-type CacheKey = (H256, String, Option<String>);
+type ResponseCacheKey = (H256, String, Option<String>);
 
-type ResponseLrcCache = RwLock<FifoSizedMap<CacheKey, JsonRpcForwardedResponse>>;
-
-type ActiveRequestsMap = DashMap<CacheKey, watch::Receiver<bool>>;
+// TODO!! a RWLock on this made us super slow. But a DashMap makes this grow unbounded!
+type ResponseCache = DashMap<ResponseCacheKey, JsonRpcForwardedResponse>;
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
@@ -78,20 +74,20 @@ pub struct Web3ProxyApp {
     pub balanced_rpcs: Arc<Web3Connections>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     pub private_rpcs: Arc<Web3Connections>,
-    /// Track active requests so that we don't send the same query to multiple backends
-    pub active_requests: ActiveRequestsMap,
-    response_cache: ResponseLrcCache,
+    response_cache: ResponseCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
     head_block_receiver: watch::Receiver<ArcBlock>,
     pending_tx_sender: broadcast::Sender<TxStatus>,
+    pub active_requests: AtomicUsize,
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
     pub pending_transactions: Arc<DashMap<TxHash, TxStatus>>,
     pub rate_limiter: Option<RedisRateLimit>,
     pub redis_pool: Option<RedisPool>,
     pub stats: AppStats,
-    pub user_cache: RwLock<FifoCountMap<Uuid, UserCacheValue>>,
+    // TODO: this grows unbounded! Make a "SizedDashMap" that cleans up old rows with some garbage collection task
+    pub user_cache: DashMap<Uuid, UserCacheValue>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -304,16 +300,12 @@ impl Web3ProxyApp {
             )
         });
 
-        // keep the borrow checker happy
-        let response_cache_max_bytes = top_config.app.response_cache_max_bytes;
-
         let app = Self {
             config: top_config.app,
             balanced_rpcs,
             private_rpcs,
             active_requests: Default::default(),
-            // TODO: make the share configurable. or maybe take a number as bytes?
-            response_cache: RwLock::new(FifoSizedMap::new(response_cache_max_bytes, 100)),
+            response_cache: Default::default(),
             head_block_receiver,
             pending_tx_sender,
             pending_transactions,
@@ -323,7 +315,7 @@ impl Web3ProxyApp {
             stats: app_stats,
             // TODO: make the size configurable
             // TODO: better type for this?
-            user_cache: RwLock::new(FifoCountMap::new(1_000)),
+            user_cache: Default::default(),
         };
 
         let app = Arc::new(app);
@@ -530,7 +522,8 @@ impl Web3ProxyApp {
         &self,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
-        debug!(?request, "proxy_web3_rpc");
+        // TODO: this should probably be trace level
+        trace!(?request, "proxy_web3_rpc");
 
         // even though we have timeouts on the requests to our backend providers,
         // we need a timeout for the incoming request so that retries don't run forever
@@ -546,7 +539,8 @@ impl Web3ProxyApp {
             ),
         };
 
-        debug!(?response, "Forwarding");
+        // TODO: this should probably be trace level
+        trace!(?response, "Forwarding");
 
         Ok(response)
     }
@@ -593,10 +587,7 @@ impl Web3ProxyApp {
         // TODO: accept a block hash here also?
         min_block_needed: Option<&U64>,
         request: &JsonRpcRequest,
-    ) -> anyhow::Result<(
-        CacheKey,
-        Result<JsonRpcForwardedResponse, &ResponseLrcCache>,
-    )> {
+    ) -> anyhow::Result<Result<JsonRpcForwardedResponse, ResponseCacheKey>> {
         // TODO: inspect the request to pick the right cache
         // TODO: https://github.com/ethereum/web3.py/blob/master/web3/middleware/cache.py
 
@@ -617,20 +608,20 @@ impl Web3ProxyApp {
             request.params.clone().map(|x| x.to_string()),
         );
 
-        if let Some(response) = self.response_cache.read().get(&key) {
+        if let Some(response) = self.response_cache.get(&key) {
             // TODO: emit a stat
             trace!(?request.method, "cache hit!");
 
             // TODO: can we make references work? maybe put them in an Arc?
-            return Ok((key, Ok(response.to_owned())));
-        } else {
-            // TODO: emit a stat
-            trace!(?request.method, "cache miss!");
+            return Ok(Ok(response.to_owned()));
         }
 
-        let cache = &self.response_cache;
+        // TODO: another lock here so that we don't send the same request to a backend more than onces xzs
 
-        Ok((key, Err(cache)))
+        // TODO: emit a stat
+        trace!(?request.method, "cache miss!");
+
+        Ok(Err(key))
     }
 
     async fn proxy_web3_rpc_request(
@@ -828,63 +819,20 @@ impl Web3ProxyApp {
 
                 trace!(?min_block_needed, ?method);
 
-                // TODO: emit a stat on error. maybe with .map_err?
-                let (cache_key, cache_result) =
+                let cached_response_result =
                     self.cached_response(min_block_needed, &request).await?;
 
-                let response_cache = match cache_result {
-                    Ok(mut response) => {
-                        let _ = self.active_requests.remove(&cache_key);
+                // TODO: emit a stat on error. maybe with .map_err?
+                let cache_key = match cached_response_result {
+                    Ok(mut cache_result) => {
+                        // put our request id on the cached response
+                        // TODO: maybe only cache the inner result?
+                        cache_result.id = request.id;
 
-                        // TODO: if the response is cached, should it count less against the account's costs?
-
-                        // TODO: cache just the result part of the response?
-                        response.id = request.id;
-
-                        return Ok(response);
+                        return Ok(cache_result);
                     }
-                    Err(response_cache) => response_cache,
+                    Err(cache_key) => cache_key,
                 };
-
-                // check if this request is already in flight
-                // TODO: move this logic into an IncomingRequestHandler (ActiveRequestHandler has an rpc, but this won't)
-                let (incoming_tx, incoming_rx) = watch::channel(true);
-                let mut other_incoming_rx = None;
-                match self.active_requests.entry(cache_key.clone()) {
-                    DashMapEntry::Occupied(entry) => {
-                        other_incoming_rx = Some(entry.get().clone());
-                    }
-                    DashMapEntry::Vacant(entry) => {
-                        entry.insert(incoming_rx);
-                    }
-                }
-
-                if let Some(mut other_incoming_rx) = other_incoming_rx {
-                    // wait for the other request to finish. it might have finished successfully or with an error
-                    trace!("{:?} waiting on in-flight request", request);
-
-                    let _ = other_incoming_rx.changed().await;
-
-                    // now that we've waited, lets check the cache again
-                    if let Some(cached) = response_cache.read().get(&cache_key) {
-                        let _ = self.active_requests.remove(&cache_key);
-                        let _ = incoming_tx.send(false);
-
-                        // TODO: emit a stat
-                        trace!(
-                            "{:?} cache hit after waiting for in-flight request!",
-                            request
-                        );
-
-                        return Ok(cached.to_owned());
-                    } else {
-                        // TODO: emit a stat
-                        trace!(
-                            "{:?} cache miss after waiting for in-flight request!",
-                            request
-                        );
-                    }
-                }
 
                 let response = match method {
                     "temporarily disabled" => {
@@ -904,18 +852,14 @@ impl Web3ProxyApp {
 
                 // TODO: move this caching outside this match and cache some of the other responses?
                 // TODO: cache the warp::reply to save us serializing every time?
+                if self
+                    .response_cache
+                    .insert(cache_key.clone(), response.clone())
+                    .is_some()
                 {
-                    let mut response_cache = response_cache.write();
-
-                    if response_cache.insert(cache_key.clone(), response.clone()) {
-                    } else {
-                        // TODO: emit a stat instead? what else should be in the log
-                        trace!(?cache_key, "value too large for caching");
-                    }
+                    // TODO: we had another lock to prevent this, but its not worth the extra locking
+                    debug!("already cached")
                 }
-
-                let _ = self.active_requests.remove(&cache_key);
-                let _ = incoming_tx.send(false);
 
                 return Ok(response);
             }

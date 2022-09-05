@@ -1,7 +1,7 @@
 use crate::app::Web3ProxyApp;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use serde_json::json;
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
 /// Health check page for load balancers to use
 pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
@@ -19,7 +19,7 @@ pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoRe
     let body = json!({
         "balanced_rpcs": app.balanced_rpcs,
         "private_rpcs": app.private_rpcs,
-        "num_active_requests": app.active_requests.len(),
+        "num_active_requests": app.active_requests.load(Ordering::Acquire),
         "num_pending_transactions": app.pending_transactions.len(),
     });
 

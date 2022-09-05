@@ -253,6 +253,7 @@ pub async fn post_login(
 }
 
 /// the JSON input to the `post_user` handler
+/// This handles updating
 #[derive(Deserialize)]
 pub struct PostUser {
     primary_address: Address,
@@ -262,7 +263,7 @@ pub struct PostUser {
 }
 
 #[debug_handler]
-/// post to the user endpoint to modify your account
+/// post to the user endpoint to modify your existing account
 pub async fn post_user(
     AuthBearer(bearer_token): AuthBearer,
     ClientIp(ip): ClientIp,
@@ -271,9 +272,25 @@ pub async fn post_user(
 ) -> FrontendResult {
     let _ip = rate_limit_by_ip(&app, ip).await?;
 
-    ProtectedAction::PostUser
+    let user = ProtectedAction::PostUser
         .verify(app.as_ref(), bearer_token, &payload.primary_address)
         .await?;
+
+    let mut user: user::ActiveModel = user.into();
+
+    // TODO: rate limit by user, too?
+
+    if let Some(x) = payload.email {
+        if x.is_empty() {
+            user.email = sea_orm::Set(None);
+        } else {
+            user.email = sea_orm::Set(Some(x));
+        }
+    }
+
+    let db = app.db_conn.as_ref().unwrap();
+
+    user.save(db).await?;
 
     // let user = user::ActiveModel {
     //     address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
@@ -295,7 +312,7 @@ impl ProtectedAction {
         app: &Web3ProxyApp,
         bearer_token: String,
         primary_address: &Address,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<user::Model> {
         // get the attached address from redis for the given auth_token.
         let bearer_key = format!("bearer:{}", bearer_token);
 

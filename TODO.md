@@ -137,6 +137,8 @@
 - [ ] when using a bunch of slow public servers, i see "no servers in sync" even when things should be right
   - [ ] i think checking the parents of the heaviest chain works most of the time, but not always
   - maybe iterate connection heads by total weight? i still think we need to include parent hashes
+- [ ] some of the DashMaps grow unbounded! Make a "SizedDashMap" that cleans up old rows with some garbage collection task
+
 
 ## V1
 

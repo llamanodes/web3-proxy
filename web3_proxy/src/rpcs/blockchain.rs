@@ -17,7 +17,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::{broadcast, watch};
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 pub type ArcBlock = Arc<Block<TxHash>>;
 
@@ -60,10 +60,10 @@ impl Web3Connections {
                 Entry::Occupied(mut x) => {
                     let old_hash = x.insert(*block_hash);
 
-                    // if block_hash == &old_hash {
-                    //     // this block has already been saved
-                    //     return Ok(());
-                    // }
+                    if block_hash == &old_hash {
+                        // this block has already been saved
+                        return Ok(());
+                    }
 
                     // TODO: what should we do?
                     // TODO: if old_hash's number is > block_num, we need to remove more entries
@@ -284,19 +284,19 @@ impl Web3Connections {
         // iterate the known heads to find the highest_work_block
         let mut checked_heads = HashSet::new();
         let mut highest_work_block: Option<Ref<H256, ArcBlock>> = None;
-        for rpc_head_hash in connection_heads.values() {
-            if checked_heads.contains(rpc_head_hash) {
+        for conn_head_hash in connection_heads.values() {
+            if checked_heads.contains(conn_head_hash) {
                 // we already checked this head from another rpc
                 continue;
             }
             // don't check the same hash multiple times
-            checked_heads.insert(rpc_head_hash);
+            checked_heads.insert(conn_head_hash);
 
-            let rpc_head_block = if let Some(x) = self.block_hashes.get(rpc_head_hash) {
+            let rpc_head_block = if let Some(x) = self.block_hashes.get(conn_head_hash) {
                 x
             } else {
                 // TODO: why does this happen?
-                warn!(%rpc_head_hash, %rpc, "No block found");
+                warn!(%conn_head_hash, %rpc, "No block found");
                 continue;
             };
 
@@ -404,6 +404,7 @@ impl Web3Connections {
                     .synced_connections
                     .swap(Arc::new(new_synced_connections));
 
+                // TODO: add these to the log messages
                 let num_connection_heads = connection_heads.len();
                 let total_conns = self.conns.len();
 
@@ -422,11 +423,10 @@ impl Web3Connections {
                                 // multiple blocks with the same fork!
                                 if heavy_block_id.hash == old_block_id.hash {
                                     // no change in hash. no need to use head_block_sender
-                                    debug!(head=%heavy_block_id, %rpc, "con block")
+                                    debug!(head=%heavy_block_id, old=%old_block_id, %rpc, "con block")
                                 } else {
                                     // hash changed
-                                    // TODO: better log
-                                    warn!(heavy=%heavy_block_id, %rpc, "fork detected");
+                                    info!(heavy=%heavy_block_id, old=%old_block_id, %rpc, "unc block");
 
                                     // todo!("handle equal by updating the cannonical chain");
                                     self.save_block(&rpc_head_block, Some(true))?;

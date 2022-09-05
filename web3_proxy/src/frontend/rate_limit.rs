@@ -195,14 +195,14 @@ impl Web3ProxyApp {
         };
 
         //  save for the next run
-        self.user_cache.write().insert(user_key, user_data);
+        self.user_cache.insert(user_key, user_data);
 
         Ok(user_data)
     }
 
     pub async fn rate_limit_by_key(&self, user_key: Uuid) -> anyhow::Result<RateLimitResult> {
         // check the local cache
-        let user_data = if let Some(cached_user) = self.user_cache.read().get(&user_key) {
+        let user_data = if let Some(cached_user) = self.user_cache.get(&user_key) {
             // TODO: also include the time this value was last checked! otherwise we cache forever!
             if cached_user.expires_at < Instant::now() {
                 // old record found

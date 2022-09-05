@@ -16,7 +16,7 @@ entities = { path = "../entities" }
 migration = { path = "../migration" }
 redis-rate-limit = { path = "../redis-rate-limit" }
 
-anyhow = { version = "1.0.63", features = ["backtrace"] }
+anyhow = { version = "1.0.64", features = ["backtrace"] }
 arc-swap = "1.5.1"
 argh = "0.1.8"
 axum = { version = "0.5.15", features = ["headers", "serde_json", "tokio-tungstenite", "ws"] }

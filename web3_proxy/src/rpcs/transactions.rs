@@ -71,7 +71,6 @@ impl Web3Connections {
         }
 
         trace!(?pending_tx_id, "checking pending_transactions on {}", rpc);
-
         if self.pending_transactions.contains_key(&pending_tx_id) {
             // this transaction has already been processed
             return Ok(());
