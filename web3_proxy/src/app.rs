@@ -39,7 +39,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
+use tracing::{info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
 
 // TODO: make this customizable?
@@ -151,7 +151,6 @@ impl Web3ProxyApp {
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
     )> {
         // safety checks on the config
-        debug!("redirect_user_url: {}", top_config.app.redirect_user_url);
         assert!(
             top_config.app.redirect_user_url.contains("{{user_id}}"),
             "redirect user url must contain \"{{user_id}}\""

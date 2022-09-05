@@ -58,7 +58,7 @@ impl OpenRequestHandle {
         while provider.is_none() {
             match self.0.provider.read().await.as_ref() {
                 None => {
-                    warn!(rpc=?self.0, "no provider!");
+                    warn!(rpc=%self.0, "no provider!");
                     // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
                     // TODO: sleep how long? subscribe to something instead?
                     sleep(Duration::from_millis(100)).await

@@ -157,7 +157,7 @@ impl Web3Connection {
         Ok((new_connection, handle))
     }
 
-    #[instrument]
+    #[instrument(skip_all)]
     async fn check_block_data_limit(self: &Arc<Self>) -> anyhow::Result<Option<u64>> {
         let mut limit = None;
 
@@ -166,7 +166,7 @@ impl Web3Connection {
 
             // TODO: wait until head block is set outside the loop? if we disconnect while starting we could actually get 0 though
             while head_block_num == U64::zero() {
-                warn!("no head block");
+                warn!(rpc=%self, "no head block yet. retrying");
 
                 // TODO: subscribe to a channel instead of polling? subscribe to http_interval_sender?
                 sleep(Duration::from_secs(1)).await;
@@ -191,7 +191,7 @@ impl Web3Connection {
                 )
                 .await;
 
-            trace!(?archive_result, %self);
+            trace!(?archive_result, rpc=%self);
 
             if archive_result.is_ok() {
                 limit = Some(block_data_limit);
@@ -298,7 +298,7 @@ impl Web3Connection {
                     // self got the head block first. unfortunately its missing a necessary field
                     // keep this even after https://github.com/ledgerwatch/erigon/issues/5190 is closed.
                     // there are other clients and we might have to use a third party without the td fix.
-                    trace!(rpc=?self, ?new_hash, "total_difficulty missing");
+                    trace!(rpc=%self, ?new_hash, "total_difficulty missing");
                     // todo: this can wait forever!
                     let complete_head_block: Block<TxHash> = self
                         .wait_for_request_handle()
@@ -382,7 +382,7 @@ impl Web3Connection {
 
             if futures.is_empty() {
                 // TODO: is there a better way to make a channel that is never ready?
-                info!(?self, "no-op subscription");
+                info!(rpc=%self, "no-op subscription");
                 return Ok(());
             }
 
@@ -393,7 +393,7 @@ impl Web3Connection {
                         // TODO: exponential backoff
                         let retry_in = Duration::from_secs(1);
                         warn!(
-                            ?self,
+                            rpc=%self,
                             "subscription exited. Attempting to reconnect in {:?}. {:?}",
                             retry_in,
                             err
@@ -404,7 +404,7 @@ impl Web3Connection {
                         // TODO: this isn't going to work. it will get in a loop with newHeads
                         self.reconnect(block_sender.clone()).await?;
                     } else {
-                        error!(?self, ?err, "subscription exited");
+                        error!(rpc=%self, ?err, "subscription exited");
                         return Err(err);
                     }
                 }
@@ -490,12 +490,12 @@ impl Web3Connection {
                                 broadcast::error::RecvError::Lagged(lagged) => {
                                     // querying the block was delayed
                                     // this can happen if tokio is very busy or waiting for requests limits took too long
-                                    warn!(?err, ?self, "http interval lagging by {}!", lagged);
+                                    warn!(?err, rpc=%self, "http interval lagging by {}!", lagged);
                                 }
                             }
                         }
 
-                        trace!(?self, "ok http interval");
+                        trace!(rpc=%self, "ok http interval");
                     }
                 }
                 Web3Provider::Ws(provider) => {
@@ -526,7 +526,7 @@ impl Web3Connection {
                         .await?;
                     }
 
-                    warn!(?self, "subscription ended");
+                    warn!(rpc=%self, "subscription ended");
                 }
             }
         }
@@ -588,7 +588,7 @@ impl Web3Connection {
                         // TODO: periodically check for listeners. if no one is subscribed, unsubscribe and wait for a subscription
                     }
 
-                    warn!(?self, "subscription ended");
+                    warn!(rpc=%self, "subscription ended");
                 }
             }
         }
@@ -644,7 +644,7 @@ impl Web3Connection {
                     // save the smallest retry_after. if nothing succeeds, return an Err with retry_after in it
                     // TODO: use tracing better
                     // TODO: i'm seeing "Exhausted rate limit on moralis: 0ns". How is it getting 0?
-                    warn!(?retry_at, ?self, "Exhausted rate limit");
+                    warn!(?retry_at, rpc=%self, "Exhausted rate limit");
 
                     return Ok(OpenRequestResult::RetryAt(retry_at.into()));
                 }

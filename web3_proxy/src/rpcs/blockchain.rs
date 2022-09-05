@@ -313,7 +313,7 @@ impl Web3Connections {
         // clone to release the read lock on self.block_hashes
         if let Some(mut maybe_head_block) = highest_work_block {
             // track rpcs on this heaviest chain so we can build a new SyncedConnections
-            let mut heavy_rpcs: Vec<&Arc<Web3Connection>> = vec![];
+            let mut heavy_rpcs = HashSet::<&String>::new();
             // a running total of the soft limits covered by the heavy rpcs
             let mut heavy_sum_soft_limit: u32 = 0;
             // TODO: also track heavy_sum_hard_limit?
@@ -335,7 +335,7 @@ impl Web3Connections {
                     }
 
                     if let Some(rpc) = self.conns.get(conn_name) {
-                        heavy_rpcs.push(rpc);
+                        heavy_rpcs.insert(conn_name);
                         heavy_sum_soft_limit += rpc.soft_limit;
                     } else {
                         warn!("connection missing")
@@ -366,9 +366,27 @@ impl Web3Connections {
                         break;
                     }
                 }
+            }
 
+            // TODO: if heavy_rpcs.is_empty, try another method of finding the head block
+
+            // we've done all the searching for the heaviest block that we can
+            if heavy_rpcs.is_empty() {
+                // if we get here, something is wrong. clear synced connections
+                let empty_synced_connections = SyncedConnections::default();
+
+                let old_synced_connections = self
+                    .synced_connections
+                    .swap(Arc::new(empty_synced_connections));
+
+                // TODO: log different things depending on old_synced_connections
+                warn!("no consensus head!");
+            } else {
                 // success! this block has enough soft limit and nodes on it (or on later blocks)
-                let conns = heavy_rpcs.into_iter().cloned().collect();
+                let conns: Vec<Arc<Web3Connection>> = heavy_rpcs
+                    .into_iter()
+                    .filter_map(|conn_name| self.conns.get(conn_name).cloned())
+                    .collect();
 
                 let heavy_block = maybe_head_block;
 
@@ -376,6 +394,11 @@ impl Web3Connections {
                 let heavy_num = heavy_block.number.expect("head blocks always have numbers");
 
                 debug_assert_ne!(heavy_num, U64::zero());
+
+                // TODO: add these to the log messages
+                let num_consensus_rpcs = conns.len();
+                let num_connection_heads = connection_heads.len();
+                let total_conns = self.conns.len();
 
                 let heavy_block_id = BlockId {
                     hash: heavy_hash,
@@ -391,14 +414,10 @@ impl Web3Connections {
                     .synced_connections
                     .swap(Arc::new(new_synced_connections));
 
-                // TODO: add these to the log messages
-                let num_connection_heads = connection_heads.len();
-                let total_conns = self.conns.len();
-
                 // TODO: if the rpc_head_block != heavy, log something somewhere in here
                 match &old_synced_connections.head_block_id {
                     None => {
-                        debug!(block=%heavy_block_id, %rpc, "first consensus head");
+                        debug!(block=%heavy_block_id, %rpc, "first consensus head {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                         self.save_block(&rpc_head_block, true).await?;
 
@@ -410,10 +429,10 @@ impl Web3Connections {
                                 // multiple blocks with the same fork!
                                 if heavy_block_id.hash == old_block_id.hash {
                                     // no change in hash. no need to use head_block_sender
-                                    debug!(head=%heavy_block_id, old=%old_block_id, %rpc, "con block")
+                                    debug!(head=%heavy_block_id, %rpc, "con block {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns)
                                 } else {
                                     // hash changed
-                                    info!(heavy=%heavy_block_id, old=%old_block_id, %rpc, "unc block");
+                                    info!(heavy=%heavy_block_id, old=%old_block_id, %rpc, "unc block {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                                     // todo!("handle equal by updating the cannonical chain");
                                     self.save_block(&rpc_head_block, true).await?;
@@ -424,7 +443,7 @@ impl Web3Connections {
                             Ordering::Less => {
                                 // this is unlikely but possible
                                 // TODO: better log
-                                warn!(head=%heavy_block_id, %rpc, "chain rolled back");
+                                warn!(head=%heavy_block_id, %rpc, "chain rolled back {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                                 self.save_block(&rpc_head_block, true).await?;
 
@@ -432,7 +451,7 @@ impl Web3Connections {
                                 head_block_sender.send(heavy_block)?;
                             }
                             Ordering::Greater => {
-                                debug!(head=%heavy_block_id, %rpc, "new block");
+                                debug!(head=%heavy_block_id, %rpc, "new block {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                                 // todo!("handle greater by adding this block to and any missing parents to the cannonical chain");
 
@@ -443,18 +462,7 @@ impl Web3Connections {
                         }
                     }
                 }
-
-                return Ok(());
             }
-
-            // if we get here, something is wrong. clear synced connections
-            let empty_synced_connections = SyncedConnections::default();
-
-            let old_synced_connections = self
-                .synced_connections
-                .swap(Arc::new(empty_synced_connections));
-
-            // TODO: log different things depending on old_synced_connections
         }
 
         Ok(())
