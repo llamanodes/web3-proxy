@@ -139,7 +139,11 @@
   - maybe iterate connection heads by total weight? i still think we need to include parent hashes
 - [x] some of the DashMaps grow unbounded! Make/find a "SizedDashMap" that cleans up old rows with some garbage collection task
   - moka is exactly what we need
-- [ ] add size limits to all the Caches
+- [ ] add configurable size limits to all the Caches
+- [ ] i see "No block found" sometimes. Not sure why since reads should happen after writes
+- [ ] when there are a LOT of concurrent requests, I see an error. i thought that was a problem with redis cell, but it happens with my simpler rate limit
+  - [ ] WARN http_request: redis_rate_limit::errors: redis error err=Response was of incompatible type: "Response type not string compatible." (response was int(500237)) id=01GC6514JWN5PS1NCWJCGJTC94 method=POST
+  - [ ] maybe fix this and then put redis-cell back?
 
 ## V1
 
