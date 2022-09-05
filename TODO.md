@@ -144,9 +144,13 @@
 - [ ] when there are a LOT of concurrent requests, I see an error. i thought that was a problem with redis cell, but it happens with my simpler rate limit
   - [ ] WARN http_request: redis_rate_limit::errors: redis error err=Response was of incompatible type: "Response type not string compatible." (response was int(500237)) id=01GC6514JWN5PS1NCWJCGJTC94 method=POST
   - [ ] maybe fix this and then put redis-cell back?
+- [ ] benchmarks from https://github.com/curvefi/curve-api
 
 ## V1
 
+- [ ] make rate limits check in the background
+  - right now every single request requires calling incr on redis
+  - instead, we should check a local cache for the current rate limit (+1) and spawn an update to the local cache from redis in the background.
 - [ ] benchmarks of the different Cache implementations (futures vs dash)
 - [ ] benchmarks from https://github.com/llamafolio/llamafolio-api/
 - [ ] benchmarks from ethspam and versus
