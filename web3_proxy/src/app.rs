@@ -39,7 +39,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{debug, error, info, info_span, instrument, trace, warn, Instrument};
+use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
 
 // TODO: make this customizable?
@@ -590,7 +590,7 @@ impl Web3ProxyApp {
         }
     }
 
-    async fn cached_response(
+    async fn cached_response_or_key(
         &self,
         // TODO: accept a block hash here also?
         min_block_needed: Option<&U64>,
@@ -829,7 +829,10 @@ impl Web3ProxyApp {
                 trace!(?min_block_needed, ?method);
 
                 // TODO: emit a stat on error. maybe with .map_err?
-                let cache_key = match self.cached_response(min_block_needed, &request).await? {
+                let cache_key = match self
+                    .cached_response_or_key(min_block_needed, &request)
+                    .await?
+                {
                     Ok(mut cache_result) => {
                         // we got a cache hit! no need to do any backend requests.
 
