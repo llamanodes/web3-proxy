@@ -272,7 +272,7 @@ impl Web3Connections {
         // iterate the known heads to find the highest_work_block
         let mut checked_heads = HashSet::new();
         let mut highest_work_block: Option<ArcBlock> = None;
-        for conn_head_hash in connection_heads.values() {
+        for (conn_name, conn_head_hash) in connection_heads.iter() {
             if checked_heads.contains(conn_head_hash) {
                 // we already checked this head from another rpc
                 continue;
@@ -280,18 +280,17 @@ impl Web3Connections {
             // don't check the same hash multiple times
             checked_heads.insert(conn_head_hash);
 
-            let rpc_head_block = if let Some(x) = self.block_hashes.get(conn_head_hash) {
+            let conn_head_block = if let Some(x) = self.block_hashes.get(conn_head_hash) {
                 x
             } else {
                 // TODO: why does this happen?
-                warn!(%conn_head_hash, %rpc, "No block found");
+                warn!(%conn_head_hash, %conn_name, "No block found");
                 continue;
             };
 
-            match &rpc_head_block.total_difficulty {
+            match &conn_head_block.total_difficulty {
                 None => {
-                    // no total difficulty. this is a bug
-                    unimplemented!("block is missing total difficulty");
+                    panic!("block is missing total difficulty. this is a bug");
                 }
                 Some(td) => {
                     // if this is the first block we've tried
@@ -305,7 +304,7 @@ impl Web3Connections {
                                 .as_ref()
                                 .expect("there should always be total difficulty here")
                     {
-                        highest_work_block = Some(rpc_head_block);
+                        highest_work_block = Some(conn_head_block);
                     }
                 }
             }
