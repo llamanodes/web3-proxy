@@ -2,7 +2,6 @@ use super::blockchain::BlockId;
 use super::connection::Web3Connection;
 use super::connections::Web3Connections;
 use ethers::prelude::{H256, U64};
-use indexmap::IndexSet;
 use serde::Serialize;
 use std::fmt;
 use std::sync::Arc;
@@ -15,7 +14,7 @@ pub struct SyncedConnections {
     pub(super) head_block_id: Option<BlockId>,
     // TODO: this should be able to serialize, but it isn't
     #[serde(skip_serializing)]
-    pub(super) conns: IndexSet<Arc<Web3Connection>>,
+    pub(super) conns: Vec<Arc<Web3Connection>>,
 }
 
 impl fmt::Debug for SyncedConnections {

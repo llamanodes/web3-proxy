@@ -243,6 +243,7 @@ impl Web3Connection {
 
         // tell the block subscriber that we don't have any blocks
         if let Some(block_sender) = block_sender {
+            // TODO: maybe it would be better do send a "None" or an Option<Arc<Block<TxHash>>>
             block_sender
                 .send_async((Arc::new(Block::default()), self.clone()))
                 .await
