@@ -40,7 +40,7 @@ pub struct Web3Connection {
     /// Lower weight are higher priority when sending requests
     pub(super) weight: u32,
     // TODO: async lock?
-    pub(super) head_block: RwLock<BlockId>,
+    pub(super) head_block_id: RwLock<BlockId>,
 }
 
 impl Web3Connection {
@@ -86,7 +86,7 @@ impl Web3Connection {
             hard_limit,
             soft_limit,
             block_data_limit: Default::default(),
-            head_block: RwLock::new(Default::default()),
+            head_block_id: RwLock::new(Default::default()),
             weight,
         };
 
@@ -162,7 +162,7 @@ impl Web3Connection {
         let mut limit = None;
 
         for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
-            let mut head_block_num = self.head_block.read().num;
+            let mut head_block_num = self.head_block_id.read().num;
 
             // TODO: wait until head block is set outside the loop? if we disconnect while starting we could actually get 0 though
             while head_block_num == U64::zero() {
@@ -171,7 +171,7 @@ impl Web3Connection {
                 // TODO: subscribe to a channel instead of polling? subscribe to http_interval_sender?
                 sleep(Duration::from_secs(1)).await;
 
-                head_block_num = self.head_block.read().num;
+                head_block_num = self.head_block_id.read().num;
             }
 
             // TODO: subtract 1 from block_data_limit for safety?
@@ -216,7 +216,7 @@ impl Web3Connection {
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
         let block_data_limit: U64 = self.block_data_limit();
 
-        let newest_block_num = self.head_block.read().num;
+        let newest_block_num = self.head_block_id.read().num;
 
         let oldest_block_num = newest_block_num
             .saturating_sub(block_data_limit)
@@ -322,7 +322,7 @@ impl Web3Connection {
                 // save the block so we don't send the same one multiple times
                 // also save so that archive checks can know how far back to query
                 {
-                    let mut head_block = self.head_block.write();
+                    let mut head_block = self.head_block_id.write();
 
                     head_block.hash = new_hash;
                     head_block.num = new_num;
@@ -703,7 +703,7 @@ impl Serialize for Web3Connection {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Connection", 4)?;
+        let mut state = serializer.serialize_struct("Web3Connection", 5)?;
 
         // the url is excluded because it likely includes private information. just show the name
         state.serialize_field("name", &self.name)?;
@@ -717,6 +717,9 @@ impl Serialize for Web3Connection {
             "active_requests",
             &self.active_requests.load(atomic::Ordering::Relaxed),
         )?;
+
+        let head_block_id = &*self.head_block_id.read();
+        state.serialize_field("head_block_id", head_block_id)?;
 
         state.end()
     }
