@@ -331,6 +331,11 @@ impl Web3Connections {
                 // find all rpcs with maybe_head_block as their current head
                 for (conn_name, conn_head_hash) in connection_heads.iter() {
                     if conn_head_hash != maybe_head_hash {
+                        // connection is not on the desired block
+                        continue;
+                    }
+                    if heavy_rpcs.contains(conn_name) {
+                        // connection is on a child block
                         continue;
                     }
 
