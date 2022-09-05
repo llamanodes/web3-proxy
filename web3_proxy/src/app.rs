@@ -153,11 +153,8 @@ impl Web3ProxyApp {
         // safety checks on the config
         debug!("redirect_user_url: {}", top_config.app.redirect_user_url);
         assert!(
-            top_config
-                .app
-                .redirect_user_url
-                .contains("{{user_address}}"),
-            "redirect user url must contain \"{{user_address}}\""
+            top_config.app.redirect_user_url.contains("{{user_id}}"),
+            "redirect user url must contain \"{{user_id}}\""
         );
 
         // first, we connect to mysql and make sure the latest migrations have run
