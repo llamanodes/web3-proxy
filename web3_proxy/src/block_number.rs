@@ -119,7 +119,7 @@ pub fn block_needed(
             }
 
             if let Some(x) = obj.get("blockHash") {
-                // TODO: check a linkedhashmap of recent hashes
+                // TODO: check a Cache of recent hashes
                 // TODO: error if fromBlock or toBlock were set
                 todo!("handle blockHash {}", x);
             }
@@ -133,7 +133,7 @@ pub fn block_needed(
             return None;
         }
         "eth_getTransactionByBlockHashAndIndex" => {
-            // TODO: check a linkedhashmap of recent hashes
+            // TODO: check a Cache of recent hashes
             // try full nodes first. retry will use archive
             return None;
         }
@@ -145,13 +145,13 @@ pub fn block_needed(
             return None;
         }
         "eth_getUncleByBlockHashAndIndex" => {
-            // TODO: check a linkedhashmap of recent hashes
+            // TODO: check a Cache of recent hashes
             // try full nodes first. retry will use archive
             return None;
         }
         "eth_getUncleByBlockNumberAndIndex" => 0,
         "eth_getUncleCountByBlockHash" => {
-            // TODO: check a linkedhashmap of recent hashes
+            // TODO: check a Cache of recent hashes
             // try full nodes first. retry will use archive
             return None;
         }

@@ -137,11 +137,13 @@
 - [ ] when using a bunch of slow public servers, i see "no servers in sync" even when things should be right
   - [ ] i think checking the parents of the heaviest chain works most of the time, but not always
   - maybe iterate connection heads by total weight? i still think we need to include parent hashes
-- [ ] some of the DashMaps grow unbounded! Make a "SizedDashMap" that cleans up old rows with some garbage collection task
-
+- [x] some of the DashMaps grow unbounded! Make/find a "SizedDashMap" that cleans up old rows with some garbage collection task
+  - moka is exactly what we need
+- [ ] add size limits to all the Caches
 
 ## V1
 
+- [ ] benchmarks of the different Cache implementations (futures vs dash)
 - [ ] benchmarks from https://github.com/llamafolio/llamafolio-api/
 - [ ] benchmarks from ethspam and versus
 - [ ] benchmarks from other things

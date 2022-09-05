@@ -9,14 +9,13 @@ use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
 use arc_swap::ArcSwap;
 use counter::Counter;
-use dashmap::DashMap;
 use derive_more::From;
 use ethers::prelude::{Block, ProviderError, TxHash, H256, U64};
 use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
-use parking_lot::RwLock;
+use moka::future::Cache;
 use petgraph::graphmap::DiGraphMap;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
@@ -25,10 +24,10 @@ use std::cmp;
 use std::cmp::Reverse;
 use std::fmt;
 use std::sync::Arc;
+use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{broadcast, watch};
 use tokio::task;
-use tokio::time::{interval, sleep, sleep_until, MissedTickBehavior};
-use tokio::time::{Duration, Instant};
+use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{error, info, instrument, trace, warn};
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
@@ -37,15 +36,15 @@ pub struct Web3Connections {
     pub(super) conns: HashMap<String, Arc<Web3Connection>>,
     /// any requests will be forwarded to one (or more) of these connections
     pub(super) synced_connections: ArcSwap<SyncedConnections>,
-    pub(super) pending_transactions: Arc<DashMap<TxHash, TxStatus>>,
+    pub(super) pending_transactions: Cache<TxHash, TxStatus>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
     pub(super) block_hashes: BlockHashesMap,
     /// blocks on the heaviest chain
-    pub(super) block_numbers: DashMap<U64, H256>,
+    pub(super) block_numbers: Cache<U64, H256>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// TODO: what should we use for edges?
-    pub(super) blockchain_graphmap: RwLock<DiGraphMap<H256, u32>>,
+    pub(super) blockchain_graphmap: AsyncRwLock<DiGraphMap<H256, u32>>,
     pub(super) min_synced_rpcs: usize,
     pub(super) min_sum_soft_limit: u32,
 }
@@ -63,7 +62,7 @@ impl Web3Connections {
         min_sum_soft_limit: u32,
         min_synced_rpcs: usize,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
-        pending_transactions: Arc<DashMap<TxHash, TxStatus>>,
+        pending_transactions: Cache<TxHash, TxStatus>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) =
@@ -168,12 +167,16 @@ impl Web3Connections {
 
         let synced_connections = SyncedConnections::default();
 
+        // TODO: sizing and expiration on these caches!
+        let block_hashes = Cache::new(10000);
+        let block_numbers = Cache::new(10000);
+
         let connections = Arc::new(Self {
             conns: connections,
             synced_connections: ArcSwap::new(Arc::new(synced_connections)),
             pending_transactions,
-            block_hashes: Default::default(),
-            block_numbers: Default::default(),
+            block_hashes,
+            block_numbers,
             blockchain_graphmap: Default::default(),
             min_sum_soft_limit,
             min_synced_rpcs,

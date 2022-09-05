@@ -215,10 +215,10 @@ mod tests {
                 default_requests_per_minute: 6_000_000,
                 min_sum_soft_limit: 1,
                 min_synced_rpcs: 1,
-                public_rate_limit_per_minute: 0,
+                public_rate_limit_per_minute: 6_000_000,
                 response_cache_max_bytes: 10_usize.pow(7),
                 redirect_public_url: "example.com/".to_string(),
-                redirect_user_url: "example.com/users/{user_address}".to_string(),
+                redirect_user_url: "example.com/{{user_address}}".to_string(),
                 ..Default::default()
             },
             balanced_rpcs: HashMap::from([

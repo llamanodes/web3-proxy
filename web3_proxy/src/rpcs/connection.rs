@@ -5,7 +5,6 @@ use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
 use anyhow::Context;
-use dashmap::mapref::entry::Entry;
 use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
@@ -36,6 +35,7 @@ pub struct Web3Connection {
     hard_limit: Option<RedisRateLimit>,
     /// used for load balancing to the least loaded server
     pub(super) soft_limit: u32,
+    /// TODO: have an enum for this so that "no limit" prints pretty
     block_data_limit: AtomicU64,
     /// Lower weight are higher priority when sending requests
     pub(super) weight: u32,
@@ -280,58 +280,42 @@ impl Web3Connection {
                 // TODO: is unwrap_or_default ok? we might have an empty block
                 let new_hash = new_head_block.hash.unwrap_or_default();
 
-                let mut td_is_needed = new_head_block.total_difficulty.is_none();
-
                 // if we already have this block saved, we don't need to store this copy
-                // be careful with the entry api! awaits during this are a very bad idea.
-                new_head_block = match block_map.entry(new_hash) {
-                    Entry::Vacant(x) => {
-                        // only save the block if it has a total difficulty!
-                        if !td_is_needed {
-                            x.insert(new_head_block).clone()
-                        } else {
-                            new_head_block
-                        }
-                    }
-                    Entry::Occupied(x) => {
-                        let existing_block = x.get().clone();
+                // TODO: small race here
+                new_head_block = if let Some(existing_block) = block_map.get(&new_hash) {
+                    // we only save blocks with a total difficulty
+                    debug_assert!(existing_block.total_difficulty.is_some());
+                    existing_block
+                } else if new_head_block.total_difficulty.is_some() {
+                    // this block has a total difficulty, it is safe to use
+                    block_map.insert(new_hash, new_head_block).await;
 
-                        // we only save blocks with a total difficulty
-                        debug_assert!(existing_block.total_difficulty.is_some());
-                        td_is_needed = false;
-
-                        existing_block
-                    }
-                };
-
-                if td_is_needed {
+                    // we get instead of return new_head_block just in case there was a race
+                    // TODO: but how bad is this race? it might be fine
+                    block_map.get(&new_hash).expect("we just inserted")
+                } else {
+                    // Cache miss and NO TOTAL DIFFICULTY!
                     // self got the head block first. unfortunately its missing a necessary field
                     // keep this even after https://github.com/ledgerwatch/erigon/issues/5190 is closed.
                     // there are other clients and we might have to use a third party without the td fix.
                     trace!(rpc=?self, ?new_hash, "total_difficulty missing");
-                    // todo: this can wait forever
+                    // todo: this can wait forever!
                     let complete_head_block: Block<TxHash> = self
                         .wait_for_request_handle()
                         .await?
                         .request("eth_getBlockByHash", (new_hash, false))
                         .await?;
 
-                    new_head_block = match block_map.entry(new_hash) {
-                        Entry::Vacant(x) => {
-                            // still vacant! self is still the leader
-                            // now we definitely have total difficulty, so save
-                            x.insert(Arc::new(complete_head_block)).clone()
-                        }
-                        Entry::Occupied(x) => {
-                            let existing_block = x.get().clone();
+                    debug_assert!(complete_head_block.total_difficulty.is_some());
 
-                            // we only save blocks with a total difficulty
-                            debug_assert!(existing_block.total_difficulty.is_some());
+                    block_map
+                        .insert(new_hash, Arc::new(complete_head_block))
+                        .await;
 
-                            existing_block
-                        }
-                    };
-                }
+                    // we get instead of return new_head_block just in case there was a race
+                    // TODO: but how bad is this race? it might be fine
+                    block_map.get(&new_hash).expect("we just inserted")
+                };
 
                 let new_num = new_head_block.number.unwrap_or_default();
 

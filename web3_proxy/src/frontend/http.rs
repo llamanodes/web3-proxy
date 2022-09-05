@@ -20,7 +20,9 @@ pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoRe
         "balanced_rpcs": app.balanced_rpcs,
         "private_rpcs": app.private_rpcs,
         "num_active_requests": app.active_requests.load(Ordering::Acquire),
-        "num_pending_transactions": app.pending_transactions.len(),
+        // TODO: include number of items?
+        "pending_transactions_count": app.pending_transactions.entry_count(),
+        "pending_transactions_size": app.pending_transactions.weighted_size(),
     });
 
     (StatusCode::OK, Json(body))

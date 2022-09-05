@@ -1,8 +1,6 @@
 [workspace]
 members = [
   "entities",
-  "fifomap",
-  "linkedhashmap",
   "migration",
   "redis-rate-limit",
   "web3_proxy",

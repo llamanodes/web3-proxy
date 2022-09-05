@@ -9,7 +9,7 @@ redis_url = "redis://dev-redis:6379/"
 # TODO: how do we find the optimal redis_max_connections? too high actually ends up being slower
 redis_max_connections = 99
 redirect_public_url = "https://llamanodes.com/free-rpc-stats"
-redirect_user_url = "https://llamanodes.com/user-rpc-stats/{{user_id}}"
+redirect_user_url = "https://llamanodes.com/user-rpc-stats/{{user_address}}"
 public_rate_limit_per_minute = 0
 # 1GB of cache
 response_cache_max_bytes = 10000000000

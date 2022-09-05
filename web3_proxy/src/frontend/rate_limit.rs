@@ -195,7 +195,7 @@ impl Web3ProxyApp {
         };
 
         //  save for the next run
-        self.user_cache.insert(user_key, user_data);
+        self.user_cache.insert(user_key, user_data).await;
 
         Ok(user_data)
     }
@@ -209,7 +209,7 @@ impl Web3ProxyApp {
                 None
             } else {
                 // this key was active in the database recently
-                Some(*cached_user)
+                Some(cached_user)
             }
         } else {
             // cache miss

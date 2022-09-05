@@ -72,7 +72,7 @@ pub async fn user_websocket_handler(
             // TODO: store this on the app and use register_template?
             let reg = Handlebars::new();
 
-            // TODO: show the user's address, not their id (remember to update the checks for {{user_id}} in app.rs)
+            // TODO: show the user's address, not their id (remember to update the checks for {{user_address}}} in app.rs)
             // TODO: query to get the user's address. expose that instead of user_id
             let user_url = reg
                 .render_template(

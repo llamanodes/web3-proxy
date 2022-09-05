@@ -6,22 +6,20 @@ use crate::{
     config::BlockAndRpc, jsonrpc::JsonRpcRequest, rpcs::synced_connections::SyncedConnections,
 };
 use anyhow::Context;
-use dashmap::{
-    mapref::{entry::Entry, one::Ref},
-    DashMap,
-};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use hashbrown::{HashMap, HashSet};
+use moka::future::Cache;
 use serde::Serialize;
 use serde_json::json;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, info, trace, warn};
 
+// TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
 
-pub type BlockHashesMap = Arc<DashMap<H256, ArcBlock>>;
+pub type BlockHashesMap = Cache<H256, ArcBlock>;
 
 /// A block's hash and number.
 #[derive(Clone, Debug, Default, From, Serialize)]
@@ -38,43 +36,37 @@ impl Display for BlockId {
 
 impl Web3Connections {
     /// add a block to our map and it's hash to our graphmap of the blockchain
-    pub fn save_block(&self, block: &ArcBlock, heaviest_chain: Option<bool>) -> anyhow::Result<()> {
+    pub async fn save_block(
+        &self,
+        block: &ArcBlock,
+        heaviest_chain: Option<bool>,
+    ) -> anyhow::Result<()> {
         // TODO: i think we can rearrange this function to make it faster on the hot path
         let block_hash = block.hash.as_ref().context("no block hash")?;
         let block_num = block.number.as_ref().context("no block num")?;
         let _block_td = block
             .total_difficulty
             .as_ref()
-            .context("no block total difficulty")?;
+            .expect("no block total difficulty");
 
         // if self.block_hashes.contains_key(block_hash) {
         //     // this block is already included. no need to continue
         //     return Ok(());
         // }
 
-        let mut blockchain = self.blockchain_graphmap.write();
+        let mut blockchain = self.blockchain_graphmap.write().await;
 
-        // think more about heaviest_chain
+        // TODO: think more about heaviest_chain
         if heaviest_chain.unwrap_or(true) {
-            match self.block_numbers.entry(*block_num) {
-                Entry::Occupied(mut x) => {
-                    let old_hash = x.insert(*block_hash);
-
-                    if block_hash == &old_hash {
-                        // this block has already been saved
-                        return Ok(());
-                    }
-
-                    // TODO: what should we do?
-                    // TODO: if old_hash's number is > block_num, we need to remove more entries
-                    warn!(
-                        "do something with the old hash ({}) for {}? we may need to update a bunch more block numbers", old_hash, block_num
-                    )
-                }
-                Entry::Vacant(x) => {
-                    x.insert(*block_hash);
+            // this is the only place that writes to block_numbers, and its inside a write lock on blockchain_graphmap, so i think there is no race
+            if let Some(old_hash) = self.block_numbers.get(block_num) {
+                if block_hash == &old_hash {
+                    // this block has already been saved
+                    return Ok(());
                 }
             }
+            // i think a race here isn't that big of a problem. just 2 inserts
+            self.block_numbers.insert(*block_num, *block_hash).await;
         }
 
         // if blockchain.contains_node(*block_hash) {
@@ -84,12 +76,7 @@ impl Web3Connections {
         // }
 
         // TODO: theres a small race between contains_key and insert
-        if let Some(_overwritten) = self.block_hashes.insert(*block_hash, block.clone()) {
-            // there was a race and another thread wrote this block
-            // i don't think this will happen. the blockchain.conains_node above should be enough
-            // no need to continue because that other thread would have written (or soon will) write the
-            return Ok(());
-        }
+        self.block_hashes.insert(*block_hash, block.clone()).await;
 
         // TODO: prettier log? or probably move the log somewhere else
         trace!(%block_hash, "new block");
@@ -117,7 +104,7 @@ impl Web3Connections {
         // first, try to get the hash from our cache
         // the cache is set last, so if its here, its everywhere
         if let Some(block) = self.block_hashes.get(hash) {
-            return Ok(block.clone());
+            return Ok(block);
         }
 
         // block not in cache. we need to ask an rpc for it
@@ -147,7 +134,7 @@ impl Web3Connections {
         let block = Arc::new(block);
 
         // the block was fetched using eth_getBlockByHash, so it should have all fields
-        self.save_block(&block, None)?;
+        self.save_block(&block, None).await?;
 
         Ok(block)
     }
@@ -164,7 +151,7 @@ impl Web3Connections {
     /// Get the heaviest chain's block from cache or backend rpc
     pub async fn cannonical_block(&self, num: &U64) -> anyhow::Result<ArcBlock> {
         // we only have blocks by hash now
-        // maybe save them during save_block in a blocks_by_number DashMap<U64, Vec<ArcBlock>>
+        // maybe save them during save_block in a blocks_by_number Cache<U64, Vec<ArcBlock>>
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
 
         // be sure the requested block num exists
@@ -183,7 +170,7 @@ impl Web3Connections {
 
         // try to get the hash from our cache
         // deref to not keep the lock open
-        if let Some(block_hash) = self.block_numbers.get(num).map(|x| *x) {
+        if let Some(block_hash) = self.block_numbers.get(num) {
             // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
             return self.block(&block_hash, None).await;
         }
@@ -205,7 +192,7 @@ impl Web3Connections {
         let block = Arc::new(block);
 
         // the block was fetched using eth_getBlockByNumber, so it should have all fields and be on the heaviest chain
-        self.save_block(&block, Some(true))?;
+        self.save_block(&block, Some(true)).await?;
 
         Ok(block)
     }
@@ -213,7 +200,8 @@ impl Web3Connections {
     pub(super) async fn process_incoming_blocks(
         &self,
         block_receiver: flume::Receiver<BlockAndRpc>,
-        // TODO: head_block_sender should be a broadcast_sender like pending_tx_sender
+        // TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
+        // Geth's subscriptions have the same potential for skipping blocks.
         head_block_sender: watch::Sender<ArcBlock>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
@@ -262,7 +250,7 @@ impl Web3Connections {
                     connection_heads.insert(rpc.name.to_owned(), rpc_head_hash);
 
                     // we don't know if its on the heaviest chain yet
-                    self.save_block(&rpc_head_block, Some(false))?;
+                    self.save_block(&rpc_head_block, Some(false)).await?;
 
                     Some(BlockId {
                         hash: rpc_head_hash,
@@ -283,7 +271,7 @@ impl Web3Connections {
 
         // iterate the known heads to find the highest_work_block
         let mut checked_heads = HashSet::new();
-        let mut highest_work_block: Option<Ref<H256, ArcBlock>> = None;
+        let mut highest_work_block: Option<ArcBlock> = None;
         for conn_head_hash in connection_heads.values() {
             if checked_heads.contains(conn_head_hash) {
                 // we already checked this head from another rpc
@@ -324,7 +312,7 @@ impl Web3Connections {
         }
 
         // clone to release the read lock on self.block_hashes
-        if let Some(mut maybe_head_block) = highest_work_block.map(|x| x.clone()) {
+        if let Some(mut maybe_head_block) = highest_work_block {
             // track rpcs on this heaviest chain so we can build a new SyncedConnections
             let mut heavy_rpcs: Vec<&Arc<Web3Connection>> = vec![];
             // a running total of the soft limits covered by the heavy rpcs
@@ -413,7 +401,7 @@ impl Web3Connections {
                     None => {
                         debug!(block=%heavy_block_id, %rpc, "first consensus head");
 
-                        self.save_block(&rpc_head_block, Some(true))?;
+                        self.save_block(&rpc_head_block, Some(true)).await?;
 
                         head_block_sender.send(heavy_block)?;
                     }
@@ -429,7 +417,7 @@ impl Web3Connections {
                                     info!(heavy=%heavy_block_id, old=%old_block_id, %rpc, "unc block");
 
                                     // todo!("handle equal by updating the cannonical chain");
-                                    self.save_block(&rpc_head_block, Some(true))?;
+                                    self.save_block(&rpc_head_block, Some(true)).await?;
 
                                     head_block_sender.send(heavy_block)?;
                                 }
@@ -439,7 +427,7 @@ impl Web3Connections {
                                 // TODO: better log
                                 warn!(head=%heavy_block_id, %rpc, "chain rolled back");
 
-                                self.save_block(&rpc_head_block, Some(true))?;
+                                self.save_block(&rpc_head_block, Some(true)).await?;
 
                                 // todo!("handle less by removing higher blocks from the cannonical chain");
                                 head_block_sender.send(heavy_block)?;
@@ -449,7 +437,7 @@ impl Web3Connections {
 
                                 // todo!("handle greater by adding this block to and any missing parents to the cannonical chain");
 
-                                self.save_block(&rpc_head_block, Some(true))?;
+                                self.save_block(&rpc_head_block, Some(true)).await?;
 
                                 head_block_sender.send(heavy_block)?;
                             }

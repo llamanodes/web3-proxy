@@ -12,7 +12,6 @@ use crate::rpcs::transactions::TxStatus;
 use crate::stats::AppStats;
 use anyhow::Context;
 use axum::extract::ws::Message;
-use dashmap::DashMap;
 use derive_more::From;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, Bytes, TxHash, H256, U64};
@@ -22,6 +21,7 @@ use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use futures::Future;
 use migration::{Migrator, MigratorTrait};
+use moka::future::Cache;
 use redis_rate_limit::bb8::PooledConnection;
 use redis_rate_limit::{
     bb8::{self, ErrorSink},
@@ -39,7 +39,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
+use tracing::{debug, error, info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
 
 // TODO: make this customizable?
@@ -54,8 +54,7 @@ static APP_USER_AGENT: &str = concat!(
 // TODO: better name
 type ResponseCacheKey = (H256, String, Option<String>);
 
-// TODO!! a RWLock on this made us super slow. But a DashMap makes this grow unbounded!
-type ResponseCache = DashMap<ResponseCacheKey, JsonRpcForwardedResponse>;
+type ResponseCache = Cache<ResponseCacheKey, JsonRpcForwardedResponse>;
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
@@ -79,15 +78,16 @@ pub struct Web3ProxyApp {
     // TODO: broadcast channel instead?
     head_block_receiver: watch::Receiver<ArcBlock>,
     pending_tx_sender: broadcast::Sender<TxStatus>,
+    /// TODO: this doesn't ever get incremented!
     pub active_requests: AtomicUsize,
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
-    pub pending_transactions: Arc<DashMap<TxHash, TxStatus>>,
+    /// store pending transactions that we've seen so that we don't send duplicates to subscribers
+    pub pending_transactions: Cache<TxHash, TxStatus>,
     pub rate_limiter: Option<RedisRateLimit>,
     pub redis_pool: Option<RedisPool>,
     pub stats: AppStats,
-    // TODO: this grows unbounded! Make a "SizedDashMap" that cleans up old rows with some garbage collection task
-    pub user_cache: DashMap<Uuid, UserCacheValue>,
+    pub user_cache: Cache<Uuid, UserCacheValue>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -151,9 +151,13 @@ impl Web3ProxyApp {
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
     )> {
         // safety checks on the config
+        debug!("redirect_user_url: {}", top_config.app.redirect_user_url);
         assert!(
-            top_config.app.redirect_user_url.contains("{{user_id}}"),
-            "redirect user url must contain \"{{user_id}}\""
+            top_config
+                .app
+                .redirect_user_url
+                .contains("{{user_address}}"),
+            "redirect user url must contain \"{{user_address}}\""
         );
 
         // first, we connect to mysql and make sure the latest migrations have run
@@ -235,15 +239,17 @@ impl Web3ProxyApp {
         // TODO: use this? it could listen for confirmed transactions and then clear pending_transactions, but the head_block_sender is doing that
         drop(pending_tx_receiver);
 
-        // TODO: this will grow unbounded!! add some expiration to this. and probably move to redis
-        let pending_transactions = Arc::new(DashMap::new());
+        // TODO: sized and timed expiration!
+        // TODO: put some in Redis, too?
+        let pending_transactions = Cache::new(10000);
 
         // TODO: don't drop the pending_tx_receiver. instead, read it to mark transactions as "seen". once seen, we won't re-send them
         // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
         // TODO: we should still have some sort of expiration or maximum size limit for the map
 
         // this block map is shared between balanced_rpcs and private_rpcs.
-        let block_map = BlockHashesMap::default();
+        // TODO: what limits should we have for expiration?
+        let block_map = BlockHashesMap::new(10_000);
 
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
             top_config.app.chain_id,
@@ -300,12 +306,16 @@ impl Web3ProxyApp {
             )
         });
 
+        // TODO: change this to a sized cache
+        let response_cache = Cache::new(1_000);
+        let user_cache = Cache::new(10_000);
+
         let app = Self {
             config: top_config.app,
             balanced_rpcs,
             private_rpcs,
             active_requests: Default::default(),
-            response_cache: Default::default(),
+            response_cache,
             head_block_receiver,
             pending_tx_sender,
             pending_transactions,
@@ -313,9 +323,7 @@ impl Web3ProxyApp {
             db_conn,
             redis_pool,
             stats: app_stats,
-            // TODO: make the size configurable
-            // TODO: better type for this?
-            user_cache: Default::default(),
+            user_cache,
         };
 
         let app = Arc::new(app);
@@ -613,7 +621,7 @@ impl Web3ProxyApp {
             trace!(?request.method, "cache hit!");
 
             // TODO: can we make references work? maybe put them in an Arc?
-            return Ok(Ok(response.to_owned()));
+            return Ok(Ok(response));
         }
 
         // TODO: another lock here so that we don't send the same request to a backend more than onces xzs
@@ -638,7 +646,8 @@ impl Web3ProxyApp {
         let span = info_span!("rpc_request");
         // let _enter = span.enter(); // DO NOT ENTER! we can't use enter across awaits! (clippy lint soon)
 
-        let partial_response: serde_json::Value = match request.method.as_ref() {
+        // TODO: don't clone
+        let partial_response: serde_json::Value = match request.method.clone().as_ref() {
             // lots of commands are blocked
             "admin_addPeer"
             | "admin_datadir"
@@ -819,47 +828,45 @@ impl Web3ProxyApp {
 
                 trace!(?min_block_needed, ?method);
 
-                let cached_response_result =
-                    self.cached_response(min_block_needed, &request).await?;
-
                 // TODO: emit a stat on error. maybe with .map_err?
-                let cache_key = match cached_response_result {
+                let cache_key = match self.cached_response(min_block_needed, &request).await? {
                     Ok(mut cache_result) => {
+                        // we got a cache hit! no need to do any backend requests.
+
                         // put our request id on the cached response
-                        // TODO: maybe only cache the inner result?
+                        // TODO: maybe only cache the inner result? then have a JsonRpcForwardedResponse::from_cache
                         cache_result.id = request.id;
+
+                        // emit a stat
 
                         return Ok(cache_result);
                     }
                     Err(cache_key) => cache_key,
                 };
 
-                let response = match method {
-                    "temporarily disabled" => {
-                        // "eth_getTransactionByHash" | "eth_getTransactionReceipt" => {
-                        // TODO: try_send_all serially with retries instead of parallel
-                        self.private_rpcs
-                            .try_send_all_upstream_servers(request, min_block_needed)
-                            .await?
-                    }
-                    _ => {
-                        // TODO: retries?
-                        self.balanced_rpcs
-                            .try_send_best_upstream_server(request, min_block_needed)
-                            .await?
-                    }
-                };
-
                 // TODO: move this caching outside this match and cache some of the other responses?
                 // TODO: cache the warp::reply to save us serializing every time?
-                if self
+                let response = self
                     .response_cache
-                    .insert(cache_key.clone(), response.clone())
-                    .is_some()
-                {
-                    // TODO: we had another lock to prevent this, but its not worth the extra locking
-                    debug!("already cached")
-                }
+                    .try_get_with(cache_key, async move {
+                        match method {
+                            "temporarily disabled" => {
+                                // "eth_getTransactionByHash" | "eth_getTransactionReceipt" => {
+                                // TODO: try_send_all serially with retries instead of parallel
+                                self.private_rpcs
+                                    .try_send_all_upstream_servers(request, min_block_needed)
+                                    .await
+                            }
+                            _ => {
+                                // TODO: retries?
+                                self.balanced_rpcs
+                                    .try_send_best_upstream_server(request, min_block_needed)
+                                    .await
+                            }
+                        }
+                    })
+                    .await
+                    .unwrap();
 
                 return Ok(response);
             }
