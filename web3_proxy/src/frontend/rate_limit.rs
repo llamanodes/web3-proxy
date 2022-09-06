@@ -237,6 +237,7 @@ impl Web3ProxyApp {
         if let Some(rate_limiter) = &self.rate_limiter {
             // TODO: query redis in the background so that users don't have to wait on this network request
             // TODO: better key? have a prefix so its easy to delete all of these
+            // TODO: we should probably hash this or something
             let rate_limiter_label = user_key.to_string();
 
             match rate_limiter
@@ -248,8 +249,8 @@ impl Web3ProxyApp {
                 .await
             {
                 Ok(ThrottleResult::Allowed) => {}
-                Ok(ThrottleResult::RetryAt(_retry_at)) => {
-                    // TODO: set headers so they know when they can retry
+                Ok(ThrottleResult::RetryAt(retry_at)) => {
+                    // TODO: set headers so they know when they can retry or maybe tarpit them? if they are barely over?
                     debug!(?rate_limiter_label, "user rate limit exceeded"); // this is too verbose, but a stat might be good
                                                                              // TODO: use their id if possible
                     return Ok(RateLimitResult::UserRateLimitExceeded(user_data.user_id));
