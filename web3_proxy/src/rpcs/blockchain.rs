@@ -39,6 +39,12 @@ impl Web3Connections {
     pub async fn save_block(&self, block: &ArcBlock, heaviest_chain: bool) -> anyhow::Result<()> {
         // TODO: i think we can rearrange this function to make it faster on the hot path
         let block_hash = block.hash.as_ref().context("no block hash")?;
+
+        // skip if
+        if block_hash.is_zero() {
+            return Ok(());
+        }
+
         let block_num = block.number.as_ref().context("no block num")?;
         let _block_td = block
             .total_difficulty
@@ -232,40 +238,34 @@ impl Web3Connections {
     async fn process_block_from_rpc(
         &self,
         connection_heads: &mut HashMap<String, H256>,
-        rpc_head_block: ArcBlock,
+        rpc_head_block: Option<ArcBlock>,
         rpc: Arc<Web3Connection>,
         head_block_sender: &watch::Sender<ArcBlock>,
         pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
-        // add the block to connection_heads
-        let rpc_block_id = match (rpc_head_block.hash, rpc_head_block.number) {
-            (Some(rpc_head_hash), Some(rpc_head_num)) => {
-                if rpc_head_num == U64::zero() {
+        // add the rpc's block to connection_heads, or remove the rpc from connection_heads
+        match rpc_head_block {
+            Some(rpc_head_block) => {
+                let rpc_head_num = rpc_head_block.number.unwrap();
+                let rpc_head_hash = rpc_head_block.hash.unwrap();
+
+                if rpc_head_num.is_zero() {
+                    // TODO: i don't think we can get to this anymore now that we use Options
                     debug!(%rpc, "still syncing");
 
                     connection_heads.remove(&rpc.name);
-
-                    None
                 } else {
                     // we don't know if its on the heaviest chain yet
                     self.save_block(&rpc_head_block, false).await?;
 
                     connection_heads.insert(rpc.name.to_owned(), rpc_head_hash);
-
-                    Some(BlockId {
-                        hash: rpc_head_hash,
-                        num: rpc_head_num,
-                    })
                 }
             }
-            _ => {
+            None => {
                 // TODO: warn is too verbose. this is expected if a node disconnects and has to reconnect
                 trace!(%rpc, "Block without number or hash!");
 
                 connection_heads.remove(&rpc.name);
-
-                // don't return yet! self.synced_connections likely needs an update
-                None
             }
         };
 
@@ -284,7 +284,7 @@ impl Web3Connections {
                 x
             } else {
                 // TODO: why does this happen?
-                warn!(%conn_head_hash, %conn_name, "No block found");
+                warn!(%conn_head_hash, %conn_name, %rpc, "Missing block in connection_heads");
                 continue;
             };
 
@@ -375,6 +375,9 @@ impl Web3Connections {
 
             // TODO: if heavy_rpcs.is_empty, try another method of finding the head block
 
+            let num_connection_heads = connection_heads.len();
+            let total_conns = self.conns.len();
+
             // we've done all the searching for the heaviest block that we can
             if heavy_rpcs.is_empty() {
                 // if we get here, something is wrong. clear synced connections
@@ -385,8 +388,12 @@ impl Web3Connections {
                     .swap(Arc::new(empty_synced_connections));
 
                 // TODO: log different things depending on old_synced_connections
-                warn!("no consensus head!");
+                warn!(%rpc, "no consensus head! {}/{}/{}", 0, num_connection_heads, total_conns);
             } else {
+                // TODO: this is too verbose. move to trace
+                // i think "conns" is somehow getting dupes
+                debug!(?heavy_rpcs);
+
                 // success! this block has enough soft limit and nodes on it (or on later blocks)
                 let conns: Vec<Arc<Web3Connection>> = heavy_rpcs
                     .into_iter()
@@ -402,8 +409,6 @@ impl Web3Connections {
 
                 // TODO: add these to the log messages
                 let num_consensus_rpcs = conns.len();
-                let num_connection_heads = connection_heads.len();
-                let total_conns = self.conns.len();
 
                 let heavy_block_id = BlockId {
                     hash: heavy_hash,
@@ -424,7 +429,7 @@ impl Web3Connections {
                     None => {
                         debug!(block=%heavy_block_id, %rpc, "first consensus head {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
-                        self.save_block(&rpc_head_block, true).await?;
+                        self.save_block(&heavy_block, true).await?;
 
                         head_block_sender.send(heavy_block)?;
                     }
@@ -440,7 +445,7 @@ impl Web3Connections {
                                     info!(heavy=%heavy_block_id, old=%old_block_id, %rpc, "unc block {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                                     // todo!("handle equal by updating the cannonical chain");
-                                    self.save_block(&rpc_head_block, true).await?;
+                                    self.save_block(&heavy_block, true).await?;
 
                                     head_block_sender.send(heavy_block)?;
                                 }
@@ -450,7 +455,7 @@ impl Web3Connections {
                                 // TODO: better log
                                 warn!(head=%heavy_block_id, %rpc, "chain rolled back {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
-                                self.save_block(&rpc_head_block, true).await?;
+                                self.save_block(&heavy_block, true).await?;
 
                                 // todo!("handle less by removing higher blocks from the cannonical chain");
                                 head_block_sender.send(heavy_block)?;
@@ -460,7 +465,7 @@ impl Web3Connections {
 
                                 // todo!("handle greater by adding this block to and any missing parents to the cannonical chain");
 
-                                self.save_block(&rpc_head_block, true).await?;
+                                self.save_block(&heavy_block, true).await?;
 
                                 head_block_sender.send(heavy_block)?;
                             }

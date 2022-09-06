@@ -234,35 +234,40 @@ impl Web3Connection {
         needed_block_num >= &oldest_block_num && needed_block_num <= &newest_block_num
     }
 
+    /// reconnect a websocket provider
     #[instrument(skip_all)]
     pub async fn reconnect(
         self: &Arc<Self>,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
     ) -> anyhow::Result<()> {
+        // TODO: no-op if this called on a http provider
         // websocket doesn't need the http client
         let http_client = None;
 
-        info!(%self, "reconnecting");
+        info!(rpc=%self, "reconnecting");
 
         // since this lock is held open over an await, we use tokio's locking
         // TODO: timeout on this lock. if its slow, something is wrong
-        let mut provider = self.provider.write().await;
+        {
+            let mut provider = self.provider.write().await;
 
-        *provider = None;
+            *provider = None;
+
+            // TODO: if this fails, keep retrying
+            let new_provider = Web3Provider::from_str(&self.url, http_client)
+                .await
+                .unwrap();
+
+            *provider = Some(Arc::new(new_provider));
+        }
 
         // tell the block subscriber that we don't have any blocks
         if let Some(block_sender) = block_sender {
-            // TODO: maybe it would be better do send a "None" or an Option<Arc<Block<TxHash>>>
             block_sender
-                .send_async((Arc::new(Block::default()), self.clone()))
+                .send_async((None, self.clone()))
                 .await
-                .context("block_sender at 0")?;
+                .context("block_sender during reconnect")?;
         }
-
-        // TODO: if this fails, keep retrying
-        let new_provider = Web3Provider::from_str(&self.url, http_client).await?;
-
-        *provider = Some(Arc::new(new_provider));
 
         Ok(())
     }
@@ -280,16 +285,19 @@ impl Web3Connection {
     #[instrument(skip_all)]
     async fn send_head_block_result(
         self: &Arc<Self>,
-        new_head_block: Result<ArcBlock, ProviderError>,
+        new_head_block: Result<Option<ArcBlock>, ProviderError>,
         block_sender: &flume::Sender<BlockAndRpc>,
         block_map: BlockHashesMap,
     ) -> anyhow::Result<()> {
         match new_head_block {
-            Ok(mut new_head_block) => {
+            Ok(None) => {
+                todo!("handle no block")
+            }
+            Ok(Some(mut new_head_block)) => {
                 // TODO: is unwrap_or_default ok? we might have an empty block
                 let new_hash = new_head_block.hash.unwrap_or_default();
 
-                // if we already have this block saved, we don't need to store this copy
+                // if we already have this block saved, set new_block_head to that arc and don't store this copy
                 // TODO: small race here
                 new_head_block = if let Some(existing_block) = block_map.get(&new_hash) {
                     // we only save blocks with a total difficulty
@@ -348,7 +356,7 @@ impl Web3Connection {
                 }
 
                 block_sender
-                    .send_async((new_head_block, self.clone()))
+                    .send_async((Some(new_head_block), self.clone()))
                     .await
                     .context("block_sender")?;
             }
@@ -358,7 +366,7 @@ impl Web3Connection {
 
                 // send an empty block to take this server out of rotation
                 block_sender
-                    .send_async((Arc::new(Block::default()), self.clone()))
+                    .send_async((None, self.clone()))
                     .await
                     .context("block_sender")?;
             }
@@ -474,7 +482,7 @@ impl Web3Connection {
                                             last_hash = new_hash;
 
                                             self.send_head_block_result(
-                                                Ok(Arc::new(block)),
+                                                Ok(Some(Arc::new(block))),
                                                 &block_sender,
                                                 block_map.clone(),
                                             )
@@ -526,19 +534,19 @@ impl Web3Connection {
                     // query the block once since the subscription doesn't send the current block
                     // there is a very small race condition here where the stream could send us a new block right now
                     // all it does is print "new block" for the same block as current block
-                    let block: Result<ArcBlock, _> = self
+                    let block: Result<Option<ArcBlock>, _> = self
                         .wait_for_request_handle()
                         .await?
                         .request("eth_getBlockByNumber", ("latest", false))
                         .await
-                        .map(Arc::new);
+                        .map(|x| Some(Arc::new(x)));
 
                     self.send_head_block_result(block, &block_sender, block_map.clone())
                         .await?;
 
                     while let Some(new_block) = stream.next().await {
                         self.send_head_block_result(
-                            Ok(Arc::new(new_block)),
+                            Ok(Some(Arc::new(new_block))),
                             &block_sender,
                             block_map.clone(),
                         )

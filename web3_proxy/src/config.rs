@@ -10,7 +10,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-pub type BlockAndRpc = (ArcBlock, Arc<Web3Connection>);
+pub type BlockAndRpc = (Option<ArcBlock>, Arc<Web3Connection>);
 pub type TxHashAndRpc = (TxHash, Arc<Web3Connection>);
 
 #[derive(Debug, FromArgs)]

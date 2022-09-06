@@ -10,7 +10,7 @@ use crate::rpcs::transactions::TxStatus;
 use arc_swap::ArcSwap;
 use counter::Counter;
 use derive_more::From;
-use ethers::prelude::{Block, ProviderError, TxHash, H256, U64};
+use ethers::prelude::{ProviderError, TxHash, H256, U64};
 use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -65,8 +65,7 @@ impl Web3Connections {
         pending_transactions: Cache<TxHash, TxStatus>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
-        let (block_sender, block_receiver) =
-            flume::unbounded::<(Arc<Block<H256>>, Arc<Web3Connection>)>();
+        let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
 
         let http_interval_sender = if http_client.is_some() {
             let (sender, receiver) = broadcast::channel(1);

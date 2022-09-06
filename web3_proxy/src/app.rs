@@ -227,7 +227,7 @@ impl Web3ProxyApp {
             }
         };
 
-        // TODO: this should be a broadcast channel
+        // TODO: i don't like doing Block::default here! Change this to "None"?
         let (head_block_sender, head_block_receiver) = watch::channel(Arc::new(Block::default()));
         // TODO: will one receiver lagging be okay? how big should this be?
         let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
