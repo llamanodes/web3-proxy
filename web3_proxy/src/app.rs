@@ -39,7 +39,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{info, info_span, instrument, trace, warn, Instrument};
+use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
 
 // TODO: make this customizable?
@@ -303,7 +303,7 @@ impl Web3ProxyApp {
         });
 
         // TODO: change this to a sized cache
-        let response_cache = Cache::new(1_000);
+        let response_cache = Cache::new(10_000);
         let user_cache = Cache::new(10_000);
 
         let app = Self {
@@ -527,7 +527,8 @@ impl Web3ProxyApp {
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         // TODO: this should probably be trace level
-        trace!(?request, "proxy_web3_rpc");
+        // trace!(?request, "proxy_web3_rpc");
+        debug!(?request, "proxying request");
 
         // even though we have timeouts on the requests to our backend providers,
         // we need a timeout for the incoming request so that retries don't run forever
@@ -544,7 +545,8 @@ impl Web3ProxyApp {
         };
 
         // TODO: this should probably be trace level
-        trace!(?response, "Forwarding");
+        // trace!(?response, "Forwarding");
+        debug!(?response.ids(), "forwarding response");
 
         Ok(response)
     }
@@ -633,6 +635,9 @@ impl Web3ProxyApp {
         mut request: JsonRpcRequest,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         trace!("Received request: {:?}", request);
+
+        // save the id so we can attach it to the response
+        let id = request.id.clone();
 
         // TODO: if eth_chainId or net_version, serve those without querying the backend
 
@@ -845,7 +850,7 @@ impl Web3ProxyApp {
 
                 // TODO: move this caching outside this match and cache some of the other responses?
                 // TODO: cache the warp::reply to save us serializing every time?
-                let response = self
+                let mut response = self
                     .response_cache
                     .try_get_with(cache_key, async move {
                         match method {
@@ -867,11 +872,14 @@ impl Web3ProxyApp {
                     .await
                     .unwrap();
 
+                // this is fragile and i no longer like it
+                response.id = id;
+
                 return Ok(response);
             }
         };
 
-        let response = JsonRpcForwardedResponse::from_value(partial_response, request.id);
+        let response = JsonRpcForwardedResponse::from_value(partial_response, id);
 
         Ok(response)
     }
