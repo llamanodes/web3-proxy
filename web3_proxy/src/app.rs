@@ -144,6 +144,7 @@ impl Web3ProxyApp {
     pub async fn spawn(
         app_stats: AppStats,
         top_config: TopConfig,
+        num_workers: u32,
     ) -> anyhow::Result<(
         Arc<Web3ProxyApp>,
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
@@ -156,13 +157,13 @@ impl Web3ProxyApp {
 
         // first, we connect to mysql and make sure the latest migrations have run
         let db_conn = if let Some(db_url) = &top_config.app.db_url {
-            let db_min_connections = top_config.app.db_min_connections;
+            let db_min_connections = top_config.app.db_min_connections.unwrap_or(num_workers);
 
             // TODO: what default multiple?
             let redis_max_connections = top_config
                 .app
                 .db_max_connections
-                .unwrap_or(db_min_connections * 4);
+                .unwrap_or(db_min_connections * 2);
 
             let db =
                 get_migrated_db(db_url.clone(), db_min_connections, redis_max_connections).await?;
@@ -201,12 +202,13 @@ impl Web3ProxyApp {
 
                 let manager = RedisConnectionManager::new(redis_url.as_ref())?;
 
-                let redis_min_connections = top_config.app.redis_min_connections;
+                let redis_min_connections =
+                    top_config.app.redis_min_connections.unwrap_or(num_workers);
 
                 let redis_max_connections = top_config
                     .app
                     .redis_max_connections
-                    .unwrap_or(redis_min_connections * 4);
+                    .unwrap_or(redis_min_connections * 2);
 
                 // TODO: min_idle?
                 // TODO: set max_size based on max expected concurrent connections? set based on num_workers?

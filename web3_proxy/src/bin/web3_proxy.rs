@@ -65,7 +65,7 @@ fn run(
     // start tokio's async runtime
     let rt = rt_builder.build()?;
 
-    let num_workers = rt.metrics().num_workers();
+    let num_workers = rt.metrics().num_workers() as u32;
     debug!(?num_workers);
 
     rt.block_on(async {
@@ -76,7 +76,7 @@ fn run(
         let app_frontend_port = cli_config.port;
         let app_prometheus_port = cli_config.prometheus_port;
 
-        let (app, app_handle) = Web3ProxyApp::spawn(app_stats, top_config).await?;
+        let (app, app_handle) = Web3ProxyApp::spawn(app_stats, top_config, num_workers).await?;
 
         let frontend_handle = tokio::spawn(frontend::serve(app_frontend_port, app));
 

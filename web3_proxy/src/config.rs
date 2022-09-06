@@ -5,7 +5,6 @@ use argh::FromArgs;
 use derive_more::Constructor;
 use ethers::prelude::TxHash;
 use hashbrown::HashMap;
-use num::One;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -47,9 +46,10 @@ pub struct AppConfig {
     pub chain_id: u64,
     pub db_url: Option<String>,
     /// minimum size of the connection pool for the database
-    #[serde(default = "u32::one")]
-    pub db_min_connections: u32,
+    /// If none, the number of workers are used
+    pub db_min_connections: Option<u32>,
     /// minimum size of the connection pool for the database
+    /// If none, the minimum * 2 is used
     pub db_max_connections: Option<u32>,
     #[serde(default = "default_default_requests_per_minute")]
     pub default_requests_per_minute: u32,
@@ -63,9 +63,10 @@ pub struct AppConfig {
     pub public_rate_limit_per_minute: u64,
     pub redis_url: Option<String>,
     /// minimum size of the connection pool for the cache
-    #[serde(default = "u32::one")]
-    pub redis_min_connections: u32,
+    /// If none, the number of workers are used
+    pub redis_min_connections: Option<u32>,
     /// maximum size of the connection pool for the cache
+    /// If none, the minimum * 2 is used
     pub redis_max_connections: Option<u32>,
     #[serde(default = "default_response_cache_max_bytes")]
     pub response_cache_max_bytes: usize,
