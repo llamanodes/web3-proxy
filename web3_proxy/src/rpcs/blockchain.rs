@@ -458,7 +458,7 @@ impl Web3Connections {
                                     debug!(con_head=%heavy_block_id, rpc_head=%rpc_head_str, %rpc, "con {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns)
                                 } else {
                                     // hash changed
-                                    info!(con_head=%heavy_block_id, rpc_head=%rpc_head_str, old=%old_block_id, %rpc, "unc {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
+                                    info!(con_head=%heavy_block_id, old=%old_block_id, rpc_head=%rpc_head_str, %rpc, "unc {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                                     // todo!("handle equal by updating the cannonical chain");
                                     self.save_block(&heavy_block, true).await?;

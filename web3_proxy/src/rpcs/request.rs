@@ -22,11 +22,17 @@ pub struct OpenRequestHandle(Arc<Web3Connection>);
 
 impl OpenRequestHandle {
     pub fn new(connection: Arc<Web3Connection>) -> Self {
-        // TODO: attach a unique id to this?
+        // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
         connection
             .active_requests
             .fetch_add(1, atomic::Ordering::AcqRel);
+
+        // TODO: handle overflows?
+        // TODO: what ordering?
+        connection
+            .total_requests
+            .fetch_add(1, atomic::Ordering::Relaxed);
 
         Self(connection)
     }

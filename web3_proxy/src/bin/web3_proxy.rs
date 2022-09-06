@@ -127,7 +127,7 @@ fn main() -> anyhow::Result<()> {
     // if RUST_LOG isn't set, configure a default
     // TODO: is there a better way to do this?
     if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "info,web3_proxy=debug");
+        std::env::set_var("RUST_LOG", "info,redis_rate_limit=debug,web3_proxy=debug");
     }
 
     // install global collector configured based on RUST_LOG env var.

@@ -56,7 +56,7 @@ impl Web3Connections {
         chain_id: u64,
         server_configs: HashMap<String, Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
-        redis_client_pool: Option<redis_rate_limit::RedisPool>,
+        redis_pool: Option<redis_rate_limit::RedisPool>,
         block_map: BlockHashesMap,
         head_block_sender: Option<watch::Sender<ArcBlock>>,
         min_sum_soft_limit: u32,
@@ -83,7 +83,7 @@ impl Web3Connections {
 
                 async move {
                     loop {
-                        // TODO: every time a head_block arrives (maybe with a small delay), or on the interval.
+                        // TODO: every time a head_block arrives (with a small delay for known slow servers), or on the interval.
                         interval.tick().await;
 
                         trace!("http interval ready");
@@ -108,7 +108,7 @@ impl Web3Connections {
             .into_iter()
             .map(|(server_name, server_config)| {
                 let http_client = http_client.clone();
-                let redis_client_pool = redis_client_pool.clone();
+                let redis_pool = redis_pool.clone();
                 let http_interval_sender = http_interval_sender.clone();
 
                 let block_sender = if head_block_sender.is_some() {
@@ -124,7 +124,7 @@ impl Web3Connections {
                     server_config
                         .spawn(
                             server_name,
-                            redis_client_pool,
+                            redis_pool,
                             chain_id,
                             http_client,
                             http_interval_sender,
@@ -159,10 +159,15 @@ impl Web3Connections {
             }
         }
 
-        // TODO: less than 3? what should we do here?
-        if connections.len() < 2 {
-            warn!("Only {} connection(s)!", connections.len());
+        if connections.len() < min_synced_rpcs {
+            return Err(anyhow::anyhow!(
+                "Only {}/{} connections!",
+                connections.len(),
+                min_synced_rpcs
+            ));
         }
+
+        // TODO: safety check on sum soft limit
 
         let synced_connections = SyncedConnections::default();
 

@@ -39,7 +39,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
+use tracing::{info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
 
 // TODO: make this customizable?
@@ -78,8 +78,6 @@ pub struct Web3ProxyApp {
     // TODO: broadcast channel instead?
     head_block_receiver: watch::Receiver<ArcBlock>,
     pending_tx_sender: broadcast::Sender<TxStatus>,
-    /// TODO: this doesn't ever get incremented!
-    pub active_requests: AtomicUsize,
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
@@ -265,6 +263,7 @@ impl Web3ProxyApp {
         handles.push(balanced_handle);
 
         let private_rpcs = if private_rpcs.is_empty() {
+            // TODO: do None instead of clone?
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             balanced_rpcs.clone()
         } else {
@@ -310,7 +309,6 @@ impl Web3ProxyApp {
             config: top_config.app,
             balanced_rpcs,
             private_rpcs,
-            active_requests: Default::default(),
             response_cache,
             head_block_receiver,
             pending_tx_sender,
@@ -527,8 +525,7 @@ impl Web3ProxyApp {
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         // TODO: this should probably be trace level
-        // trace!(?request, "proxy_web3_rpc");
-        debug!(?request, "proxying request");
+        trace!(?request, "proxy_web3_rpc");
 
         // even though we have timeouts on the requests to our backend providers,
         // we need a timeout for the incoming request so that retries don't run forever
@@ -545,8 +542,7 @@ impl Web3ProxyApp {
         };
 
         // TODO: this should probably be trace level
-        // trace!(?response, "Forwarding");
-        debug!(?response.ids(), "forwarding response");
+        trace!(?response, "Forwarding");
 
         Ok(response)
     }

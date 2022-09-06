@@ -11,7 +11,7 @@ use sea_orm::{
 };
 use std::{net::IpAddr, time::Duration};
 use tokio::time::Instant;
-use tracing::debug;
+use tracing::{debug, error};
 use uuid::Uuid;
 
 pub enum RateLimitResult {
@@ -119,6 +119,7 @@ impl TryFrom<RateLimitResult> for RequestFrom {
 impl Web3ProxyApp {
     pub async fn rate_limit_by_ip(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_key
+        // TODO: have a local cache because if we hit redis too hard we get errors
         if let Some(rate_limiter) = &self.rate_limiter {
             let rate_limiter_label = format!("ip-{}", ip);
 
@@ -136,12 +137,13 @@ impl Web3ProxyApp {
                 }
                 Ok(ThrottleResult::RetryNever) => {
                     // TODO: prettier error for the user
-                    return Err(anyhow::anyhow!("blocked by rate limiter"));
+                    return Err(anyhow::anyhow!("ip blocked by rate limiter"));
                 }
                 Err(err) => {
                     // internal error, not rate limit being hit
                     // TODO: i really want axum to do this for us in a single place.
-                    return Err(err);
+                    error!(?err, "redis is unhappy. allowing ip");
+                    return Ok(RateLimitResult::AllowedIp(ip));
                 }
             }
         } else {
@@ -194,7 +196,7 @@ impl Web3ProxyApp {
             }
         };
 
-        //  save for the next run
+        // save for the next run
         self.user_cache.insert(user_key, user_data).await;
 
         Ok(user_data)
@@ -234,20 +236,39 @@ impl Web3ProxyApp {
         // user key is valid. now check rate limits
         if let Some(rate_limiter) = &self.rate_limiter {
             // TODO: query redis in the background so that users don't have to wait on this network request
-            if rate_limiter
+            // TODO: better key? have a prefix so its easy to delete all of these
+            let rate_limiter_label = user_key.to_string();
+
+            match rate_limiter
                 .throttle_label(
-                    &user_key.to_string(),
+                    &rate_limiter_label,
                     Some(user_data.user_count_per_period),
                     1,
                 )
                 .await
-                .is_err()
             {
-                // TODO: set headers so they know when they can retry
-                // warn!(?ip, "public rate limit exceeded");  // this is too verbose, but a stat might be good
-                // TODO: use their id if possible
-                // TODO: StatusCode::TOO_MANY_REQUESTS
-                return Err(anyhow::anyhow!("too many requests from this key"));
+                Ok(ThrottleResult::Allowed) => {}
+                Ok(ThrottleResult::RetryAt(_retry_at)) => {
+                    // TODO: set headers so they know when they can retry
+                    debug!(?rate_limiter_label, "user rate limit exceeded"); // this is too verbose, but a stat might be good
+                                                                             // TODO: use their id if possible
+                    return Ok(RateLimitResult::UserRateLimitExceeded(user_data.user_id));
+                }
+                Ok(ThrottleResult::RetryNever) => {
+                    // TODO: prettier error for the user
+                    return Err(anyhow::anyhow!("user blocked by rate limiter"));
+                }
+                Err(err) => {
+                    // internal error, not rate limit being hit
+                    // rather than have downtime, i think its better to just use in-process rate limiting
+                    // TODO: in-process rate limits that pipe into redis
+                    error!(?err, "redis is unhappy. allowing ip");
+                    return Ok(RateLimitResult::AllowedUser(user_data.user_id));
+                } // // TODO: set headers so they know when they can retry
+                  // // warn!(?ip, "public rate limit exceeded");  // this is too verbose, but a stat might be good
+                  // // TODO: use their id if possible
+                  // // TODO: StatusCode::TOO_MANY_REQUESTS
+                  // return Err(anyhow::anyhow!("too many requests from this key"));
             }
         } else {
             // TODO: if no redis, rate limit with a local cache?

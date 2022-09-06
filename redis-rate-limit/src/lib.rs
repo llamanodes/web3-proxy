@@ -5,7 +5,7 @@ use anyhow::Context;
 use bb8_redis::redis::pipe;
 use std::ops::Add;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tracing::trace;
+use tracing::{debug, trace};
 
 pub use crate::errors::{RedisError, RedisErrorSink};
 pub use bb8_redis::{bb8, redis, RedisConnectionManager};
@@ -72,12 +72,15 @@ impl RedisRateLimit {
 
         let mut conn = self.pool.get().await?;
 
+        // TODO: at high concurency, i think this is giving errors
+        // TODO: i'm starting to think that bb8 has a bug
         let x: Vec<u64> = pipe()
             // we could get the key first, but that means an extra redis call for every check. this seems better
             .incr(&throttle_key, count)
-            // set expiration the first time we set the key. ignore the result
+            // set expiration each time we set the key. ignore the result
             .expire(&throttle_key, self.period as usize)
-            // .arg("NX")  // TODO: this works in redis, but not elasticache
+            // TODO: NX will make it only set the expiration the first time. works in redis, but not elasticache
+            // .arg("NX")
             .ignore()
             // do the query
             .query_async(&mut *conn)
@@ -91,12 +94,13 @@ impl RedisRateLimit {
 
             let retry_at = Instant::now().add(Duration::from_secs_f32(seconds_left_in_period));
 
-            trace!(%label, ?retry_at, "rate limited");
+            debug!(%label, ?retry_at, "rate limited: {}/{}", new_count, max_per_period);
 
-            return Ok(ThrottleResult::RetryAt(retry_at));
+            Ok(ThrottleResult::RetryAt(retry_at))
+        } else {
+            trace!(%label, "NOT rate limited: {}/{}", new_count, max_per_period);
+            Ok(ThrottleResult::Allowed)
         }
-
-        Ok(ThrottleResult::Allowed)
     }
 
     #[inline]

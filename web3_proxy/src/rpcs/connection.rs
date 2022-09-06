@@ -28,6 +28,9 @@ pub struct Web3Connection {
     url: String,
     /// keep track of currently open requests. We sort on this
     pub(super) active_requests: AtomicU32,
+    /// keep track of total requests
+    /// TODO: is this type okay?
+    pub(super) total_requests: AtomicU64,
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
     pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
@@ -35,7 +38,7 @@ pub struct Web3Connection {
     hard_limit: Option<RedisRateLimit>,
     /// used for load balancing to the least loaded server
     pub(super) soft_limit: u32,
-    /// TODO: have an enum for this so that "no limit" prints pretty
+    /// TODO: have an enum for this so that "no limit" prints pretty?
     block_data_limit: AtomicU64,
     /// Lower weight are higher priority when sending requests
     pub(super) weight: u32,
@@ -82,6 +85,7 @@ impl Web3Connection {
             name,
             url: url_str.clone(),
             active_requests: 0.into(),
+            total_requests: 0.into(),
             provider: AsyncRwLock::new(Some(Arc::new(provider))),
             hard_limit,
             soft_limit,
@@ -777,19 +781,29 @@ impl Serialize for Web3Connection {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Connection", 5)?;
+        let mut state = serializer.serialize_struct("Web3Connection", 6)?;
 
         // the url is excluded because it likely includes private information. just show the name
         state.serialize_field("name", &self.name)?;
 
         let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
-        state.serialize_field("block_data_limit", &block_data_limit)?;
+
+        if block_data_limit == u64::MAX {
+            state.serialize_field("block_data_limit", "None")?;
+        } else {
+            state.serialize_field("block_data_limit", &block_data_limit)?;
+        }
 
         state.serialize_field("soft_limit", &self.soft_limit)?;
 
         state.serialize_field(
             "active_requests",
             &self.active_requests.load(atomic::Ordering::Relaxed),
+        )?;
+
+        state.serialize_field(
+            "total_requests",
+            &self.total_requests.load(atomic::Ordering::Relaxed),
         )?;
 
         let head_block_id = &*self.head_block_id.read();

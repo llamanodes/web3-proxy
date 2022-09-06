@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use derive_more::From;
-use ethers::providers::Middleware;
-use tracing::{error_span, info_span, instrument, Instrument};
+use tracing::{info_span, instrument, Instrument};
 
 /// Use HTTP and WS providers.
 // TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit <https://github.com/gakonst/ethers-rs/issues/592>
