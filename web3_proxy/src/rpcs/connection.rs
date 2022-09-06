@@ -16,8 +16,8 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::{cmp::Ordering, sync::Arc};
+use tokio::sync::broadcast;
 use tokio::sync::RwLock as AsyncRwLock;
-use tokio::sync::{broadcast, oneshot};
 use tokio::time::{interval, sleep, sleep_until, Duration, MissedTickBehavior};
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -409,18 +409,27 @@ impl Web3Connection {
                 futures.push(flatten_handle(tokio::spawn(f)));
             }
 
-            let mut never_shot = None;
+            {
+                // TODO: move this into a proper function
+                let conn = self.clone();
+                // health check
+                let f = async move {
+                    loop {
+                        if let Some(provider) = conn.provider.read().await.as_ref() {
+                            if provider.ready() {
+                                trace!(rpc=%conn, "provider is ready");
+                            } else {
+                                warn!(rpc=%conn, "provider is NOT ready");
+                                return Err(anyhow::anyhow!("provider is not ready"));
+                            }
+                        }
 
-            if futures.is_empty() {
-                info!(rpc=%self, "no-op subscription");
-
-                // TODO: is there a better way to make a channel that is never ready?
-                // TODO: this is wrong! we still need retries! have this do a health check on an interval instead
-                let (tx, rx) = oneshot::channel();
-
-                never_shot = Some(tx);
-
-                let f = async move { rx.await.map_err(Into::into) };
+                        // TODO: how often?
+                        // TODO: should we also check that the head block has changed recently?
+                        // TODO: maybe instead we should do a simple subscription and follow that instead
+                        sleep(Duration::from_secs(10)).await;
+                    }
+                };
 
                 futures.push(flatten_handle(tokio::spawn(f)));
             }
@@ -433,14 +442,13 @@ impl Web3Connection {
                         let retry_in = Duration::from_secs(1);
                         warn!(
                             rpc=%self,
-                            "subscription exited. Attempting to reconnect in {:?}. {:?}",
-                            retry_in,
-                            err
+                            ?err,
+                            ?retry_in,
+                            "subscription exited",
                         );
                         sleep(retry_in).await;
 
                         // TODO: loop on reconnecting! do not return with a "?" here
-                        // TODO: this isn't going to work. it will get in a loop with newHeads
                         self.reconnect(block_sender.clone()).await?;
                     } else {
                         error!(rpc=%self, ?err, "subscription exited");
@@ -448,11 +456,9 @@ impl Web3Connection {
                     }
                 }
             }
-
-            drop(never_shot);
         }
 
-        info!(rpc=%self, "subscription complete");
+        info!(rpc=%self, "all subscriptions complete");
 
         Ok(())
     }
@@ -557,10 +563,29 @@ impl Web3Connection {
                         .await
                         .map(|x| Some(Arc::new(x)));
 
+                    let mut last_hash = match &block {
+                        Ok(Some(new_block)) => new_block
+                            .hash
+                            .expect("blocks should always have a hash here"),
+                        _ => H256::zero(),
+                    };
+
                     self.send_head_block_result(block, &block_sender, block_map.clone())
                         .await?;
 
                     while let Some(new_block) = stream.next().await {
+                        // TODO: check the new block's hash to be sure we don't send dupes
+                        let new_hash = new_block
+                            .hash
+                            .expect("blocks should always have a hash here");
+
+                        if new_hash == last_hash {
+                            // some rpcs like to give us duplicates. don't waste our time on them
+                            continue;
+                        } else {
+                            last_hash = new_hash;
+                        }
+
                         self.send_head_block_result(
                             Ok(Some(Arc::new(new_block))),
                             &block_sender,
@@ -569,7 +594,10 @@ impl Web3Connection {
                         .await?;
                     }
 
-                    warn!(rpc=%self, "subscription ended");
+                    // TODO: is this always an error?
+                    // TODO: we probably don't want a warn and to return error
+                    warn!(rpc=%self, "new_heads subscription ended");
+                    return Err(anyhow::anyhow!("new_heads subscription ended"));
                 }
             }
         }
@@ -631,7 +659,10 @@ impl Web3Connection {
                         // TODO: periodically check for listeners. if no one is subscribed, unsubscribe and wait for a subscription
                     }
 
-                    warn!(rpc=%self, "subscription ended");
+                    // TODO: is this always an error?
+                    // TODO: we probably don't want a warn and to return error
+                    warn!(rpc=%self, "pending_transactions subscription ended");
+                    return Err(anyhow::anyhow!("pending_transactions subscription ended"));
                 }
             }
         }

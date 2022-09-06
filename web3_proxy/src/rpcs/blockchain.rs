@@ -244,7 +244,7 @@ impl Web3Connections {
         pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         // add the rpc's block to connection_heads, or remove the rpc from connection_heads
-        match rpc_head_block {
+        let rpc_head_id = match rpc_head_block {
             Some(rpc_head_block) => {
                 let rpc_head_num = rpc_head_block.number.unwrap();
                 let rpc_head_hash = rpc_head_block.hash.unwrap();
@@ -254,11 +254,18 @@ impl Web3Connections {
                     debug!(%rpc, "still syncing");
 
                     connection_heads.remove(&rpc.name);
+
+                    None
                 } else {
                     // we don't know if its on the heaviest chain yet
                     self.save_block(&rpc_head_block, false).await?;
 
                     connection_heads.insert(rpc.name.to_owned(), rpc_head_hash);
+
+                    Some(BlockId {
+                        hash: rpc_head_hash,
+                        num: rpc_head_num,
+                    })
                 }
             }
             None => {
@@ -266,6 +273,8 @@ impl Web3Connections {
                 trace!(%rpc, "Block without number or hash!");
 
                 connection_heads.remove(&rpc.name);
+
+                None
             }
         };
 
@@ -427,22 +436,29 @@ impl Web3Connections {
                 // TODO: if the rpc_head_block != heavy, log something somewhere in here
                 match &old_synced_connections.head_block_id {
                     None => {
-                        debug!(block=%heavy_block_id, %rpc, "first consensus head {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
+                        debug!(block=%heavy_block_id, %rpc, "first {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                         self.save_block(&heavy_block, true).await?;
 
                         head_block_sender.send(heavy_block)?;
                     }
                     Some(old_block_id) => {
+                        // TODO: do this log item better
+                        let rpc_head_str = rpc_head_id
+                            .map(|x| x.to_string())
+                            .unwrap_or_else(|| "None".to_string());
+
                         match heavy_block_id.num.cmp(&old_block_id.num) {
                             Ordering::Equal => {
+                                // TODO: if rpc_block_id != heavy_block_id, do a different log
+
                                 // multiple blocks with the same fork!
                                 if heavy_block_id.hash == old_block_id.hash {
                                     // no change in hash. no need to use head_block_sender
-                                    debug!(head=%heavy_block_id, %rpc, "con block {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns)
+                                    debug!(con_head=%heavy_block_id, rpc_head=%rpc_head_str, %rpc, "con {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns)
                                 } else {
                                     // hash changed
-                                    info!(heavy=%heavy_block_id, old=%old_block_id, %rpc, "unc block {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
+                                    info!(con_head=%heavy_block_id, rpc_head=%rpc_head_str, old=%old_block_id, %rpc, "unc {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                                     // todo!("handle equal by updating the cannonical chain");
                                     self.save_block(&heavy_block, true).await?;
@@ -453,7 +469,7 @@ impl Web3Connections {
                             Ordering::Less => {
                                 // this is unlikely but possible
                                 // TODO: better log
-                                warn!(head=%heavy_block_id, %rpc, "chain rolled back {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
+                                warn!(con_head=%heavy_block_id, rpc_head=%rpc_head_str, %rpc, "chain rolled back {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                                 self.save_block(&heavy_block, true).await?;
 
@@ -461,7 +477,7 @@ impl Web3Connections {
                                 head_block_sender.send(heavy_block)?;
                             }
                             Ordering::Greater => {
-                                debug!(head=%heavy_block_id, %rpc, "new block {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
+                                debug!(con_head=%heavy_block_id, rpc_head=%rpc_head_str, %rpc, "new {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                                 // todo!("handle greater by adding this block to and any missing parents to the cannonical chain");
 

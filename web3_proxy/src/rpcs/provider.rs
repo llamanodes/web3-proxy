@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use derive_more::From;
-use tracing::{info_span, instrument, Instrument};
+use ethers::providers::Middleware;
+use tracing::{error_span, info_span, instrument, Instrument};
 
 /// Use HTTP and WS providers.
 // TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit <https://github.com/gakonst/ethers-rs/issues/592>
@@ -12,6 +13,14 @@ pub enum Web3Provider {
 }
 
 impl Web3Provider {
+    pub fn ready(&self) -> bool {
+        // TODO: i'm not sure if this is enough
+        match self {
+            Self::Http(_) => true,
+            Self::Ws(provider) => provider.as_ref().ready(),
+        }
+    }
+
     #[instrument]
     pub async fn from_str(
         url_str: &str,
@@ -30,6 +39,7 @@ impl Web3Provider {
                 .interval(Duration::from_secs(13))
                 .into()
         } else if url_str.starts_with("ws") {
+            // TODO: i dont think this instrument does much of anything. what level should it be?
             let provider = ethers::providers::Ws::connect(url_str)
                 .instrument(info_span!("Web3Provider", %url_str))
                 .await?;
