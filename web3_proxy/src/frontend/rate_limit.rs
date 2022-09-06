@@ -226,7 +226,7 @@ impl Web3ProxyApp {
                 .context("no user data")?
         } else {
             // unwrap the cache's result
-            user_data.context("no user data")?
+            user_data.expect("we just checked the user_data is_none above")
         };
 
         if user_data.user_id == 0 {
@@ -234,46 +234,49 @@ impl Web3ProxyApp {
         }
 
         // user key is valid. now check rate limits
-        if let Some(rate_limiter) = &self.rate_limiter {
-            // TODO: query redis in the background so that users don't have to wait on this network request
-            // TODO: better key? have a prefix so its easy to delete all of these
-            // TODO: we should probably hash this or something
-            let rate_limiter_label = user_key.to_string();
+        // TODO: this is throwing errors when curve-api hits us with high concurrency. investigate
+        if false {
+            if let Some(rate_limiter) = &self.rate_limiter {
+                // TODO: query redis in the background so that users don't have to wait on this network request
+                // TODO: better key? have a prefix so its easy to delete all of these
+                // TODO: we should probably hash this or something
+                let rate_limiter_label = user_key.to_string();
 
-            match rate_limiter
-                .throttle_label(
-                    &rate_limiter_label,
-                    Some(user_data.user_count_per_period),
-                    1,
-                )
-                .await
-            {
-                Ok(ThrottleResult::Allowed) => {}
-                Ok(ThrottleResult::RetryAt(retry_at)) => {
-                    // TODO: set headers so they know when they can retry or maybe tarpit them? if they are barely over?
-                    debug!(?rate_limiter_label, "user rate limit exceeded"); // this is too verbose, but a stat might be good
-                                                                             // TODO: use their id if possible
-                    return Ok(RateLimitResult::UserRateLimitExceeded(user_data.user_id));
+                match rate_limiter
+                    .throttle_label(
+                        &rate_limiter_label,
+                        Some(user_data.user_count_per_period),
+                        1,
+                    )
+                    .await
+                {
+                    Ok(ThrottleResult::Allowed) => {}
+                    Ok(ThrottleResult::RetryAt(retry_at)) => {
+                        // TODO: set headers so they know when they can retry or maybe tarpit them? if they are barely over?
+                        debug!(?rate_limiter_label, "user rate limit exceeded"); // this is too verbose, but a stat might be good
+                                                                                 // TODO: use their id if possible
+                        return Ok(RateLimitResult::UserRateLimitExceeded(user_data.user_id));
+                    }
+                    Ok(ThrottleResult::RetryNever) => {
+                        // TODO: prettier error for the user
+                        return Err(anyhow::anyhow!("user blocked by rate limiter"));
+                    }
+                    Err(err) => {
+                        // internal error, not rate limit being hit
+                        // rather than have downtime, i think its better to just use in-process rate limiting
+                        // TODO: in-process rate limits that pipe into redis
+                        error!(?err, "redis is unhappy. allowing ip");
+                        return Ok(RateLimitResult::AllowedUser(user_data.user_id));
+                    } // // TODO: set headers so they know when they can retry
+                      // // warn!(?ip, "public rate limit exceeded");  // this is too verbose, but a stat might be good
+                      // // TODO: use their id if possible
+                      // // TODO: StatusCode::TOO_MANY_REQUESTS
+                      // return Err(anyhow::anyhow!("too many requests from this key"));
                 }
-                Ok(ThrottleResult::RetryNever) => {
-                    // TODO: prettier error for the user
-                    return Err(anyhow::anyhow!("user blocked by rate limiter"));
-                }
-                Err(err) => {
-                    // internal error, not rate limit being hit
-                    // rather than have downtime, i think its better to just use in-process rate limiting
-                    // TODO: in-process rate limits that pipe into redis
-                    error!(?err, "redis is unhappy. allowing ip");
-                    return Ok(RateLimitResult::AllowedUser(user_data.user_id));
-                } // // TODO: set headers so they know when they can retry
-                  // // warn!(?ip, "public rate limit exceeded");  // this is too verbose, but a stat might be good
-                  // // TODO: use their id if possible
-                  // // TODO: StatusCode::TOO_MANY_REQUESTS
-                  // return Err(anyhow::anyhow!("too many requests from this key"));
+            } else {
+                // TODO: if no redis, rate limit with a local cache?
+                todo!("no redis. cannot rate limit")
             }
-        } else {
-            // TODO: if no redis, rate limit with a local cache?
-            todo!("no redis. cannot rate limit")
         }
 
         Ok(RateLimitResult::AllowedUser(user_data.user_id))

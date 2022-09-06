@@ -4,6 +4,7 @@ use std::fmt;
 use std::sync::atomic;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration, Instant};
+use tracing::debug;
 use tracing::warn;
 use tracing::{instrument, trace};
 
@@ -57,7 +58,7 @@ impl OpenRequestHandle {
         // TODO: use tracing spans properly
         // TODO: requests from customers have request ids, but we should add
         // TODO: including params in this is way too verbose
-        trace!("Sending {} to {}", method, self.0);
+        debug!("Sending {} to {}", method, self.0);
 
         let mut provider = None;
 
@@ -80,8 +81,8 @@ impl OpenRequestHandle {
 
         // TODO: i think ethers already has trace logging (and does it much more fancy)
         // TODO: at least instrument this with more useful information
-        // trace!("Reply from {}: {:?}", self.0, response);
-        trace!("Reply from {}", self.0);
+        trace!("Reply from {} for {}: {:?}", self.0, method, response);
+        // trace!("Reply from {}", self.0);
 
         response
     }

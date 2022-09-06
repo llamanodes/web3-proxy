@@ -186,6 +186,7 @@ impl fmt::Debug for JsonRpcForwardedResponse {
 impl JsonRpcForwardedResponse {
     pub fn from_anyhow_error(err: anyhow::Error, id: Box<RawValue>) -> Self {
         // TODO: this is too verbose. plenty of errors are valid, like users giving an invalid address. no need to log that
+        // TODO: can we somehow get the initial request here? if we put that into a tracing span, will things slow down a ton?
         warn!(?err, "forwarding error");
 
         JsonRpcForwardedResponse {
