@@ -148,6 +148,9 @@
 
 These are not yet ordered.
 
+- [ ] favicon.
+  - eth_1       | 2022-09-07T17:10:48.431536Z  WARN web3_proxy::jsonrpc: forwarding error err=nothing to see here
+  - use the one on https://staging.llamanodes.com/
 - [ ] page that prints a graphviz dotfile of the blockchain
 - [ ] warn if no servers have transaction subscriptions
     - [ ] if no servers have transaction subscriptions, and a user tries to subscribe, make sure the error is user friendly
