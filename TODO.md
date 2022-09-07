@@ -90,7 +90,7 @@
   - whenever blocks were slow, we started checking as fast as possible
 - [x] create user script should allow setting requests per minute
 - [x] cache api keys that are not in the database
-- [ ] improve consensus block selection. Our goal is to find the highest work chain with a block over a minimum threshold of sum_soft_limit.
+- [x] improve consensus block selection. Our goal is to find the highest work chain with a block over a minimum threshold of sum_soft_limit.
   - [x] i saw a fork of like 300 blocks. probably just because a node was restarted and had fallen behind. need some checks to ignore things that are far behind. this improvement should fix this problem
   - [x] A new block arrives at a connection.
   - [x] It checks that it isn't the same that it already has (which is a problem with polling nodes)
@@ -106,48 +106,57 @@
       - [x] block_num: DashMap<U64, H256>
       - [x] blockchain: DiGraphMap<blockhash, ?>
     - [x] iterate the rpc_map to find the highest_work_block
-    - [?] oldest_block_num = highest_work_block.number - 256
-        - think more about this. if we have to go back more than a couple blocks, we will serve very stale data
-    - [x] while sum_soft_limit < min_sum_soft_limit:
-      - [x] consensus_head_hash = block.parent_hash
-      - [x] sum_soft_limit = ??? (something with iterating rpc_map, caches, and petgraph's all_simple_paths)
-        - if all_simple_paths returns no paths, warn about a chain split?
-    - [x] now that we have a consensus head with enough soft limit (or an empty set), update SyncedConnections
+    - [x] update synced connections
     - [x] send the block through new head_block_sender
   - [x] rewrite cannonical_block to work as long as there are no forks
-  - [ ] rewrite cannonical_block (again) and related functions to handle forks
-    - [ ] todo!("do something with the old hash. we need to update a bunch more block numbers")
-    - [ ] todo!("handle equal") and also less and greater
+  - [x] rewrite cannonical_block (again) and related functions to handle forks
+    - [x] got a very large number of possible heads here. i think maybe a server was very far out of sync. we should drop servers behind by too much
+    eth_1       | 2022-08-10T23:26:06.377129Z  WARN web3_proxy::connections: chain is forked! 261 possible heads. 1/2/5/5 rpcs have 0xd403…3c5d
+    eth_1       | 2022-08-10T23:26:08.917603Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
+    eth_1       | 2022-08-10T23:26:10.195014Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
+    eth_1       | 2022-08-10T23:26:10.195658Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 2/3/5/5 rpcs have 0x0538…bfff
+    - [x] todo!("handle equal") and also less and greater
     - [x] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
       - i think there is also a bug because i've seen "server not synced" a couple times
 - [x] bug around eth_getBlockByHash sometimes causes tokio to lock up
   - i keep a mapping of blocks so that i can go from hash -> block. it has some consistent hashing it does to split them up across multiple maps each with their own lock. so a lot of the time reads dont block writes because they are in different internal maps. this was fine.
   - but after changing my fork detection logic to use the same rules as erigon, i discovered that when you get blocks from a websocket subscription in erigon and geth, theres a missing field (https://github.com/ledgerwatch/erigon/issues/5190). so i added a query to get the block that includes the missing field.
   - but i did this in a way where i was holding the write lock open while doing the query. the "new" block that has the missing field ends up in the same bucket and it also wants a write lock. oops. entry api has very sharp edges. don't ever await inside a match on DashMap::entry
-- [-] use siwe messages and signatures for sign up and login
-- [-] requests for "Get transactions receipts" are routed to the private_rpcs and not the balanced_rpcs. do this better.
-  - [x] quick fix, send to balanced_rpcs for now. we will just live with errors on new transactions. 
+- [x] requests for "Get transactions receipts" are routed to the private_rpcs and not the balanced_rpcs. do this better.
+  - [x] quick fix, send to balanced_rpcs for now. we will just live with errors on new transactions.
   - this was intentional so that recently confirmed transactions go to a server that is more likely to have the tx.
   - but under heavy load, we hit their rate limits. need a "retry_until_success" function that goes to balanced_rpcs. or maybe store in redis the txids that we broadcast privately and use that to route.
-  - [ ] write a function for receipts that tries balanced_rpcs and only on error of all balanced tries privates
-- [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
-- [ ] web3connection3.block(...) might wait forever. be sure to do it safely
-- [ ] search for all "todo!"
-- [ ] replace all `.context("no servers in sync")` with proper error type
-- [ ] when using a bunch of slow public servers, i see "no servers in sync" even when things should be right
-  - [ ] i think checking the parents of the heaviest chain works most of the time, but not always
-  - maybe iterate connection heads by total weight? i still think we need to include parent hashes
 - [x] some of the DashMaps grow unbounded! Make/find a "SizedDashMap" that cleans up old rows with some garbage collection task
   - moka is exactly what we need
-- [ ] add configurable size limits to all the Caches
-- [ ] i see "No block found" sometimes. Not sure why since reads should happen after writes
-- [ ] when there are a LOT of concurrent requests, I see an error. i thought that was a problem with redis cell, but it happens with my simpler rate limit
-  - [ ] WARN http_request: redis_rate_limit::errors: redis error err=Response was of incompatible type: "Response type not string compatible." (response was int(500237)) id=01GC6514JWN5PS1NCWJCGJTC94 method=POST
-  - [ ] maybe fix this and then put redis-cell back?
-- [ ] benchmarks from https://github.com/curvefi/curve-api
+- [x] if block data limit is 0, say Unknown in Debug output
+- [-] use siwe messages and signatures for sign up and login
+- [ ] quick script that calls all the curve-api endpoints once and checks for success, then calls wrk to hammer it
+  - [ ] https://github.com/curvefi/curve-api
+  - [ ] test /api/getGauges
+      - usually times out after vercel's 60 second timeout
+      - one time got: Error invalid Json response ""
+- [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
+- [ ] rewrite rate limiting to have a tiered cache. do not put redis in the hot path
+  - when there are a LOT of concurrent requests, I see an error. i thought that was a problem with redis cell, but it happens with my simpler rate limit. now i think the problem is actually with bb8
+  - [ ] https://docs.rs/redis/latest/redis/aio/struct.ConnectionManager.html or https://crates.io/crates/deadpool-redis?
+  - WARN http_request: redis_rate_limit::errors: redis error err=Response was of incompatible type: "Response type not string compatible." (response was int(500237)) id=01GC6514JWN5PS1NCWJCGJTC94 method=POST
+  - maybe even bring back redis-cell
+- [ ] i think all the async methods in ethers need tracing instrument. something like `cfgif(tracing, tracing::instrument)`
+  - if they do that, i think my request_id will show up on their logs
 
 ## V1
 
+These are not yet ordered.
+
+- [ ] page that prints a graphviz dotfile of the blockchain
+- [ ] warn if no servers have transaction subscriptions
+    - [ ] if no servers have transaction subscriptions, and a user tries to subscribe, make sure the error is user friendly
+- [ ] eth_subscribe logs (https://geth.ethereum.org/docs/rpc/pubsub)
+- [ ] add configurable size limits to all the Caches
+- [ ] make private transactions opt in (its already in the database, but not our code)
+- [ ] write a function for receipts that tries balanced_rpcs and only on error of all balanced tries privates
+  - [ ] automatic retries with a timeout or until all the servers have been tried.
+    - i had the websocket die on me in the middle of a long test. only one in-flight request failed because of it. the rest delayed. figure out how to catch these ones since websocket fails sadly seem common
 - [ ] make rate limits check in the background
   - right now every single request requires calling incr on redis
   - instead, we should check a local cache for the current rate limit (+1) and spawn an update to the local cache from redis in the background.
@@ -195,6 +204,11 @@
 - [ ] when handling errors from axum parsing the Json...Enum, the errors don't get wrapped in json. i think we need a Layer
 - [ ] don't "unwrap" anywhere. give proper errors
 - [ ] tool to revoke bearer tokens that also clears redis
+- [ ] eth_getBlockByNumber and similar calls served from the block map
+  - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
+  - so maybe we don't want this. we can just use the general request cache for these. they will only require 1 request and it means requests won't get in the way as much on writes as new blocks arrive.
+  - after looking at my request logs, i think its worth doing this. no point hitting the backends with requests for blocks multiple times. will also help with cache hit rates since we can keep recent blocks in a separate cache
+- [ ] handle log subscriptions
 
 new endpoints for users:
 - [x] GET /u/:api_key
@@ -224,19 +238,17 @@ new endpoints for users:
 
 ## V2
 
-- [ ] eth_getBlockByNumber and similar calls served from the block map
-  - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
-  - so maybe we don't want this. we can just use the general request cache for these. they will only require 1 request and it means requests won't get in the way as much on writes as new blocks arrive.
-  - after looking at my request logs, i think its worth doing this. no point hitting the backends with requests for blocks multiple times. will also help with cache hit rates since we can keep recent blocks in a separate cache
+These are not 
+
+
 - [ ] jwt auth so people can easily switch from infura
-- [ ] handle log subscriptions
 - [ ] most things that are cached locally should probably be in shared redis caches
 - [ ] automated soft limit
   - look at average request time for getBlock? i'm not sure how good a proxy that will be for serving eth_call, but its a start
   - https://crates.io/crates/histogram-sampler
 - [ ] interval for http subscriptions should be based on block time. load from config is easy, but better to query. currently hard coded to 13 seconds
 - [ ] handle user payments
-- [ ] Load testing script so we can find optimal cost servers 
+- [ ] Advanced load testing scripts so we can find optimal cost servers 
 
 in another repo: event subscriber
   - [ ] watch for transfer events to our contract and submit them to /payment/$tx_hash
@@ -244,7 +256,7 @@ in another repo: event subscriber
 
 ## "Maybe some day" and other Miscellaneous Things
 
-- [ ] search for all the "TODO" items in the code and move them here
+- [ ] search for all the "TODO" and `todo!(...)` items in the code and move them here
 - [ ] instead of giving a rate limit error code, delay the connection's response at the start. reject if incoming requests is super high?
 - [ ] add the backend server to the header?
 - [ ] have a low-latency option that always tries at least two servers in parallel and then returns the first success?
@@ -310,16 +322,28 @@ in another repo: event subscriber
   - when those rate limits are hit, what should happen?
   - missing pending transactions might be okay, but not missing confirmed blocks 
 - [ ] for easier errors in the axum code, i think we need to have our own type that wraps anyhow::Result+Error
-- [ ] got a very large number of possible heads here. i think maybe a server was very far out of sync. we should drop servers behind by too much
-  eth_1       | 2022-08-10T23:26:06.377129Z  WARN web3_proxy::connections: chain is forked! 261 possible heads. 1/2/5/5 rpcs have 0xd403…3c5d
-  eth_1       | 2022-08-10T23:26:08.917603Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
-  eth_1       | 2022-08-10T23:26:10.195014Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 1/2/5/5 rpcs have 0x0538…bfff
-  eth_1       | 2022-08-10T23:26:10.195658Z  WARN web3_proxy::connections: chain is forked! 262 possible heads. 2/3/5/5 rpcs have 0x0538…bfff
 - [ ] fix ip detection when running in dev
 - [ ] double check weight sorting code
 - [ ] sea-orm brings in async-std, but we are using tokio. benchmark switching 
 - [ ] this query always times out, but erigon can serve it quickly: `curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["latest"],"id":1}' 127.0.0.1:8544' 127.0.0.1:8544`
   {"jsonrpc":"2.0","id":null,"error":{"code":-32099,"message":"deadline has elapsed"}}
-
   - [ ] figure out rate limits for private rpcs. eden v1 gives 500 error instead of a code for rate limits
 - [ ] https://gitlab.com/moka-labs/tiered-cache-example
+- [ ] web3connection3.block(...) might wait forever. be sure to do it safely
+- [ ] search for all "todo!"
+- [ ] replace all `.context("no servers in sync")` with proper error type
+- [ ] when using a bunch of slow public servers, i see "no servers in sync" even when things should be right
+  - [ ] i think checking the parents of the heaviest chain works most of the time, but not always
+  - maybe iterate connection heads by total weight? i still think we need to include parent hashes
+- [ ] i see "No block found" sometimes for a single server's block. Not sure why since reads should happen after writes
+- [ ] figure out why total requests is climbing so fast
+    - is someone using my node that i don't expect?
+    - is staking that inefficient?
+    - maybe arbitrum syncing?
+    - internal requests gone haywire?
+    - need graphs!
+- [ ] it looks like our reconnect logic is not always firing. we need to make reconnect more robust!
+  - i am pretty sure that this is actually servers that fail to connect on initial setup (maybe the rpcs that are on the wrong chain are just timing out and they aren't set to reconnect?)
+- [ ] whats going on here? why is it rolling back? maybe total_difficulty was a LOT higher?
+  - 2022-09-05T19:21:39.763630Z  WARN web3_proxy::rpcs::blockchain: chain rolled back 1/6/7 head=15479604 (0xf809…6a2c) rpc=infura_free
+  - i wish i had more logs. its possible that 15479605 came immediatly after
