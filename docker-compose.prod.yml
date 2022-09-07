@@ -70,14 +70,14 @@ services:
     ports:
       - 7504:8544
 
-  # gnosis:
-  #   extends:
-  #     file: docker-compose.common.yml
-  #     service: base
-  #   volumes:
-  #     - ./config/production-gnosis.toml:/config.toml
-  #   ports:
-  #     - 7505:8544
+  gnosis:
+    extends:
+      file: docker-compose.common.yml
+      service: base
+    volumes:
+      - ./config/production-gnosis.toml:/config.toml
+    ports:
+      - 7505:8544
 
   # goerli:
   #   extends:
