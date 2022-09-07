@@ -24,8 +24,8 @@ pub type BlockHashesMap = Cache<H256, ArcBlock>;
 /// A block's hash and number.
 #[derive(Clone, Debug, Default, From, Serialize)]
 pub struct BlockId {
-    pub(super) hash: H256,
-    pub(super) num: U64,
+    pub hash: H256,
+    pub num: U64,
 }
 
 impl Display for BlockId {

@@ -437,15 +437,15 @@ impl Web3Connections {
     // TODO: better type on this that can return an anyhow::Result
     pub async fn upstream_servers(
         &self,
-        min_block_needed: Option<&U64>,
+        block_needed: Option<&U64>,
     ) -> Result<Vec<OpenRequestHandle>, Option<Instant>> {
         let mut earliest_retry_at = None;
         // TODO: with capacity?
         let mut selected_rpcs = vec![];
 
         for connection in self.conns.values() {
-            if let Some(min_block_needed) = min_block_needed {
-                if !connection.has_block_data(min_block_needed) {
+            if let Some(block_needed) = block_needed {
+                if !connection.has_block_data(block_needed) {
                     continue;
                 }
             }
@@ -575,10 +575,10 @@ impl Web3Connections {
     pub async fn try_send_all_upstream_servers(
         &self,
         request: JsonRpcRequest,
-        min_block_needed: Option<&U64>,
+        block_needed: Option<&U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
-            match self.upstream_servers(min_block_needed).await {
+            match self.upstream_servers(block_needed).await {
                 Ok(active_request_handles) => {
                     // TODO: benchmark this compared to waiting on unbounded futures
                     // TODO: do something with this handle?

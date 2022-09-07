@@ -3,7 +3,7 @@ use super::rate_limit::{rate_limit_by_ip, rate_limit_by_user_key};
 use crate::stats::Protocol;
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::Path;
-use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
+use axum::{response::IntoResponse, Extension, Json};
 use axum_client_ip::ClientIp;
 use std::sync::Arc;
 use tracing::{error_span, Instrument};
@@ -58,7 +58,7 @@ pub async fn public_proxy_web3_rpc(
 
     let response = app.proxy_web3_rpc(payload).instrument(user_span).await?;
 
-    Ok((StatusCode::OK, Json(&response)).into_response())
+    Ok(Json(&response).into_response())
 }
 
 pub async fn user_proxy_web3_rpc(
@@ -74,5 +74,5 @@ pub async fn user_proxy_web3_rpc(
 
     let response = app.proxy_web3_rpc(payload).instrument(user_span).await?;
 
-    Ok((StatusCode::OK, Json(&response)).into_response())
+    Ok(Json(&response).into_response())
 }

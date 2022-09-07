@@ -120,7 +120,7 @@ impl Web3ProxyApp {
     pub async fn rate_limit_by_ip(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_key
         // TODO: have a local cache because if we hit redis too hard we get errors
-        if let Some(rate_limiter) = &self.rate_limiter {
+        if let Some(rate_limiter) = &self.frontend_rate_limiter {
             let rate_limiter_label = format!("ip-{}", ip);
 
             // TODO: query redis in the background so that users don't have to wait on this network request
@@ -236,7 +236,7 @@ impl Web3ProxyApp {
         // user key is valid. now check rate limits
         // TODO: this is throwing errors when curve-api hits us with high concurrency. investigate
         if false {
-            if let Some(rate_limiter) = &self.rate_limiter {
+            if let Some(rate_limiter) = &self.frontend_rate_limiter {
                 // TODO: query redis in the background so that users don't have to wait on this network request
                 // TODO: better key? have a prefix so its easy to delete all of these
                 // TODO: we should probably hash this or something

@@ -6,7 +6,7 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
-use crate::rpcs::blockchain::{ArcBlock, BlockHashesMap};
+use crate::rpcs::blockchain::{ArcBlock, BlockHashesMap, BlockId};
 use crate::rpcs::connections::Web3Connections;
 use crate::rpcs::transactions::TxStatus;
 use crate::stats::AppStats;
@@ -32,10 +32,10 @@ use serde_json::json;
 use std::fmt;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::atomic::{self, AtomicUsize};
+use std::sync::atomic::{self, AtomicU64, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, watch, Notify};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
@@ -52,9 +52,13 @@ static APP_USER_AGENT: &str = concat!(
 
 /// block hash, method, params
 // TODO: better name
-type ResponseCacheKey = (H256, String, Option<String>);
+type Web3QueryCacheKey = (H256, String, Option<String>);
 
-type ResponseCache = Cache<ResponseCacheKey, JsonRpcForwardedResponse>;
+/// wait on this to
+type ResponseCacheReady = Arc<Notify>;
+
+type RequestCache = Cache<Web3QueryCacheKey, (u64, ResponseCacheReady)>;
+type ResponseCache = Cache<Web3QueryCacheKey, JsonRpcForwardedResponse>;
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
@@ -80,9 +84,12 @@ pub struct Web3ProxyApp {
     pending_tx_sender: broadcast::Sender<TxStatus>,
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
+    /// store pending queries so that we don't send the same request to our backends multiple times
+    pub total_queries: AtomicU64,
+    pub active_queries: RequestCache,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     pub pending_transactions: Cache<TxHash, TxStatus>,
-    pub rate_limiter: Option<RedisRateLimit>,
+    pub frontend_rate_limiter: Option<RedisRateLimit>,
     pub redis_pool: Option<RedisPool>,
     pub stats: AppStats,
     pub user_cache: Cache<Uuid, UserCacheValue>,
@@ -304,6 +311,8 @@ impl Web3ProxyApp {
         });
 
         // TODO: change this to a sized cache
+        let total_queries = 0.into();
+        let active_queries = Cache::new(10_000);
         let response_cache = Cache::new(10_000);
         let user_cache = Cache::new(10_000);
 
@@ -314,8 +323,10 @@ impl Web3ProxyApp {
             response_cache,
             head_block_receiver,
             pending_tx_sender,
+            total_queries,
+            active_queries,
             pending_transactions,
-            rate_limiter: frontend_rate_limiter,
+            frontend_rate_limiter,
             db_conn,
             redis_pool,
             stats: app_stats,
@@ -324,8 +335,6 @@ impl Web3ProxyApp {
 
         let app = Arc::new(app);
 
-        // create a handle that returns on the first error
-        // TODO: move this to a helper. i think Web3Connections needs it too
         let handle = Box::pin(flatten_handles(handles));
 
         Ok((app, handle))
@@ -586,48 +595,6 @@ impl Web3ProxyApp {
         }
     }
 
-    async fn cached_response_or_key(
-        &self,
-        // TODO: accept a block hash here also?
-        min_block_needed: Option<&U64>,
-        request: &JsonRpcRequest,
-    ) -> anyhow::Result<Result<JsonRpcForwardedResponse, ResponseCacheKey>> {
-        // TODO: inspect the request to pick the right cache
-        // TODO: https://github.com/ethereum/web3.py/blob/master/web3/middleware/cache.py
-
-        let request_block_hash = if let Some(min_block_needed) = min_block_needed {
-            // TODO: maybe this should be on the app and not on balanced_rpcs
-            self.balanced_rpcs.block_hash(min_block_needed).await?
-        } else {
-            // TODO: maybe this should be on the app and not on balanced_rpcs
-            self.balanced_rpcs
-                .head_block_hash()
-                .context("no servers in sync")?
-        };
-
-        // TODO: better key? benchmark this
-        let key = (
-            request_block_hash,
-            request.method.clone(),
-            request.params.clone().map(|x| x.to_string()),
-        );
-
-        if let Some(response) = self.response_cache.get(&key) {
-            // TODO: emit a stat
-            trace!(?request.method, "cache hit!");
-
-            // TODO: can we make references work? maybe put them in an Arc?
-            return Ok(Ok(response));
-        }
-
-        // TODO: another lock here so that we don't send the same request to a backend more than onces xzs
-
-        // TODO: emit a stat
-        trace!(?request.method, "cache miss!");
-
-        Ok(Err(key))
-    }
-
     async fn proxy_web3_rpc_request(
         &self,
         mut request: JsonRpcRequest,
@@ -635,7 +602,7 @@ impl Web3ProxyApp {
         trace!("Received request: {:?}", request);
 
         // save the id so we can attach it to the response
-        let id = request.id.clone();
+        let request_id = request.id.clone();
 
         // TODO: if eth_chainId or net_version, serve those without querying the backend
 
@@ -807,44 +774,40 @@ impl Web3ProxyApp {
                     _ => return Err(anyhow::anyhow!("invalid request")),
                 }
             }
-
-            // TODO: web3_sha3?
             // anything else gets sent to backend rpcs and cached
             method => {
                 // emit stats
 
-                let head_block_number = self
+                // TODO: wait for them to be synced?
+                let head_block_id = self
                     .balanced_rpcs
-                    .head_block_num()
+                    .head_block_id()
                     .context("no servers synced")?;
 
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
-                let min_block_needed =
-                    block_needed(method, request.params.as_mut(), head_block_number);
-
-                let min_block_needed = min_block_needed.as_ref();
-
-                trace!(?min_block_needed, ?method);
-
-                // TODO: emit a stat on error. maybe with .map_err?
-                let cache_key = match self
-                    .cached_response_or_key(min_block_needed, &request)
-                    .await?
+                let request_block_id = if let Some(request_block_needed) =
+                    block_needed(method, request.params.as_mut(), head_block_id.num)
                 {
-                    Ok(mut cache_result) => {
-                        // we got a cache hit! no need to do any backend requests.
+                    // TODO: maybe this should be on the app and not on balanced_rpcs
+                    let request_block_hash =
+                        self.balanced_rpcs.block_hash(&request_block_needed).await?;
 
-                        // put our request id on the cached response
-                        // TODO: maybe only cache the inner result? then have a JsonRpcForwardedResponse::from_cache
-                        cache_result.id = request.id;
-
-                        // emit a stat
-
-                        return Ok(cache_result);
+                    BlockId {
+                        num: request_block_needed,
+                        hash: request_block_hash,
                     }
-                    Err(cache_key) => cache_key,
+                } else {
+                    head_block_id
                 };
+
+                // TODO: struct for this?
+                // TODO: this can be rather large. is that okay?
+                let cache_key = (
+                    request_block_id.hash,
+                    request.method.clone(),
+                    request.params.clone().map(|x| x.to_string()),
+                );
 
                 // TODO: move this caching outside this match and cache some of the other responses?
                 // TODO: cache the warp::reply to save us serializing every time?
@@ -856,13 +819,19 @@ impl Web3ProxyApp {
                                 // "eth_getTransactionByHash" | "eth_getTransactionReceipt" => {
                                 // TODO: try_send_all serially with retries instead of parallel
                                 self.private_rpcs
-                                    .try_send_all_upstream_servers(request, min_block_needed)
+                                    .try_send_all_upstream_servers(
+                                        request,
+                                        Some(&request_block_id.num),
+                                    )
                                     .await
                             }
                             _ => {
-                                // TODO: retries?
+                                // TODO: retry some failures automatically!
                                 self.balanced_rpcs
-                                    .try_send_best_upstream_server(request, min_block_needed)
+                                    .try_send_best_upstream_server(
+                                        request,
+                                        Some(&request_block_id.num),
+                                    )
                                     .await
                             }
                         }
@@ -870,14 +839,15 @@ impl Web3ProxyApp {
                     .await
                     .unwrap();
 
-                // this is fragile and i no longer like it
-                response.id = id;
+                // since this data came out of a cache, the id is likely wrong.
+                // replace the id with our request's id.
+                response.id = request_id;
 
                 return Ok(response);
             }
         };
 
-        let response = JsonRpcForwardedResponse::from_value(partial_response, id);
+        let response = JsonRpcForwardedResponse::from_value(partial_response, request_id);
 
         Ok(response)
     }

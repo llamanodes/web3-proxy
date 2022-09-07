@@ -65,7 +65,7 @@ pub fn clean_block_number(
 pub fn block_needed(
     method: &str,
     params: Option<&mut serde_json::Value>,
-    head_block: U64,
+    head_block_num: U64,
 ) -> Option<U64> {
     // if no params, no block is needed
     let params = params?;
@@ -97,7 +97,7 @@ pub fn block_needed(
             if let Some(x) = obj.get_mut("fromBlock") {
                 let block_num: BlockNumber = serde_json::from_value(x.clone()).ok()?;
 
-                let (modified, block_num) = block_num_to_u64(block_num, head_block);
+                let (modified, block_num) = block_num_to_u64(block_num, head_block_num);
 
                 if modified {
                     *x = serde_json::to_value(block_num).unwrap();
@@ -109,7 +109,7 @@ pub fn block_needed(
             if let Some(x) = obj.get_mut("toBlock") {
                 let block_num: BlockNumber = serde_json::from_value(x.clone()).ok()?;
 
-                let (modified, block_num) = block_num_to_u64(block_num, head_block);
+                let (modified, block_num) = block_num_to_u64(block_num, head_block_num);
 
                 if modified {
                     *x = serde_json::to_value(block_num).unwrap();
@@ -162,7 +162,7 @@ pub fn block_needed(
         }
     };
 
-    match clean_block_number(params, block_param_id, head_block) {
+    match clean_block_number(params, block_param_id, head_block_num) {
         Ok(block) => Some(block),
         Err(err) => {
             // TODO: seems unlikely that we will get here

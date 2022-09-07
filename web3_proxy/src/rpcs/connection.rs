@@ -787,9 +787,8 @@ impl Serialize for Web3Connection {
         state.serialize_field("name", &self.name)?;
 
         let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
-
         if block_data_limit == u64::MAX {
-            state.serialize_field("block_data_limit", "None")?;
+            state.serialize_field("block_data_limit", &None::<()>)?;
         } else {
             state.serialize_field("block_data_limit", &block_data_limit)?;
         }
@@ -821,9 +820,9 @@ impl fmt::Debug for Web3Connection {
 
         let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
         if block_data_limit == u64::MAX {
-            f.field("data", &"archive");
+            f.field("blocks", &"all");
         } else {
-            f.field("data", &block_data_limit);
+            f.field("blocks", &block_data_limit);
         }
 
         f.finish_non_exhaustive()
