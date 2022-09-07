@@ -35,7 +35,7 @@ use std::str::FromStr;
 use std::sync::atomic::{self, AtomicU64, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{broadcast, watch, Notify};
+use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
@@ -52,13 +52,8 @@ static APP_USER_AGENT: &str = concat!(
 
 /// block hash, method, params
 // TODO: better name
-type Web3QueryCacheKey = (H256, String, Option<String>);
-
-/// wait on this to
-type ResponseCacheReady = Arc<Notify>;
-
-type RequestCache = Cache<Web3QueryCacheKey, (u64, ResponseCacheReady)>;
-type ResponseCache = Cache<Web3QueryCacheKey, JsonRpcForwardedResponse>;
+type ResponseCacheKey = (H256, String, Option<String>);
+type ResponseCache = Cache<ResponseCacheKey, JsonRpcForwardedResponse>;
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
@@ -86,7 +81,6 @@ pub struct Web3ProxyApp {
     pub db_conn: Option<sea_orm::DatabaseConnection>,
     /// store pending queries so that we don't send the same request to our backends multiple times
     pub total_queries: AtomicU64,
-    pub active_queries: RequestCache,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     pub pending_transactions: Cache<TxHash, TxStatus>,
     pub frontend_rate_limiter: Option<RedisRateLimit>,
@@ -312,7 +306,6 @@ impl Web3ProxyApp {
 
         // TODO: change this to a sized cache
         let total_queries = 0.into();
-        let active_queries = Cache::new(10_000);
         let response_cache = Cache::new(10_000);
         let user_cache = Cache::new(10_000);
 
@@ -324,7 +317,6 @@ impl Web3ProxyApp {
             head_block_receiver,
             pending_tx_sender,
             total_queries,
-            active_queries,
             pending_transactions,
             frontend_rate_limiter,
             db_conn,
@@ -611,6 +603,8 @@ impl Web3ProxyApp {
         // // TODO: add more to this span such as
         let span = info_span!("rpc_request");
         // let _enter = span.enter(); // DO NOT ENTER! we can't use enter across awaits! (clippy lint soon)
+
+        self.total_queries.fetch_add(1, atomic::Ordering::Relaxed);
 
         // TODO: don't clone
         let partial_response: serde_json::Value = match request.method.clone().as_ref() {

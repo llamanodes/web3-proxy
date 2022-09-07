@@ -1,5 +1,6 @@
 use crate::app::Web3ProxyApp;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
+use moka::future::ConcurrentCacheExt;
 use serde_json::json;
 use std::sync::{atomic, Arc};
 
@@ -16,10 +17,11 @@ pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoRe
 /// TODO: replace this with proper stats and monitoring
 pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     // TODO: what else should we include? uptime?
+    app.pending_transactions.sync();
+    app.user_cache.sync();
+
     let body = json!({
-        "total_queries": app.total_queries.load(atomic::Ordering::Relaxed),
-        "active_queries_count": app.active_queries.entry_count(),
-        "active_queries_size": app.active_queries.weighted_size(),
+        "total_queries": app.total_queries.load(atomic::Ordering::Acquire),
         "pending_transactions_count": app.pending_transactions.entry_count(),
         "pending_transactions_size": app.pending_transactions.weighted_size(),
         "user_cache_count": app.user_cache.entry_count(),
