@@ -21,7 +21,10 @@ services:
   adminer:
     image: adminer
     ports:
-      - 8306:8080
+      - mode: host
+        protocol: tcp
+        published: 8306
+        target: 8080
     environment:
       ADMINER_DEFAULT_SERVER: db
 
@@ -32,7 +35,10 @@ services:
     volumes:
       - ./config/production-arbitrum.toml:/config.toml
     ports:
-      - 7500:8544
+      - mode: host
+        protocol: tcp
+        published: 7500
+        target: 8544
 
   # avalanche-c:
   #   extends:
@@ -41,7 +47,10 @@ services:
   #   volumes:
   #     - ./config/production-avalanche-c.toml:/config.toml
   #   ports:
-  #     - 7501:8544
+  #    - mode: host
+  #      protocol: tcp
+  #      published: 7501
+  #      target: 8544
 
   bsc:
     extends:
@@ -50,16 +59,23 @@ services:
     volumes:
       - ./config/production-bsc.toml:/config.toml
     ports:
-      - 7502:8544
+      - mode: host
+        protocol: tcp
+        published: 7502
+        target: 8544
 
   eth:
     extends:
       file: docker-compose.common.yml
       service: base
+    command: --config /config.toml --workers 72
     volumes:
       - ./config/production-eth.toml:/config.toml
     ports:
-      - 7503:8544
+      - mode: host
+        protocol: tcp
+        published: 7503
+        target: 8544
 
   fantom:
     extends:
@@ -68,7 +84,10 @@ services:
     volumes:
       - ./config/production-fantom.toml:/config.toml
     ports:
-      - 7504:8544
+      - mode: host
+        protocol: tcp
+        published: 7504
+        target: 8544
 
   gnosis:
     extends:
@@ -77,7 +96,10 @@ services:
     volumes:
       - ./config/production-gnosis.toml:/config.toml
     ports:
-      - 7505:8544
+      - mode: host
+        protocol: tcp
+        published: 7505
+        target: 8544
 
   # goerli:
   #   extends:
@@ -86,7 +108,10 @@ services:
   #   volumes:
   #     - ./config/production-goerli.toml:/config.toml
   #   ports:
-  #     - 7506:8544
+  #    - mode: host
+  #      protocol: tcp
+  #      published: 7506
+  #      target: 8544
 
   optimism:
     extends:
@@ -95,7 +120,10 @@ services:
     volumes:
       - ./config/production-optimism.toml:/config.toml
     ports:
-      - 7507:8544
+      - mode: host
+        protocol: tcp
+        published: 7507
+        target: 8544
 
   polygon:
     extends:
@@ -104,4 +132,7 @@ services:
     volumes:
       - ./config/production-polygon.toml:/config.toml
     ports:
-      - 7508:8544
+      - mode: host
+        protocol: tcp
+        published: 7508
+        target: 8544

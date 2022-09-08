@@ -3,4 +3,6 @@
 # change to the project's root directory
 cd "${0%/*}/.."
 
+export DOCKER_BUILDKIT=1
+
 exec docker-compose -f docker-compose.prod.yml "$@"
