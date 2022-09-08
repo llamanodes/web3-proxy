@@ -9,7 +9,6 @@ use crate::jsonrpc::JsonRpcRequestEnum;
 use crate::rpcs::blockchain::{ArcBlock, BlockHashesMap, BlockId};
 use crate::rpcs::connections::Web3Connections;
 use crate::rpcs::transactions::TxStatus;
-use crate::stats::AppStats;
 use anyhow::Context;
 use axum::extract::ws::Message;
 use derive_more::From;
@@ -20,6 +19,8 @@ use futures::future::{join_all, AbortHandle};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use futures::Future;
+use hashbrown::HashMap;
+use metered::{metered, ErrorCount, HitCount, InFlight, ResponseTime, Throughput};
 use migration::{Migrator, MigratorTrait};
 use moka::future::Cache;
 use redis_rate_limit::bb8::PooledConnection;
@@ -79,13 +80,14 @@ pub struct Web3ProxyApp {
     pending_tx_sender: broadcast::Sender<TxStatus>,
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
+    /// prometheus metrics
+    metrics: Arc<Web3ProxyAppMetrics>,
     /// store pending queries so that we don't send the same request to our backends multiple times
     pub total_queries: AtomicU64,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     pub pending_transactions: Cache<TxHash, TxStatus>,
     pub frontend_rate_limiter: Option<RedisRateLimit>,
     pub redis_pool: Option<RedisPool>,
-    pub stats: AppStats,
     pub user_cache: Cache<Uuid, UserCacheValue>,
 }
 
@@ -115,6 +117,7 @@ pub async fn flatten_handles<T>(
 }
 
 /// Connect to the database and run migrations
+#[instrument(skip_all)]
 pub async fn get_migrated_db(
     db_url: String,
     min_connections: u32,
@@ -141,9 +144,9 @@ pub async fn get_migrated_db(
     Ok(db)
 }
 
+#[metered(registry = Web3ProxyAppMetrics)]
 impl Web3ProxyApp {
     pub async fn spawn(
-        app_stats: AppStats,
         top_config: TopConfig,
         num_workers: u32,
     ) -> anyhow::Result<(
@@ -321,7 +324,7 @@ impl Web3ProxyApp {
             frontend_rate_limiter,
             db_conn,
             redis_pool,
-            stats: app_stats,
+            metrics: Default::default(),
             user_cache,
         };
 
@@ -332,10 +335,22 @@ impl Web3ProxyApp {
         Ok((app, handle))
     }
 
-    pub async fn eth_subscribe(
-        self: Arc<Self>,
+    pub fn prometheus_metrics(&self) -> anyhow::Result<String> {
+        let globals = HashMap::new();
+        // TODO: what globals? should this be the hostname or what?
+        // globals.insert("service", "web3_proxy");
+
+        let serialized = serde_prometheus::to_string(&self.metrics, Some("web3_proxy"), globals)?;
+
+        Ok(serialized)
+    }
+
+    #[instrument(skip_all)]
+    #[measure([ErrorCount, HitCount, InFlight, ResponseTime, Throughput])]
+    pub async fn eth_subscribe<'a>(
+        self: &'a Arc<Self>,
         payload: JsonRpcRequest,
-        subscription_count: &AtomicUsize,
+        subscription_count: &'a AtomicUsize,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
         response_sender: flume::Sender<Message>,
     ) -> anyhow::Result<(AbortHandle, JsonRpcForwardedResponse)> {
@@ -524,7 +539,7 @@ impl Web3ProxyApp {
     /// send the request or batch of requests to the approriate RPCs
     #[instrument(skip_all)]
     pub async fn proxy_web3_rpc(
-        &self,
+        self: &Arc<Self>,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         // TODO: this should probably be trace level
@@ -550,14 +565,14 @@ impl Web3ProxyApp {
         Ok(response)
     }
 
+    /// cut up the request and send to potentually different servers
+    /// TODO: make sure this isn't a problem
+    #[instrument(skip_all)]
     async fn proxy_web3_rpc_requests(
-        &self,
+        self: &Arc<Self>,
         requests: Vec<JsonRpcRequest>,
     ) -> anyhow::Result<Vec<JsonRpcForwardedResponse>> {
         // TODO: we should probably change ethers-rs to support this directly
-        // we cut up the request and send to potentually different servers. this could be a problem.
-        // if the client needs consistent blocks, they should specify instead of assume batches work on the same
-        // TODO: is spawning here actually slower?
         let num_requests = requests.len();
         let responses = join_all(
             requests
@@ -576,6 +591,7 @@ impl Web3ProxyApp {
         Ok(collected)
     }
 
+    #[instrument(skip_all)]
     pub async fn redis_conn(&self) -> anyhow::Result<PooledConnection<RedisConnectionManager>> {
         match self.redis_pool.as_ref() {
             None => Err(anyhow::anyhow!("no redis server configured")),
@@ -587,8 +603,10 @@ impl Web3ProxyApp {
         }
     }
 
+    #[measure([ErrorCount, HitCount, InFlight, ResponseTime, Throughput])]
+    #[instrument(skip_all)]
     async fn proxy_web3_rpc_request(
-        &self,
+        self: &Arc<Self>,
         mut request: JsonRpcRequest,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         trace!("Received request: {:?}", request);
@@ -609,7 +627,7 @@ impl Web3ProxyApp {
         // TODO: don't clone
         let partial_response: serde_json::Value = match request.method.clone().as_ref() {
             // lots of commands are blocked
-            "admin_addPeer"
+            method @ ("admin_addPeer"
             | "admin_datadir"
             | "admin_startRPC"
             | "admin_startWS"
@@ -671,20 +689,20 @@ impl Web3ProxyApp {
             | "shh_newIdentity"
             | "shh_post"
             | "shh_uninstallFilter"
-            | "shh_version" => {
+            | "shh_version") => {
                 // TODO: client error stat
                 // TODO: proper error code
-                return Err(anyhow::anyhow!("unsupported"));
+                return Err(anyhow::anyhow!("method unsupported: {}", method));
             }
             // TODO: implement these commands
-            "eth_getFilterChanges"
+            method @ ("eth_getFilterChanges"
             | "eth_getFilterLogs"
             | "eth_newBlockFilter"
             | "eth_newFilter"
             | "eth_newPendingTransactionFilter"
-            | "eth_uninstallFilter" => {
+            | "eth_uninstallFilter") => {
                 // TODO: unsupported command stat
-                return Err(anyhow::anyhow!("not yet implemented"));
+                return Err(anyhow::anyhow!("not yet implemented: {}", method));
             }
             // some commands can use local data or caches
             "eth_accounts" => {
@@ -698,7 +716,9 @@ impl Web3ProxyApp {
                     }
                     None => {
                         // TODO: what does geth do if this happens?
-                        return Err(anyhow::anyhow!("no servers synced"));
+                        return Err(anyhow::anyhow!(
+                            "no servers synced. unknown eth_blockNumber"
+                        ));
                     }
                 }
             }

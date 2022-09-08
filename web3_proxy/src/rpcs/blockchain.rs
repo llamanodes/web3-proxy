@@ -14,7 +14,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::{broadcast, watch};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
@@ -401,7 +401,7 @@ impl Web3Connections {
             } else {
                 // TODO: this is too verbose. move to trace
                 // i think "conns" is somehow getting dupes
-                debug!(?heavy_rpcs);
+                trace!(?heavy_rpcs);
 
                 // success! this block has enough soft limit and nodes on it (or on later blocks)
                 let conns: Vec<Arc<Web3Connection>> = heavy_rpcs

@@ -8,6 +8,7 @@ use hashbrown::HashMap;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tracing::instrument;
 
 pub type BlockAndRpc = (Option<ArcBlock>, Arc<Web3Connection>);
 pub type TxHashAndRpc = (TxHash, Arc<Web3Connection>);
@@ -113,6 +114,7 @@ impl Web3ConnectionConfig {
     /// Create a Web3Connection from config
     /// TODO: move this into Web3Connection (just need to make things pub(crate))
     #[allow(clippy::too_many_arguments)]
+    #[instrument(skip_all)]
     pub async fn spawn(
         self,
         name: String,

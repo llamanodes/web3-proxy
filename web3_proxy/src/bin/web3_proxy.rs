@@ -18,8 +18,7 @@ use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 use web3_proxy::app::{flatten_handle, Web3ProxyApp};
 use web3_proxy::config::{CliConfig, TopConfig};
-use web3_proxy::frontend;
-use web3_proxy::stats::AppStatsRegistry;
+use web3_proxy::{frontend, metrics};
 
 fn run(
     shutdown_receiver: flume::Receiver<()>,
@@ -69,18 +68,14 @@ fn run(
     debug!(?num_workers);
 
     rt.block_on(async {
-        let app_stats_registry = AppStatsRegistry::new();
-
-        let app_stats = app_stats_registry.stats.clone();
-
         let app_frontend_port = cli_config.port;
         let app_prometheus_port = cli_config.prometheus_port;
 
-        let (app, app_handle) = Web3ProxyApp::spawn(app_stats, top_config, num_workers).await?;
+        let (app, app_handle) = Web3ProxyApp::spawn(top_config, num_workers).await?;
 
-        let frontend_handle = tokio::spawn(frontend::serve(app_frontend_port, app));
+        let frontend_handle = tokio::spawn(frontend::serve(app_frontend_port, app.clone()));
 
-        let prometheus_handle = tokio::spawn(app_stats_registry.serve(app_prometheus_port));
+        let prometheus_handle = tokio::spawn(metrics::serve(app, app_prometheus_port));
 
         // if everything is working, these should both run forever
         // TODO: try_join these instead? use signal_shutdown here?

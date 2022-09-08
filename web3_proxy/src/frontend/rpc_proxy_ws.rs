@@ -24,7 +24,6 @@ use uuid::Uuid;
 use crate::{
     app::Web3ProxyApp,
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
-    stats::Protocol,
 };
 
 #[debug_handler]
@@ -36,9 +35,8 @@ pub async fn public_websocket_handler(
     let _ip = rate_limit_by_ip(&app, ip).await?;
 
     let user_id = 0;
-    let protocol = Protocol::Websocket;
 
-    let user_span = error_span!("user", user_id, ?protocol);
+    let user_span = error_span!("user", user_id);
 
     match ws_upgrade {
         Some(ws) => Ok(ws
@@ -59,11 +57,9 @@ pub async fn user_websocket_handler(
 ) -> FrontendResult {
     let user_id: u64 = rate_limit_by_user_key(&app, user_key).await?;
 
-    let protocol = Protocol::Websocket;
-
     // log the id, not the address. we don't want to expose the user's address
     // TODO: type that wraps Address and have it censor? would protect us from accidently logging addresses
-    let user_span = error_span!("user", user_id, ?protocol);
+    let user_span = error_span!("user", user_id);
 
     match ws_upgrade {
         Some(ws_upgrade) => Ok(ws_upgrade
@@ -118,7 +114,6 @@ async fn handle_socket_payload(
                     let span = error_span!("eth_subscribe");
 
                     let response = app
-                        .clone()
                         .eth_subscribe(payload, subscription_count, response_sender.clone())
                         .instrument(span)
                         .await;

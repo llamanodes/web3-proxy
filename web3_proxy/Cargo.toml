@@ -34,13 +34,13 @@ flume = "0.10.14"
 futures = { version = "0.3.24", features = ["thread-pool"] }
 hashbrown = { version = "0.12.3", features = ["serde"] }
 http = "0.2.8"
+metered = { version = "0.9.0", features = ["serialize"] }
 moka = { version = "0.9.4", default-features = false, features = ["future"] }
 notify = "5.0.0"
 num = "0.4.0"
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 petgraph = "0.6.2"
 proctitle = "0.1.1"
-prometheus-client = "0.18.0"
 rand = "0.8.5"
 # TODO: regex has several "perf" features that we might want to use
 regex = "1.6.0"
@@ -51,6 +51,7 @@ siwe = "0.4.2"
 sea-orm = { version = "0.9.2", features = ["macros"] }
 serde = { version = "1.0.144", features = [] }
 serde_json = { version = "1.0.85", default-features = false, features = ["alloc", "raw_value"] }
+serde_prometheus = "0.1.6"
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 time = "0.3.14"
 tokio = { version = "1.21.0", features = ["full", "tracing"] }
@@ -64,5 +65,5 @@ tracing = "0.1.36"
 # TODO: tracing-subscriber has serde and serde_json features that we might want to use
 tracing-subscriber = { version = "0.3.15", features = ["env-filter", "parking_lot"] }
 ulid = { version = "1.0.0", features = ["serde"] }
-url = "2.2.2"
+url = "2.3.1"
 uuid = "1.1.2"

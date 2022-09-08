@@ -1,10 +1,10 @@
 use super::connection::Web3Connection;
 use super::provider::Web3Provider;
+// use metered::{measure, ErrorCount, HitCount, InFlight, ResponseTime, Throughput};
 use std::fmt;
 use std::sync::atomic;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration, Instant};
-use tracing::debug;
 use tracing::warn;
 use tracing::{instrument, trace};
 
@@ -45,6 +45,7 @@ impl OpenRequestHandle {
     /// Send a web3 request
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// By taking self here, we ensure that this is dropped after the request is complete
+    // #[measure([ErrorCount, HitCount, InFlight, ResponseTime, Throughput])]
     #[instrument(skip_all)]
     pub async fn request<T, R>(
         &self,
@@ -58,7 +59,7 @@ impl OpenRequestHandle {
         // TODO: use tracing spans properly
         // TODO: requests from customers have request ids, but we should add
         // TODO: including params in this is way too verbose
-        debug!("Sending {} to {}", method, self.0);
+        trace!(rpc=%self.0, %method, "request");
 
         let mut provider = None;
 
@@ -81,8 +82,8 @@ impl OpenRequestHandle {
 
         // TODO: i think ethers already has trace logging (and does it much more fancy)
         // TODO: at least instrument this with more useful information
-        trace!("Reply from {} for {}: {:?}", self.0, method, response);
-        // trace!("Reply from {}", self.0);
+        // trace!(rpc=%self.0, %method, ?response);
+        trace!(rpc=%self.0, %method, "response");
 
         response
     }

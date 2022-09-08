@@ -137,7 +137,7 @@ impl Web3ProxyApp {
                 }
                 Ok(ThrottleResult::RetryNever) => {
                     // TODO: prettier error for the user
-                    return Err(anyhow::anyhow!("ip blocked by rate limiter"));
+                    return Err(anyhow::anyhow!("ip ({}) blocked by rate limiter", ip));
                 }
                 Err(err) => {
                     // internal error, not rate limit being hit
@@ -259,7 +259,10 @@ impl Web3ProxyApp {
                     }
                     Ok(ThrottleResult::RetryNever) => {
                         // TODO: prettier error for the user
-                        return Err(anyhow::anyhow!("user blocked by rate limiter"));
+                        return Err(anyhow::anyhow!(
+                            "user #{} blocked by rate limiter",
+                            user_data.user_id
+                        ));
                     }
                     Err(err) => {
                         // internal error, not rate limit being hit

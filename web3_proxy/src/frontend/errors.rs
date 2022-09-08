@@ -9,6 +9,7 @@ use redis_rate_limit::{bb8::RunError, RedisError};
 use sea_orm::DbErr;
 use serde_json::value::RawValue;
 use std::error::Error;
+use tracing::instrument;
 
 // TODO: take "IntoResult" instead?
 pub type FrontendResult = Result<Response, FrontendErrorResponse>;
@@ -51,6 +52,7 @@ impl IntoResponse for FrontendErrorResponse {
     }
 }
 
+#[instrument(skip_all)]
 pub async fn handler_404() -> Response {
     let err = anyhow::anyhow!("nothing to see here");
 
