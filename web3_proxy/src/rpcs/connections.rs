@@ -1,7 +1,7 @@
 ///! Load balanced communication with a group of web3 providers
 use super::blockchain::{ArcBlock, BlockHashesMap};
 use super::connection::Web3Connection;
-use super::request::{OpenRequestHandle, OpenRequestResult};
+use super::request::{OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult};
 use super::synced_connections::SyncedConnections;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3ConnectionConfig};
@@ -63,6 +63,7 @@ impl Web3Connections {
         min_synced_rpcs: usize,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         pending_transactions: Cache<TxHash, TxStatus>,
+        open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
@@ -119,6 +120,7 @@ impl Web3Connections {
 
                 let pending_tx_id_sender = Some(pending_tx_id_sender.clone());
                 let block_map = block_map.clone();
+                let open_request_handle_metrics = open_request_handle_metrics.clone();
 
                 tokio::spawn(async move {
                     server_config
@@ -131,6 +133,7 @@ impl Web3Connections {
                             block_map,
                             block_sender,
                             pending_tx_id_sender,
+                            open_request_handle_metrics,
                         )
                         .await
                 })

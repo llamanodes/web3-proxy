@@ -1,5 +1,6 @@
 use crate::rpcs::blockchain::BlockHashesMap;
 use crate::rpcs::connection::Web3Connection;
+use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::{app::AnyhowJoinHandle, rpcs::blockchain::ArcBlock};
 use argh::FromArgs;
 use derive_more::Constructor;
@@ -125,6 +126,7 @@ impl Web3ConnectionConfig {
         block_map: BlockHashesMap,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
+        open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = match (self.hard_limit, redis_pool) {
             (None, None) => None,
@@ -156,6 +158,7 @@ impl Web3ConnectionConfig {
             tx_id_sender,
             true,
             self.weight,
+            open_request_handle_metrics,
         )
         .await
     }

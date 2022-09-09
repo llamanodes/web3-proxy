@@ -8,6 +8,7 @@ use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
 use crate::rpcs::blockchain::{ArcBlock, BlockHashesMap, BlockId};
 use crate::rpcs::connections::Web3Connections;
+use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
 use anyhow::Context;
 use axum::extract::ws::Message;
@@ -29,11 +30,12 @@ use redis_rate_limit::{
     RedisConnectionManager, RedisErrorSink, RedisPool, RedisRateLimit,
 };
 use sea_orm::DatabaseConnection;
+use serde::Serialize;
 use serde_json::json;
 use std::fmt;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::atomic::{self, AtomicU64, AtomicUsize};
+use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
@@ -81,9 +83,8 @@ pub struct Web3ProxyApp {
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
     /// prometheus metrics
-    metrics: Arc<Web3ProxyAppMetrics>,
-    /// store pending queries so that we don't send the same request to our backends multiple times
-    pub total_queries: AtomicU64,
+    app_metrics: Arc<Web3ProxyAppMetrics>,
+    open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     pub pending_transactions: Cache<TxHash, TxStatus>,
     pub frontend_rate_limiter: Option<RedisRateLimit>,
@@ -144,7 +145,7 @@ pub async fn get_migrated_db(
     Ok(db)
 }
 
-#[metered(registry = Web3ProxyAppMetrics)]
+#[metered(registry = Web3ProxyAppMetrics, registry_expr = self.app_metrics, visibility = pub)]
 impl Web3ProxyApp {
     pub async fn spawn(
         top_config: TopConfig,
@@ -158,6 +159,9 @@ impl Web3ProxyApp {
             top_config.app.redirect_user_url.contains("{{user_id}}"),
             "redirect user url must contain \"{{user_id}}\""
         );
+
+        let app_metrics = Default::default();
+        let open_request_handle_metrics: Arc<OpenRequestHandleMetrics> = Default::default();
 
         // first, we connect to mysql and make sure the latest migrations have run
         let db_conn = if let Some(db_url) = &top_config.app.db_url {
@@ -262,6 +266,7 @@ impl Web3ProxyApp {
             top_config.app.min_synced_rpcs,
             Some(pending_tx_sender.clone()),
             pending_transactions.clone(),
+            open_request_handle_metrics.clone(),
         )
         .await
         .context("balanced rpcs")?;
@@ -288,6 +293,7 @@ impl Web3ProxyApp {
                 // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits
                 None,
                 pending_transactions.clone(),
+                open_request_handle_metrics.clone(),
             )
             .await
             .context("private_rpcs")?;
@@ -308,7 +314,6 @@ impl Web3ProxyApp {
         });
 
         // TODO: change this to a sized cache
-        let total_queries = 0.into();
         let response_cache = Cache::new(10_000);
         let user_cache = Cache::new(10_000);
 
@@ -319,12 +324,12 @@ impl Web3ProxyApp {
             response_cache,
             head_block_receiver,
             pending_tx_sender,
-            total_queries,
             pending_transactions,
             frontend_rate_limiter,
             db_conn,
             redis_pool,
-            metrics: Default::default(),
+            app_metrics,
+            open_request_handle_metrics,
             user_cache,
         };
 
@@ -340,7 +345,18 @@ impl Web3ProxyApp {
         // TODO: what globals? should this be the hostname or what?
         // globals.insert("service", "web3_proxy");
 
-        let serialized = serde_prometheus::to_string(&self.metrics, Some("web3_proxy"), globals)?;
+        #[derive(Serialize)]
+        struct CombinedMetrics<'a> {
+            app: &'a Web3ProxyAppMetrics,
+            backend_rpc: &'a OpenRequestHandleMetrics,
+        }
+
+        let metrics = CombinedMetrics {
+            app: &self.app_metrics,
+            backend_rpc: &self.open_request_handle_metrics,
+        };
+
+        let serialized = serde_prometheus::to_string(&metrics, Some("web3_proxy"), globals)?;
 
         Ok(serialized)
     }
@@ -618,11 +634,9 @@ impl Web3ProxyApp {
 
         // TODO: how much should we retry? probably with a timeout and not with a count like this
         // TODO: think more about this loop.
-        // // TODO: add more to this span such as
+        // TODO: add things to this span
         let span = info_span!("rpc_request");
         // let _enter = span.enter(); // DO NOT ENTER! we can't use enter across awaits! (clippy lint soon)
-
-        self.total_queries.fetch_add(1, atomic::Ordering::Relaxed);
 
         // TODO: don't clone
         let partial_response: serde_json::Value = match request.method.clone().as_ref() {

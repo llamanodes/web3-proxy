@@ -1,7 +1,7 @@
 ///! Rate-limited communication with a web3 provider.
 use super::blockchain::{ArcBlock, BlockHashesMap, BlockId};
 use super::provider::Web3Provider;
-use super::request::{OpenRequestHandle, OpenRequestResult};
+use super::request::{OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
 use anyhow::Context;
@@ -30,6 +30,7 @@ pub struct Web3Connection {
     pub(super) active_requests: AtomicU32,
     /// keep track of total requests
     /// TODO: is this type okay?
+    /// TODO: replace this with something in metered?
     pub(super) total_requests: AtomicU64,
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
@@ -44,6 +45,7 @@ pub struct Web3Connection {
     pub(super) weight: u32,
     // TODO: async lock?
     pub(super) head_block_id: RwLock<Option<BlockId>>,
+    pub(super) open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
 }
 
 impl Web3Connection {
@@ -67,6 +69,7 @@ impl Web3Connection {
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
         weight: u32,
+        open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_conection)| {
             // TODO: allow configurable period and max_burst
@@ -92,6 +95,7 @@ impl Web3Connection {
             block_data_limit: Default::default(),
             head_block_id: RwLock::new(Default::default()),
             weight,
+            open_request_handle_metrics,
         };
 
         let new_connection = Arc::new(new_connection);

@@ -1,8 +1,6 @@
 use crate::app::Web3ProxyApp;
-use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
-use moka::future::ConcurrentCacheExt;
-use serde_json::json;
-use std::sync::{atomic, Arc};
+use axum::{http::StatusCode, response::IntoResponse, Extension};
+use std::sync::Arc;
 use tracing::instrument;
 
 /// Health check page for load balancers to use

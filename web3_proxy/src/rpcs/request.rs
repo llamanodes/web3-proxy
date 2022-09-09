@@ -1,6 +1,11 @@
 use super::connection::Web3Connection;
 use super::provider::Web3Provider;
-// use metered::{measure, ErrorCount, HitCount, InFlight, ResponseTime, Throughput};
+use metered::metered;
+use metered::ErrorCount;
+use metered::HitCount;
+use metered::InFlight;
+use metered::ResponseTime;
+use metered::Throughput;
 use std::fmt;
 use std::sync::atomic;
 use std::sync::Arc;
@@ -19,34 +24,39 @@ pub enum OpenRequestResult {
 
 /// Make RPC requests through this handle and drop it when you are done.
 #[derive(Debug)]
-pub struct OpenRequestHandle(Arc<Web3Connection>);
+pub struct OpenRequestHandle {
+    conn: Arc<Web3Connection>,
+    // TODO: this is the same metrics on the conn. use a reference
+    metrics: Arc<OpenRequestHandleMetrics>,
+}
 
+#[metered(registry = OpenRequestHandleMetrics, visibility = pub)]
 impl OpenRequestHandle {
-    pub fn new(connection: Arc<Web3Connection>) -> Self {
+    pub fn new(conn: Arc<Web3Connection>) -> Self {
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
-        connection
-            .active_requests
-            .fetch_add(1, atomic::Ordering::AcqRel);
+        // TODO: should we be using metered, or not? i think not because we want stats for each handle
+        // TODO: these should maybe be sent to an influxdb instance?
+        conn.active_requests.fetch_add(1, atomic::Ordering::AcqRel);
 
         // TODO: handle overflows?
         // TODO: what ordering?
-        connection
-            .total_requests
-            .fetch_add(1, atomic::Ordering::Relaxed);
+        conn.total_requests.fetch_add(1, atomic::Ordering::Relaxed);
 
-        Self(connection)
+        let metrics = conn.open_request_handle_metrics.clone();
+
+        Self { conn, metrics }
     }
 
     pub fn clone_connection(&self) -> Arc<Web3Connection> {
-        self.0.clone()
+        self.conn.clone()
     }
 
     /// Send a web3 request
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// By taking self here, we ensure that this is dropped after the request is complete
-    // #[measure([ErrorCount, HitCount, InFlight, ResponseTime, Throughput])]
     #[instrument(skip_all)]
+    #[measure([ErrorCount, HitCount, InFlight, ResponseTime, Throughput])]
     pub async fn request<T, R>(
         &self,
         method: &str,
@@ -59,14 +69,14 @@ impl OpenRequestHandle {
         // TODO: use tracing spans properly
         // TODO: requests from customers have request ids, but we should add
         // TODO: including params in this is way too verbose
-        trace!(rpc=%self.0, %method, "request");
+        trace!(rpc=%self.conn, %method, "request");
 
         let mut provider = None;
 
         while provider.is_none() {
-            match self.0.provider.read().await.as_ref() {
+            match self.conn.provider.read().await.as_ref() {
                 None => {
-                    warn!(rpc=%self.0, "no provider!");
+                    warn!(rpc=%self.conn, "no provider!");
                     // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
                     // TODO: sleep how long? subscribe to something instead?
                     sleep(Duration::from_millis(100)).await
@@ -83,7 +93,7 @@ impl OpenRequestHandle {
         // TODO: i think ethers already has trace logging (and does it much more fancy)
         // TODO: at least instrument this with more useful information
         // trace!(rpc=%self.0, %method, ?response);
-        trace!(rpc=%self.0, %method, "response");
+        trace!(rpc=%self.conn, %method, "response");
 
         response
     }
@@ -91,7 +101,7 @@ impl OpenRequestHandle {
 
 impl Drop for OpenRequestHandle {
     fn drop(&mut self) {
-        self.0
+        self.conn
             .active_requests
             .fetch_sub(1, atomic::Ordering::AcqRel);
     }
