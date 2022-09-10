@@ -8,3 +8,6 @@ edition = "2021"
 anyhow = "1.0.64"
 bb8-redis = "0.11.0"
 tracing = "0.1.36"
+
+# TODO: i'd prefer not to require tokio here, but we use tokio::time
+tokio = "1.21.0"

@@ -717,24 +717,21 @@ impl Web3Connection {
 
         // check rate limits
         if let Some(ratelimiter) = self.hard_limit.as_ref() {
-            match ratelimiter.throttle().await {
-                Ok(ThrottleResult::Allowed) => {
+            match ratelimiter.throttle().await? {
+                ThrottleResult::Allowed => {
                     trace!("rate limit succeeded")
                 }
-                Ok(ThrottleResult::RetryAt(retry_at)) => {
+                ThrottleResult::RetryAt(retry_at) => {
                     // rate limit failed
                     // save the smallest retry_after. if nothing succeeds, return an Err with retry_after in it
                     // TODO: use tracing better
                     // TODO: i'm seeing "Exhausted rate limit on moralis: 0ns". How is it getting 0?
                     warn!(?retry_at, rpc=%self, "Exhausted rate limit");
 
-                    return Ok(OpenRequestResult::RetryAt(retry_at.into()));
+                    return Ok(OpenRequestResult::RetryAt(retry_at));
                 }
-                Ok(ThrottleResult::RetryNever) => {
-                    return Err(anyhow::anyhow!("Rate limit failed."));
-                }
-                Err(err) => {
-                    return Err(err);
+                ThrottleResult::RetryNever => {
+                    return Ok(OpenRequestResult::RetryNever);
                 }
             }
         };

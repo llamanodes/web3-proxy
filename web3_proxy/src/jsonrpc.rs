@@ -4,7 +4,6 @@ use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::Serialize;
 use serde_json::value::RawValue;
 use std::fmt;
-use tracing::warn;
 
 // this is used by serde
 #[allow(dead_code)]
@@ -184,21 +183,32 @@ impl fmt::Debug for JsonRpcForwardedResponse {
 }
 
 impl JsonRpcForwardedResponse {
-    pub fn from_anyhow_error(err: anyhow::Error, id: Box<RawValue>) -> Self {
+    pub fn from_anyhow_error(
+        err: anyhow::Error,
+        code: Option<i64>,
+        id: Option<Box<RawValue>>,
+    ) -> Self {
+        let message = format!("{:?}", err);
+
+        Self::from_string(message, code, id)
+    }
+
+    pub fn from_str(message: &str, code: Option<i64>, id: Option<Box<RawValue>>) -> Self {
+        Self::from_string(message.to_string(), code, id)
+    }
+
+    pub fn from_string(message: String, code: Option<i64>, id: Option<Box<RawValue>>) -> Self {
         // TODO: this is too verbose. plenty of errors are valid, like users giving an invalid address. no need to log that
         // TODO: can we somehow get the initial request here? if we put that into a tracing span, will things slow down a ton?
-        warn!(?err, "forwarding error");
-
         JsonRpcForwardedResponse {
             jsonrpc: "2.0".to_string(),
-            id,
+            id: id.unwrap_or_else(|| {
+                RawValue::from_string("null".to_string()).expect("null id should always work")
+            }),
             result: None,
             error: Some(JsonRpcErrorData {
-                // TODO: set this jsonrpc error code to match the http status code? or maybe the other way around? maybe take it as an arg
-                code: -32099,
-                // TODO: some errors should be included here. others should not. i think anyhow might not be the right choice
-                // message: "internal server error".to_string(),
-                message: format!("{:?}", err),
+                code: code.unwrap_or(-32099),
+                message,
                 data: None,
             }),
         }

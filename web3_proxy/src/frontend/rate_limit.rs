@@ -1,118 +1,49 @@
-use super::errors::{anyhow_error_into_response, FrontendErrorResponse};
+use super::errors::FrontendErrorResponse;
 use crate::app::{UserCacheValue, Web3ProxyApp};
 use anyhow::Context;
-use axum::response::Response;
-use derive_more::From;
 use entities::user_keys;
 use redis_rate_limit::ThrottleResult;
-use reqwest::StatusCode;
 use sea_orm::{
     ColumnTrait, DeriveColumn, EntityTrait, EnumIter, IdenStatic, QueryFilter, QuerySelect,
 };
 use std::{net::IpAddr, time::Duration};
 use tokio::time::Instant;
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub enum RateLimitResult {
     AllowedIp(IpAddr),
     AllowedUser(u64),
-    IpRateLimitExceeded(IpAddr),
-    UserRateLimitExceeded(u64),
+    RateLimitedIp(IpAddr, Option<Instant>),
+    RateLimitedUser(u64, Option<Instant>),
     UnknownKey,
-}
-
-#[derive(From)]
-pub enum RequestFrom {
-    Ip(IpAddr),
-    // TODO: fetch the actual user?
-    User(u64),
-}
-
-impl TryFrom<RequestFrom> for IpAddr {
-    type Error = anyhow::Error;
-
-    fn try_from(value: RequestFrom) -> Result<Self, Self::Error> {
-        match value {
-            RequestFrom::Ip(x) => Ok(x),
-            _ => Err(anyhow::anyhow!("not an ip")),
-        }
-    }
-}
-
-impl TryFrom<RequestFrom> for u64 {
-    type Error = anyhow::Error;
-
-    fn try_from(value: RequestFrom) -> Result<Self, Self::Error> {
-        match value {
-            RequestFrom::User(x) => Ok(x),
-            _ => Err(anyhow::anyhow!("not a user")),
-        }
-    }
 }
 
 pub async fn rate_limit_by_ip(
     app: &Web3ProxyApp,
     ip: IpAddr,
 ) -> Result<IpAddr, FrontendErrorResponse> {
-    let rate_limit_result = app.rate_limit_by_ip(ip).await?;
-
-    match rate_limit_result {
+    match app.rate_limit_by_ip(ip).await? {
         RateLimitResult::AllowedIp(x) => Ok(x),
-        RateLimitResult::AllowedUser(_) => panic!("only ips or errors are expected here"),
-        rate_limit_result => {
-            let _: RequestFrom = rate_limit_result.try_into()?;
-
-            panic!("try_into should have failed")
+        RateLimitResult::RateLimitedIp(x, retry_at) => {
+            Err(FrontendErrorResponse::RateLimitedIp(x, retry_at))
         }
+        x => unimplemented!("rate_limit_by_ip shouldn't ever see these: {:?}", x),
     }
 }
 
-pub async fn rate_limit_by_user_key(
+pub async fn rate_limit_by_key(
     app: &Web3ProxyApp,
     // TODO: change this to a Ulid
     user_key: Uuid,
 ) -> Result<u64, FrontendErrorResponse> {
-    let rate_limit_result = app.rate_limit_by_key(user_key).await?;
-
-    match rate_limit_result {
-        RateLimitResult::AllowedIp(_) => panic!("only user keys or errors are expected here"),
+    match app.rate_limit_by_key(user_key).await? {
         RateLimitResult::AllowedUser(x) => Ok(x),
-        rate_limit_result => {
-            let _: RequestFrom = rate_limit_result.try_into()?;
-
-            panic!("try_into should have failed")
+        RateLimitResult::RateLimitedUser(x, retry_at) => {
+            Err(FrontendErrorResponse::RateLimitedUser(x, retry_at))
         }
-    }
-}
-
-impl TryFrom<RateLimitResult> for RequestFrom {
-    // TODO: return an error that has its own IntoResponse?
-    type Error = Response;
-
-    fn try_from(value: RateLimitResult) -> Result<Self, Self::Error> {
-        match value {
-            RateLimitResult::AllowedIp(x) => Ok(RequestFrom::Ip(x)),
-            RateLimitResult::AllowedUser(x) => Ok(RequestFrom::User(x)),
-            RateLimitResult::IpRateLimitExceeded(ip) => Err(anyhow_error_into_response(
-                Some(StatusCode::TOO_MANY_REQUESTS),
-                None,
-                // TODO: how can we attach context here? maybe add a request id tracing field?
-                anyhow::anyhow!(format!("rate limit exceeded for {}", ip)),
-            )),
-            RateLimitResult::UserRateLimitExceeded(user) => Err(anyhow_error_into_response(
-                Some(StatusCode::TOO_MANY_REQUESTS),
-                None,
-                // TODO: don't expose numeric ids. show the address instead
-                // TODO: how can we attach context here? maybe add a request id tracing field?
-                anyhow::anyhow!(format!("rate limit exceeded for user {}", user)),
-            )),
-            RateLimitResult::UnknownKey => Err(anyhow_error_into_response(
-                Some(StatusCode::FORBIDDEN),
-                None,
-                anyhow::anyhow!("unknown key"),
-            )),
-        }
+        x => unimplemented!("rate_limit_by_key shouldn't ever see these: {:?}", x),
     }
 }
 
@@ -120,38 +51,42 @@ impl Web3ProxyApp {
     pub async fn rate_limit_by_ip(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_key
         // TODO: have a local cache because if we hit redis too hard we get errors
+        // TODO: query redis in the background so that users don't have to wait on this network request
         if let Some(rate_limiter) = &self.frontend_rate_limiter {
             let rate_limiter_label = format!("ip-{}", ip);
 
-            // TODO: query redis in the background so that users don't have to wait on this network request
             match rate_limiter
                 .throttle_label(&rate_limiter_label, None, 1)
                 .await
             {
-                Ok(ThrottleResult::Allowed) => {}
-                Ok(ThrottleResult::RetryAt(_retry_at)) => {
+                Ok(ThrottleResult::Allowed) => Ok(RateLimitResult::AllowedIp(ip)),
+                Ok(ThrottleResult::RetryAt(retry_at)) => {
                     // TODO: set headers so they know when they can retry
-                    debug!(?rate_limiter_label, "rate limit exceeded"); // this is too verbose, but a stat might be good
-                                                                        // TODO: use their id if possible
-                    return Ok(RateLimitResult::IpRateLimitExceeded(ip));
+                    // TODO: debug or trace?
+                    // this is too verbose, but a stat might be good
+                    trace!(
+                        ?rate_limiter_label,
+                        "rate limit exceeded until {:?}",
+                        retry_at
+                    );
+                    Ok(RateLimitResult::RateLimitedIp(ip, Some(retry_at)))
                 }
                 Ok(ThrottleResult::RetryNever) => {
-                    // TODO: prettier error for the user
-                    return Err(anyhow::anyhow!("ip ({}) blocked by rate limiter", ip));
+                    // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
+                    debug!(?rate_limiter_label, "rate limit exceeded");
+                    Ok(RateLimitResult::RateLimitedIp(ip, None))
                 }
                 Err(err) => {
                     // internal error, not rate limit being hit
                     // TODO: i really want axum to do this for us in a single place.
-                    error!(?err, "redis is unhappy. allowing ip");
-                    return Ok(RateLimitResult::AllowedIp(ip));
+                    error!(?err, "rate limiter is unhappy. allowing ip");
+                    Ok(RateLimitResult::AllowedIp(ip))
                 }
             }
         } else {
             // TODO: if no redis, rate limit with a local cache? "warn!" probably isn't right
             todo!("no rate limiter");
         }
-
-        Ok(RateLimitResult::AllowedIp(ip))
     }
 
     pub(crate) async fn cache_user_data(&self, user_key: Uuid) -> anyhow::Result<UserCacheValue> {
@@ -234,13 +169,13 @@ impl Web3ProxyApp {
         }
 
         // user key is valid. now check rate limits
-        // TODO: this is throwing errors when curve-api hits us with high concurrency. investigate
+        // TODO: this is throwing errors when curve-api hits us with high concurrency. investigate i think its bb8's fault
         if false {
             if let Some(rate_limiter) = &self.frontend_rate_limiter {
                 // TODO: query redis in the background so that users don't have to wait on this network request
                 // TODO: better key? have a prefix so its easy to delete all of these
                 // TODO: we should probably hash this or something
-                let rate_limiter_label = user_key.to_string();
+                let rate_limiter_label = format!("user-{}", user_key);
 
                 match rate_limiter
                     .throttle_label(
@@ -250,38 +185,41 @@ impl Web3ProxyApp {
                     )
                     .await
                 {
-                    Ok(ThrottleResult::Allowed) => {}
+                    Ok(ThrottleResult::Allowed) => {
+                        Ok(RateLimitResult::AllowedUser(user_data.user_id))
+                    }
                     Ok(ThrottleResult::RetryAt(retry_at)) => {
-                        // TODO: set headers so they know when they can retry or maybe tarpit them? if they are barely over?
-                        debug!(?rate_limiter_label, "user rate limit exceeded"); // this is too verbose, but a stat might be good
-                                                                                 // TODO: use their id if possible
-                        return Ok(RateLimitResult::UserRateLimitExceeded(user_data.user_id));
+                        // TODO: set headers so they know when they can retry
+                        // TODO: debug or trace?
+                        // this is too verbose, but a stat might be good
+                        trace!(
+                            ?rate_limiter_label,
+                            "rate limit exceeded until {:?}",
+                            retry_at
+                        );
+                        Ok(RateLimitResult::RateLimitedUser(
+                            user_data.user_id,
+                            Some(retry_at),
+                        ))
                     }
                     Ok(ThrottleResult::RetryNever) => {
-                        // TODO: prettier error for the user
-                        return Err(anyhow::anyhow!(
-                            "user #{} blocked by rate limiter",
-                            user_data.user_id
-                        ));
+                        // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
+                        debug!(?rate_limiter_label, "rate limit exceeded");
+                        Ok(RateLimitResult::RateLimitedUser(user_data.user_id, None))
                     }
                     Err(err) => {
                         // internal error, not rate limit being hit
-                        // rather than have downtime, i think its better to just use in-process rate limiting
-                        // TODO: in-process rate limits that pipe into redis
-                        error!(?err, "redis is unhappy. allowing ip");
-                        return Ok(RateLimitResult::AllowedUser(user_data.user_id));
-                    } // // TODO: set headers so they know when they can retry
-                      // // warn!(?ip, "public rate limit exceeded");  // this is too verbose, but a stat might be good
-                      // // TODO: use their id if possible
-                      // // TODO: StatusCode::TOO_MANY_REQUESTS
-                      // return Err(anyhow::anyhow!("too many requests from this key"));
+                        // TODO: i really want axum to do this for us in a single place.
+                        error!(?err, "rate limiter is unhappy. allowing ip");
+                        Ok(RateLimitResult::AllowedUser(user_data.user_id))
+                    }
                 }
             } else {
                 // TODO: if no redis, rate limit with a local cache?
                 todo!("no redis. cannot rate limit")
             }
+        } else {
+            Ok(RateLimitResult::AllowedUser(user_data.user_id))
         }
-
-        Ok(RateLimitResult::AllowedUser(user_data.user_id))
     }
 }

@@ -132,7 +132,7 @@
 - [-] use siwe messages and signatures for sign up and login
 - [ ] quick script that calls all the curve-api endpoints once and checks for success, then calls wrk to hammer it
   - [ ] https://github.com/curvefi/curve-api
-  - [ ] test /api/getGauges
+  - [ ] test /api/getGaugesmethod
       - usually times out after vercel's 60 second timeout
       - one time got: Error invalid Json response ""
 - [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
@@ -148,7 +148,7 @@
 
 These are not yet ordered.
 
-- [ ] favicon.
+- [ ] favicon
   - eth_1       | 2022-09-07T17:10:48.431536Z  WARN web3_proxy::jsonrpc: forwarding error err=nothing to see here
   - use the one on https://staging.llamanodes.com/
 - [ ] page that prints a graphviz dotfile of the blockchain
@@ -241,9 +241,11 @@ new endpoints for users:
 
 ## V2
 
-These are not 
+These are not ordered. I think some rows also accidently got deleted here. Check git history.
 
-
+- [ ] opt-in debug mode that inspects responses for reverts and gives more logs about the call
+  - this must be opt-in since it will slow things down and will make their calls less private
+  - erigon just gives `method=eth_call reqid=986147 t=1.151551ms err="execution reverted"`
 - [ ] jwt auth so people can easily switch from infura
 - [ ] most things that are cached locally should probably be in shared redis caches
 - [ ] automated soft limit

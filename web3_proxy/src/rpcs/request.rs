@@ -8,6 +8,7 @@ use metered::ResponseTime;
 use metered::Throughput;
 use std::fmt;
 use std::sync::atomic;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration, Instant};
 use tracing::warn;
@@ -28,6 +29,7 @@ pub struct OpenRequestHandle {
     conn: Arc<Web3Connection>,
     // TODO: this is the same metrics on the conn. use a reference
     metrics: Arc<OpenRequestHandleMetrics>,
+    decremented: AtomicBool,
 }
 
 #[metered(registry = OpenRequestHandleMetrics, visibility = pub)]
@@ -45,7 +47,13 @@ impl OpenRequestHandle {
 
         let metrics = conn.open_request_handle_metrics.clone();
 
-        Self { conn, metrics }
+        let decremented = false.into();
+
+        Self {
+            conn,
+            metrics,
+            decremented,
+        }
     }
 
     pub fn clone_connection(&self) -> Arc<Web3Connection> {
@@ -54,7 +62,8 @@ impl OpenRequestHandle {
 
     /// Send a web3 request
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
-    /// By taking self here, we ensure that this is dropped after the request is complete
+    /// By taking self here, we ensure that this is dropped after the request is complete.
+    /// TODO: we no longer take self because metered doesn't like that
     #[instrument(skip_all)]
     #[measure([ErrorCount, HitCount, InFlight, ResponseTime, Throughput])]
     pub async fn request<T, R>(
@@ -91,9 +100,19 @@ impl OpenRequestHandle {
         };
 
         // TODO: i think ethers already has trace logging (and does it much more fancy)
-        // TODO: at least instrument this with more useful information
-        // trace!(rpc=%self.0, %method, ?response);
-        trace!(rpc=%self.conn, %method, "response");
+        if let Err(err) = &response {
+            warn!(?err, %method, rpc=%self.conn, "response");
+        } else {
+            // trace!(rpc=%self.0, %method, ?response);
+            trace!(%method, rpc=%self.conn, "response");
+        }
+
+        self.decremented.store(true, atomic::Ordering::Release);
+        self.conn
+            .active_requests
+            .fetch_sub(1, atomic::Ordering::AcqRel);
+
+        // todo: do something to make sure this doesn't get called again? i miss having the function sig have self
 
         response
     }
@@ -101,6 +120,11 @@ impl OpenRequestHandle {
 
 impl Drop for OpenRequestHandle {
     fn drop(&mut self) {
+        if self.decremented.load(atomic::Ordering::Acquire) {
+            // we already decremented from a successful request
+            return;
+        }
+
         self.conn
             .active_requests
             .fetch_sub(1, atomic::Ordering::AcqRel);

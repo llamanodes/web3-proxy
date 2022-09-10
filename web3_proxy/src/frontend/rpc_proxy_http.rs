@@ -1,5 +1,5 @@
 use super::errors::FrontendResult;
-use super::rate_limit::{rate_limit_by_ip, rate_limit_by_user_key};
+use super::rate_limit::{rate_limit_by_ip, rate_limit_by_key};
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::{Host, Path};
 use axum::headers::{Referer, UserAgent};
@@ -48,7 +48,7 @@ pub async fn user_proxy_web3_rpc(
 ) -> FrontendResult {
     let request_span = debug_span!("request", host, ?referer, ?user_agent);
 
-    let user_id: u64 = rate_limit_by_user_key(&app, user_key)
+    let user_id = rate_limit_by_key(&app, user_key)
         .instrument(request_span.clone())
         .await?;
 

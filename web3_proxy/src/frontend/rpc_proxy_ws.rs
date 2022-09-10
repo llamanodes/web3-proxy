@@ -1,5 +1,5 @@
 use super::errors::FrontendResult;
-use super::rate_limit::{rate_limit_by_ip, rate_limit_by_user_key};
+use super::rate_limit::{rate_limit_by_ip, rate_limit_by_key};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::Path,
@@ -55,7 +55,7 @@ pub async fn user_websocket_handler(
     Path(user_key): Path<Uuid>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    let user_id: u64 = rate_limit_by_user_key(&app, user_key).await?;
+    let user_id: u64 = rate_limit_by_key(&app, user_key).await?;
 
     // log the id, not the address. we don't want to expose the user's address
     // TODO: type that wraps Address and have it censor? would protect us from accidently logging addresses
@@ -162,7 +162,7 @@ async fn handle_socket_payload(
         Ok(x) => serde_json::to_string(&x),
         Err(err) => {
             // we have an anyhow error. turn it into
-            let response = JsonRpcForwardedResponse::from_anyhow_error(err, id);
+            let response = JsonRpcForwardedResponse::from_anyhow_error(err, None, Some(id));
             serde_json::to_string(&response)
         }
     }

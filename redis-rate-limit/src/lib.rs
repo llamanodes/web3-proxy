@@ -4,7 +4,8 @@ mod errors;
 use anyhow::Context;
 use bb8_redis::redis::pipe;
 use std::ops::Add;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::time::{Duration, Instant};
 use tracing::{debug, trace};
 
 pub use crate::errors::{RedisError, RedisErrorSink};
