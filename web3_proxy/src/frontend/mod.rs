@@ -50,8 +50,9 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/u/:user_key", post(rpc_proxy_http::user_proxy_web3_rpc))
         .route("/u/:user_key", get(rpc_proxy_ws::user_websocket_handler))
         .route("/health", get(http::health))
-        // TODO: we probably want to remove /status in favor of the separate prometheus thread
         .route("/status", get(http::status))
+        // TODO: make this optional or remove it since it is available on another port
+        .route("/prometheus", get(http::prometheus))
         .route("/login/:user_address", get(users::get_login))
         .route("/login/:user_address/:message_eip", get(users::get_login))
         .route("/login", post(users::post_login))

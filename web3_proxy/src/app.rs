@@ -340,7 +340,7 @@ impl Web3ProxyApp {
         Ok((app, handle))
     }
 
-    pub fn prometheus_metrics(&self) -> anyhow::Result<String> {
+    pub fn prometheus_metrics(&self) -> String {
         let globals = HashMap::new();
         // TODO: what globals? should this be the hostname or what?
         // globals.insert("service", "web3_proxy");
@@ -356,9 +356,8 @@ impl Web3ProxyApp {
             backend_rpc: &self.open_request_handle_metrics,
         };
 
-        let serialized = serde_prometheus::to_string(&metrics, Some("web3_proxy"), globals)?;
-
-        Ok(serialized)
+        serde_prometheus::to_string(&metrics, Some("web3_proxy"), globals)
+            .expect("prometheus metrics should always serialize")
     }
 
     #[instrument(skip_all)]

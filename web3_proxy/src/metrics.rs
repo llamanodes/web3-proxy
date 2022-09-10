@@ -44,7 +44,7 @@ pub async fn serve(app: Arc<Web3ProxyApp>, port: u16) -> anyhow::Result<()> {
 
 #[instrument(skip_all)]
 async fn root(Extension(app): Extension<Arc<Web3ProxyApp>>) -> Response {
-    let serialized = app.prometheus_metrics().unwrap();
+    let serialized = app.prometheus_metrics();
 
     let mut r = serialized.into_response();
 
