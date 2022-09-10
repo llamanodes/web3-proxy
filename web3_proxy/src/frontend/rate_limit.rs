@@ -155,17 +155,16 @@ impl Web3ProxyApp {
 
         // if cache was empty, check the database
         // TODO: i think there is a cleaner way to do this
-        let user_data = if user_data.is_none() {
-            self.cache_user_data(user_key)
+        let user_data = match user_data {
+            None => self
+                .cache_user_data(user_key)
                 .await
-                .context("no user data")?
-        } else {
-            // unwrap the cache's result
-            user_data.expect("we just checked the user_data is_none above")
+                .context("fetching user data for rate limits")?,
+            Some(user_data) => user_data,
         };
 
         if user_data.user_id == 0 {
-            return Err(anyhow::anyhow!("unknown key!"));
+            return Ok(RateLimitResult::UnknownKey);
         }
 
         // user key is valid. now check rate limits
