@@ -32,10 +32,14 @@ pub fn clean_block_number(
     latest_block: U64,
 ) -> anyhow::Result<U64> {
     match params.as_array_mut() {
-        None => Err(anyhow::anyhow!("params not an array")),
+        None => {
+            // TODO: this needs the correct error code in the response
+            Err(anyhow::anyhow!("params not an array"))
+        }
         Some(params) => match params.get_mut(block_param_id) {
             None => {
                 if params.len() != block_param_id - 1 {
+                    // TODO: this needs the correct error code in the response
                     return Err(anyhow::anyhow!("unexpected params length"));
                 }
 

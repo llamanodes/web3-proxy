@@ -94,25 +94,25 @@ impl OpenRequestHandle {
             }
         }
 
-        let response = match &*provider.unwrap() {
+        let response = match &*provider.expect("provider was checked already") {
             Web3Provider::Http(provider) => provider.request(method, params).await,
             Web3Provider::Ws(provider) => provider.request(method, params).await,
         };
-
-        // TODO: i think ethers already has trace logging (and does it much more fancy)
-        if let Err(err) = &response {
-            warn!(?err, %method, rpc=%self.conn, "response");
-        } else {
-            // trace!(rpc=%self.0, %method, ?response);
-            trace!(%method, rpc=%self.conn, "response");
-        }
 
         self.decremented.store(true, atomic::Ordering::Release);
         self.conn
             .active_requests
             .fetch_sub(1, atomic::Ordering::AcqRel);
-
         // todo: do something to make sure this doesn't get called again? i miss having the function sig have self
+
+        // TODO: i think ethers already has trace logging (and does it much more fancy)
+        if let Err(err) = &response {
+            warn!(?err, %method, rpc=%self.conn, "bad response!");
+        } else {
+            // TODO: opt-in response inspection to log reverts with their request. put into redis or what?
+            // trace!(rpc=%self.0, %method, ?response);
+            trace!(%method, rpc=%self.conn, "response");
+        }
 
         response
     }

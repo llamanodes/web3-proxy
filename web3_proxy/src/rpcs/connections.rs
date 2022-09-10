@@ -492,9 +492,9 @@ impl Web3Connections {
             }
             match self
                 .next_upstream_server(&skip_rpcs, min_block_needed)
-                .await
+                .await?
             {
-                Ok(OpenRequestResult::Handle(active_request_handle)) => {
+                OpenRequestResult::Handle(active_request_handle) => {
                     // save the rpc in case we get an error and want to retry on another server
                     skip_rpcs.push(active_request_handle.clone_connection());
 
@@ -535,19 +535,20 @@ impl Web3Connections {
                             return Ok(response);
                         }
                         Err(e) => {
-                            warn!(?self, ?e, "Backend server error!");
+                            let rpc = skip_rpcs
+                                .last()
+                                .expect("there must have been a provider if we got an error");
+
+                            warn!(%rpc, ?e, "Backend server error! Retrying on another");
 
                             // TODO: sleep how long? until synced_connections changes or rate limits are available
-                            sleep(Duration::from_millis(100)).await;
+                            // sleep(Duration::from_millis(100)).await;
 
-                            // TODO: when we retry, depending on the error, skip using this same server
-                            // for example, if rpc isn't available on this server, retrying is bad
-                            // but if an http error, retrying on same is probably fine
                             continue;
                         }
                     }
                 }
-                Ok(OpenRequestResult::RetryAt(retry_at)) => {
+                OpenRequestResult::RetryAt(retry_at) => {
                     // TODO: move this to a helper function
                     // sleep (TODO: with a lock?) until our rate limits should be available
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
@@ -557,7 +558,7 @@ impl Web3Connections {
 
                     continue;
                 }
-                Ok(OpenRequestResult::RetryNever) => {
+                OpenRequestResult::RetryNever => {
                     warn!(?self, "No server handles!");
 
                     // TODO: subscribe to something on synced connections. maybe it should just be a watch channel
@@ -565,13 +566,10 @@ impl Web3Connections {
 
                     continue;
                 }
-                Err(err) => {
-                    return Err(err);
-                }
             }
         }
 
-        Err(anyhow::anyhow!("all retries exhausted"))
+        Err(anyhow::anyhow!("all {} tries exhausted", skip_rpcs.len()))
     }
 
     /// be sure there is a timeout on this or it might loop forever
@@ -604,7 +602,7 @@ impl Web3Connections {
                     return Ok(response);
                 }
                 Err(None) => {
-                    warn!(?self, "No servers in sync!");
+                    warn!(?self, "No servers in sync! Retrying");
 
                     // TODO: i don't think this will ever happen
                     // TODO: return a 502? if it does?

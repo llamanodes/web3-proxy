@@ -790,6 +790,7 @@ impl Web3ProxyApp {
                     Some(serde_json::Value::Array(params)) => {
                         // TODO: make a struct and use serde conversion to clean this up
                         if params.len() != 1 || !params[0].is_string() {
+                            // TODO: this needs the correct error code in the response
                             return Err(anyhow::anyhow!("invalid request"));
                         }
 
@@ -799,7 +800,10 @@ impl Web3ProxyApp {
 
                         json!(hash)
                     }
-                    _ => return Err(anyhow::anyhow!("invalid request")),
+                    _ => {
+                        // TODO: this needs the correct error code in the response
+                        return Err(anyhow::anyhow!("invalid request"));
+                    }
                 }
             }
             // anything else gets sent to backend rpcs and cached

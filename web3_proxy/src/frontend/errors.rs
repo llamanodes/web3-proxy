@@ -35,8 +35,9 @@ impl IntoResponse for FrontendErrorResponse {
                 warn!(?err, "anyhow");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "anyhow error!",
+                    JsonRpcForwardedResponse::from_string(
+                        // TODO: is it safe to expose all our anyhow strings?
+                        err.to_string(),
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),

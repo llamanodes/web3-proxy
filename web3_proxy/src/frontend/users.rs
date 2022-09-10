@@ -102,7 +102,10 @@ pub async fn get_login(
         // https://github.com/spruceid/siwe/issues/98
         "eip191_bytes" => Bytes::from(message.eip191_bytes().unwrap()).to_string(),
         "eip191_hash" => Bytes::from(&message.eip191_hash().unwrap()).to_string(),
-        _ => return Err(anyhow::anyhow!("invalid message eip given").into()),
+        _ => {
+            // TODO: this needs the correct error code in the response
+            return Err(anyhow::anyhow!("invalid message eip given").into());
+        }
     };
 
     Ok(message.into_response())
