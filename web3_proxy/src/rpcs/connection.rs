@@ -259,9 +259,24 @@ impl Web3Connection {
         {
             let mut provider = self.provider.write().await;
 
+            // our provider doesn't work anymore
             *provider = None;
 
-            // TODO: if this fails, keep retrying
+            // reset sync status
+            {
+                let mut head_block_id = self.head_block_id.write();
+                *head_block_id = None;
+            }
+
+            // tell the block subscriber that we don't have any blocks
+            if let Some(block_sender) = &block_sender {
+                block_sender
+                    .send_async((None, self.clone()))
+                    .await
+                    .context("block_sender during reconnect clear")?;
+            }
+
+            // TODO: if this fails, keep retrying! otherwise it crashes and doesn't try again!
             let new_provider = Web3Provider::from_str(&self.url, http_client)
                 .await
                 .unwrap();
@@ -299,6 +314,7 @@ impl Web3Connection {
     ) -> anyhow::Result<()> {
         match new_head_block {
             Ok(None) => {
+                // TODO: i think this should clear the local block and then update over the block sender
                 todo!("handle no block")
             }
             Ok(Some(mut new_head_block)) => {
