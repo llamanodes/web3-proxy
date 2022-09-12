@@ -281,19 +281,19 @@ impl Web3Connections {
         // iterate the known heads to find the highest_work_block
         let mut checked_heads = HashSet::new();
         let mut highest_work_block: Option<ArcBlock> = None;
-        for (conn_name, conn_head_hash) in connection_heads.iter() {
-            if checked_heads.contains(conn_head_hash) {
+        for (conn_name, connection_head_hash) in connection_heads.iter() {
+            if checked_heads.contains(connection_head_hash) {
                 // we already checked this head from another rpc
                 continue;
             }
             // don't check the same hash multiple times
-            checked_heads.insert(conn_head_hash);
+            checked_heads.insert(connection_head_hash);
 
-            let conn_head_block = if let Some(x) = self.block_hashes.get(conn_head_hash) {
+            let conn_head_block = if let Some(x) = self.block_hashes.get(connection_head_hash) {
                 x
             } else {
                 // TODO: why does this happen?
-                warn!(%conn_head_hash, %conn_name, %rpc, "Missing block in connection_heads");
+                warn!(%connection_head_hash, %conn_name, %rpc, "Missing connection_head_block in block_hashes");
                 continue;
             };
 

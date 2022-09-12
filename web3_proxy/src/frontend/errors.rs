@@ -24,6 +24,7 @@ pub enum FrontendErrorResponse {
     Database(DbErr),
     RateLimitedUser(u64, Option<Instant>),
     RateLimitedIp(IpAddr, Option<Instant>),
+    UnknownKey,
     NotFound,
 }
 
@@ -117,6 +118,14 @@ impl IntoResponse for FrontendErrorResponse {
                     ),
                 )
             }
+            Self::UnknownKey => (
+                StatusCode::UNAUTHORIZED,
+                JsonRpcForwardedResponse::from_str(
+                    "unknown api key!",
+                    Some(StatusCode::UNAUTHORIZED.as_u16().into()),
+                    None,
+                ),
+            ),
             Self::NotFound => {
                 // TODO: emit a stat?
                 (

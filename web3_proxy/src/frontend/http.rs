@@ -8,6 +8,7 @@ use tracing::instrument;
 /// Health check page for load balancers to use
 #[instrument(skip_all)]
 pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
+    // TODO: also check that the head block is not too old
     if app.balanced_rpcs.synced() {
         (StatusCode::OK, "OK")
     } else {
@@ -26,10 +27,10 @@ pub async fn prometheus(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl In
 /// TODO: replace this with proper stats and monitoring
 #[instrument(skip_all)]
 pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
-    // TODO: what else should we include? uptime?
     app.pending_transactions.sync();
     app.user_cache.sync();
 
+    // TODO: what else should we include? uptime, cache hit rates, cpu load
     let body = json!({
         "pending_transactions_count": app.pending_transactions.entry_count(),
         "pending_transactions_size": app.pending_transactions.weighted_size(),

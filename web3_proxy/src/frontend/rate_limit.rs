@@ -29,6 +29,7 @@ pub async fn rate_limit_by_ip(
         RateLimitResult::RateLimitedIp(x, retry_at) => {
             Err(FrontendErrorResponse::RateLimitedIp(x, retry_at))
         }
+        // TODO: don't panic. give the user an error
         x => unimplemented!("rate_limit_by_ip shouldn't ever see these: {:?}", x),
     }
 }
@@ -43,6 +44,8 @@ pub async fn rate_limit_by_key(
         RateLimitResult::RateLimitedUser(x, retry_at) => {
             Err(FrontendErrorResponse::RateLimitedUser(x, retry_at))
         }
+        RateLimitResult::UnknownKey => Err(FrontendErrorResponse::UnknownKey),
+        // TODO: don't panic. give the user an error
         x => unimplemented!("rate_limit_by_key shouldn't ever see these: {:?}", x),
     }
 }
