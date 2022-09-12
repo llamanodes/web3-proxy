@@ -447,7 +447,7 @@ impl Web3Connection {
                 Err(err) => {
                     if reconnect {
                         // TODO: exponential backoff
-                        let retry_in = Duration::from_secs(1);
+                        let retry_in = Duration::from_millis(50);
                         warn!(
                             rpc=%self,
                             ?err,

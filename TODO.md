@@ -192,6 +192,7 @@ These are not yet ordered.
 - [ ] don't "unwrap" anywhere. give proper errors
 - [ ] handle log subscriptions
   - probably as a paid feature
+- [ ] exponential backoff when reconnecting a connection
 
 new endpoints for users (not totally sure about the exact paths, but these features are all needed):
 - [x] GET /u/:api_key
