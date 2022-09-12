@@ -2,6 +2,8 @@
 
 ## MVP
 
+These are roughly in order of completition
+
 - [x] simple proxy
 - [x] better locking. when lots of requests come in, we seem to be in the way of block updates
 - [x] load balance between multiple RPC servers
@@ -129,91 +131,69 @@
 - [x] some of the DashMaps grow unbounded! Make/find a "SizedDashMap" that cleans up old rows with some garbage collection task
   - moka is exactly what we need
 - [x] if block data limit is 0, say Unknown in Debug output
-- [-] use siwe messages and signatures for sign up and login
-- [ ] quick script that calls all the curve-api endpoints once and checks for success, then calls wrk to hammer it
-  - [ ] https://github.com/curvefi/curve-api
-  - [ ] test /api/getGaugesmethod
-      - usually times out after vercel's 60 second timeout
-      - one time got: Error invalid Json response ""
-- [-] basic request method stats (using the user_id and other fields that are in the tracing frame)
+- [x] basic request method stats (using the user_id and other fields that are in the tracing frame)
+- [x] refactor from_anyhow_error to have consistent error codes and http codes. maybe implement the Error trait
+- [x] improve rpc weights. i think theres still a potential thundering herd
+- [x] improved logging with useful instrumentation
+- [x] right now the block_map is unbounded. move this to redis and do some calculations to be sure about RAM usage
+- [x] synced connections swap threshold should come from config
+- [x] right now we send too many getTransaction queries to the private rpc tier and i are being rate limited by some of them. change to be serial and weight by hard/soft limit.  
 - [ ] rewrite rate limiting to have a tiered cache. do not put redis in the hot path
-  - when there are a LOT of concurrent requests, I see an error. i thought that was a problem with redis cell, but it happens with my simpler rate limit. now i think the problem is actually with bb8
+  - instead, we should check a local cache for the current rate limit (+1) and spawn an update to the local cache from redis in the background.
+  - when there are a LOT of concurrent requests, we see errors. i thought that was a problem with redis cell, but it happens with my simpler rate limit. now i think the problem is actually with bb8
   - [ ] https://docs.rs/redis/latest/redis/aio/struct.ConnectionManager.html or https://crates.io/crates/deadpool-redis?
   - WARN http_request: redis_rate_limit::errors: redis error err=Response was of incompatible type: "Response type not string compatible." (response was int(500237)) id=01GC6514JWN5PS1NCWJCGJTC94 method=POST
   - maybe even bring back redis-cell
-- [ ] i think all the async methods in ethers need tracing instrument. something like `cfgif(tracing, tracing::instrument)`
-  - if they do that, i think my request_id will show up on their logs
+- [ ] web3_proxy_error_count{path = "backend_rpc/request"} is inflated by a bunch of reverts. do not log reverts as warn. 
+  - erigon gives `method=eth_call reqid=986147 t=1.151551ms err="execution reverted"`
+  - [ ] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user
+  - this must be opt-in or spawned since it will slow things down and will make their calls less private
+- [ ] chain rolled back 1/1/1 con_head=15510065 (0xa4a3…d2d8) rpc_head=15510065 (0xa4a3…d2d8) rpc=local_erigon_archive
+    - include the old head number and block in the log
+- [ ] add configurable size limits to all the Caches
+- [ ] Ulid instead of Uuid for user keys
+  - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
+- [ ] Ulid instead of Uuid for database ids
+  - might have to use Uuid in sea-orm and then convert to Ulid on display
+- [ ] Api keys need option to lock to IP, cors header, referer, etc
 
 ## V1
 
 These are not yet ordered.
 
-- [ ] favicon
-  - eth_1       | 2022-09-07T17:10:48.431536Z  WARN web3_proxy::jsonrpc: forwarding error err=nothing to see here
-  - use the one on https://staging.llamanodes.com/
-- [ ] page that prints a graphviz dotfile of the blockchain
-- [ ] warn if no servers have transaction subscriptions
-    - [ ] if no servers have transaction subscriptions, and a user tries to subscribe, make sure the error is user friendly
-- [ ] eth_subscribe logs (https://geth.ethereum.org/docs/rpc/pubsub)
-- [ ] add configurable size limits to all the Caches
-- [ ] make private transactions opt in (its already in the database, but not our code)
-- [ ] write a function for receipts that tries balanced_rpcs and only on error of all balanced tries privates
-  - [ ] automatic retries with a timeout or until all the servers have been tried.
-    - i had the websocket die on me in the middle of a long test. only one in-flight request failed because of it. the rest delayed. figure out how to catch these ones since websocket fails sadly seem common
-- [ ] make rate limits check in the background
-  - right now every single request requires calling incr on redis
-  - instead, we should check a local cache for the current rate limit (+1) and spawn an update to the local cache from redis in the background.
-- [ ] benchmarks of the different Cache implementations (futures vs dash)
-- [ ] benchmarks from https://github.com/llamafolio/llamafolio-api/
-- [ ] benchmarks from ethspam and versus
-- [ ] benchmarks from other things
-- [ ] send logs to sentry
-- [ ] active requests on /status is always 0 even when i'm running requests through
-- [ ] redis cell is giving errors under high load. maybe replace with https://redis.com/redis-best-practices/basic-rate-limiting/
-- [ ] cli tool for resetting api keys
-- [ ] cli tool for checking config
-- [ ] nice output when cargo doc is run
-- [ ] Ulid instead of Uuid
-    - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
-- [ ] if we request an old block, more servers can handle it than we currently use.
+- [-] use siwe messages and signatures for sign up and login
+- [-] if we request an old block, more servers can handle it than we currently use.
     - [ ] instead of the one list of just heads, store our intermediate mappings (rpcs_by_hash, rpcs_by_num, blocks_by_hash) in SyncedConnections. this shouldn't be too much slower than what we have now
     - [ ] remove the if/else where we optionally route to archive and refactor to require a BlockNumber enum
     - [ ] then check syncedconnections for the blockNum. if num given, use the cannonical chain to figure out the winning hash
     - [ ] this means if someone requests a recent but not ancient block, they can use all our servers, even the slower ones. need smart sorting for priority here
-- [ ] refactor so configs can change while running
-  - create the app without applying any config to it
-  - have a blocking future watching the config file and calling app.apply_config() on first load and on change
-  - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
+- [ ] favicon
+  - eth_1       | 2022-09-07T17:10:48.431536Z  WARN web3_proxy::jsonrpc: forwarding error err=nothing to see here
+  - use the one on https://staging.llamanodes.com/
+- [ ] warn if no servers have transaction subscriptions
+    - [ ] if no servers have transaction subscriptions, and a user tries to subscribe, make sure the error is user friendly
+- [ ] only allow transaction and full block subscriptions if the user is registered?
+- [ ] eth_subscribe logs (https://geth.ethereum.org/docs/rpc/pubsub)
+- [ ] make private transactions opt in (its already in the database, but not our code)
+- [ ] write a function for receipts that tries balanced_rpcs and only if they all error should it try private relays
+  - [ ] automatic retries with a timeout or until all the servers have been tried.
+    - i had the websocket die on me in the middle of a long test. only one in-flight request failed because of it. the rest delayed. figure out how to catch these ones since websocket fails sadly seem common
+- [ ] nice output when cargo doc is run
 - [ ] cache more things locally or in redis
-- [ ] if a rpc fails to connect at start, retry later instead of skipping it forever
-- [ ] synced connections swap threshold should come from config
-  - if there are bad forks, we need to think about this more. keep backfilling until there is a common block, or just error? if the common block is old, i think we should error rather than serve data. that's kind of "downtime" but really its on the chain and not us. think about this more
-- [ ] improve rpc weights. i think theres still a potential thundering herd
 - [ ] stats when forks are resolved (and what chain they were on?)
 - [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
-- [ ] right now the block_map is unbounded. move this to redis and do some calculations to be sure about RAM usage
-- [ ] emit stats for successes, retries, failures, with the types of requests, account, chain, rpc
-- [ ] right now we send too many getTransaction queries to the private rpc tier and i are being rate limited by some of them. change to be serial and weight by hard/soft limit.  
-- [ ] improved logging with useful instrumentation
+- [ ] emit stats for user's successes, retries, failures, with the types of requests, chain, rpc
 - [ ] cli for creating and editing api keys
-- [ ] Api keys need option to lock to IP, cors header, etc
 - [ ] Only subscribe to transactions when someone is listening and if the server has opted in to it
 - [ ] When sending eth_sendRawTransaction, retry errors
-- [ ] I think block limit should default to 1 or error if its still at 0 after archive checks
-  - [ ] Public bsc server got “0” for block data limit (ninicoin)
 - [ ] If we need an archive server and no servers in sync, exit immediately with an error instead of waiting 60 seconds
 - [ ] 60 second timeout is too short. Maybe do that for free tier and larger timeout for paid. Problem is that some queries can take over 1000 seconds
-- [ ] refactor from_anyhow_error to have consistent error codes and http codes. maybe implement the Error trait
-- [ ] when handling errors from axum parsing the Json...Enum, the errors don't get wrapped in json. i think we need a Layer
+- [ ] when handling errors from axum parsing the Json...Enum, the errors don't get wrapped in json. i think we need a axum::Layer
 - [ ] don't "unwrap" anywhere. give proper errors
-- [ ] tool to revoke bearer tokens that also clears redis
-- [ ] eth_getBlockByNumber and similar calls served from the block map
-  - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
-  - so maybe we don't want this. we can just use the general request cache for these. they will only require 1 request and it means requests won't get in the way as much on writes as new blocks arrive.
-  - after looking at my request logs, i think its worth doing this. no point hitting the backends with requests for blocks multiple times. will also help with cache hit rates since we can keep recent blocks in a separate cache
 - [ ] handle log subscriptions
+  - probably as a paid feature
 
-new endpoints for users:
+new endpoints for users (not totally sure about the exact paths, but these features are all needed):
 - [x] GET /u/:api_key
   - proxies to web3 websocket
 - [x] POST /u/:api_key
@@ -235,25 +215,26 @@ new endpoints for users:
   - opt-in link email address
   - checks for api key in session cookie or header
   - allows modifying user settings
-- [ ] POST /users/process_transaction
-  - checks a transaction to see if it modifies a user's balance. records results in a sql database
-  - we will have our own event subscriber watching for "deposit" events, but sometimes events get missed and users might incorrectly "transfer" the tokens directly to an address instead of using the dapp
 
 ## V2
 
 These are not ordered. I think some rows also accidently got deleted here. Check git history.
 
-- [ ] opt-in debug mode that inspects responses for reverts and gives more logs about the call
-  - this must be opt-in since it will slow things down and will make their calls less private
-  - erigon just gives `method=eth_call reqid=986147 t=1.151551ms err="execution reverted"`
+- [ ] handle user payments
+  - [ ] separate daemon (or users themselves) call POST /users/process_transaction
+    - checks a transaction to see if it modifies a user's balance. records results in a sql database
+    - we will have our own event subscriber watching for "deposit" events, but sometimes events get missed and users might incorrectly "transfer" the tokens directly to an address instead of using the dapp
+- [ ] refactor so configs can change while running
+  - this will probably be a rather large change, but is necessary when we have autoscaling
+  - create the app without applying any config to it
+  - have a blocking future watching the config file and calling app.apply_config() on first load and on change
+  - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
+- [ ] if a rpc fails to connect at start, retry later instead of skipping it forever (need config hot reloads first)
 - [ ] jwt auth so people can easily switch from infura
-- [ ] most things that are cached locally should probably be in shared redis caches
 - [ ] automated soft limit
   - look at average request time for getBlock? i'm not sure how good a proxy that will be for serving eth_call, but its a start
   - https://crates.io/crates/histogram-sampler
 - [ ] interval for http subscriptions should be based on block time. load from config is easy, but better to query. currently hard coded to 13 seconds
-- [ ] handle user payments
-- [ ] Advanced load testing scripts so we can find optimal cost servers 
 
 in another repo: event subscriber
   - [ ] watch for transfer events to our contract and submit them to /payment/$tx_hash
@@ -261,6 +242,28 @@ in another repo: event subscriber
 
 ## "Maybe some day" and other Miscellaneous Things
 
+- [ ] tool to revoke bearer tokens that also clears redis
+- [ ] eth_getBlockByNumber and similar calls served from the block map
+  - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
+  - so maybe we don't want this. we can just use the general request cache for these. they will only require 1 request and it means requests won't get in the way as much on writes as new blocks arrive.
+  - after looking at my request logs, i think its worth doing this. no point hitting the backends with requests for blocks multiple times. will also help with cache hit rates since we can keep recent blocks in a separate cache
+- [ ] Public bsc server got “0” for block data limit (ninicoin)
+- [ ] cli tool for resetting api keys
+- [ ] cli tool for checking config
+- [ ] benchmarks of the different Cache implementations (futures vs dash)
+- [ ] Advanced load testing scripts so we can find optimal cost servers 
+  - [ ] benchmarks from https://github.com/llamafolio/llamafolio-api/
+  - [ ] benchmarks from ethspam and versus
+  - [ ] benchmarks from other things
+  - [ ] quick script that calls all the curve-api endpoints once and checks for success, then calls wrk to hammer it
+    - [ ] https://github.com/curvefi/curve-api
+    - [ ] test /api/getGaugesmethod
+        - usually times out after vercel's 60 second timeout
+        - one time got: Error invalid Json response ""
+- [ ] send logs to sentry
+- [ ] i think all the async methods in ethers need tracing instrument. something like `cfgif(tracing, tracing::instrument)`
+  - if they do that, i think my request_id will show up on their logs
+- [ ] page that prints a graphviz dotfile of the blockchain
 - [ ] search for all the "TODO" and `todo!(...)` items in the code and move them here
 - [ ] instead of giving a rate limit error code, delay the connection's response at the start. reject if incoming requests is super high?
 - [ ] add the backend server to the header?
@@ -315,7 +318,6 @@ in another repo: event subscriber
 - [ ] docker build context is really big. we must be including target or something
 - [ ] ip detection needs work so that everything doesnt show up as 172.x.x.x
 - [ ] status page leaks our urls which contain secrets. change that to use names
-- [ ] im seeing redis errors/warnings around unwrapping and invalid responses. need better logs to diagnose. probably need retries
 - [ ] PR to add this to sea orm prelude:
   ```
   #[cfg(feature = "with-uuid")]
