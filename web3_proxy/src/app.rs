@@ -24,11 +24,7 @@ use hashbrown::HashMap;
 use metered::{metered, ErrorCount, HitCount, InFlight, ResponseTime, Throughput};
 use migration::{Migrator, MigratorTrait};
 use moka::future::Cache;
-use redis_rate_limit::bb8::PooledConnection;
-use redis_rate_limit::{
-    bb8::{self, ErrorSink},
-    RedisConnectionManager, RedisErrorSink, RedisPool, RedisRateLimit,
-};
+use redis_rate_limit::{Config as RedisConfig, Pool as RedisPool, RedisRateLimit, Runtime};
 use sea_orm::DatabaseConnection;
 use serde::Serialize;
 use serde_json::json;
@@ -152,7 +148,7 @@ pub async fn get_migrated_db(
 impl Web3ProxyApp {
     pub async fn spawn(
         top_config: TopConfig,
-        num_workers: u32,
+        num_workers: usize,
     ) -> anyhow::Result<(
         Arc<Web3ProxyApp>,
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
@@ -168,7 +164,10 @@ impl Web3ProxyApp {
 
         // first, we connect to mysql and make sure the latest migrations have run
         let db_conn = if let Some(db_url) = &top_config.app.db_url {
-            let db_min_connections = top_config.app.db_min_connections.unwrap_or(num_workers);
+            let db_min_connections = top_config
+                .app
+                .db_min_connections
+                .unwrap_or(num_workers as u32);
 
             // TODO: what default multiple?
             let redis_max_connections = top_config
@@ -212,26 +211,26 @@ impl Web3ProxyApp {
                 // TODO: scrub credentials and then include the redis_url in logs
                 info!("Connecting to redis");
 
-                let manager = RedisConnectionManager::new(redis_url.as_ref())?;
-
-                let redis_min_connections =
-                    top_config.app.redis_min_connections.unwrap_or(num_workers);
-
+                // TODO: what is a good default?
                 let redis_max_connections = top_config
                     .app
                     .redis_max_connections
-                    .unwrap_or(redis_min_connections * 2);
+                    .unwrap_or(num_workers * 2);
 
-                // TODO: min_idle?
-                // TODO: set max_size based on max expected concurrent connections? set based on num_workers?
-                let builder = bb8::Pool::builder()
-                    .error_sink(RedisErrorSink.boxed_clone())
-                    .min_idle(Some(redis_min_connections))
-                    .max_size(redis_max_connections);
+                // TODO: what are reasonable timeouts
+                let redis_pool = RedisConfig::from_url(redis_url)
+                    .builder()?
+                    .create_timeout(Some(Duration::from_secs(2)))
+                    .max_size(redis_max_connections)
+                    .recycle_timeout(Some(Duration::from_secs(2)))
+                    .runtime(Runtime::Tokio1)
+                    .wait_timeout(Some(Duration::from_secs(2)))
+                    .build()?;
 
-                let pool = builder.build(manager).await?;
+                // test the pool
+                redis_pool.get().await.context("Redis connection failed")?;
 
-                Some(pool)
+                Some(redis_pool)
             }
             None => {
                 warn!("no redis connection");
@@ -611,7 +610,7 @@ impl Web3ProxyApp {
     }
 
     #[instrument(skip_all)]
-    pub async fn redis_conn(&self) -> anyhow::Result<PooledConnection<RedisConnectionManager>> {
+    pub async fn redis_conn(&self) -> anyhow::Result<redis_rate_limit::Connection> {
         match self.redis_pool.as_ref() {
             None => Err(anyhow::anyhow!("no redis server configured")),
             Some(redis_pool) => {

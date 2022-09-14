@@ -5,7 +5,7 @@ use axum::{
     Json,
 };
 use derive_more::From;
-use redis_rate_limit::{bb8::RunError, RedisError};
+use redis_rate_limit::redis::RedisError;
 use sea_orm::DbErr;
 use std::{error::Error, net::IpAddr};
 use tokio::time::Instant;
@@ -18,8 +18,9 @@ pub type FrontendResult = Result<Response, FrontendErrorResponse>;
 pub enum FrontendErrorResponse {
     Anyhow(anyhow::Error),
     Box(Box<dyn Error>),
+    // TODO: update these for Redis
     Redis(RedisError),
-    RedisRun(RunError<RedisError>),
+    // RedisRun(RunError<RedisError>),
     Response(Response),
     Database(DbErr),
     RateLimitedUser(u64, Option<Instant>),
@@ -67,17 +68,17 @@ impl IntoResponse for FrontendErrorResponse {
                     ),
                 )
             }
-            Self::RedisRun(err) => {
-                warn!(?err, "redis run");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "redis run error!",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
-                )
-            }
+            // Self::RedisRun(err) => {
+            //     warn!(?err, "redis run");
+            //     (
+            //         StatusCode::INTERNAL_SERVER_ERROR,
+            //         JsonRpcForwardedResponse::from_str(
+            //             "redis run error!",
+            //             Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+            //             None,
+            //         ),
+            //     )
+            // }
             Self::Response(r) => {
                 debug_assert_ne!(r.status(), StatusCode::OK);
                 return r;

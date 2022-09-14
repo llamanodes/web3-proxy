@@ -98,10 +98,9 @@ pub async fn get_login(
         .unwrap_or_else(|| "eip4361".to_string());
 
     let message: String = match message_eip.as_str() {
-        "eip4361" => message.to_string(),
-        // https://github.com/spruceid/siwe/issues/98
         "eip191_bytes" => Bytes::from(message.eip191_bytes().unwrap()).to_string(),
         "eip191_hash" => Bytes::from(&message.eip191_hash().unwrap()).to_string(),
+        "eip4361" => message.to_string(),
         _ => {
             // TODO: this needs the correct error code in the response
             return Err(anyhow::anyhow!("invalid message eip given").into());

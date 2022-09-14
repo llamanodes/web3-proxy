@@ -2,19 +2,20 @@
 mod errors;
 
 use anyhow::Context;
-use bb8_redis::redis::pipe;
+use deadpool_redis::redis::pipe;
 use std::ops::Add;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{Duration, Instant};
 use tracing::{debug, trace};
 
-pub use crate::errors::{RedisError, RedisErrorSink};
-pub use bb8_redis::{bb8, redis, RedisConnectionManager};
+pub use deadpool_redis::redis;
+pub use deadpool_redis::{Config, Connection, Manager, Pool, Runtime};
 
-pub type RedisPool = bb8::Pool<RedisConnectionManager>;
+// pub use crate::errors::{RedisError, RedisErrorSink};
+// pub use bb8_redis::{bb8, redis, RedisConnectionManager};
 
 pub struct RedisRateLimit {
-    pool: RedisPool,
+    pool: Pool,
     key_prefix: String,
     /// The default maximum requests allowed in a period.
     max_requests_per_period: u64,
@@ -30,7 +31,7 @@ pub enum ThrottleResult {
 
 impl RedisRateLimit {
     pub fn new(
-        pool: RedisPool,
+        pool: Pool,
         app: &str,
         label: &str,
         max_requests_per_period: u64,

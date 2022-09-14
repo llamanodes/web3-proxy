@@ -10,7 +10,7 @@ use futures::future::try_join_all;
 use futures::StreamExt;
 use parking_lot::RwLock;
 use rand::Rng;
-use redis_rate_limit::{RedisPool, RedisRateLimit, ThrottleResult};
+use redis_rate_limit::{Pool as RedisPool, RedisRateLimit, ThrottleResult};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use std::cmp::min;

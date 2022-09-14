@@ -172,56 +172,50 @@ impl Web3ProxyApp {
 
         // user key is valid. now check rate limits
         // TODO: this is throwing errors when curve-api hits us with high concurrency. investigate i think its bb8's fault
-        if false {
-            if let Some(rate_limiter) = &self.frontend_rate_limiter {
-                // TODO: query redis in the background so that users don't have to wait on this network request
-                // TODO: better key? have a prefix so its easy to delete all of these
-                // TODO: we should probably hash this or something
-                let rate_limiter_label = format!("user-{}", user_key);
+        if let Some(rate_limiter) = &self.frontend_rate_limiter {
+            // TODO: query redis in the background so that users don't have to wait on this network request
+            // TODO: better key? have a prefix so its easy to delete all of these
+            // TODO: we should probably hash this or something
+            let rate_limiter_label = format!("user-{}", user_key);
 
-                match rate_limiter
-                    .throttle_label(
-                        &rate_limiter_label,
-                        Some(user_data.user_count_per_period),
-                        1,
-                    )
-                    .await
-                {
-                    Ok(ThrottleResult::Allowed) => {
-                        Ok(RateLimitResult::AllowedUser(user_data.user_id))
-                    }
-                    Ok(ThrottleResult::RetryAt(retry_at)) => {
-                        // TODO: set headers so they know when they can retry
-                        // TODO: debug or trace?
-                        // this is too verbose, but a stat might be good
-                        trace!(
-                            ?rate_limiter_label,
-                            "rate limit exceeded until {:?}",
-                            retry_at
-                        );
-                        Ok(RateLimitResult::RateLimitedUser(
-                            user_data.user_id,
-                            Some(retry_at),
-                        ))
-                    }
-                    Ok(ThrottleResult::RetryNever) => {
-                        // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
-                        debug!(?rate_limiter_label, "rate limit exceeded");
-                        Ok(RateLimitResult::RateLimitedUser(user_data.user_id, None))
-                    }
-                    Err(err) => {
-                        // internal error, not rate limit being hit
-                        // TODO: i really want axum to do this for us in a single place.
-                        error!(?err, "rate limiter is unhappy. allowing ip");
-                        Ok(RateLimitResult::AllowedUser(user_data.user_id))
-                    }
+            match rate_limiter
+                .throttle_label(
+                    &rate_limiter_label,
+                    Some(user_data.user_count_per_period),
+                    1,
+                )
+                .await
+            {
+                Ok(ThrottleResult::Allowed) => Ok(RateLimitResult::AllowedUser(user_data.user_id)),
+                Ok(ThrottleResult::RetryAt(retry_at)) => {
+                    // TODO: set headers so they know when they can retry
+                    // TODO: debug or trace?
+                    // this is too verbose, but a stat might be good
+                    trace!(
+                        ?rate_limiter_label,
+                        "rate limit exceeded until {:?}",
+                        retry_at
+                    );
+                    Ok(RateLimitResult::RateLimitedUser(
+                        user_data.user_id,
+                        Some(retry_at),
+                    ))
                 }
-            } else {
-                // TODO: if no redis, rate limit with a local cache?
-                todo!("no redis. cannot rate limit")
+                Ok(ThrottleResult::RetryNever) => {
+                    // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
+                    debug!(?rate_limiter_label, "rate limit exceeded");
+                    Ok(RateLimitResult::RateLimitedUser(user_data.user_id, None))
+                }
+                Err(err) => {
+                    // internal error, not rate limit being hit
+                    // TODO: i really want axum to do this for us in a single place.
+                    error!(?err, "rate limiter is unhappy. allowing ip");
+                    Ok(RateLimitResult::AllowedUser(user_data.user_id))
+                }
             }
         } else {
-            Ok(RateLimitResult::AllowedUser(user_data.user_id))
+            // TODO: if no redis, rate limit with a local cache?
+            todo!("no redis. cannot rate limit")
         }
     }
 }

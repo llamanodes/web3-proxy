@@ -64,7 +64,7 @@ fn run(
     // start tokio's async runtime
     let rt = rt_builder.build()?;
 
-    let num_workers = rt.metrics().num_workers() as u32;
+    let num_workers = rt.metrics().num_workers();
     debug!(?num_workers);
 
     rt.block_on(async {

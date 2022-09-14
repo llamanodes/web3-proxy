@@ -64,12 +64,9 @@ pub struct AppConfig {
     #[serde(default = "default_public_rate_limit_per_minute")]
     pub public_rate_limit_per_minute: u64,
     pub redis_url: Option<String>,
-    /// minimum size of the connection pool for the cache
-    /// If none, the number of workers are used
-    pub redis_min_connections: Option<u32>,
     /// maximum size of the connection pool for the cache
     /// If none, the minimum * 2 is used
-    pub redis_max_connections: Option<u32>,
+    pub redis_max_connections: Option<usize>,
     #[serde(default = "default_response_cache_max_bytes")]
     pub response_cache_max_bytes: usize,
     /// the stats page url for an anonymous user.
@@ -119,7 +116,7 @@ impl Web3ConnectionConfig {
     pub async fn spawn(
         self,
         name: String,
-        redis_pool: Option<redis_rate_limit::RedisPool>,
+        redis_pool: Option<redis_rate_limit::Pool>,
         chain_id: u64,
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
