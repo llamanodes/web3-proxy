@@ -299,7 +299,7 @@ impl Web3Connection {
     ) -> anyhow::Result<()> {
         // TODO: no-op if this called on a http provider
         // websocket doesn't need the http client
-        info!(rpc=%self, "reconnecting");
+        info!(rpc=%self, "connecting");
 
         // since this lock is held open over an await, we use tokio's locking
         // TODO: timeout on this lock. if its slow, something is wrong
@@ -319,7 +319,7 @@ impl Web3Connection {
             block_sender
                 .send_async((None, self.clone()))
                 .await
-                .context("block_sender during reconnect clear")?;
+                .context("block_sender during connect")?;
         }
 
         // TODO: if this fails, keep retrying! otherwise it crashes and doesn't try again!
@@ -327,7 +327,7 @@ impl Web3Connection {
 
         *provider = Some(Arc::new(new_provider));
 
-        info!(rpc=%self, "successfully reconnected");
+        info!(rpc=%self, "successfully connected");
 
         Ok(())
     }
