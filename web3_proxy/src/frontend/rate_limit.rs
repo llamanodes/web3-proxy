@@ -170,6 +170,9 @@ impl Web3ProxyApp {
             return Ok(RateLimitResult::UnknownKey);
         }
 
+        // TODO: turn back on rate limiting once our alpha test is complete
+        return Ok(RateLimitResult::AllowedUser(user_data.user_id));
+
         // user key is valid. now check rate limits
         // TODO: this is throwing errors when curve-api hits us with high concurrency. investigate i think its bb8's fault
         if let Some(rate_limiter) = &self.frontend_rate_limiter {

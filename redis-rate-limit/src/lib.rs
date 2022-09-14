@@ -72,7 +72,7 @@ impl RedisRateLimit {
 
         let throttle_key = format!("{}:{}:{}", self.key_prefix, label, period_id);
 
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get().await.context("throttle")?;
 
         // TODO: at high concurency, i think this is giving errors
         // TODO: i'm starting to think that bb8 has a bug

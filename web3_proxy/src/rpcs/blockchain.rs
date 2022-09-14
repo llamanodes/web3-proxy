@@ -287,7 +287,7 @@ impl Web3Connections {
             let conn_head_block = if let Some(x) = self.block_hashes.get(connection_head_hash) {
                 x
             } else {
-                // TODO: why does this happen?!?!
+                // TODO: why does this happen?!?! seems to only happen with uncled blocks. maybe a check on total difficulty skipped it?
                 // TODO: maybe we should do get_with?
                 // TODO: maybe we should just continue. this only seems to happen when an older block is received
                 warn!(%connection_head_hash, %conn_name, %rpc, "Missing connection_head_block in block_hashes. Fetching now");
