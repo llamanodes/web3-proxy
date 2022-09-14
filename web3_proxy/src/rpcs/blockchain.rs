@@ -120,7 +120,7 @@ impl Web3Connections {
             Some(rpc) => {
                 rpc.wait_for_request_handle()
                     .await?
-                    .request("eth_getBlockByHash", get_block_params)
+                    .request("eth_getBlockByHash", get_block_params, false)
                     .await?
             }
             None => {
@@ -140,7 +140,8 @@ impl Web3Connections {
         let block = Arc::new(block);
 
         // the block was fetched using eth_getBlockByHash, so it should have all fields
-        self.save_block(&block, true).await?;
+        // TODO: fill in heaviest_chain!
+        self.save_block(&block, false).await?;
 
         Ok(block)
     }
@@ -256,6 +257,7 @@ impl Web3Connections {
                     None
                 } else {
                     // we don't know if its on the heaviest chain yet
+                    debug!(?rpc_head_hash, ?rpc_head_num, %rpc.name, "saving");
                     self.save_block(&rpc_head_block, false).await?;
 
                     connection_heads.insert(rpc.name.to_owned(), rpc_head_hash);
@@ -290,7 +292,7 @@ impl Web3Connections {
             let conn_head_block = if let Some(x) = self.block_hashes.get(connection_head_hash) {
                 x
             } else {
-                // TODO: why does this happen?
+                // TODO: why does this happen?!?! maybe we should do get_with?
                 warn!(%connection_head_hash, %conn_name, %rpc, "Missing connection_head_block in block_hashes");
                 continue;
             };
@@ -400,6 +402,8 @@ impl Web3Connections {
                 // TODO: this is too verbose. move to trace
                 // i think "conns" is somehow getting dupes
                 trace!(?heavy_rpcs);
+
+                // TODO: if maybe_head_block.time() is old, ignore it
 
                 // success! this block has enough soft limit and nodes on it (or on later blocks)
                 let conns: Vec<Arc<Web3Connection>> = heavy_rpcs

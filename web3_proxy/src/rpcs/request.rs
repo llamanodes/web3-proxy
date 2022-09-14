@@ -64,12 +64,14 @@ impl OpenRequestHandle {
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// By taking self here, we ensure that this is dropped after the request is complete.
     /// TODO: we no longer take self because metered doesn't like that
+    /// TODO: ErrorCount includes too many types of errors, such as transaction reverts
     #[instrument(skip_all)]
     #[measure([ErrorCount, HitCount, InFlight, ResponseTime, Throughput])]
     pub async fn request<T, R>(
         &self,
         method: &str,
         params: T,
+        silent_errors: bool,
     ) -> Result<R, ethers::prelude::ProviderError>
     where
         T: fmt::Debug + serde::Serialize + Send + Sync,
@@ -107,7 +109,10 @@ impl OpenRequestHandle {
 
         // TODO: i think ethers already has trace logging (and does it much more fancy)
         if let Err(err) = &response {
-            warn!(?err, %method, rpc=%self.conn, "bad response!");
+            if !silent_errors {
+                // TODO: this isn't always bad. missing trie node while we are checking initial
+                warn!(?err, %method, rpc=%self.conn, "bad response!");
+            }
         } else {
             // TODO: opt-in response inspection to log reverts with their request. put into redis or what?
             // trace!(rpc=%self.0, %method, ?response);

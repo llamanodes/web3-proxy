@@ -74,7 +74,7 @@ pub struct Web3ProxyApp {
     /// Send requests to the best server available
     pub balanced_rpcs: Arc<Web3Connections>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
-    pub private_rpcs: Arc<Web3Connections>,
+    pub private_rpcs: Option<Arc<Web3Connections>>,
     response_cache: ResponseCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
@@ -280,7 +280,7 @@ impl Web3ProxyApp {
         let private_rpcs = if private_rpcs.is_empty() {
             // TODO: do None instead of clone?
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
-            balanced_rpcs.clone()
+            None
         } else {
             // TODO: attach context to this error
             let (private_rpcs, private_handle) = Web3Connections::spawn(
@@ -304,7 +304,7 @@ impl Web3ProxyApp {
 
             handles.push(private_handle);
 
-            private_rpcs
+            Some(private_rpcs)
         };
 
         let frontend_rate_limiter = redis_pool.as_ref().map(|redis_pool| {
@@ -762,8 +762,9 @@ impl Web3ProxyApp {
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => {
                 // emit stats
-                return self
-                    .private_rpcs
+                let rpcs = self.private_rpcs.as_ref().unwrap_or(&self.balanced_rpcs);
+
+                return rpcs
                     .try_send_all_upstream_servers(request, None)
                     .instrument(span)
                     .await;
@@ -849,27 +850,11 @@ impl Web3ProxyApp {
                 let mut response = self
                     .response_cache
                     .try_get_with(cache_key, async move {
-                        match method {
-                            "temporarily disabled" => {
-                                // "eth_getTransactionByHash" | "eth_getTransactionReceipt" => {
-                                // TODO: try_send_all serially with retries instead of parallel
-                                self.private_rpcs
-                                    .try_send_all_upstream_servers(
-                                        request,
-                                        Some(&request_block_id.num),
-                                    )
-                                    .await
-                            }
-                            _ => {
-                                // TODO: retry some failures automatically!
-                                self.balanced_rpcs
-                                    .try_send_best_upstream_server(
-                                        request,
-                                        Some(&request_block_id.num),
-                                    )
-                                    .await
-                            }
-                        }
+                        // TODO: retry some failures automatically!
+                        // TODO: try private_rpcs if all the balanced_rpcs fail!
+                        self.balanced_rpcs
+                            .try_send_best_upstream_server(request, Some(&request_block_id.num))
+                            .await
                     })
                     .await
                     .unwrap();

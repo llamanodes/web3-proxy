@@ -305,7 +305,7 @@ impl Web3Connections {
             .into_iter()
             .map(|active_request_handle| async move {
                 let result: Result<Box<RawValue>, _> =
-                    active_request_handle.request(method, params).await;
+                    active_request_handle.request(method, params, false).await;
                 result
             })
             .collect::<FuturesUnordered<_>>()
@@ -500,7 +500,7 @@ impl Web3Connections {
                     skip_rpcs.push(active_request_handle.clone_connection());
 
                     let response_result = active_request_handle
-                        .request(&request.method, &request.params)
+                        .request(&request.method, &request.params, false)
                         .await;
 
                     match JsonRpcForwardedResponse::try_from_response_result(

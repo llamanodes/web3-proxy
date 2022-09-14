@@ -114,7 +114,7 @@ impl Web3Connection {
         let found_chain_id: Result<U64, _> = new_connection
             .wait_for_request_handle()
             .await?
-            .request("eth_chainId", Option::None::<()>)
+            .request("eth_chainId", Option::None::<()>, false)
             .await;
 
         match found_chain_id {
@@ -206,6 +206,7 @@ impl Web3Connection {
                         "0xdead00000000000000000000000000000000beef",
                         maybe_archive_block,
                     ),
+                    true,
                 )
                 .await;
 
@@ -295,31 +296,40 @@ impl Web3Connection {
     #[instrument(skip_all)]
     pub async fn reconnect(
         self: &Arc<Self>,
+        // websocket doesn't need the http client
         block_sender: Option<&flume::Sender<BlockAndRpc>>,
     ) -> anyhow::Result<()> {
-        // TODO: no-op if this called on a http provider
-        // websocket doesn't need the http client
-        info!(rpc=%self, "connecting");
-
         // since this lock is held open over an await, we use tokio's locking
         // TODO: timeout on this lock. if its slow, something is wrong
         let mut provider = self.provider.write().await;
 
-        // our provider doesn't work anymore
-        *provider = None;
+        if provider.is_some() {
+            if self.http_client.is_some() {
+                // http clients don't need to do anything for reconnecting
+                // they *do* need to run this function to setup the first
+                return Ok(());
+            }
 
-        // reset sync status
-        {
-            let mut head_block_id = self.head_block_id.write();
-            *head_block_id = None;
-        }
+            info!(rpc=%self, "reconnecting");
 
-        // tell the block subscriber that we don't have any blocks
-        if let Some(block_sender) = &block_sender {
-            block_sender
-                .send_async((None, self.clone()))
-                .await
-                .context("block_sender during connect")?;
+            // disconnect the current provider
+            *provider = None;
+
+            // reset sync status
+            {
+                let mut head_block_id = self.head_block_id.write();
+                *head_block_id = None;
+            }
+
+            // tell the block subscriber that we don't have any blocks
+            if let Some(block_sender) = &block_sender {
+                block_sender
+                    .send_async((None, self.clone()))
+                    .await
+                    .context("block_sender during connect")?;
+            }
+        } else {
+            info!(rpc=%self, "connecting");
         }
 
         // TODO: if this fails, keep retrying! otherwise it crashes and doesn't try again!
@@ -381,7 +391,7 @@ impl Web3Connection {
                     let complete_head_block: Block<TxHash> = self
                         .wait_for_request_handle()
                         .await?
-                        .request("eth_getBlockByHash", (new_hash, false))
+                        .request("eth_getBlockByHash", (new_hash, false), false)
                         .await?;
 
                     debug_assert!(complete_head_block.total_difficulty.is_some());
@@ -549,7 +559,7 @@ impl Web3Connection {
                         match self.wait_for_request_handle().await {
                             Ok(active_request_handle) => {
                                 let block: Result<Block<TxHash>, _> = active_request_handle
-                                    .request("eth_getBlockByNumber", ("latest", false))
+                                    .request("eth_getBlockByNumber", ("latest", false), false)
                                     .await;
 
                                 match block {
@@ -619,7 +629,7 @@ impl Web3Connection {
                     let block: Result<Option<ArcBlock>, _> = self
                         .wait_for_request_handle()
                         .await?
-                        .request("eth_getBlockByNumber", ("latest", false))
+                        .request("eth_getBlockByNumber", ("latest", false), false)
                         .await
                         .map(|x| Some(Arc::new(x)));
 

@@ -27,7 +27,7 @@ impl Web3Connections {
         let tx: Transaction = match rpc.try_request_handle().await {
             Ok(OpenRequestResult::Handle(handle)) => {
                 handle
-                    .request("eth_getTransactionByHash", (pending_tx_id,))
+                    .request("eth_getTransactionByHash", (pending_tx_id,), false)
                     .await?
             }
             Ok(_) => {
