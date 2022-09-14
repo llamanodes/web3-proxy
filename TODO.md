@@ -143,27 +143,28 @@ These are roughly in order of completition
 - [x] need a retrying_reconnect that is used everywhere reconnect is. have exponential backoff here
 - [x] it looks like our reconnect logic is not always firing. we need to make reconnect more robust!
   - i am pretty sure that this is actually servers that fail to connect on initial setup (maybe the rpcs that are on the wrong chain are just timing out and they aren't set to reconnect?)
+- [x] chain rolled back 1/1/1 con_head=15510065 (0xa4a3…d2d8) rpc_head=15510065 (0xa4a3…d2d8) rpc=local_erigon_archive
+    - include the old head number and block in the log
 - [ ] rewrite rate limiting to have a tiered cache. do not put redis in the hot path
   - instead, we should check a local cache for the current rate limit (+1) and spawn an update to the local cache from redis in the background.
-  - when there are a LOT of concurrent requests, we see errors. i thought that was a problem with redis cell, but it happens with my simpler rate limit. now i think the problem is actually with bb8
-  - [ ] https://docs.rs/redis/latest/redis/aio/struct.ConnectionManager.html or https://crates.io/crates/deadpool-redis?
+  - [x] when there are a LOT of concurrent requests, we see errors. i thought that was a problem with redis cell, but it happens with my simpler rate limit. now i think the problem is actually with bb8
+  - https://docs.rs/redis/latest/redis/aio/struct.ConnectionManager.html or https://crates.io/crates/deadpool-redis?
   - WARN http_request: redis_rate_limit::errors: redis error err=Response was of incompatible type: "Response type not string compatible." (response was int(500237)) id=01GC6514JWN5PS1NCWJCGJTC94 method=POST
-  - maybe even bring back redis-cell
+  - [ ] bring back redis-cell?
 - [ ] web3_proxy_error_count{path = "backend_rpc/request"} is inflated by a bunch of reverts. do not log reverts as warn. 
   - erigon gives `method=eth_call reqid=986147 t=1.151551ms err="execution reverted"`
   - [ ] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
-- [ ] chain rolled back 1/1/1 con_head=15510065 (0xa4a3…d2d8) rpc_head=15510065 (0xa4a3…d2d8) rpc=local_erigon_archive
-    - include the old head number and block in the log
 - [ ] add configurable size limits to all the Caches
+- [ ] Api keys need option to lock to IP, cors header, referer, etc
+- [ ] requests per second per api key
+- [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
+- [ ] web3 on rpc1 exited without errors. maybe promote some shutdown messages from debug to info?
 - [ ] Ulid instead of Uuid for user keys
   - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
   - since users are actively using our service, we will need to support both
 - [ ] Ulid instead of Uuid for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
-- [ ] Api keys need option to lock to IP, cors header, referer, etc
-- [ ] requests per second per api key
-- [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
 
 ## V1
 
@@ -357,3 +358,4 @@ in another repo: event subscriber
   - i wish i had more logs. its possible that 15479605 came immediatly after
 - [ ] ip blocking logs a warn. we don't need that. a stat at most
 - [ ] keep it working without redis and a database
+- [ ] in /status, block hashes has a lower count than block numbers. how is that possible?

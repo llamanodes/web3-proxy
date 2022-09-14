@@ -478,7 +478,7 @@ impl Web3Connections {
                             Ordering::Less => {
                                 // this is unlikely but possible
                                 // TODO: better log
-                                warn!(con_head=%heavy_block_id, rpc_head=%rpc_head_str, %rpc, "chain rolled back {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
+                                warn!(con_head=%heavy_block_id, old_head=%old_block_id, rpc_head=%rpc_head_str, %rpc, "chain rolled back {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                                 self.save_block(&heavy_block, true).await?;
 
