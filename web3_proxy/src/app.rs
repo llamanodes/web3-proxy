@@ -21,7 +21,7 @@ use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use futures::Future;
 use hashbrown::HashMap;
-use metered::{metered, ErrorCount, HitCount, InFlight, ResponseTime, Throughput};
+use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
 use migration::{Migrator, MigratorTrait};
 use moka::future::Cache;
 use redis_rate_limit::{Config as RedisConfig, Pool as RedisPool, RedisRateLimit, Runtime};
@@ -364,7 +364,7 @@ impl Web3ProxyApp {
     }
 
     #[instrument(skip_all)]
-    #[measure([ErrorCount, HitCount, InFlight, ResponseTime, Throughput])]
+    #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
     pub async fn eth_subscribe<'a>(
         self: &'a Arc<Self>,
         payload: JsonRpcRequest,
@@ -621,7 +621,7 @@ impl Web3ProxyApp {
         }
     }
 
-    #[measure([ErrorCount, HitCount, InFlight, ResponseTime, Throughput])]
+    #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
     #[instrument(skip_all)]
     async fn proxy_web3_rpc_request(
         self: &Arc<Self>,

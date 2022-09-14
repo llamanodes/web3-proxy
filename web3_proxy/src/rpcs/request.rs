@@ -3,7 +3,6 @@ use super::provider::Web3Provider;
 use metered::metered;
 use metered::ErrorCount;
 use metered::HitCount;
-use metered::InFlight;
 use metered::ResponseTime;
 use metered::Throughput;
 use std::fmt;
@@ -66,7 +65,7 @@ impl OpenRequestHandle {
     /// TODO: we no longer take self because metered doesn't like that
     /// TODO: ErrorCount includes too many types of errors, such as transaction reverts
     #[instrument(skip_all)]
-    #[measure([ErrorCount, HitCount, InFlight, ResponseTime, Throughput])]
+    #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
     pub async fn request<T, R>(
         &self,
         method: &str,
