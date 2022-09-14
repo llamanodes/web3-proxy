@@ -269,7 +269,11 @@ impl Web3Connection {
                 cap_ms,
                 rand::thread_rng().gen_range(base_ms..(base_ms * range_multiplier)),
             );
-            sleep(Duration::from_millis(first_sleep_ms)).await;
+            let reconnect_in = Duration::from_millis(first_sleep_ms);
+
+            warn!(rpc=%self, ?reconnect_in, "Reconnect in");
+
+            sleep(reconnect_in).await;
 
             first_sleep_ms
         } else {
@@ -301,19 +305,22 @@ impl Web3Connection {
     ) -> anyhow::Result<()> {
         // since this lock is held open over an await, we use tokio's locking
         // TODO: timeout on this lock. if its slow, something is wrong
-        let mut provider = self.provider.write().await;
+        let mut provider_option = self.provider.write().await;
 
-        if provider.is_some() {
-            if self.http_client.is_some() {
-                // http clients don't need to do anything for reconnecting
-                // they *do* need to run this function to setup the first
-                return Ok(());
+        if let Some(provider) = &*provider_option {
+            match provider.as_ref() {
+                Web3Provider::Http(_) => {
+                    // http clients don't need to do anything for reconnecting
+                    // they *do* need to run this function to setup the first
+                    return Ok(());
+                }
+                Web3Provider::Ws(_) => {}
             }
 
             info!(rpc=%self, "reconnecting");
 
             // disconnect the current provider
-            *provider = None;
+            *provider_option = None;
 
             // reset sync status
             {
@@ -335,7 +342,7 @@ impl Web3Connection {
         // TODO: if this fails, keep retrying! otherwise it crashes and doesn't try again!
         let new_provider = Web3Provider::from_str(&self.url, self.http_client.clone()).await?;
 
-        *provider = Some(Arc::new(new_provider));
+        *provider_option = Some(Arc::new(new_provider));
 
         info!(rpc=%self, "successfully connected");
 
