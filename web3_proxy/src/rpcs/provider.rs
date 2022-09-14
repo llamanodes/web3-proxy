@@ -1,6 +1,6 @@
-use std::time::Duration;
-
+use anyhow::Context;
 use derive_more::From;
+use std::time::Duration;
 use tracing::{info_span, instrument, Instrument};
 
 /// Use HTTP and WS providers.
@@ -28,7 +28,7 @@ impl Web3Provider {
         let provider = if url_str.starts_with("http") {
             let url: url::Url = url_str.parse()?;
 
-            let http_client = http_client.ok_or_else(|| anyhow::anyhow!("no http_client"))?;
+            let http_client = http_client.context("no http_client")?;
 
             let provider = ethers::providers::Http::new_with_client(url, http_client);
 

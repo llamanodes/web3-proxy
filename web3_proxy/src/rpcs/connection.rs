@@ -28,6 +28,7 @@ pub struct Web3Connection {
     pub name: String,
     /// TODO: can we get this from the provider? do we even need it?
     url: String,
+    http_client: Option<reqwest::Client>,
     /// keep track of currently open requests. We sort on this
     pub(super) active_requests: AtomicU32,
     /// keep track of total requests
@@ -86,6 +87,7 @@ impl Web3Connection {
 
         let new_connection = Self {
             name,
+            http_client,
             url: url_str.clone(),
             active_requests: 0.into(),
             total_requests: 0.into(),
@@ -102,7 +104,7 @@ impl Web3Connection {
 
         // connect to the server (with retries)
         new_connection
-            .retrying_reconnect(block_sender.as_ref())
+            .retrying_reconnect(block_sender.as_ref(), false)
             .await?;
 
         // check the server's chain_id here
@@ -177,12 +179,11 @@ impl Web3Connection {
         for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
             let mut head_block_id = self.head_block_id.read().clone();
 
-            // TODO: wait until head block is set outside the loop? if we disconnect while starting we could actually get 0 though
+            // TODO: subscribe to a channel instead of polling. subscribe to http_interval_sender?
             while head_block_id.is_none() {
                 warn!(rpc=%self, "no head block yet. retrying");
 
-                // TODO: subscribe to a channel instead of polling? subscribe to http_interval_sender?
-                sleep(Duration::from_secs(1)).await;
+                sleep(Duration::from_secs(13)).await;
 
                 head_block_id = self.head_block_id.read().clone();
             }
@@ -253,6 +254,7 @@ impl Web3Connection {
     pub async fn retrying_reconnect(
         self: &Arc<Self>,
         block_sender: Option<&flume::Sender<BlockAndRpc>>,
+        initial_sleep: bool,
     ) -> anyhow::Result<()> {
         // there are several crates that have retry helpers, but they all seem more complex than necessary
         let base_ms = 500;
@@ -260,11 +262,18 @@ impl Web3Connection {
         let range_multiplier = 3;
 
         // sleep once before the initial retry attempt
-        let mut sleep_ms = min(
-            cap_ms,
-            rand::thread_rng().gen_range(base_ms..(base_ms * range_multiplier)),
-        );
-        sleep(Duration::from_millis(sleep_ms)).await;
+        // TODO: now that we use this method for our initial connection, do we still want this sleep?
+        let mut sleep_ms = if initial_sleep {
+            let first_sleep_ms = min(
+                cap_ms,
+                rand::thread_rng().gen_range(base_ms..(base_ms * range_multiplier)),
+            );
+            sleep(Duration::from_millis(first_sleep_ms)).await;
+
+            first_sleep_ms
+        } else {
+            base_ms
+        };
 
         // retry until we succeed
         while let Err(err) = self.reconnect(block_sender).await {
@@ -290,8 +299,6 @@ impl Web3Connection {
     ) -> anyhow::Result<()> {
         // TODO: no-op if this called on a http provider
         // websocket doesn't need the http client
-        let http_client = None;
-
         info!(rpc=%self, "reconnecting");
 
         // since this lock is held open over an await, we use tokio's locking
@@ -316,7 +323,7 @@ impl Web3Connection {
         }
 
         // TODO: if this fails, keep retrying! otherwise it crashes and doesn't try again!
-        let new_provider = Web3Provider::from_str(&self.url, http_client).await?;
+        let new_provider = Web3Provider::from_str(&self.url, self.http_client.clone()).await?;
 
         *provider = Some(Arc::new(new_provider));
 
@@ -502,7 +509,7 @@ impl Web3Connection {
                             "subscription exited",
                         );
 
-                        self.retrying_reconnect(block_sender.as_ref()).await?;
+                        self.retrying_reconnect(block_sender.as_ref(), true).await?;
                     } else {
                         error!(rpc=%self, ?err, "subscription exited");
                         return Err(err);

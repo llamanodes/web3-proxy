@@ -161,9 +161,7 @@ impl Web3Connections {
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
 
         // be sure the requested block num exists
-        let head_block_num = self
-            .head_block_num()
-            .ok_or_else(|| anyhow::anyhow!("no servers in sync"))?;
+        let head_block_num = self.head_block_num().context("no servers in sync")?;
         if num > &head_block_num {
             // TODO: i'm seeing this a lot when using ethspam. i dont know why though. i thought we delayed publishing
             // TODO: instead of error, maybe just sleep and try again?
