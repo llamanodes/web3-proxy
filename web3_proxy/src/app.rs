@@ -124,6 +124,9 @@ pub async fn get_migrated_db(
     min_connections: u32,
     max_connections: u32,
 ) -> anyhow::Result<DatabaseConnection> {
+    // TODO: scrub credentials and then include the db_url in logs
+    info!("Connecting to db");
+
     let mut db_opt = sea_orm::ConnectOptions::new(db_url);
 
     // TODO: load all these options from the config file. i think mysql default max is 100
@@ -206,7 +209,8 @@ impl Web3ProxyApp {
 
         let redis_pool = match top_config.app.redis_url.as_ref() {
             Some(redis_url) => {
-                info!("Connecting to redis on {}", redis_url);
+                // TODO: scrub credentials and then include the redis_url in logs
+                info!("Connecting to redis");
 
                 let manager = RedisConnectionManager::new(redis_url.as_ref())?;
 

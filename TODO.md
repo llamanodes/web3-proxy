@@ -138,6 +138,11 @@ These are roughly in order of completition
 - [x] right now the block_map is unbounded. move this to redis and do some calculations to be sure about RAM usage
 - [x] synced connections swap threshold should come from config
 - [x] right now we send too many getTransaction queries to the private rpc tier and i are being rate limited by some of them. change to be serial and weight by hard/soft limit.  
+- [x] ip blocking gives a 500 and not the proper error code
+- [x] need a reconnect that doesn't unwrap
+- [x] need a retrying_reconnect that is used everywhere reconnect is. have exponential backoff here
+- [x] it looks like our reconnect logic is not always firing. we need to make reconnect more robust!
+  - i am pretty sure that this is actually servers that fail to connect on initial setup (maybe the rpcs that are on the wrong chain are just timing out and they aren't set to reconnect?)
 - [ ] rewrite rate limiting to have a tiered cache. do not put redis in the hot path
   - instead, we should check a local cache for the current rate limit (+1) and spawn an update to the local cache from redis in the background.
   - when there are a LOT of concurrent requests, we see errors. i thought that was a problem with redis cell, but it happens with my simpler rate limit. now i think the problem is actually with bb8
@@ -153,9 +158,12 @@ These are roughly in order of completition
 - [ ] add configurable size limits to all the Caches
 - [ ] Ulid instead of Uuid for user keys
   - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
+  - since users are actively using our service, we will need to support both
 - [ ] Ulid instead of Uuid for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
 - [ ] Api keys need option to lock to IP, cors header, referer, etc
+- [ ] requests per second per api key
+- [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
 
 ## V1
 
@@ -344,14 +352,8 @@ in another repo: event subscriber
   - [ ] i think checking the parents of the heaviest chain works most of the time, but not always
   - maybe iterate connection heads by total weight? i still think we need to include parent hashes
 - [ ] i see "No block found" sometimes for a single server's block. Not sure why since reads should happen after writes
-- [ ] figure out why total requests is climbing so fast
-    - is someone using my node that i don't expect?
-    - is staking that inefficient?
-    - maybe arbitrum syncing?
-    - internal requests gone haywire?
-    - need graphs!
-- [ ] it looks like our reconnect logic is not always firing. we need to make reconnect more robust!
-  - i am pretty sure that this is actually servers that fail to connect on initial setup (maybe the rpcs that are on the wrong chain are just timing out and they aren't set to reconnect?)
 - [ ] whats going on here? why is it rolling back? maybe total_difficulty was a LOT higher?
   - 2022-09-05T19:21:39.763630Z  WARN web3_proxy::rpcs::blockchain: chain rolled back 1/6/7 head=15479604 (0xf809…6a2c) rpc=infura_free
   - i wish i had more logs. its possible that 15479605 came immediatly after
+- [ ] ip blocking logs a warn. we don't need that. a stat at most
+- [ ] keep it working without redis and a database

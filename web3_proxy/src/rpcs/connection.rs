@@ -9,9 +9,11 @@ use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64
 use futures::future::try_join_all;
 use futures::StreamExt;
 use parking_lot::RwLock;
+use rand::Rng;
 use redis_rate_limit::{RedisPool, RedisRateLimit, ThrottleResult};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
+use std::cmp::min;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32, AtomicU64};
@@ -82,14 +84,12 @@ impl Web3Connection {
             )
         });
 
-        let provider = Web3Provider::from_str(&url_str, http_client).await?;
-
         let new_connection = Self {
             name,
             url: url_str.clone(),
             active_requests: 0.into(),
             total_requests: 0.into(),
-            provider: AsyncRwLock::new(Some(Arc::new(provider))),
+            provider: AsyncRwLock::new(None),
             hard_limit,
             soft_limit,
             block_data_limit: Default::default(),
@@ -99,6 +99,11 @@ impl Web3Connection {
         };
 
         let new_connection = Arc::new(new_connection);
+
+        // connect to the server (with retries)
+        new_connection
+            .retrying_reconnect(block_sender.as_ref())
+            .await?;
 
         // check the server's chain_id here
         // TODO: move this outside the `new` function and into a `start` function or something. that way we can do retries from there
@@ -242,11 +247,46 @@ impl Web3Connection {
         needed_block_num >= &oldest_block_num && needed_block_num <= &newest_block_num
     }
 
+    /// reconnect to the provider. errors are retried forever with exponential backoff with jitter.
+    /// We use the "Decorrelated" jitter from https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+    /// TODO: maybe it would be better to use "Full Jitter". The "Full Jitter" approach uses less work, but slightly more time.
+    pub async fn retrying_reconnect(
+        self: &Arc<Self>,
+        block_sender: Option<&flume::Sender<BlockAndRpc>>,
+    ) -> anyhow::Result<()> {
+        // there are several crates that have retry helpers, but they all seem more complex than necessary
+        let base_ms = 500;
+        let cap_ms = 30_000;
+        let range_multiplier = 3;
+
+        // sleep once before the initial retry attempt
+        let mut sleep_ms = min(
+            cap_ms,
+            rand::thread_rng().gen_range(base_ms..(base_ms * range_multiplier)),
+        );
+        sleep(Duration::from_millis(sleep_ms)).await;
+
+        // retry until we succeed
+        while let Err(err) = self.reconnect(block_sender).await {
+            sleep_ms = min(
+                cap_ms,
+                rand::thread_rng().gen_range(base_ms..(sleep_ms * range_multiplier)),
+            );
+
+            let retry_in = Duration::from_millis(sleep_ms);
+            warn!(rpc=%self, ?retry_in, ?err, "Failed to reconnect!");
+
+            sleep(retry_in).await;
+        }
+
+        Ok(())
+    }
+
     /// reconnect a websocket provider
     #[instrument(skip_all)]
     pub async fn reconnect(
         self: &Arc<Self>,
-        block_sender: Option<flume::Sender<BlockAndRpc>>,
+        block_sender: Option<&flume::Sender<BlockAndRpc>>,
     ) -> anyhow::Result<()> {
         // TODO: no-op if this called on a http provider
         // websocket doesn't need the http client
@@ -256,41 +296,31 @@ impl Web3Connection {
 
         // since this lock is held open over an await, we use tokio's locking
         // TODO: timeout on this lock. if its slow, something is wrong
+        let mut provider = self.provider.write().await;
+
+        // our provider doesn't work anymore
+        *provider = None;
+
+        // reset sync status
         {
-            let mut provider = self.provider.write().await;
-
-            // our provider doesn't work anymore
-            *provider = None;
-
-            // reset sync status
-            {
-                let mut head_block_id = self.head_block_id.write();
-                *head_block_id = None;
-            }
-
-            // tell the block subscriber that we don't have any blocks
-            if let Some(block_sender) = &block_sender {
-                block_sender
-                    .send_async((None, self.clone()))
-                    .await
-                    .context("block_sender during reconnect clear")?;
-            }
-
-            // TODO: if this fails, keep retrying! otherwise it crashes and doesn't try again!
-            let new_provider = Web3Provider::from_str(&self.url, http_client)
-                .await
-                .unwrap();
-
-            *provider = Some(Arc::new(new_provider));
+            let mut head_block_id = self.head_block_id.write();
+            *head_block_id = None;
         }
 
         // tell the block subscriber that we don't have any blocks
-        if let Some(block_sender) = block_sender {
+        if let Some(block_sender) = &block_sender {
             block_sender
                 .send_async((None, self.clone()))
                 .await
-                .context("block_sender during reconnect")?;
+                .context("block_sender during reconnect clear")?;
         }
+
+        // TODO: if this fails, keep retrying! otherwise it crashes and doesn't try again!
+        let new_provider = Web3Provider::from_str(&self.url, http_client).await?;
+
+        *provider = Some(Arc::new(new_provider));
+
+        info!(rpc=%self, "successfully reconnected");
 
         Ok(())
     }
@@ -399,6 +429,7 @@ impl Web3Connection {
         Ok(())
     }
 
+    /// subscribe to blocks and transactions with automatic reconnects
     #[instrument(skip_all)]
     async fn subscribe(
         self: Arc<Self>,
@@ -459,21 +490,19 @@ impl Web3Connection {
             }
 
             match try_join_all(futures).await {
-                Ok(_) => break,
+                Ok(_) => {
+                    // futures all exited without error. break instead of restarting subscriptions
+                    break;
+                }
                 Err(err) => {
                     if reconnect {
-                        // TODO: exponential backoff
-                        let retry_in = Duration::from_millis(50);
                         warn!(
                             rpc=%self,
                             ?err,
-                            ?retry_in,
                             "subscription exited",
                         );
-                        sleep(retry_in).await;
 
-                        // TODO: loop on reconnecting! do not return with a "?" here
-                        self.reconnect(block_sender.clone()).await?;
+                        self.retrying_reconnect(block_sender.as_ref()).await?;
                     } else {
                         error!(rpc=%self, ?err, "subscription exited");
                         return Err(err);
