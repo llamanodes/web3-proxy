@@ -643,11 +643,15 @@ impl Serialize for Web3Connections {
     where
         S: Serializer,
     {
-        let conns: Vec<&Web3Connection> = self.conns.iter().map(|x| x.1.as_ref()).collect();
+        let conns: Vec<&Web3Connection> = self.conns.values().map(|x| x.as_ref()).collect();
 
-        let mut state = serializer.serialize_struct("Web3Connections", 2)?;
+        let mut state = serializer.serialize_struct("Web3Connections", 6)?;
         state.serialize_field("conns", &conns)?;
         state.serialize_field("synced_connections", &**self.synced_connections.load())?;
+        state.serialize_field("block_hashes_count", &self.block_hashes.entry_count())?;
+        state.serialize_field("block_hashes_size", &self.block_hashes.weighted_size())?;
+        state.serialize_field("block_numbers_count", &self.block_numbers.entry_count())?;
+        state.serialize_field("block_numbers_size", &self.block_numbers.weighted_size())?;
         state.end()
     }
 }

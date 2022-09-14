@@ -4,5 +4,6 @@ pub mod config;
 pub mod frontend;
 pub mod jsonrpc;
 pub mod metrics;
+pub mod rate_limiter;
 pub mod rpcs;
 pub mod users;
