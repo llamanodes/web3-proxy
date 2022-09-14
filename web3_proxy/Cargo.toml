@@ -16,7 +16,7 @@ entities = { path = "../entities" }
 migration = { path = "../migration" }
 redis-rate-limit = { path = "../redis-rate-limit" }
 
-anyhow = { version = "1.0.64", features = ["backtrace"] }
+anyhow = { version = "1.0.65", features = ["backtrace"] }
 arc-swap = "1.5.1"
 argh = "0.1.8"
 axum = { version = "0.5.16", features = ["headers", "serde_json", "tokio-tungstenite", "ws"] }
@@ -54,7 +54,7 @@ serde_json = { version = "1.0.85", default-features = false, features = ["alloc"
 serde_prometheus = "0.1.6"
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 time = "0.3.14"
-tokio = { version = "1.21.0", features = ["full", "tracing"] }
+tokio = { version = "1.21.1", features = ["full", "tracing"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.9", features = ["sync"] }
 toml = "0.5.9"
