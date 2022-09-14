@@ -375,42 +375,10 @@ impl Web3Connection {
                 // TODO: is unwrap_or_default ok? we might have an empty block
                 let new_hash = new_head_block.hash.unwrap_or_default();
 
-                // if we already have this block saved, set new_block_head to that arc and don't store this copy
-                // TODO: small race here
-                new_head_block = if let Some(existing_block) = block_map.get(&new_hash) {
-                    // we only save blocks with a total difficulty
-                    debug_assert!(existing_block.total_difficulty.is_some());
-                    existing_block
-                } else if new_head_block.total_difficulty.is_some() {
-                    // this block has a total difficulty, it is safe to use
-                    block_map.insert(new_hash, new_head_block).await;
-
-                    // we get instead of return new_head_block just in case there was a race
-                    // TODO: but how bad is this race? it might be fine
-                    block_map.get(&new_hash).expect("we just inserted")
-                } else {
-                    // Cache miss and NO TOTAL DIFFICULTY!
-                    // self got the head block first. unfortunately its missing a necessary field
-                    // keep this even after https://github.com/ledgerwatch/erigon/issues/5190 is closed.
-                    // there are other clients and we might have to use a third party without the td fix.
-                    trace!(rpc=%self, ?new_hash, "total_difficulty missing");
-                    // todo: this can wait forever!
-                    let complete_head_block: Block<TxHash> = self
-                        .wait_for_request_handle()
-                        .await?
-                        .request("eth_getBlockByHash", (new_hash, false), false)
-                        .await?;
-
-                    debug_assert!(complete_head_block.total_difficulty.is_some());
-
-                    block_map
-                        .insert(new_hash, Arc::new(complete_head_block))
-                        .await;
-
-                    // we get instead of return new_head_block just in case there was a race
-                    // TODO: but how bad is this race? it might be fine
-                    block_map.get(&new_hash).expect("we just inserted")
-                };
+                // if we already have this block saved, set new_head_block to that arc. otherwise store this copy
+                new_head_block = block_map
+                    .get_with(new_hash, async move { new_head_block })
+                    .await;
 
                 let new_num = new_head_block.number.unwrap_or_default();
 

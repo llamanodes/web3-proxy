@@ -144,8 +144,9 @@ These are roughly in order of completition
 - [x] it looks like our reconnect logic is not always firing. we need to make reconnect more robust!
   - i am pretty sure that this is actually servers that fail to connect on initial setup (maybe the rpcs that are on the wrong chain are just timing out and they aren't set to reconnect?)
 - [x] chain rolled back 1/1/1 con_head=15510065 (0xa4a3…d2d8) rpc_head=15510065 (0xa4a3…d2d8) rpc=local_erigon_archive
-    - include the old head number and block in the log
-- [ ] rewrite rate limiting to have a tiered cache. do not put redis in the hot path
+  - include the old head number and block in the log
+- [x] once the merge happens, we don't want to use total difficulty and instead just care about the number
+- [-] rewrite rate limiting to have a tiered cache. do not put redis in the hot path
   - instead, we should check a local cache for the current rate limit (+1) and spawn an update to the local cache from redis in the background.
   - [x] when there are a LOT of concurrent requests, we see errors. i thought that was a problem with redis cell, but it happens with my simpler rate limit. now i think the problem is actually with bb8
   - https://docs.rs/redis/latest/redis/aio/struct.ConnectionManager.html or https://crates.io/crates/deadpool-redis?
@@ -202,6 +203,9 @@ These are not yet ordered.
 - [ ] handle log subscriptions
   - probably as a paid feature
 - [ ] exponential backoff when reconnecting a connection
+- [ ] on ETH, we no longer use total difficulty, but other chains might
+  - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
+  - if total difficulty is set and non-zero, use it for consensus instead of just the number
 
 new endpoints for users (not totally sure about the exact paths, but these features are all needed):
 - [x] GET /u/:api_key
