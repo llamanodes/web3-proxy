@@ -153,8 +153,9 @@ impl Web3Connections {
                     handles.push(handle);
                 }
                 Ok(Err(err)) => {
-                    // TODO: some of these are probably retry-able
-                    error!(?err);
+                    // if we got an error here, it is not retryable
+                    // TODO: include context about which connection failed
+                    error!(?err, "Unable to create connection");
                 }
                 Err(err) => {
                     return Err(err.into());
