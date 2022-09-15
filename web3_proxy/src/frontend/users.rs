@@ -19,13 +19,11 @@ use axum::{
 use axum_auth::AuthBearer;
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
-use http::StatusCode;
-use uuid::Uuid;
-// use entities::sea_orm_active_enums::Role;
 use entities::{user, user_keys};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
-use redis_rate_limit::redis::AsyncCommands;
+use http::StatusCode;
+use redis_rate_limiter::redis::AsyncCommands;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use siwe::Message;
@@ -33,6 +31,7 @@ use std::ops::Add;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
+use uuid::Uuid;
 
 // TODO: how do we customize axum's error response? I think we probably want an enum that implements IntoResponse instead
 #[debug_handler]

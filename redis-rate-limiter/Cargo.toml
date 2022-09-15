@@ -1,5 +1,5 @@
 [package]
-name = "redis-rate-limit"
+name = "redis-rate-limiter"
 version = "0.2.0"
 authors = ["Bryan Stitt <bryan@stitthappens.com>"]
 edition = "2021"

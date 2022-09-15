@@ -1,41 +1,39 @@
 //#![warn(missing_docs)]
-mod errors;
-
 use anyhow::Context;
-use deadpool_redis::redis::pipe;
 use std::ops::Add;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{Duration, Instant};
 use tracing::{debug, trace};
 
 pub use deadpool_redis::redis;
-pub use deadpool_redis::{Config, Connection, Manager, Pool, Runtime};
+pub use deadpool_redis::{
+    Config as RedisConfig, Connection as RedisConnection, Manager as RedisManager,
+    Pool as RedisPool, Runtime as DeadpoolRuntime,
+};
 
-// pub use crate::errors::{RedisError, RedisErrorSink};
-// pub use bb8_redis::{bb8, redis, RedisConnectionManager};
-
-pub struct RedisRateLimit {
-    pool: Pool,
+#[derive(Clone)]
+pub struct RedisRateLimiter {
     key_prefix: String,
     /// The default maximum requests allowed in a period.
-    max_requests_per_period: u64,
+    pub max_requests_per_period: u64,
     /// seconds
-    period: f32,
+    pub period: f32,
+    pool: RedisPool,
 }
 
-pub enum ThrottleResult {
-    Allowed,
-    RetryAt(Instant),
+pub enum RedisRateLimitResult {
+    Allowed(u64),
+    RetryAt(Instant, u64),
     RetryNever,
 }
 
-impl RedisRateLimit {
+impl RedisRateLimiter {
     pub fn new(
-        pool: Pool,
         app: &str,
         label: &str,
         max_requests_per_period: u64,
         period: f32,
+        pool: RedisPool,
     ) -> Self {
         let key_prefix = format!("{}:rrl:{}", app, label);
 
@@ -49,17 +47,16 @@ impl RedisRateLimit {
 
     /// label might be an ip address or a user_key id.
     /// if setting max_per_period, be sure to keep the period the same for all requests to this label
-    /// TODO:
     pub async fn throttle_label(
         &self,
         label: &str,
         max_per_period: Option<u64>,
         count: u64,
-    ) -> anyhow::Result<ThrottleResult> {
+    ) -> anyhow::Result<RedisRateLimitResult> {
         let max_per_period = max_per_period.unwrap_or(self.max_requests_per_period);
 
         if max_per_period == 0 {
-            return Ok(ThrottleResult::RetryNever);
+            return Ok(RedisRateLimitResult::RetryNever);
         }
 
         let now = SystemTime::now()
@@ -70,13 +67,14 @@ impl RedisRateLimit {
         // if self.period is 60, period_id will be the minute of the current time
         let period_id = (now / self.period) % self.period;
 
+        // TODO: include max per period in the throttle key?
         let throttle_key = format!("{}:{}:{}", self.key_prefix, label, period_id);
 
         let mut conn = self.pool.get().await.context("throttle")?;
 
         // TODO: at high concurency, i think this is giving errors
         // TODO: i'm starting to think that bb8 has a bug
-        let x: Vec<u64> = pipe()
+        let x: Vec<u64> = redis::pipe()
             // we could get the key first, but that means an extra redis call for every check. this seems better
             .incr(&throttle_key, count)
             // set expiration each time we set the key. ignore the result
@@ -89,28 +87,25 @@ impl RedisRateLimit {
             .await
             .context("increment rate limit")?;
 
-        let new_count = x.first().context("check rate limit result")?;
+        // TODO: is there a better way to do this?
+        let new_count = *x.first().context("check rate limit result")?;
 
-        if new_count > &max_per_period {
+        if new_count > max_per_period {
             let seconds_left_in_period = self.period - (now % self.period);
 
             let retry_at = Instant::now().add(Duration::from_secs_f32(seconds_left_in_period));
 
             debug!(%label, ?retry_at, "rate limited: {}/{}", new_count, max_per_period);
 
-            Ok(ThrottleResult::RetryAt(retry_at))
+            Ok(RedisRateLimitResult::RetryAt(retry_at, new_count))
         } else {
             trace!(%label, "NOT rate limited: {}/{}", new_count, max_per_period);
-            Ok(ThrottleResult::Allowed)
+            Ok(RedisRateLimitResult::Allowed(new_count))
         }
     }
 
     #[inline]
-    pub async fn throttle(&self) -> anyhow::Result<ThrottleResult> {
+    pub async fn throttle(&self) -> anyhow::Result<RedisRateLimitResult> {
         self.throttle_label("", None, 1).await
-    }
-
-    pub fn max_requests_per_period(&self) -> u64 {
-        self.max_requests_per_period
     }
 }

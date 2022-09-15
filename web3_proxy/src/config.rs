@@ -116,7 +116,7 @@ impl Web3ConnectionConfig {
     pub async fn spawn(
         self,
         name: String,
-        redis_pool: Option<redis_rate_limit::Pool>,
+        redis_pool: Option<redis_rate_limiter::RedisPool>,
         chain_id: u64,
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,

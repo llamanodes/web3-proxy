@@ -1,8 +1,9 @@
 [workspace]
 members = [
+  "deferred-rate-limiter",
   "entities",
   "migration",
-  "redis-rate-limit",
+  "redis-rate-limiter",
   "web3_proxy",
 ]
 

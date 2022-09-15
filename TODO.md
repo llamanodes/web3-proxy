@@ -206,6 +206,8 @@ These are not yet ordered.
 - [ ] on ETH, we no longer use total difficulty, but other chains might
   - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
   - if total difficulty is set and non-zero, use it for consensus instead of just the number
+- [ ] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
+
 
 new endpoints for users (not totally sure about the exact paths, but these features are all needed):
 - [x] GET /u/:api_key

@@ -10,7 +10,7 @@ use futures::future::try_join_all;
 use futures::StreamExt;
 use parking_lot::RwLock;
 use rand::Rng;
-use redis_rate_limit::{Pool as RedisPool, RedisRateLimit, ThrottleResult};
+use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use std::cmp::min;
@@ -23,11 +23,12 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::{interval, sleep, sleep_until, Duration, MissedTickBehavior};
 use tracing::{debug, error, info, instrument, trace, warn};
 
-/// An active connection to a Web3Rpc
+/// An active connection to a Web3 RPC server like geth or erigon.
 pub struct Web3Connection {
     pub name: String,
     /// TODO: can we get this from the provider? do we even need it?
     url: String,
+    /// Some connections use an http_client. we keep a clone for reconnecting
     http_client: Option<reqwest::Client>,
     /// keep track of currently open requests. We sort on this
     pub(super) active_requests: AtomicU32,
@@ -39,7 +40,8 @@ pub struct Web3Connection {
     /// it is an async lock because we hold it open across awaits
     pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
-    hard_limit: Option<RedisRateLimit>,
+    /// We do not use the deferred rate limiter because going over limits would cause errors
+    hard_limit: Option<RedisRateLimiter>,
     /// used for load balancing to the least loaded server
     pub(super) soft_limit: u32,
     /// TODO: have an enum for this so that "no limit" prints pretty?
@@ -74,14 +76,14 @@ impl Web3Connection {
         weight: u32,
         open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
-        let hard_limit = hard_limit.map(|(hard_rate_limit, redis_conection)| {
-            // TODO: allow configurable period and max_burst
-            RedisRateLimit::new(
-                redis_conection,
+        let hard_limit = hard_limit.map(|(hard_rate_limit, redis_pool)| {
+            // TODO: is cache size 1 okay? i think we need
+            RedisRateLimiter::new(
                 "web3_proxy",
                 &format!("{}:{}", chain_id, url_str),
                 hard_rate_limit,
                 60.0,
+                redis_pool,
             )
         });
 
@@ -755,10 +757,10 @@ impl Web3Connection {
         // check rate limits
         if let Some(ratelimiter) = self.hard_limit.as_ref() {
             match ratelimiter.throttle().await? {
-                ThrottleResult::Allowed => {
+                RedisRateLimitResult::Allowed(_) => {
                     trace!("rate limit succeeded")
                 }
-                ThrottleResult::RetryAt(retry_at) => {
+                RedisRateLimitResult::RetryAt(retry_at, _) => {
                     // rate limit failed
                     // save the smallest retry_after. if nothing succeeds, return an Err with retry_after in it
                     // TODO: use tracing better
@@ -767,7 +769,7 @@ impl Web3Connection {
 
                     return Ok(OpenRequestResult::RetryAt(retry_at));
                 }
-                ThrottleResult::RetryNever => {
+                RedisRateLimitResult::RetryNever => {
                     return Ok(OpenRequestResult::RetryNever);
                 }
             }

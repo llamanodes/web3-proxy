@@ -56,7 +56,7 @@ impl Web3Connections {
         chain_id: u64,
         server_configs: HashMap<String, Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
-        redis_pool: Option<redis_rate_limit::Pool>,
+        redis_pool: Option<redis_rate_limiter::RedisPool>,
         block_map: BlockHashesMap,
         head_block_sender: Option<watch::Sender<ArcBlock>>,
         min_sum_soft_limit: u32,

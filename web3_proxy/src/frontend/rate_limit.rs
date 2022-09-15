@@ -1,14 +1,14 @@
 use super::errors::FrontendErrorResponse;
 use crate::app::{UserCacheValue, Web3ProxyApp};
 use anyhow::Context;
+use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::user_keys;
-use redis_rate_limit::ThrottleResult;
 use sea_orm::{
     ColumnTrait, DeriveColumn, EntityTrait, EnumIter, IdenStatic, QueryFilter, QuerySelect,
 };
 use std::{net::IpAddr, time::Duration};
 use tokio::time::Instant;
-use tracing::{debug, error, trace};
+use tracing::{error, trace};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -55,28 +55,19 @@ impl Web3ProxyApp {
         // TODO: dry this up with rate_limit_by_key
         // TODO: have a local cache because if we hit redis too hard we get errors
         // TODO: query redis in the background so that users don't have to wait on this network request
-        if let Some(rate_limiter) = &self.frontend_rate_limiter {
-            let rate_limiter_label = format!("ip-{}", ip);
-
-            match rate_limiter
-                .throttle_label(&rate_limiter_label, None, 1)
-                .await
-            {
-                Ok(ThrottleResult::Allowed) => Ok(RateLimitResult::AllowedIp(ip)),
-                Ok(ThrottleResult::RetryAt(retry_at)) => {
+        if let Some(rate_limiter) = &self.frontend_ip_rate_limiter {
+            match rate_limiter.throttle(&ip, None, 1).await {
+                Ok(DeferredRateLimitResult::Allowed) => Ok(RateLimitResult::AllowedIp(ip)),
+                Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
                     // TODO: set headers so they know when they can retry
                     // TODO: debug or trace?
                     // this is too verbose, but a stat might be good
-                    trace!(
-                        ?rate_limiter_label,
-                        "rate limit exceeded until {:?}",
-                        retry_at
-                    );
+                    trace!(?ip, "rate limit exceeded until {:?}", retry_at);
                     Ok(RateLimitResult::RateLimitedIp(ip, Some(retry_at)))
                 }
-                Ok(ThrottleResult::RetryNever) => {
+                Ok(DeferredRateLimitResult::RetryNever) => {
                     // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
-                    debug!(?rate_limiter_label, "rate limit exceeded");
+                    trace!(?ip, "rate limit is 0");
                     Ok(RateLimitResult::RateLimitedIp(ip, None))
                 }
                 Err(err) => {
@@ -175,38 +166,32 @@ impl Web3ProxyApp {
 
         // user key is valid. now check rate limits
         // TODO: this is throwing errors when curve-api hits us with high concurrency. investigate i think its bb8's fault
-        if let Some(rate_limiter) = &self.frontend_rate_limiter {
+        if let Some(rate_limiter) = &self.frontend_key_rate_limiter {
             // TODO: query redis in the background so that users don't have to wait on this network request
             // TODO: better key? have a prefix so its easy to delete all of these
             // TODO: we should probably hash this or something
-            let rate_limiter_label = format!("user-{}", user_key);
-
             match rate_limiter
-                .throttle_label(
-                    &rate_limiter_label,
-                    Some(user_data.user_count_per_period),
-                    1,
-                )
+                .throttle(&user_key, Some(user_data.user_count_per_period), 1)
                 .await
             {
-                Ok(ThrottleResult::Allowed) => Ok(RateLimitResult::AllowedUser(user_data.user_id)),
-                Ok(ThrottleResult::RetryAt(retry_at)) => {
+                Ok(DeferredRateLimitResult::Allowed) => {
+                    Ok(RateLimitResult::AllowedUser(user_data.user_id))
+                }
+                Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
                     // TODO: set headers so they know when they can retry
                     // TODO: debug or trace?
                     // this is too verbose, but a stat might be good
-                    trace!(
-                        ?rate_limiter_label,
-                        "rate limit exceeded until {:?}",
-                        retry_at
-                    );
+                    // TODO: keys are secrets! use the id instead
+                    trace!(?user_key, "rate limit exceeded until {:?}", retry_at);
                     Ok(RateLimitResult::RateLimitedUser(
                         user_data.user_id,
                         Some(retry_at),
                     ))
                 }
-                Ok(ThrottleResult::RetryNever) => {
+                Ok(DeferredRateLimitResult::RetryNever) => {
                     // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
-                    debug!(?rate_limiter_label, "rate limit exceeded");
+                    // TODO: keys are secret. don't log them!
+                    trace!(?user_key, "rate limit is 0");
                     Ok(RateLimitResult::RateLimitedUser(user_data.user_id, None))
                 }
                 Err(err) => {

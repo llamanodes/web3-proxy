@@ -12,6 +12,7 @@ use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
 use anyhow::Context;
 use axum::extract::ws::Message;
+use deferred_rate_limiter::DeferredRateLimiter;
 use derive_more::From;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, Bytes, TxHash, H256, U64};
@@ -24,11 +25,12 @@ use hashbrown::HashMap;
 use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
 use migration::{Migrator, MigratorTrait};
 use moka::future::Cache;
-use redis_rate_limit::{Config as RedisConfig, Pool as RedisPool, RedisRateLimit, Runtime};
+use redis_rate_limiter::{DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use sea_orm::DatabaseConnection;
 use serde::Serialize;
 use serde_json::json;
 use std::fmt;
+use std::net::IpAddr;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::{self, AtomicUsize};
@@ -83,7 +85,8 @@ pub struct Web3ProxyApp {
     open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     pub pending_transactions: Cache<TxHash, TxStatus>,
-    pub frontend_rate_limiter: Option<RedisRateLimit>,
+    pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
+    pub frontend_key_rate_limiter: Option<DeferredRateLimiter<Uuid>>,
     pub redis_pool: Option<RedisPool>,
     pub user_cache: Cache<Uuid, UserCacheValue>,
 }
@@ -224,7 +227,7 @@ impl Web3ProxyApp {
                     .create_timeout(Some(Duration::from_secs(5)))
                     .max_size(redis_max_connections)
                     .recycle_timeout(Some(Duration::from_secs(5)))
-                    .runtime(Runtime::Tokio1)
+                    .runtime(DeadpoolRuntime::Tokio1)
                     .build()?;
 
                 // test the pool
@@ -306,18 +309,29 @@ impl Web3ProxyApp {
             Some(private_rpcs)
         };
 
-        let frontend_rate_limiter = redis_pool.as_ref().map(|redis_pool| {
-            RedisRateLimit::new(
-                redis_pool.clone(),
+        let mut frontend_ip_rate_limiter = None;
+        let mut frontend_key_rate_limiter = None;
+        if let Some(redis_pool) = redis_pool.as_ref() {
+            let rrl = RedisRateLimiter::new(
                 "web3_proxy",
                 "frontend",
                 top_config.app.public_rate_limit_per_minute,
                 60.0,
-            )
-        });
+                redis_pool.clone(),
+            );
 
-        // TODO: change this to a sized cache
+            // TODO: take cache_size from config
+            frontend_ip_rate_limiter = Some(DeferredRateLimiter::<IpAddr>::new(
+                10_000,
+                "ip",
+                rrl.clone(),
+            ));
+            frontend_key_rate_limiter = Some(DeferredRateLimiter::<Uuid>::new(10_000, "key", rrl));
+        }
+
+        // TODO: change this to a sized cache. theres some potentially giant responses that will break things
         let response_cache = Cache::new(10_000);
+
         let user_cache = Cache::new(10_000);
 
         let app = Self {
@@ -328,7 +342,8 @@ impl Web3ProxyApp {
             head_block_receiver,
             pending_tx_sender,
             pending_transactions,
-            frontend_rate_limiter,
+            frontend_ip_rate_limiter,
+            frontend_key_rate_limiter,
             db_conn,
             redis_pool,
             app_metrics,
@@ -610,7 +625,7 @@ impl Web3ProxyApp {
     }
 
     #[instrument(skip_all)]
-    pub async fn redis_conn(&self) -> anyhow::Result<redis_rate_limit::Connection> {
+    pub async fn redis_conn(&self) -> anyhow::Result<redis_rate_limiter::RedisConnection> {
         match self.redis_pool.as_ref() {
             None => Err(anyhow::anyhow!("no redis server configured")),
             Some(redis_pool) => {

@@ -1257,6 +1257,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "deferred-rate-limiter"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "moka",
+ "redis-rate-limiter",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "der"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3752,7 +3763,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "redis-rate-limit"
+name = "redis-rate-limiter"
 version = "0.2.0"
 dependencies = [
  "anyhow",
@@ -5529,6 +5540,7 @@ dependencies = [
  "axum-macros",
  "counter",
  "dashmap",
+ "deferred-rate-limiter",
  "derive_more",
  "dotenv",
  "entities",
@@ -5548,7 +5560,7 @@ dependencies = [
  "petgraph",
  "proctitle",
  "rand 0.8.5",
- "redis-rate-limit",
+ "redis-rate-limiter",
  "regex",
  "reqwest",
  "rustc-hash",

@@ -5,7 +5,7 @@ use axum::{
     Json,
 };
 use derive_more::From;
-use redis_rate_limit::redis::RedisError;
+use redis_rate_limiter::redis::RedisError;
 use sea_orm::DbErr;
 use std::{error::Error, net::IpAddr};
 use tokio::time::Instant;
@@ -18,9 +18,7 @@ pub type FrontendResult = Result<Response, FrontendErrorResponse>;
 pub enum FrontendErrorResponse {
     Anyhow(anyhow::Error),
     Box(Box<dyn Error>),
-    // TODO: update these for Redis
     Redis(RedisError),
-    // RedisRun(RunError<RedisError>),
     Response(Response),
     Database(DbErr),
     RateLimitedUser(u64, Option<Instant>),
