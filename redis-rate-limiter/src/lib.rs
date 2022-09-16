@@ -45,6 +45,25 @@ impl RedisRateLimiter {
         }
     }
 
+    pub fn now_as_secs(&self) -> f32 {
+        // TODO: if system time doesn't match redis, this won't work great
+        // TODO: now that we fixed
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("cannot tell the time")
+            .as_secs_f32()
+    }
+
+    pub fn period_id(&self, now_as_secs: f32) -> f32 {
+        (now_as_secs / self.period) % self.period
+    }
+
+    pub fn next_period(&self, now_as_secs: f32) -> Instant {
+        let seconds_left_in_period = self.period - (now_as_secs % self.period);
+
+        Instant::now().add(Duration::from_secs_f32(seconds_left_in_period))
+    }
+
     /// label might be an ip address or a user_key id.
     /// if setting max_per_period, be sure to keep the period the same for all requests to this label
     pub async fn throttle_label(
@@ -59,13 +78,10 @@ impl RedisRateLimiter {
             return Ok(RedisRateLimitResult::RetryNever);
         }
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .context("cannot tell the time")?
-            .as_secs_f32();
+        let now = self.now_as_secs();
 
         // if self.period is 60, period_id will be the minute of the current time
-        let period_id = (now / self.period) % self.period;
+        let period_id = self.period_id(now);
 
         // TODO: include max per period in the throttle key?
         let throttle_key = format!("{}:{}:{}", self.key_prefix, label, period_id);
@@ -91,9 +107,8 @@ impl RedisRateLimiter {
         let new_count = *x.first().context("check rate limit result")?;
 
         if new_count > max_per_period {
-            let seconds_left_in_period = self.period - (now % self.period);
-
-            let retry_at = Instant::now().add(Duration::from_secs_f32(seconds_left_in_period));
+            // TODO: this might actually be early if we are way over the count
+            let retry_at = self.next_period(now);
 
             debug!(%label, ?retry_at, "rate limited: {}/{}", new_count, max_per_period);
 
