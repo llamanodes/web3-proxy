@@ -40,7 +40,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{info, info_span, instrument, trace, warn, Instrument};
+use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
 
 // TODO: make this customizable?
@@ -231,7 +231,9 @@ impl Web3ProxyApp {
                     .build()?;
 
                 // test the pool
-                redis_pool.get().await.context("Redis connection failed")?;
+                if let Err(err) = redis_pool.get().await {
+                    error!("failed to connect to redis. some features will be disabled");
+                };
 
                 Some(redis_pool)
             }

@@ -7,7 +7,7 @@ use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{atomic::AtomicU64, Arc};
 use tokio::sync::Mutex;
-use tokio::time::Instant;
+use tokio::time::{Duration, Instant};
 use tracing::error;
 
 /// A local cache that sits in front of a RedisRateLimiter
@@ -16,7 +16,7 @@ pub struct DeferredRateLimiter<K>
 where
     K: Send + Sync,
 {
-    local_cache: Cache<K, Arc<AtomicU64>>,
+    local_cache: Cache<K, Arc<AtomicU64>, ahash::RandomState>,
     prefix: String,
     rrl: RedisRateLimiter,
 }
@@ -32,8 +32,19 @@ where
     K: Copy + Debug + Display + Hash + Eq + Send + Sync + 'static,
 {
     pub fn new(cache_size: u64, prefix: &str, rrl: RedisRateLimiter) -> Self {
+        let ttl = rrl.period as u64;
+
+        let hasher = ahash::RandomState::new();
+
+        // TODO: think more about this ttl. if
+        let local_cache = Cache::builder()
+            .time_to_live(Duration::from_secs(ttl))
+            .max_capacity(cache_size)
+            .name(prefix)
+            .build_with_hasher(hasher);
+
         Self {
-            local_cache: Cache::new(cache_size),
+            local_cache,
             prefix: prefix.to_string(),
             rrl,
         }
