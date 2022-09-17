@@ -254,7 +254,8 @@ impl Web3ProxyApp {
         // TODO: use this? it could listen for confirmed transactions and then clear pending_transactions, but the head_block_sender is doing that
         drop(pending_tx_receiver);
 
-        // TODO: sized and timed expiration!
+        // TODO: capacity from configs
+        // all these are the same size, so no need for a weigher
         let pending_transactions = Cache::builder()
             .max_capacity(10_000)
             .build_with_hasher(ahash::RandomState::new());
@@ -264,9 +265,11 @@ impl Web3ProxyApp {
         // TODO: we should still have some sort of expiration or maximum size limit for the map
 
         // this block map is shared between balanced_rpcs and private_rpcs.
-        // TODO: what limits should we have for expiration?
+        // TODO: limits from config
+        // TODO: these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         let block_map = Cache::builder()
             .max_capacity(10_000)
+            .weigher()
             .build_with_hasher(ahash::RandomState::new());
 
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
@@ -338,10 +341,15 @@ impl Web3ProxyApp {
         }
 
         // TODO: change this to a sized cache. theres some potentially giant responses that will break things
+        // responses can be very different in sizes, so this definitely needs a weigher
+        // TODO: max_capacity from config
         let response_cache = Cache::builder()
             .max_capacity(10_000)
+            .weigher()
             .build_with_hasher(ahash::RandomState::new());
 
+        // all the users are the same size, so no need for a weigher
+        // TODO: max_capacity from config
         let user_cache = Cache::builder()
             .max_capacity(10_000)
             .build_with_hasher(ahash::RandomState::new());
