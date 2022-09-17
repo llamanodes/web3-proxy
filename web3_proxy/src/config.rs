@@ -1,4 +1,4 @@
-use crate::rpcs::blockchain::BlockHashesMap;
+use crate::rpcs::blockchain::BlockHashesCache;
 use crate::rpcs::connection::Web3Connection;
 use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::{app::AnyhowJoinHandle, rpcs::blockchain::ArcBlock};
@@ -120,7 +120,7 @@ impl Web3ConnectionConfig {
         chain_id: u64,
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        block_map: BlockHashesMap,
+        block_map: BlockHashesCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
         open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,

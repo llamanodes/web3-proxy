@@ -6,7 +6,7 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
-use crate::rpcs::blockchain::{ArcBlock, BlockHashesMap, BlockId};
+use crate::rpcs::blockchain::{ArcBlock, BlockId};
 use crate::rpcs::connections::Web3Connections;
 use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
@@ -54,7 +54,7 @@ static APP_USER_AGENT: &str = concat!(
 /// block hash, method, params
 // TODO: better name
 type ResponseCacheKey = (H256, String, Option<String>);
-type ResponseCache = Cache<ResponseCacheKey, JsonRpcForwardedResponse>;
+type ResponseCache = Cache<ResponseCacheKey, JsonRpcForwardedResponse, ahash::RandomState>;
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
@@ -84,11 +84,11 @@ pub struct Web3ProxyApp {
     app_metrics: Arc<Web3ProxyAppMetrics>,
     open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
-    pub pending_transactions: Cache<TxHash, TxStatus>,
+    pub pending_transactions: Cache<TxHash, TxStatus, ahash::RandomState>,
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     pub frontend_key_rate_limiter: Option<DeferredRateLimiter<Uuid>>,
     pub redis_pool: Option<RedisPool>,
-    pub user_cache: Cache<Uuid, UserCacheValue>,
+    pub user_cache: Cache<Uuid, UserCacheValue, ahash::RandomState>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -232,7 +232,10 @@ impl Web3ProxyApp {
 
                 // test the pool
                 if let Err(err) = redis_pool.get().await {
-                    error!("failed to connect to redis. some features will be disabled");
+                    error!(
+                        ?err,
+                        "failed to connect to redis. some features will be disabled"
+                    );
                 };
 
                 Some(redis_pool)
@@ -252,8 +255,9 @@ impl Web3ProxyApp {
         drop(pending_tx_receiver);
 
         // TODO: sized and timed expiration!
-        // TODO: put some in Redis, too?
-        let pending_transactions = Cache::new(10000);
+        let pending_transactions = Cache::builder()
+            .max_capacity(10_000)
+            .build_with_hasher(ahash::RandomState::new());
 
         // TODO: don't drop the pending_tx_receiver. instead, read it to mark transactions as "seen". once seen, we won't re-send them
         // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
@@ -261,7 +265,9 @@ impl Web3ProxyApp {
 
         // this block map is shared between balanced_rpcs and private_rpcs.
         // TODO: what limits should we have for expiration?
-        let block_map = BlockHashesMap::new(10_000);
+        let block_map = Cache::builder()
+            .max_capacity(10_000)
+            .build_with_hasher(ahash::RandomState::new());
 
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
             top_config.app.chain_id,
@@ -332,9 +338,13 @@ impl Web3ProxyApp {
         }
 
         // TODO: change this to a sized cache. theres some potentially giant responses that will break things
-        let response_cache = Cache::new(10_000);
+        let response_cache = Cache::builder()
+            .max_capacity(10_000)
+            .build_with_hasher(ahash::RandomState::new());
 
-        let user_cache = Cache::new(10_000);
+        let user_cache = Cache::builder()
+            .max_capacity(10_000)
+            .build_with_hasher(ahash::RandomState::new());
 
         let app = Self {
             config: top_config.app,

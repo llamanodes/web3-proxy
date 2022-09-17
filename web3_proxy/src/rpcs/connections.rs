@@ -1,5 +1,5 @@
 ///! Load balanced communication with a group of web3 providers
-use super::blockchain::{ArcBlock, BlockHashesMap};
+use super::blockchain::{ArcBlock, BlockHashesCache};
 use super::connection::Web3Connection;
 use super::request::{OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult};
 use super::synced_connections::SyncedConnections;
@@ -36,12 +36,12 @@ pub struct Web3Connections {
     pub(super) conns: HashMap<String, Arc<Web3Connection>>,
     /// any requests will be forwarded to one (or more) of these connections
     pub(super) synced_connections: ArcSwap<SyncedConnections>,
-    pub(super) pending_transactions: Cache<TxHash, TxStatus>,
+    pub(super) pending_transactions: Cache<TxHash, TxStatus, ahash::RandomState>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
-    pub(super) block_hashes: BlockHashesMap,
+    pub(super) block_hashes: BlockHashesCache,
     /// blocks on the heaviest chain
-    pub(super) block_numbers: Cache<U64, H256>,
+    pub(super) block_numbers: Cache<U64, H256, ahash::RandomState>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// TODO: what should we use for edges?
     pub(super) blockchain_graphmap: AsyncRwLock<DiGraphMap<H256, u32>>,
@@ -57,12 +57,12 @@ impl Web3Connections {
         server_configs: HashMap<String, Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
-        block_map: BlockHashesMap,
+        block_map: BlockHashesCache,
         head_block_sender: Option<watch::Sender<ArcBlock>>,
         min_sum_soft_limit: u32,
         min_synced_rpcs: usize,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
-        pending_transactions: Cache<TxHash, TxStatus>,
+        pending_transactions: Cache<TxHash, TxStatus, ahash::RandomState>,
         open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
@@ -176,8 +176,14 @@ impl Web3Connections {
         let synced_connections = SyncedConnections::default();
 
         // TODO: sizing and expiration on these caches!
-        let block_hashes = Cache::new(10000);
-        let block_numbers = Cache::new(10000);
+        let block_hashes = Cache::builder()
+            .time_to_idle(Duration::from_secs(600))
+            .max_capacity(10_000)
+            .build_with_hasher(ahash::RandomState::new());
+        let block_numbers = Cache::builder()
+            .time_to_idle(Duration::from_secs(600))
+            .max_capacity(10_000)
+            .build_with_hasher(ahash::RandomState::new());
 
         let connections = Arc::new(Self {
             conns: connections,

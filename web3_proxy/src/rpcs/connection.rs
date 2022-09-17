@@ -1,5 +1,5 @@
 ///! Rate-limited communication with a web3 provider.
-use super::blockchain::{ArcBlock, BlockHashesMap, BlockId};
+use super::blockchain::{ArcBlock, BlockHashesCache, BlockId};
 use super::provider::Web3Provider;
 use super::request::{OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
@@ -69,7 +69,7 @@ impl Web3Connection {
         hard_limit: Option<(u64, RedisPool)>,
         // TODO: think more about this type
         soft_limit: u32,
-        block_map: BlockHashesMap,
+        block_map: BlockHashesCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
@@ -366,7 +366,7 @@ impl Web3Connection {
         self: &Arc<Self>,
         new_head_block: Result<Option<ArcBlock>, ProviderError>,
         block_sender: &flume::Sender<BlockAndRpc>,
-        block_map: BlockHashesMap,
+        block_map: BlockHashesCache,
     ) -> anyhow::Result<()> {
         match new_head_block {
             Ok(None) => {
@@ -428,7 +428,7 @@ impl Web3Connection {
     async fn subscribe(
         self: Arc<Self>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        block_map: BlockHashesMap,
+        block_map: BlockHashesCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
@@ -516,7 +516,7 @@ impl Web3Connection {
         self: Arc<Self>,
         http_interval_receiver: Option<broadcast::Receiver<()>>,
         block_sender: flume::Sender<BlockAndRpc>,
-        block_map: BlockHashesMap,
+        block_map: BlockHashesCache,
     ) -> anyhow::Result<()> {
         info!(%self, "watching new heads");
 
