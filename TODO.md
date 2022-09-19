@@ -167,6 +167,8 @@ These are roughly in order of completition
   - since users are actively using our service, we will need to support both
 - [ ] Ulid instead of Uuid for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
+- [ ] database migration to change user_keys.requests_per_minute to bigint (max of 18446744073709551615)
+- [ ] change user creation script to have a "unlimited requests per minute" flag that sets it to 18446744073709551615
 
 ## V1
 

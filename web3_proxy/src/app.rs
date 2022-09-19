@@ -30,6 +30,7 @@ use sea_orm::DatabaseConnection;
 use serde::Serialize;
 use serde_json::json;
 use std::fmt;
+use std::mem::size_of_val;
 use std::net::IpAddr;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -62,7 +63,8 @@ pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 pub struct UserCacheValue {
     pub expires_at: Instant,
     pub user_id: u64,
-    pub user_count_per_period: u64,
+    /// if None, allow unlimited queries
+    pub user_count_per_period: Option<u64>,
 }
 
 /// The application
@@ -269,7 +271,7 @@ impl Web3ProxyApp {
         // TODO: these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         let block_map = Cache::builder()
             .max_capacity(10_000)
-            .weigher()
+            .weigher(|_k, v| size_of_val(v) as u32)
             .build_with_hasher(ahash::RandomState::new());
 
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
@@ -345,7 +347,7 @@ impl Web3ProxyApp {
         // TODO: max_capacity from config
         let response_cache = Cache::builder()
             .max_capacity(10_000)
-            .weigher()
+            .weigher(|k, v| (size_of_val(k) + size_of_val(v)) as u32)
             .build_with_hasher(ahash::RandomState::new());
 
         // all the users are the same size, so no need for a weigher
