@@ -254,23 +254,21 @@ impl Web3ProxyApp {
         let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
 
         // TODO: use this? it could listen for confirmed transactions and then clear pending_transactions, but the head_block_sender is doing that
+        // TODO: don't drop the pending_tx_receiver. instead, read it to mark transactions as "seen". once seen, we won't re-send them
+        // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
+        // TODO: we should still have some sort of expiration or maximum size limit for the map
         drop(pending_tx_receiver);
-
         // TODO: capacity from configs
         // all these are the same size, so no need for a weigher
         let pending_transactions = Cache::builder()
             .max_capacity(10_000)
             .build_with_hasher(ahash::RandomState::new());
 
-        // TODO: don't drop the pending_tx_receiver. instead, read it to mark transactions as "seen". once seen, we won't re-send them
-        // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
-        // TODO: we should still have some sort of expiration or maximum size limit for the map
-
-        // this block map is shared between balanced_rpcs and private_rpcs.
+        // keep 1GB of blocks in the cache
         // TODO: limits from config
-        // TODO: these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
+        // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         let block_map = Cache::builder()
-            .max_capacity(10_000)
+            .max_capacity(1024 * 1024 * 1024)
             .weigher(|_k, v| size_of_val(v) as u32)
             .build_with_hasher(ahash::RandomState::new());
 
@@ -342,11 +340,12 @@ impl Web3ProxyApp {
             frontend_key_rate_limiter = Some(DeferredRateLimiter::<Uuid>::new(10_000, "key", rrl));
         }
 
-        // TODO: change this to a sized cache. theres some potentially giant responses that will break things
+        // keep 1GB of blocks in the cache
         // responses can be very different in sizes, so this definitely needs a weigher
         // TODO: max_capacity from config
+        // TODO: don't allow any response to be bigger than X% of the cache
         let response_cache = Cache::builder()
-            .max_capacity(10_000)
+            .max_capacity(1024 * 1024 * 1024)
             .weigher(|k, v| (size_of_val(k) + size_of_val(v)) as u32)
             .build_with_hasher(ahash::RandomState::new());
 

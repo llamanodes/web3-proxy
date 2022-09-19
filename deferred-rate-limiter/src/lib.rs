@@ -34,7 +34,7 @@ where
     pub fn new(cache_size: u64, prefix: &str, rrl: RedisRateLimiter) -> Self {
         let ttl = rrl.period as u64;
 
-        // TODO: time to live is not right. we want this ttl counter to start only after redis is down. this works for now
+        // TODO: time to live is not exactly right. we want this ttl counter to start only after redis is down. this works for now
         let local_cache = Cache::builder()
             .time_to_live(Duration::from_secs(ttl))
             .max_capacity(cache_size)

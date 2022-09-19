@@ -159,7 +159,7 @@ These are roughly in order of completition
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
 - [ ] add configurable size limits to all the Caches
 - [ ] Api keys need option to lock to IP, cors header, referer, etc
-- [ ] requests per second per api key
+- [ ] active requests per second per api key
 - [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
 - [ ] web3 on rpc1 exited without errors. maybe promote some shutdown messages from debug to info?
 - [ ] Ulid instead of Uuid for user keys
@@ -180,6 +180,7 @@ These are not yet ordered.
     - [ ] remove the if/else where we optionally route to archive and refactor to require a BlockNumber enum
     - [ ] then check syncedconnections for the blockNum. if num given, use the cannonical chain to figure out the winning hash
     - [ ] this means if someone requests a recent but not ancient block, they can use all our servers, even the slower ones. need smart sorting for priority here
+- [ ] script that looks at config and estimates max memory used by caches
 - [ ] favicon
   - eth_1       | 2022-09-07T17:10:48.431536Z  WARN web3_proxy::jsonrpc: forwarding error err=nothing to see here
   - use the one on https://staging.llamanodes.com/
