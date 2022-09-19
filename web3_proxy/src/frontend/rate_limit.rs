@@ -107,11 +107,17 @@ impl Web3ProxyApp {
             .await?
         {
             Some((user_id, requests_per_minute)) => {
+                // TODO: add a column here for max, or is u64::MAX fine?
+                let user_count_per_period = if requests_per_minute == u64::MAX {
+                    None
+                } else {
+                    Some(requests_per_minute)
+                };
                 UserCacheValue::from((
                     // TODO: how long should this cache last? get this from config
                     Instant::now() + Duration::from_secs(60),
                     user_id,
-                    requests_per_minute,
+                    user_count_per_period,
                 ))
             }
             None => {
@@ -120,7 +126,7 @@ impl Web3ProxyApp {
                     // TODO: how long should this cache last? get this from config
                     Instant::now() + Duration::from_secs(60),
                     0,
-                    0,
+                    Some(0),
                 ))
             }
         };
@@ -132,7 +138,7 @@ impl Web3ProxyApp {
     }
 
     pub async fn rate_limit_by_key(&self, user_key: Uuid) -> anyhow::Result<RateLimitResult> {
-        // check the local cache
+        // check the local cache fo user data to save a database query
         let user_data = if let Some(cached_user) = self.user_cache.get(&user_key) {
             // TODO: also include the time this value was last checked! otherwise we cache forever!
             if cached_user.expires_at < Instant::now() {
@@ -148,7 +154,6 @@ impl Web3ProxyApp {
         };
 
         // if cache was empty, check the database
-        // TODO: i think there is a cleaner way to do this
         let user_data = match user_data {
             None => self
                 .cache_user_data(user_key)
@@ -162,43 +167,45 @@ impl Web3ProxyApp {
         }
 
         // TODO: turn back on rate limiting once our alpha test is complete
-        return Ok(RateLimitResult::AllowedUser(user_data.user_id));
+        // TODO: if user_data.unlimited_queries
+        // return Ok(RateLimitResult::AllowedUser(user_data.user_id));
 
         // user key is valid. now check rate limits
-        // TODO: this is throwing errors when curve-api hits us with high concurrency. investigate i think its bb8's fault
         if let Some(rate_limiter) = &self.frontend_key_rate_limiter {
-            // TODO: query redis in the background so that users don't have to wait on this network request
-            // TODO: better key? have a prefix so its easy to delete all of these
-            // TODO: we should probably hash this or something
-            match rate_limiter
-                .throttle(&user_key, Some(user_data.user_count_per_period), 1)
-                .await
-            {
-                Ok(DeferredRateLimitResult::Allowed) => {
-                    Ok(RateLimitResult::AllowedUser(user_data.user_id))
-                }
-                Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
-                    // TODO: set headers so they know when they can retry
-                    // TODO: debug or trace?
-                    // this is too verbose, but a stat might be good
-                    // TODO: keys are secrets! use the id instead
-                    trace!(?user_key, "rate limit exceeded until {:?}", retry_at);
-                    Ok(RateLimitResult::RateLimitedUser(
-                        user_data.user_id,
-                        Some(retry_at),
-                    ))
-                }
-                Ok(DeferredRateLimitResult::RetryNever) => {
-                    // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
-                    // TODO: keys are secret. don't log them!
-                    trace!(?user_key, "rate limit is 0");
-                    Ok(RateLimitResult::RateLimitedUser(user_data.user_id, None))
-                }
-                Err(err) => {
-                    // internal error, not rate limit being hit
-                    // TODO: i really want axum to do this for us in a single place.
-                    error!(?err, "rate limiter is unhappy. allowing ip");
-                    Ok(RateLimitResult::AllowedUser(user_data.user_id))
+            if user_data.user_count_per_period.is_none() {
+                // None means unlimited rate limit
+                Ok(RateLimitResult::AllowedUser(user_data.user_id))
+            } else {
+                match rate_limiter
+                    .throttle(&user_key, user_data.user_count_per_period, 1)
+                    .await
+                {
+                    Ok(DeferredRateLimitResult::Allowed) => {
+                        Ok(RateLimitResult::AllowedUser(user_data.user_id))
+                    }
+                    Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
+                        // TODO: set headers so they know when they can retry
+                        // TODO: debug or trace?
+                        // this is too verbose, but a stat might be good
+                        // TODO: keys are secrets! use the id instead
+                        trace!(?user_key, "rate limit exceeded until {:?}", retry_at);
+                        Ok(RateLimitResult::RateLimitedUser(
+                            user_data.user_id,
+                            Some(retry_at),
+                        ))
+                    }
+                    Ok(DeferredRateLimitResult::RetryNever) => {
+                        // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
+                        // TODO: keys are secret. don't log them!
+                        trace!(?user_key, "rate limit is 0");
+                        Ok(RateLimitResult::RateLimitedUser(user_data.user_id, None))
+                    }
+                    Err(err) => {
+                        // internal error, not rate limit being hit
+                        // TODO: i really want axum to do this for us in a single place.
+                        error!(?err, "rate limiter is unhappy. allowing ip");
+                        Ok(RateLimitResult::AllowedUser(user_data.user_id))
+                    }
                 }
             }
         } else {

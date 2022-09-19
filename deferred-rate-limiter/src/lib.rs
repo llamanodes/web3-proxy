@@ -4,7 +4,7 @@ use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
 use std::cmp::Eq;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{atomic::AtomicU64, Arc};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
@@ -49,6 +49,7 @@ where
     }
 
     /// if setting max_per_period, be sure to keep the period the same for all requests to this label
+    /// TODO: max_per_period being None means two things. some places it means unlimited, but here it means to use the default. make an enum
     pub async fn throttle(
         &self,
         key: &K,
@@ -61,40 +62,52 @@ where
             return Ok(DeferredRateLimitResult::RetryNever);
         }
 
-        let arc_new_entry = Arc::new(AtomicBool::new(false));
-
-        // TODO: this can't be right. what type do we actually want here?
-        let arc_retry_at = Arc::new(Mutex::new(None));
+        let arc_deferred_rate_limit_result = Arc::new(Mutex::new(None));
 
         let redis_key = format!("{}:{}", self.prefix, key);
 
         // TODO: DO NOT UNWRAP HERE. figure out how to handle anyhow error being wrapped in an Arc
         // TODO: i'm sure this could be a lot better. but race conditions make this hard to think through. brain needs sleep
         let arc_key_count: Arc<AtomicU64> = {
-            // clone things outside of the
-            let arc_new_entry = arc_new_entry.clone();
-            let arc_retry_at = arc_retry_at.clone();
+            // clone things outside of the `async move`
+            let arc_deferred_rate_limit_result = arc_deferred_rate_limit_result.clone();
             let redis_key = redis_key.clone();
             let rrl = Arc::new(self.rrl.clone());
 
+            // set arc_deferred_rate_limit_result and return the coun
             self.local_cache
                 .get_with(*key, async move {
-                    arc_new_entry.store(true, Ordering::Release);
-
                     // we do not use the try operator here because we want to be okay with redis errors
                     let redis_count = match rrl
                         .throttle_label(&redis_key, Some(max_per_period), count)
                         .await
                     {
-                        Ok(RedisRateLimitResult::Allowed(count)) => count,
-                        Ok(RedisRateLimitResult::RetryAt(retry_at, count)) => {
-                            let _ = arc_retry_at.lock().await.insert(Some(retry_at));
+                        Ok(RedisRateLimitResult::Allowed(count)) => {
+                            let _ = arc_deferred_rate_limit_result
+                                .lock()
+                                .await
+                                .insert(DeferredRateLimitResult::Allowed);
                             count
                         }
-                        Ok(RedisRateLimitResult::RetryNever) => unimplemented!(),
+                        Ok(RedisRateLimitResult::RetryAt(retry_at, count)) => {
+                            let _ = arc_deferred_rate_limit_result
+                                .lock()
+                                .await
+                                .insert(DeferredRateLimitResult::RetryAt(retry_at));
+                            count
+                        }
+                        Ok(RedisRateLimitResult::RetryNever) => {
+                            panic!("RetryNever shouldn't happen")
+                        }
                         Err(err) => {
-                            // if we get a redis error, just let the user through. local caches will work fine
-                            // though now that we do this, we need to reset rate limits every minute!
+                            let _ = arc_deferred_rate_limit_result
+                                .lock()
+                                .await
+                                .insert(DeferredRateLimitResult::Allowed);
+
+                            // if we get a redis error, just let the user through.
+                            // if users are sticky on a server, local caches will work well enough
+                            // though now that we do this, we need to reset rate limits every minute! cache must have ttl!
                             error!(?err, "unable to rate limit! creating empty cache");
                             0
                         }
@@ -105,14 +118,12 @@ where
                 .await
         };
 
-        if arc_new_entry.load(Ordering::Acquire) {
+        let mut locked = arc_deferred_rate_limit_result.lock().await;
+
+        if let Some(deferred_rate_limit_result) = locked.take() {
             // new entry. redis was already incremented
             // return the retry_at that we got from
-            if let Some(Some(retry_at)) = arc_retry_at.lock().await.take() {
-                Ok(DeferredRateLimitResult::RetryAt(retry_at))
-            } else {
-                Ok(DeferredRateLimitResult::Allowed)
-            }
+            Ok(deferred_rate_limit_result)
         } else {
             // we have a cached amount here
             let cached_key_count = arc_key_count.fetch_add(count, Ordering::Acquire);
