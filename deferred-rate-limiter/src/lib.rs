@@ -68,9 +68,9 @@ where
 
         // TODO: DO NOT UNWRAP HERE. figure out how to handle anyhow error being wrapped in an Arc
         // TODO: i'm sure this could be a lot better. but race conditions make this hard to think through. brain needs sleep
-        let arc_key_count: Arc<AtomicU64> = {
+        let local_key_count: Arc<AtomicU64> = {
             // clone things outside of the `async move`
-            let arc_deferred_rate_limit_result = arc_deferred_rate_limit_result.clone();
+            let deferred_rate_limit_result = arc_deferred_rate_limit_result.clone();
             let redis_key = redis_key.clone();
             let rrl = Arc::new(self.rrl.clone());
 
@@ -83,14 +83,14 @@ where
                         .await
                     {
                         Ok(RedisRateLimitResult::Allowed(count)) => {
-                            let _ = arc_deferred_rate_limit_result
+                            let _ = deferred_rate_limit_result
                                 .lock()
                                 .await
                                 .insert(DeferredRateLimitResult::Allowed);
                             count
                         }
                         Ok(RedisRateLimitResult::RetryAt(retry_at, count)) => {
-                            let _ = arc_deferred_rate_limit_result
+                            let _ = deferred_rate_limit_result
                                 .lock()
                                 .await
                                 .insert(DeferredRateLimitResult::RetryAt(retry_at));
@@ -100,7 +100,7 @@ where
                             panic!("RetryNever shouldn't happen")
                         }
                         Err(err) => {
-                            let _ = arc_deferred_rate_limit_result
+                            let _ = deferred_rate_limit_result
                                 .lock()
                                 .await
                                 .insert(DeferredRateLimitResult::Allowed);
@@ -126,7 +126,7 @@ where
             Ok(deferred_rate_limit_result)
         } else {
             // we have a cached amount here
-            let cached_key_count = arc_key_count.fetch_add(count, Ordering::Acquire);
+            let cached_key_count = local_key_count.fetch_add(count, Ordering::Acquire);
 
             // assuming no other parallel futures incremented this key, this is the count that redis has
             let expected_key_count = cached_key_count + count;
@@ -153,11 +153,11 @@ where
                             .await
                         {
                             Ok(RedisRateLimitResult::Allowed(count)) => {
-                                arc_key_count.store(count, Ordering::Release);
+                                local_key_count.store(count, Ordering::Release);
                                 DeferredRateLimitResult::Allowed
                             }
                             Ok(RedisRateLimitResult::RetryAt(retry_at, count)) => {
-                                arc_key_count.store(count, Ordering::Release);
+                                local_key_count.store(count, Ordering::Release);
                                 DeferredRateLimitResult::RetryAt(retry_at)
                             }
                             Ok(RedisRateLimitResult::RetryNever) => {

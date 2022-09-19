@@ -133,11 +133,9 @@ pub async fn get_migrated_db(
     // TODO: load all these options from the config file. i think mysql default max is 100
     // TODO: sqlx logging only in debug. way too verbose for production
     db_opt
+        .connect_timeout(Duration::from_secs(30))
         .min_connections(min_connections)
         .max_connections(max_connections)
-        .connect_timeout(Duration::from_secs(8))
-        .idle_timeout(Duration::from_secs(8))
-        .max_lifetime(Duration::from_secs(60))
         .sqlx_logging(false);
     // .sqlx_logging_level(log::LevelFilter::Info);
 
