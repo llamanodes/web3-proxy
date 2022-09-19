@@ -351,6 +351,7 @@ impl Web3ProxyApp {
         // TODO: max_capacity from config
         let user_cache = Cache::builder()
             .max_capacity(10_000)
+            .time_to_live(Duration::from_secs(60))
             .build_with_hasher(ahash::RandomState::new());
 
         let app = Self {
