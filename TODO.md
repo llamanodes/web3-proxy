@@ -147,12 +147,11 @@ These are roughly in order of completition
   - include the old head number and block in the log
 - [x] exponential backoff when reconnecting a connection
 - [x] once the merge happens, we don't want to use total difficulty and instead just care about the number
-- [-] rewrite rate limiting to have a tiered cache. do not put redis in the hot path
+- [x] rewrite rate limiting to have a tiered cache. do not put redis in the hot path
   - instead, we should check a local cache for the current rate limit (+1) and spawn an update to the local cache from redis in the background.
   - [x] when there are a LOT of concurrent requests, we see errors. i thought that was a problem with redis cell, but it happens with my simpler rate limit. now i think the problem is actually with bb8
   - https://docs.rs/redis/latest/redis/aio/struct.ConnectionManager.html or https://crates.io/crates/deadpool-redis?
   - WARN http_request: redis_rate_limit::errors: redis error err=Response was of incompatible type: "Response type not string compatible." (response was int(500237)) id=01GC6514JWN5PS1NCWJCGJTC94 method=POST
-  - [ ] bring back redis-cell?
 - [ ] web3_proxy_error_count{path = "backend_rpc/request"} is inflated by a bunch of reverts. do not log reverts as warn. 
   - erigon gives `method=eth_call reqid=986147 t=1.151551ms err="execution reverted"`
   - [ ] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user

@@ -56,7 +56,7 @@ impl Web3ProxyApp {
         // TODO: have a local cache because if we hit redis too hard we get errors
         // TODO: query redis in the background so that users don't have to wait on this network request
         if let Some(rate_limiter) = &self.frontend_ip_rate_limiter {
-            match rate_limiter.throttle(&ip, None, 1).await {
+            match rate_limiter.throttle(ip, None, 1).await {
                 Ok(DeferredRateLimitResult::Allowed) => Ok(RateLimitResult::AllowedIp(ip)),
                 Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
                     // TODO: set headers so they know when they can retry
@@ -117,6 +117,7 @@ impl Web3ProxyApp {
                         } else {
                             Some(requests_per_minute)
                         };
+
                         Ok(UserCacheValue::from((user_id, user_count_per_period)))
                     }
                     None => Ok(UserCacheValue::from((0, Some(0)))),
@@ -144,7 +145,7 @@ impl Web3ProxyApp {
         // user key is valid. now check rate limits
         if let Some(rate_limiter) = &self.frontend_key_rate_limiter {
             match rate_limiter
-                .throttle(&user_key, Some(user_count_per_period), 1)
+                .throttle(user_key, Some(user_count_per_period), 1)
                 .await
             {
                 Ok(DeferredRateLimitResult::Allowed) => {

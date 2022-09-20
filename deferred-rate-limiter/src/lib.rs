@@ -52,7 +52,7 @@ where
     /// TODO: max_per_period being None means two things. some places it means unlimited, but here it means to use the default. make an enum
     pub async fn throttle(
         &self,
-        key: &K,
+        key: K,
         max_per_period: Option<u64>,
         count: u64,
     ) -> anyhow::Result<DeferredRateLimitResult> {
@@ -76,7 +76,7 @@ where
 
             // set arc_deferred_rate_limit_result and return the coun
             self.local_cache
-                .get_with(*key, async move {
+                .get_with(key, async move {
                     // we do not use the try operator here because we want to be okay with redis errors
                     let redis_count = match rrl
                         .throttle_label(&redis_key, Some(max_per_period), count)
@@ -167,9 +167,9 @@ where
                             Err(err) => {
                                 // don't let redis errors block our users!
                                 error!(
-                                    // ?key,  // TODO: this errors
+                                    ?key,
                                     ?err,
-                                    "unable to query rate limits. local cache available"
+                                    "unable to query rate limits, but local cache is available"
                                 );
                                 // TODO: we need to start a timer that resets this count every minute
                                 DeferredRateLimitResult::Allowed

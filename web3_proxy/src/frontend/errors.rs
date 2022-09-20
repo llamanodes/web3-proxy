@@ -36,19 +36,19 @@ impl IntoResponse for FrontendErrorResponse {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_string(
-                        // TODO: is it safe to expose all our anyhow strings?
+                        // TODO: is it safe to expose all of our anyhow strings?
                         err.to_string(),
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
                 )
             }
-            // TODO: make this better
             Self::Box(err) => {
                 warn!(?err, "boxed");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
+                        // TODO: make this better. maybe include the error type?
                         "boxed error!",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
@@ -66,17 +66,6 @@ impl IntoResponse for FrontendErrorResponse {
                     ),
                 )
             }
-            // Self::RedisRun(err) => {
-            //     warn!(?err, "redis run");
-            //     (
-            //         StatusCode::INTERNAL_SERVER_ERROR,
-            //         JsonRpcForwardedResponse::from_str(
-            //             "redis run error!",
-            //             Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-            //             None,
-            //         ),
-            //     )
-            // }
             Self::Response(r) => {
                 debug_assert_ne!(r.status(), StatusCode::OK);
                 return r;
@@ -95,6 +84,7 @@ impl IntoResponse for FrontendErrorResponse {
             Self::RateLimitedIp(ip, retry_at) => {
                 // TODO: emit a stat
                 // TODO: include retry_at in the error
+                // TODO: if retry_at is None, give an unauthorized status code?
                 (
                     StatusCode::TOO_MANY_REQUESTS,
                     JsonRpcForwardedResponse::from_string(
@@ -127,6 +117,7 @@ impl IntoResponse for FrontendErrorResponse {
             ),
             Self::NotFound => {
                 // TODO: emit a stat?
+                // TODO: instead of an error, show a normal html page for 404
                 (
                     StatusCode::NOT_FOUND,
                     JsonRpcForwardedResponse::from_str(

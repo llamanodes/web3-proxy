@@ -39,7 +39,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
-use tokio::time::{timeout};
+use tokio::time::timeout;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
@@ -166,7 +166,7 @@ impl Web3ProxyApp {
         let open_request_handle_metrics: Arc<OpenRequestHandleMetrics> = Default::default();
 
         // first, we connect to mysql and make sure the latest migrations have run
-        let db_conn = if let Some(db_url) = &top_config.app.db_url {
+        let db_conn = if let Some(db_url) = top_config.app.db_url.clone() {
             let db_min_connections = top_config
                 .app
                 .db_min_connections
@@ -178,8 +178,7 @@ impl Web3ProxyApp {
                 .db_max_connections
                 .unwrap_or(db_min_connections * 2);
 
-            let db =
-                get_migrated_db(db_url.clone(), db_min_connections, redis_max_connections).await?;
+            let db = get_migrated_db(db_url, db_min_connections, redis_max_connections).await?;
 
             Some(db)
         } else {
@@ -220,17 +219,15 @@ impl Web3ProxyApp {
                     .redis_max_connections
                     .unwrap_or(num_workers * 2);
 
-                // TODO: what are reasonable timeouts
+                // TODO: what are reasonable timeouts?
                 // TODO: set a wait timeout? maybe somehow just emit a warning if this is long
                 let redis_pool = RedisConfig::from_url(redis_url)
                     .builder()?
-                    .create_timeout(Some(Duration::from_secs(5)))
                     .max_size(redis_max_connections)
-                    .recycle_timeout(Some(Duration::from_secs(5)))
                     .runtime(DeadpoolRuntime::Tokio1)
                     .build()?;
 
-                // test the pool
+                // test the redis pool
                 if let Err(err) = redis_pool.get().await {
                     error!(
                         ?err,
@@ -484,7 +481,8 @@ impl Web3ProxyApp {
                             },
                         });
 
-                        let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+                        let msg =
+                            Message::Text(serde_json::to_string(&msg).expect("we made this `msg`"));
 
                         if response_sender.send_async(msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
@@ -526,7 +524,9 @@ impl Web3ProxyApp {
                             },
                         });
 
-                        let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+                        let msg = Message::Text(
+                            serde_json::to_string(&msg).expect("we made this message"),
+                        );
 
                         if response_sender.send_async(msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
@@ -667,6 +667,7 @@ impl Web3ProxyApp {
         trace!("Received request: {:?}", request);
 
         // save the id so we can attach it to the response
+        // TODO: instead of cloning, take the id out
         let request_id = request.id.clone();
 
         // TODO: if eth_chainId or net_version, serve those without querying the backend
@@ -834,7 +835,11 @@ impl Web3ProxyApp {
                             return Err(anyhow::anyhow!("invalid request"));
                         }
 
-                        let param = Bytes::from_str(params[0].as_str().unwrap())?;
+                        let param = Bytes::from_str(
+                            params[0]
+                                .as_str()
+                                .context("parsing params 0 into str then bytes")?,
+                        )?;
 
                         let hash = H256::from(keccak256(param));
 
@@ -881,6 +886,8 @@ impl Web3ProxyApp {
                     request.params.clone().map(|x| x.to_string()),
                 );
 
+                // TODO: remove their request id instead of cloning it
+
                 // TODO: move this caching outside this match and cache some of the other responses?
                 // TODO: cache the warp::reply to save us serializing every time?
                 let mut response = self
@@ -888,15 +895,24 @@ impl Web3ProxyApp {
                     .try_get_with(cache_key, async move {
                         // TODO: retry some failures automatically!
                         // TODO: try private_rpcs if all the balanced_rpcs fail!
-                        self.balanced_rpcs
+                        // TODO: put the hash here instead?
+                        let mut response = self
+                            .balanced_rpcs
                             .try_send_best_upstream_server(request, Some(&request_block_id.num))
-                            .await
+                            .await?;
+
+                        // discard their id by replacing it with an empty
+                        response.id = Default::default();
+
+                        Ok::<_, anyhow::Error>(response)
                     })
                     .await
-                    .unwrap();
+                    .map_err(|err| Arc::try_unwrap(err).expect("this should be the only reference"))
+                    .context("caching response")?;
 
-                // since this data came out of a cache, the id is likely wrong.
+                // since this data came likely out of a cache, the id is not going to match
                 // replace the id with our request's id.
+                // TODO: cache without the id
                 response.id = request_id;
 
                 return Ok(response);
