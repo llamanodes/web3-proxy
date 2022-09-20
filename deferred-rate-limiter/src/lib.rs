@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{atomic::AtomicU64, Arc};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
-use tracing::error;
+use tracing::{error, info_span, Instrument};
 
 /// A local cache that sits in front of a RedisRateLimiter
 /// Generic accross the key so it is simple to use with IPs or user keys
@@ -62,7 +62,7 @@ where
             return Ok(DeferredRateLimitResult::RetryNever);
         }
 
-        let arc_deferred_rate_limit_result = Arc::new(Mutex::new(None));
+        let deferred_rate_limit_result = Arc::new(Mutex::new(None));
 
         let redis_key = format!("{}:{}", self.prefix, key);
 
@@ -70,7 +70,7 @@ where
         // TODO: i'm sure this could be a lot better. but race conditions make this hard to think through. brain needs sleep
         let local_key_count: Arc<AtomicU64> = {
             // clone things outside of the `async move`
-            let deferred_rate_limit_result = arc_deferred_rate_limit_result.clone();
+            let deferred_rate_limit_result = deferred_rate_limit_result.clone();
             let redis_key = redis_key.clone();
             let rrl = Arc::new(self.rrl.clone());
 
@@ -118,7 +118,7 @@ where
                 .await
         };
 
-        let mut locked = arc_deferred_rate_limit_result.lock().await;
+        let mut locked = deferred_rate_limit_result.lock().await;
 
         if let Some(deferred_rate_limit_result) = locked.take() {
             // new entry. redis was already incremented
@@ -184,8 +184,11 @@ where
                     // close to period. don't risk it. wait on redis
                     Ok(rate_limit_f.await)
                 } else {
+                    // TODO: pass the frontend request id through
+                    let span = info_span!("deferred rate limit");
+
                     // rate limit has enough headroom that it should be safe to do this in the background
-                    tokio::spawn(rate_limit_f);
+                    tokio::spawn(rate_limit_f.instrument(span));
 
                     Ok(DeferredRateLimitResult::Allowed)
                 }

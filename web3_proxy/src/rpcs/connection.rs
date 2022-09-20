@@ -20,7 +20,7 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::RwLock as AsyncRwLock;
-use tokio::time::{interval, sleep, sleep_until, Duration, MissedTickBehavior};
+use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 /// An active connection to a Web3 RPC server like geth or erigon.
@@ -112,9 +112,9 @@ impl Web3Connection {
         // check the server's chain_id here
         // TODO: move this outside the `new` function and into a `start` function or something. that way we can do retries from there
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
-        // TODO: this will wait forever. do we want that?
+        // TODO: what should the timeout be?
         let found_chain_id: Result<U64, _> = new_connection
-            .wait_for_request_handle()
+            .wait_for_request_handle(Duration::from_secs(30))
             .await?
             .request("eth_chainId", Option::None::<()>, false)
             .await;
@@ -199,8 +199,9 @@ impl Web3Connection {
                 .max(U64::one());
 
             // TODO: wait for the handle BEFORE we check the current block number. it might be delayed too!
+            // TODO: what should the request be?
             let archive_result: Result<Bytes, _> = self
-                .wait_for_request_handle()
+                .wait_for_request_handle(Duration::from_secs(30))
                 .await?
                 .request(
                     "eth_getCode",
@@ -532,8 +533,8 @@ impl Web3Connection {
                     let mut last_hash = H256::zero();
 
                     loop {
-                        // TODO: try, or wait_for?
-                        match self.wait_for_request_handle().await {
+                        // TODO: what should the max_wait be?
+                        match self.wait_for_request_handle(Duration::from_secs(30)).await {
                             Ok(active_request_handle) => {
                                 let block: Result<Block<TxHash>, _> = active_request_handle
                                     .request("eth_getBlockByNumber", ("latest", false), false)
@@ -596,7 +597,8 @@ impl Web3Connection {
                 }
                 Web3Provider::Ws(provider) => {
                     // todo: move subscribe_blocks onto the request handle?
-                    let active_request_handle = self.wait_for_request_handle().await;
+                    let active_request_handle =
+                        self.wait_for_request_handle(Duration::from_secs(30)).await;
                     let mut stream = provider.subscribe_blocks().await?;
                     drop(active_request_handle);
 
@@ -604,7 +606,7 @@ impl Web3Connection {
                     // there is a very small race condition here where the stream could send us a new block right now
                     // all it does is print "new block" for the same block as current block
                     let block: Result<Option<ArcBlock>, _> = self
-                        .wait_for_request_handle()
+                        .wait_for_request_handle(Duration::from_secs(30))
                         .await?
                         .request("eth_getBlockByNumber", ("latest", false), false)
                         .await
@@ -691,7 +693,8 @@ impl Web3Connection {
                 }
                 Web3Provider::Ws(provider) => {
                     // TODO: maybe the subscribe_pending_txs function should be on the active_request_handle
-                    let active_request_handle = self.wait_for_request_handle().await;
+                    let active_request_handle =
+                        self.wait_for_request_handle(Duration::from_secs(30)).await;
 
                     let mut stream = provider.subscribe_pending_txs().await?;
 
@@ -718,10 +721,12 @@ impl Web3Connection {
     }
 
     /// be careful with this; it might wait forever!
-    // TODO: maximum wait time?
     #[instrument]
-    pub async fn wait_for_request_handle(self: &Arc<Self>) -> anyhow::Result<OpenRequestHandle> {
-        // TODO: maximum wait time? i think timeouts in other parts of the code are probably best
+    pub async fn wait_for_request_handle(
+        self: &Arc<Self>,
+        max_wait: Duration,
+    ) -> anyhow::Result<OpenRequestHandle> {
+        let max_wait = Instant::now() + max_wait;
 
         loop {
             let x = self.try_request_handle().await;
@@ -733,13 +738,18 @@ impl Web3Connection {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
                     trace!(?retry_at);
+
+                    if retry_at > max_wait {
+                        // break now since we will wait past our maximum wait time
+                        return Err(anyhow::anyhow!("timeout waiting for request handle"));
+                    }
                     sleep_until(retry_at).await;
                 }
                 Ok(OpenRequestResult::RetryNever) => {
                     // TODO: when can this happen? log? emit a stat?
                     // TODO: subscribe to the head block on this
                     // TODO: sleep how long? maybe just error?
-                    return Err(anyhow::anyhow!("unable to retry"));
+                    return Err(anyhow::anyhow!("unable to retry for request handle"));
                 }
                 Err(err) => return Err(err),
             }

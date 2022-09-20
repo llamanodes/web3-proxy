@@ -14,6 +14,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::{broadcast, watch};
+use tokio::time::Duration;
 use tracing::{debug, trace, warn};
 
 // TODO: type for Hydrated Blocks with their full transactions?
@@ -87,7 +88,6 @@ impl Web3Connections {
 
     /// Get a block from caches with fallback.
     /// Will query a specific node or the best available.
-    /// WARNING! If rpc is specified, this may wait forever. be sure this runs with your own timeout
     pub async fn block(
         &self,
         hash: &H256,
@@ -104,7 +104,7 @@ impl Web3Connections {
         // TODO: if error, retry?
         let block: Block<TxHash> = match rpc {
             Some(rpc) => {
-                rpc.wait_for_request_handle()
+                rpc.wait_for_request_handle(Duration::from_secs(30))
                     .await?
                     .request("eth_getBlockByHash", get_block_params, false)
                     .await?

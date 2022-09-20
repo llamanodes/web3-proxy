@@ -1,7 +1,7 @@
 use derive_more::From;
 use ethers::prelude::{HttpClientError, ProviderError, WsClientError};
-use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
-use serde::Serialize;
+use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::fmt;
 
@@ -11,7 +11,7 @@ fn default_jsonrpc() -> String {
     "2.0".to_string()
 }
 
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct JsonRpcRequest {
     // TODO: skip jsonrpc entirely? its against spec to drop it, but some servers bad
     #[serde(default = "default_jsonrpc")]
@@ -45,7 +45,7 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
     where
         D: Deserializer<'de>,
     {
-        #[derive(serde::Deserialize)]
+        #[derive(Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
             JsonRpc,
@@ -149,7 +149,7 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
 
 // TODO: impl Error on this?
 /// All jsonrpc errors use this structure
-#[derive(Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct JsonRpcErrorData {
     /// The error code
     pub code: i64,
@@ -161,7 +161,7 @@ pub struct JsonRpcErrorData {
 }
 
 /// A complete response
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct JsonRpcForwardedResponse {
     // TODO: jsonrpc a &str?
     #[serde(default = "default_jsonrpc")]
