@@ -154,6 +154,7 @@ These are roughly in order of completition
   - WARN http_request: redis_rate_limit::errors: redis error err=Response was of incompatible type: "Response type not string compatible." (response was int(500237)) id=01GC6514JWN5PS1NCWJCGJTC94 method=POST
 - [ ] web3_proxy_error_count{path = "backend_rpc/request"} is inflated by a bunch of reverts. do not log reverts as warn. 
   - erigon gives `method=eth_call reqid=986147 t=1.151551ms err="execution reverted"`
+  - [ ] maybe change request to return a JsonRpcResponse or an anyhow
   - [ ] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
 - [ ] add configurable size limits to all the Caches
