@@ -220,7 +220,6 @@ impl Web3ProxyApp {
                     .unwrap_or(num_workers * 2);
 
                 // TODO: what are reasonable timeouts?
-                // TODO: set a wait timeout? maybe somehow just emit a warning if this is long
                 let redis_pool = RedisConfig::from_url(redis_url)
                     .builder()?
                     .max_size(redis_max_connections)

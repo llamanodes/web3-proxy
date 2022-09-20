@@ -1,5 +1,6 @@
 //#![warn(missing_docs)]
 use anyhow::Context;
+use deadpool_redis::redis::AsyncCommands;
 use std::ops::Add;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{Duration, Instant};
@@ -71,6 +72,7 @@ impl RedisRateLimiter {
         label: &str,
         max_per_period: Option<u64>,
         count: u64,
+        expire: bool,
     ) -> anyhow::Result<RedisRateLimitResult> {
         let max_per_period = max_per_period.unwrap_or(self.max_requests_per_period);
 
@@ -92,23 +94,32 @@ impl RedisRateLimiter {
             .await
             .context("get redis connection for rate limits")?;
 
-        // TODO: at high concurency, i think this is giving errors
-        // TODO: i'm starting to think that bb8 has a bug
-        let x: Vec<u64> = redis::pipe()
-            // we could get the key first, but that means an extra redis call for every check. this seems better
-            .incr(&throttle_key, count)
-            // set expiration each time we set the key. ignore the result
-            .expire(&throttle_key, self.period as usize)
-            // TODO: NX will make it only set the expiration the first time. works in redis, but not elasticache
-            // .arg("NX")
-            .ignore()
-            // do the query
-            .query_async(&mut *conn)
-            .await
-            .context("increment rate limit")?;
+        // TODO: at high concurency, this gives "connection reset by peer" errors. at least they are off the hot path
+        // TODO: only set expire if this is a new key
+        let new_count: u64 = if expire {
+            trace!("redis incr+expire");
+            // TODO: automatic retry
+            let x: Vec<_> = redis::pipe()
+                .atomic()
+                // we could get the key first, but that means an extra redis call for every check. this seems better
+                .incr(&throttle_key, count)
+                // set expiration each time we set the key. ignore the result
+                .expire(&throttle_key, 1 + self.period as usize)
+                // TODO: NX will make it only set the expiration the first time. works in redis, but not elasticache
+                // .arg("NX")
+                .ignore()
+                // do the query
+                .query_async(&mut *conn)
+                .await
+                .context("increment rate limit and set expiration")?;
 
-        // TODO: is there a better way to do this?
-        let new_count = *x.first().context("check rate limit result")?;
+            *x.first().expect("check redis")
+        } else {
+            trace!("redis incr only");
+            conn.incr(&throttle_key, count)
+                .await
+                .context("increment rate limit")?
+        };
 
         if new_count > max_per_period {
             // TODO: this might actually be early if we are way over the count
@@ -124,7 +135,7 @@ impl RedisRateLimiter {
     }
 
     #[inline]
-    pub async fn throttle(&self) -> anyhow::Result<RedisRateLimitResult> {
-        self.throttle_label("", None, 1).await
+    pub async fn throttle(&self, expire: bool) -> anyhow::Result<RedisRateLimitResult> {
+        self.throttle_label("", None, 1, expire).await
     }
 }

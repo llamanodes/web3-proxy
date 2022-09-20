@@ -83,12 +83,15 @@ impl Web3ProxyApp {
         }
     }
 
+    // check the local cache for user data, or query the database
     pub(crate) async fn user_data(&self, user_key: Uuid) -> anyhow::Result<UserCacheValue> {
         let db = self.db_conn.as_ref().context("no database")?;
 
         let user_data: Result<_, Arc<anyhow::Error>> = self
             .user_cache
             .try_get_with(user_key, async move {
+                trace!(?user_key, "user_cache miss");
+
                 /// helper enum for querying just a few columns instead of the entire table
                 #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
                 enum QueryAs {
@@ -130,7 +133,6 @@ impl Web3ProxyApp {
     }
 
     pub async fn rate_limit_by_key(&self, user_key: Uuid) -> anyhow::Result<RateLimitResult> {
-        // check the local cache fo user data to save a database query
         let user_data = self.user_data(user_key).await?;
 
         if user_data.user_id == 0 {

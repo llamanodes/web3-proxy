@@ -79,7 +79,7 @@ where
                 .get_with(key, async move {
                     // we do not use the try operator here because we want to be okay with redis errors
                     let redis_count = match rrl
-                        .throttle_label(&redis_key, Some(max_per_period), count)
+                        .throttle_label(&redis_key, Some(max_per_period), count, true)
                         .await
                     {
                         Ok(RedisRateLimitResult::Allowed(count)) => {
@@ -149,7 +149,7 @@ where
                     let rrl = self.rrl.clone();
                     async move {
                         match rrl
-                            .throttle_label(&redis_key, Some(max_per_period), count)
+                            .throttle_label(&redis_key, Some(max_per_period), count, false)
                             .await
                         {
                             Ok(RedisRateLimitResult::Allowed(count)) => {

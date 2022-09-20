@@ -1,8 +1,8 @@
 use super::connection::Web3Connection;
 use super::provider::Web3Provider;
+use crate::metered::{JsonRpcErrorCount, ProviderErrorCount};
 use ethers::providers::ProviderError;
 use metered::metered;
-use metered::ErrorCount;
 use metered::HitCount;
 use metered::ResponseTime;
 use metered::Throughput;
@@ -65,7 +65,7 @@ impl OpenRequestHandle {
     /// TODO: we no longer take self because metered doesn't like that
     /// TODO: ErrorCount includes too many types of errors, such as transaction reverts
     #[instrument(skip_all)]
-    #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
+    #[measure([JsonRpcErrorCount, HitCount, ProviderErrorCount, ResponseTime, Throughput])]
     pub async fn request<T, R>(
         &self,
         method: &str,
