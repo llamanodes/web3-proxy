@@ -61,8 +61,11 @@ pub async fn get_login(
 
     let expiration_time = issued_at.add(Duration::new(expire_seconds as i64, 0));
 
-    // TODO: proper errors. the first unwrap should be impossible, but the second will happen with bad input
-    let user_address: Address = params.remove("user_address").unwrap().parse().unwrap();
+    let user_address: Address = params
+        .remove("user_address")
+        .context("impossible")?
+        .parse()
+        .context("bad input")?;
 
     // TODO: get most of these from the app config
     let message = Message {
