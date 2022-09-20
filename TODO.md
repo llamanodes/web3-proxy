@@ -152,12 +152,11 @@ These are roughly in order of completition
   - [x] when there are a LOT of concurrent requests, we see errors. i thought that was a problem with redis cell, but it happens with my simpler rate limit. now i think the problem is actually with bb8
   - https://docs.rs/redis/latest/redis/aio/struct.ConnectionManager.html or https://crates.io/crates/deadpool-redis?
   - WARN http_request: redis_rate_limit::errors: redis error err=Response was of incompatible type: "Response type not string compatible." (response was int(500237)) id=01GC6514JWN5PS1NCWJCGJTC94 method=POST
-- [ ] web3_proxy_error_count{path = "backend_rpc/request"} is inflated by a bunch of reverts. do not log reverts as warn. 
+- [x] web3_proxy_error_count{path = "backend_rpc/request"} is inflated by a bunch of reverts. do not log reverts as warn. 
   - erigon gives `method=eth_call reqid=986147 t=1.151551ms err="execution reverted"`
-  - [ ] maybe change request to return a JsonRpcResponse or an anyhow
-  - [ ] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user
+- [ ] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
-- [ ] add configurable size limits to all the Caches
+- [-] add configurable size limits to all the Caches
 - [ ] Api keys need option to lock to IP, cors header, referer, etc
 - [ ] active requests per second per api key
 - [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
