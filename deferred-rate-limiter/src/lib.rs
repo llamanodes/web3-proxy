@@ -16,7 +16,7 @@ pub struct DeferredRateLimiter<K>
 where
     K: Send + Sync,
 {
-    local_cache: Cache<K, Arc<AtomicU64>, ahash::RandomState>,
+    local_cache: Cache<K, Arc<AtomicU64>, hashbrown::hash_map::DefaultHashBuilder>,
     prefix: String,
     rrl: RedisRateLimiter,
 }
@@ -39,7 +39,7 @@ where
             .time_to_live(Duration::from_secs(ttl))
             .max_capacity(cache_size)
             .name(prefix)
-            .build_with_hasher(ahash::RandomState::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
         Self {
             local_cache,

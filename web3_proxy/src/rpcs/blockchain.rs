@@ -19,7 +19,7 @@ use tracing::{debug, trace, warn};
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
 
-pub type BlockHashesCache = Cache<H256, ArcBlock, ahash::RandomState>;
+pub type BlockHashesCache = Cache<H256, ArcBlock, hashbrown::hash_map::DefaultHashBuilder>;
 
 /// A block's hash and number.
 #[derive(Clone, Debug, Default, From, Serialize)]

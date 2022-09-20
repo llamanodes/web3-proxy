@@ -36,12 +36,13 @@ pub struct Web3Connections {
     pub(super) conns: HashMap<String, Arc<Web3Connection>>,
     /// any requests will be forwarded to one (or more) of these connections
     pub(super) synced_connections: ArcSwap<SyncedConnections>,
-    pub(super) pending_transactions: Cache<TxHash, TxStatus, ahash::RandomState>,
+    pub(super) pending_transactions:
+        Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
     pub(super) block_hashes: BlockHashesCache,
     /// blocks on the heaviest chain
-    pub(super) block_numbers: Cache<U64, H256, ahash::RandomState>,
+    pub(super) block_numbers: Cache<U64, H256, hashbrown::hash_map::DefaultHashBuilder>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// TODO: what should we use for edges?
     pub(super) blockchain_graphmap: AsyncRwLock<DiGraphMap<H256, u32>>,
@@ -62,7 +63,7 @@ impl Web3Connections {
         min_sum_soft_limit: u32,
         min_synced_rpcs: usize,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
-        pending_transactions: Cache<TxHash, TxStatus, ahash::RandomState>,
+        pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
         open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
@@ -180,12 +181,12 @@ impl Web3Connections {
         let block_hashes = Cache::builder()
             .time_to_idle(Duration::from_secs(600))
             .max_capacity(10_000)
-            .build_with_hasher(ahash::RandomState::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
         // all block numbers are the same size, so no need for weigher
         let block_numbers = Cache::builder()
             .time_to_idle(Duration::from_secs(600))
             .max_capacity(10_000)
-            .build_with_hasher(ahash::RandomState::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
         let connections = Arc::new(Self {
             conns: connections,

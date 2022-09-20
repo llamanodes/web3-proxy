@@ -248,7 +248,7 @@ pub async fn post_login(
 
     // save the user data in redis with a short expiry
     // TODO: we already have uk, so this could be more efficient. it works for now
-    app.cache_user_data(uk.api_key).await?;
+    app.user_data(uk.api_key).await?;
 
     Ok(response)
 }

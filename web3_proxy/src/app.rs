@@ -39,7 +39,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
-use tokio::time::{timeout, Instant};
+use tokio::time::{timeout};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
 use uuid::Uuid;
@@ -55,13 +55,13 @@ static APP_USER_AGENT: &str = concat!(
 /// block hash, method, params
 // TODO: better name
 type ResponseCacheKey = (H256, String, Option<String>);
-type ResponseCache = Cache<ResponseCacheKey, JsonRpcForwardedResponse, ahash::RandomState>;
+type ResponseCache =
+    Cache<ResponseCacheKey, JsonRpcForwardedResponse, hashbrown::hash_map::DefaultHashBuilder>;
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
 #[derive(Clone, Copy, From)]
 pub struct UserCacheValue {
-    pub expires_at: Instant,
     pub user_id: u64,
     /// if None, allow unlimited queries
     pub user_count_per_period: Option<u64>,
@@ -86,11 +86,11 @@ pub struct Web3ProxyApp {
     app_metrics: Arc<Web3ProxyAppMetrics>,
     open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
-    pub pending_transactions: Cache<TxHash, TxStatus, ahash::RandomState>,
+    pub pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     pub frontend_key_rate_limiter: Option<DeferredRateLimiter<Uuid>>,
     pub redis_pool: Option<RedisPool>,
-    pub user_cache: Cache<Uuid, UserCacheValue, ahash::RandomState>,
+    pub user_cache: Cache<Uuid, UserCacheValue, hashbrown::hash_map::DefaultHashBuilder>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -256,11 +256,13 @@ impl Web3ProxyApp {
         // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
         // TODO: we should still have some sort of expiration or maximum size limit for the map
         drop(pending_tx_receiver);
+
         // TODO: capacity from configs
         // all these are the same size, so no need for a weigher
+        // TODO: ttl on this?
         let pending_transactions = Cache::builder()
             .max_capacity(10_000)
-            .build_with_hasher(ahash::RandomState::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
         // keep 1GB of blocks in the cache
         // TODO: limits from config
@@ -268,7 +270,7 @@ impl Web3ProxyApp {
         let block_map = Cache::builder()
             .max_capacity(1024 * 1024 * 1024)
             .weigher(|_k, v| size_of_val(v) as u32)
-            .build_with_hasher(ahash::RandomState::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
             top_config.app.chain_id,
@@ -345,14 +347,14 @@ impl Web3ProxyApp {
         let response_cache = Cache::builder()
             .max_capacity(1024 * 1024 * 1024)
             .weigher(|k, v| (size_of_val(k) + size_of_val(v)) as u32)
-            .build_with_hasher(ahash::RandomState::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
         // all the users are the same size, so no need for a weigher
         // TODO: max_capacity from config
         let user_cache = Cache::builder()
             .max_capacity(10_000)
             .time_to_live(Duration::from_secs(60))
-            .build_with_hasher(ahash::RandomState::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
         let app = Self {
             config: top_config.app,
