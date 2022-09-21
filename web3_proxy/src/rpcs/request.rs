@@ -107,7 +107,7 @@ impl OpenRequestHandle {
             Web3Provider::Ws(provider) => provider.request(method, params).await,
         };
 
-        // no need to do conn.active_requests.fetch_sub because Drop will do that
+        conn.active_requests.fetch_sub(1, atomic::Ordering::AcqRel);
 
         // TODO: i think ethers already has trace logging (and does it much more fancy)
         if let Err(err) = &response {
