@@ -174,7 +174,7 @@ enum SecondaryUser {
 -- TODO: more security features. likely similar to infura
 */
 #[derive(Iden)]
-enum UserKeys {
+pub enum UserKeys {
     Table,
     Id,
     UserId,

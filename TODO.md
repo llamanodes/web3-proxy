@@ -154,6 +154,8 @@ These are roughly in order of completition
   - WARN http_request: redis_rate_limit::errors: redis error err=Response was of incompatible type: "Response type not string compatible." (response was int(500237)) id=01GC6514JWN5PS1NCWJCGJTC94 method=POST
 - [x] web3_proxy_error_count{path = "backend_rpc/request"} is inflated by a bunch of reverts. do not log reverts as warn. 
   - erigon gives `method=eth_call reqid=986147 t=1.151551ms err="execution reverted"`
+- [x] database migration to change user_keys.requests_per_minute to bigunsigned (max of 18446744073709551615)
+- [x] change user creation script to have a "unlimited requests per minute" flag that sets it to u64::MAX (18446744073709551615)
 - [ ] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user. let them choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
 - [-] add configurable size limits to all the Caches
@@ -166,8 +168,6 @@ These are roughly in order of completition
   - since users are actively using our service, we will need to support both
 - [ ] Ulid instead of Uuid for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
-- [ ] database migration to change user_keys.requests_per_minute to bigint (max of 18446744073709551615)
-- [ ] change user creation script to have a "unlimited requests per minute" flag that sets it to u64::MAX (18446744073709551615)
 
 ## V1
 

@@ -7,8 +7,9 @@ use tracing::info;
 use uuid::Uuid;
 use web3_proxy::users::new_api_key;
 
-fn default_rpm() -> u32 {
-    6_000_000
+/// default to max int which the code sees as "unlimited" requests
+fn default_rpm() -> u64 {
+    u64::MAX
 }
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
@@ -30,7 +31,7 @@ pub struct CreateUserSubCommand {
 
     #[argh(option, default = "default_rpm()")]
     /// maximum requests per minute
-    rpm: u32,
+    rpm: u64,
 }
 
 impl CreateUserSubCommand {
