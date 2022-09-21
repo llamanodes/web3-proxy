@@ -133,7 +133,6 @@ impl IntoResponse for FrontendErrorResponse {
     }
 }
 
-#[instrument(skip_all)]
 pub async fn handler_404() -> Response {
     FrontendErrorResponse::NotFound.into_response()
 }

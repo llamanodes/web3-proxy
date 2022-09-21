@@ -1,9 +1,12 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
+use anyhow::Context;
 use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
 use tracing::warn;
+
+use crate::rpcs::connections::Web3Connections;
 
 pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> (bool, U64) {
     match block_num {
@@ -29,10 +32,11 @@ pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> (bool, U64
 }
 
 /// modify params to always have a block number and not "latest"
-pub fn clean_block_number(
+pub async fn clean_block_number(
     params: &mut serde_json::Value,
     block_param_id: usize,
     latest_block: U64,
+    rpcs: &Web3Connections,
 ) -> anyhow::Result<U64> {
     match params.as_array_mut() {
         None => {
@@ -53,20 +57,33 @@ pub fn clean_block_number(
             }
             Some(x) => {
                 // convert the json value to a BlockNumber
-                // TODO: this is wrong, it might be a Map like `{"blockHash": String("0xa5626dc20d3a0a209b1de85521717a3e859698de8ce98bca1b16822b7501f74b")}`
-                let block_num = if let Some(obj) = x.as_object_mut() {
+                let (modified, block_num) = if let Some(obj) = x.as_object_mut() {
+                    // it might be a Map like `{"blockHash": String("0xa5626dc20d3a0a209b1de85521717a3e859698de8ce98bca1b16822b7501f74b")}`
                     if let Some(block_hash) = obj.remove("blockHash") {
-                        let block_hash: H256 = serde_json::from_value(block_hash)?;
+                        let block_hash: H256 =
+                            serde_json::from_value(block_hash).context("decoding blockHash")?;
 
-                        todo!("look up the block_hash from our cache");
+                        let block = rpcs.block(&block_hash, None).await?;
+
+                        let block_num = block
+                            .number
+                            .expect("blocks here should always have numbers");
+
+                        // always set modfied to true because we used "take" above
+                        (true, block_num)
                     } else {
-                        unimplemented!();
+                        return Err(anyhow::anyhow!("blockHash missing"));
                     }
                 } else {
-                    serde_json::from_value::<BlockNumber>(x.take())?
-                };
+                    // it might be a string like "latest" or a block number
+                    // TODO: "BlockNumber" needs a better name
+                    let block_number = serde_json::from_value::<BlockNumber>(x.take())?;
 
-                let (modified, block_num) = block_num_to_u64(block_num, latest_block);
+                    let (_, block_num) = block_num_to_u64(block_number, latest_block);
+
+                    // always set modfied to true because we used "take" above
+                    (true, block_num)
+                };
 
                 // if we changed "latest" to a number, update the params to match
                 if modified {
@@ -79,11 +96,12 @@ pub fn clean_block_number(
     }
 }
 
-// TODO: change this to also return the hash needed
-pub fn block_needed(
+// TODO: change this to also return the hash needed?
+pub async fn block_needed(
     method: &str,
     params: Option<&mut serde_json::Value>,
     head_block_num: U64,
+    rpcs: &Web3Connections,
 ) -> Option<U64> {
     // if no params, no block is needed
     let params = params?;
@@ -121,6 +139,8 @@ pub fn block_needed(
                     *x = serde_json::to_value(block_num).unwrap();
                 }
 
+                // TODO: maybe don't return. instead check toBlock too?
+                // TODO: if there is a very wide fromBlock and toBlock, we need to check that our rpcs have both!
                 return Some(block_num);
             }
 
@@ -136,13 +156,11 @@ pub fn block_needed(
                 return Some(block_num);
             }
 
-            if let Some(x) = obj.get("blockHash") {
-                // TODO: check a Cache of recent hashes
-                // TODO: error if fromBlock or toBlock were set
-                todo!("handle blockHash {}", x);
+            if obj.contains_key("blockHash") {
+                1
+            } else {
+                return None;
             }
-
-            return None;
         }
         "eth_getStorageAt" => 2,
         "eth_getTransactionByHash" => {
@@ -180,7 +198,7 @@ pub fn block_needed(
         }
     };
 
-    match clean_block_number(params, block_param_id, head_block_num) {
+    match clean_block_number(params, block_param_id, head_block_num, rpcs).await {
         Ok(block) => Some(block),
         Err(err) => {
             // TODO: seems unlikely that we will get here

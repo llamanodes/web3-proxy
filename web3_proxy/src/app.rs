@@ -119,7 +119,6 @@ pub async fn flatten_handles<T>(
 }
 
 /// Connect to the database and run migrations
-#[instrument(skip_all)]
 pub async fn get_migrated_db(
     db_url: String,
     min_connections: u32,
@@ -316,6 +315,8 @@ impl Web3ProxyApp {
             Some(private_rpcs)
         };
 
+        // TODO: setup a channel here for receiving influxdb stats
+
         let mut frontend_ip_rate_limiter = None;
         let mut frontend_key_rate_limiter = None;
         if let Some(redis_pool) = redis_pool.as_ref() {
@@ -347,6 +348,7 @@ impl Web3ProxyApp {
 
         // all the users are the same size, so no need for a weigher
         // TODO: max_capacity from config
+        // TODO: ttl from config
         let user_cache = Cache::builder()
             .max_capacity(10_000)
             .time_to_live(Duration::from_secs(60))
@@ -396,7 +398,6 @@ impl Web3ProxyApp {
             .expect("prometheus metrics should always serialize")
     }
 
-    #[instrument(skip_all)]
     #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
     pub async fn eth_subscribe<'a>(
         self: &'a Arc<Self>,
@@ -591,7 +592,6 @@ impl Web3ProxyApp {
     }
 
     /// send the request or batch of requests to the approriate RPCs
-    #[instrument(skip_all)]
     pub async fn proxy_web3_rpc(
         self: &Arc<Self>,
         request: JsonRpcRequestEnum,
@@ -621,7 +621,6 @@ impl Web3ProxyApp {
 
     /// cut up the request and send to potentually different servers
     /// TODO: make sure this isn't a problem
-    #[instrument(skip_all)]
     async fn proxy_web3_rpc_requests(
         self: &Arc<Self>,
         requests: Vec<JsonRpcRequest>,
@@ -645,7 +644,6 @@ impl Web3ProxyApp {
         Ok(collected)
     }
 
-    #[instrument(skip_all)]
     pub async fn redis_conn(&self) -> anyhow::Result<redis_rate_limiter::RedisConnection> {
         match self.redis_pool.as_ref() {
             None => Err(anyhow::anyhow!("no redis server configured")),
@@ -658,7 +656,6 @@ impl Web3ProxyApp {
     }
 
     #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
-    #[instrument(skip_all)]
     async fn proxy_web3_rpc_request(
         self: &Arc<Self>,
         mut request: JsonRpcRequest,
@@ -670,14 +667,7 @@ impl Web3ProxyApp {
         let request_id = request.id.clone();
 
         // TODO: if eth_chainId or net_version, serve those without querying the backend
-
-        // TODO: how much should we retry? probably with a timeout and not with a count like this
-        // TODO: think more about this loop.
-        // TODO: add things to this span
-        let span = info_span!("rpc_request");
-        // let _enter = span.enter(); // DO NOT ENTER! we can't use enter across awaits! (clippy lint soon)
-
-        // TODO: don't clone
+        // TODO: don't clone?
         let partial_response: serde_json::Value = match request.method.clone().as_ref() {
             // lots of commands are blocked
             method @ ("admin_addPeer"
@@ -800,10 +790,7 @@ impl Web3ProxyApp {
                 // emit stats
                 let rpcs = self.private_rpcs.as_ref().unwrap_or(&self.balanced_rpcs);
 
-                return rpcs
-                    .try_send_all_upstream_servers(request, None)
-                    .instrument(span)
-                    .await;
+                return rpcs.try_send_all_upstream_servers(request, None).await;
             }
             "eth_syncing" => {
                 // no stats on this. its cheap
@@ -862,8 +849,13 @@ impl Web3ProxyApp {
 
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
-                let request_block_id = if let Some(request_block_needed) =
-                    block_needed(method, request.params.as_mut(), head_block_id.num)
+                let request_block_id = if let Some(request_block_needed) = block_needed(
+                    method,
+                    request.params.as_mut(),
+                    head_block_id.num,
+                    &self.balanced_rpcs,
+                )
+                .await
                 {
                     // TODO: maybe this should be on the app and not on balanced_rpcs
                     let request_block_hash =

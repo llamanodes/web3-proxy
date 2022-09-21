@@ -121,8 +121,7 @@ These are roughly in order of completition
     - [x] "chain is forked" message is wrong. it includes nodes just being on different heights of the same chain. need a smarter check
       - i think there is also a bug because i've seen "server not synced" a couple times
 - [x] bug around eth_getBlockByHash sometimes causes tokio to lock up
-  - i keep a mapping of blocks so that i can go from hash -> block. it has some consistent hashing it does to split them up across multiple maps each with their own lock. so a lot of the time reads dont block writes because they are in different internal maps. this was fine.
-  - but after changing my fork detection logic to use the same rules as erigon, i discovered that when you get blocks from a websocket subscription in erigon and geth, theres a missing field (https://github.com/ledgerwatch/erigon/issues/5190). so i added a query to get the block that includes the missing field.
+  - i keep a mapping of blocks so that i can go from hash -> block. it has some consistent hashing it does to split them up across multiple maps each with their own lock. so a lot of the time reads dont block writes because they are in different internal maps. this was fine. but after changing my fork detection logic to use the same rules as erigon, i discovered that when you get blocks from a websocket subscription in erigon and geth, theres a missing field (https://github.com/ledgerwatch/erigon/issues/5190). so i added a query to get the block that includes the missing field.
   - but i did this in a way where i was holding the write lock open while doing the query. the "new" block that has the missing field ends up in the same bucket and it also wants a write lock. oops. entry api has very sharp edges. don't ever await inside a match on DashMap::entry
 - [x] requests for "Get transactions receipts" are routed to the private_rpcs and not the balanced_rpcs. do this better.
   - [x] quick fix, send to balanced_rpcs for now. we will just live with errors on new transactions.
@@ -156,18 +155,24 @@ These are roughly in order of completition
   - erigon gives `method=eth_call reqid=986147 t=1.151551ms err="execution reverted"`
 - [x] database migration to change user_keys.requests_per_minute to bigunsigned (max of 18446744073709551615)
 - [x] change user creation script to have a "unlimited requests per minute" flag that sets it to u64::MAX (18446744073709551615)
-- [ ] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user. let them choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
+- [x] in /status, block hashes has a lower count than block numbers. how is that possible?
+  - we weren't calling sync. now we are
+- [-] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user.
+  - [-] let them choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
-- [-] add configurable size limits to all the Caches
-- [ ] Api keys need option to lock to IP, cors header, referer, etc
+- [-] Api keys need option to lock to IP, cors header, referer, etc
 - [ ] active requests per second per api key
 - [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
-- [ ] web3 on rpc1 exited without errors. maybe promote some shutdown messages from debug to info?
+- [-] add configurable size limits to all the Caches
 - [ ] Ulid instead of Uuid for user keys
   - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
   - since users are actively using our service, we will need to support both
 - [ ] Ulid instead of Uuid for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
+- [ ] bearer tokens should expire
+- [-] signed cookie jar
+- [ ] user login should return both the bearer token and a jwt (jsonwebtoken rust crate should make it easy)
+- [ ] /user/logout to clear bearer token and jwt
 
 ## V1
 
@@ -366,4 +371,8 @@ in another repo: event subscriber
   - i wish i had more logs. its possible that 15479605 came immediatly after
 - [ ] ip blocking logs a warn. we don't need that. a stat at most
 - [ ] keep it working without redis and a database
-- [ ] in /status, block hashes has a lower count than block numbers. how is that possible?
+- [ ] web3 on rpc1 exited without errors. maybe promote some shutdown messages from debug to info?
+- [ ] better handling for offline http servers
+  - if we get a connection refused, we should remove the server's block info so it is taken out of rotation
+- [ ] web3_proxy_cli command should read database settings from config
+- [ ] how should we handle reverting transactions? they won't confirm for a while after we send them

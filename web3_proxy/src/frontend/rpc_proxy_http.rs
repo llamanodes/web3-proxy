@@ -12,26 +12,18 @@ use uuid::Uuid;
 
 pub async fn public_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    Host(host): Host,
     ClientIp(ip): ClientIp,
     Json(payload): Json<JsonRpcRequestEnum>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
 ) -> FrontendResult {
-    let request_span = debug_span!("request", host, ?referer, ?user_agent);
+    let request_span = error_span!("request", %ip, ?referer, ?user_agent);
 
     let ip = rate_limit_by_ip(&app, ip)
         .instrument(request_span.clone())
         .await?;
 
-    let user_span = error_span!("ip", %ip);
-
-    let f = tokio::spawn(async move {
-        app.proxy_web3_rpc(payload)
-            .instrument(request_span)
-            .instrument(user_span)
-            .await
-    });
+    let f = tokio::spawn(async move { app.proxy_web3_rpc(payload).instrument(request_span).await });
 
     let response = f.await.unwrap()?;
 
@@ -40,26 +32,23 @@ pub async fn public_proxy_web3_rpc(
 
 pub async fn user_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    Host(host): Host,
+    ClientIp(ip): ClientIp,
     Json(payload): Json<JsonRpcRequestEnum>,
+    referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     Path(user_key): Path<Uuid>,
-    referer: Option<TypedHeader<Referer>>,
 ) -> FrontendResult {
-    let request_span = debug_span!("request", host, ?referer, ?user_agent);
+    let request_span =
+        error_span!("request", %ip, ?referer, ?user_agent, user_id = tracing::field::Empty);
 
+    // TODO: this should probably return the user_key_id instead? or maybe both?
     let user_id = rate_limit_by_key(&app, user_key)
         .instrument(request_span.clone())
         .await?;
 
-    let user_span = error_span!("user", user_id);
+    request_span.record("user_id", user_id);
 
-    let f = tokio::spawn(async move {
-        app.proxy_web3_rpc(payload)
-            .instrument(request_span)
-            .instrument(user_span)
-            .await
-    });
+    let f = tokio::spawn(async move { app.proxy_web3_rpc(payload).instrument(request_span).await });
 
     let response = f.await.unwrap()?;
 

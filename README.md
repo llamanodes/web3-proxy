@@ -37,6 +37,12 @@ cargo run --release -- --config ./config/example.toml
 
 ## Common commands
 
+Create a user:
+
+```
+cargo run --bin web3_proxy_cli -- --db-url "$YOUR_DB_URL" create_user --address "$USER_ADDRESS_0x"
+```
+
 Check that the proxy is working:
 
 ```

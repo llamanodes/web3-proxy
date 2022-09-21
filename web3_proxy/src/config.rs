@@ -113,7 +113,6 @@ impl Web3ConnectionConfig {
     /// Create a Web3Connection from config
     /// TODO: move this into Web3Connection (just need to make things pub(crate))
     #[allow(clippy::too_many_arguments)]
-    #[instrument(skip_all)]
     pub async fn spawn(
         self,
         name: String,

@@ -174,7 +174,6 @@ impl Web3Connection {
         Ok((new_connection, handle))
     }
 
-    #[instrument(skip_all)]
     async fn check_block_data_limit(self: &Arc<Self>) -> anyhow::Result<Option<u64>> {
         let mut limit = None;
 
@@ -301,7 +300,6 @@ impl Web3Connection {
     }
 
     /// reconnect a websocket provider
-    #[instrument(skip_all)]
     pub async fn reconnect(
         self: &Arc<Self>,
         // websocket doesn't need the http client
@@ -363,7 +361,6 @@ impl Web3Connection {
         self.provider.read().await.is_some()
     }
 
-    #[instrument(skip_all)]
     async fn send_head_block_result(
         self: &Arc<Self>,
         new_head_block: Result<Option<ArcBlock>, ProviderError>,
@@ -426,7 +423,6 @@ impl Web3Connection {
     }
 
     /// subscribe to blocks and transactions with automatic reconnects
-    #[instrument(skip_all)]
     async fn subscribe(
         self: Arc<Self>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
@@ -513,7 +509,6 @@ impl Web3Connection {
     }
 
     /// Subscribe to new blocks. If `reconnect` is true, this runs forever.
-    #[instrument(skip_all)]
     async fn subscribe_new_heads(
         self: Arc<Self>,
         http_interval_receiver: Option<broadcast::Receiver<()>>,
@@ -663,7 +658,6 @@ impl Web3Connection {
         Ok(())
     }
 
-    #[instrument(skip_all)]
     async fn subscribe_pending_transactions(
         self: Arc<Self>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,

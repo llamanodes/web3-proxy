@@ -12,7 +12,7 @@ use std::sync::atomic;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration, Instant};
 use tracing::Level;
-use tracing::{debug, error, instrument, trace, warn};
+use tracing::{debug, error, trace, warn, Event};
 
 #[derive(Debug)]
 pub enum OpenRequestResult {
@@ -82,7 +82,6 @@ impl OpenRequestHandle {
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// TODO: we no longer take self because metered doesn't like that
     /// TODO: ErrorCount includes too many types of errors, such as transaction reverts
-    #[instrument(skip_all)]
     #[measure([JsonRpcErrorCount, HitCount, ProviderErrorCount, ResponseTime, Throughput])]
     pub async fn request<T, R>(
         &self,
@@ -142,7 +141,27 @@ impl OpenRequestHandle {
                     warn!(?err, %method, rpc=%conn, "bad response!");
                 }
                 RequestErrorHandler::SaveReverts(chance) => {
-                    // TODO: only set SaveReverts if this is an eth_call or eth_estimateGas?
+                    // TODO: only set SaveReverts if this is an eth_call or eth_estimateGas? we'll need eth_sendRawTransaction somewhere else
+
+                    if let Some(metadata) = tracing::Span::current().metadata() {
+                        let fields = metadata.fields();
+
+                        if let Some(user_id) = fields.field("user_id") {
+                            let values = [(&user_id, None)];
+
+                            let valueset = fields.value_set(&values);
+
+                            let visitor = todo!();
+
+                            valueset.record(visitor);
+
+                            // TODO: now how we do we get the current value out of it? we might need this index
+                        } else {
+                            warn!("no user id");
+                        }
+                    }
+
+                    // TODO: check the span for user_key_id
 
                     // TODO: only set SaveReverts for
                     // TODO: logging every one is going to flood the database
@@ -153,8 +172,9 @@ impl OpenRequestHandle {
                                 if let Some(HttpClientError::JsonRpcError(err)) =
                                     err.downcast_ref::<HttpClientError>()
                                 {
-                                    if err.message == "execution reverted" {
+                                    if err.message.starts_with("execution reverted") {
                                         debug!(%method, ?params, "TODO: save the request");
+                                        // TODO: don't do this on the hot path. spawn it
                                     } else {
                                         debug!(?err, %method, rpc=%conn, "bad response!");
                                     }
@@ -164,8 +184,9 @@ impl OpenRequestHandle {
                                 if let Some(WsClientError::JsonRpcError(err)) =
                                     err.downcast_ref::<WsClientError>()
                                 {
-                                    if err.message == "execution reverted" {
+                                    if err.message.starts_with("execution reverted") {
                                         debug!(%method, ?params, "TODO: save the request");
+                                        // TODO: don't do this on the hot path. spawn it
                                     } else {
                                         debug!(?err, %method, rpc=%conn, "bad response!");
                                     }

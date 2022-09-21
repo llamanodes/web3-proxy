@@ -6,7 +6,6 @@ use std::sync::Arc;
 use tracing::instrument;
 
 /// Health check page for load balancers to use
-#[instrument(skip_all)]
 pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     // TODO: also check that the head block is not too old
     if app.balanced_rpcs.synced() {
@@ -18,14 +17,12 @@ pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoRe
 
 /// Prometheus metrics
 /// TODO: when done debugging, remove this and only allow access on a different port
-#[instrument(skip_all)]
 pub async fn prometheus(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     app.prometheus_metrics()
 }
 
 /// Very basic status page
 /// TODO: replace this with proper stats and monitoring
-#[instrument(skip_all)]
 pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     app.pending_transactions.sync();
     app.user_cache.sync();

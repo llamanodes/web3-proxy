@@ -9,7 +9,6 @@ use tracing::{info, instrument};
 use crate::app::Web3ProxyApp;
 
 /// Run a prometheus metrics server on the given port.
-#[instrument(skip_all)]
 pub async fn serve(app: Arc<Web3ProxyApp>, port: u16) -> anyhow::Result<()> {
     // build our application with a route
     // order most to least common
@@ -42,7 +41,6 @@ pub async fn serve(app: Arc<Web3ProxyApp>, port: u16) -> anyhow::Result<()> {
         .map_err(Into::into)
 }
 
-#[instrument(skip_all)]
 async fn root(Extension(app): Extension<Arc<Web3ProxyApp>>) -> Response {
     let serialized = app.prometheus_metrics();
 

@@ -17,7 +17,7 @@ use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
-use moka::future::Cache;
+use moka::future::{Cache, ConcurrentCacheExt};
 use petgraph::graphmap::DiGraphMap;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
@@ -302,7 +302,6 @@ impl Web3Connections {
     }
 
     /// Send the same request to all the handles. Returning the most common success or most common error.
-    #[instrument(skip_all)]
     pub async fn try_send_parallel_requests(
         &self,
         active_request_handles: Vec<OpenRequestHandle>,
@@ -361,7 +360,6 @@ impl Web3Connections {
     }
 
     /// get the best available rpc server
-    #[instrument(skip_all)]
     pub async fn next_upstream_server(
         &self,
         skip: &[Arc<Web3Connection>],
@@ -591,6 +589,7 @@ impl Web3Connections {
     }
 
     /// be sure there is a timeout on this or it might loop forever
+    #[instrument]
     pub async fn try_send_all_upstream_servers(
         &self,
         request: JsonRpcRequest,
@@ -660,11 +659,16 @@ impl Serialize for Web3Connections {
     where
         S: Serializer,
     {
-        let conns: Vec<&Web3Connection> = self.conns.values().map(|x| x.as_ref()).collect();
-
         let mut state = serializer.serialize_struct("Web3Connections", 6)?;
+
+        let conns: Vec<&Web3Connection> = self.conns.values().map(|x| x.as_ref()).collect();
         state.serialize_field("conns", &conns)?;
-        state.serialize_field("synced_connections", &**self.synced_connections.load())?;
+
+        let synced_connections = &**self.synced_connections.load();
+        state.serialize_field("synced_connections", synced_connections)?;
+
+        self.block_hashes.sync();
+        self.block_numbers.sync();
         state.serialize_field("block_hashes_count", &self.block_hashes.entry_count())?;
         state.serialize_field("block_hashes_size", &self.block_hashes.weighted_size())?;
         state.serialize_field("block_numbers_count", &self.block_numbers.entry_count())?;
