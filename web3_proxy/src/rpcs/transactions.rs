@@ -5,7 +5,7 @@ use super::request::OpenRequestResult;
 use ethers::prelude::{ProviderError, Transaction, TxHash};
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{debug, trace};
+use tracing::{debug, trace, Level};
 
 // TODO: think more about TxState
 #[derive(Clone)]
@@ -27,7 +27,11 @@ impl Web3Connections {
         let tx: Transaction = match rpc.try_request_handle().await {
             Ok(OpenRequestResult::Handle(handle)) => {
                 handle
-                    .request("eth_getTransactionByHash", (pending_tx_id,), false)
+                    .request(
+                        "eth_getTransactionByHash",
+                        &(pending_tx_id,),
+                        Level::ERROR.into(),
+                    )
                     .await?
             }
             Ok(_) => {

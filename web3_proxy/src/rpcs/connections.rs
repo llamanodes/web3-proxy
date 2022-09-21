@@ -1,7 +1,9 @@
 ///! Load balanced communication with a group of web3 providers
 use super::blockchain::{ArcBlock, BlockHashesCache};
 use super::connection::Web3Connection;
-use super::request::{OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult};
+use super::request::{
+    OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult, RequestErrorHandler,
+};
 use super::synced_connections::SyncedConnections;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3ConnectionConfig};
@@ -313,8 +315,9 @@ impl Web3Connections {
         let responses = active_request_handles
             .into_iter()
             .map(|active_request_handle| async move {
-                let result: Result<Box<RawValue>, _> =
-                    active_request_handle.request(method, params, false).await;
+                let result: Result<Box<RawValue>, _> = active_request_handle
+                    .request(method, &params, tracing::Level::ERROR.into())
+                    .await;
                 result
             })
             .collect::<FuturesUnordered<_>>()
@@ -508,8 +511,13 @@ impl Web3Connections {
                     // save the rpc in case we get an error and want to retry on another server
                     skip_rpcs.push(active_request_handle.clone_connection());
 
+                    // TODO: get the log percent from the user data?
                     let response_result = active_request_handle
-                        .request(&request.method, &request.params, false)
+                        .request(
+                            &request.method,
+                            &request.params,
+                            RequestErrorHandler::SaveReverts(100.0),
+                        )
                         .await;
 
                     match JsonRpcForwardedResponse::try_from_response_result(

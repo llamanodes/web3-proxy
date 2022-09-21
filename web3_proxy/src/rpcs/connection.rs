@@ -21,7 +21,7 @@ use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn, Level};
 
 /// An active connection to a Web3 RPC server like geth or erigon.
 pub struct Web3Connection {
@@ -116,7 +116,7 @@ impl Web3Connection {
         let found_chain_id: Result<U64, _> = new_connection
             .wait_for_request_handle(Duration::from_secs(30))
             .await?
-            .request("eth_chainId", Option::None::<()>, false)
+            .request("eth_chainId", &Option::None::<()>, Level::ERROR.into())
             .await;
 
         match found_chain_id {
@@ -205,11 +205,12 @@ impl Web3Connection {
                 .await?
                 .request(
                     "eth_getCode",
-                    (
+                    &(
                         "0xdead00000000000000000000000000000000beef",
                         maybe_archive_block,
                     ),
-                    true,
+                    // error here are expected, so keep the level low
+                    tracing::Level::DEBUG.into(),
                 )
                 .await;
 
@@ -537,7 +538,11 @@ impl Web3Connection {
                         match self.wait_for_request_handle(Duration::from_secs(30)).await {
                             Ok(active_request_handle) => {
                                 let block: Result<Block<TxHash>, _> = active_request_handle
-                                    .request("eth_getBlockByNumber", ("latest", false), false)
+                                    .request(
+                                        "eth_getBlockByNumber",
+                                        &("latest", false),
+                                        tracing::Level::ERROR.into(),
+                                    )
                                     .await;
 
                                 match block {
@@ -608,7 +613,11 @@ impl Web3Connection {
                     let block: Result<Option<ArcBlock>, _> = self
                         .wait_for_request_handle(Duration::from_secs(30))
                         .await?
-                        .request("eth_getBlockByNumber", ("latest", false), false)
+                        .request(
+                            "eth_getBlockByNumber",
+                            &("latest", false),
+                            tracing::Level::ERROR.into(),
+                        )
                         .await
                         .map(|x| Some(Arc::new(x)));
 

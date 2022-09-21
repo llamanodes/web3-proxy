@@ -1,7 +1,7 @@
 use super::connection::Web3Connection;
 use super::provider::Web3Provider;
 use crate::metered::{JsonRpcErrorCount, ProviderErrorCount};
-use ethers::providers::ProviderError;
+use ethers::providers::{HttpClientError, ProviderError, WsClientError};
 use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
@@ -11,8 +11,8 @@ use std::fmt;
 use std::sync::atomic;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration, Instant};
-use tracing::warn;
-use tracing::{instrument, trace};
+use tracing::Level;
+use tracing::{debug, error, instrument, trace, warn};
 
 #[derive(Debug)]
 pub enum OpenRequestResult {
@@ -29,6 +29,24 @@ pub struct OpenRequestHandle {
     conn: Mutex<Option<Arc<Web3Connection>>>,
     // TODO: this is the same metrics on the conn. use a reference?
     metrics: Arc<OpenRequestHandleMetrics>,
+}
+
+pub enum RequestErrorHandler {
+    SaveReverts(f32),
+    DebugLevel,
+    ErrorLevel,
+    WarnLevel,
+}
+
+impl From<Level> for RequestErrorHandler {
+    fn from(level: Level) -> Self {
+        match level {
+            Level::DEBUG => RequestErrorHandler::DebugLevel,
+            Level::ERROR => RequestErrorHandler::ErrorLevel,
+            Level::WARN => RequestErrorHandler::WarnLevel,
+            _ => unimplemented!(),
+        }
+    }
 }
 
 #[metered(registry = OpenRequestHandleMetrics, visibility = pub)]
@@ -69,9 +87,8 @@ impl OpenRequestHandle {
     pub async fn request<T, R>(
         &self,
         method: &str,
-        params: T,
-        // TODO: change this to error_log_level?
-        silent_errors: bool,
+        params: &T,
+        error_handler: RequestErrorHandler,
     ) -> Result<R, ProviderError>
     where
         T: fmt::Debug + serde::Serialize + Send + Sync,
@@ -95,27 +112,71 @@ impl OpenRequestHandle {
                 None => {
                     warn!(rpc=%conn, "no provider!");
                     // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
+                    // TODO: maybe use a watch handle?
                     // TODO: sleep how long? subscribe to something instead?
+                    // TODO: this is going to be very verbose!
                     sleep(Duration::from_millis(100)).await
                 }
                 Some(found_provider) => provider = Some(found_provider.clone()),
             }
         }
 
-        let response = match &*provider.expect("provider was checked already") {
+        let provider = &*provider.expect("provider was checked already");
+
+        let response = match provider {
             Web3Provider::Http(provider) => provider.request(method, params).await,
             Web3Provider::Ws(provider) => provider.request(method, params).await,
         };
 
         conn.active_requests.fetch_sub(1, atomic::Ordering::AcqRel);
 
-        // TODO: i think ethers already has trace logging (and does it much more fancy)
         if let Err(err) = &response {
-            if !silent_errors {
-                // TODO: this isn't always bad. missing trie node while we are checking initial
-                warn!(?err, %method, rpc=%conn, "bad response!");
+            match error_handler {
+                RequestErrorHandler::ErrorLevel => {
+                    error!(?err, %method, rpc=%conn, "bad response!");
+                }
+                RequestErrorHandler::DebugLevel => {
+                    debug!(?err, %method, rpc=%conn, "bad response!");
+                }
+                RequestErrorHandler::WarnLevel => {
+                    warn!(?err, %method, rpc=%conn, "bad response!");
+                }
+                RequestErrorHandler::SaveReverts(chance) => {
+                    // TODO: only set SaveReverts if this is an eth_call or eth_estimateGas?
+
+                    // TODO: only set SaveReverts for
+                    // TODO: logging every one is going to flood the database
+                    // TODO: have a percent chance to do this. or maybe a "logged reverts per second"
+                    if let ProviderError::JsonRpcClientError(err) = err {
+                        match provider {
+                            Web3Provider::Http(_) => {
+                                if let Some(HttpClientError::JsonRpcError(err)) =
+                                    err.downcast_ref::<HttpClientError>()
+                                {
+                                    if err.message == "execution reverted" {
+                                        debug!(%method, ?params, "TODO: save the request");
+                                    } else {
+                                        debug!(?err, %method, rpc=%conn, "bad response!");
+                                    }
+                                }
+                            }
+                            Web3Provider::Ws(_) => {
+                                if let Some(WsClientError::JsonRpcError(err)) =
+                                    err.downcast_ref::<WsClientError>()
+                                {
+                                    if err.message == "execution reverted" {
+                                        debug!(%method, ?params, "TODO: save the request");
+                                    } else {
+                                        debug!(?err, %method, rpc=%conn, "bad response!");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } else {
+            // TODO: i think ethers already has trace logging (and does it much more fancy)
             // TODO: opt-in response inspection to log reverts with their request. put into redis or what?
             // trace!(rpc=%self.0, %method, ?response);
             trace!(%method, rpc=%conn, "response");

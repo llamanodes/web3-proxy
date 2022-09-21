@@ -1,5 +1,8 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
-use ethers::prelude::{BlockNumber, U64};
+use ethers::{
+    prelude::{BlockNumber, U64},
+    types::H256,
+};
 use tracing::warn;
 
 pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> (bool, U64) {
@@ -50,7 +53,18 @@ pub fn clean_block_number(
             }
             Some(x) => {
                 // convert the json value to a BlockNumber
-                let block_num: BlockNumber = serde_json::from_value(x.clone())?;
+                // TODO: this is wrong, it might be a Map like `{"blockHash": String("0xa5626dc20d3a0a209b1de85521717a3e859698de8ce98bca1b16822b7501f74b")}`
+                let block_num = if let Some(obj) = x.as_object_mut() {
+                    if let Some(block_hash) = obj.remove("blockHash") {
+                        let block_hash: H256 = serde_json::from_value(block_hash)?;
+
+                        todo!("look up the block_hash from our cache");
+                    } else {
+                        unimplemented!();
+                    }
+                } else {
+                    serde_json::from_value::<BlockNumber>(x.take())?
+                };
 
                 let (modified, block_num) = block_num_to_u64(block_num, latest_block);
 
@@ -170,7 +184,6 @@ pub fn block_needed(
         Ok(block) => Some(block),
         Err(err) => {
             // TODO: seems unlikely that we will get here
-            // if this is incorrect, it should retry on an archive server
             warn!(?err, "could not get block from params");
             None
         }

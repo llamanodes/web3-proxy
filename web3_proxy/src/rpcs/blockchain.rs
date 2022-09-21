@@ -15,7 +15,7 @@ use serde_json::json;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Duration;
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace, warn, Level};
 
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
@@ -106,7 +106,7 @@ impl Web3Connections {
             Some(rpc) => {
                 rpc.wait_for_request_handle(Duration::from_secs(30))
                     .await?
-                    .request("eth_getBlockByHash", get_block_params, false)
+                    .request("eth_getBlockByHash", &get_block_params, Level::ERROR.into())
                     .await?
             }
             None => {
