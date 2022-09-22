@@ -7,6 +7,7 @@ use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
 use metered::Throughput;
+use rand::Rng;
 use std::fmt;
 use std::sync::atomic::{self, AtomicBool, Ordering};
 use std::sync::Arc;
@@ -77,7 +78,10 @@ impl OpenRequestHandle {
         let metrics = conn.open_request_handle_metrics.clone();
         let used = false.into();
 
-        let authorization = authorization.unwrap_or_else(|| Arc::new(AuthorizedRequest::Internal));
+        let authorization = authorization.unwrap_or_else(|| {
+            let db_conn = conn.db_conn.clone();
+            Arc::new(AuthorizedRequest::Internal(db_conn))
+        });
 
         Self {
             authorization,
@@ -156,43 +160,46 @@ impl OpenRequestHandle {
                     // TODO: only set SaveReverts if this is an eth_call or eth_estimateGas? we'll need eth_sendRawTransaction somewhere else
                     // TODO: logging every one is going to flood the database
                     // TODO: have a percent chance to do this. or maybe a "logged reverts per second"
-                    if let ProviderError::JsonRpcClientError(err) = err {
-                        match provider {
-                            Web3Provider::Http(_) => {
-                                if let Some(HttpClientError::JsonRpcError(err)) =
-                                    err.downcast_ref::<HttpClientError>()
-                                {
-                                    if err.message.starts_with("execution reverted") {
-                                        debug!(%method, ?params, "TODO: save the request");
+                    if save_chance == 1.0 || rand::thread_rng().gen_range(0.0..=1.0) <= save_chance
+                    {
+                        if let ProviderError::JsonRpcClientError(err) = err {
+                            match provider {
+                                Web3Provider::Http(_) => {
+                                    if let Some(HttpClientError::JsonRpcError(err)) =
+                                        err.downcast_ref::<HttpClientError>()
+                                    {
+                                        if err.message.starts_with("execution reverted") {
+                                            debug!(%method, ?params, "TODO: save the request");
 
-                                        let f = self
-                                            .authorization
-                                            .clone()
-                                            .save_revert(method.to_string(), params);
+                                            let f = self
+                                                .authorization
+                                                .clone()
+                                                .save_revert(method.to_string(), params);
 
-                                        tokio::spawn(async move { f.await });
+                                            tokio::spawn(async move { f.await });
 
-                                        // TODO: don't do this on the hot path. spawn it
-                                    } else {
-                                        debug!(?err, %method, rpc=%self.conn, "bad response!");
+                                            // TODO: don't do this on the hot path. spawn it
+                                        } else {
+                                            debug!(?err, %method, rpc=%self.conn, "bad response!");
+                                        }
                                     }
                                 }
-                            }
-                            Web3Provider::Ws(_) => {
-                                if let Some(WsClientError::JsonRpcError(err)) =
-                                    err.downcast_ref::<WsClientError>()
-                                {
-                                    if err.message.starts_with("execution reverted") {
-                                        debug!(%method, ?params, "TODO: save the request");
+                                Web3Provider::Ws(_) => {
+                                    if let Some(WsClientError::JsonRpcError(err)) =
+                                        err.downcast_ref::<WsClientError>()
+                                    {
+                                        if err.message.starts_with("execution reverted") {
+                                            debug!(%method, ?params, "TODO: save the request");
 
-                                        let f = self
-                                            .authorization
-                                            .clone()
-                                            .save_revert(method.to_string(), params);
+                                            let f = self
+                                                .authorization
+                                                .clone()
+                                                .save_revert(method.to_string(), params);
 
-                                        tokio::spawn(async move { f.await });
-                                    } else {
-                                        debug!(?err, %method, rpc=%self.conn, "bad response!");
+                                            tokio::spawn(async move { f.await });
+                                        } else {
+                                            debug!(?err, %method, rpc=%self.conn, "bad response!");
+                                        }
                                     }
                                 }
                             }

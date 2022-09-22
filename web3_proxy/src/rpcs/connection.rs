@@ -12,6 +12,7 @@ use futures::StreamExt;
 use parking_lot::RwLock;
 use rand::Rng;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
+use sea_orm::DatabaseConnection;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use std::cmp::min;
@@ -52,6 +53,7 @@ pub struct Web3Connection {
     // TODO: async lock?
     pub(super) head_block_id: RwLock<Option<BlockId>>,
     pub(super) open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
+    pub(super) db_conn: Option<DatabaseConnection>,
 }
 
 impl Web3Connection {
@@ -76,6 +78,7 @@ impl Web3Connection {
         reconnect: bool,
         weight: u32,
         open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
+        db_conn: Option<DatabaseConnection>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_pool)| {
             // TODO: is cache size 1 okay? i think we need
@@ -101,6 +104,7 @@ impl Web3Connection {
             head_block_id: RwLock::new(Default::default()),
             weight,
             open_request_handle_metrics,
+            db_conn,
         };
 
         let new_connection = Arc::new(new_connection);

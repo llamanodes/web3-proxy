@@ -20,6 +20,7 @@ use futures::StreamExt;
 use hashbrown::HashMap;
 use moka::future::{Cache, ConcurrentCacheExt};
 use petgraph::graphmap::DiGraphMap;
+use sea_orm::DatabaseConnection;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::value::RawValue;
@@ -68,6 +69,7 @@ impl Web3Connections {
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
         open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
+        db_conn: Option<DatabaseConnection>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
@@ -125,6 +127,7 @@ impl Web3Connections {
                 let pending_tx_id_sender = Some(pending_tx_id_sender.clone());
                 let block_map = block_map.clone();
                 let open_request_handle_metrics = open_request_handle_metrics.clone();
+                let db_conn = db_conn.clone();
 
                 tokio::spawn(async move {
                     server_config
@@ -138,6 +141,7 @@ impl Web3Connections {
                             block_sender,
                             pending_tx_id_sender,
                             open_request_handle_metrics,
+                            db_conn,
                         )
                         .await
                 })

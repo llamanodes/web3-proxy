@@ -5,7 +5,8 @@ use axum::headers::{Referer, UserAgent};
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::user_keys;
 use sea_orm::{
-    ColumnTrait, DeriveColumn, EntityTrait, EnumIter, IdenStatic, QueryFilter, QuerySelect,
+    ColumnTrait, DatabaseConnection, DeriveColumn, EntityTrait, EnumIter, IdenStatic, QueryFilter,
+    QuerySelect,
 };
 use serde::Serialize;
 use std::{net::IpAddr, sync::Arc};
@@ -53,11 +54,11 @@ impl AuthorizedKey {
 #[derive(Debug, Serialize)]
 pub enum AuthorizedRequest {
     /// Request from the app itself
-    Internal,
+    Internal(#[serde(skip)] Option<DatabaseConnection>),
     /// Request from an anonymous IP address
-    Ip(IpAddr),
+    Ip(#[serde(skip)] Option<DatabaseConnection>, IpAddr),
     /// Request from an authenticated and authorized user
-    User(AuthorizedKey),
+    User(#[serde(skip)] Option<DatabaseConnection>, AuthorizedKey),
 }
 
 pub async fn ip_is_authorized(
@@ -74,7 +75,9 @@ pub async fn ip_is_authorized(
         x => unimplemented!("rate_limit_by_ip shouldn't ever see these: {:?}", x),
     };
 
-    Ok(AuthorizedRequest::Ip(ip))
+    let db = app.db_conn.clone();
+
+    Ok(AuthorizedRequest::Ip(db, ip))
 }
 
 pub async fn key_is_authorized(
@@ -97,7 +100,9 @@ pub async fn key_is_authorized(
 
     let authorized_user = AuthorizedKey::try_new(ip, user_data, referer, user_agent)?;
 
-    Ok(AuthorizedRequest::User(authorized_user))
+    let db = app.db_conn.clone();
+
+    Ok(AuthorizedRequest::User(db, authorized_user))
 }
 
 impl Web3ProxyApp {
