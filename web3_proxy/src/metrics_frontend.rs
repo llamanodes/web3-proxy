@@ -4,7 +4,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{routing::get, Extension, Router};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{info, instrument};
+use tracing::info;
 
 use crate::app::Web3ProxyApp;
 

@@ -20,6 +20,22 @@ services:
     volumes:
       - ./data/dev_mysql:/var/lib/mysql
 
+  dev-influxdb:
+    image: influxdb:latest
+    ports:
+      - '127.0.0.1:18086:8086'
+    volumes:
+      - ./data/dev_influxdb:/var/lib/influxdb
+    environment:
+      - INFLUXDB_DB=db0
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=dev_web3_proxy
+
+  dev-otel-collector:
+    image: otel/opentelemetry-collector-dev:latest
+    expose:
+      - 4317
+
   dev-adminer:
     image: adminer
     ports:

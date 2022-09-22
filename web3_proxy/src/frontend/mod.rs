@@ -1,6 +1,6 @@
+mod authorization;
 mod errors;
 mod http;
-mod rate_limit;
 mod rpc_proxy_http;
 mod rpc_proxy_ws;
 mod users;

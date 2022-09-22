@@ -9,7 +9,6 @@ use hashbrown::HashMap;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::instrument;
 
 pub type BlockAndRpc = (Option<ArcBlock>, Arc<Web3Connection>);
 pub type TxHashAndRpc = (TxHash, Arc<Web3Connection>);
@@ -53,6 +52,7 @@ pub struct AppConfig {
     /// minimum size of the connection pool for the database
     /// If none, the minimum * 2 is used
     pub db_max_connections: Option<u32>,
+    pub influxdb_url: Option<String>,
     #[serde(default = "default_default_requests_per_minute")]
     pub default_requests_per_minute: u64,
     pub invite_code: Option<String>,

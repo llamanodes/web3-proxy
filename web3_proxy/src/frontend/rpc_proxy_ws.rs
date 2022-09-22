@@ -1,10 +1,11 @@
+use super::authorization::{ip_is_authorized, key_is_authorized, AuthorizedRequest};
 use super::errors::FrontendResult;
-use super::rate_limit::{rate_limit_by_ip, rate_limit_by_key};
+use axum::headers::{Referer, UserAgent};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::Path,
     response::{IntoResponse, Redirect},
-    Extension,
+    Extension, TypedHeader,
 };
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
@@ -32,15 +33,15 @@ pub async fn public_websocket_handler(
     ClientIp(ip): ClientIp,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    let _ip = rate_limit_by_ip(&app, ip).await?;
+    let authorized_request = ip_is_authorized(&app, ip).await?;
 
-    let user_id = 0;
-
-    let user_span = error_span!("user", user_id);
+    let request_span = error_span!("request", ?authorized_request);
 
     match ws_upgrade {
         Some(ws) => Ok(ws
-            .on_upgrade(|socket| proxy_web3_socket(app, socket).instrument(user_span))
+            .on_upgrade(|socket| {
+                proxy_web3_socket(app, authorized_request, socket).instrument(request_span)
+            })
             .into_response()),
         None => {
             // this is not a websocket. redirect to a friendly page
@@ -52,18 +53,29 @@ pub async fn public_websocket_handler(
 #[debug_handler]
 pub async fn user_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ClientIp(ip): ClientIp,
     Path(user_key): Path<Uuid>,
+    referer: Option<TypedHeader<Referer>>,
+    user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    let user_id: u64 = rate_limit_by_key(&app, user_key).await?;
+    let authorized_request = key_is_authorized(
+        &app,
+        user_key,
+        ip,
+        referer.map(|x| x.0),
+        user_agent.map(|x| x.0),
+    )
+    .await?;
 
     // log the id, not the address. we don't want to expose the user's address
     // TODO: type that wraps Address and have it censor? would protect us from accidently logging addresses
-    let user_span = error_span!("user", user_id);
+    let request_span = error_span!("request", ?authorized_request);
 
     match ws_upgrade {
-        Some(ws_upgrade) => Ok(ws_upgrade
-            .on_upgrade(move |socket| proxy_web3_socket(app, socket).instrument(user_span))),
+        Some(ws_upgrade) => Ok(ws_upgrade.on_upgrade(move |socket| {
+            proxy_web3_socket(app, authorized_request, socket).instrument(request_span)
+        })),
         None => {
             // TODO: store this on the app and use register_template?
             let reg = Handlebars::new();
@@ -73,7 +85,7 @@ pub async fn user_websocket_handler(
             let user_url = reg
                 .render_template(
                     &app.config.redirect_user_url,
-                    &json!({ "user_id": user_id }),
+                    &json!({ "authorized_request": authorized_request }),
                 )
                 .unwrap();
 
@@ -83,7 +95,11 @@ pub async fn user_websocket_handler(
     }
 }
 
-async fn proxy_web3_socket(app: Arc<Web3ProxyApp>, socket: WebSocket) {
+async fn proxy_web3_socket(
+    app: Arc<Web3ProxyApp>,
+    authorized_request: AuthorizedRequest,
+    socket: WebSocket,
+) {
     // split the websocket so we can read and write concurrently
     let (ws_tx, ws_rx) = socket.split();
 
@@ -91,7 +107,12 @@ async fn proxy_web3_socket(app: Arc<Web3ProxyApp>, socket: WebSocket) {
     let (response_sender, response_receiver) = flume::unbounded::<Message>();
 
     tokio::spawn(write_web3_socket(response_receiver, ws_tx));
-    tokio::spawn(read_web3_socket(app, ws_rx, response_sender));
+    tokio::spawn(read_web3_socket(
+        app,
+        authorized_request,
+        ws_rx,
+        response_sender,
+    ));
 }
 
 /// websockets support a few more methods than http clients
@@ -173,6 +194,7 @@ async fn handle_socket_payload(
 
 async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
+    authorized_request: AuthorizedRequest,
     mut ws_rx: SplitStream<WebSocket>,
     response_sender: flume::Sender<Message>,
 ) {

@@ -12,7 +12,7 @@ use std::sync::atomic;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration, Instant};
 use tracing::Level;
-use tracing::{debug, error, trace, warn, Event};
+use tracing::{debug, error, trace, warn};
 
 #[derive(Debug)]
 pub enum OpenRequestResult {
@@ -142,28 +142,6 @@ impl OpenRequestHandle {
                 }
                 RequestErrorHandler::SaveReverts(chance) => {
                     // TODO: only set SaveReverts if this is an eth_call or eth_estimateGas? we'll need eth_sendRawTransaction somewhere else
-
-                    if let Some(metadata) = tracing::Span::current().metadata() {
-                        let fields = metadata.fields();
-
-                        if let Some(user_id) = fields.field("user_id") {
-                            let values = [(&user_id, None)];
-
-                            let valueset = fields.value_set(&values);
-
-                            let visitor = todo!();
-
-                            valueset.record(visitor);
-
-                            // TODO: now how we do we get the current value out of it? we might need this index
-                        } else {
-                            warn!("no user id");
-                        }
-                    }
-
-                    // TODO: check the span for user_key_id
-
-                    // TODO: only set SaveReverts for
                     // TODO: logging every one is going to flood the database
                     // TODO: have a percent chance to do this. or maybe a "logged reverts per second"
                     if let ProviderError::JsonRpcClientError(err) = err {

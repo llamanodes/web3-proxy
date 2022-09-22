@@ -41,7 +41,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{error, info, info_span, instrument, trace, warn, Instrument};
+use tracing::{error, info, trace, warn};
 use uuid::Uuid;
 
 // TODO: make this customizable?
@@ -60,9 +60,10 @@ type ResponseCache =
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
-#[derive(Clone, Copy, From)]
-pub struct UserCacheValue {
-    pub user_id: u64,
+#[derive(Clone, Copy, Debug, From, Serialize)]
+/// TODO: rename this?
+pub struct UserData {
+    pub user_key_id: u64,
     /// if None, allow unlimited queries
     pub user_count_per_period: Option<u64>,
 }
@@ -90,7 +91,7 @@ pub struct Web3ProxyApp {
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     pub frontend_key_rate_limiter: Option<DeferredRateLimiter<Uuid>>,
     pub redis_pool: Option<RedisPool>,
-    pub user_cache: Cache<Uuid, UserCacheValue, hashbrown::hash_map::DefaultHashBuilder>,
+    pub user_cache: Cache<Uuid, UserData, hashbrown::hash_map::DefaultHashBuilder>,
 }
 
 /// flatten a JoinError into an anyhow error

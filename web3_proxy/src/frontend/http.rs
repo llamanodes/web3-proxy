@@ -3,7 +3,6 @@ use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use moka::future::ConcurrentCacheExt;
 use serde_json::json;
 use std::sync::Arc;
-use tracing::instrument;
 
 /// Health check page for load balancers to use
 pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {

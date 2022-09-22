@@ -3,6 +3,7 @@ chain_id = 1
 db_url = "mysql://root:dev_web3_proxy@dev-db:3306/dev_web3_proxy"
 # TODO: how do we find the optimal db_max_connections? too high actually ends up being slower
 db_max_connections = 99
+influxdb_url = "http://influxdb:8086"
 min_sum_soft_limit = 2000
 min_synced_rpcs = 2
 redis_url = "redis://dev-redis:6379/"

@@ -1,4 +1,4 @@
-use crate::jsonrpc::JsonRpcForwardedResponse;
+use crate::{app::UserData, jsonrpc::JsonRpcForwardedResponse};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -9,7 +9,7 @@ use redis_rate_limiter::redis::RedisError;
 use sea_orm::DbErr;
 use std::{error::Error, net::IpAddr};
 use tokio::time::Instant;
-use tracing::{instrument, warn};
+use tracing::warn;
 
 // TODO: take "IntoResult" instead?
 pub type FrontendResult = Result<Response, FrontendErrorResponse>;
@@ -21,7 +21,7 @@ pub enum FrontendErrorResponse {
     Redis(RedisError),
     Response(Response),
     Database(DbErr),
-    RateLimitedUser(u64, Option<Instant>),
+    RateLimitedUser(UserData, Option<Instant>),
     RateLimitedIp(IpAddr, Option<Instant>),
     UnknownKey,
     NotFound,
@@ -95,13 +95,14 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             // TODO: this should actually by the id of the key. multiple users might control one key
-            Self::RateLimitedUser(user_id, retry_at) => {
+            Self::RateLimitedUser(user_data, retry_at) => {
                 // TODO: emit a stat
                 // TODO: include retry_at in the error
                 (
                     StatusCode::TOO_MANY_REQUESTS,
                     JsonRpcForwardedResponse::from_string(
-                        format!("too many requests from user {}!", user_id),
+                        // TODO: better error
+                        format!("too many requests from {:?}!", user_data),
                         Some(StatusCode::TOO_MANY_REQUESTS.as_u16().into()),
                         None,
                     ),
