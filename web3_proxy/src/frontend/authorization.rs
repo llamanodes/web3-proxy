@@ -61,6 +61,18 @@ pub enum AuthorizedRequest {
     User(#[serde(skip)] Option<DatabaseConnection>, AuthorizedKey),
 }
 
+impl AuthorizedRequest {
+    pub fn has_db(&self) -> bool {
+        let db_conn = match self {
+            Self::Internal(db_conn) => db_conn,
+            Self::Ip(db_conn, _) => db_conn,
+            Self::User(db_conn, _) => db_conn,
+        };
+
+        db_conn.is_some()
+    }
+}
+
 pub async fn ip_is_authorized(
     app: &Web3ProxyApp,
     ip: IpAddr,

@@ -34,6 +34,7 @@ pub struct OpenRequestHandle {
     used: AtomicBool,
 }
 
+/// Depending on the context, RPC errors can require different handling.
 pub enum RequestErrorHandler {
     /// Contains the percent chance to save the revert
     SaveReverts(f32),
@@ -57,6 +58,7 @@ impl From<Level> for RequestErrorHandler {
 }
 
 impl AuthorizedRequest {
+    /// Save a RPC call that return "execution reverted" to the database.
     async fn save_revert<T>(self: Arc<Self>, method: String, params: T) -> anyhow::Result<()>
     where
         T: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
@@ -95,6 +97,7 @@ impl OpenRequestHandle {
         }
     }
 
+    #[inline]
     pub fn clone_connection(&self) -> Arc<Web3Connection> {
         self.conn.clone()
     }
@@ -164,47 +167,43 @@ impl OpenRequestHandle {
                     // TODO: only set SaveReverts if this is an eth_call or eth_estimateGas? we'll need eth_sendRawTransaction somewhere else
                     // TODO: logging every one is going to flood the database
                     // TODO: have a percent chance to do this. or maybe a "logged reverts per second"
-                    if save_chance == 1.0 || rand::thread_rng().gen_range(0.0..=1.0) <= save_chance
+                    if self.authorization.has_db()
+                        && (save_chance == 1.0
+                            || rand::thread_rng().gen_range(0.0..=1.0) <= save_chance)
                     {
                         if let ProviderError::JsonRpcClientError(err) = err {
-                            match provider {
+                            let msg = match provider {
                                 Web3Provider::Http(_) => {
                                     if let Some(HttpClientError::JsonRpcError(err)) =
                                         err.downcast_ref::<HttpClientError>()
                                     {
-                                        if err.message.starts_with("execution reverted") {
-                                            debug!(%method, ?params, "TODO: save the request");
-
-                                            let f = self
-                                                .authorization
-                                                .clone()
-                                                .save_revert(method.to_string(), params.clone());
-
-                                            tokio::spawn(async move { f.await });
-
-                                            // TODO: don't do this on the hot path. spawn it
-                                        } else {
-                                            debug!(?err, %method, rpc=%self.conn, "bad response!");
-                                        }
+                                        Some(&err.message)
+                                    } else {
+                                        None
                                     }
                                 }
                                 Web3Provider::Ws(_) => {
                                     if let Some(WsClientError::JsonRpcError(err)) =
                                         err.downcast_ref::<WsClientError>()
                                     {
-                                        if err.message.starts_with("execution reverted") {
-                                            debug!(%method, ?params, "TODO: save the request");
-
-                                            let f = self
-                                                .authorization
-                                                .clone()
-                                                .save_revert(method.to_string(), params.clone());
-
-                                            tokio::spawn(async move { f.await });
-                                        } else {
-                                            debug!(?err, %method, rpc=%self.conn, "bad response!");
-                                        }
+                                        Some(&err.message)
+                                    } else {
+                                        None
                                     }
+                                }
+                            };
+
+                            if let Some(msg) = msg {
+                                if msg.starts_with("execution reverted") {
+                                    // spawn saving to the database so we don't slow down the request (or error if no db)
+                                    let f = self
+                                        .authorization
+                                        .clone()
+                                        .save_revert(method.to_string(), params.clone());
+
+                                    tokio::spawn(async move { f.await });
+                                } else {
+                                    debug!(?err, %method, rpc=%self.conn, "bad response!");
                                 }
                             }
                         }
