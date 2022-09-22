@@ -153,58 +153,70 @@ impl OpenRequestHandle {
         };
 
         if let Err(err) = &response {
-            match error_handler {
-                RequestErrorHandler::ErrorLevel => {
-                    error!(?err, %method, rpc=%self.conn, "bad response!");
+            // only save reverts for some types of calls
+            // TODO: do something special for eth_sendRawTransaction too
+            let error_handler = if let RequestErrorHandler::SaveReverts(save_chance) = error_handler
+            {
+                if ["eth_call", "eth_estimateGas"].contains(&method)
+                    && self.authorization.has_db()
+                    && (save_chance == 1.0
+                        || rand::thread_rng().gen_range(0.0..=1.0) <= save_chance)
+                {
+                    error_handler
+                } else {
+                    // TODO: is always logging at debug level fine?
+                    RequestErrorHandler::DebugLevel
                 }
+            } else {
+                error_handler
+            };
+
+            match error_handler {
                 RequestErrorHandler::DebugLevel => {
                     debug!(?err, %method, rpc=%self.conn, "bad response!");
+                }
+                RequestErrorHandler::ErrorLevel => {
+                    error!(?err, %method, rpc=%self.conn, "bad response!");
                 }
                 RequestErrorHandler::WarnLevel => {
                     warn!(?err, %method, rpc=%self.conn, "bad response!");
                 }
-                RequestErrorHandler::SaveReverts(save_chance) => {
-                    // TODO: only set SaveReverts if this is an eth_call or eth_estimateGas? we'll need eth_sendRawTransaction somewhere else
+                RequestErrorHandler::SaveReverts(_) => {
                     // TODO: logging every one is going to flood the database
                     // TODO: have a percent chance to do this. or maybe a "logged reverts per second"
-                    if self.authorization.has_db()
-                        && (save_chance == 1.0
-                            || rand::thread_rng().gen_range(0.0..=1.0) <= save_chance)
-                    {
-                        if let ProviderError::JsonRpcClientError(err) = err {
-                            let msg = match provider {
-                                Web3Provider::Http(_) => {
-                                    if let Some(HttpClientError::JsonRpcError(err)) =
-                                        err.downcast_ref::<HttpClientError>()
-                                    {
-                                        Some(&err.message)
-                                    } else {
-                                        None
-                                    }
-                                }
-                                Web3Provider::Ws(_) => {
-                                    if let Some(WsClientError::JsonRpcError(err)) =
-                                        err.downcast_ref::<WsClientError>()
-                                    {
-                                        Some(&err.message)
-                                    } else {
-                                        None
-                                    }
-                                }
-                            };
-
-                            if let Some(msg) = msg {
-                                if msg.starts_with("execution reverted") {
-                                    // spawn saving to the database so we don't slow down the request (or error if no db)
-                                    let f = self
-                                        .authorization
-                                        .clone()
-                                        .save_revert(method.to_string(), params.clone());
-
-                                    tokio::spawn(async move { f.await });
+                    if let ProviderError::JsonRpcClientError(err) = err {
+                        let msg = match provider {
+                            Web3Provider::Http(_) => {
+                                if let Some(HttpClientError::JsonRpcError(err)) =
+                                    err.downcast_ref::<HttpClientError>()
+                                {
+                                    Some(&err.message)
                                 } else {
-                                    debug!(?err, %method, rpc=%self.conn, "bad response!");
+                                    None
                                 }
+                            }
+                            Web3Provider::Ws(_) => {
+                                if let Some(WsClientError::JsonRpcError(err)) =
+                                    err.downcast_ref::<WsClientError>()
+                                {
+                                    Some(&err.message)
+                                } else {
+                                    None
+                                }
+                            }
+                        };
+
+                        if let Some(msg) = msg {
+                            if msg.starts_with("execution reverted") {
+                                // spawn saving to the database so we don't slow down the request (or error if no db)
+                                let f = self
+                                    .authorization
+                                    .clone()
+                                    .save_revert(method.to_string(), params.clone());
+
+                                tokio::spawn(async move { f.await });
+                            } else {
+                                debug!(?err, %method, rpc=%self.conn, "bad response!");
                             }
                         }
                     }
