@@ -22,9 +22,10 @@ impl Web3Connections {
         pending_tx_id: TxHash,
     ) -> Result<Option<TxStatus>, ProviderError> {
         // TODO: there is a race here on geth. sometimes the rpc isn't yet ready to serve the transaction (even though they told us about it!)
+        // TODO: might not be a race. might be a nonce thats higher than the current account nonce. geth discards chains
         // TODO: yearn devs have had better luck with batching these, but i think that's likely just adding a delay itself
         // TODO: if one rpc fails, try another?
-        let tx: Transaction = match rpc.try_request_handle().await {
+        let tx: Transaction = match rpc.try_request_handle(None).await {
             Ok(OpenRequestResult::Handle(handle)) => {
                 handle
                     .request(

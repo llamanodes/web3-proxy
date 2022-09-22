@@ -19,11 +19,19 @@ pub async fn public_proxy_web3_rpc(
 ) -> FrontendResult {
     let request_span = error_span!("request", %ip, ?referer, ?user_agent);
 
-    let ip = ip_is_authorized(&app, ip)
+    let authorized_request = ip_is_authorized(&app, ip)
         .instrument(request_span.clone())
         .await?;
 
-    let f = tokio::spawn(async move { app.proxy_web3_rpc(payload).instrument(request_span).await });
+    let request_span = error_span!("request", ?authorized_request);
+
+    let authorized_request = Arc::new(authorized_request);
+
+    let f = tokio::spawn(async move {
+        app.proxy_web3_rpc(&authorized_request, payload)
+            .instrument(request_span)
+            .await
+    });
 
     let response = f.await.unwrap()?;
 
@@ -53,7 +61,13 @@ pub async fn user_proxy_web3_rpc(
 
     let request_span = error_span!("request", ?authorized_request);
 
-    let f = tokio::spawn(async move { app.proxy_web3_rpc(payload).instrument(request_span).await });
+    let authorized_request = Arc::new(authorized_request);
+
+    let f = tokio::spawn(async move {
+        app.proxy_web3_rpc(&authorized_request, payload)
+            .instrument(request_span)
+            .await
+    });
 
     let response = f.await.unwrap()?;
 

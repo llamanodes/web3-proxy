@@ -1,4 +1,4 @@
-mod authorization;
+pub mod authorization;
 mod errors;
 mod http;
 mod rpc_proxy_http;

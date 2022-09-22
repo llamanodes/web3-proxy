@@ -2,6 +2,7 @@
 
 use crate::block_number::block_needed;
 use crate::config::{AppConfig, TopConfig};
+use crate::frontend::authorization::AuthorizedRequest;
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
@@ -12,6 +13,7 @@ use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
 use anyhow::Context;
 use axum::extract::ws::Message;
+use axum::headers::{Referer, UserAgent};
 use deferred_rate_limiter::DeferredRateLimiter;
 use derive_more::From;
 use ethers::core::utils::keccak256;
@@ -60,12 +62,18 @@ type ResponseCache =
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
-#[derive(Clone, Copy, Debug, From, Serialize)]
+#[derive(Clone, Debug, From)]
 /// TODO: rename this?
-pub struct UserData {
+pub struct UserKeyData {
     pub user_key_id: u64,
     /// if None, allow unlimited queries
     pub user_count_per_period: Option<u64>,
+    /// if None, allow any Referer
+    pub allowed_referer: Option<Referer>,
+    /// if None, allow any UserAgent
+    pub allowed_user_agent: Option<UserAgent>,
+    /// if None, allow any IpAddr
+    pub allowed_ip: Option<IpAddr>,
 }
 
 /// The application
@@ -91,7 +99,7 @@ pub struct Web3ProxyApp {
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     pub frontend_key_rate_limiter: Option<DeferredRateLimiter<Uuid>>,
     pub redis_pool: Option<RedisPool>,
-    pub user_cache: Cache<Uuid, UserData, hashbrown::hash_map::DefaultHashBuilder>,
+    pub user_cache: Cache<Uuid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -402,6 +410,7 @@ impl Web3ProxyApp {
     #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
     pub async fn eth_subscribe<'a>(
         self: &'a Arc<Self>,
+        authorized_request: Arc<AuthorizedRequest>,
         payload: JsonRpcRequest,
         subscription_count: &'a AtomicUsize,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
@@ -595,6 +604,7 @@ impl Web3ProxyApp {
     /// send the request or batch of requests to the approriate RPCs
     pub async fn proxy_web3_rpc(
         self: &Arc<Self>,
+        authorized_request: &Arc<AuthorizedRequest>,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         // TODO: this should probably be trace level
@@ -607,10 +617,18 @@ impl Web3ProxyApp {
 
         let response = match request {
             JsonRpcRequestEnum::Single(request) => JsonRpcForwardedResponseEnum::Single(
-                timeout(max_time, self.proxy_web3_rpc_request(request)).await??,
+                timeout(
+                    max_time,
+                    self.proxy_web3_rpc_request(authorized_request, request),
+                )
+                .await??,
             ),
             JsonRpcRequestEnum::Batch(requests) => JsonRpcForwardedResponseEnum::Batch(
-                timeout(max_time, self.proxy_web3_rpc_requests(requests)).await??,
+                timeout(
+                    max_time,
+                    self.proxy_web3_rpc_requests(authorized_request, requests),
+                )
+                .await??,
             ),
         };
 
@@ -624,6 +642,7 @@ impl Web3ProxyApp {
     /// TODO: make sure this isn't a problem
     async fn proxy_web3_rpc_requests(
         self: &Arc<Self>,
+        authorized_request: &Arc<AuthorizedRequest>,
         requests: Vec<JsonRpcRequest>,
     ) -> anyhow::Result<Vec<JsonRpcForwardedResponse>> {
         // TODO: we should probably change ethers-rs to support this directly
@@ -631,7 +650,7 @@ impl Web3ProxyApp {
         let responses = join_all(
             requests
                 .into_iter()
-                .map(|request| self.proxy_web3_rpc_request(request))
+                .map(|request| self.proxy_web3_rpc_request(authorized_request, request))
                 .collect::<Vec<_>>(),
         )
         .await;
@@ -659,6 +678,7 @@ impl Web3ProxyApp {
     #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
     async fn proxy_web3_rpc_request(
         self: &Arc<Self>,
+        authorized_request: &Arc<AuthorizedRequest>,
         mut request: JsonRpcRequest,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         trace!("Received request: {:?}", request);
@@ -791,7 +811,9 @@ impl Web3ProxyApp {
                 // emit stats
                 let rpcs = self.private_rpcs.as_ref().unwrap_or(&self.balanced_rpcs);
 
-                return rpcs.try_send_all_upstream_servers(request, None).await;
+                return rpcs
+                    .try_send_all_upstream_servers(Some(authorized_request), request, None)
+                    .await;
             }
             "eth_syncing" => {
                 // no stats on this. its cheap
@@ -890,7 +912,11 @@ impl Web3ProxyApp {
                         // TODO: put the hash here instead?
                         let mut response = self
                             .balanced_rpcs
-                            .try_send_best_upstream_server(request, Some(&request_block_id.num))
+                            .try_send_best_upstream_server(
+                                Some(authorized_request),
+                                request,
+                                Some(&request_block_id.num),
+                            )
                             .await?;
 
                         // discard their id by replacing it with an empty

@@ -1,4 +1,4 @@
-use crate::{app::UserData, jsonrpc::JsonRpcForwardedResponse};
+use crate::{app::UserKeyData, jsonrpc::JsonRpcForwardedResponse};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -21,7 +21,7 @@ pub enum FrontendErrorResponse {
     Redis(RedisError),
     Response(Response),
     Database(DbErr),
-    RateLimitedUser(UserData, Option<Instant>),
+    RateLimitedUser(UserKeyData, Option<Instant>),
     RateLimitedIp(IpAddr, Option<Instant>),
     UnknownKey,
     NotFound,

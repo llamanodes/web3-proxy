@@ -2,6 +2,7 @@
 use super::connection::Web3Connection;
 use super::connections::Web3Connections;
 use super::transactions::TxStatus;
+use crate::frontend::authorization::AuthorizedRequest;
 use crate::{
     config::BlockAndRpc, jsonrpc::JsonRpcRequest, rpcs::synced_connections::SyncedConnections,
 };
@@ -90,6 +91,7 @@ impl Web3Connections {
     /// Will query a specific node or the best available.
     pub async fn block(
         &self,
+        authorized_request: Option<&Arc<AuthorizedRequest>>,
         hash: &H256,
         rpc: Option<&Arc<Web3Connection>>,
     ) -> anyhow::Result<ArcBlock> {
@@ -104,7 +106,7 @@ impl Web3Connections {
         // TODO: if error, retry?
         let block: Block<TxHash> = match rpc {
             Some(rpc) => {
-                rpc.wait_for_request_handle(Duration::from_secs(30))
+                rpc.wait_for_request_handle(authorized_request, Duration::from_secs(30))
                     .await?
                     .request("eth_getBlockByHash", &get_block_params, Level::ERROR.into())
                     .await?
@@ -115,7 +117,9 @@ impl Web3Connections {
                 let request = json!({ "id": "1", "method": "eth_getBlockByHash", "params": get_block_params });
                 let request: JsonRpcRequest = serde_json::from_value(request)?;
 
-                let response = self.try_send_best_upstream_server(request, None).await?;
+                let response = self
+                    .try_send_best_upstream_server(authorized_request, request, None)
+                    .await?;
 
                 let block = response.result.unwrap();
 
@@ -163,7 +167,8 @@ impl Web3Connections {
         // deref to not keep the lock open
         if let Some(block_hash) = self.block_numbers.get(num) {
             // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
-            return self.block(&block_hash, None).await;
+            // TODO: pass authorized_request through here?
+            return self.block(None, &block_hash, None).await;
         }
 
         // block number not in cache. we need to ask an rpc for it
@@ -173,7 +178,7 @@ impl Web3Connections {
 
         // TODO: if error, retry?
         let response = self
-            .try_send_best_upstream_server(request, Some(num))
+            .try_send_best_upstream_server(None, request, Some(num))
             .await?;
 
         let raw_block = response.result.context("no block result")?;
@@ -290,7 +295,7 @@ impl Web3Connections {
                 // this option should always be populated
                 let conn_rpc = self.conns.get(conn_name);
 
-                match self.block(connection_head_hash, conn_rpc).await {
+                match self.block(None, connection_head_hash, conn_rpc).await {
                     Ok(block) => block,
                     Err(err) => {
                         warn!(%connection_head_hash, %conn_name, %rpc, ?err, "Failed fetching connection_head_block for block_hashes");

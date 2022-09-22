@@ -7,6 +7,7 @@ use super::request::{
 use super::synced_connections::SyncedConnections;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3ConnectionConfig};
+use crate::frontend::authorization::AuthorizedRequest;
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
 use arc_swap::ArcSwap;
@@ -304,6 +305,7 @@ impl Web3Connections {
     /// Send the same request to all the handles. Returning the most common success or most common error.
     pub async fn try_send_parallel_requests(
         &self,
+        authorized_request: Option<&Arc<AuthorizedRequest>>,
         active_request_handles: Vec<OpenRequestHandle>,
         method: &str,
         // TODO: remove this box once i figure out how to do the options
@@ -362,6 +364,7 @@ impl Web3Connections {
     /// get the best available rpc server
     pub async fn next_upstream_server(
         &self,
+        authorized_request: Option<&Arc<AuthorizedRequest>>,
         skip: &[Arc<Web3Connection>],
         min_block_needed: Option<&U64>,
     ) -> anyhow::Result<OpenRequestResult> {
@@ -420,7 +423,7 @@ impl Web3Connections {
         // now that the rpcs are sorted, try to get an active request handle for one of them
         for rpc in synced_rpcs.into_iter() {
             // increment our connection counter
-            match rpc.try_request_handle().await {
+            match rpc.try_request_handle(authorized_request.clone()).await {
                 Ok(OpenRequestResult::Handle(handle)) => {
                     trace!("next server on {:?}: {:?}", self, rpc);
                     return Ok(OpenRequestResult::Handle(handle));
@@ -451,6 +454,7 @@ impl Web3Connections {
     // TODO: better type on this that can return an anyhow::Result
     pub async fn upstream_servers(
         &self,
+        authorized_request: Option<&Arc<AuthorizedRequest>>,
         block_needed: Option<&U64>,
     ) -> Result<Vec<OpenRequestHandle>, Option<Instant>> {
         let mut earliest_retry_at = None;
@@ -465,7 +469,7 @@ impl Web3Connections {
             }
 
             // check rate limits and increment our connection counter
-            match connection.try_request_handle().await {
+            match connection.try_request_handle(authorized_request).await {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
@@ -491,6 +495,7 @@ impl Web3Connections {
     /// be sure there is a timeout on this or it might loop forever
     pub async fn try_send_best_upstream_server(
         &self,
+        authorized_request: Option<&Arc<AuthorizedRequest>>,
         request: JsonRpcRequest,
         min_block_needed: Option<&U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
@@ -502,7 +507,7 @@ impl Web3Connections {
                 break;
             }
             match self
-                .next_upstream_server(&skip_rpcs, min_block_needed)
+                .next_upstream_server(authorized_request, &skip_rpcs, min_block_needed)
                 .await?
             {
                 OpenRequestResult::Handle(active_request_handle) => {
@@ -592,17 +597,22 @@ impl Web3Connections {
     #[instrument]
     pub async fn try_send_all_upstream_servers(
         &self,
+        authorized_request: Option<&Arc<AuthorizedRequest>>,
         request: JsonRpcRequest,
         block_needed: Option<&U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
-            match self.upstream_servers(block_needed).await {
+            match self
+                .upstream_servers(authorized_request.clone(), block_needed)
+                .await
+            {
                 Ok(active_request_handles) => {
                     // TODO: benchmark this compared to waiting on unbounded futures
                     // TODO: do something with this handle?
                     // TODO: this is not working right. simplify
                     let quorum_response = self
                         .try_send_parallel_requests(
+                            authorized_request,
                             active_request_handles,
                             request.method.as_ref(),
                             request.params.as_ref(),

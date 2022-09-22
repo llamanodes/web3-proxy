@@ -4,6 +4,7 @@ use super::provider::Web3Provider;
 use super::request::{OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
+use crate::frontend::authorization::AuthorizedRequest;
 use anyhow::Context;
 use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
@@ -114,7 +115,7 @@ impl Web3Connection {
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
         // TODO: what should the timeout be?
         let found_chain_id: Result<U64, _> = new_connection
-            .wait_for_request_handle(Duration::from_secs(30))
+            .wait_for_request_handle(None, Duration::from_secs(30))
             .await?
             .request("eth_chainId", &Option::None::<()>, Level::ERROR.into())
             .await;
@@ -200,7 +201,7 @@ impl Web3Connection {
             // TODO: wait for the handle BEFORE we check the current block number. it might be delayed too!
             // TODO: what should the request be?
             let archive_result: Result<Bytes, _> = self
-                .wait_for_request_handle(Duration::from_secs(30))
+                .wait_for_request_handle(None, Duration::from_secs(30))
                 .await?
                 .request(
                     "eth_getCode",
@@ -530,7 +531,7 @@ impl Web3Connection {
 
                     loop {
                         // TODO: what should the max_wait be?
-                        match self.wait_for_request_handle(Duration::from_secs(30)).await {
+                        match self.wait_for_request_handle(None, Duration::from_secs(30)).await {
                             Ok(active_request_handle) => {
                                 let block: Result<Block<TxHash>, _> = active_request_handle
                                     .request(
@@ -598,7 +599,7 @@ impl Web3Connection {
                 Web3Provider::Ws(provider) => {
                     // todo: move subscribe_blocks onto the request handle?
                     let active_request_handle =
-                        self.wait_for_request_handle(Duration::from_secs(30)).await;
+                        self.wait_for_request_handle(None, Duration::from_secs(30)).await;
                     let mut stream = provider.subscribe_blocks().await?;
                     drop(active_request_handle);
 
@@ -606,7 +607,7 @@ impl Web3Connection {
                     // there is a very small race condition here where the stream could send us a new block right now
                     // all it does is print "new block" for the same block as current block
                     let block: Result<Option<ArcBlock>, _> = self
-                        .wait_for_request_handle(Duration::from_secs(30))
+                        .wait_for_request_handle(None, Duration::from_secs(30))
                         .await?
                         .request(
                             "eth_getBlockByNumber",
@@ -697,7 +698,7 @@ impl Web3Connection {
                 Web3Provider::Ws(provider) => {
                     // TODO: maybe the subscribe_pending_txs function should be on the active_request_handle
                     let active_request_handle =
-                        self.wait_for_request_handle(Duration::from_secs(30)).await;
+                        self.wait_for_request_handle(None, Duration::from_secs(30)).await;
 
                     let mut stream = provider.subscribe_pending_txs().await?;
 
@@ -727,12 +728,13 @@ impl Web3Connection {
     #[instrument]
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
+        authorized_request: Option<&Arc<AuthorizedRequest>>,
         max_wait: Duration,
     ) -> anyhow::Result<OpenRequestHandle> {
         let max_wait = Instant::now() + max_wait;
 
         loop {
-            let x = self.try_request_handle().await;
+            let x = self.try_request_handle(authorized_request.clone()).await;
 
             trace!(?x, "try_request_handle");
 
@@ -760,7 +762,10 @@ impl Web3Connection {
     }
 
     #[instrument]
-    pub async fn try_request_handle(self: &Arc<Self>) -> anyhow::Result<OpenRequestResult> {
+    pub async fn try_request_handle(
+        self: &Arc<Self>,
+        authorized_user: Option<&Arc<AuthorizedRequest>>,
+    ) -> anyhow::Result<OpenRequestResult> {
         // check that we are connected
         if !self.has_provider().await {
             // TODO: emit a stat?
