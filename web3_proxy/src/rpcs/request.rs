@@ -35,9 +35,13 @@ pub struct OpenRequestHandle {
 }
 
 pub enum RequestErrorHandler {
+    /// Contains the percent chance to save the revert
     SaveReverts(f32),
+    /// Log at the debug level. Use when errors are expected.
     DebugLevel,
+    /// Log at the error level. Use when errors are bad.
     ErrorLevel,
+    /// Log at the warn level. Use when errors do not cause problems.
     WarnLevel,
 }
 
@@ -47,7 +51,7 @@ impl From<Level> for RequestErrorHandler {
             Level::DEBUG => RequestErrorHandler::DebugLevel,
             Level::ERROR => RequestErrorHandler::ErrorLevel,
             Level::WARN => RequestErrorHandler::WarnLevel,
-            _ => unimplemented!(),
+            _ => unimplemented!("unexpected tracing Level"),
         }
     }
 }
