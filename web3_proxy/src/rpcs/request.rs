@@ -1,14 +1,14 @@
 use super::connection::Web3Connection;
 use super::provider::Web3Provider;
+use crate::frontend::authorization::AuthorizedRequest;
 use crate::metered::{JsonRpcErrorCount, ProviderErrorCount};
 use ethers::providers::{HttpClientError, ProviderError, WsClientError};
 use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
 use metered::Throughput;
-use parking_lot::Mutex;
 use std::fmt;
-use std::sync::atomic;
+use std::sync::atomic::{self, AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration, Instant};
 use tracing::Level;
@@ -26,9 +26,11 @@ pub enum OpenRequestResult {
 /// Make RPC requests through this handle and drop it when you are done.
 #[derive(Debug)]
 pub struct OpenRequestHandle {
-    conn: Mutex<Option<Arc<Web3Connection>>>,
+    authorized_request: Arc<AuthorizedRequest>,
+    conn: Arc<Web3Connection>,
     // TODO: this is the same metrics on the conn. use a reference?
     metrics: Arc<OpenRequestHandleMetrics>,
+    used: AtomicBool,
 }
 
 pub enum RequestErrorHandler {
@@ -51,7 +53,10 @@ impl From<Level> for RequestErrorHandler {
 
 #[metered(registry = OpenRequestHandleMetrics, visibility = pub)]
 impl OpenRequestHandle {
-    pub fn new(conn: Arc<Web3Connection>) -> Self {
+    pub fn new(
+        conn: Arc<Web3Connection>,
+        authorized_request: Option<Arc<AuthorizedRequest>>,
+    ) -> Self {
         // TODO: take request_id as an argument?
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
@@ -64,18 +69,21 @@ impl OpenRequestHandle {
         conn.total_requests.fetch_add(1, atomic::Ordering::Relaxed);
 
         let metrics = conn.open_request_handle_metrics.clone();
+        let used = false.into();
 
-        let conn = Mutex::new(Some(conn));
+        let authorized_request =
+            authorized_request.unwrap_or_else(|| Arc::new(AuthorizedRequest::Internal));
 
-        Self { conn, metrics }
+        Self {
+            authorized_request,
+            conn,
+            metrics,
+            used,
+        }
     }
 
     pub fn clone_connection(&self) -> Arc<Web3Connection> {
-        if let Some(conn) = self.conn.lock().as_ref() {
-            conn.clone()
-        } else {
-            unimplemented!("this shouldn't happen")
-        }
+        self.conn.clone()
     }
 
     /// Send a web3 request
@@ -93,23 +101,22 @@ impl OpenRequestHandle {
         T: fmt::Debug + serde::Serialize + Send + Sync,
         R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug,
     {
-        let conn = self
-            .conn
-            .lock()
-            .take()
-            .expect("cannot use request multiple times");
+        // ensure this function only runs once
+        if self.used.swap(true, Ordering::Release) {
+            unimplemented!("a request handle should only be used once");
+        }
 
         // TODO: use tracing spans properly
         // TODO: requests from customers have request ids, but we should add
         // TODO: including params in this is way too verbose
-        trace!(rpc=%conn, %method, "request");
+        trace!(rpc=%self.conn, %method, "request");
 
         let mut provider = None;
 
         while provider.is_none() {
-            match conn.provider.read().await.as_ref() {
+            match self.conn.provider.read().await.as_ref() {
                 None => {
-                    warn!(rpc=%conn, "no provider!");
+                    warn!(rpc=%self.conn, "no provider!");
                     // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
                     // TODO: maybe use a watch handle?
                     // TODO: sleep how long? subscribe to something instead?
@@ -127,20 +134,18 @@ impl OpenRequestHandle {
             Web3Provider::Ws(provider) => provider.request(method, params).await,
         };
 
-        conn.active_requests.fetch_sub(1, atomic::Ordering::AcqRel);
-
         if let Err(err) = &response {
             match error_handler {
                 RequestErrorHandler::ErrorLevel => {
-                    error!(?err, %method, rpc=%conn, "bad response!");
+                    error!(?err, %method, rpc=%self.conn, "bad response!");
                 }
                 RequestErrorHandler::DebugLevel => {
-                    debug!(?err, %method, rpc=%conn, "bad response!");
+                    debug!(?err, %method, rpc=%self.conn, "bad response!");
                 }
                 RequestErrorHandler::WarnLevel => {
-                    warn!(?err, %method, rpc=%conn, "bad response!");
+                    warn!(?err, %method, rpc=%self.conn, "bad response!");
                 }
-                RequestErrorHandler::SaveReverts(chance) => {
+                RequestErrorHandler::SaveReverts(save_chance) => {
                     // TODO: only set SaveReverts if this is an eth_call or eth_estimateGas? we'll need eth_sendRawTransaction somewhere else
                     // TODO: logging every one is going to flood the database
                     // TODO: have a percent chance to do this. or maybe a "logged reverts per second"
@@ -154,7 +159,7 @@ impl OpenRequestHandle {
                                         debug!(%method, ?params, "TODO: save the request");
                                         // TODO: don't do this on the hot path. spawn it
                                     } else {
-                                        debug!(?err, %method, rpc=%conn, "bad response!");
+                                        debug!(?err, %method, rpc=%self.conn, "bad response!");
                                     }
                                 }
                             }
@@ -166,7 +171,7 @@ impl OpenRequestHandle {
                                         debug!(%method, ?params, "TODO: save the request");
                                         // TODO: don't do this on the hot path. spawn it
                                     } else {
-                                        debug!(?err, %method, rpc=%conn, "bad response!");
+                                        debug!(?err, %method, rpc=%self.conn, "bad response!");
                                     }
                                 }
                             }
@@ -177,8 +182,8 @@ impl OpenRequestHandle {
         } else {
             // TODO: i think ethers already has trace logging (and does it much more fancy)
             // TODO: opt-in response inspection to log reverts with their request. put into redis or what?
-            // trace!(rpc=%self.0, %method, ?response);
-            trace!(%method, rpc=%conn, "response");
+            // trace!(rpc=%self.conn, %method, ?response);
+            trace!(%method, rpc=%self.conn, "response");
         }
 
         response
@@ -187,8 +192,8 @@ impl OpenRequestHandle {
 
 impl Drop for OpenRequestHandle {
     fn drop(&mut self) {
-        if let Some(conn) = self.conn.lock().take() {
-            conn.active_requests.fetch_sub(1, atomic::Ordering::AcqRel);
-        }
+        self.conn
+            .active_requests
+            .fetch_sub(1, atomic::Ordering::AcqRel);
     }
 }

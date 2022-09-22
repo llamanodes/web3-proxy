@@ -423,7 +423,7 @@ impl Web3Connections {
         // now that the rpcs are sorted, try to get an active request handle for one of them
         for rpc in synced_rpcs.into_iter() {
             // increment our connection counter
-            match rpc.try_request_handle(authorized_request.clone()).await {
+            match rpc.try_request_handle(authorized_request).await {
                 Ok(OpenRequestResult::Handle(handle)) => {
                     trace!("next server on {:?}: {:?}", self, rpc);
                     return Ok(OpenRequestResult::Handle(handle));
