@@ -33,16 +33,16 @@ pub async fn public_websocket_handler(
     ClientIp(ip): ClientIp,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    let authorized_request = ip_is_authorized(&app, ip).await?;
+    let authorization = ip_is_authorized(&app, ip).await?;
 
-    let request_span = error_span!("request", ?authorized_request);
+    let request_span = error_span!("request", ?authorization);
 
-    let authorized_request = Arc::new(authorized_request);
+    let authorization = Arc::new(authorization);
 
     match ws_upgrade {
         Some(ws) => Ok(ws
             .on_upgrade(|socket| {
-                proxy_web3_socket(app, authorized_request, socket).instrument(request_span)
+                proxy_web3_socket(app, authorization, socket).instrument(request_span)
             })
             .into_response()),
         None => {
@@ -61,7 +61,7 @@ pub async fn user_websocket_handler(
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    let authorized_request = key_is_authorized(
+    let authorization = key_is_authorized(
         &app,
         user_key,
         ip,
@@ -71,13 +71,13 @@ pub async fn user_websocket_handler(
     .await?;
 
     // TODO: type that wraps Address and have it censor? would protect us from accidently logging addresses or other user info
-    let request_span = error_span!("request", ?authorized_request);
+    let request_span = error_span!("request", ?authorization);
 
-    let authorized_request = Arc::new(authorized_request);
+    let authorization = Arc::new(authorization);
 
     match ws_upgrade {
         Some(ws_upgrade) => Ok(ws_upgrade.on_upgrade(move |socket| {
-            proxy_web3_socket(app, authorized_request, socket).instrument(request_span)
+            proxy_web3_socket(app, authorization, socket).instrument(request_span)
         })),
         None => {
             // TODO: store this on the app and use register_template?
@@ -88,7 +88,7 @@ pub async fn user_websocket_handler(
             let user_url = reg
                 .render_template(
                     &app.config.redirect_user_url,
-                    &json!({ "authorized_request": authorized_request }),
+                    &json!({ "authorization": authorization }),
                 )
                 .unwrap();
 
@@ -100,7 +100,7 @@ pub async fn user_websocket_handler(
 
 async fn proxy_web3_socket(
     app: Arc<Web3ProxyApp>,
-    authorized_request: Arc<AuthorizedRequest>,
+    authorization: Arc<AuthorizedRequest>,
     socket: WebSocket,
 ) {
     // split the websocket so we can read and write concurrently
@@ -110,18 +110,13 @@ async fn proxy_web3_socket(
     let (response_sender, response_receiver) = flume::unbounded::<Message>();
 
     tokio::spawn(write_web3_socket(response_receiver, ws_tx));
-    tokio::spawn(read_web3_socket(
-        app,
-        authorized_request,
-        ws_rx,
-        response_sender,
-    ));
+    tokio::spawn(read_web3_socket(app, authorization, ws_rx, response_sender));
 }
 
 /// websockets support a few more methods than http clients
 async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
-    authorized_request: Arc<AuthorizedRequest>,
+    authorization: Arc<AuthorizedRequest>,
     payload: &str,
     response_sender: &flume::Sender<Message>,
     subscription_count: &AtomicUsize,
@@ -140,7 +135,7 @@ async fn handle_socket_payload(
 
                     let response = app
                         .eth_subscribe(
-                            authorized_request.clone(),
+                            authorization.clone(),
                             payload,
                             subscription_count,
                             response_sender.clone(),
@@ -177,10 +172,7 @@ async fn handle_socket_payload(
 
                     Ok(response.into())
                 }
-                _ => {
-                    app.proxy_web3_rpc(&authorized_request, payload.into())
-                        .await
-                }
+                _ => app.proxy_web3_rpc(&authorization, payload.into()).await,
             };
 
             (id, response)
@@ -206,7 +198,7 @@ async fn handle_socket_payload(
 
 async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
-    authorized_request: Arc<AuthorizedRequest>,
+    authorization: Arc<AuthorizedRequest>,
     mut ws_rx: SplitStream<WebSocket>,
     response_sender: flume::Sender<Message>,
 ) {
@@ -219,7 +211,7 @@ async fn read_web3_socket(
             Message::Text(payload) => {
                 handle_socket_payload(
                     app.clone(),
-                    authorized_request.clone(),
+                    authorization.clone(),
                     &payload,
                     &response_sender,
                     &subscription_count,
@@ -242,7 +234,7 @@ async fn read_web3_socket(
 
                 handle_socket_payload(
                     app.clone(),
-                    authorized_request.clone(),
+                    authorization.clone(),
                     payload,
                     &response_sender,
                     &subscription_count,

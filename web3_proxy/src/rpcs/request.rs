@@ -26,7 +26,7 @@ pub enum OpenRequestResult {
 /// Make RPC requests through this handle and drop it when you are done.
 #[derive(Debug)]
 pub struct OpenRequestHandle {
-    authorized_request: Arc<AuthorizedRequest>,
+    authorization: Arc<AuthorizedRequest>,
     conn: Arc<Web3Connection>,
     // TODO: this is the same metrics on the conn. use a reference?
     metrics: Arc<OpenRequestHandleMetrics>,
@@ -51,12 +51,18 @@ impl From<Level> for RequestErrorHandler {
     }
 }
 
+impl AuthorizedRequest {
+    async fn save_revert<T>(self: Arc<Self>, method: String, params: T) -> anyhow::Result<()>
+    where
+        T: fmt::Debug + serde::Serialize + Send + Sync,
+    {
+        todo!("save the revert to the database");
+    }
+}
+
 #[metered(registry = OpenRequestHandleMetrics, visibility = pub)]
 impl OpenRequestHandle {
-    pub fn new(
-        conn: Arc<Web3Connection>,
-        authorized_request: Option<Arc<AuthorizedRequest>>,
-    ) -> Self {
+    pub fn new(conn: Arc<Web3Connection>, authorization: Option<Arc<AuthorizedRequest>>) -> Self {
         // TODO: take request_id as an argument?
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
@@ -71,11 +77,10 @@ impl OpenRequestHandle {
         let metrics = conn.open_request_handle_metrics.clone();
         let used = false.into();
 
-        let authorized_request =
-            authorized_request.unwrap_or_else(|| Arc::new(AuthorizedRequest::Internal));
+        let authorization = authorization.unwrap_or_else(|| Arc::new(AuthorizedRequest::Internal));
 
         Self {
-            authorized_request,
+            authorization,
             conn,
             metrics,
             used,
@@ -94,11 +99,12 @@ impl OpenRequestHandle {
     pub async fn request<T, R>(
         &self,
         method: &str,
-        params: &T,
+        params: T,
         error_handler: RequestErrorHandler,
     ) -> Result<R, ProviderError>
     where
-        T: fmt::Debug + serde::Serialize + Send + Sync,
+        // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
+        T: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
         R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug,
     {
         // ensure this function only runs once
@@ -106,32 +112,33 @@ impl OpenRequestHandle {
             unimplemented!("a request handle should only be used once");
         }
 
-        // TODO: use tracing spans properly
+        // TODO: use tracing spans
         // TODO: requests from customers have request ids, but we should add
         // TODO: including params in this is way too verbose
+        // the authorization field is already on a parent span
         trace!(rpc=%self.conn, %method, "request");
 
         let mut provider = None;
 
         while provider.is_none() {
-            match self.conn.provider.read().await.as_ref() {
+            match self.conn.provider.read().await.clone() {
                 None => {
                     warn!(rpc=%self.conn, "no provider!");
                     // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
-                    // TODO: maybe use a watch handle?
-                    // TODO: sleep how long? subscribe to something instead?
-                    // TODO: this is going to be very verbose!
+                    // TODO: sleep how long? subscribe to something instead? maybe use a watch handle?
+                    // TODO: this is going to be way too verbose!
                     sleep(Duration::from_millis(100)).await
                 }
-                Some(found_provider) => provider = Some(found_provider.clone()),
+                Some(found_provider) => provider = Some(found_provider),
             }
         }
 
         let provider = &*provider.expect("provider was checked already");
 
+        // TODO: really sucks that we have to clone here
         let response = match provider {
-            Web3Provider::Http(provider) => provider.request(method, params).await,
-            Web3Provider::Ws(provider) => provider.request(method, params).await,
+            Web3Provider::Http(provider) => provider.request(method, params.clone()).await,
+            Web3Provider::Ws(provider) => provider.request(method, params.clone()).await,
         };
 
         if let Err(err) = &response {
@@ -157,6 +164,14 @@ impl OpenRequestHandle {
                                 {
                                     if err.message.starts_with("execution reverted") {
                                         debug!(%method, ?params, "TODO: save the request");
+
+                                        let f = self
+                                            .authorization
+                                            .clone()
+                                            .save_revert(method.to_string(), params);
+
+                                        tokio::spawn(async move { f.await });
+
                                         // TODO: don't do this on the hot path. spawn it
                                     } else {
                                         debug!(?err, %method, rpc=%self.conn, "bad response!");
@@ -169,7 +184,13 @@ impl OpenRequestHandle {
                                 {
                                     if err.message.starts_with("execution reverted") {
                                         debug!(%method, ?params, "TODO: save the request");
-                                        // TODO: don't do this on the hot path. spawn it
+
+                                        let f = self
+                                            .authorization
+                                            .clone()
+                                            .save_revert(method.to_string(), params);
+
+                                        tokio::spawn(async move { f.await });
                                     } else {
                                         debug!(?err, %method, rpc=%self.conn, "bad response!");
                                     }

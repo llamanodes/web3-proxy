@@ -19,16 +19,16 @@ pub async fn public_proxy_web3_rpc(
 ) -> FrontendResult {
     let request_span = error_span!("request", %ip, ?referer, ?user_agent);
 
-    let authorized_request = ip_is_authorized(&app, ip)
+    let authorization = ip_is_authorized(&app, ip)
         .instrument(request_span.clone())
         .await?;
 
-    let request_span = error_span!("request", ?authorized_request);
+    let request_span = error_span!("request", ?authorization);
 
-    let authorized_request = Arc::new(authorized_request);
+    let authorization = Arc::new(authorization);
 
     let f = tokio::spawn(async move {
-        app.proxy_web3_rpc(&authorized_request, payload)
+        app.proxy_web3_rpc(&authorization, payload)
             .instrument(request_span)
             .await
     });
@@ -49,7 +49,7 @@ pub async fn user_proxy_web3_rpc(
     let request_span = error_span!("request", %ip, ?referer, ?user_agent);
 
     // TODO: this should probably return the user_key_id instead? or maybe both?
-    let authorized_request = key_is_authorized(
+    let authorization = key_is_authorized(
         &app,
         user_key,
         ip,
@@ -59,12 +59,12 @@ pub async fn user_proxy_web3_rpc(
     .instrument(request_span.clone())
     .await?;
 
-    let request_span = error_span!("request", ?authorized_request);
+    let request_span = error_span!("request", ?authorization);
 
-    let authorized_request = Arc::new(authorized_request);
+    let authorization = Arc::new(authorization);
 
     let f = tokio::spawn(async move {
-        app.proxy_web3_rpc(&authorized_request, payload)
+        app.proxy_web3_rpc(&authorization, payload)
             .instrument(request_span)
             .await
     });

@@ -410,7 +410,7 @@ impl Web3ProxyApp {
     #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
     pub async fn eth_subscribe<'a>(
         self: &'a Arc<Self>,
-        authorized_request: Arc<AuthorizedRequest>,
+        authorization: Arc<AuthorizedRequest>,
         payload: JsonRpcRequest,
         subscription_count: &'a AtomicUsize,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
@@ -604,7 +604,7 @@ impl Web3ProxyApp {
     /// send the request or batch of requests to the approriate RPCs
     pub async fn proxy_web3_rpc(
         self: &Arc<Self>,
-        authorized_request: &Arc<AuthorizedRequest>,
+        authorization: &Arc<AuthorizedRequest>,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         // TODO: this should probably be trace level
@@ -619,14 +619,14 @@ impl Web3ProxyApp {
             JsonRpcRequestEnum::Single(request) => JsonRpcForwardedResponseEnum::Single(
                 timeout(
                     max_time,
-                    self.proxy_web3_rpc_request(authorized_request, request),
+                    self.proxy_web3_rpc_request(authorization, request),
                 )
                 .await??,
             ),
             JsonRpcRequestEnum::Batch(requests) => JsonRpcForwardedResponseEnum::Batch(
                 timeout(
                     max_time,
-                    self.proxy_web3_rpc_requests(authorized_request, requests),
+                    self.proxy_web3_rpc_requests(authorization, requests),
                 )
                 .await??,
             ),
@@ -642,7 +642,7 @@ impl Web3ProxyApp {
     /// TODO: make sure this isn't a problem
     async fn proxy_web3_rpc_requests(
         self: &Arc<Self>,
-        authorized_request: &Arc<AuthorizedRequest>,
+        authorization: &Arc<AuthorizedRequest>,
         requests: Vec<JsonRpcRequest>,
     ) -> anyhow::Result<Vec<JsonRpcForwardedResponse>> {
         // TODO: we should probably change ethers-rs to support this directly
@@ -650,7 +650,7 @@ impl Web3ProxyApp {
         let responses = join_all(
             requests
                 .into_iter()
-                .map(|request| self.proxy_web3_rpc_request(authorized_request, request))
+                .map(|request| self.proxy_web3_rpc_request(authorization, request))
                 .collect::<Vec<_>>(),
         )
         .await;
@@ -678,7 +678,7 @@ impl Web3ProxyApp {
     #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
     async fn proxy_web3_rpc_request(
         self: &Arc<Self>,
-        authorized_request: &Arc<AuthorizedRequest>,
+        authorization: &Arc<AuthorizedRequest>,
         mut request: JsonRpcRequest,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         trace!("Received request: {:?}", request);
@@ -812,7 +812,7 @@ impl Web3ProxyApp {
                 let rpcs = self.private_rpcs.as_ref().unwrap_or(&self.balanced_rpcs);
 
                 return rpcs
-                    .try_send_all_upstream_servers(Some(authorized_request), request, None)
+                    .try_send_all_upstream_servers(Some(authorization), request, None)
                     .await;
             }
             "eth_syncing" => {
@@ -913,7 +913,7 @@ impl Web3ProxyApp {
                         let mut response = self
                             .balanced_rpcs
                             .try_send_best_upstream_server(
-                                Some(authorized_request),
+                                Some(authorization),
                                 request,
                                 Some(&request_block_id.num),
                             )

@@ -91,7 +91,7 @@ impl Web3Connections {
     /// Will query a specific node or the best available.
     pub async fn block(
         &self,
-        authorized_request: Option<&Arc<AuthorizedRequest>>,
+        authorization: Option<&Arc<AuthorizedRequest>>,
         hash: &H256,
         rpc: Option<&Arc<Web3Connection>>,
     ) -> anyhow::Result<ArcBlock> {
@@ -102,13 +102,13 @@ impl Web3Connections {
         }
 
         // block not in cache. we need to ask an rpc for it
-        let get_block_params = (hash, false);
+        let get_block_params = (*hash, false);
         // TODO: if error, retry?
         let block: Block<TxHash> = match rpc {
             Some(rpc) => {
-                rpc.wait_for_request_handle(authorized_request, Duration::from_secs(30))
+                rpc.wait_for_request_handle(authorization, Duration::from_secs(30))
                     .await?
-                    .request("eth_getBlockByHash", &get_block_params, Level::ERROR.into())
+                    .request("eth_getBlockByHash", get_block_params, Level::ERROR.into())
                     .await?
             }
             None => {
@@ -118,7 +118,7 @@ impl Web3Connections {
                 let request: JsonRpcRequest = serde_json::from_value(request)?;
 
                 let response = self
-                    .try_send_best_upstream_server(authorized_request, request, None)
+                    .try_send_best_upstream_server(authorization, request, None)
                     .await?;
 
                 let block = response.result.unwrap();
@@ -167,7 +167,7 @@ impl Web3Connections {
         // deref to not keep the lock open
         if let Some(block_hash) = self.block_numbers.get(num) {
             // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
-            // TODO: pass authorized_request through here?
+            // TODO: pass authorization through here?
             return self.block(None, &block_hash, None).await;
         }
 
