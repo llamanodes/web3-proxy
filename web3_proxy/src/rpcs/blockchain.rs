@@ -108,7 +108,7 @@ impl Web3Connections {
             Some(rpc) => {
                 rpc.wait_for_request_handle(authorization, Duration::from_secs(30))
                     .await?
-                    .request("eth_getBlockByHash", get_block_params, Level::ERROR.into())
+                    .request("eth_getBlockByHash", &get_block_params, Level::ERROR.into())
                     .await?
             }
             None => {

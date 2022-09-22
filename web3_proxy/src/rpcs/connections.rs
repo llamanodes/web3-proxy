@@ -312,8 +312,8 @@ impl Web3Connections {
         authorization: Option<&Arc<AuthorizedRequest>>,
         active_request_handles: Vec<OpenRequestHandle>,
         method: &str,
-        // TODO: remove this box once i figure out how to do the options
         params: Option<&serde_json::Value>,
+        // TODO: remove this box once i figure out how to do the options
     ) -> Result<Box<RawValue>, ProviderError> {
         // TODO: if only 1 active_request_handles, do self.try_send_request?
 
@@ -321,7 +321,7 @@ impl Web3Connections {
             .into_iter()
             .map(|active_request_handle| async move {
                 let result: Result<Box<RawValue>, _> = active_request_handle
-                    .request(method, params.cloned(), tracing::Level::ERROR.into())
+                    .request(method, &params.cloned(), tracing::Level::ERROR.into())
                     .await;
                 result
             })
@@ -522,7 +522,7 @@ impl Web3Connections {
                     let response_result = active_request_handle
                         .request(
                             &request.method,
-                            request.params.clone(),
+                            &request.params,
                             RequestErrorHandler::SaveReverts(100.0),
                         )
                         .await;

@@ -209,7 +209,7 @@ impl Web3Connection {
                 .await?
                 .request(
                     "eth_getCode",
-                    (
+                    &(
                         "0xdead00000000000000000000000000000000beef",
                         maybe_archive_block,
                     ),

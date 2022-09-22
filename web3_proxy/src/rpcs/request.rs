@@ -55,7 +55,7 @@ impl From<Level> for RequestErrorHandler {
 impl AuthorizedRequest {
     async fn save_revert<T>(self: Arc<Self>, method: String, params: T) -> anyhow::Result<()>
     where
-        T: fmt::Debug + serde::Serialize + Send + Sync,
+        T: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
     {
         todo!("save the revert to the database");
     }
@@ -103,7 +103,7 @@ impl OpenRequestHandle {
     pub async fn request<T, R>(
         &self,
         method: &str,
-        params: T,
+        params: &T,
         error_handler: RequestErrorHandler,
     ) -> Result<R, ProviderError>
     where
@@ -141,8 +141,8 @@ impl OpenRequestHandle {
 
         // TODO: really sucks that we have to clone here
         let response = match provider {
-            Web3Provider::Http(provider) => provider.request(method, params.clone()).await,
-            Web3Provider::Ws(provider) => provider.request(method, params.clone()).await,
+            Web3Provider::Http(provider) => provider.request(method, params).await,
+            Web3Provider::Ws(provider) => provider.request(method, params).await,
         };
 
         if let Err(err) = &response {
@@ -174,7 +174,7 @@ impl OpenRequestHandle {
                                             let f = self
                                                 .authorization
                                                 .clone()
-                                                .save_revert(method.to_string(), params);
+                                                .save_revert(method.to_string(), params.clone());
 
                                             tokio::spawn(async move { f.await });
 
@@ -194,7 +194,7 @@ impl OpenRequestHandle {
                                             let f = self
                                                 .authorization
                                                 .clone()
-                                                .save_revert(method.to_string(), params);
+                                                .save_revert(method.to_string(), params.clone());
 
                                             tokio::spawn(async move { f.await });
                                         } else {
