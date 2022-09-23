@@ -16,15 +16,20 @@ impl MigrationTrait for Migration {
                     .modify_column(
                         ColumnDef::new(UserKeys::RequestsPerMinute)
                             .big_unsigned()
-                            .not_null(),
+                            .null(),
                     )
                     // add a column for logging reverts in the RevertLogs table
                     .add_column(
                         ColumnDef::new(UserKeys::LogReverts)
-                            .boolean()
+                            .decimal_len(5, 4)
                             .not_null()
-                            .default(false),
+                            .default("0.0"),
                     )
+                    // add columns for more advanced authorization
+                    .add_column(ColumnDef::new(UserKeys::AllowedIps).text().null())
+                    .add_column(ColumnDef::new(UserKeys::AllowedOrigins).text().null())
+                    .add_column(ColumnDef::new(UserKeys::AllowedReferers).text().null())
+                    .add_column(ColumnDef::new(UserKeys::AllowedUserAgents).text().null())
                     .to_owned(),
             )
             .await?;
@@ -97,6 +102,7 @@ impl MigrationTrait for Migration {
 pub enum UserKeys {
     Table,
     Id,
+    // we don't touch some of the columns
     // UserId,
     // ApiKey,
     // Description,
@@ -104,6 +110,10 @@ pub enum UserKeys {
     // Active,
     RequestsPerMinute,
     LogReverts,
+    AllowedIps,
+    AllowedOrigins,
+    AllowedReferers,
+    AllowedUserAgents,
 }
 
 #[derive(Iden)]

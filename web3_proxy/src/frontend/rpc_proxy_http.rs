@@ -2,7 +2,7 @@ use super::authorization::{ip_is_authorized, key_is_authorized};
 use super::errors::FrontendResult;
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::Path;
-use axum::headers::{Referer, UserAgent};
+use axum::headers::{Origin, Referer, UserAgent};
 use axum::TypedHeader;
 use axum::{response::IntoResponse, Extension, Json};
 use axum_client_ip::ClientIp;
@@ -42,6 +42,7 @@ pub async fn user_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
     Json(payload): Json<JsonRpcRequestEnum>,
+    origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     Path(user_key): Path<Uuid>,
@@ -53,6 +54,7 @@ pub async fn user_proxy_web3_rpc(
         &app,
         user_key,
         ip,
+        origin.map(|x| x.0),
         referer.map(|x| x.0),
         user_agent.map(|x| x.0),
     )

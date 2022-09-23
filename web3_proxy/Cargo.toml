@@ -36,6 +36,7 @@ flume = "0.10.14"
 futures = { version = "0.3.24", features = ["thread-pool"] }
 hashbrown = { version = "0.12.3", features = ["serde"] }
 http = "0.2.8"
+ipnet = "*"
 metered = { version = "0.9.0", features = ["serialize"] }
 moka = { version = "0.9.4", default-features = false, features = ["future"] }
 notify = "5.0.0"

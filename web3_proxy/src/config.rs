@@ -54,8 +54,7 @@ pub struct AppConfig {
     /// If none, the minimum * 2 is used
     pub db_max_connections: Option<u32>,
     pub influxdb_url: Option<String>,
-    #[serde(default = "default_default_requests_per_minute")]
-    pub default_requests_per_minute: u64,
+    pub default_requests_per_minute: Option<u64>,
     pub invite_code: Option<String>,
     #[serde(default = "default_min_sum_soft_limit")]
     pub min_sum_soft_limit: u32,
@@ -74,12 +73,6 @@ pub struct AppConfig {
     pub redirect_public_url: String,
     /// the stats page url for a logged in user. it must contain "{user_id}"
     pub redirect_user_url: String,
-}
-
-/// default to unlimited requests
-/// TODO: pick a lower limit so we don't get DOSd
-fn default_default_requests_per_minute() -> u64 {
-    u64::MAX
 }
 
 fn default_min_sum_soft_limit() -> u32 {

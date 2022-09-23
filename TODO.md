@@ -160,7 +160,7 @@ These are roughly in order of completition
 - [-] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user.
   - [-] let them choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
-- [-] Api keys need option to lock to IP, cors header, referer, etc
+- [-] Api keys need option to lock to IP, cors header, referer, user agent, etc
 - [ ] active requests per second per api key
 - [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
 - [-] add configurable size limits to all the Caches

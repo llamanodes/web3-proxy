@@ -1,17 +1,15 @@
 use super::errors::FrontendErrorResponse;
 use crate::app::{UserKeyData, Web3ProxyApp};
 use anyhow::Context;
-use axum::headers::{Referer, UserAgent};
+use axum::headers::{Origin, Referer, UserAgent};
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::user_keys;
-use sea_orm::{
-    ColumnTrait, DatabaseConnection, DeriveColumn, EntityTrait, EnumIter, IdenStatic, QueryFilter,
-    QuerySelect,
-};
+use ipnet::IpNet;
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::{net::IpAddr, sync::Arc};
 use tokio::time::Instant;
-use tracing::{error, trace, warn};
+use tracing::{error, trace};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -31,6 +29,7 @@ pub enum RateLimitResult {
 #[derive(Debug, Serialize)]
 pub struct AuthorizedKey {
     ip: IpAddr,
+    origin: Option<String>,
     user_key_id: u64,
     // TODO: what else?
 }
@@ -38,14 +37,64 @@ pub struct AuthorizedKey {
 impl AuthorizedKey {
     pub fn try_new(
         ip: IpAddr,
-        user_data: UserKeyData,
+        origin: Option<Origin>,
         referer: Option<Referer>,
         user_agent: Option<UserAgent>,
+        user_data: UserKeyData,
     ) -> anyhow::Result<Self> {
-        warn!("todo: check referer and user_agent against user_data");
+        // check ip
+        match &user_data.allowed_ips {
+            None => {}
+            Some(allowed_ips) => {
+                if !allowed_ips.iter().any(|x| x.contains(&ip)) {
+                    return Err(anyhow::anyhow!("IP is not allowed!"));
+                }
+            }
+        }
+
+        // check origin
+        // TODO: do this with the Origin type instead of a String?
+        let origin = origin.map(|x| x.to_string());
+        match (&origin, &user_data.allowed_origins) {
+            (None, None) => {}
+            (Some(_), None) => {}
+            (None, Some(_)) => return Err(anyhow::anyhow!("Origin required")),
+            (Some(origin), Some(allowed_origins)) => {
+                let origin = origin.to_string();
+
+                if !allowed_origins.contains(&origin) {
+                    return Err(anyhow::anyhow!("IP is not allowed!"));
+                }
+            }
+        }
+
+        // check referer
+        match (referer, &user_data.allowed_referers) {
+            (None, None) => {}
+            (Some(_), None) => {}
+            (None, Some(_)) => return Err(anyhow::anyhow!("Referer required")),
+            (Some(referer), Some(allowed_referers)) => {
+                if !allowed_referers.contains(&referer) {
+                    return Err(anyhow::anyhow!("Referer is not allowed!"));
+                }
+            }
+        }
+
+        // check user_agent
+        match (user_agent, &user_data.allowed_user_agents) {
+            (None, None) => {}
+            (Some(_), None) => {}
+            (None, Some(_)) => return Err(anyhow::anyhow!("User agent required")),
+            (Some(user_agent), Some(allowed_user_agents)) => {
+                if !allowed_user_agents.contains(&user_agent) {
+                    return Err(anyhow::anyhow!("User agent is not allowed!"));
+                }
+            }
+        }
 
         Ok(Self {
             ip,
+            origin,
             user_key_id: user_data.user_key_id,
         })
     }
@@ -62,14 +111,12 @@ pub enum AuthorizedRequest {
 }
 
 impl AuthorizedRequest {
-    pub fn has_db(&self) -> bool {
-        let db_conn = match self {
-            Self::Internal(db_conn) => db_conn,
-            Self::Ip(db_conn, _) => db_conn,
-            Self::User(db_conn, _) => db_conn,
-        };
-
-        db_conn.is_some()
+    pub fn db_conn(&self) -> Option<&DatabaseConnection> {
+        match self {
+            Self::Internal(x) => x.as_ref(),
+            Self::Ip(x, _) => x.as_ref(),
+            Self::User(x, _) => x.as_ref(),
+        }
     }
 }
 
@@ -96,6 +143,7 @@ pub async fn key_is_authorized(
     app: &Web3ProxyApp,
     user_key: Uuid,
     ip: IpAddr,
+    origin: Option<Origin>,
     referer: Option<Referer>,
     user_agent: Option<UserAgent>,
 ) -> Result<AuthorizedRequest, FrontendErrorResponse> {
@@ -110,7 +158,7 @@ pub async fn key_is_authorized(
         x => unimplemented!("rate_limit_by_key shouldn't ever see these: {:?}", x),
     };
 
-    let authorized_user = AuthorizedKey::try_new(ip, user_data, referer, user_agent)?;
+    let authorized_user = AuthorizedKey::try_new(ip, origin, referer, user_agent, user_data)?;
 
     let db = app.db_conn.clone();
 
@@ -159,50 +207,76 @@ impl Web3ProxyApp {
 
                 let db = self.db_conn.as_ref().context("no database")?;
 
-                /// helper enum for querying just a few columns instead of the entire table
-                /// TODO: query more! we need allowed ips, referers, and probably other things
-                #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
-                enum QueryAs {
-                    Id,
-                    RequestsPerMinute,
-                }
-
                 // TODO: join the user table to this to return the User? we don't always need it
                 match user_keys::Entity::find()
-                    .select_only()
-                    .column_as(user_keys::Column::Id, QueryAs::Id)
-                    .column_as(
-                        user_keys::Column::RequestsPerMinute,
-                        QueryAs::RequestsPerMinute,
-                    )
                     .filter(user_keys::Column::ApiKey.eq(user_key))
                     .filter(user_keys::Column::Active.eq(true))
-                    .into_values::<_, QueryAs>()
                     .one(db)
                     .await?
                 {
-                    Some((user_key_id, requests_per_minute)) => {
-                        // TODO: add a column here for max, or is u64::MAX fine?
-                        let user_count_per_period = if requests_per_minute == u64::MAX {
-                            None
-                        } else {
-                            Some(requests_per_minute)
-                        };
+                    Some(user_key_model) => {
+                        let allowed_ips: Option<Vec<IpNet>> =
+                            user_key_model.allowed_ips.map(|allowed_ips| {
+                                serde_json::from_str::<Vec<String>>(&allowed_ips)
+                                    .expect("allowed_ips should always parse")
+                                    .into_iter()
+                                    // TODO: try_for_each
+                                    .map(|x| {
+                                        x.parse::<IpNet>().expect("ip address should always parse")
+                                    })
+                                    .collect()
+                            });
+
+                        // TODO: should this be an Option<Vec<Origin>>?
+                        let allowed_origins =
+                            user_key_model.allowed_origins.map(|allowed_origins| {
+                                serde_json::from_str::<Vec<String>>(&allowed_origins)
+                                    .expect("allowed_origins should always parse")
+                            });
+
+                        let allowed_referers =
+                            user_key_model.allowed_referers.map(|allowed_referers| {
+                                serde_json::from_str::<Vec<String>>(&allowed_referers)
+                                    .expect("allowed_referers should always parse")
+                                    .into_iter()
+                                    // TODO: try_for_each
+                                    .map(|x| {
+                                        x.parse::<Referer>().expect("referer should always parse")
+                                    })
+                                    .collect()
+                            });
+
+                        let allowed_user_agents =
+                            user_key_model
+                                .allowed_user_agents
+                                .map(|allowed_user_agents| {
+                                    serde_json::from_str::<Vec<String>>(&allowed_user_agents)
+                                        .expect("allowed_user_agents should always parse")
+                                        .into_iter()
+                                        // TODO: try_for_each
+                                        .map(|x| {
+                                            x.parse::<UserAgent>()
+                                                .expect("user agent should always parse")
+                                        })
+                                        .collect()
+                                });
 
                         Ok(UserKeyData {
-                            user_key_id,
-                            user_count_per_period,
-                            allowed_ip: None,
-                            allowed_referer: None,
-                            allowed_user_agent: None,
+                            user_key_id: user_key_model.id,
+                            user_max_requests_per_period: user_key_model.requests_per_minute,
+                            allowed_ips,
+                            allowed_origins,
+                            allowed_referers,
+                            allowed_user_agents,
                         })
                     }
                     None => Ok(UserKeyData {
                         user_key_id: 0,
-                        user_count_per_period: Some(0),
-                        allowed_ip: None,
-                        allowed_referer: None,
-                        allowed_user_agent: None,
+                        user_max_requests_per_period: Some(0),
+                        allowed_ips: None,
+                        allowed_origins: None,
+                        allowed_referers: None,
+                        allowed_user_agents: None,
                     }),
                 }
             })
@@ -219,7 +293,7 @@ impl Web3ProxyApp {
             return Ok(RateLimitResult::UnknownKey);
         }
 
-        let user_count_per_period = match user_data.user_count_per_period {
+        let user_max_requests_per_period = match user_data.user_max_requests_per_period {
             None => return Ok(RateLimitResult::AllowedUser(user_data)),
             Some(x) => x,
         };
@@ -227,7 +301,7 @@ impl Web3ProxyApp {
         // user key is valid. now check rate limits
         if let Some(rate_limiter) = &self.frontend_key_rate_limiter {
             match rate_limiter
-                .throttle(user_key, Some(user_count_per_period), 1)
+                .throttle(user_key, Some(user_max_requests_per_period), 1)
                 .await
             {
                 Ok(DeferredRateLimitResult::Allowed) => Ok(RateLimitResult::AllowedUser(user_data)),

@@ -1,6 +1,6 @@
 use super::authorization::{ip_is_authorized, key_is_authorized, AuthorizedRequest};
 use super::errors::FrontendResult;
-use axum::headers::{Referer, UserAgent};
+use axum::headers::{Origin, Referer, UserAgent};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::Path,
@@ -57,6 +57,7 @@ pub async fn user_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
     Path(user_key): Path<Uuid>,
+    origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
@@ -65,6 +66,7 @@ pub async fn user_websocket_handler(
         &app,
         user_key,
         ip,
+        origin.map(|x| x.0),
         referer.map(|x| x.0),
         user_agent.map(|x| x.0),
     )

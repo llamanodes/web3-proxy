@@ -2,6 +2,7 @@ use super::connection::Web3Connection;
 use super::provider::Web3Provider;
 use crate::frontend::authorization::AuthorizedRequest;
 use crate::metered::{JsonRpcErrorCount, ProviderErrorCount};
+use anyhow::Context;
 use ethers::providers::{HttpClientError, ProviderError, WsClientError};
 use metered::metered;
 use metered::HitCount;
@@ -63,6 +64,8 @@ impl AuthorizedRequest {
     where
         T: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
     {
+        let db_conn = self.db_conn().context("db_conn needed to save reverts")?;
+
         todo!("save the revert to the database");
     }
 }
@@ -158,7 +161,8 @@ impl OpenRequestHandle {
             let error_handler = if let RequestErrorHandler::SaveReverts(save_chance) = error_handler
             {
                 if ["eth_call", "eth_estimateGas"].contains(&method)
-                    && self.authorization.has_db()
+                    && self.authorization.db_conn().is_some()
+                    && save_chance != 0.0
                     && (save_chance == 1.0
                         || rand::thread_rng().gen_range(0.0..=1.0) <= save_chance)
                 {

@@ -15,7 +15,11 @@ pub struct Model {
     pub description: Option<String>,
     pub private_txs: bool,
     pub active: bool,
-    pub requests_per_minute: u64,
+    pub requests_per_minute: Option<u64>,
+    pub allowed_ips: Option<String>,
+    pub allowed_origins: Option<String>,
+    pub allowed_referers: Option<String>,
+    pub allowed_user_agents: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

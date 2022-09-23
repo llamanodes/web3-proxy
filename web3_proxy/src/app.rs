@@ -24,6 +24,7 @@ use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use futures::Future;
 use hashbrown::HashMap;
+use ipnet::IpNet;
 use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
 use migration::{Migrator, MigratorTrait};
 use moka::future::Cache;
@@ -66,14 +67,16 @@ pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 /// TODO: rename this?
 pub struct UserKeyData {
     pub user_key_id: u64,
-    /// if None, allow unlimited queries
-    pub user_count_per_period: Option<u64>,
+    /// if u64::MAX, allow unlimited queries
+    pub user_max_requests_per_period: Option<u64>,
+    /// if None, allow any Origin
+    pub allowed_origins: Option<Vec<String>>,
     /// if None, allow any Referer
-    pub allowed_referer: Option<Referer>,
+    pub allowed_referers: Option<Vec<Referer>>,
     /// if None, allow any UserAgent
-    pub allowed_user_agent: Option<UserAgent>,
-    /// if None, allow any IpAddr
-    pub allowed_ip: Option<IpAddr>,
+    pub allowed_user_agents: Option<Vec<UserAgent>>,
+    /// if None, allow any IP Address
+    pub allowed_ips: Option<Vec<IpNet>>,
 }
 
 /// The application
