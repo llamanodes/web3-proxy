@@ -44,6 +44,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
+use tower_cookies::Key;
 use tracing::{error, info, trace, warn};
 use uuid::Uuid;
 
@@ -87,6 +88,8 @@ pub struct Web3ProxyApp {
     pub balanced_rpcs: Arc<Web3Connections>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     pub private_rpcs: Option<Arc<Web3Connections>>,
+    // TODO: this lifetime is definitely wrong
+    pub cookie_key: Key,
     response_cache: ResponseCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
@@ -368,8 +371,12 @@ impl Web3ProxyApp {
             .time_to_live(Duration::from_secs(60))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
+        // TODO: get this from the app's config
+        let cookie_key = Key::from(&[0; 64]);
+
         let app = Self {
             config: top_config.app,
+            cookie_key,
             balanced_rpcs,
             private_rpcs,
             response_cache,

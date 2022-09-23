@@ -15,6 +15,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tower_cookies::CookieManagerLayer;
 use tower_http::trace::TraceLayer;
 use tower_request_id::{RequestId, RequestIdLayer};
 use tracing::{error_span, info};
@@ -43,20 +44,25 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         });
 
     // build our axum Router
+    // TODO: these should probbably all start with /rpc. then / can be the static site
     let app = Router::new()
         // routes should be order most to least common
-        .route("/", post(rpc_proxy_http::public_proxy_web3_rpc))
-        .route("/", get(rpc_proxy_ws::public_websocket_handler))
-        .route("/u/:user_key", post(rpc_proxy_http::user_proxy_web3_rpc))
-        .route("/u/:user_key", get(rpc_proxy_ws::user_websocket_handler))
-        .route("/health", get(http::health))
-        .route("/status", get(http::status))
+        .route("/rpc", post(rpc_proxy_http::public_proxy_web3_rpc))
+        .route("/rpc", get(rpc_proxy_ws::public_websocket_handler))
+        .route("/rpc/:user_key", post(rpc_proxy_http::user_proxy_web3_rpc))
+        .route("/rpc/:user_key", get(rpc_proxy_ws::user_websocket_handler))
+        .route("/rpc/health", get(http::health))
+        .route("/rpc/status", get(http::status))
         // TODO: make this optional or remove it since it is available on another port
-        .route("/prometheus", get(http::prometheus))
-        .route("/login/:user_address", get(users::get_login))
-        .route("/login/:user_address/:message_eip", get(users::get_login))
-        .route("/login", post(users::post_login))
-        .route("/users", post(users::post_user))
+        .route("/rpc/prometheus", get(http::prometheus))
+        .route("/rpc/user/login/:user_address", get(users::get_login))
+        .route(
+            "/rpc/user/login/:user_address/:message_eip",
+            get(users::get_login),
+        )
+        .route("/rpc/user/login", post(users::post_login))
+        .route("/rpc/user", post(users::post_user))
+        .route("/rpc/user/logout", get(users::get_logout))
         // layers are ordered bottom up
         // the last layer is first for requests and last for responses
         .layer(Extension(proxy_app))
@@ -64,6 +70,8 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .layer(request_tracing_layer)
         // create a unique id for each request
         .layer(RequestIdLayer)
+        // signed cookies
+        .layer(CookieManagerLayer::new())
         // 404 for any unknown routes
         .fallback(errors::handler_404.into_service());
 

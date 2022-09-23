@@ -309,7 +309,6 @@ impl Web3Connections {
     /// Send the same request to all the handles. Returning the most common success or most common error.
     pub async fn try_send_parallel_requests(
         &self,
-        authorization: Option<&Arc<AuthorizedRequest>>,
         active_request_handles: Vec<OpenRequestHandle>,
         method: &str,
         params: Option<&serde_json::Value>,
@@ -613,7 +612,6 @@ impl Web3Connections {
                     // TODO: this is not working right. simplify
                     let quorum_response = self
                         .try_send_parallel_requests(
-                            authorization,
                             active_request_handles,
                             request.method.as_ref(),
                             request.params.as_ref(),

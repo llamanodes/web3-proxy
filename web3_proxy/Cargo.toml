@@ -23,7 +23,6 @@ anyhow = { version = "1.0.65", features = ["backtrace"] }
 arc-swap = "1.5.1"
 argh = "0.1.9"
 axum = { version = "0.5.16", features = ["headers", "serde_json", "tokio-tungstenite", "ws"] }
-axum-auth = "0.3.0"
 axum-client-ip = "0.2.0"
 axum-macros = "0.2.3"
 counter = "0.5.6"
@@ -36,7 +35,7 @@ flume = "0.10.14"
 futures = { version = "0.3.24", features = ["thread-pool"] }
 hashbrown = { version = "0.12.3", features = ["serde"] }
 http = "0.2.8"
-ipnet = "*"
+ipnet = "2.5.0"
 metered = { version = "0.9.0", features = ["serialize"] }
 moka = { version = "0.9.4", default-features = false, features = ["future"] }
 notify = "5.0.0"
@@ -60,7 +59,7 @@ time = "0.3.14"
 tokio = { version = "1.21.1", features = ["full", "tracing"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.10", features = ["sync"] }
-tower-cookies = "0.7.0"
+tower-cookies = { version = "0.7.0", features = ["private"] }
 toml = "0.5.9"
 tower = "0.4.13"
 tower-request-id = "0.2.0"

@@ -125,6 +125,7 @@ pub async fn ip_is_authorized(
     ip: IpAddr,
 ) -> Result<AuthorizedRequest, FrontendErrorResponse> {
     // TODO: i think we could write an `impl From` for this
+    // TODO: move this to an AuthorizedUser extrator
     let ip = match app.rate_limit_by_ip(ip).await? {
         RateLimitResult::AllowedIp(x) => x,
         RateLimitResult::RateLimitedIp(x, retry_at) => {

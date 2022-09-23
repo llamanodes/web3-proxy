@@ -160,19 +160,23 @@ These are roughly in order of completition
 - [-] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user.
   - [-] let them choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
-- [-] Api keys need option to lock to IP, cors header, referer, user agent, etc
+- [x] Api keys need option to lock to IP, cors header, referer, user agent, etc
+- [ ] endpoint for creating/modifying api keys and their advanced security features
 - [ ] active requests per second per api key
 - [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
 - [-] add configurable size limits to all the Caches
+- [ ] /user/logout to clear bearer token and jwt
+- [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
+- [ ] bearer tokens should expire
+- [-] signed cookie jar
+- [ ] user login should return both the bearer token and a jwt (jsonwebtoken rust crate should make it easy)
+- [ ] revert logs should have a maximum age and a maximum count to keep the database from being huge
 - [ ] Ulid instead of Uuid for user keys
   - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
   - since users are actively using our service, we will need to support both
 - [ ] Ulid instead of Uuid for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
-- [ ] bearer tokens should expire
-- [-] signed cookie jar
-- [ ] user login should return both the bearer token and a jwt (jsonwebtoken rust crate should make it easy)
-- [ ] /user/logout to clear bearer token and jwt
+- [ ] option to rotate api key
 
 ## V1
 

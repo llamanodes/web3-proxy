@@ -13,10 +13,10 @@ use crate::{app::Web3ProxyApp, users::new_api_key};
 use anyhow::Context;
 use axum::{
     extract::{Path, Query},
+    headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
-    Extension, Json,
+    Extension, Json, TypedHeader,
 };
-use axum_auth::AuthBearer;
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
 use entities::{user, user_keys};
@@ -30,6 +30,7 @@ use siwe::Message;
 use std::ops::Add;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
+use tower_cookies::Cookies;
 use ulid::Ulid;
 use uuid::Uuid;
 
@@ -139,8 +140,8 @@ pub struct PostLoginResponse {
 #[debug_handler]
 /// Post to the user endpoint to register or login.
 pub async fn post_login(
-    ClientIp(ip): ClientIp,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ClientIp(ip): ClientIp,
     Json(payload): Json<PostLogin>,
     Query(query): Query<PostLoginQuery>,
 ) -> FrontendResult {
@@ -255,6 +256,29 @@ pub async fn post_login(
     Ok(response)
 }
 
+#[debug_handler]
+pub async fn get_logout(
+    cookies: Cookies,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+) -> FrontendResult {
+    // delete the cookie if it exists
+    let private_cookies = cookies.private(&app.cookie_key);
+
+    if let Some(c) = private_cookies.get("bearer") {
+        let bearer_cache_key = format!("bearer:{}", c.value());
+
+        // TODO: should deleting the cookie be last? redis being down shouldn't block the user
+        private_cookies.remove(c);
+
+        let mut redis_conn = app.redis_conn().await?;
+
+        redis_conn.del(bearer_cache_key).await?;
+    }
+
+    // TODO: what should the response be? probably json something
+    Ok("goodbye".into_response())
+}
+
 /// the JSON input to the `post_user` handler
 /// This handles updating
 #[derive(Deserialize)]
@@ -268,7 +292,7 @@ pub struct PostUser {
 #[debug_handler]
 /// post to the user endpoint to modify your existing account
 pub async fn post_user(
-    AuthBearer(bearer_token): AuthBearer,
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     ClientIp(ip): ClientIp,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Json(payload): Json<PostUser>,
@@ -313,16 +337,18 @@ impl ProtectedAction {
     async fn verify(
         self,
         app: &Web3ProxyApp,
-        bearer_token: String,
+        bearer: Bearer,
         primary_address: &Address,
     ) -> anyhow::Result<user::Model> {
         // get the attached address from redis for the given auth_token.
-        let bearer_key = format!("bearer:{}", bearer_token);
+        let bearer_cache_key = format!("bearer:{}", bearer.token());
 
         let mut redis_conn = app.redis_conn().await?;
 
         // TODO: is this type correct?
-        let u_id: Option<u64> = redis_conn.get(bearer_key).await?;
+        let u_id: Option<u64> = redis_conn.get(bearer_cache_key).await?;
+
+        // TODO: if not in redis, check the db?
 
         // TODO: if auth_address == primary_address, allow
         // TODO: if auth_address != primary_address, only allow if they are a secondary user with the correct role
