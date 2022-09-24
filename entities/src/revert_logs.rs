@@ -13,8 +13,8 @@ pub struct Model {
     pub timestamp: DateTimeUtc,
     pub method: Method,
     pub to: Vec<u8>,
-    #[sea_orm(column_type = "Text")]
-    pub call_data: String,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub call_data: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

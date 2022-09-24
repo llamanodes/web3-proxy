@@ -61,7 +61,7 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(RevertLogs::To).binary_len(20).not_null())
-                    .col(ColumnDef::new(RevertLogs::CallData).text().not_null())
+                    .col(ColumnDef::new(RevertLogs::CallData).text().null())
                     .index(sea_query::Index::create().col(RevertLogs::To))
                     .foreign_key(
                         sea_query::ForeignKey::create()
