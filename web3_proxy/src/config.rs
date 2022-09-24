@@ -67,8 +67,10 @@ pub struct AppConfig {
     #[serde(default = "default_min_synced_rpcs")]
     pub min_synced_rpcs: usize,
     /// Set to 0 to block all anonymous requests
-    #[serde(default = "default_public_rate_limit_per_minute")]
-    pub public_rate_limit_per_minute: u64,
+    #[serde(default = "default_frontend_rate_limit_per_minute")]
+    pub frontend_rate_limit_per_minute: u64,
+    #[serde(default = "default_login_rate_limit_per_minute")]
+    pub login_rate_limit_per_minute: u64,
     pub redis_url: Option<String>,
     /// maximum size of the connection pool for the cache
     /// If none, the minimum * 2 is used
@@ -89,9 +91,14 @@ fn default_min_synced_rpcs() -> usize {
     1
 }
 
-/// 0 blocks public requests by default.
-fn default_public_rate_limit_per_minute() -> u64 {
+/// 0 blocks anonymous requests by default.
+fn default_frontend_rate_limit_per_minute() -> u64 {
     0
+}
+
+/// Having a low amount of requests per minute for login is safest.
+fn default_login_rate_limit_per_minute() -> u64 {
+    10
 }
 
 fn default_response_cache_max_bytes() -> usize {

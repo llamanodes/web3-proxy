@@ -104,6 +104,7 @@ pub struct Web3ProxyApp {
     pub pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     pub frontend_key_rate_limiter: Option<DeferredRateLimiter<Uuid>>,
+    pub login_rate_limiter: Option<RedisRateLimiter>,
     pub redis_pool: Option<RedisPool>,
     pub user_cache: Cache<Uuid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
 }
@@ -336,22 +337,37 @@ impl Web3ProxyApp {
 
         let mut frontend_ip_rate_limiter = None;
         let mut frontend_key_rate_limiter = None;
+        let mut login_rate_limiter = None;
+
         if let Some(redis_pool) = redis_pool.as_ref() {
-            let rrl = RedisRateLimiter::new(
+            let rpc_rrl = RedisRateLimiter::new(
                 "web3_proxy",
                 "frontend",
-                top_config.app.public_rate_limit_per_minute,
+                top_config.app.frontend_rate_limit_per_minute,
                 60.0,
                 redis_pool.clone(),
             );
 
+            // these two rate limiters can share the base limiter
             // TODO: take cache_size from config
             frontend_ip_rate_limiter = Some(DeferredRateLimiter::<IpAddr>::new(
                 10_000,
                 "ip",
-                rrl.clone(),
+                rpc_rrl.clone(),
+                None,
             ));
-            frontend_key_rate_limiter = Some(DeferredRateLimiter::<Uuid>::new(10_000, "key", rrl));
+            frontend_key_rate_limiter = Some(DeferredRateLimiter::<Uuid>::new(
+                10_000, "key", rpc_rrl, None,
+            ));
+
+            // don't defer this one because it will have a low request per peiod
+            login_rate_limiter = Some(RedisRateLimiter::new(
+                "web3_proxy",
+                "login",
+                top_config.app.login_rate_limit_per_minute,
+                60.0,
+                redis_pool.clone(),
+            ));
         }
 
         // keep 1GB of blocks in the cache
@@ -381,6 +397,7 @@ impl Web3ProxyApp {
             pending_transactions,
             frontend_ip_rate_limiter,
             frontend_key_rate_limiter,
+            login_rate_limiter,
             db_conn,
             redis_pool,
             app_metrics,

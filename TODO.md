@@ -161,16 +161,19 @@ These are roughly in order of completition
 - [x] Api keys need option to lock to IP, cors header, referer, user agent, etc
 - [x] /user/logout to clear bearer token and jwt
 - [x] bearer tokens should expire
-- [-] user login should return the bearer token, the user keys, and a jwt (jsonwebtoken rust crate should make it easy)
+- [x] login endpoint needs its own rate limiter
+  - we don't want an rpc request limit of 0 to block logins
+  - for security, we want these limits low.
+- [x] user login should return the bearer token and the user keys
+- [x] use siwe messages and signatures for sign up and login
+- [ ] active requests per second per api key
+- [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
 - [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
   - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
 - [-] add configurable size limits to all the Caches
-- [ ] active requests per second per api key
-- [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
 - [ ] endpoint for creating/modifying api keys and their advanced security features
 - [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
-- [ ] revert logs should have a maximum age and a maximum count to keep the database from being huge
 - [ ] Ulid instead of Uuid for user keys
   - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
   - since users are actively using our service, we will need to support both
@@ -183,7 +186,9 @@ These are roughly in order of completition
 
 These are not yet ordered.
 
-- [-] use siwe messages and signatures for sign up and login
+- [ ] instead of Option<...> in our frontend function signatures, use result and then the try operator so that we get our errors wrapped in json
+- [ ] revert logs should have a maximum age and a maximum count to keep the database from being huge
+- [ ] user login should also return a jwt (jsonwebtoken rust crate should make it easy)
 - [-] if we request an old block, more servers can handle it than we currently use.
     - [ ] instead of the one list of just heads, store our intermediate mappings (rpcs_by_hash, rpcs_by_num, blocks_by_hash) in SyncedConnections. this shouldn't be too much slower than what we have now
     - [ ] remove the if/else where we optionally route to archive and refactor to require a BlockNumber enum

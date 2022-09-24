@@ -790,7 +790,7 @@ impl Web3Connection {
         // check rate limits
         if let Some(ratelimiter) = self.hard_limit.as_ref() {
             // TODO: how should we know if we should set expire or not?
-            match ratelimiter.throttle(true).await? {
+            match ratelimiter.throttle().await? {
                 RedisRateLimitResult::Allowed(_) => {
                     trace!("rate limit succeeded")
                 }

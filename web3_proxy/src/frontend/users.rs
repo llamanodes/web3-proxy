@@ -7,7 +7,7 @@
 // I wonder how we handle payment
 // probably have to do manual withdrawals
 
-use super::authorization::ip_is_authorized;
+use super::authorization::login_is_authorized;
 use super::errors::FrontendResult;
 use crate::{app::Web3ProxyApp, users::new_api_key};
 use anyhow::Context;
@@ -42,7 +42,7 @@ pub async fn get_login(
     // TODO: allow ENS names here?
     Path(mut params): Path<HashMap<String, String>>,
 ) -> FrontendResult {
-    let _ip = ip_is_authorized(&app, ip).await?;
+    let _ = login_is_authorized(&app, ip).await?;
 
     // at first i thought about checking that user_address is in our db
     // but theres no need to separate the registration and login flows
@@ -119,6 +119,7 @@ pub struct PostLoginQuery {
 }
 
 /// JSON body to our `post_login` handler.
+/// TODO: this should be an enum with the different login methods having different structs
 #[derive(Deserialize)]
 pub struct PostLogin {
     address: Address,
@@ -145,7 +146,7 @@ pub async fn post_login(
     Json(payload): Json<PostLogin>,
     Query(query): Query<PostLoginQuery>,
 ) -> FrontendResult {
-    let _ip = ip_is_authorized(&app, ip).await?;
+    let _ = login_is_authorized(&app, ip).await?;
 
     if let Some(invite_code) = &app.config.invite_code {
         // we don't do per-user referral codes because we shouldn't collect what we don't need.
@@ -291,7 +292,7 @@ pub async fn post_user(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Json(payload): Json<PostUser>,
 ) -> FrontendResult {
-    let _ip = ip_is_authorized(&app, ip).await?;
+    let _ = login_is_authorized(&app, ip).await?;
 
     let user = ProtectedAction::PostUser
         .verify(app.as_ref(), bearer_token, &payload.primary_address)

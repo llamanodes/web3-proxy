@@ -5,6 +5,7 @@ use axum::headers::{Origin, Referer, UserAgent};
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::user_keys;
 use ipnet::IpNet;
+use redis_rate_limiter::RedisRateLimitResult;
 use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::{net::IpAddr, sync::Arc};
@@ -122,6 +123,26 @@ impl AuthorizedRequest {
     }
 }
 
+pub async fn login_is_authorized(
+    app: &Web3ProxyApp,
+    ip: IpAddr,
+) -> Result<AuthorizedRequest, FrontendErrorResponse> {
+    // TODO: i think we could write an `impl From` for this
+    // TODO: move this to an AuthorizedUser extrator
+    let ip = match app.rate_limit_login(ip).await? {
+        RateLimitResult::AllowedIp(x) => x,
+        RateLimitResult::RateLimitedIp(x, retry_at) => {
+            return Err(FrontendErrorResponse::RateLimitedIp(x, retry_at));
+        }
+        // TODO: don't panic. give the user an error
+        x => unimplemented!("rate_limit_login shouldn't ever see these: {:?}", x),
+    };
+
+    let db = None;
+
+    Ok(AuthorizedRequest::Ip(db, ip))
+}
+
 pub async fn ip_is_authorized(
     app: &Web3ProxyApp,
     ip: IpAddr,
@@ -169,6 +190,38 @@ pub async fn key_is_authorized(
 }
 
 impl Web3ProxyApp {
+    pub async fn rate_limit_login(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
+        // TODO: dry this up with rate_limit_by_key
+        // TODO: have a local cache because if we hit redis too hard we get errors
+        // TODO: query redis in the background so that users don't have to wait on this network request
+        if let Some(rate_limiter) = &self.login_rate_limiter {
+            match rate_limiter.throttle_label(&ip.to_string(), None, 1).await {
+                Ok(RedisRateLimitResult::Allowed(_)) => Ok(RateLimitResult::AllowedIp(ip)),
+                Ok(RedisRateLimitResult::RetryAt(retry_at, _)) => {
+                    // TODO: set headers so they know when they can retry
+                    // TODO: debug or trace?
+                    // this is too verbose, but a stat might be good
+                    trace!(?ip, "login rate limit exceeded until {:?}", retry_at);
+                    Ok(RateLimitResult::RateLimitedIp(ip, Some(retry_at)))
+                }
+                Ok(RedisRateLimitResult::RetryNever) => {
+                    // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
+                    trace!(?ip, "login rate limit is 0");
+                    Ok(RateLimitResult::RateLimitedIp(ip, None))
+                }
+                Err(err) => {
+                    // internal error, not rate limit being hit
+                    // TODO: i really want axum to do this for us in a single place.
+                    error!(?err, "login rate limiter is unhappy. allowing ip");
+                    Ok(RateLimitResult::AllowedIp(ip))
+                }
+            }
+        } else {
+            // TODO: if no redis, rate limit with a local cache? "warn!" probably isn't right
+            todo!("no rate limiter");
+        }
+    }
+
     pub async fn rate_limit_by_ip(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_key
         // TODO: have a local cache because if we hit redis too hard we get errors

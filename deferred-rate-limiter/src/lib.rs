@@ -19,6 +19,8 @@ where
     local_cache: Cache<K, Arc<AtomicU64>, hashbrown::hash_map::DefaultHashBuilder>,
     prefix: String,
     rrl: RedisRateLimiter,
+    /// if None, defers to the max on rrl
+    default_max_requests_per_period: Option<u64>,
 }
 
 pub enum DeferredRateLimitResult {
@@ -31,7 +33,12 @@ impl<K> DeferredRateLimiter<K>
 where
     K: Copy + Debug + Display + Hash + Eq + Send + Sync + 'static,
 {
-    pub fn new(cache_size: u64, prefix: &str, rrl: RedisRateLimiter) -> Self {
+    pub fn new(
+        cache_size: u64,
+        prefix: &str,
+        rrl: RedisRateLimiter,
+        default_max_requests_per_second: Option<u64>,
+    ) -> Self {
         let ttl = rrl.period as u64;
 
         // TODO: time to live is not exactly right. we want this ttl counter to start only after redis is down. this works for now
@@ -45,6 +52,7 @@ where
             local_cache,
             prefix: prefix.to_string(),
             rrl,
+            default_max_requests_per_period: default_max_requests_per_second,
         }
     }
 
@@ -53,12 +61,15 @@ where
     pub async fn throttle(
         &self,
         key: K,
-        max_per_period: Option<u64>,
+        max_requests_per_period: Option<u64>,
         count: u64,
     ) -> anyhow::Result<DeferredRateLimitResult> {
-        let max_per_period = max_per_period.unwrap_or(self.rrl.max_requests_per_period);
+        let max_requests_per_period = max_requests_per_period.unwrap_or_else(|| {
+            self.default_max_requests_per_period
+                .unwrap_or(self.rrl.max_requests_per_period)
+        });
 
-        if max_per_period == 0 {
+        if max_requests_per_period == 0 {
             return Ok(DeferredRateLimitResult::RetryNever);
         }
 
@@ -79,7 +90,7 @@ where
                 .get_with(key, async move {
                     // we do not use the try operator here because we want to be okay with redis errors
                     let redis_count = match rrl
-                        .throttle_label(&redis_key, Some(max_per_period), count, true)
+                        .throttle_label(&redis_key, Some(max_requests_per_period), count)
                         .await
                     {
                         Ok(RedisRateLimitResult::Allowed(count)) => {
@@ -131,7 +142,7 @@ where
             // assuming no other parallel futures incremented this key, this is the count that redis has
             let expected_key_count = cached_key_count + count;
 
-            if expected_key_count > max_per_period {
+            if expected_key_count > max_requests_per_period {
                 // rate limit overshot!
                 let now = self.rrl.now_as_secs();
 
@@ -149,7 +160,7 @@ where
                     let rrl = self.rrl.clone();
                     async move {
                         match rrl
-                            .throttle_label(&redis_key, Some(max_per_period), count, false)
+                            .throttle_label(&redis_key, Some(max_requests_per_period), count)
                             .await
                         {
                             Ok(RedisRateLimitResult::Allowed(count)) => {
@@ -180,7 +191,7 @@ where
 
                 // if close to max_per_period, wait for redis
                 // TODO: how close should we allow? depends on max expected concurent requests from one user
-                if expected_key_count > max_per_period * 99 / 100 {
+                if expected_key_count > max_requests_per_period * 99 / 100 {
                     // close to period. don't risk it. wait on redis
                     Ok(rate_limit_f.await)
                 } else {
