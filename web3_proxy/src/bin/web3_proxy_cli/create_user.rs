@@ -39,21 +39,19 @@ impl CreateUserSubCommand {
 
         // TODO: would be nice to use the fixed array instead of a Vec in the entities
         // take a simple String. If it starts with 0x, parse as address. otherwise convert ascii to hex
-        // TODO: there has to be a cleaner way to convert a String to a [u8; 20]
         let address = if self.address.starts_with("0x") {
             let address = self.address.parse::<Address>()?;
 
             address.to_fixed_bytes().into()
         } else {
-            let bytes = self.address.as_bytes();
+            // left pad and truncate the string
+            let address = &format!("{:\x00>20}", self.address)[0..20];
 
-            let mut address: [u8; 20] = [0; 20];
+            // convert the string to bytes
+            let bytes = address.as_bytes();
 
-            let len = 20.min(bytes.len());
-
-            address[..len].copy_from_slice(&bytes[..len]);
-
-            address.into()
+            // convert the slice to a Vec
+            bytes.try_into().unwrap()
         };
 
         // TODO: get existing or create a new one
