@@ -1,10 +1,11 @@
 use super::errors::FrontendErrorResponse;
 use crate::app::{UserKeyData, Web3ProxyApp};
 use anyhow::Context;
-use axum::headers::{Origin, Referer, UserAgent};
+use axum::headers::{authorization::Bearer, Origin, Referer, UserAgent};
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::user_keys;
 use ipnet::IpNet;
+use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
 use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
@@ -143,6 +144,37 @@ pub async fn login_is_authorized(
     Ok(AuthorizedRequest::Ip(db, ip))
 }
 
+pub async fn bearer_is_authorized(
+    app: &Web3ProxyApp,
+    bearer: Bearer,
+    ip: IpAddr,
+    origin: Option<Origin>,
+    referer: Option<Referer>,
+    user_agent: Option<UserAgent>,
+) -> Result<AuthorizedRequest, FrontendErrorResponse> {
+    let mut redis_conn = app.redis_conn().await.context("Getting redis connection")?;
+
+    // TODO: verify that bearer.token() is a Ulid?
+    let bearer_cache_key = format!("bearer:{}", bearer.token());
+
+    // turn bearer into a user key id
+    let user_key_id: u64 = redis_conn
+        .get(bearer_cache_key)
+        .await
+        .context("unknown bearer token")?;
+
+    let db_conn = app.db_conn().context("Getting database connection")?;
+
+    // turn user key id into a user key
+    let user_key_data = user_keys::Entity::find_by_id(user_key_id)
+        .one(db_conn)
+        .await
+        .context("fetching user key by id")?
+        .context("unknown user id")?;
+
+    key_is_authorized(app, user_key_data.api_key, ip, origin, referer, user_agent).await
+}
+
 pub async fn ip_is_authorized(
     app: &Web3ProxyApp,
     ip: IpAddr,
@@ -261,7 +293,7 @@ impl Web3ProxyApp {
             .try_get_with(user_key, async move {
                 trace!(?user_key, "user_cache miss");
 
-                let db = self.db_conn.as_ref().context("no database")?;
+                let db = self.db_conn().context("Getting database connection")?;
 
                 // TODO: join the user table to this to return the User? we don't always need it
                 match user_keys::Entity::find()

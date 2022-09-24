@@ -175,7 +175,7 @@ pub async fn post_login(
 
     let bearer_token = Ulid::new();
 
-    let db = app.db_conn.as_ref().unwrap();
+    let db = app.db_conn().context("Getting database connection")?;
 
     // TODO: limit columns or load whole user?
     let u = user::Entity::find()
@@ -263,10 +263,10 @@ pub async fn get_logout(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
+    let mut redis_conn = app.redis_conn().await?;
+
     // TODO: i don't like this. move this to a helper function so it is less fragile
     let bearer_cache_key = format!("bearer:{}", bearer.token());
-
-    let mut redis_conn = app.redis_conn().await?;
 
     redis_conn.del(bearer_cache_key).await?;
 
@@ -310,7 +310,7 @@ pub async fn post_user(
         }
     }
 
-    let db = app.db_conn.as_ref().unwrap();
+    let db = app.db_conn().context("Getting database connection")?;
 
     user.save(db).await?;
 
@@ -332,16 +332,19 @@ impl ProtectedAction {
     async fn verify(
         self,
         app: &Web3ProxyApp,
+        // TODO: i don't think we want Bearer here. we want user_key and a helper for bearer -> user_key
         bearer: Bearer,
         primary_address: &Address,
     ) -> anyhow::Result<user::Model> {
         // get the attached address from redis for the given auth_token.
-        let bearer_cache_key = format!("bearer:{}", bearer.token());
-
         let mut redis_conn = app.redis_conn().await?;
 
-        // TODO: is this type correct?
-        let u_id: Option<u64> = redis_conn.get(bearer_cache_key).await?;
+        let bearer_cache_key = format!("bearer:{}", bearer.token());
+
+        let user_key_id: Option<u64> = redis_conn
+            .get(bearer_cache_key)
+            .await
+            .context("fetching bearer cache key from redis")?;
 
         // TODO: if auth_address == primary_address, allow
         // TODO: if auth_address != primary_address, only allow if they are a secondary user with the correct role

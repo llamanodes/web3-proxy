@@ -689,6 +689,10 @@ impl Web3ProxyApp {
         Ok(collected)
     }
 
+    pub fn db_conn(&self) -> Option<&DatabaseConnection> {
+        self.db_conn.as_ref()
+    }
+
     pub async fn redis_conn(&self) -> anyhow::Result<redis_rate_limiter::RedisConnection> {
         match self.redis_pool.as_ref() {
             None => Err(anyhow::anyhow!("no redis server configured")),
