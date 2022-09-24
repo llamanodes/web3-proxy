@@ -11,7 +11,9 @@ use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
 use metered::Throughput;
+use num_traits::cast::FromPrimitive;
 use rand::Rng;
+use sea_orm::prelude::Decimal;
 use sea_orm::ActiveModelTrait;
 use serde_json::json;
 use std::fmt;
@@ -42,8 +44,8 @@ pub struct OpenRequestHandle {
 
 /// Depending on the context, RPC errors can require different handling.
 pub enum RequestErrorHandler {
-    /// Contains the percent chance to save the revert
-    SaveReverts(f32),
+    /// Potentially save the revert. Users can tune how often this happens
+    SaveReverts,
     /// Log at the debug level. Use when errors are expected.
     DebugLevel,
     /// Log at the error level. Use when errors are bad.
@@ -52,13 +54,17 @@ pub enum RequestErrorHandler {
     WarnLevel,
 }
 
+// TODO: second param could be skipped since we don't need it here
 #[derive(serde::Deserialize, serde::Serialize)]
-struct EthCallParams {
+struct EthCallParams((EthCallFirstParams, Option<serde_json::Value>));
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct EthCallFirstParams {
     method: Method,
     // TODO: do this as Address instead
     to: Vec<u8>,
     // TODO: do this as a Bytes instead
-    data: String,
+    data: Option<String>,
 }
 
 impl From<Level> for RequestErrorHandler {
@@ -74,7 +80,7 @@ impl From<Level> for RequestErrorHandler {
 
 impl AuthorizedRequest {
     /// Save a RPC call that return "execution reverted" to the database.
-    async fn save_revert(self: Arc<Self>, params: EthCallParams) -> anyhow::Result<()> {
+    async fn save_revert(self: Arc<Self>, params: EthCallFirstParams) -> anyhow::Result<()> {
         if let Self::User(Some(db_conn), authorized_request) = &*self {
             // TODO: do this on the database side?
             let timestamp = Utc::now();
@@ -122,10 +128,8 @@ impl OpenRequestHandle {
         let metrics = conn.open_request_handle_metrics.clone();
         let used = false.into();
 
-        let authorized_request = authorized_request.unwrap_or_else(|| {
-            let db_conn = conn.db_conn.clone();
-            Arc::new(AuthorizedRequest::Internal(db_conn))
-        });
+        let authorized_request =
+            authorized_request.unwrap_or_else(|| Arc::new(AuthorizedRequest::Internal));
 
         Self {
             authorized_request,
@@ -193,17 +197,40 @@ impl OpenRequestHandle {
         if let Err(err) = &response {
             // only save reverts for some types of calls
             // TODO: do something special for eth_sendRawTransaction too
-            let error_handler = if let RequestErrorHandler::SaveReverts(save_chance) = error_handler
-            {
-                if ["eth_call", "eth_estimateGas"].contains(&method)
-                    && self.authorized_request.db_conn().is_some()
-                    && save_chance != 0.0
-                    && (save_chance == 1.0
-                        || rand::thread_rng().gen_range(0.0..=1.0) <= save_chance)
+            let error_handler = if let RequestErrorHandler::SaveReverts = error_handler {
+                if !["eth_call", "eth_estimateGas"].contains(&method) {
+                    debug!(%method, "skipping save on revert");
+                    RequestErrorHandler::DebugLevel
+                } else if self.authorized_request.db_conn().is_none() {
+                    debug!(%method, "no database. skipping save on revert");
+                    RequestErrorHandler::DebugLevel
+                } else if let AuthorizedRequest::User(db_conn, y) = self.authorized_request.as_ref()
                 {
-                    error_handler
+                    if db_conn.is_none() {
+                        trace!(%method, "no database. skipping save on revert");
+                        RequestErrorHandler::DebugLevel
+                    } else {
+                        let log_revert_chance = y.log_revert_chance;
+
+                        if log_revert_chance.is_zero() {
+                            trace!(%method, "no chance. skipping save on revert");
+                            RequestErrorHandler::DebugLevel
+                        } else if log_revert_chance == Decimal::ONE {
+                            trace!(%method, "gaurenteed chance. SAVING on revert");
+                            error_handler
+                        } else if Decimal::from_f32(rand::thread_rng().gen_range(0.0f32..=1.0))
+                            .expect("f32 should always convert to a Decimal")
+                            > log_revert_chance
+                        {
+                            trace!(%method, "missed chance. skipping save on revert");
+                            RequestErrorHandler::DebugLevel
+                        } else {
+                            trace!("Saving on revert");
+                            // TODO: is always logging at debug level fine?
+                            error_handler
+                        }
+                    }
                 } else {
-                    // TODO: is always logging at debug level fine?
                     RequestErrorHandler::DebugLevel
                 }
             } else {
@@ -220,10 +247,11 @@ impl OpenRequestHandle {
                 RequestErrorHandler::WarnLevel => {
                     warn!(?err, %method, rpc=%self.conn, "bad response!");
                 }
-                RequestErrorHandler::SaveReverts(_) => {
+                RequestErrorHandler::SaveReverts => {
                     // TODO: logging every one is going to flood the database
                     // TODO: have a percent chance to do this. or maybe a "logged reverts per second"
                     if let ProviderError::JsonRpcClientError(err) = err {
+                        // Http and Ws errors are very similar, but different types
                         let msg = match provider {
                             Web3Provider::Http(_) => {
                                 if let Some(HttpClientError::JsonRpcError(err)) =
@@ -248,14 +276,19 @@ impl OpenRequestHandle {
                         if let Some(msg) = msg {
                             if msg.starts_with("execution reverted") {
                                 // TODO: is there a more efficient way to do this?
-                                let params: EthCallParams = serde_json::from_value(json!(params))
-                                    .expect("parsing eth_call");
+                                debug!(?params);
 
-                                // spawn saving to the database so we don't slow down the request (or error if no db)
-                                let f = self.authorized_request.clone().save_revert(params);
+                                // TODO: DO NOT UNWRAP! But also figure out the best way to keep returning ProviderErrors here
+                                let params: EthCallParams = serde_json::from_value(json!(params))
+                                    .context("parsing params to EthCallParams")
+                                    .unwrap();
+
+                                // spawn saving to the database so we don't slow down the request
+                                let f = self.authorized_request.clone().save_revert(params.0 .0);
 
                                 tokio::spawn(async move { f.await });
                             } else {
+                                // TODO: log any of the errors?
                                 debug!(?err, %method, rpc=%self.conn, "bad response!");
                             }
                         }

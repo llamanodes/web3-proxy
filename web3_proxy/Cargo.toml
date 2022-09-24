@@ -25,7 +25,7 @@ argh = "0.1.9"
 axum = { version = "0.5.16", features = ["headers", "serde_json", "tokio-tungstenite", "ws"] }
 axum-client-ip = "0.2.0"
 axum-macros = "0.2.3"
-# TODO: import this from ethorm so we always have the same version
+# TODO: import chrono from sea-orm so we always have the same version
 chrono = "0.4.22"
 counter = "0.5.6"
 dashmap = "5.4.0"
@@ -42,6 +42,8 @@ metered = { version = "0.9.0", features = ["serialize"] }
 moka = { version = "0.9.4", default-features = false, features = ["future"] }
 notify = "5.0.0"
 num = "0.4.0"
+# TODO: import num_traits from sea-orm so we always have the same version
+num-traits = "0.2.15"
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 petgraph = "0.6.2"
 proctitle = "0.1.1"

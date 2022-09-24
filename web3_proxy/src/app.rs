@@ -295,7 +295,6 @@ impl Web3ProxyApp {
             Some(pending_tx_sender.clone()),
             pending_transactions.clone(),
             open_request_handle_metrics.clone(),
-            db_conn.clone(),
         )
         .await
         .context("balanced rpcs")?;
@@ -323,7 +322,6 @@ impl Web3ProxyApp {
                 None,
                 pending_transactions.clone(),
                 open_request_handle_metrics.clone(),
-                db_conn.clone(),
             )
             .await
             .context("private_rpcs")?;

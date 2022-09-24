@@ -6,7 +6,6 @@ use argh::FromArgs;
 use derive_more::Constructor;
 use ethers::prelude::TxHash;
 use hashbrown::HashMap;
-use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -131,7 +130,6 @@ impl Web3ConnectionConfig {
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
         open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
-        db_conn: Option<DatabaseConnection>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = match (self.hard_limit, redis_pool) {
             (None, None) => None,
@@ -164,7 +162,6 @@ impl Web3ConnectionConfig {
             true,
             self.weight,
             open_request_handle_metrics,
-            db_conn,
         )
         .await
     }

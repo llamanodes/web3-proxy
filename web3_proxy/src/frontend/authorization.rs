@@ -180,19 +180,20 @@ impl AuthorizedKey {
 
 #[derive(Debug, Serialize)]
 pub enum AuthorizedRequest {
-    /// Request from the app itself
-    Internal(#[serde(skip)] Option<DatabaseConnection>),
+    /// Request from this app
+    Internal,
     /// Request from an anonymous IP address
-    Ip(#[serde(skip)] Option<DatabaseConnection>, IpAddr),
+    Ip(#[serde(skip)] IpAddr),
     /// Request from an authenticated and authorized user
     User(#[serde(skip)] Option<DatabaseConnection>, AuthorizedKey),
 }
 
 impl AuthorizedRequest {
+    /// Only User has a database connection in case it needs to save a revert to the database.
     pub fn db_conn(&self) -> Option<&DatabaseConnection> {
         match self {
-            Self::Internal(x) => x.as_ref(),
-            Self::Ip(x, _) => x.as_ref(),
+            Self::Internal => None,
+            Self::Ip(_) => None,
             Self::User(x, _) => x.as_ref(),
         }
     }
@@ -213,9 +214,7 @@ pub async fn login_is_authorized(
         x => unimplemented!("rate_limit_login shouldn't ever see these: {:?}", x),
     };
 
-    let db = None;
-
-    Ok(AuthorizedRequest::Ip(db, ip))
+    Ok(AuthorizedRequest::Ip(ip))
 }
 
 pub async fn bearer_is_authorized(
@@ -272,9 +271,7 @@ pub async fn ip_is_authorized(
         x => unimplemented!("rate_limit_by_ip shouldn't ever see these: {:?}", x),
     };
 
-    let db = app.db_conn.clone();
-
-    Ok(AuthorizedRequest::Ip(db, ip))
+    Ok(AuthorizedRequest::Ip(ip))
 }
 
 pub async fn key_is_authorized(
