@@ -157,19 +157,19 @@ These are roughly in order of completition
 - [x] change user creation script to have a "unlimited requests per minute" flag that sets it to u64::MAX (18446744073709551615)
 - [x] in /status, block hashes has a lower count than block numbers. how is that possible?
   - we weren't calling sync. now we are
-- [-] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user.
-  - [-] let them choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
-  - this must be opt-in or spawned since it will slow things down and will make their calls less private
+- [x] opt-in debug mode that inspects responses for reverts and saves the request to the database for the user.
 - [x] Api keys need option to lock to IP, cors header, referer, user agent, etc
-- [ ] endpoint for creating/modifying api keys and their advanced security features
+- [x] /user/logout to clear bearer token and jwt
+- [x] bearer tokens should expire
+- [-] user login should return the bearer token, the user keys, and a jwt (jsonwebtoken rust crate should make it easy)
+- [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
+  - this must be opt-in or spawned since it will slow things down and will make their calls less private
+  - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
+- [-] add configurable size limits to all the Caches
 - [ ] active requests per second per api key
 - [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
-- [-] add configurable size limits to all the Caches
-- [ ] /user/logout to clear bearer token and jwt
+- [ ] endpoint for creating/modifying api keys and their advanced security features
 - [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
-- [ ] bearer tokens should expire
-- [-] signed cookie jar
-- [ ] user login should return both the bearer token and a jwt (jsonwebtoken rust crate should make it easy)
 - [ ] revert logs should have a maximum age and a maximum count to keep the database from being huge
 - [ ] Ulid instead of Uuid for user keys
   - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
@@ -177,6 +177,7 @@ These are roughly in order of completition
 - [ ] Ulid instead of Uuid for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
 - [ ] option to rotate api key
+- [ ] read the cookie key from a file. easy to re-use and no giant blob of hex in our app config
 
 ## V1
 
@@ -380,3 +381,4 @@ in another repo: event subscriber
   - if we get a connection refused, we should remove the server's block info so it is taken out of rotation
 - [ ] web3_proxy_cli command should read database settings from config
 - [ ] how should we handle reverting transactions? they won't confirm for a while after we send them
+- [ ] allow configuration of the expiration time of bearer tokens

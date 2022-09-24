@@ -15,7 +15,6 @@ use axum::{
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tower_cookies::CookieManagerLayer;
 use tower_http::trace::TraceLayer;
 use tower_request_id::{RequestId, RequestIdLayer};
 use tracing::{error_span, info};
@@ -70,8 +69,6 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .layer(request_tracing_layer)
         // create a unique id for each request
         .layer(RequestIdLayer)
-        // signed cookies
-        .layer(CookieManagerLayer::new())
         // 404 for any unknown routes
         .fallback(errors::handler_404.into_service());
 

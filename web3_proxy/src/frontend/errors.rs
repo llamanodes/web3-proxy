@@ -81,7 +81,7 @@ impl IntoResponse for FrontendErrorResponse {
                     ),
                 )
             }
-            Self::RateLimitedIp(ip, retry_at) => {
+            Self::RateLimitedIp(ip, _retry_at) => {
                 // TODO: emit a stat
                 // TODO: include retry_at in the error
                 // TODO: if retry_at is None, give an unauthorized status code?
@@ -95,7 +95,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             // TODO: this should actually by the id of the key. multiple users might control one key
-            Self::RateLimitedUser(user_data, retry_at) => {
+            Self::RateLimitedUser(user_data, _retry_at) => {
                 // TODO: emit a stat
                 // TODO: include retry_at in the error
                 (

@@ -30,7 +30,6 @@ use siwe::Message;
 use std::ops::Add;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
-use tower_cookies::Cookies;
 use ulid::Ulid;
 use uuid::Uuid;
 
@@ -130,15 +129,16 @@ pub struct PostLogin {
     // signer: String,
 }
 
+/// TODO: what information should we return?
 #[derive(Serialize)]
 pub struct PostLoginResponse {
     bearer_token: Ulid,
-    // TODO: change this Ulid
-    api_key: Uuid,
+    api_keys: Vec<Uuid>,
 }
 
-#[debug_handler]
 /// Post to the user endpoint to register or login.
+/// It is recommended to save the returned bearer this in a cookie and send bac
+#[debug_handler]
 pub async fn post_login(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -183,7 +183,7 @@ pub async fn post_login(
         .await
         .unwrap();
 
-    let (u, uk, response) = match u {
+    let (u, _uks, response) = match u {
         None => {
             let txn = db.begin().await?;
 
@@ -209,71 +209,65 @@ pub async fn post_login(
                 .await
                 .context("Failed saving new user key")?;
 
+            let uks = vec![uk];
+
             txn.commit().await?;
 
             let response_json = PostLoginResponse {
                 bearer_token,
-                api_key: uk.api_key,
+                api_keys: uks.iter().map(|uk| uk.api_key).collect(),
             };
 
             let response = (StatusCode::CREATED, Json(response_json)).into_response();
 
-            (u, uk, response)
+            (u, uks, response)
         }
         Some(u) => {
             // the user is already registered
-            // TODO: what if the user has multiple keys?
-            let uk = user_keys::Entity::find()
+            let uks = user_keys::Entity::find()
                 .filter(user_keys::Column::UserId.eq(u.id))
-                .one(db)
+                .all(db)
                 .await
-                .context("failed loading user's key")?
-                .unwrap();
+                .context("failed loading user's key")?;
 
             let response_json = PostLoginResponse {
                 bearer_token,
-                api_key: uk.api_key,
+                api_keys: uks.iter().map(|uk| uk.api_key).collect(),
             };
 
             let response = (StatusCode::OK, Json(response_json)).into_response();
 
-            (u, uk, response)
+            (u, uks, response)
         }
     };
 
-    // TODO: set a session cookie with the bearer token?
-
-    // save the bearer token in redis with a long (7 or 30 day?) expiry. or in database?
+    // add bearer to redis
     let mut redis_conn = app.redis_conn().await?;
 
-    // TODO: move this into a struct so this is less fragile
-    let bearer_key = format!("bearer:{}", bearer_token);
+    let bearer_redis_key = format!("bearer:{}", bearer_token);
 
-    redis_conn.set(bearer_key, u.id.to_string()).await?;
-
-    // TODO: save user_data. we already have uk, so this could be more efficient. it works for now
+    // expire in 4 weeks
+    // TODO: get expiration time from app config
+    // TODO: do we use this?
+    redis_conn
+        .set_ex(bearer_redis_key, u.id.to_string(), 2_419_200)
+        .await?;
 
     Ok(response)
 }
 
+/// Log out the user connected to the given Authentication header.
 #[debug_handler]
 pub async fn get_logout(
-    cookies: Cookies,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
-    // delete the cookie if it exists
-    let private_cookies = cookies.private(&app.cookie_key);
+    // TODO: i don't like this. move this to a helper function so it is less fragile
+    let bearer_cache_key = format!("bearer:{}", bearer.token());
 
-    if let Some(c) = private_cookies.get("bearer") {
-        let bearer_cache_key = format!("bearer:{}", c.value());
+    let mut redis_conn = app.redis_conn().await?;
 
-        // TODO: should deleting the cookie be last? redis being down shouldn't block the user
-        private_cookies.remove(c);
-
-        let mut redis_conn = app.redis_conn().await?;
-
-        redis_conn.del(bearer_cache_key).await?;
-    }
+    redis_conn.del(bearer_cache_key).await?;
 
     // TODO: what should the response be? probably json something
     Ok("goodbye".into_response())
@@ -347,8 +341,6 @@ impl ProtectedAction {
 
         // TODO: is this type correct?
         let u_id: Option<u64> = redis_conn.get(bearer_cache_key).await?;
-
-        // TODO: if not in redis, check the db?
 
         // TODO: if auth_address == primary_address, allow
         // TODO: if auth_address != primary_address, only allow if they are a secondary user with the correct role

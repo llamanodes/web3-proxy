@@ -204,6 +204,7 @@ mod tests {
             prometheus_port: 0,
             workers: 4,
             config: "./does/not/exist/test.toml".to_string(),
+            cookie_key_filename: "./does/not/exist/development_cookie_key".to_string(),
         };
 
         // make a test AppConfig

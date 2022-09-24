@@ -3,12 +3,17 @@ use super::provider::Web3Provider;
 use crate::frontend::authorization::AuthorizedRequest;
 use crate::metered::{JsonRpcErrorCount, ProviderErrorCount};
 use anyhow::Context;
+use chrono::Utc;
+use entities::revert_logs;
+use entities::sea_orm_active_enums::Method;
 use ethers::providers::{HttpClientError, ProviderError, WsClientError};
 use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
 use metered::Throughput;
 use rand::Rng;
+use sea_orm::ActiveModelTrait;
+use serde_json::json;
 use std::fmt;
 use std::sync::atomic::{self, AtomicBool, Ordering};
 use std::sync::Arc;
@@ -47,6 +52,15 @@ pub enum RequestErrorHandler {
     WarnLevel,
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+struct EthCallParams {
+    method: Method,
+    // TODO: do this as Address instead
+    to: Vec<u8>,
+    // TODO: do this as a Bytes instead
+    data: String,
+}
+
 impl From<Level> for RequestErrorHandler {
     fn from(level: Level) -> Self {
         match level {
@@ -60,13 +74,31 @@ impl From<Level> for RequestErrorHandler {
 
 impl AuthorizedRequest {
     /// Save a RPC call that return "execution reverted" to the database.
-    async fn save_revert<T>(self: Arc<Self>, method: String, params: T) -> anyhow::Result<()>
-    where
-        T: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
-    {
-        let db_conn = self.db_conn().context("db_conn needed to save reverts")?;
+    async fn save_revert(self: Arc<Self>, params: EthCallParams) -> anyhow::Result<()> {
+        if let Self::User(Some(db_conn), authorized_request) = &*self {
+            // TODO: do this on the database side?
+            let timestamp = Utc::now();
 
-        todo!("save the revert to the database");
+            let rl = revert_logs::ActiveModel {
+                user_key_id: sea_orm::Set(authorized_request.user_key_id),
+                method: sea_orm::Set(params.method),
+                to: sea_orm::Set(params.to),
+                call_data: sea_orm::Set(params.data),
+                timestamp: sea_orm::Set(timestamp),
+                ..Default::default()
+            };
+
+            let rl = rl
+                .save(db_conn)
+                .await
+                .context("Failed saving new revert log")?;
+
+            // TODO: what log level?
+            trace!(?rl);
+        }
+
+        // TODO: return something useful
+        Ok(())
     }
 }
 
@@ -110,15 +142,15 @@ impl OpenRequestHandle {
     /// TODO: we no longer take self because metered doesn't like that
     /// TODO: ErrorCount includes too many types of errors, such as transaction reverts
     #[measure([JsonRpcErrorCount, HitCount, ProviderErrorCount, ResponseTime, Throughput])]
-    pub async fn request<T, R>(
+    pub async fn request<P, R>(
         &self,
         method: &str,
-        params: &T,
+        params: &P,
         error_handler: RequestErrorHandler,
     ) -> Result<R, ProviderError>
     where
         // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
-        T: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
+        P: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
         R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug,
     {
         // ensure this function only runs once
@@ -212,11 +244,12 @@ impl OpenRequestHandle {
 
                         if let Some(msg) = msg {
                             if msg.starts_with("execution reverted") {
+                                // TODO: is there a more efficient way to do this?
+                                let params: EthCallParams = serde_json::from_value(json!(params))
+                                    .expect("parsing eth_call");
+
                                 // spawn saving to the database so we don't slow down the request (or error if no db)
-                                let f = self
-                                    .authorization
-                                    .clone()
-                                    .save_revert(method.to_string(), params.clone());
+                                let f = self.authorization.clone().save_revert(params);
 
                                 tokio::spawn(async move { f.await });
                             } else {

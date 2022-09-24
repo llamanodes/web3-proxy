@@ -17,7 +17,7 @@ pub struct Model {
     pub active: bool,
     pub requests_per_minute: Option<u64>,
     #[sea_orm(column_type = "Decimal(Some((5, 4)))")]
-    pub log_reverts: Decimal,
+    pub log_revert_chance: Decimal,
     #[sea_orm(column_type = "Text", nullable)]
     pub allowed_ips: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]

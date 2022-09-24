@@ -20,7 +20,7 @@ impl MigrationTrait for Migration {
                     )
                     // add a column for logging reverts in the RevertLogs table
                     .add_column(
-                        ColumnDef::new(UserKeys::LogReverts)
+                        ColumnDef::new(UserKeys::LogRevertChance)
                             .decimal_len(5, 4)
                             .not_null()
                             .default("0.0"),
@@ -90,7 +90,7 @@ impl MigrationTrait for Migration {
                             .unsigned()
                             .not_null(),
                     )
-                    .drop_column(UserKeys::LogReverts)
+                    .drop_column(UserKeys::LogRevertChance)
                     .to_owned(),
             )
             .await
@@ -109,7 +109,7 @@ pub enum UserKeys {
     // PrivateTxs,
     // Active,
     RequestsPerMinute,
-    LogReverts,
+    LogRevertChance,
     AllowedIps,
     AllowedOrigins,
     AllowedReferers,

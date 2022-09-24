@@ -5,7 +5,7 @@ use axum::headers::{Origin, Referer, UserAgent};
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::user_keys;
 use ipnet::IpNet;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::{net::IpAddr, sync::Arc};
 use tokio::time::Instant;
@@ -28,9 +28,10 @@ pub enum RateLimitResult {
 
 #[derive(Debug, Serialize)]
 pub struct AuthorizedKey {
-    ip: IpAddr,
-    origin: Option<String>,
-    user_key_id: u64,
+    pub ip: IpAddr,
+    pub origin: Option<String>,
+    pub user_key_id: u64,
+    pub log_revert_chance: Decimal,
     // TODO: what else?
 }
 
@@ -96,6 +97,7 @@ impl AuthorizedKey {
             ip,
             origin,
             user_key_id: user_data.user_key_id,
+            log_revert_chance: user_data.log_revert_chance,
         })
     }
 }
@@ -269,16 +271,10 @@ impl Web3ProxyApp {
                             allowed_origins,
                             allowed_referers,
                             allowed_user_agents,
+                            log_revert_chance: user_key_model.log_revert_chance,
                         })
                     }
-                    None => Ok(UserKeyData {
-                        user_key_id: 0,
-                        user_max_requests_per_period: Some(0),
-                        allowed_ips: None,
-                        allowed_origins: None,
-                        allowed_referers: None,
-                        allowed_user_agents: None,
-                    }),
+                    None => Ok(UserKeyData::default()),
                 }
             })
             .await;

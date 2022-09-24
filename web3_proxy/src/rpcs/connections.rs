@@ -23,6 +23,7 @@ use petgraph::graphmap::DiGraphMap;
 use sea_orm::DatabaseConnection;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
+use serde_json::json;
 use serde_json::value::RawValue;
 use std::cmp;
 use std::cmp::Reverse;
@@ -320,7 +321,11 @@ impl Web3Connections {
             .into_iter()
             .map(|active_request_handle| async move {
                 let result: Result<Box<RawValue>, _> = active_request_handle
-                    .request(method, &params.cloned(), tracing::Level::ERROR.into())
+                    .request(
+                        method,
+                        &json!(params.cloned()),
+                        tracing::Level::ERROR.into(),
+                    )
                     .await;
                 result
             })
@@ -517,12 +522,12 @@ impl Web3Connections {
                     // save the rpc in case we get an error and want to retry on another server
                     skip_rpcs.push(active_request_handle.clone_connection());
 
-                    // TODO: get the log percent from the user data?
+                    // TODO: get the log percent from the user data
                     let response_result = active_request_handle
                         .request(
                             &request.method,
-                            &request.params,
-                            RequestErrorHandler::SaveReverts(100.0),
+                            &json!(request.params),
+                            RequestErrorHandler::SaveReverts(0.0),
                         )
                         .await;
 

@@ -15,6 +15,7 @@ use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use sea_orm::DatabaseConnection;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
+use serde_json::json;
 use std::cmp::min;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -121,7 +122,11 @@ impl Web3Connection {
         let found_chain_id: Result<U64, _> = new_connection
             .wait_for_request_handle(None, Duration::from_secs(30))
             .await?
-            .request("eth_chainId", &Option::None::<()>, Level::ERROR.into())
+            .request(
+                "eth_chainId",
+                &json!(Option::None::<()>),
+                Level::ERROR.into(),
+            )
             .await;
 
         match found_chain_id {
@@ -209,10 +214,10 @@ impl Web3Connection {
                 .await?
                 .request(
                     "eth_getCode",
-                    &(
+                    &json!((
                         "0xdead00000000000000000000000000000000beef",
                         maybe_archive_block,
-                    ),
+                    )),
                     // error here are expected, so keep the level low
                     tracing::Level::DEBUG.into(),
                 )
@@ -543,7 +548,7 @@ impl Web3Connection {
                                 let block: Result<Block<TxHash>, _> = active_request_handle
                                     .request(
                                         "eth_getBlockByNumber",
-                                        &("latest", false),
+                                        &json!(("latest", false)),
                                         tracing::Level::ERROR.into(),
                                     )
                                     .await;
@@ -619,7 +624,7 @@ impl Web3Connection {
                         .await?
                         .request(
                             "eth_getBlockByNumber",
-                            &("latest", false),
+                            &json!(("latest", false)),
                             tracing::Level::ERROR.into(),
                         )
                         .await

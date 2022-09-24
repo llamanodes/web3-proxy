@@ -36,6 +36,7 @@ impl CreateUserSubCommand {
 
         // TODO: would be nice to use the fixed array instead of a Vec in the entities
         // TODO: how can we use custom types with
+        // TODO: take a simple String. If it starts with 0x, parse as address. otherwise convert ascii to hex
         let address = self.address.to_fixed_bytes().into();
 
         let u = user::ActiveModel {

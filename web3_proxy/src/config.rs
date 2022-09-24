@@ -32,6 +32,10 @@ pub struct CliConfig {
     /// number of worker threads. Defaults to the number of logical processors
     #[argh(option, default = "0")]
     pub workers: usize,
+
+    /// path to a binary file used to encrypt cookies. Should be at least 64 bytes.
+    #[argh(option, default = "\"./data/development_cookie_key\".to_string()")]
+    pub cookie_key_filename: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,6 +50,8 @@ pub struct TopConfig {
 pub struct AppConfig {
     // TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
     pub chain_id: u64,
+    pub cookie_domain: Option<String>,
+    pub cookie_secure: Option<bool>,
     pub db_url: Option<String>,
     /// minimum size of the connection pool for the database
     /// If none, the number of workers are used
