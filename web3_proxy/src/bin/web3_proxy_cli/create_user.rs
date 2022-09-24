@@ -13,8 +13,10 @@ use web3_proxy::frontend::authorization::UserKey;
 #[argh(subcommand, name = "create_user")]
 pub struct CreateUserSubCommand {
     #[argh(option)]
-    /// the user's ethereum address.
-    address: Address,
+    /// the user's ethereum address or descriptive string.
+    /// If a string is given, it will be converted to hex and potentially truncated.
+    /// Users from strings are only for testing since they won't be able to log in.
+    address: String,
 
     #[argh(option)]
     /// the user's optional email.
@@ -36,9 +38,23 @@ impl CreateUserSubCommand {
         let txn = db.begin().await?;
 
         // TODO: would be nice to use the fixed array instead of a Vec in the entities
-        // TODO: how can we use custom types with
-        // TODO: take a simple String. If it starts with 0x, parse as address. otherwise convert ascii to hex
-        let address = self.address.to_fixed_bytes().into();
+        // take a simple String. If it starts with 0x, parse as address. otherwise convert ascii to hex
+        // TODO: there has to be a cleaner way to convert a String to a [u8; 20]
+        let address = if self.address.starts_with("0x") {
+            let address = self.address.parse::<Address>()?;
+
+            address.to_fixed_bytes().into()
+        } else {
+            let bytes = self.address.as_bytes();
+
+            let mut address: [u8; 20] = [0; 20];
+
+            let len = 20.min(bytes.len());
+
+            address[..len].copy_from_slice(&bytes[..len]);
+
+            address.into()
+        };
 
         // TODO: get existing or create a new one
         let u = user::ActiveModel {
