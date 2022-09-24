@@ -47,12 +47,15 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
     let app = Router::new()
         // routes should be order most to least common
         .route("/rpc", post(rpc_proxy_http::proxy_web3_rpc))
-        .route("/rpc", get(rpc_proxy_ws::public_websocket_handler))
+        .route("/rpc", get(rpc_proxy_ws::websocket_handler))
         .route(
             "/rpc/:user_key",
             post(rpc_proxy_http::proxy_web3_rpc_with_key),
         )
-        .route("/rpc/:user_key", get(rpc_proxy_ws::user_websocket_handler))
+        .route(
+            "/rpc/:user_key",
+            get(rpc_proxy_ws::websocket_handler_with_key),
+        )
         .route("/rpc/health", get(http::health))
         .route("/rpc/status", get(http::status))
         // TODO: make this optional or remove it since it is available on another port

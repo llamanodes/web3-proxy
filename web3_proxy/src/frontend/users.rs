@@ -7,9 +7,9 @@
 // I wonder how we handle payment
 // probably have to do manual withdrawals
 
-use super::authorization::login_is_authorized;
+use super::authorization::{login_is_authorized, UserKey};
 use super::errors::FrontendResult;
-use crate::{app::Web3ProxyApp, users::new_api_key};
+use crate::app::Web3ProxyApp;
 use anyhow::Context;
 use axum::{
     extract::{Path, Query},
@@ -31,7 +31,6 @@ use std::ops::Add;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
-use uuid::Uuid;
 
 // TODO: how do we customize axum's error response? I think we probably want an enum that implements IntoResponse instead
 #[debug_handler]
@@ -134,7 +133,7 @@ pub struct PostLogin {
 #[derive(Serialize)]
 pub struct PostLoginResponse {
     bearer_token: Ulid,
-    api_keys: Vec<Uuid>,
+    api_keys: Vec<UserKey>,
 }
 
 /// Post to the user endpoint to register or login.
@@ -197,9 +196,11 @@ pub async fn post_login(
 
             let u = u.insert(&txn).await?;
 
+            let user_key = UserKey::new();
+
             let uk = user_keys::ActiveModel {
                 user_id: sea_orm::Set(u.id),
-                api_key: sea_orm::Set(new_api_key()),
+                api_key: sea_orm::Set(user_key.into()),
                 requests_per_minute: sea_orm::Set(app.config.default_requests_per_minute),
                 ..Default::default()
             };
@@ -216,7 +217,7 @@ pub async fn post_login(
 
             let response_json = PostLoginResponse {
                 bearer_token,
-                api_keys: uks.iter().map(|uk| uk.api_key).collect(),
+                api_keys: uks.iter().map(|uk| uk.api_key.into()).collect(),
             };
 
             let response = (StatusCode::CREATED, Json(response_json)).into_response();
@@ -233,7 +234,7 @@ pub async fn post_login(
 
             let response_json = PostLoginResponse {
                 bearer_token,
-                api_keys: uks.iter().map(|uk| uk.api_key).collect(),
+                api_keys: uks.iter().map(|uk| uk.api_key.into()).collect(),
             };
 
             let response = (StatusCode::OK, Json(response_json)).into_response();

@@ -166,6 +166,11 @@ These are roughly in order of completition
   - for security, we want these limits low.
 - [x] user login should return the bearer token and the user keys
 - [x] use siwe messages and signatures for sign up and login
+- [x] check for bearer token on /rpc
+- [x] ip blocking logs a warn. we don't need that
+- [x] Ulid instead of Uuid for user keys
+  - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
+  - since users are actively using our service, we will need to support both
 - [ ] active requests per second per api key
 - [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
 - [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
@@ -174,13 +179,9 @@ These are roughly in order of completition
 - [-] add configurable size limits to all the Caches
 - [ ] endpoint for creating/modifying api keys and their advanced security features
 - [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
-- [ ] Ulid instead of Uuid for user keys
-  - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
-  - since users are actively using our service, we will need to support both
-- [ ] Ulid instead of Uuid for database ids
-  - might have to use Uuid in sea-orm and then convert to Ulid on display
 - [ ] option to rotate api key
 - [ ] read the cookie key from a file. easy to re-use and no giant blob of hex in our app config
+- [ ] if no bearer token found in redis (likely because it expired), send 401 unauthorized
 
 ## V1
 
@@ -275,7 +276,7 @@ in another repo: event subscriber
 
 ## "Maybe some day" and other Miscellaneous Things
 
-- [ ] tool to revoke bearer tokens that also clears redis
+- [ ] tool to revoke bearer tokens that clears redis
 - [ ] eth_getBlockByNumber and similar calls served from the block map
   - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
   - so maybe we don't want this. we can just use the general request cache for these. they will only require 1 request and it means requests won't get in the way as much on writes as new blocks arrive.
@@ -371,7 +372,6 @@ in another repo: event subscriber
 - [ ] https://gitlab.com/moka-labs/tiered-cache-example
 - [ ] web3connection3.block(...) might wait forever. be sure to do it safely
 - [ ] search for all "todo!"
-- [ ] replace all `.context("no servers in sync")` with proper error type
 - [ ] when using a bunch of slow public servers, i see "no servers in sync" even when things should be right
   - [ ] i think checking the parents of the heaviest chain works most of the time, but not always
   - maybe iterate connection heads by total weight? i still think we need to include parent hashes
@@ -379,11 +379,14 @@ in another repo: event subscriber
 - [ ] whats going on here? why is it rolling back? maybe total_difficulty was a LOT higher?
   - 2022-09-05T19:21:39.763630Z  WARN web3_proxy::rpcs::blockchain: chain rolled back 1/6/7 head=15479604 (0xf809…6a2c) rpc=infura_free
   - i wish i had more logs. its possible that 15479605 came immediatly after
-- [ ] ip blocking logs a warn. we don't need that. a stat at most
 - [ ] keep it working without redis and a database
 - [ ] web3 on rpc1 exited without errors. maybe promote some shutdown messages from debug to info?
 - [ ] better handling for offline http servers
   - if we get a connection refused, we should remove the server's block info so it is taken out of rotation
 - [ ] web3_proxy_cli command should read database settings from config
 - [ ] how should we handle reverting transactions? they won't confirm for a while after we send them
-- [ ] allow configuration of the expiration time of bearer tokens
+- [ ] allow configuration of the expiration time of bearer tokens. currently defaults to 4 weeks
+- [ ] instead of putting everything under /rpc, have a site_prefix config?
+- [ ] Ulid instead of Uuid for database ids
+  - might have to use Uuid in sea-orm and then convert to Ulid on display
+- [ ] emit stat when an IP/key goes over rate limits

@@ -9,10 +9,84 @@ use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
 use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
-use std::{net::IpAddr, sync::Arc};
+use std::fmt::Display;
+use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::time::Instant;
 use tracing::{error, trace};
+use ulid::Ulid;
 use uuid::Uuid;
+
+/// This lets us use UUID and ULID while we transition to only ULIDs
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub enum UserKey {
+    Ulid(Ulid),
+    Uuid(Uuid),
+}
+
+impl UserKey {
+    pub fn new() -> Self {
+        Ulid::new().into()
+    }
+}
+
+impl Display for UserKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // TODO: do this without dereferencing
+        let ulid: Ulid = (*self).into();
+
+        ulid.fmt(f)
+    }
+}
+
+impl Default for UserKey {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FromStr for UserKey {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(ulid) = s.parse::<Ulid>() {
+            Ok(ulid.into())
+        } else if let Ok(uuid) = s.parse::<Uuid>() {
+            Ok(uuid.into())
+        } else {
+            Err(anyhow::anyhow!("UserKey was not a ULID or UUID"))
+        }
+    }
+}
+
+impl From<Ulid> for UserKey {
+    fn from(x: Ulid) -> Self {
+        UserKey::Ulid(x)
+    }
+}
+
+impl From<Uuid> for UserKey {
+    fn from(x: Uuid) -> Self {
+        UserKey::Uuid(x)
+    }
+}
+
+impl From<UserKey> for Ulid {
+    fn from(x: UserKey) -> Self {
+        match x {
+            UserKey::Ulid(x) => x,
+            UserKey::Uuid(x) => Ulid::from(x.as_u128()),
+        }
+    }
+}
+
+impl From<UserKey> for Uuid {
+    fn from(x: UserKey) -> Self {
+        match x {
+            UserKey::Ulid(x) => Uuid::from_u128(x.0),
+            UserKey::Uuid(x) => x,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum RateLimitResult {
@@ -172,7 +246,15 @@ pub async fn bearer_is_authorized(
         .context("fetching user key by id")?
         .context("unknown user id")?;
 
-    key_is_authorized(app, user_key_data.api_key, ip, origin, referer, user_agent).await
+    key_is_authorized(
+        app,
+        user_key_data.api_key.into(),
+        ip,
+        origin,
+        referer,
+        user_agent,
+    )
+    .await
 }
 
 pub async fn ip_is_authorized(
@@ -197,7 +279,7 @@ pub async fn ip_is_authorized(
 
 pub async fn key_is_authorized(
     app: &Web3ProxyApp,
-    user_key: Uuid,
+    user_key: UserKey,
     ip: IpAddr,
     origin: Option<Origin>,
     referer: Option<Referer>,
@@ -287,17 +369,19 @@ impl Web3ProxyApp {
     }
 
     // check the local cache for user data, or query the database
-    pub(crate) async fn user_data(&self, user_key: Uuid) -> anyhow::Result<UserKeyData> {
+    pub(crate) async fn user_data(&self, user_key: UserKey) -> anyhow::Result<UserKeyData> {
         let user_data: Result<_, Arc<anyhow::Error>> = self
             .user_cache
-            .try_get_with(user_key, async move {
+            .try_get_with(user_key.into(), async move {
                 trace!(?user_key, "user_cache miss");
 
                 let db = self.db_conn().context("Getting database connection")?;
 
+                let user_uuid: Uuid = user_key.into();
+
                 // TODO: join the user table to this to return the User? we don't always need it
                 match user_keys::Entity::find()
-                    .filter(user_keys::Column::ApiKey.eq(user_key))
+                    .filter(user_keys::Column::ApiKey.eq(user_uuid))
                     .filter(user_keys::Column::Active.eq(true))
                     .one(db)
                     .await?
@@ -368,7 +452,7 @@ impl Web3ProxyApp {
         user_data.map_err(|err| Arc::try_unwrap(err).expect("this should be the only reference"))
     }
 
-    pub async fn rate_limit_by_key(&self, user_key: Uuid) -> anyhow::Result<RateLimitResult> {
+    pub async fn rate_limit_by_key(&self, user_key: UserKey) -> anyhow::Result<RateLimitResult> {
         let user_data = self.user_data(user_key).await?;
 
         if user_data.user_key_id == 0 {
@@ -383,7 +467,7 @@ impl Web3ProxyApp {
         // user key is valid. now check rate limits
         if let Some(rate_limiter) = &self.frontend_key_rate_limiter {
             match rate_limiter
-                .throttle(user_key, Some(user_max_requests_per_period), 1)
+                .throttle(user_key.into(), Some(user_max_requests_per_period), 1)
                 .await
             {
                 Ok(DeferredRateLimitResult::Allowed) => Ok(RateLimitResult::AllowedUser(user_data)),

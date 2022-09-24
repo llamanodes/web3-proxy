@@ -33,7 +33,7 @@ pub enum OpenRequestResult {
 /// Make RPC requests through this handle and drop it when you are done.
 #[derive(Debug)]
 pub struct OpenRequestHandle {
-    authorization: Arc<AuthorizedRequest>,
+    authorized_request: Arc<AuthorizedRequest>,
     conn: Arc<Web3Connection>,
     // TODO: this is the same metrics on the conn. use a reference?
     metrics: Arc<OpenRequestHandleMetrics>,
@@ -104,7 +104,10 @@ impl AuthorizedRequest {
 
 #[metered(registry = OpenRequestHandleMetrics, visibility = pub)]
 impl OpenRequestHandle {
-    pub fn new(conn: Arc<Web3Connection>, authorization: Option<Arc<AuthorizedRequest>>) -> Self {
+    pub fn new(
+        conn: Arc<Web3Connection>,
+        authorized_request: Option<Arc<AuthorizedRequest>>,
+    ) -> Self {
         // TODO: take request_id as an argument?
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
@@ -119,13 +122,13 @@ impl OpenRequestHandle {
         let metrics = conn.open_request_handle_metrics.clone();
         let used = false.into();
 
-        let authorization = authorization.unwrap_or_else(|| {
+        let authorized_request = authorized_request.unwrap_or_else(|| {
             let db_conn = conn.db_conn.clone();
             Arc::new(AuthorizedRequest::Internal(db_conn))
         });
 
         Self {
-            authorization,
+            authorized_request,
             conn,
             metrics,
             used,
@@ -161,7 +164,7 @@ impl OpenRequestHandle {
         // TODO: use tracing spans
         // TODO: requests from customers have request ids, but we should add
         // TODO: including params in this is way too verbose
-        // the authorization field is already on a parent span
+        // the authorized_request field is already on a parent span
         trace!(rpc=%self.conn, %method, "request");
 
         let mut provider = None;
@@ -193,7 +196,7 @@ impl OpenRequestHandle {
             let error_handler = if let RequestErrorHandler::SaveReverts(save_chance) = error_handler
             {
                 if ["eth_call", "eth_estimateGas"].contains(&method)
-                    && self.authorization.db_conn().is_some()
+                    && self.authorized_request.db_conn().is_some()
                     && save_chance != 0.0
                     && (save_chance == 1.0
                         || rand::thread_rng().gen_range(0.0..=1.0) <= save_chance)
@@ -249,7 +252,7 @@ impl OpenRequestHandle {
                                     .expect("parsing eth_call");
 
                                 // spawn saving to the database so we don't slow down the request (or error if no db)
-                                let f = self.authorization.clone().save_revert(params);
+                                let f = self.authorized_request.clone().save_revert(params);
 
                                 tokio::spawn(async move { f.await });
                             } else {

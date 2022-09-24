@@ -742,13 +742,13 @@ impl Web3Connection {
     #[instrument]
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
-        authorization: Option<&Arc<AuthorizedRequest>>,
+        authorized_request: Option<&Arc<AuthorizedRequest>>,
         max_wait: Duration,
     ) -> anyhow::Result<OpenRequestHandle> {
         let max_wait = Instant::now() + max_wait;
 
         loop {
-            let x = self.try_request_handle(authorization).await;
+            let x = self.try_request_handle(authorized_request).await;
 
             trace!(?x, "try_request_handle");
 
@@ -778,7 +778,7 @@ impl Web3Connection {
     #[instrument]
     pub async fn try_request_handle(
         self: &Arc<Self>,
-        authorization: Option<&Arc<AuthorizedRequest>>,
+        authorized_request: Option<&Arc<AuthorizedRequest>>,
     ) -> anyhow::Result<OpenRequestResult> {
         // check that we are connected
         if !self.has_provider().await {
@@ -809,7 +809,7 @@ impl Web3Connection {
             }
         };
 
-        let handle = OpenRequestHandle::new(self.clone(), authorization.cloned());
+        let handle = OpenRequestHandle::new(self.clone(), authorized_request.cloned());
 
         Ok(OpenRequestResult::Handle(handle))
     }
