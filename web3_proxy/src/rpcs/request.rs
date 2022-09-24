@@ -7,6 +7,7 @@ use chrono::Utc;
 use entities::revert_logs;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::{HttpClientError, ProviderError, WsClientError};
+use ethers::types::{Address, Bytes};
 use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
@@ -14,6 +15,7 @@ use metered::Throughput;
 use num_traits::cast::FromPrimitive;
 use rand::Rng;
 use sea_orm::prelude::Decimal;
+use sea_orm::ActiveEnum;
 use sea_orm::ActiveModelTrait;
 use serde_json::json;
 use std::fmt;
@@ -60,11 +62,8 @@ struct EthCallParams((EthCallFirstParams, Option<serde_json::Value>));
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct EthCallFirstParams {
-    method: Method,
-    // TODO: do this as Address instead
-    to: Vec<u8>,
-    // TODO: do this as a Bytes instead
-    data: Option<String>,
+    to: Address,
+    data: Option<Bytes>,
 }
 
 impl From<Level> for RequestErrorHandler {
@@ -80,16 +79,26 @@ impl From<Level> for RequestErrorHandler {
 
 impl AuthorizedRequest {
     /// Save a RPC call that return "execution reverted" to the database.
-    async fn save_revert(self: Arc<Self>, params: EthCallFirstParams) -> anyhow::Result<()> {
+    async fn save_revert(
+        self: Arc<Self>,
+        method: Method,
+        params: EthCallFirstParams,
+    ) -> anyhow::Result<()> {
         if let Self::User(Some(db_conn), authorized_request) = &*self {
-            // TODO: do this on the database side?
+            // TODO: should the database set the timestamp?
             let timestamp = Utc::now();
+            let to: Vec<u8> = params
+                .to
+                .as_bytes()
+                .try_into()
+                .expect("address should always convert to a Vec<u8>");
+            let call_data = params.data.map(|x| format!("{}", x));
 
             let rl = revert_logs::ActiveModel {
                 user_key_id: sea_orm::Set(authorized_request.user_key_id),
-                method: sea_orm::Set(params.method),
-                to: sea_orm::Set(params.to),
-                call_data: sea_orm::Set(params.data),
+                method: sea_orm::Set(method),
+                to: sea_orm::Set(to),
+                call_data: sea_orm::Set(call_data),
                 timestamp: sea_orm::Set(timestamp),
                 ..Default::default()
             };
@@ -100,6 +109,7 @@ impl AuthorizedRequest {
                 .context("Failed saving new revert log")?;
 
             // TODO: what log level?
+            // TODO: better format
             trace!(?rl);
         }
 
@@ -199,10 +209,10 @@ impl OpenRequestHandle {
             // TODO: do something special for eth_sendRawTransaction too
             let error_handler = if let RequestErrorHandler::SaveReverts = error_handler {
                 if !["eth_call", "eth_estimateGas"].contains(&method) {
-                    debug!(%method, "skipping save on revert");
+                    trace!(%method, "skipping save on revert");
                     RequestErrorHandler::DebugLevel
                 } else if self.authorized_request.db_conn().is_none() {
-                    debug!(%method, "no database. skipping save on revert");
+                    trace!(%method, "no database. skipping save on revert");
                     RequestErrorHandler::DebugLevel
                 } else if let AuthorizedRequest::User(db_conn, y) = self.authorized_request.as_ref()
                 {
@@ -275,8 +285,9 @@ impl OpenRequestHandle {
 
                         if let Some(msg) = msg {
                             if msg.starts_with("execution reverted") {
-                                // TODO: is there a more efficient way to do this?
-                                debug!(?params);
+                                // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
+                                let method: Method =
+                                    Method::try_from_value(&method.to_string()).unwrap();
 
                                 // TODO: DO NOT UNWRAP! But also figure out the best way to keep returning ProviderErrors here
                                 let params: EthCallParams = serde_json::from_value(json!(params))
@@ -284,7 +295,10 @@ impl OpenRequestHandle {
                                     .unwrap();
 
                                 // spawn saving to the database so we don't slow down the request
-                                let f = self.authorized_request.clone().save_revert(params.0 .0);
+                                let f = self
+                                    .authorized_request
+                                    .clone()
+                                    .save_revert(method, params.0 .0);
 
                                 tokio::spawn(async move { f.await });
                             } else {
