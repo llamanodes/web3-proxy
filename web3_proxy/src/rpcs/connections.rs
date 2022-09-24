@@ -321,11 +321,7 @@ impl Web3Connections {
             .into_iter()
             .map(|active_request_handle| async move {
                 let result: Result<Box<RawValue>, _> = active_request_handle
-                    .request(
-                        method,
-                        &json!(params.cloned()),
-                        tracing::Level::ERROR.into(),
-                    )
+                    .request(method, &json!(&params), tracing::Level::ERROR.into())
                     .await;
                 result
             })
