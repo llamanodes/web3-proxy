@@ -13,3 +13,13 @@ pub enum Role {
     #[sea_orm(string_value = "collaborator")]
     Collaborator,
 }
+#[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "method")]
+pub enum Method {
+    #[sea_orm(string_value = "eth_call")]
+    EthCall,
+    #[sea_orm(string_value = "eth_estimateGas")]
+    EthEstimateGas,
+    #[sea_orm(string_value = "eth_sendRawTransaction")]
+    EthSendRawTransaction,
+}

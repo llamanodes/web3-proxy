@@ -2,6 +2,7 @@
 
 pub mod prelude;
 
+pub mod revert_logs;
 pub mod sea_orm_active_enums;
 pub mod secondary_user;
 pub mod user;
