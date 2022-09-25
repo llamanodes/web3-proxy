@@ -171,6 +171,7 @@ These are roughly in order of completition
 - [x] Ulid instead of Uuid for user keys
   - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
   - since users are actively using our service, we will need to support both
+- [x] get to /, when not serving a websocket, should have a simple welcome page. maybe with a button to update your wallet. 
 - [ ] active requests per second per api key
 - [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
 - [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
@@ -357,7 +358,6 @@ in another repo: event subscriber
   #[cfg(feature = "with-uuid")]
   pub use uuid::Builder as UuidBuilder;
   ```
-- [ ] get to /, when not serving a websocket, should have a simple welcome page. maybe with a button to update your wallet. 
 - [ ] rate limit thoughts:
   - if someone subscribes to all pending transactions, how should that count against rate limits
   - when those rate limits are hit, what should happen?
@@ -373,7 +373,6 @@ in another repo: event subscriber
 - [ ] web3connection3.block(...) might wait forever. be sure to do it safely
 - [ ] search for all "todo!"
 - [ ] when using a bunch of slow public servers, i see "no servers in sync" even when things should be right
-  - [ ] i think checking the parents of the heaviest chain works most of the time, but not always
   - maybe iterate connection heads by total weight? i still think we need to include parent hashes
 - [ ] i see "No block found" sometimes for a single server's block. Not sure why since reads should happen after writes
 - [ ] whats going on here? why is it rolling back? maybe total_difficulty was a LOT higher?
@@ -386,7 +385,6 @@ in another repo: event subscriber
 - [ ] web3_proxy_cli command should read database settings from config
 - [ ] how should we handle reverting transactions? they won't confirm for a while after we send them
 - [ ] allow configuration of the expiration time of bearer tokens. currently defaults to 4 weeks
-- [ ] instead of putting everything under /rpc, have a site_prefix config?
 - [ ] Ulid instead of Uuid for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
 - [ ] emit stat when an IP/key goes over rate limits

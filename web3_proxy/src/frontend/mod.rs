@@ -47,7 +47,6 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         });
 
     // build our axum Router
-    // TODO: these should probbably all start with /rpc. then / can be the static site
     let app = Router::new()
         // routes should be order most to least common
         .route("/rpc", post(rpc_proxy_http::proxy_web3_rpc))
@@ -60,18 +59,18 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
             "/rpc/:user_key",
             get(rpc_proxy_ws::websocket_handler_with_key),
         )
-        .route("/rpc/health", get(status::health))
-        .route("/rpc/status", get(status::status))
+        .route("/health", get(status::health))
+        .route("/status", get(status::status))
         // TODO: make this optional or remove it since it is available on another port
-        .route("/rpc/prometheus", get(status::prometheus))
-        .route("/rpc/user/login/:user_address", get(users::get_login))
+        .route("/prometheus", get(status::prometheus))
+        .route("/user/login/:user_address", get(users::get_login))
         .route(
-            "/rpc/user/login/:user_address/:message_eip",
+            "/user/login/:user_address/:message_eip",
             get(users::get_login),
         )
-        .route("/rpc/user/login", post(users::post_login))
-        .route("/rpc/user", post(users::post_user))
-        .route("/rpc/user/logout", get(users::get_logout))
+        .route("/user/login", post(users::post_login))
+        .route("/user", post(users::post_user))
+        .route("/user/logout", get(users::get_logout))
         // layers are ordered bottom up
         // the last layer is first for requests and last for responses
         // Mark the `Authorization` request header as sensitive so it doesn't show in logs
