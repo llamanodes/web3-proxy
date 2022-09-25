@@ -1,21 +1,24 @@
 pub mod authorization;
 mod errors;
-mod http;
 mod rpc_proxy_http;
 mod rpc_proxy_ws;
+mod status;
 mod users;
 
 use crate::app::Web3ProxyApp;
-use ::http::Request;
 use axum::{
     body::Body,
     handler::Handler,
     routing::{get, post},
     Extension, Router,
 };
+use http::header::AUTHORIZATION;
+use http::Request;
+use std::iter::once;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
+use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::trace::TraceLayer;
 use tower_request_id::{RequestId, RequestIdLayer};
 use tracing::{error_span, info};
@@ -57,10 +60,10 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
             "/rpc/:user_key",
             get(rpc_proxy_ws::websocket_handler_with_key),
         )
-        .route("/rpc/health", get(http::health))
-        .route("/rpc/status", get(http::status))
+        .route("/rpc/health", get(status::health))
+        .route("/rpc/status", get(status::status))
         // TODO: make this optional or remove it since it is available on another port
-        .route("/rpc/prometheus", get(http::prometheus))
+        .route("/rpc/prometheus", get(status::prometheus))
         .route("/rpc/user/login/:user_address", get(users::get_login))
         .route(
             "/rpc/user/login/:user_address/:message_eip",
@@ -71,13 +74,16 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/rpc/user/logout", get(users::get_logout))
         // layers are ordered bottom up
         // the last layer is first for requests and last for responses
-        .layer(Extension(proxy_app))
+        // Mark the `Authorization` request header as sensitive so it doesn't show in logs
+        .layer(SetSensitiveRequestHeadersLayer::new(once(AUTHORIZATION)))
         // add the request id to our tracing logs
         .layer(request_tracing_layer)
         // handle cors
         .layer(CorsLayer::very_permissive())
         // create a unique id for each request
         .layer(RequestIdLayer)
+        // application state
+        .layer(Extension(proxy_app))
         // 404 for any unknown routes
         .fallback(errors::handler_404.into_service());
 
