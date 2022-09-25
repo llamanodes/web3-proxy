@@ -15,6 +15,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tower_request_id::{RequestId, RequestIdLayer};
 use tracing::{error_span, info};
@@ -73,6 +74,8 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .layer(Extension(proxy_app))
         // add the request id to our tracing logs
         .layer(request_tracing_layer)
+        // handle cors
+        .layer(CorsLayer::very_permissive())
         // create a unique id for each request
         .layer(RequestIdLayer)
         // 404 for any unknown routes

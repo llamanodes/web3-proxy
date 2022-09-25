@@ -65,8 +65,9 @@ tokio = { version = "1.21.1", features = ["full", "tracing"] }
 tokio-stream = { version = "0.1.10", features = ["sync"] }
 toml = "0.5.9"
 tower = "0.4.13"
+# TODO: i don't think we need this. we can use it from tower-http instead. though this seems to use ulid and not uuid?
 tower-request-id = "0.2.0"
-tower-http = { version = "0.3.4", features = ["trace"] }
+tower-http = { version = "0.3.4", features = ["cors", "trace"] }
 tracing = "0.1.36"
 # TODO: tracing-subscriber has serde and serde_json features that we might want to use
 tracing-subscriber = { version = "0.3.15", features = ["env-filter", "parking_lot"] }

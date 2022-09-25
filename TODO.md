@@ -390,3 +390,7 @@ in another repo: event subscriber
 - [ ] Ulid instead of Uuid for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
 - [ ] emit stat when an IP/key goes over rate limits
+- [ ] readme command should run create_user commands via docker-compose
+- [ ] helper for UUID <-> ULID
+- [ ] Wrapping extractors in Result makes them optional and gives you the reason the extraction failed
+- [ ] save errors if there is a cache hit?
