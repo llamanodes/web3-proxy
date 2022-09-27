@@ -28,6 +28,17 @@ services:
     environment:
       ADMINER_DEFAULT_SERVER: db
 
+  influxdb:
+    image: influxdb:latest
+    ports:
+      - '127.0.0.1:8086:8086'
+    volumes:
+      - ./data/influxdb:/var/lib/influxdb
+    environment:
+      - INFLUXDB_DB=db0
+      - INFLUXDB_ADMIN_USER=web3_proxy
+      - INFLUXDB_ADMIN_PASSWORD=web3_proxy
+
   arbitrum:
     extends:
       file: docker-compose.common.yml
