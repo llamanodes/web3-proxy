@@ -21,7 +21,8 @@ pub async fn proxy_web3_rpc(
 ) -> FrontendResult {
     let request_span = error_span!("request", %ip, ?referer, ?user_agent);
 
-    let authorized_request = if let Some(TypedHeader(Authorization(bearer))) = bearer {
+    let (authorized_request, _semaphore) = if let Some(TypedHeader(Authorization(bearer))) = bearer
+    {
         let origin = origin.map(|x| x.0);
         let referer = referer.map(|x| x.0);
         let user_agent = user_agent.map(|x| x.0);
@@ -64,7 +65,7 @@ pub async fn proxy_web3_rpc_with_key(
     let request_span = error_span!("request", %ip, ?referer, ?user_agent);
 
     // TODO: this should probably return the user_key_id instead? or maybe both?
-    let authorized_request = key_is_authorized(
+    let (authorized_request, _semaphore) = key_is_authorized(
         &app,
         user_key,
         ip,

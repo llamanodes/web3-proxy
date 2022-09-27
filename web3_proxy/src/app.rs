@@ -41,7 +41,7 @@ use std::str::FromStr;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
@@ -106,7 +106,9 @@ pub struct Web3ProxyApp {
     pub frontend_key_rate_limiter: Option<DeferredRateLimiter<Ulid>>,
     pub login_rate_limiter: Option<RedisRateLimiter>,
     pub redis_pool: Option<RedisPool>,
-    pub user_cache: Cache<Ulid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
+    pub user_key_cache: Cache<Ulid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
+    pub user_key_semaphores: Cache<u64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
+    pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -380,9 +382,17 @@ impl Web3ProxyApp {
         // all the users are the same size, so no need for a weigher
         // TODO: max_capacity from config
         // TODO: ttl from config
-        let user_cache = Cache::builder()
+        let user_key_cache = Cache::builder()
             .max_capacity(10_000)
             .time_to_live(Duration::from_secs(60))
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+
+        // TODO: what should tti be for semaphores?
+        let user_key_semaphores = Cache::builder()
+            .time_to_idle(Duration::from_secs(120))
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+        let ip_semaphores = Cache::builder()
+            .time_to_idle(Duration::from_secs(120))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
         let app = Self {
@@ -400,7 +410,9 @@ impl Web3ProxyApp {
             redis_pool,
             app_metrics,
             open_request_handle_metrics,
-            user_cache,
+            user_key_cache,
+            user_key_semaphores,
+            ip_semaphores,
         };
 
         let app = Arc::new(app);

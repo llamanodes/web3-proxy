@@ -182,7 +182,6 @@ These are roughly in order of completition
 - [ ] endpoint for creating/modifying api keys and their advanced security features
 - [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
 - [ ] option to rotate api key
-- [ ] read the cookie key from a file. easy to re-use and no giant blob of hex in our app config
 - [ ] if no bearer token found in redis (likely because it expired), send 401 unauthorized
 - [ ] user create script should allow a description field
 - [ ] user create script should allow multiple keys per user
@@ -191,6 +190,7 @@ These are roughly in order of completition
 
 These are not yet ordered.
 
+- [ ] implement filters and other unimplemented rpc methods
 - [ ] instead of Option<...> in our frontend function signatures, use result and then the try operator so that we get our errors wrapped in json
 - [ ] revert logs should have a maximum age and a maximum count to keep the database from being huge
 - [ ] user login should also return a jwt (jsonwebtoken rust crate should make it easy)
@@ -229,7 +229,7 @@ These are not yet ordered.
   - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
   - if total difficulty is set and non-zero, use it for consensus instead of just the number
 - [ ] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
-- [ ] we need concurrent requests limits. these should NOT throw rate limit exceeded, instead they should wait on a dashmap of semaphores. or maybe an unbounded cache of semaphores. if the request timeout is exceeded, then we can return a rate limit exceeded error
+- [ ] we need concurrent requests limits. these should NOT throw rate limit exceeded, instead they should wait on a dashmap of semaphores. or maybe an unbounded cache of Arc<tokio::sync::Semaphore>s. if the request timeout is exceeded, then we can return a rate limit exceeded error
 
 
 new endpoints for users (not totally sure about the exact paths, but these features are all needed):
