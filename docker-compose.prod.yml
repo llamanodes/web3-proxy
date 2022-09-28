@@ -63,17 +63,17 @@ services:
   #      published: 7701
   #      target: 8544
 
-  bsc:
-    extends:
-      file: docker-compose.common.yml
-      service: web3-proxy
-    volumes:
-      - ./config/production-bsc.toml:/config.toml
-    ports:
-      - mode: host
-        protocol: tcp
-        published: 7702
-        target: 8544
+  # bsc:
+  #   extends:
+  #     file: docker-compose.common.yml
+  #     service: web3-proxy
+  #   volumes:
+  #     - ./config/production-bsc.toml:/config.toml
+  #   ports:
+  #     - mode: host
+  #       protocol: tcp
+  #       published: 7702
+  #       target: 8544
 
   eth:
     extends:
