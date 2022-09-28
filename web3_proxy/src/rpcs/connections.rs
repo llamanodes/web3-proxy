@@ -444,7 +444,7 @@ impl Web3Connections {
         warn!("no servers on {:?}! {:?}", self, earliest_retry_at);
 
         match earliest_retry_at {
-            None => todo!(),
+            None => Err(anyhow::anyhow!("no servers synced")),
             Some(earliest_retry_at) => Ok(OpenRequestResult::RetryAt(earliest_retry_at)),
         }
     }
