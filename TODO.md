@@ -172,7 +172,8 @@ These are roughly in order of completition
   - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
   - since users are actively using our service, we will need to support both
 - [x] get to /, when not serving a websocket, should have a simple welcome page. maybe with a button to update your wallet. 
-- [x] we need concurrent requests limits. these should NOT throw rate limit exceeded, instead they should wait on a dashmap of semaphores. or maybe an unbounded cache of Arc<tokio::sync::Semaphore>s. if the request timeout is exceeded, then we can return a rate limit exceeded error
+- [x] instead of giving a rate limit error code, delay the connection's response at the start. reject if incoming requests is super high?
+  - [x] did this by checking a key/ip-specific semaphore before checking rate limits
 - [ ] active requests per second per api key
 - [ ] parallel requests per api key
 - [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
@@ -305,7 +306,6 @@ in another repo: event subscriber
   - if they do that, i think my request_id will show up on their logs
 - [ ] page that prints a graphviz dotfile of the blockchain
 - [ ] search for all the "TODO" and `todo!(...)` items in the code and move them here
-- [ ] instead of giving a rate limit error code, delay the connection's response at the start. reject if incoming requests is super high?
 - [ ] add the backend server to the header?
 - [ ] have a low-latency option that always tries at least two servers in parallel and then returns the first success?
   - this doubles our request load though. maybe only if the first one doesn't respond very quickly? 
@@ -396,4 +396,5 @@ in another repo: event subscriber
 - [ ] readme command should run create_user commands via docker-compose
 - [ ] helper for UUID <-> ULID
 - [ ] Wrapping extractors in Result makes them optional and gives you the reason the extraction failed
-- [ ] save errors if there is a cache hit?
+- [ ] at concurrency 100, ethspam is getting 400 and 422 errors. figure out why. probably something with redis or mysql, but maybe its something else like spawning
+- [ ] emit per-key stats for latency of semaphore awaits. if this starts to grow, people will know they are hitting limits and need a higher tier
