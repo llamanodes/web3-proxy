@@ -2,6 +2,7 @@
 /.git
 /bin/
 /data/
+/docker-compose*
 /Dockerfile
 /redis-cell-server/
 /target
