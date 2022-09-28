@@ -41,7 +41,8 @@ pub async fn get_login(
     // TODO: allow ENS names here?
     Path(mut params): Path<HashMap<String, String>>,
 ) -> FrontendResult {
-    let _ = login_is_authorized(&app, ip).await?;
+    // give these named variables so that we drop them at the very end of this function
+    let (_, _semaphore) = login_is_authorized(&app, ip).await?;
 
     // at first i thought about checking that user_address is in our db
     // but theres no need to separate the registration and login flows
@@ -145,7 +146,8 @@ pub async fn post_login(
     Json(payload): Json<PostLogin>,
     Query(query): Query<PostLoginQuery>,
 ) -> FrontendResult {
-    let _ = login_is_authorized(&app, ip).await?;
+    // give these named variables so that we drop them at the very end of this function
+    let (_, _semaphore) = login_is_authorized(&app, ip).await?;
 
     if let Some(invite_code) = &app.config.invite_code {
         // we don't do per-user referral codes because we shouldn't collect what we don't need.
@@ -293,7 +295,8 @@ pub async fn post_user(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Json(payload): Json<PostUser>,
 ) -> FrontendResult {
-    let _ = login_is_authorized(&app, ip).await?;
+    // give these named variables so that we drop them at the very end of this function
+    let (_, _semaphore) = login_is_authorized(&app, ip).await?;
 
     let user = ProtectedAction::PostUser
         .verify(app.as_ref(), bearer_token, &payload.primary_address)
@@ -303,7 +306,10 @@ pub async fn post_user(
 
     // TODO: rate limit by user, too?
 
+    // TODO: allow changing the primary address, too. require a message from the new address to finish the change
+
     if let Some(x) = payload.email {
+        // TODO: only Set if no change
         if x.is_empty() {
             user.email = sea_orm::Set(None);
         } else {
@@ -314,12 +320,6 @@ pub async fn post_user(
     let db = app.db_conn().context("Getting database connection")?;
 
     user.save(db).await?;
-
-    // let user = user::ActiveModel {
-    //     address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
-    //     email: sea_orm::Set(payload.email),
-    //     ..Default::default()
-    // };
 
     todo!("finish post_user");
 }

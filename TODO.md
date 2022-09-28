@@ -172,6 +172,7 @@ These are roughly in order of completition
   - <https://discord.com/channels/873880840487206962/900758376164757555/1012942974608474142>
   - since users are actively using our service, we will need to support both
 - [x] get to /, when not serving a websocket, should have a simple welcome page. maybe with a button to update your wallet. 
+- [x] we need concurrent requests limits. these should NOT throw rate limit exceeded, instead they should wait on a dashmap of semaphores. or maybe an unbounded cache of Arc<tokio::sync::Semaphore>s. if the request timeout is exceeded, then we can return a rate limit exceeded error
 - [ ] active requests per second per api key
 - [ ] parallel requests per api key
 - [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
@@ -179,6 +180,8 @@ These are roughly in order of completition
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
   - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
 - [-] add configurable size limits to all the Caches
+  - [ ] instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages
+  - [ ] if user cache has evictions that aren't from timeouts, log a warning
 - [ ] endpoint for creating/modifying api keys and their advanced security features
 - [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
 - [ ] option to rotate api key
@@ -229,8 +232,6 @@ These are not yet ordered.
   - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
   - if total difficulty is set and non-zero, use it for consensus instead of just the number
 - [ ] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
-- [ ] we need concurrent requests limits. these should NOT throw rate limit exceeded, instead they should wait on a dashmap of semaphores. or maybe an unbounded cache of Arc<tokio::sync::Semaphore>s. if the request timeout is exceeded, then we can return a rate limit exceeded error
-
 
 new endpoints for users (not totally sure about the exact paths, but these features are all needed):
 - [x] GET /u/:api_key

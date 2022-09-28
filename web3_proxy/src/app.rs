@@ -68,8 +68,10 @@ pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 /// TODO: rename this?
 pub struct UserKeyData {
     pub user_key_id: u64,
-    /// if u64::MAX, allow unlimited queries
-    pub user_max_requests_per_period: Option<u64>,
+    /// if None, allow unlimited queries
+    pub max_requests_per_period: Option<u64>,
+    // if None, allow unlimited concurrent requests
+    pub max_concurrent_requests: Option<u64>,
     /// if None, allow any Origin
     pub allowed_origins: Option<Vec<String>>,
     /// if None, allow any Referer

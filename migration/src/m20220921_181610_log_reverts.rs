@@ -84,20 +84,23 @@ impl MigrationTrait for Migration {
             .alter_table(
                 sea_query::Table::alter()
                     .table(UserKeys::Table)
-                    .to_owned()
                     .modify_column(
                         ColumnDef::new(UserKeys::RequestsPerMinute)
                             .unsigned()
                             .not_null(),
                     )
                     .drop_column(UserKeys::LogRevertChance)
+                    .drop_column(UserKeys::AllowedIps)
+                    .drop_column(UserKeys::AllowedOrigins)
+                    .drop_column(UserKeys::AllowedReferers)
+                    .drop_column(UserKeys::AllowedUserAgents)
                     .to_owned(),
             )
             .await
     }
 }
 
-// copied from create_table.rs, but added
+// copied from create_table.rs, but added new columns
 #[derive(Iden)]
 pub enum UserKeys {
     Table,

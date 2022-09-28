@@ -28,7 +28,6 @@ axum-macros = "0.2.3"
 # TODO: import chrono from sea-orm so we always have the same version
 chrono = "0.4.22"
 counter = "0.5.6"
-dashmap = "5.4.0"
 derive_more = "0.99.17"
 dotenv = "0.15.0"
 ethers = { version = "0.17.0", features = ["rustls", "ws"] }
@@ -60,7 +59,7 @@ serde_json = { version = "1.0.85", default-features = false, features = ["alloc"
 serde_prometheus = "0.1.6"
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 time = "0.3.14"
-tokio = { version = "1.21.1", features = ["full", "tracing"] }
+tokio = { version = "1.21.2", features = ["full", "tracing"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.10", features = ["sync"] }
 toml = "0.5.9"

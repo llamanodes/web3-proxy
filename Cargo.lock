@@ -1198,19 +1198,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dashmap"
-version = "5.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "907076dfda823b0b36d2a1bb5f90c96660a5bbcd7729e10727f07858f22c4edc"
-dependencies = [
- "cfg-if",
- "hashbrown",
- "lock_api",
- "once_cell",
- "parking_lot_core 0.9.3",
-]
-
-[[package]]
 name = "deadpool"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1457,7 +1444,7 @@ dependencies = [
 
 [[package]]
 name = "entities"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "sea-orm",
  "serde",
@@ -2770,7 +2757,7 @@ dependencies = [
 
 [[package]]
 name = "migration"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-std",
  "sea-orm-migration",
@@ -4948,9 +4935,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.21.1"
+version = "1.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0020c875007ad96677dcc890298f4b942882c5d4eb7cc8f439fc3bf813dc9c95"
+checksum = "a9e03c497dc955702ba729190dc4aac6f2a0ce97f913e5b1b5912fc5039d9099"
 dependencies = [
  "autocfg 1.1.0",
  "bytes",
@@ -4958,7 +4945,6 @@ dependencies = [
  "memchr",
  "mio",
  "num_cpus",
- "once_cell",
  "parking_lot 0.12.1",
  "pin-project-lite",
  "signal-hook-registry",
@@ -5528,7 +5514,6 @@ dependencies = [
  "axum-macros",
  "chrono",
  "counter",
- "dashmap",
  "deferred-rate-limiter",
  "derive_more",
  "dotenv",

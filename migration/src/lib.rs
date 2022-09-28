@@ -2,6 +2,7 @@ pub use sea_orm_migration::prelude::*;
 
 mod m20220101_000001_create_table;
 mod m20220921_181610_log_reverts;
+mod m20220928_015108_concurrency_limits;
 
 pub struct Migrator;
 
@@ -11,6 +12,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20220101_000001_create_table::Migration),
             Box::new(m20220921_181610_log_reverts::Migration),
+            Box::new(m20220928_015108_concurrency_limits::Migration),
         ]
     }
 }

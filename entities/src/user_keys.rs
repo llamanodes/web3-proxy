@@ -16,6 +16,7 @@ pub struct Model {
     pub private_txs: bool,
     pub active: bool,
     pub requests_per_minute: Option<u64>,
+    pub max_concurrent_requests: Option<u64>,
     #[sea_orm(column_type = "Decimal(Some((5, 4)))")]
     pub log_revert_chance: Decimal,
     #[sea_orm(column_type = "Text", nullable)]
