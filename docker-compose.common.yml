@@ -1,7 +1,8 @@
 services:
-  base:
+  web3-proxy:
     # TODO: build in dev but use docker hub in prod?
     build: .
+    init: true
     restart: unless-stopped
     command: --config /config.toml --workers 16
     environment:
