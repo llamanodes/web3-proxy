@@ -5,6 +5,8 @@ services:
     init: true
     restart: unless-stopped
     command: --config /config.toml --workers 16
+    # rust's tokio crate expects a SIGINT https://tokio.rs/tokio/topics/shutdown
+    stop_signal: SIGINT
     environment:
       #RUST_LOG: "info,web3_proxy=debug"
       RUST_LOG: info
