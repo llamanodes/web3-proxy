@@ -174,21 +174,23 @@ These are roughly in order of completition
 - [x] get to /, when not serving a websocket, should have a simple welcome page. maybe with a button to update your wallet. 
 - [x] instead of giving a rate limit error code, delay the connection's response at the start. reject if incoming requests is super high?
   - [x] did this by checking a key/ip-specific semaphore before checking rate limits
-- [ ] active requests per second per api key
-- [ ] parallel requests per api key
-- [ ] distribution of methods per api key (eth_call, eth_getLogs, etc.)
+- [ ] collect active requests per second per api key
+- [ ] collect parallel requests per api key
+- [ ] collect distribution of methods per api key (eth_call, eth_getLogs, etc.)
+- [ ] display key stats on an endpoint that requires authentication
 - [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
   - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
 - [-] add configurable size limits to all the Caches
-  - [ ] instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages
-  - [ ] if user cache has evictions that aren't from timeouts, log a warning
+  - [ ] instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
+  - [ ] if user-specific caches have evictions that aren't from timeouts, log a warning
 - [ ] endpoint for creating/modifying api keys and their advanced security features
 - [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
 - [ ] option to rotate api key
 - [ ] if no bearer token found in redis (likely because it expired), send 401 unauthorized
 - [ ] user create script should allow a description field
 - [ ] user create script should allow multiple keys per user
+- [ ] somehow the proxy thought latest was hours behind. need internal health check that forces reconnect if this happens
 
 ## V1
 
@@ -398,3 +400,7 @@ in another repo: event subscriber
 - [ ] Wrapping extractors in Result makes them optional and gives you the reason the extraction failed
 - [ ] at concurrency 100, ethspam is getting 400 and 422 errors. figure out why. probably something with redis or mysql, but maybe its something else like spawning
 - [ ] emit per-key stats for latency of semaphore awaits. if this starts to grow, people will know they are hitting limits and need a higher tier
+- [ ] need a status page for your wallet's rpc. show head block information with age
+- [ ] hit counts seem wrong. how are we hitting the backend so much more than the frontend? retries on disconnect don't seem to fit that
+  web3_proxy_hit_count{path = "app/proxy_web3_rpc_request"} 857270
+  web3_proxy_hit_count{path = "backend_rpc/request"}       1396127
