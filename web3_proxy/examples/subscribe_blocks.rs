@@ -13,9 +13,9 @@ async fn main() -> anyhow::Result<()> {
     fdlimit::raise_fd_limit();
 
     // erigon
-    // let url = "ws://10.11.12.16:8548";
+    let url = "ws://10.11.12.16:8548";
     // geth
-    let url = "ws://10.11.12.16:8546";
+    // let url = "ws://10.11.12.16:8546";
 
     println!("Subscribing to blocks from {}", url);
 

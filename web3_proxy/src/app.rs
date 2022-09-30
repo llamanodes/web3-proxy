@@ -615,7 +615,9 @@ impl Web3ProxyApp {
                             },
                         });
 
-                        let msg = Message::Text(serde_json::to_string(&msg).unwrap());
+                        let msg = Message::Text(
+                            serde_json::to_string(&msg).expect("this message was just built"),
+                        );
 
                         if response_sender.send_async(msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
@@ -919,7 +921,7 @@ impl Web3ProxyApp {
                     head_block_id.num,
                     &self.balanced_rpcs,
                 )
-                .await
+                .await?
                 {
                     // TODO: maybe this should be on the app and not on balanced_rpcs
                     let request_block_hash =
@@ -966,7 +968,8 @@ impl Web3ProxyApp {
                         Ok::<_, anyhow::Error>(response)
                     })
                     .await
-                    .map_err(|err| Arc::try_unwrap(err).expect("this should be the only reference"))
+                    // TODO: what is the best way to handle an Arc here?
+                    .map_err(|err| anyhow::anyhow!(err))
                     .context("caching response")?;
 
                 // since this data came likely out of a cache, the id is not going to match

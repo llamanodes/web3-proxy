@@ -46,7 +46,7 @@ pub async fn proxy_web3_rpc(
             .await
     });
 
-    let response = f.await.unwrap()?;
+    let response = f.await.expect("joinhandle should always work")?;
 
     Ok(Json(&response).into_response())
 }
@@ -86,7 +86,7 @@ pub async fn proxy_web3_rpc_with_key(
             .await
     });
 
-    let response = f.await.unwrap()?;
+    let response = f.await.expect("JoinHandle should always work")?;
 
     Ok(Json(&response).into_response())
 }

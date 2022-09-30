@@ -117,7 +117,7 @@ pub async fn websocket_handler_with_key(
                     &app.config.redirect_user_url,
                     &json!({ "authorized_request": authorized_request }),
                 )
-                .unwrap();
+                .expect("templating should always work");
 
             // this is not a websocket. redirect to a page for this user
             Ok(Redirect::to(&user_url).into_response())
@@ -178,8 +178,15 @@ async fn handle_socket_payload(
                     match response {
                         Ok((handle, response)) => {
                             // TODO: better key
-                            subscriptions
-                                .insert(response.result.as_ref().unwrap().to_string(), handle);
+                            subscriptions.insert(
+                                response
+                                    .result
+                                    .as_ref()
+                                    // TODO: what if there is an error?
+                                    .expect("response should always have a result, not an error")
+                                    .to_string(),
+                                handle,
+                            );
 
                             Ok(response.into())
                         }
@@ -188,7 +195,7 @@ async fn handle_socket_payload(
                 }
                 "eth_unsubscribe" => {
                     // TODO: how should handle rate limits and stats on this?
-
+                    // TODO: handle invalid params
                     let subscription_id = payload.params.unwrap().to_string();
 
                     let partial_response = match subscriptions.remove(&subscription_id) {
@@ -213,7 +220,7 @@ async fn handle_socket_payload(
             (id, response)
         }
         Err(err) => {
-            let id = RawValue::from_string("null".to_string()).unwrap();
+            let id = RawValue::from_string("null".to_string()).expect("null can always be a value");
             (id, Err(err.into()))
         }
     };
@@ -221,11 +228,12 @@ async fn handle_socket_payload(
     let response_str = match response {
         Ok(x) => serde_json::to_string(&x),
         Err(err) => {
-            // we have an anyhow error. turn it into
+            // we have an anyhow error. turn it into a response
             let response = JsonRpcForwardedResponse::from_anyhow_error(err, None, Some(id));
             serde_json::to_string(&response)
         }
     }
+    // TODO: what error should this be?
     .unwrap();
 
     Message::Text(response_str)

@@ -191,12 +191,16 @@ These are roughly in order of completition
 - [ ] user create script should allow a description field
 - [ ] user create script should allow multiple keys per user
 - [ ] somehow the proxy thought latest was hours behind. need internal health check that forces reconnect if this happens
+- [ ] display logged reverts on an endpoint that requires authentication
+- [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
 
 ## V1
 
 These are not yet ordered.
 
 - [ ] implement filters and other unimplemented rpc methods
+  - multiple teams need log filters and subscriptions.
+  - would be nice if our subscriptions had better gaurentees than geth/erigon do, but maybe simpler to just setup a broadcast channel and proxy all the respones to a backend instead
 - [ ] instead of Option<...> in our frontend function signatures, use result and then the try operator so that we get our errors wrapped in json
 - [ ] revert logs should have a maximum age and a maximum count to keep the database from being huge
 - [ ] user login should also return a jwt (jsonwebtoken rust crate should make it easy)
@@ -220,7 +224,6 @@ These are not yet ordered.
 - [ ] nice output when cargo doc is run
 - [ ] cache more things locally or in redis
 - [ ] stats when forks are resolved (and what chain they were on?)
-- [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
 - [ ] emit stats for user's successes, retries, failures, with the types of requests, chain, rpc
 - [ ] cli for creating and editing api keys
 - [ ] Only subscribe to transactions when someone is listening and if the server has opted in to it
@@ -235,6 +238,8 @@ These are not yet ordered.
   - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
   - if total difficulty is set and non-zero, use it for consensus instead of just the number
 - [ ] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
+- [ ] add a "failover" tier that is only used if balanced_rpcs has "no servers synced"
+  - use this tier (and private tier) to check timestamp on latest block. if we are behind that by more than a few seconds, something is wrong
 
 new endpoints for users (not totally sure about the exact paths, but these features are all needed):
 - [x] GET /u/:api_key

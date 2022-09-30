@@ -52,7 +52,7 @@ impl Web3Connections {
 
         let mut blockchain = self.blockchain_graphmap.write().await;
 
-        // TODO: think more about heaviest_chain
+        // TODO: think more about heaviest_chain. would be better to do the check inside this function
         if heaviest_chain {
             // this is the only place that writes to block_numbers
             // its inside a write lock on blockchain_graphmap, so i think there is no race
@@ -61,16 +61,12 @@ impl Web3Connections {
         }
 
         if blockchain.contains_node(*block_hash) {
-            // this hash is already included
-            trace!(%block_hash, %block_num, "skipping saving existing block");
-            // return now since this work was already done.
+            trace!(%block_hash, %block_num, "block already saved");
             return Ok(());
         }
 
-        // TODO: prettier log? or probably move the log somewhere else
         trace!(%block_hash, %block_num, "saving new block");
 
-        // TODO: theres a small race between contains_key and insert
         self.block_hashes
             .insert(*block_hash, block.to_owned())
             .await;
@@ -78,11 +74,10 @@ impl Web3Connections {
         blockchain.add_node(*block_hash);
 
         // what should edge weight be? and should the nodes be the blocks instead?
-        // TODO: maybe the weight should be the block?
         // we store parent_hash -> hash because the block already stores the parent_hash
         blockchain.add_edge(block.parent_hash, *block_hash, 0);
 
-        // TODO: prune block_numbers and block_map to only keep a configurable (256 on ETH?) number of blocks?
+        // TODO: prune blockchain to only keep a configurable (256 on ETH?) number of blocks?
 
         Ok(())
     }

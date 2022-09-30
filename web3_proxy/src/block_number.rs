@@ -8,25 +8,25 @@ use tracing::warn;
 
 use crate::rpcs::connections::Web3Connections;
 
-pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> (bool, U64) {
+pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> U64 {
     match block_num {
         BlockNumber::Earliest => {
             // modified is false because we want the backend to see "pending"
-            (false, U64::zero())
+            U64::zero()
         }
         BlockNumber::Latest => {
             // change "latest" to a number
             // modified is true because we want the backend to see the height and not "latest"
-            (true, latest_block)
+            latest_block
         }
         BlockNumber::Number(x) => {
             // we already have a number
-            (false, x)
+            x
         }
         BlockNumber::Pending => {
             // TODO: think more about how to handle Pending
             // modified is false because we want the backend to see "pending"
-            (false, latest_block)
+            latest_block
         }
     }
 }
@@ -57,7 +57,7 @@ pub async fn clean_block_number(
             }
             Some(x) => {
                 // convert the json value to a BlockNumber
-                let (modified, block_num) = if let Some(obj) = x.as_object_mut() {
+                let block_num = if let Some(obj) = x.as_object_mut() {
                     // it might be a Map like `{"blockHash": String("0xa5626dc20d3a0a209b1de85521717a3e859698de8ce98bca1b16822b7501f74b")}`
                     if let Some(block_hash) = obj.remove("blockHash") {
                         let block_hash: H256 =
@@ -65,12 +65,9 @@ pub async fn clean_block_number(
 
                         let block = rpcs.block(None, &block_hash, None).await?;
 
-                        let block_num = block
+                        block
                             .number
-                            .expect("blocks here should always have numbers");
-
-                        // always set modfied to true because we used "take" above
-                        (true, block_num)
+                            .expect("blocks here should always have numbers")
                     } else {
                         return Err(anyhow::anyhow!("blockHash missing"));
                     }
@@ -79,16 +76,11 @@ pub async fn clean_block_number(
                     // TODO: "BlockNumber" needs a better name
                     let block_number = serde_json::from_value::<BlockNumber>(x.take())?;
 
-                    let (_, block_num) = block_num_to_u64(block_number, latest_block);
-
-                    // always set modfied to true because we used "take" above
-                    (true, block_num)
+                    block_num_to_u64(block_number, latest_block)
                 };
 
                 // if we changed "latest" to a number, update the params to match
-                if modified {
-                    *x = serde_json::to_value(block_num)?;
-                }
+                *x = serde_json::to_value(block_num)?;
 
                 Ok(block_num)
             }
@@ -102,9 +94,13 @@ pub async fn block_needed(
     params: Option<&mut serde_json::Value>,
     head_block_num: U64,
     rpcs: &Web3Connections,
-) -> Option<U64> {
+) -> anyhow::Result<Option<U64>> {
     // if no params, no block is needed
-    let params = params?;
+    let params = if let Some(params) = params {
+        params
+    } else {
+        return Ok(None);
+    };
 
     // get the index for the BlockNumber or return None to say no block is needed.
     // The BlockNumber is usually the last element.
@@ -115,95 +111,95 @@ pub async fn block_needed(
         "eth_getBalance" => 1,
         "eth_getBlockByHash" => {
             // TODO: double check that any node can serve this
-            return None;
+            return Ok(None);
         }
         "eth_getBlockByNumber" => {
             // TODO: double check that any node can serve this
-            return None;
+            return Ok(None);
         }
         "eth_getBlockTransactionCountByHash" => {
             // TODO: double check that any node can serve this
-            return None;
+            return Ok(None);
         }
         "eth_getBlockTransactionCountByNumber" => 0,
         "eth_getCode" => 1,
         "eth_getLogs" => {
-            let obj = params[0].as_object_mut().unwrap();
+            // TODO: jsonrpc has a specific code for this
+            let obj = params[0]
+                .as_object_mut()
+                .ok_or_else(|| anyhow::anyhow!("invalid format"))?;
 
             if let Some(x) = obj.get_mut("fromBlock") {
-                let block_num: BlockNumber = serde_json::from_value(x.clone()).ok()?;
+                let block_num: BlockNumber = serde_json::from_value(x.take())?;
 
-                let (modified, block_num) = block_num_to_u64(block_num, head_block_num);
+                let block_num = block_num_to_u64(block_num, head_block_num);
 
-                if modified {
-                    *x = serde_json::to_value(block_num).unwrap();
-                }
+                *x = serde_json::to_value(block_num).expect("U64 can always be a serde_json::Value");
 
                 // TODO: maybe don't return. instead check toBlock too?
                 // TODO: if there is a very wide fromBlock and toBlock, we need to check that our rpcs have both!
-                return Some(block_num);
+                return Ok(Some(block_num));
             }
 
             if let Some(x) = obj.get_mut("toBlock") {
-                let block_num: BlockNumber = serde_json::from_value(x.clone()).ok()?;
+                let block_num: BlockNumber = serde_json::from_value(x.take())?;
 
-                let (modified, block_num) = block_num_to_u64(block_num, head_block_num);
+                let block_num = block_num_to_u64(block_num, head_block_num);
 
-                if modified {
-                    *x = serde_json::to_value(block_num).unwrap();
-                }
+                *x = serde_json::to_value(block_num)
+                    .expect("block_num should always turn into a value");
 
-                return Some(block_num);
+                return Ok(Some(block_num));
             }
 
             if obj.contains_key("blockHash") {
                 1
             } else {
-                return None;
+                return Ok(None);
             }
         }
         "eth_getStorageAt" => 2,
         "eth_getTransactionByHash" => {
             // TODO: not sure how best to look these up
             // try full nodes first. retry will use archive
-            return None;
+            return Ok(None);
         }
         "eth_getTransactionByBlockHashAndIndex" => {
             // TODO: check a Cache of recent hashes
             // try full nodes first. retry will use archive
-            return None;
+            return Ok(None);
         }
         "eth_getTransactionByBlockNumberAndIndex" => 0,
         "eth_getTransactionCount" => 1,
         "eth_getTransactionReceipt" => {
             // TODO: not sure how best to look these up
             // try full nodes first. retry will use archive
-            return None;
+            return Ok(None);
         }
         "eth_getUncleByBlockHashAndIndex" => {
             // TODO: check a Cache of recent hashes
             // try full nodes first. retry will use archive
-            return None;
+            return Ok(None);
         }
         "eth_getUncleByBlockNumberAndIndex" => 0,
         "eth_getUncleCountByBlockHash" => {
             // TODO: check a Cache of recent hashes
             // try full nodes first. retry will use archive
-            return None;
+            return Ok(None);
         }
         "eth_getUncleCountByBlockNumber" => 0,
         _ => {
             // some other command that doesn't take block numbers as an argument
-            return None;
+            return Ok(None);
         }
     };
 
     match clean_block_number(params, block_param_id, head_block_num, rpcs).await {
-        Ok(block) => Some(block),
+        Ok(block) => Ok(Some(block)),
         Err(err) => {
             // TODO: seems unlikely that we will get here
             warn!(?err, "could not get block from params");
-            None
+            Ok(None)
         }
     }
 }

@@ -326,12 +326,14 @@ impl Web3ProxyApp {
         if let Some(max_concurrent_requests) = user_data.max_concurrent_requests {
             let semaphore = self
                 .user_key_semaphores
-                .get_with(user_data.user_key_id, async move {
-                    let s = Semaphore::const_new(max_concurrent_requests.try_into().unwrap());
+                .try_get_with(user_data.user_key_id, async move {
+                    let s = Semaphore::const_new(max_concurrent_requests.try_into()?);
                     trace!("new semaphore for user_key_id {}", user_data.user_key_id);
-                    Arc::new(s)
+                    Ok::<_, anyhow::Error>(Arc::new(s))
                 })
-                .await;
+                .await
+                // TODO: is this the best way to handle an arc
+                .map_err(|err| anyhow::anyhow!(err))?;
 
             let semaphore_permit = semaphore.acquire_owned().await?;
 
@@ -492,8 +494,8 @@ impl Web3ProxyApp {
             })
             .await;
 
-        // TODO: i'm not actually sure about this expect
-        user_data.map_err(|err| Arc::try_unwrap(err).expect("this should be the only reference"))
+        // TODO: what's the best way to handle this arc? try_unwrap will not work
+        user_data.map_err(|err| anyhow::anyhow!(err))
     }
 
     pub async fn rate_limit_by_key(&self, user_key: UserKey) -> anyhow::Result<RateLimitResult> {
