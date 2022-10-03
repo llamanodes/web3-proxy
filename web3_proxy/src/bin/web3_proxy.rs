@@ -78,7 +78,7 @@ fn run(
         let prometheus_handle = tokio::spawn(metrics_frontend::serve(app, app_prometheus_port));
 
         // if everything is working, these should both run forever
-        // TODO: try_join these instead? use signal_shutdown here?
+        // TODO: try_join these instead?
         tokio::select! {
             x = app_handle => {
                 match x {

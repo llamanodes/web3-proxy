@@ -174,8 +174,8 @@ These are roughly in order of completition
 - [x] get to /, when not serving a websocket, should have a simple welcome page. maybe with a button to update your wallet. 
 - [x] instead of giving a rate limit error code, delay the connection's response at the start. reject if incoming requests is super high?
   - [x] did this by checking a key/ip-specific semaphore before checking rate limits
-- [ ] collect active requests per second per api key
-- [ ] collect parallel requests per api key
+- [ ] collect requests per second per api key
+- [ ] collect concurrent requests per api key
 - [ ] collect distribution of methods per api key (eth_call, eth_getLogs, etc.)
 - [ ] display key stats on an endpoint that requires authentication
 - [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly

@@ -45,6 +45,7 @@ pub struct TopConfig {
 }
 
 /// shared configuration between Web3Connections
+// TODO: no String, only &str
 #[derive(Debug, Default, Deserialize)]
 pub struct AppConfig {
     // TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
@@ -59,6 +60,7 @@ pub struct AppConfig {
     /// If none, the minimum * 2 is used
     pub db_max_connections: Option<u32>,
     pub influxdb_url: Option<String>,
+    pub influxdb_name: Option<String>,
     pub default_requests_per_minute: Option<u64>,
     pub invite_code: Option<String>,
     #[serde(default = "default_min_sum_soft_limit")]

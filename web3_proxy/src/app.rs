@@ -11,6 +11,7 @@ use crate::rpcs::blockchain::{ArcBlock, BlockId};
 use crate::rpcs::connections::Web3Connections;
 use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
+use crate::stats::StatEmitter;
 use anyhow::Context;
 use axum::extract::ws::Message;
 use axum::headers::{Referer, UserAgent};
@@ -168,6 +169,7 @@ pub async fn get_migrated_db(
 
 #[metered(registry = Web3ProxyAppMetrics, registry_expr = self.app_metrics, visibility = pub)]
 impl Web3ProxyApp {
+    /// The main entrypoint.
     pub async fn spawn(
         top_config: TopConfig,
         num_workers: usize,
@@ -181,10 +183,11 @@ impl Web3ProxyApp {
             "redirect user url must contain \"{{user_id}}\""
         );
 
+        // setup metrics
         let app_metrics = Default::default();
         let open_request_handle_metrics: Arc<OpenRequestHandleMetrics> = Default::default();
 
-        // first, we connect to mysql and make sure the latest migrations have run
+        // connect to mysql and make sure the latest migrations have run
         let db_conn = if let Some(db_url) = top_config.app.db_url.clone() {
             let db_min_connections = top_config
                 .app
@@ -192,12 +195,12 @@ impl Web3ProxyApp {
                 .unwrap_or(num_workers as u32);
 
             // TODO: what default multiple?
-            let redis_max_connections = top_config
+            let db_max_connections = top_config
                 .app
                 .db_max_connections
                 .unwrap_or(db_min_connections * 2);
 
-            let db = get_migrated_db(db_url, db_min_connections, redis_max_connections).await?;
+            let db = get_migrated_db(db_url, db_min_connections, db_max_connections).await?;
 
             Some(db)
         } else {
@@ -206,19 +209,14 @@ impl Web3ProxyApp {
         };
 
         let balanced_rpcs = top_config.balanced_rpcs;
-
-        let private_rpcs = if let Some(private_rpcs) = top_config.private_rpcs {
-            private_rpcs
-        } else {
-            Default::default()
-        };
+        let private_rpcs = top_config.private_rpcs.unwrap_or_default();
 
         // TODO: try_join_all instead?
         let handles = FuturesUnordered::new();
 
         // make a http shared client
         // TODO: can we configure the connection pool? should we?
-        // TODO: 5 minutes is probably long enough. unlimited is a bad idea if something is wrong with the remote server
+        // TODO: timeouts from config. defaults are hopefully good
         let http_client = Some(
             reqwest::ClientBuilder::new()
                 .connect_timeout(Duration::from_secs(5))
@@ -227,6 +225,8 @@ impl Web3ProxyApp {
                 .build()?,
         );
 
+        // create a connection pool for redis
+        // a failure to connect does NOT block the application from starting
         let redis_pool = match top_config.app.redis_url.as_ref() {
             Some(redis_url) => {
                 // TODO: scrub credentials and then include the redis_url in logs
@@ -261,13 +261,36 @@ impl Web3ProxyApp {
             }
         };
 
+        // setup a channel here for receiving influxdb stats
+        // we do this in a channel so we don't slow down our response to the users
+        // TODO: make influxdb optional
+        let stat_sender = if let Some(influxdb_url) = top_config.app.influxdb_url.clone() {
+            let influxdb_name = top_config
+                .app
+                .influxdb_name
+                .clone()
+                .context("connecting to influxdb")?;
+
+            // TODO: sender and receiver here are a little confusing. because the thing that reads the receiver is what actually submits the stats
+            let (stat_sender, stat_handle) =
+                StatEmitter::spawn(influxdb_url, influxdb_name, http_client.clone());
+
+            handles.push(stat_handle);
+
+            Some(stat_sender)
+        } else {
+            warn!("no influxdb connection");
+
+            None
+        };
+
         // TODO: i don't like doing Block::default here! Change this to "None"?
         let (head_block_sender, head_block_receiver) = watch::channel(Arc::new(Block::default()));
         // TODO: will one receiver lagging be okay? how big should this be?
         let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
 
         // TODO: use this? it could listen for confirmed transactions and then clear pending_transactions, but the head_block_sender is doing that
-        // TODO: don't drop the pending_tx_receiver. instead, read it to mark transactions as "seen". once seen, we won't re-send them
+        // TODO: don't drop the pending_tx_receiver. instead, read it to mark transactions as "seen". once seen, we won't re-send them?
         // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
         // TODO: we should still have some sort of expiration or maximum size limit for the map
         drop(pending_tx_receiver);
@@ -287,6 +310,7 @@ impl Web3ProxyApp {
             .weigher(|_k, v| size_of_val(v) as u32)
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
+        // connect to the load balanced rpcs
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
             top_config.app.chain_id,
             balanced_rpcs,
@@ -301,16 +325,18 @@ impl Web3ProxyApp {
             open_request_handle_metrics.clone(),
         )
         .await
-        .context("balanced rpcs")?;
+        .context("spawning balanced rpcs")?;
 
+        // save the handle to catch any errors
         handles.push(balanced_handle);
 
+        // connect to the private rpcs
+        // only some chains have this, so this is optional
         let private_rpcs = if private_rpcs.is_empty() {
             // TODO: do None instead of clone?
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             None
         } else {
-            // TODO: attach context to this error
             let (private_rpcs, private_handle) = Web3Connections::spawn(
                 top_config.app.chain_id,
                 private_rpcs,
@@ -328,15 +354,16 @@ impl Web3ProxyApp {
                 open_request_handle_metrics.clone(),
             )
             .await
-            .context("private_rpcs")?;
+            .context("spawning private_rpcs")?;
 
+            // save the handle to catch any errors
             handles.push(private_handle);
 
             Some(private_rpcs)
         };
 
-        // TODO: setup a channel here for receiving influxdb stats
-
+        // create rate limiters
+        // these are optional. they require redis
         let mut frontend_ip_rate_limiter = None;
         let mut frontend_key_rate_limiter = None;
         let mut login_rate_limiter = None;
@@ -382,6 +409,7 @@ impl Web3ProxyApp {
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
         // all the users are the same size, so no need for a weigher
+        // if there is no database of users, there will be no keys and so this will be empty
         // TODO: max_capacity from config
         // TODO: ttl from config
         let user_key_cache = Cache::builder()
@@ -389,6 +417,7 @@ impl Web3ProxyApp {
             .time_to_live(Duration::from_secs(60))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
+        // create semaphores for concurrent connection limits
         // TODO: what should tti be for semaphores?
         let user_key_semaphores = Cache::builder()
             .time_to_idle(Duration::from_secs(120))
