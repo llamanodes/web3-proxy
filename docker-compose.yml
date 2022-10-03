@@ -46,7 +46,7 @@ services:
   dev-eth:
     extends:
       file: docker-compose.common.yml
-      service: base
+      service: web3-proxy
     volumes:
       - ./config/example.toml:/config.toml
     ports:

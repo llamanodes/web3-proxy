@@ -193,6 +193,7 @@ These are roughly in order of completition
 - [ ] somehow the proxy thought latest was hours behind. need internal health check that forces reconnect if this happens
 - [ ] display logged reverts on an endpoint that requires authentication
 - [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
+- [ ] have a log all option? instead of just reverts, log all request/responses? can be very useful for debugging
 
 ## V1
 

@@ -11,8 +11,9 @@ use crate::rpcs::blockchain::{ArcBlock, BlockId};
 use crate::rpcs::connections::Web3Connections;
 use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
-use crate::stats::StatEmitter;
+use crate::stats::{ProxyResponseStat, ProxyResponseType, StatEmitter, Web3ProxyStat};
 use anyhow::Context;
+use atomic::{AtomicBool, Ordering};
 use axum::extract::ws::Message;
 use axum::headers::{Referer, UserAgent};
 use deferred_rate_limiter::DeferredRateLimiter;
@@ -112,6 +113,7 @@ pub struct Web3ProxyApp {
     pub user_key_cache: Cache<Ulid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
     pub user_key_semaphores: Cache<u64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
+    pub stat_sender: Option<flume::Sender<Web3ProxyStat>>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -444,6 +446,7 @@ impl Web3ProxyApp {
             user_key_cache,
             user_key_semaphores,
             ip_semaphores,
+            stat_sender,
         };
 
         let app = Arc::new(app);
@@ -972,34 +975,56 @@ impl Web3ProxyApp {
                     request.params.clone().map(|x| x.to_string()),
                 );
 
-                // TODO: remove their request id instead of cloning it
+                let cache_hit = Arc::new(AtomicBool::new(true));
 
-                // TODO: move this caching outside this match and cache some of the other responses?
-                // TODO: cache the warp::reply to save us serializing every time?
-                let mut response = self
-                    .response_cache
-                    .try_get_with(cache_key, async move {
-                        // TODO: retry some failures automatically!
-                        // TODO: try private_rpcs if all the balanced_rpcs fail!
-                        // TODO: put the hash here instead?
-                        let mut response = self
-                            .balanced_rpcs
-                            .try_send_best_upstream_server(
-                                Some(authorized_request),
-                                request,
-                                Some(&request_block_id.num),
-                            )
-                            .await?;
+                let mut response = {
+                    let cache_hit = cache_hit.clone();
 
-                        // discard their id by replacing it with an empty
-                        response.id = Default::default();
+                    self.response_cache
+                        .try_get_with(cache_key, async move {
+                            cache_hit.store(false, Ordering::Release);
 
-                        Ok::<_, anyhow::Error>(response)
-                    })
-                    .await
-                    // TODO: what is the best way to handle an Arc here?
-                    .map_err(|err| anyhow::anyhow!(err))
-                    .context("caching response")?;
+                            // TODO: retry some failures automatically!
+                            // TODO: try private_rpcs if all the balanced_rpcs fail!
+                            // TODO: put the hash here instead?
+                            let mut response = self
+                                .balanced_rpcs
+                                .try_send_best_upstream_server(
+                                    Some(authorized_request),
+                                    request,
+                                    Some(&request_block_id.num),
+                                )
+                                .await?;
+
+                            // discard their id by replacing it with an empty
+                            response.id = Default::default();
+
+                            Ok::<_, anyhow::Error>(response)
+                        })
+                        .await
+                        // TODO: what is the best way to handle an Arc here?
+                        .map_err(|err| {
+                            // TODO: emit a stat for an error
+                            anyhow::anyhow!(err)
+                        })
+                        .context("caching response")?
+                };
+
+                if let Some(stat_sender) = &self.stat_sender {
+                    let response_type = if cache_hit.load(Ordering::Acquire) {
+                        ProxyResponseType::CacheHit
+                    } else {
+                        ProxyResponseType::CacheMiss
+                    };
+
+                    let response_stat = ProxyResponseStat::new(
+                        method.to_string(),
+                        response_type,
+                        authorized_request,
+                    );
+
+                    stat_sender.send_async(response_stat.into()).await?;
+                }
 
                 // since this data came likely out of a cache, the id is not going to match
                 // replace the id with our request's id.

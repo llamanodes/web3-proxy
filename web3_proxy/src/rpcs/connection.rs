@@ -473,13 +473,14 @@ impl Web3Connection {
                                 trace!(rpc=%conn, "provider is ready");
                             } else {
                                 warn!(rpc=%conn, "provider is NOT ready");
+                                // returning error will trigger a reconnect
+                                // TODO: what if we just happened to have this check line up with another restart?
                                 return Err(anyhow::anyhow!("provider is not ready"));
                             }
                         }
 
                         // TODO: how often?
-                        // TODO: should we also check that the head block has changed recently?
-                        // TODO: maybe instead we should do a simple subscription and follow that instead
+                        // TODO: also check that the head block has changed recently
                         sleep(Duration::from_secs(10)).await;
                     }
                 };

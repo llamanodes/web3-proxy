@@ -1,26 +1,64 @@
 use chrono::{DateTime, Utc};
+use derive_more::From;
+use influxdb::Client;
 use influxdb::InfluxDbWriteable;
-use influxdb::{Client, Query, ReadQuery, Timestamp};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, trace};
 
-/// TODO: replace this example stat with our own
-#[derive(InfluxDbWriteable)]
-pub struct WeatherReading {
-    time: DateTime<Utc>,
-    humidity: i32,
-    #[influxdb(tag)]
-    wind_direction: String,
+use crate::frontend::authorization::AuthorizedRequest;
+
+#[derive(Debug)]
+pub enum ProxyResponseType {
+    CacheHit,
+    CacheMiss,
+    Error,
 }
 
+impl From<ProxyResponseType> for influxdb::Type {
+    fn from(x: ProxyResponseType) -> Self {
+        match x {
+            ProxyResponseType::CacheHit => "cache_hit".into(),
+            ProxyResponseType::CacheMiss => "cache_miss".into(),
+            ProxyResponseType::Error => "error".into(),
+        }
+    }
+}
+
+/// TODO: where should this be defined?
+/// TODO: what should be fields and what should be tags. count is always 1 which feels wrong
+#[derive(Debug, InfluxDbWriteable)]
+pub struct ProxyResponseStat {
+    time: DateTime<Utc>,
+    count: u32,
+    #[influxdb(tag)]
+    method: String,
+    #[influxdb(tag)]
+    response_type: ProxyResponseType,
+    #[influxdb(tag)]
+    who: String,
+}
+
+impl ProxyResponseStat {
+    pub fn new(method: String, response_type: ProxyResponseType, who: &AuthorizedRequest) -> Self {
+        Self {
+            time: Utc::now(),
+            count: 1,
+            method,
+            response_type,
+            who: who.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, From)]
 pub enum Web3ProxyStat {
-    WeatherReading(WeatherReading),
+    ProxyResponse(ProxyResponseStat),
 }
 
 impl Web3ProxyStat {
     fn into_query(self) -> influxdb::WriteQuery {
         match self {
-            Self::WeatherReading(x) => x.into_query("weather"),
+            Self::ProxyResponse(x) => x.into_query("proxy_response"),
         }
     }
 }
@@ -46,7 +84,11 @@ impl StatEmitter {
 
         let f = async move {
             while let Ok(x) = rx.recv_async().await {
-                if let Err(err) = client.query(x.into_query()).await {
+                let x = x.into_query();
+
+                trace!(?x, "emitting stat");
+
+                if let Err(err) = client.query(x).await {
                     error!(?err, "failed writing stat");
                     // TODO: now what?
                 }
