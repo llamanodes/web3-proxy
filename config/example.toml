@@ -3,7 +3,7 @@ chain_id = 1
 db_url = "mysql://root:dev_web3_proxy@dev-db:3306/dev_web3_proxy"
 # TODO: how do we find the optimal db_max_connections? too high actually ends up being slower
 db_max_connections = 99
-influxdb_url = "http://influxdb:8086"
+# TODO: influxdb_url = "http://influxdb:8086"
 min_sum_soft_limit = 2000
 min_synced_rpcs = 2
 redis_url = "redis://dev-redis:6379/"
@@ -65,27 +65,29 @@ response_cache_max_bytes = 10000000000
 
 [private_rpcs]
 
-    [private_rpcs.eden]
+# these worked well on ETH 1.0, but 2.0 ends up not working as well. we will re-assess as more validators turn on private transactions
+
+    [private_rpcs_off.eden]
     url = "https://api.edennetwork.io/v1/"
     soft_limit = 1_805
     weight = 0
 
-    [private_rpcs.eden_beta]
+    [private_rpcs_off.eden_beta]
     url = "https://api.edennetwork.io/v1/beta"
     soft_limit = 5_861
     weight = 0
 
-    [private_rpcs.ethermine]
+    [private_rpcs_off.ethermine]
     url = "https://rpc.ethermine.org"
     soft_limit = 5_861
     weight = 0
 
-    [private_rpcs.flashbots]
+    [private_rpcs_off.flashbots]
     url = "https://rpc.flashbots.net/fast"
     soft_limit = 7074
     weight = 0
 
-    [private_rpcs.securerpc]
+    [private_rpcs_off.securerpc]
     url = "https://gibson.securerpc.com/v1"
     soft_limit = 4560
     weight = 0
