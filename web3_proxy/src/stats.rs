@@ -17,9 +17,9 @@ pub enum ProxyResponseType {
 impl Display for ProxyResponseType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ProxyResponseType::CacheHit => f.write_str("cache_hit"),
-            ProxyResponseType::CacheMiss => f.write_str("cache_miss"),
-            ProxyResponseType::Error => f.write_str("error"),
+            ProxyResponseType::CacheHit => f.write_str("ch"),
+            ProxyResponseType::CacheMiss => f.write_str("cm"),
+            ProxyResponseType::Error => f.write_str("err"),
         }
     }
 }
@@ -72,9 +72,7 @@ impl StatEmitter {
                 // TODO: this is too loud. just doing it for dev
                 debug!(?x, "emitting stat");
 
-                // TODO: do this without the pipe?
-                if let Err(err) = redis::pipe()
-                    .incr(&x, 1)
+                if let Err(err) = redis::Cmd::incr(&x, 1)
                     .query_async::<_, ()>(&mut redis_conn)
                     .await
                     .context("incrementing stat")
