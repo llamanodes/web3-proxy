@@ -174,10 +174,16 @@ These are roughly in order of completition
 - [x] get to /, when not serving a websocket, should have a simple welcome page. maybe with a button to update your wallet. 
 - [x] instead of giving a rate limit error code, delay the connection's response at the start. reject if incoming requests is super high?
   - [x] did this by checking a key/ip-specific semaphore before checking rate limits
-- [ ] collect requests per second per api key
-- [ ] collect concurrent requests per api key
-- [ ] collect distribution of methods per api key (eth_call, eth_getLogs, etc.)
-- [ ] display key stats on an endpoint that requires authentication
+- [x] emit stat on cache hit
+- [x] emit stat on cache miss
+- [ ] add grafana to dev docker-compose so we can browse stats
+- [ ] emit stat on retry
+- [ ] emit stat on no servers synced
+- [ ] emit stat on error (maybe just use sentry, but graphs are handy)
+  - if we wait until the error handler to emit the stat, i don't think we have access to the authorized_request
+- [ ] display requests per second per api key (only with authentication!)
+- [ ] display concurrent requests per api key (only with authentication!)
+- [ ] display distribution of methods per api key (eth_call, eth_getLogs, etc.) (only with authentication!)
 - [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
   - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
@@ -199,6 +205,8 @@ These are roughly in order of completition
 
 These are not yet ordered.
 
+- [ ] EIP1271 for siwe
+- [ ] Limited throughput during high traffic
 - [ ] implement filters and other unimplemented rpc methods
   - multiple teams need log filters and subscriptions.
   - would be nice if our subscriptions had better gaurentees than geth/erigon do, but maybe simpler to just setup a broadcast channel and proxy all the respones to a backend instead

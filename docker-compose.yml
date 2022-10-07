@@ -3,13 +3,16 @@
 version: "3.4"
 
 services:
-  dev-redis:
-    extends:
-      file: docker-compose.common.yml
-      service: volatile_redis
+  # manage the databases with a user friendly interface
+  # it is slightly dangerous with "drop all" as a single click
+  dev-adminer:
+    image: adminer
     ports:
-      - 127.0.0.1:16379:6379
+      - 18306:8080
+    environment:
+      ADMINER_DEFAULT_SERVER: dev-db
 
+  # in dev we use mysql, but production will use RDS or similar
   dev-db:
     image: mysql
     environment:
@@ -20,35 +23,30 @@ services:
     volumes:
       - ./data/dev_mysql:/var/lib/mysql
 
-  dev-influxdb:
-    image: influxdb:latest
-    ports:
-      - '127.0.0.1:18086:8086'
-    volumes:
-      - ./data/dev_influxdb:/var/lib/influxdb
-    environment:
-      - INFLUXDB_DB=db0
-      - INFLUXDB_ADMIN_USER=admin
-      - INFLUXDB_ADMIN_PASSWORD=dev_web3_proxy
-
-  dev-otel-collector:
-    image: otel/opentelemetry-collector-dev:latest
-    expose:
-      - 4317
-
-  dev-adminer:
-    image: adminer
-    ports:
-      - 18306:8080
-    environment:
-      ADMINER_DEFAULT_SERVER: dev-db
-
-  dev-eth:
+  # persistent redis for storing user stats
+  # TODO: replace this with a real time series database
+  dev-predis:
     extends:
       file: docker-compose.common.yml
-      service: web3-proxy
-    volumes:
-      - ./config/example.toml:/config.toml
+      service: persistent_redis
     ports:
-      - 8544:8544 # proxy (should be behind something handling HTTPS)
-      - 8543:8543 # prometheus
+      - 16379:6379
+    volumes:
+      - ./data/dev_predis:/data
+
+  # volatile redis for storing rate limits
+  dev-vredis:
+    extends:
+      file: docker-compose.common.yml
+      service: volatile_redis
+    ports:
+      - 16380:6379
+  # dev-eth:
+  #   extends:
+  #     file: docker-compose.common.yml
+  #     service: web3-proxy
+  #   volumes:
+  #     - ./config/example.toml:/config.toml
+  #   ports:
+  #     - 8544:8544 # proxy (should be behind something handling HTTPS)
+  #     - 8543:8543 # prometheus

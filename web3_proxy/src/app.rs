@@ -109,7 +109,7 @@ pub struct Web3ProxyApp {
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     pub frontend_key_rate_limiter: Option<DeferredRateLimiter<Ulid>>,
     pub login_rate_limiter: Option<RedisRateLimiter>,
-    pub redis_pool: Option<RedisPool>,
+    pub vredis_pool: Option<RedisPool>,
     pub user_key_cache: Cache<Ulid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
     pub user_key_semaphores: Cache<u64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
@@ -229,15 +229,15 @@ impl Web3ProxyApp {
 
         // create a connection pool for redis
         // a failure to connect does NOT block the application from starting
-        let redis_pool = match top_config.app.redis_url.as_ref() {
+        let vredis_pool = match top_config.app.volatile_redis_url.as_ref() {
             Some(redis_url) => {
                 // TODO: scrub credentials and then include the redis_url in logs
-                info!("Connecting to redis");
+                info!("Connecting to vredis");
 
                 // TODO: what is a good default?
                 let redis_max_connections = top_config
                     .app
-                    .redis_max_connections
+                    .volatile_redis_max_connections
                     .unwrap_or(num_workers * 2);
 
                 // TODO: what are reasonable timeouts?
@@ -251,37 +251,67 @@ impl Web3ProxyApp {
                 if let Err(err) = redis_pool.get().await {
                     error!(
                         ?err,
-                        "failed to connect to redis. some features will be disabled"
+                        "failed to connect to vredis. some features will be disabled"
                     );
                 };
 
                 Some(redis_pool)
             }
             None => {
-                warn!("no redis connection");
+                warn!("no redis connection. some features will be disabled");
                 None
             }
         };
 
-        // setup a channel here for receiving influxdb stats
+        // TODO: dry this with predis
+        let predis_pool = match top_config.app.persistent_redis_url.as_ref() {
+            Some(redis_url) => {
+                // TODO: scrub credentials and then include the redis_url in logs
+                info!("Connecting to predis");
+
+                // TODO: what is a good default?
+                let redis_max_connections = top_config
+                    .app
+                    .persistent_redis_max_connections
+                    .unwrap_or(num_workers * 2);
+
+                // TODO: what are reasonable timeouts?
+                let redis_pool = RedisConfig::from_url(redis_url)
+                    .builder()?
+                    .max_size(redis_max_connections)
+                    .runtime(DeadpoolRuntime::Tokio1)
+                    .build()?;
+
+                // test the redis pool
+                if let Err(err) = redis_pool.get().await {
+                    error!(
+                        ?err,
+                        "failed to connect to vredis. some features will be disabled"
+                    );
+                };
+
+                Some(redis_pool)
+            }
+            None => {
+                warn!("no predis connection. some features will be disabled");
+                None
+            }
+        };
+
+        // setup a channel for receiving stats (generally with a high cardinality, such as per-user)
         // we do this in a channel so we don't slow down our response to the users
-        // TODO: make influxdb optional
-        let stat_sender = if let Some(influxdb_url) = top_config.app.influxdb_url.clone() {
-            let influxdb_name = top_config
-                .app
-                .influxdb_name
-                .clone()
-                .context("connecting to influxdb")?;
+        let stat_sender = if let Some(redis_pool) = predis_pool.clone() {
+            let redis_conn = redis_pool.get().await?;
 
             // TODO: sender and receiver here are a little confusing. because the thing that reads the receiver is what actually submits the stats
             let (stat_sender, stat_handle) =
-                StatEmitter::spawn(influxdb_url, influxdb_name, http_client.clone());
+                StatEmitter::spawn(top_config.app.chain_id, redis_conn).await?;
 
             handles.push(stat_handle);
 
             Some(stat_sender)
         } else {
-            warn!("no influxdb connection");
+            warn!("cannot store stats without a redis connection");
 
             None
         };
@@ -317,7 +347,7 @@ impl Web3ProxyApp {
             top_config.app.chain_id,
             balanced_rpcs,
             http_client.clone(),
-            redis_pool.clone(),
+            vredis_pool.clone(),
             block_map.clone(),
             Some(head_block_sender),
             top_config.app.min_sum_soft_limit,
@@ -343,7 +373,7 @@ impl Web3ProxyApp {
                 top_config.app.chain_id,
                 private_rpcs,
                 http_client.clone(),
-                redis_pool.clone(),
+                vredis_pool.clone(),
                 block_map,
                 // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
                 None,
@@ -370,7 +400,7 @@ impl Web3ProxyApp {
         let mut frontend_key_rate_limiter = None;
         let mut login_rate_limiter = None;
 
-        if let Some(redis_pool) = redis_pool.as_ref() {
+        if let Some(redis_pool) = vredis_pool.as_ref() {
             let rpc_rrl = RedisRateLimiter::new(
                 "web3_proxy",
                 "frontend",
@@ -440,7 +470,7 @@ impl Web3ProxyApp {
             frontend_key_rate_limiter,
             login_rate_limiter,
             db_conn,
-            redis_pool,
+            vredis_pool,
             app_metrics,
             open_request_handle_metrics,
             user_key_cache,
@@ -740,7 +770,7 @@ impl Web3ProxyApp {
     }
 
     pub async fn redis_conn(&self) -> anyhow::Result<redis_rate_limiter::RedisConnection> {
-        match self.redis_pool.as_ref() {
+        match self.vredis_pool.as_ref() {
             None => Err(anyhow::anyhow!("no redis server configured")),
             Some(redis_pool) => {
                 let redis_conn = redis_pool.get().await?;

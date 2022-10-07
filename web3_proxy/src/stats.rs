@@ -1,9 +1,9 @@
-use chrono::{DateTime, Utc};
+use anyhow::Context;
 use derive_more::From;
-use influxdb::Client;
-use influxdb::InfluxDbWriteable;
+use redis_rate_limiter::{redis, RedisConnection};
+use std::fmt::Display;
 use tokio::task::JoinHandle;
-use tracing::{error, info, trace};
+use tracing::{debug, error, info};
 
 use crate::frontend::authorization::AuthorizedRequest;
 
@@ -14,39 +14,29 @@ pub enum ProxyResponseType {
     Error,
 }
 
-impl From<ProxyResponseType> for influxdb::Type {
-    fn from(x: ProxyResponseType) -> Self {
-        match x {
-            ProxyResponseType::CacheHit => "cache_hit".into(),
-            ProxyResponseType::CacheMiss => "cache_miss".into(),
-            ProxyResponseType::Error => "error".into(),
+impl Display for ProxyResponseType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProxyResponseType::CacheHit => f.write_str("cache_hit"),
+            ProxyResponseType::CacheMiss => f.write_str("cache_miss"),
+            ProxyResponseType::Error => f.write_str("error"),
         }
     }
 }
 
 /// TODO: where should this be defined?
-/// TODO: what should be fields and what should be tags. count is always 1 which feels wrong
-#[derive(Debug, InfluxDbWriteable)]
-pub struct ProxyResponseStat {
-    time: DateTime<Utc>,
-    count: u32,
-    #[influxdb(tag)]
-    method: String,
-    #[influxdb(tag)]
-    response_type: ProxyResponseType,
-    #[influxdb(tag)]
-    who: String,
-}
+#[derive(Debug)]
+pub struct ProxyResponseStat(String);
 
+/// A very basic stat that we store in redis.
+/// This probably belongs in a true time series database like influxdb, but client
 impl ProxyResponseStat {
     pub fn new(method: String, response_type: ProxyResponseType, who: &AuthorizedRequest) -> Self {
-        Self {
-            time: Utc::now(),
-            count: 1,
-            method,
-            response_type,
-            who: who.to_string(),
-        }
+        // TODO: what order?
+        // TODO: app specific prefix. need at least the chain id
+        let redis_key = format!("proxy_response:{}:{}:{}", method, response_type, who);
+
+        Self(redis_key)
     }
 }
 
@@ -56,9 +46,9 @@ pub enum Web3ProxyStat {
 }
 
 impl Web3ProxyStat {
-    fn into_query(self) -> influxdb::WriteQuery {
+    fn into_redis_key(self, chain_id: u64) -> String {
         match self {
-            Self::ProxyResponse(x) => x.into_query("proxy_response"),
+            Self::ProxyResponse(x) => format!("{}:{}", x.0, chain_id),
         }
     }
 }
@@ -66,31 +56,30 @@ impl Web3ProxyStat {
 pub struct StatEmitter;
 
 impl StatEmitter {
-    pub fn spawn(
-        influxdb_url: String,
-        influxdb_name: String,
-        http_client: Option<reqwest::Client>,
-    ) -> (flume::Sender<Web3ProxyStat>, JoinHandle<anyhow::Result<()>>) {
+    pub async fn spawn(
+        chain_id: u64,
+        mut redis_conn: RedisConnection,
+    ) -> anyhow::Result<(flume::Sender<Web3ProxyStat>, JoinHandle<anyhow::Result<()>>)> {
         let (tx, rx) = flume::unbounded::<Web3ProxyStat>();
 
-        let client = Client::new(influxdb_url, influxdb_name);
-
-        // use an existing http client
-        let client = if let Some(http_client) = http_client {
-            client.with_http_client(http_client)
-        } else {
-            client
-        };
-
+        // simple future that reads the channel and emits stats
         let f = async move {
             while let Ok(x) = rx.recv_async().await {
-                let x = x.into_query();
+                // TODO: batch stats? spawn this?
 
-                trace!(?x, "emitting stat");
+                let x = x.into_redis_key(chain_id);
 
-                if let Err(err) = client.query(x).await {
-                    error!(?err, "failed writing stat");
-                    // TODO: now what?
+                // TODO: this is too loud. just doing it for dev
+                debug!(?x, "emitting stat");
+
+                // TODO: do this without the pipe?
+                if let Err(err) = redis::pipe()
+                    .incr(&x, 1)
+                    .query_async::<_, ()>(&mut redis_conn)
+                    .await
+                    .context("incrementing stat")
+                {
+                    error!(?err, "emitting stat")
                 }
             }
 
@@ -101,6 +90,6 @@ impl StatEmitter {
 
         let handle = tokio::spawn(f);
 
-        (tx, handle)
+        Ok((tx, handle))
     }
 }

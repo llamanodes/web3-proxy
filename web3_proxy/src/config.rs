@@ -48,34 +48,49 @@ pub struct TopConfig {
 // TODO: no String, only &str
 #[derive(Debug, Default, Deserialize)]
 pub struct AppConfig {
-    // TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
+    /// EVM chain id. 1 for ETH
+    /// TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
     pub chain_id: u64,
-    pub cookie_domain: Option<String>,
-    pub cookie_secure: Option<bool>,
+    /// Database is used for user data.
+    /// Currently supports mysql or compatible backend.
     pub db_url: Option<String>,
-    /// minimum size of the connection pool for the database
-    /// If none, the number of workers are used
+    /// minimum size of the connection pool for the database.
+    /// If none, the number of workers are used.
     pub db_min_connections: Option<u32>,
-    /// minimum size of the connection pool for the database
-    /// If none, the minimum * 2 is used
+    /// maximum size of the connection pool for the database.
+    /// If none, the minimum * 2 is used.
     pub db_max_connections: Option<u32>,
-    pub influxdb_url: Option<String>,
-    pub influxdb_name: Option<String>,
+    /// Default request limit for registered users.
+    /// 0 = block all requests
+    /// None = allow all requests
     pub default_requests_per_minute: Option<u64>,
+    /// Restrict user registration.
+    /// None = no code needed
     pub invite_code: Option<String>,
+    /// The soft limit prevents thundering herds as new blocks are seen.
     #[serde(default = "default_min_sum_soft_limit")]
     pub min_sum_soft_limit: u32,
+    /// Another knob for preventing thundering herds as new blocks are seen.
     #[serde(default = "default_min_synced_rpcs")]
     pub min_synced_rpcs: usize,
-    /// Set to 0 to block all anonymous requests
+    /// Request limit for anonymous users.
+    /// Set to 0 to block all anonymous requests.
     #[serde(default = "default_frontend_rate_limit_per_minute")]
     pub frontend_rate_limit_per_minute: u64,
+    /// Rate limit for the login entrypoint.
+    /// This is separate from the rpc limits.
     #[serde(default = "default_login_rate_limit_per_minute")]
     pub login_rate_limit_per_minute: u64,
-    pub redis_url: Option<String>,
+    /// Persist user stats in a redis (or compatible backend)
+    /// TODO: research more time series databases
+    pub persistent_redis_url: Option<String>,
+    pub persistent_redis_max_connections: Option<usize>,
+    /// Track rate limits in a redis (or compatible backend)
+    pub volatile_redis_url: Option<String>,
     /// maximum size of the connection pool for the cache
     /// If none, the minimum * 2 is used
-    pub redis_max_connections: Option<usize>,
+    pub volatile_redis_max_connections: Option<usize>,
+    /// RPC responses are cached locally
     #[serde(default = "default_response_cache_max_bytes")]
     pub response_cache_max_bytes: usize,
     /// the stats page url for an anonymous user.
@@ -84,10 +99,12 @@ pub struct AppConfig {
     pub redirect_user_url: String,
 }
 
+/// This might cause a thundering herd!
 fn default_min_sum_soft_limit() -> u32 {
     1
 }
 
+/// Only require 1 server. This might cause a thundering herd!
 fn default_min_synced_rpcs() -> usize {
     1
 }
@@ -110,10 +127,16 @@ fn default_response_cache_max_bytes() -> usize {
 
 #[derive(Debug, Deserialize, Constructor)]
 pub struct Web3ConnectionConfig {
+    /// websocket (or http if no websocket)
     url: String,
+    /// the requests per second at which the server starts slowing down
     soft_limit: u32,
+    /// the requests per second at which the server throws errors (rate limit or otherwise)
     hard_limit: Option<u64>,
+    /// All else equal, a server with a lower weight receives requests
     weight: u32,
+    /// Subscribe to the firehose of pending transactions
+    /// Don't do this with free rpcs
     subscribe_txs: Option<bool>,
 }
 

@@ -26,7 +26,7 @@ use http::StatusCode;
 use redis_rate_limiter::redis::AsyncCommands;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 use serde::{Deserialize, Serialize};
-use siwe::Message;
+use siwe::{Message, VerificationOpts};
 use std::ops::Add;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
@@ -168,8 +168,14 @@ pub async fn post_login(
 
     let our_msg: siwe::Message = our_msg.parse().unwrap();
 
+    let verify_config = VerificationOpts {
+        domain: Some(our_msg.domain),
+        nonce: Some(our_msg.nonce),
+        ..Default::default()
+    };
+
     // check the domain and a nonce. let timestamp be automatic
-    if let Err(e) = their_msg.verify(their_sig, Some(&our_msg.domain), Some(&our_msg.nonce), None) {
+    if let Err(e) = their_msg.verify(&their_sig, &verify_config).await {
         // message cannot be correctly authenticated
         todo!("proper error message: {}", e)
     }

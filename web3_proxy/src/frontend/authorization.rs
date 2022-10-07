@@ -206,7 +206,7 @@ impl Display for &AuthorizedRequest {
         match self {
             AuthorizedRequest::Internal => f.write_str("internal"),
             AuthorizedRequest::Ip(x) => f.write_str(&format!("ip:{}", x)),
-            AuthorizedRequest::User(_, x) => f.write_str(&format!("user_key:{}", x.user_key_id)),
+            AuthorizedRequest::User(_, x) => f.write_str(&format!("uk:{}", x.user_key_id)),
         }
     }
 }
