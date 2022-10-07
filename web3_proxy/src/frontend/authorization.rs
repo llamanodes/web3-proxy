@@ -204,7 +204,7 @@ impl AuthorizedRequest {
 impl Display for &AuthorizedRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AuthorizedRequest::Internal => f.write_str("internal"),
+            AuthorizedRequest::Internal => f.write_str("int"),
             AuthorizedRequest::Ip(x) => f.write_str(&format!("ip:{}", x)),
             AuthorizedRequest::User(_, x) => f.write_str(&format!("uk:{}", x.user_key_id)),
         }
