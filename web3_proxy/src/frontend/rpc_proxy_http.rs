@@ -41,7 +41,7 @@ pub async fn proxy_web3_rpc(
     let authorized_request = Arc::new(authorized_request);
 
     let f = tokio::spawn(async move {
-        app.proxy_web3_rpc(&authorized_request, payload)
+        app.proxy_web3_rpc(authorized_request, payload)
             .instrument(request_span)
             .await
     });
@@ -81,7 +81,7 @@ pub async fn proxy_web3_rpc_with_key(
     let authorized_request = Arc::new(authorized_request);
 
     let f = tokio::spawn(async move {
-        app.proxy_web3_rpc(&authorized_request, payload)
+        app.proxy_web3_rpc(authorized_request, payload)
             .instrument(request_span)
             .await
     });

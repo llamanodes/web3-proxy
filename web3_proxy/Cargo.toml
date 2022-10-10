@@ -55,7 +55,7 @@ rustc-hash = "1.1.0"
 siwe = "0.5.0"
 sea-orm = { version = "0.9.3", features = ["macros"] }
 serde = { version = "1.0.145", features = [] }
-serde_json = { version = "1.0.85", default-features = false, features = ["alloc", "raw_value"] }
+serde_json = { version = "1.0.86", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.1.6"
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 time = "0.3.15"
@@ -72,4 +72,4 @@ tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "parking_lot"] }
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.3.1"
-uuid = "1.1.2"
+uuid = "1.2.1"

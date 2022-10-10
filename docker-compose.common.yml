@@ -11,11 +11,6 @@ services:
       #RUST_LOG: "info,web3_proxy=debug"
       RUST_LOG: info
 
-  persistent_redis:
-    image: redis:6.0-alpine
-    command: [ "redis-server", "--save", "", "--appendonly", "no" ]
-    # be sure to mount /data!
-
   volatile_redis:
     image: redis:6.0-alpine
     command: [ "redis-server", "--save", "60", "1" ]

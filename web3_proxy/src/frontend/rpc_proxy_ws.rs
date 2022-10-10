@@ -167,7 +167,7 @@ async fn handle_socket_payload(
 
                     let response = app
                         .eth_subscribe(
-                            authorized_request.clone(),
+                            authorized_request,
                             payload,
                             subscription_count,
                             response_sender.clone(),
@@ -211,10 +211,7 @@ async fn handle_socket_payload(
 
                     Ok(response.into())
                 }
-                _ => {
-                    app.proxy_web3_rpc(&authorized_request, payload.into())
-                        .await
-                }
+                _ => app.proxy_web3_rpc(authorized_request, payload.into()).await,
             };
 
             (id, response)

@@ -16,7 +16,6 @@ pub struct Model {
     pub private_txs: bool,
     pub active: bool,
     pub requests_per_minute: Option<u64>,
-    pub max_concurrent_requests: Option<u64>,
     #[sea_orm(column_type = "Decimal(Some((5, 4)))")]
     pub log_revert_chance: Decimal,
     #[sea_orm(column_type = "Text", nullable)]
@@ -27,6 +26,7 @@ pub struct Model {
     pub allowed_referers: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub allowed_user_agents: Option<String>,
+    pub max_concurrent_requests: Option<u64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -41,6 +41,8 @@ pub enum Relation {
     User,
     #[sea_orm(has_many = "super::revert_logs::Entity")]
     RevertLogs,
+    #[sea_orm(has_many = "super::rpc_accounting::Entity")]
+    RpcAccounting,
 }
 
 impl Related<super::user::Entity> for Entity {
@@ -52,6 +54,12 @@ impl Related<super::user::Entity> for Entity {
 impl Related<super::revert_logs::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::RevertLogs.def()
+    }
+}
+
+impl Related<super::rpc_accounting::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::RpcAccounting.def()
     }
 }
 

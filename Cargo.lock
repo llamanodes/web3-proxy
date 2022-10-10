@@ -1428,11 +1428,11 @@ dependencies = [
 
 [[package]]
 name = "entities"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "sea-orm",
  "serde",
- "uuid 1.1.2",
+ "uuid 1.2.1",
 ]
 
 [[package]]
@@ -2742,10 +2742,10 @@ dependencies = [
 
 [[package]]
 name = "migration"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
- "async-std",
  "sea-orm-migration",
+ "tokio",
 ]
 
 [[package]]
@@ -2802,7 +2802,7 @@ dependencies = [
  "tagptr",
  "thiserror",
  "triomphe",
- "uuid 1.1.2",
+ "uuid 1.2.1",
 ]
 
 [[package]]
@@ -3430,7 +3430,7 @@ dependencies = [
  "serde",
  "serde_json",
  "time 0.3.15",
- "uuid 1.1.2",
+ "uuid 1.2.1",
 ]
 
 [[package]]
@@ -4076,7 +4076,7 @@ dependencies = [
  "time 0.3.15",
  "tracing",
  "url",
- "uuid 1.1.2",
+ "uuid 1.2.1",
 ]
 
 [[package]]
@@ -4138,7 +4138,7 @@ dependencies = [
  "sea-query-driver",
  "serde_json",
  "time 0.3.15",
- "uuid 1.1.2",
+ "uuid 1.2.1",
 ]
 
 [[package]]
@@ -4271,9 +4271,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.85"
+version = "1.0.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e55a28e3aaef9d5ce0506d0a14dbba8054ddc7e499ef522dd8b26859ec9d4a44"
+checksum = "41feea4228a6f1cd09ec7a3593a682276702cd67b5273544757dae23c096f074"
 dependencies = [
  "itoa 1.0.2",
  "ryu",
@@ -4605,7 +4605,7 @@ dependencies = [
  "time 0.3.15",
  "tokio-stream",
  "url",
- "uuid 1.1.2",
+ "uuid 1.2.1",
  "webpki-roots",
 ]
 
@@ -5331,9 +5331,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.1.2"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd6469f4314d5f1ffec476e05f17cc9a78bc7a27a6a857842170bdf8d6f98d2f"
+checksum = "feb41e78f93363bb2df8b0e86a2ca30eed7806ea16ea0c790d757cf93f79be83"
 dependencies = [
  "getrandom",
  "serde",
@@ -5545,7 +5545,7 @@ dependencies = [
  "tracing-subscriber",
  "ulid 1.0.0",
  "url",
- "uuid 1.1.2",
+ "uuid 1.2.1",
 ]
 
 [[package]]

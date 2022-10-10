@@ -174,12 +174,15 @@ These are roughly in order of completition
 - [x] get to /, when not serving a websocket, should have a simple welcome page. maybe with a button to update your wallet. 
 - [x] instead of giving a rate limit error code, delay the connection's response at the start. reject if incoming requests is super high?
   - [x] did this by checking a key/ip-specific semaphore before checking rate limits
-- [x] emit stat on cache hit
-- [x] emit stat on cache miss
-- [ ] add grafana to dev docker-compose so we can browse stats
-- [ ] emit stat on retry
-- [ ] emit stat on no servers synced
-- [ ] emit stat on error (maybe just use sentry, but graphs are handy)
+- [x] emit user stat on cache hit
+- [x] emit user stat on cache miss
+- [x] have migration use tokio instead of async-std
+- [x] user create script should allow a description field
+- [-] change stats to using the database
+- [ ] emit user stat on retry
+- [ ] emit global stat on retry
+- [ ] emit global stat on no servers synced
+- [ ] emit global stat on error (maybe just use sentry, but graphs are handy)
   - if we wait until the error handler to emit the stat, i don't think we have access to the authorized_request
 - [ ] display requests per second per api key (only with authentication!)
 - [ ] display concurrent requests per api key (only with authentication!)
@@ -194,12 +197,13 @@ These are roughly in order of completition
 - [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
 - [ ] option to rotate api key
 - [ ] if no bearer token found in redis (likely because it expired), send 401 unauthorized
-- [ ] user create script should allow a description field
 - [ ] user create script should allow multiple keys per user
 - [ ] somehow the proxy thought latest was hours behind. need internal health check that forces reconnect if this happens
 - [ ] display logged reverts on an endpoint that requires authentication
 - [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
 - [ ] have a log all option? instead of just reverts, log all request/responses? can be very useful for debugging
+- [ ] WARN http_request: web3_proxy::frontend::errors: anyhow err=UserKey was not a ULID or UUID id=01GER4VBTS0FDHEBR96D1JRDZF method=POST
+  - if invalid user id given, we give a 500. should be a different error code instead
 
 ## V1
 

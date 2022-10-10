@@ -31,6 +31,10 @@ pub struct CreateUserSubCommand {
     /// maximum requests per minute.
     /// default to "None" which the code sees as "unlimited" requests.
     rpm: Option<u64>,
+
+    #[argh(option)]
+    /// a short description of the key's purpose
+    description: Option<String>,
 }
 
 impl CreateUserSubCommand {
@@ -70,16 +74,16 @@ impl CreateUserSubCommand {
         );
 
         // create a key for the new user
-        // TODO: requests_per_minute should be configurable
         let uk = user_keys::ActiveModel {
             user_id: u.id,
             api_key: sea_orm::Set(self.api_key.into()),
             requests_per_minute: sea_orm::Set(self.rpm),
+            description: sea_orm::Set(self.description),
             ..Default::default()
         };
 
         // TODO: if this fails, rever adding the user, too
-        let uk = uk.save(&txn).await.context("Failed saving new user key")?;
+        let _uk = uk.save(&txn).await.context("Failed saving new user key")?;
 
         txn.commit().await?;
 

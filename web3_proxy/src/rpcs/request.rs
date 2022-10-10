@@ -247,6 +247,8 @@ impl OpenRequestHandle {
                 error_handler
             };
 
+            // TODO: check for "execution reverted" here
+
             match error_handler {
                 RequestErrorHandler::DebugLevel => {
                     debug!(?err, %method, rpc=%self.conn, "bad response!");

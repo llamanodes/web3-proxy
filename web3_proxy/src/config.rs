@@ -81,11 +81,8 @@ pub struct AppConfig {
     /// This is separate from the rpc limits.
     #[serde(default = "default_login_rate_limit_per_minute")]
     pub login_rate_limit_per_minute: u64,
-    /// Persist user stats in a redis (or compatible backend)
-    /// TODO: research more time series databases
-    pub persistent_redis_url: Option<String>,
-    pub persistent_redis_max_connections: Option<usize>,
     /// Track rate limits in a redis (or compatible backend)
+    /// It is okay if this data is lost.
     pub volatile_redis_url: Option<String>,
     /// maximum size of the connection pool for the cache
     /// If none, the minimum * 2 is used

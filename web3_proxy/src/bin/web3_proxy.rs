@@ -78,7 +78,7 @@ fn run(
         let prometheus_handle = tokio::spawn(metrics_frontend::serve(app, app_prometheus_port));
 
         // if everything is working, these should both run forever
-        // TODO: try_join these instead?
+        // TODO: join these instead and use shutdown handler properly
         tokio::select! {
             x = app_handle => {
                 match x {
@@ -113,6 +113,10 @@ fn run(
                 return Ok(())
             }
         };
+
+        // TODO: wait on all the handles to stop
+
+        info!("finished");
 
         Ok(())
     })

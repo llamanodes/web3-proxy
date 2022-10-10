@@ -23,17 +23,6 @@ services:
     volumes:
       - ./data/dev_mysql:/var/lib/mysql
 
-  # persistent redis for storing user stats
-  # TODO: replace this with a real time series database
-  dev-predis:
-    extends:
-      file: docker-compose.common.yml
-      service: persistent_redis
-    ports:
-      - 16379:6379
-    volumes:
-      - ./data/dev_predis:/data
-
   # volatile redis for storing rate limits
   dev-vredis:
     extends:

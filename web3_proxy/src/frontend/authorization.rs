@@ -1,7 +1,9 @@
 use super::errors::FrontendErrorResponse;
 use crate::app::{UserKeyData, Web3ProxyApp};
+use crate::jsonrpc::JsonRpcRequest;
 use anyhow::Context;
 use axum::headers::{authorization::Bearer, Origin, Referer, UserAgent};
+use chrono::{DateTime, Utc};
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::user_keys;
 use ipnet::IpNet;
@@ -10,6 +12,8 @@ use redis_rate_limiter::RedisRateLimitResult;
 use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::fmt::Display;
+use std::mem::size_of_val;
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicUsize};
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
@@ -22,6 +26,62 @@ use uuid::Uuid;
 pub enum UserKey {
     Ulid(Ulid),
     Uuid(Uuid),
+}
+
+#[derive(Debug)]
+pub enum RateLimitResult {
+    /// contains the IP of the anonymous user
+    /// TODO: option inside or outside the arc?
+    AllowedIp(IpAddr, OwnedSemaphorePermit),
+    /// contains the user_key_id of an authenticated user
+    AllowedUser(UserKeyData, Option<OwnedSemaphorePermit>),
+    /// contains the IP and retry_at of the anonymous user
+    RateLimitedIp(IpAddr, Option<Instant>),
+    /// contains the user_key_id and retry_at of an authenticated user key
+    RateLimitedUser(UserKeyData, Option<Instant>),
+    /// This key is not in our database. Deny access!
+    UnknownKey,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AuthorizedKey {
+    pub ip: IpAddr,
+    pub origin: Option<String>,
+    pub user_key_id: u64,
+    // TODO: just use an f32? even an f16 is probably fine
+    pub log_revert_chance: Decimal,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct RequestMetadata {
+    pub datetime: DateTime<Utc>,
+    pub request_bytes: AtomicUsize,
+    pub backend_requests: AtomicU16,
+    pub error_response: AtomicBool,
+    pub response_bytes: AtomicUsize,
+    pub response_millis: AtomicU32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub enum AuthorizedRequest {
+    /// Request from this app
+    Internal,
+    /// Request from an anonymous IP address
+    Ip(#[serde(skip)] IpAddr),
+    /// Request from an authenticated and authorized user
+    User(#[serde(skip)] Option<DatabaseConnection>, AuthorizedKey),
+}
+
+impl RequestMetadata {
+    pub fn new(request: &JsonRpcRequest) -> Self {
+        let request_bytes = size_of_val(request);
+
+        Self {
+            request_bytes: request_bytes.into(),
+            datetime: Utc::now(),
+            ..Default::default()
+        }
+    }
 }
 
 impl UserKey {
@@ -54,6 +114,7 @@ impl FromStr for UserKey {
         } else if let Ok(uuid) = s.parse::<Uuid>() {
             Ok(uuid.into())
         } else {
+            // TODO: custom error type so that this shows as a 400
             Err(anyhow::anyhow!("UserKey was not a ULID or UUID"))
         }
     }
@@ -87,30 +148,6 @@ impl From<UserKey> for Uuid {
             UserKey::Uuid(x) => x,
         }
     }
-}
-
-#[derive(Debug)]
-pub enum RateLimitResult {
-    /// contains the IP of the anonymous user
-    /// TODO: option inside or outside the arc?
-    AllowedIp(IpAddr, OwnedSemaphorePermit),
-    /// contains the user_key_id of an authenticated user
-    AllowedUser(UserKeyData, Option<OwnedSemaphorePermit>),
-    /// contains the IP and retry_at of the anonymous user
-    RateLimitedIp(IpAddr, Option<Instant>),
-    /// contains the user_key_id and retry_at of an authenticated user key
-    RateLimitedUser(UserKeyData, Option<Instant>),
-    /// This key is not in our database. Deny access!
-    UnknownKey,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AuthorizedKey {
-    pub ip: IpAddr,
-    pub origin: Option<String>,
-    pub user_key_id: u64,
-    pub log_revert_chance: Decimal,
-    // TODO: what else?
 }
 
 impl AuthorizedKey {
@@ -180,16 +217,6 @@ impl AuthorizedKey {
     }
 }
 
-#[derive(Debug, Serialize)]
-pub enum AuthorizedRequest {
-    /// Request from this app
-    Internal,
-    /// Request from an anonymous IP address
-    Ip(#[serde(skip)] IpAddr),
-    /// Request from an authenticated and authorized user
-    User(#[serde(skip)] Option<DatabaseConnection>, AuthorizedKey),
-}
-
 impl AuthorizedRequest {
     /// Only User has a database connection in case it needs to save a revert to the database.
     pub fn db_conn(&self) -> Option<&DatabaseConnection> {
@@ -205,8 +232,8 @@ impl Display for &AuthorizedRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AuthorizedRequest::Internal => f.write_str("int"),
-            AuthorizedRequest::Ip(x) => f.write_str(&format!("ip:{}", x)),
-            AuthorizedRequest::User(_, x) => f.write_str(&format!("uk:{}", x.user_key_id)),
+            AuthorizedRequest::Ip(x) => f.write_str(&format!("ip-{}", x)),
+            AuthorizedRequest::User(_, x) => f.write_str(&format!("uk-{}", x.user_key_id)),
         }
     }
 }
@@ -324,6 +351,11 @@ impl Web3ProxyApp {
             })
             .await;
 
+        // if semaphore.available_permits() == 0 {
+        //     // TODO: concurrent limit hit! emit a stat? less important for anon users
+        //     // TODO: there is probably a race here
+        // }
+
         let semaphore_permit = semaphore.acquire_owned().await?;
 
         Ok(semaphore_permit)
@@ -344,6 +376,10 @@ impl Web3ProxyApp {
                 .await
                 // TODO: is this the best way to handle an arc
                 .map_err(|err| anyhow::anyhow!(err))?;
+
+            // if semaphore.available_permits() == 0 {
+            //     // TODO: concurrent limit hit! emit a stat
+            // }
 
             let semaphore_permit = semaphore.acquire_owned().await?;
 
@@ -419,7 +455,7 @@ impl Web3ProxyApp {
             }
         } else {
             // TODO: if no redis, rate limit with a local cache? "warn!" probably isn't right
-            todo!("no rate limiter");
+            Ok(RateLimitResult::AllowedIp(ip, semaphore))
         }
     }
 
@@ -538,12 +574,14 @@ impl Web3ProxyApp {
                     // TODO: debug or trace?
                     // this is too verbose, but a stat might be good
                     // TODO: keys are secrets! use the id instead
+                    // TODO: emit a stat
                     trace!(?user_key, "rate limit exceeded until {:?}", retry_at);
                     Ok(RateLimitResult::RateLimitedUser(user_data, Some(retry_at)))
                 }
                 Ok(DeferredRateLimitResult::RetryNever) => {
                     // TODO: keys are secret. don't log them!
                     trace!(?user_key, "rate limit is 0");
+                    // TODO: emit a stat
                     Ok(RateLimitResult::RateLimitedUser(user_data, None))
                 }
                 Err(err) => {
@@ -556,8 +594,7 @@ impl Web3ProxyApp {
             }
         } else {
             // TODO: if no redis, rate limit with just a local cache?
-            // if we don't have redis, we probably don't have a db, so this probably will never happen
-            Err(anyhow::anyhow!("no redis. cannot rate limit"))
+            Ok(RateLimitResult::AllowedUser(user_data, semaphore))
         }
     }
 }
