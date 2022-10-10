@@ -13,7 +13,7 @@ pub struct Model {
     pub timestamp: DateTimeUtc,
     pub method: String,
     pub backend_requests: u32,
-    pub error_response: i8,
+    pub error_response: bool,
     pub query_millis: u32,
     pub request_bytes: u32,
     pub response_bytes: u32,

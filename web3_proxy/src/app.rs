@@ -267,14 +267,15 @@ impl Web3ProxyApp {
         // we do this in a channel so we don't slow down our response to the users
         let stat_sender = if let Some(db_conn) = db_conn.clone() {
             // TODO: sender and receiver here are a little confusing. because the thing that reads the receiver is what actually submits the stats
-            let (stat_sender, stat_handle) = {
-                // TODO: period from
+            let (stat_sender, stat_handle, save_handle) = {
+                // TODO: period from config instead of always being 60 seconds
                 let emitter = StatEmitter::new(top_config.app.chain_id, db_conn, 60);
 
                 emitter.spawn().await?
             };
 
             handles.push(stat_handle);
+            handles.push(save_handle);
 
             Some(stat_sender)
         } else {

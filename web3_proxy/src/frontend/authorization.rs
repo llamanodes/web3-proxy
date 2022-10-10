@@ -3,7 +3,7 @@ use crate::app::{UserKeyData, Web3ProxyApp};
 use crate::jsonrpc::JsonRpcRequest;
 use anyhow::Context;
 use axum::headers::{authorization::Bearer, Origin, Referer, UserAgent};
-use chrono::{DateTime, Utc};
+use chrono::{Utc};
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::user_keys;
 use ipnet::IpNet;
@@ -54,7 +54,7 @@ pub struct AuthorizedKey {
 
 #[derive(Debug, Default, Serialize)]
 pub struct RequestMetadata {
-    pub datetime: DateTime<Utc>,
+    pub timestamp: u64,
     pub request_bytes: AtomicUsize,
     pub backend_requests: AtomicU16,
     pub error_response: AtomicBool,
@@ -78,7 +78,7 @@ impl RequestMetadata {
 
         Self {
             request_bytes: request_bytes.into(),
-            datetime: Utc::now(),
+            timestamp: Utc::now().timestamp() as u64,
             ..Default::default()
         }
     }
