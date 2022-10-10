@@ -128,8 +128,10 @@ impl StatEmitter {
                 }
 
                 // shutting down. force a save
-                // TODO: this is handled by a background thread! we need to make sure the thread survives long enough to do its work!
-                aggregated_proxy_responses.invalidate_all();
+                // we do not use invalidate_all because that is done on a background thread
+                for (key, _) in aggregated_proxy_responses.into_iter() {
+                    aggregated_proxy_responses.invalidate(&key).await;
+                }
 
                 info!("stat aggregator exited");
 
