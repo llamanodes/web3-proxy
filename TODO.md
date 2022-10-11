@@ -178,8 +178,12 @@ These are roughly in order of completition
 - [x] emit user stat on cache miss
 - [x] have migration use tokio instead of async-std
 - [x] user create script should allow a description field
-- [-] change stats to using the database
-- [ ] emit user stat on retry
+- [x] change stats to using the database
+- [x] emit user stat on retry
+- [ ] emit stdandard deviation?
+- [ ] make the "not synced" error more verbose
+  - I think there is a bug in our synced_rpcs filtering. likely in has_block_data
+  - seeing "not synced" when I load https://vfat.tools/esd/
 - [ ] emit global stat on retry
 - [ ] emit global stat on no servers synced
 - [ ] emit global stat on error (maybe just use sentry, but graphs are handy)
