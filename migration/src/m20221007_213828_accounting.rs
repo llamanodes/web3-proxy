@@ -76,7 +76,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(RpcAccounting::MeanRequestBytes)
-                            .float_len(64)
+                            .double()
                             .not_null(),
                     )
                     .col(
@@ -111,7 +111,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(RpcAccounting::MeanResponseMillis)
-                            .float_len(64)
+                            .double()
                             .not_null(),
                     )
                     .col(
@@ -146,7 +146,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(RpcAccounting::MeanResponseBytes)
-                            .float_len(64)
+                            .double()
                             .not_null(),
                     )
                     .col(

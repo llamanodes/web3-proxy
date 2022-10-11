@@ -13,7 +13,6 @@ use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use serde::Serialize;
 use std::fmt::Display;
 use std::mem::size_of_val;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64};
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
@@ -55,11 +54,11 @@ pub struct AuthorizedKey {
 #[derive(Debug, Default, Serialize)]
 pub struct RequestMetadata {
     pub timestamp: u64,
-    pub request_bytes: AtomicU64,
-    pub backend_requests: AtomicU16,
-    pub error_response: AtomicBool,
-    pub response_bytes: AtomicU64,
-    pub response_millis: AtomicU64,
+    pub request_bytes: u64,
+    pub backend_requests: u32,
+    pub error_response: bool,
+    pub response_bytes: u64,
+    pub response_millis: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -77,7 +76,7 @@ impl RequestMetadata {
         let request_bytes = size_of_val(request) as u64;
 
         Self {
-            request_bytes: request_bytes.into(),
+            request_bytes,
             timestamp: Utc::now().timestamp() as u64,
             ..Default::default()
         }
