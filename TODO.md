@@ -180,39 +180,51 @@ These are roughly in order of completition
 - [x] user create script should allow a description field
 - [x] change stats to using the database
 - [x] emit user stat on retry
-- [ ] emit stdandard deviation?
+- [ ] ability to generate a key from a web endpoint
+  - this is already partially done, but we need to double check it works. preferrably with tests
+- [ ] ability to domain lock or ip lock said key
+  - the code to check the database and use these entries already exists, but users don't have a way to set them
+- [ ] view stats about key
+  - [ ] display requests per second per api key (only with authentication!)
+  - [ ] display concurrent requests per api key (only with authentication!)
+  - [ ] display distribution of methods per api key (eth_call, eth_getLogs, etc.) (only with authentication!)
+  - [ ] display logged reverts on an endpoint that requires authentication
+- [ ] sign in
+  - i think this is done, but double check
+- [ ] sign out
+  - i think this is done, but double check
+- [ ] endpoint for creating/modifying api keys and their advanced security features
+- [ ] WARN http_request:request: web3_proxy::block_number: could not get block from params err=unexpected params length id=01GF4HTRKM4JV6NX52XSF9AYMW method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })
+- ERROR http_request:request:try_send_all_upstream_servers: web3_proxy::rpcs::request: bad response! err=JsonRpcClientError(JsonRpcError(JsonRpcError { code: -32000, message: "INTERNAL_ERROR: existing tx with same hash", data: None })) method=eth_sendRawTransaction rpc=local_erigon_alpha_archive id=01GF4HV03Y4ZNKQV8DW5NDQ5CG method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 }) self=Web3Connections { conns: {"local_erigon_alpha_archive_ws": Web3Connection { name: "local_erigon_alpha_archive_ws", blocks: "all", .. }, "local_geth_ws": Web3Connection { name: "local_geth_ws", blocks: 64, .. }, "local_erigon_alpha_archive": Web3Connection { name: "local_erigon_alpha_archive", blocks: "all", .. }}, .. } authorized_request=Some(User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })) request=JsonRpcRequest { id: RawValue(39), method: "eth_sendRawTransaction", .. } request_metadata=Some(RequestMetadata { datetime: 2022-10-11T22:14:57.406829095Z, period_seconds: 60, request_bytes: 633, backend_requests: 0, no_servers: 0, error_response: false, response_bytes: 0, response_millis: 0 }) block_needed=None
+  - why is it failing to get the block from params when its set to None? That should be the simple case
+- [-] add configurable size limits to all the Caches
+  - [ ] instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
+- [ ] if user-specific caches have evictions that aren't from timeouts, log a warning
 - [ ] make the "not synced" error more verbose
   - I think there is a bug in our synced_rpcs filtering. likely in has_block_data
   - seeing "not synced" when I load https://vfat.tools/esd/
+- [ ] emit stdandard deviation?
 - [ ] emit global stat on retry
 - [ ] emit global stat on no servers synced
 - [ ] emit global stat on error (maybe just use sentry, but graphs are handy)
   - if we wait until the error handler to emit the stat, i don't think we have access to the authorized_request
-- [ ] display requests per second per api key (only with authentication!)
-- [ ] display concurrent requests per api key (only with authentication!)
-- [ ] display distribution of methods per api key (eth_call, eth_getLogs, etc.) (only with authentication!)
 - [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
   - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
-- [-] add configurable size limits to all the Caches
-  - [ ] instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
-  - [ ] if user-specific caches have evictions that aren't from timeouts, log a warning
-- [ ] endpoint for creating/modifying api keys and their advanced security features
-- [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
-- [ ] option to rotate api key
+- [ ] endpoint (and cli script) to rotate api key
 - [ ] if no bearer token found in redis (likely because it expired), send 401 unauthorized
 - [ ] user create script should allow multiple keys per user
 - [ ] somehow the proxy thought latest was hours behind. need internal health check that forces reconnect if this happens
-- [ ] display logged reverts on an endpoint that requires authentication
-- [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
-- [ ] have a log all option? instead of just reverts, log all request/responses? can be very useful for debugging
 - [ ] WARN http_request: web3_proxy::frontend::errors: anyhow err=UserKey was not a ULID or UUID id=01GER4VBTS0FDHEBR96D1JRDZF method=POST
   - if invalid user id given, we give a 500. should be a different error code instead
+- [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
 
 ## V1
 
 These are not yet ordered.
 
+- [ ] eth_1       | 2022-10-11T22:14:57.408114Z ERROR http_request:request:try_send_all_upstream_servers: web3_proxy::rpcs::request: bad response! err=JsonRpcClientError(JsonRpcError(JsonRpcError { code: -32000, message: "INTERNAL_ERROR: existing tx with same hash", data: None })) method=eth_sendRawTransaction rpc=local_erigon_alpha_archive id=01GF4HV03Y4ZNKQV8DW5NDQ5CG method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 }) self=Web3Connections { conns: {"local_erigon_alpha_archive_ws": Web3Connection { name: "local_erigon_alpha_archive_ws", blocks: "all", .. }, "local_geth_ws": Web3Connection { name: "local_geth_ws", blocks: 64, .. }, "local_erigon_alpha_archive": Web3Connection { name: "local_erigon_alpha_archive", blocks: "all", .. }}, .. } authorized_request=Some(User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })) request=JsonRpcRequest { id: RawValue(39), method: "eth_sendRawTransaction", .. } request_metadata=Some(RequestMetadata { datetime: 2022-10-11T22:14:57.406829095Z, period_seconds: 60, request_bytes: 633, backend_requests: 0, no_servers: 0, error_response: false, response_bytes: 0, response_millis: 0 }) block_needed=None
+  - eth_sendRawTransaction should accept "INTERNAL_ERROR: existing tx with same hash" as a successful response. we just want to be sure that the server has our tx and in this case, it does.
 - [ ] EIP1271 for siwe
 - [ ] Limited throughput during high traffic
 - [ ] implement filters and other unimplemented rpc methods
@@ -427,3 +439,5 @@ in another repo: event subscriber
   web3_proxy_hit_count{path = "app/proxy_web3_rpc_request"} 857270
   web3_proxy_hit_count{path = "backend_rpc/request"}       1396127
 - [ ] replace serde_json::Value with https://lib.rs/crates/ijson (more memory efficient)
+- [ ] have a log all option? instead of just reverts, log all request/responses? can be very useful for debugging but would flood our database. maybe better for them to do that on their client side
+- [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
