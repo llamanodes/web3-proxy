@@ -7,7 +7,7 @@ use super::request::{
 use super::synced_connections::SyncedConnections;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3ConnectionConfig};
-use crate::frontend::authorization::AuthorizedRequest;
+use crate::frontend::authorization::{AuthorizedRequest, RequestMetadata};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
 use arc_swap::ArcSwap;
@@ -27,6 +27,7 @@ use serde_json::value::RawValue;
 use std::cmp;
 use std::cmp::Reverse;
 use std::fmt;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{broadcast, watch};
@@ -501,11 +502,12 @@ impl Web3Connections {
         &self,
         authorized_request: Option<&Arc<AuthorizedRequest>>,
         request: JsonRpcRequest,
+        request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         let mut skip_rpcs = vec![];
 
-        // TODO: maximum retries?
+        // TODO: maximum retries? right now its the total number of servers
         loop {
             if skip_rpcs.len() == self.conns.len() {
                 break;
@@ -517,6 +519,12 @@ impl Web3Connections {
                 OpenRequestResult::Handle(active_request_handle) => {
                     // save the rpc in case we get an error and want to retry on another server
                     skip_rpcs.push(active_request_handle.clone_connection());
+
+                    if let Some(request_metadata) = request_metadata {
+                        request_metadata
+                            .backend_requests
+                            .fetch_add(1, Ordering::Acquire);
+                    }
 
                     // TODO: get the log percent from the user data
                     let response_result = active_request_handle
@@ -534,6 +542,12 @@ impl Web3Connections {
                         Ok(response) => {
                             if let Some(error) = &response.error {
                                 trace!(?response, "rpc error");
+
+                                if let Some(request_metadata) = request_metadata {
+                                    request_metadata
+                                        .error_response
+                                        .store(true, Ordering::Release);
+                                }
 
                                 // some errors should be retried on other nodes
                                 if error.code == -32000 {
@@ -603,6 +617,7 @@ impl Web3Connections {
         &self,
         authorized_request: Option<&Arc<AuthorizedRequest>>,
         request: JsonRpcRequest,
+        request_metadata: Option<Arc<RequestMetadata>>,
         block_needed: Option<&U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {

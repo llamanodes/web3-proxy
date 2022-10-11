@@ -62,7 +62,7 @@ serde_prometheus = "0.1.6"
 time = "0.3.15"
 tokio = { version = "1.21.2", features = ["full", "tracing"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
-tokio-stream = { version = "0.1.10", features = ["sync"] }
+tokio-stream = { version = "0.1.11", features = ["sync"] }
 toml = "0.5.9"
 tower = "0.4.13"
 # TODO: i don't think we need this. we can use it from tower-http instead. though this seems to use ulid and not uuid?

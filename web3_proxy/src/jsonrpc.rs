@@ -11,7 +11,7 @@ fn default_jsonrpc() -> String {
     "2.0".to_string()
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct JsonRpcRequest {
     // TODO: skip jsonrpc entirely? its against spec to drop it, but some servers bad
     #[serde(default = "default_jsonrpc")]

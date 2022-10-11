@@ -116,8 +116,9 @@ impl Web3Connections {
                 let request = json!({ "id": "1", "method": "eth_getBlockByHash", "params": get_block_params });
                 let request: JsonRpcRequest = serde_json::from_value(request)?;
 
+                // TODO: request_metadata? maybe we should put it in the authorized_request?
                 let response = self
-                    .try_send_best_upstream_server(authorized_request, request, None)
+                    .try_send_best_upstream_server(authorized_request, request, None, None)
                     .await?;
 
                 let block = response.result.unwrap();
@@ -176,8 +177,9 @@ impl Web3Connections {
         let request: JsonRpcRequest = serde_json::from_value(request)?;
 
         // TODO: if error, retry?
+        // TODO: request_metadata or authorized_request?
         let response = self
-            .try_send_best_upstream_server(None, request, Some(num))
+            .try_send_best_upstream_server(None, request, None, Some(num))
             .await?;
 
         let raw_block = response.result.context("no block result")?;

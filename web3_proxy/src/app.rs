@@ -13,7 +13,6 @@ use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
 use crate::stats::{ProxyResponseStat, StatEmitter, Web3ProxyStat};
 use anyhow::Context;
-use atomic::{AtomicBool, Ordering};
 use axum::extract::ws::Message;
 use axum::headers::{Referer, UserAgent};
 use deferred_rate_limiter::DeferredRateLimiter;
@@ -36,7 +35,6 @@ use sea_orm::DatabaseConnection;
 use serde::Serialize;
 use serde_json::json;
 use std::fmt;
-use std::mem::size_of_val;
 use std::net::IpAddr;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -297,7 +295,7 @@ impl Web3ProxyApp {
 
         // TODO: capacity from configs
         // all these are the same size, so no need for a weigher
-        // TODO: ttl on this?
+        // TODO: ttl on this? or is max_capacity fine?
         let pending_transactions = Cache::builder()
             .max_capacity(10_000)
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
@@ -305,9 +303,13 @@ impl Web3ProxyApp {
         // keep 1GB of blocks in the cache
         // TODO: limits from config
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
+        // TODO: how can we do the weigher better? this is going to be slow!
         let block_map = Cache::builder()
             .max_capacity(1024 * 1024 * 1024)
-            .weigher(|_k, v| size_of_val(v) as u32)
+            .weigher(|_k, v: &Arc<Block<TxHash>>| {
+                // TODO: is this good enough?
+                v.transactions.len().try_into().unwrap_or(u32::MAX)
+            })
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
         // connect to the load balanced rpcs
@@ -405,7 +407,24 @@ impl Web3ProxyApp {
         // TODO: don't allow any response to be bigger than X% of the cache
         let response_cache = Cache::builder()
             .max_capacity(1024 * 1024 * 1024)
-            .weigher(|k, v| (size_of_val(k) + size_of_val(v)) as u32)
+            .weigher(|k: &(H256, String, Option<String>), v| {
+                // TODO: make this weigher past. serializing json is not fast
+                let mut size = (k.1).len();
+
+                if let Some(params) = &k.2 {
+                    size += params.len()
+                }
+
+                if let Ok(v) = serde_json::to_string(v) {
+                    size += v.len();
+
+                    // the or in unwrap_or is probably never called
+                    size.try_into().unwrap_or(u32::MAX)
+                } else {
+                    // this seems impossible
+                    u32::MAX
+                }
+            })
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
         // all the users are the same size, so no need for a weigher
@@ -763,7 +782,8 @@ impl Web3ProxyApp {
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         trace!("Received request: {:?}", request);
 
-        let request_metadata = RequestMetadata::new(&request);
+        // TODO: allow customizing the period?
+        let request_metadata = Arc::new(RequestMetadata::new(60, &request)?);
 
         // save the id so we can attach it to the response
         // TODO: instead of cloning, take the id out
@@ -894,7 +914,12 @@ impl Web3ProxyApp {
                 let rpcs = self.private_rpcs.as_ref().unwrap_or(&self.balanced_rpcs);
 
                 return rpcs
-                    .try_send_all_upstream_servers(Some(&authorized_request), request, None)
+                    .try_send_all_upstream_servers(
+                        Some(&authorized_request),
+                        request,
+                        Some(request_metadata),
+                        None,
+                    )
                     .await;
             }
             "eth_syncing" => {
@@ -982,17 +1007,13 @@ impl Web3ProxyApp {
                     request.params.clone().map(|x| x.to_string()),
                 );
 
-                let cache_hit = Arc::new(AtomicBool::new(true));
-
                 let mut response = {
-                    let cache_hit = cache_hit.clone();
+                    let request_metadata = request_metadata.clone();
 
                     let authorized_request = authorized_request.clone();
 
                     self.response_cache
                         .try_get_with(cache_key, async move {
-                            cache_hit.store(false, Ordering::Release);
-
                             // TODO: retry some failures automatically!
                             // TODO: try private_rpcs if all the balanced_rpcs fail!
                             // TODO: put the hash here instead?
@@ -1001,6 +1022,7 @@ impl Web3ProxyApp {
                                 .try_send_best_upstream_server(
                                     Some(&authorized_request),
                                     request,
+                                    Some(&request_metadata),
                                     Some(&request_block_id.num),
                                 )
                                 .await?;
@@ -1019,6 +1041,11 @@ impl Web3ProxyApp {
                         .context("caching response")?
                 };
 
+                // since this data came likely out of a cache, the id is not going to match
+                // replace the id with our request's id.
+                // TODO: cache without the id
+                response.id = request_id;
+
                 if let (Some(stat_sender), Ok(AuthorizedRequest::User(Some(_), authorized_key))) = (
                     self.stat_sender.as_ref(),
                     Arc::try_unwrap(authorized_request),
@@ -1027,15 +1054,11 @@ impl Web3ProxyApp {
                         method.to_string(),
                         authorized_key,
                         request_metadata,
+                        &response,
                     );
 
                     stat_sender.send_async(response_stat.into()).await?;
                 }
-
-                // since this data came likely out of a cache, the id is not going to match
-                // replace the id with our request's id.
-                // TODO: cache without the id
-                response.id = request_id;
 
                 return Ok(response);
             }

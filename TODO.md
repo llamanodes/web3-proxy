@@ -422,3 +422,4 @@ in another repo: event subscriber
 - [ ] hit counts seem wrong. how are we hitting the backend so much more than the frontend? retries on disconnect don't seem to fit that
   web3_proxy_hit_count{path = "app/proxy_web3_rpc_request"} 857270
   web3_proxy_hit_count{path = "backend_rpc/request"}       1396127
+- [ ] replace serde_json::Value with https://lib.rs/crates/ijson (more memory efficient)

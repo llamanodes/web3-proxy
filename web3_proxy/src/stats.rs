@@ -1,4 +1,5 @@
 use crate::frontend::authorization::{AuthorizedKey, RequestMetadata};
+use crate::jsonrpc::JsonRpcForwardedResponse;
 use anyhow::Context;
 use chrono::{TimeZone, Utc};
 use derive_more::From;
@@ -19,7 +20,14 @@ use tracing::{error, info, trace};
 pub struct ProxyResponseStat {
     user_key_id: u64,
     method: String,
-    metadata: AsyncMutex<RequestMetadata>,
+    period_seconds: u64,
+    period_timestamp: u64,
+    request_bytes: u64,
+    /// if this is 0, there was a cache_hit
+    backend_requests: u32,
+    error_response: bool,
+    response_bytes: u64,
+    response_millis: u64,
 }
 
 pub type TimeBucketTimestamp = u64;
@@ -98,13 +106,38 @@ pub enum Web3ProxyStat {
 
 impl ProxyResponseStat {
     // TODO: should RequestMetadata be in an arc? or can we handle refs here?
-    pub fn new(method: String, authorized_key: AuthorizedKey, metadata: RequestMetadata) -> Self {
-        let metadata = AsyncMutex::new(metadata);
+    pub fn new(
+        method: String,
+        authorized_key: AuthorizedKey,
+        metadata: Arc<RequestMetadata>,
+        response: &JsonRpcForwardedResponse,
+    ) -> Self {
+        // TODO: do this without serializing to a string. this is going to slow us down!
+        let response_bytes = serde_json::to_string(response)
+            .expect("serializing here should always work")
+            .len() as u64;
+
+        let backend_requests = metadata.backend_requests.load(Ordering::Acquire);
+        let period_seconds = metadata.period_seconds;
+        let period_timestamp =
+            (metadata.datetime.timestamp() as u64) / period_seconds * period_seconds;
+        let request_bytes = metadata.request_bytes;
+        let response_millis = metadata
+            .datetime
+            .signed_duration_since(Utc::now())
+            .num_seconds() as u64;
+        let error_response = metadata.error_response.load(Ordering::Acquire);
 
         Self {
             user_key_id: authorized_key.user_key_id,
             method,
-            metadata,
+            backend_requests,
+            period_seconds,
+            period_timestamp,
+            request_bytes,
+            error_response,
+            response_bytes,
+            response_millis,
         }
     }
 }
@@ -188,8 +221,7 @@ impl StatEmitter {
         while let Ok(x) = self.save_rx.recv_async().await {
             // TODO: batch these
             for (k, v) in x.into_iter() {
-                info!(?k, "saving");
-
+                // TODO: this is a lot of variables
                 let period_datetime = Utc.timestamp(v.period_timestamp as i64, 0);
                 let frontend_requests = v.frontend_requests.load(Ordering::Acquire);
                 let backend_requests = v.backend_requests.load(Ordering::Acquire);
@@ -289,31 +321,28 @@ impl StatEmitter {
     pub async fn aggregate_stat(&self, stat: Web3ProxyStat) -> anyhow::Result<()> {
         trace!(?stat, "aggregating");
         match stat {
-            Web3ProxyStat::ProxyResponse(x) => {
+            Web3ProxyStat::ProxyResponse(stat) => {
                 // TODO: move this whole closure to another function?
-                let metadata = x.metadata.lock().await;
 
-                // TODO: move period calculation into another function?
-                let period_timestamp =
-                    metadata.timestamp / self.period_seconds * self.period_seconds;
+                debug_assert_eq!(stat.period_seconds, self.period_seconds);
 
                 // get the user cache for the current period
                 let user_cache = self
                     .aggregated_proxy_responses
-                    .get_with(period_timestamp, async move {
+                    .get_with(stat.period_timestamp, async move {
                         CacheBuilder::default()
                             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new())
                     })
                     .await;
 
-                let key = (x.user_key_id, x.method, metadata.error_response).into();
+                let key = (stat.user_key_id, stat.method, stat.error_response).into();
 
                 let user_aggregate = user_cache
                     .get_with(key, async move {
                         let histograms = ProxyResponseHistograms::default();
 
                         let aggregate = ProxyResponseAggregate {
-                            period_timestamp,
+                            period_timestamp: stat.period_timestamp,
                             // start most things at 0 because we add outside this getter
                             frontend_requests: 0.into(),
                             backend_requests: 0.into(),
@@ -338,31 +367,27 @@ impl StatEmitter {
                 // a stat might have multiple backend requests
                 user_aggregate
                     .backend_requests
-                    .fetch_add(metadata.backend_requests, Ordering::Acquire);
+                    .fetch_add(stat.backend_requests, Ordering::Acquire);
 
                 user_aggregate
                     .sum_request_bytes
-                    .fetch_add(metadata.request_bytes, Ordering::Release);
+                    .fetch_add(stat.request_bytes, Ordering::Release);
 
                 user_aggregate
                     .sum_response_bytes
-                    .fetch_add(metadata.response_bytes, Ordering::Release);
+                    .fetch_add(stat.response_bytes, Ordering::Release);
 
                 user_aggregate
                     .sum_response_millis
-                    .fetch_add(metadata.response_millis, Ordering::Release);
+                    .fetch_add(stat.response_millis, Ordering::Release);
 
                 {
                     let mut histograms = user_aggregate.histograms.lock().await;
 
-                    // TODO: record_correct?
-                    histograms.request_bytes.record(metadata.request_bytes)?;
-
-                    histograms.response_bytes.record(metadata.response_bytes)?;
-
-                    histograms
-                        .response_millis
-                        .record(metadata.response_millis)?;
+                    // TODO: use `record_correct`?
+                    histograms.request_bytes.record(stat.request_bytes)?;
+                    histograms.response_bytes.record(stat.response_bytes)?;
+                    histograms.response_millis.record(stat.response_millis)?;
                 }
             }
         }

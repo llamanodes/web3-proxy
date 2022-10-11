@@ -12,7 +12,7 @@ use redis_rate_limiter::RedisRateLimitResult;
 use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::fmt::Display;
-use std::mem::size_of_val;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
@@ -53,12 +53,14 @@ pub struct AuthorizedKey {
 
 #[derive(Debug, Default, Serialize)]
 pub struct RequestMetadata {
-    pub timestamp: u64,
+    pub datetime: chrono::DateTime<Utc>,
+    pub period_seconds: u64,
     pub request_bytes: u64,
-    pub backend_requests: u32,
-    pub error_response: bool,
-    pub response_bytes: u64,
-    pub response_millis: u64,
+    /// if this is 0, there was a cache_hit
+    pub backend_requests: AtomicU32,
+    pub error_response: AtomicBool,
+    pub response_bytes: AtomicU64,
+    pub response_millis: AtomicU64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -72,14 +74,21 @@ pub enum AuthorizedRequest {
 }
 
 impl RequestMetadata {
-    pub fn new(request: &JsonRpcRequest) -> Self {
-        let request_bytes = size_of_val(request) as u64;
+    pub fn new(period_seconds: u64, request: &JsonRpcRequest) -> anyhow::Result<Self> {
+        // TODO: how can we do this without turning it into a string first. this is going to slow us down!
+        let request_bytes = serde_json::to_string(request)
+            .context("finding request size")?
+            .len()
+            .try_into()?;
 
-        Self {
+        let new = Self {
+            period_seconds,
             request_bytes,
-            timestamp: Utc::now().timestamp() as u64,
+            datetime: Utc::now(),
             ..Default::default()
-        }
+        };
+
+        Ok(new)
     }
 }
 
