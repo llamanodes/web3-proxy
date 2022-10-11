@@ -218,6 +218,8 @@ These are roughly in order of completition
 - [ ] WARN http_request: web3_proxy::frontend::errors: anyhow err=UserKey was not a ULID or UUID id=01GER4VBTS0FDHEBR96D1JRDZF method=POST
   - if invalid user id given, we give a 500. should be a different error code instead
 - [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
+- [ ] BUG?  WARN web3_proxy::rpcs::blockchain: Missing connection_head_block in block_hashes. Fetching now connection_head_hash=0x4b7a…14b5 conn_name=local_erigon_alpha_archive rpc=local_erigon_alpha_archive
+  - i see this a lot more than expected. why is it happening so much? better logs needed
 
 ## V1
 
