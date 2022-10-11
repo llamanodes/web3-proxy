@@ -55,6 +55,11 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
+                        ColumnDef::new(RpcAccounting::NoServers)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
                         ColumnDef::new(RpcAccounting::CacheMisses)
                             .big_unsigned()
                             .not_null(),
@@ -207,6 +212,7 @@ enum RpcAccounting {
     FrontendRequests,
     BackendRequests,
     BackendRetries,
+    NoServers,
     CacheMisses,
     CacheHits,
     SumRequestBytes,

@@ -64,6 +64,7 @@ pub struct ProxyResponseAggregate {
     frontend_requests: AtomicU32,
     backend_requests: AtomicU32,
     backend_retries: AtomicU32,
+    no_servers: AtomicU32,
     cache_misses: AtomicU32,
     cache_hits: AtomicU32,
     sum_request_bytes: AtomicU64,
@@ -122,11 +123,10 @@ impl ProxyResponseStat {
         let period_timestamp =
             (metadata.datetime.timestamp() as u64) / period_seconds * period_seconds;
         let request_bytes = metadata.request_bytes;
-        let response_millis = metadata
-            .datetime
-            .signed_duration_since(Utc::now())
-            .num_seconds() as u64;
         let error_response = metadata.error_response.load(Ordering::Acquire);
+
+        let response_millis =
+            (Utc::now().timestamp_millis() - metadata.datetime.timestamp_millis()) as u64;
 
         Self {
             user_key_id: authorized_key.user_key_id,
@@ -226,6 +226,7 @@ impl StatEmitter {
                 let frontend_requests = v.frontend_requests.load(Ordering::Acquire);
                 let backend_requests = v.backend_requests.load(Ordering::Acquire);
                 let backend_retries = v.backend_retries.load(Ordering::Acquire);
+                let no_servers = v.no_servers.load(Ordering::Acquire);
                 let cache_misses = v.cache_misses.load(Ordering::Acquire);
                 let cache_hits = v.cache_hits.load(Ordering::Acquire);
                 let sum_request_bytes = v.sum_request_bytes.load(Ordering::Acquire);
@@ -274,6 +275,7 @@ impl StatEmitter {
                     frontend_requests: sea_orm::Set(frontend_requests),
                     backend_requests: sea_orm::Set(backend_requests),
                     backend_retries: sea_orm::Set(backend_retries),
+                    no_servers: sea_orm::Set(no_servers),
                     cache_misses: sea_orm::Set(cache_misses),
                     cache_hits: sea_orm::Set(cache_hits),
 
@@ -347,6 +349,7 @@ impl StatEmitter {
                             frontend_requests: 0.into(),
                             backend_requests: 0.into(),
                             backend_retries: 0.into(),
+                            no_servers: 0.into(),
                             cache_misses: 0.into(),
                             cache_hits: 0.into(),
                             sum_request_bytes: 0.into(),
@@ -364,10 +367,18 @@ impl StatEmitter {
                     .frontend_requests
                     .fetch_add(1, Ordering::Acquire);
 
-                // a stat might have multiple backend requests
-                user_aggregate
-                    .backend_requests
-                    .fetch_add(stat.backend_requests, Ordering::Acquire);
+                if stat.backend_requests == 0 {
+                    // no backend request. cache hit!
+                    user_aggregate.cache_hits.fetch_add(1, Ordering::Acquire);
+                } else {
+                    // backend requests! cache miss!
+                    user_aggregate.cache_misses.fetch_add(1, Ordering::Acquire);
+
+                    // a stat might have multiple backend requests
+                    user_aggregate
+                        .backend_requests
+                        .fetch_add(stat.backend_requests, Ordering::Acquire);
+                }
 
                 user_aggregate
                     .sum_request_bytes
@@ -386,8 +397,8 @@ impl StatEmitter {
 
                     // TODO: use `record_correct`?
                     histograms.request_bytes.record(stat.request_bytes)?;
-                    histograms.response_bytes.record(stat.response_bytes)?;
                     histograms.response_millis.record(stat.response_millis)?;
+                    histograms.response_bytes.record(stat.response_bytes)?;
                 }
             }
         }

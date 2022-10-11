@@ -963,6 +963,7 @@ impl Web3ProxyApp {
                     }
                     _ => {
                         // TODO: this needs the correct error code in the response
+                        // TODO: emit stat?
                         return Err(anyhow::anyhow!("invalid request"));
                     }
                 }
@@ -1030,6 +1031,7 @@ impl Web3ProxyApp {
                             // discard their id by replacing it with an empty
                             response.id = Default::default();
 
+                            // TODO: only cache the inner response (or error)
                             Ok::<_, anyhow::Error>(response)
                         })
                         .await
@@ -1043,9 +1045,9 @@ impl Web3ProxyApp {
 
                 // since this data came likely out of a cache, the id is not going to match
                 // replace the id with our request's id.
-                // TODO: cache without the id
                 response.id = request_id;
 
+                // DRY this up by just returning the partial result (or error) here
                 if let (Some(stat_sender), Ok(AuthorizedRequest::User(Some(_), authorized_key))) = (
                     self.stat_sender.as_ref(),
                     Arc::try_unwrap(authorized_request),
@@ -1065,6 +1067,16 @@ impl Web3ProxyApp {
         };
 
         let response = JsonRpcForwardedResponse::from_value(partial_response, request_id);
+
+        if let (Some(stat_sender), Ok(AuthorizedRequest::User(Some(_), authorized_key))) = (
+            self.stat_sender.as_ref(),
+            Arc::try_unwrap(authorized_request),
+        ) {
+            let response_stat =
+                ProxyResponseStat::new(request.method, authorized_key, request_metadata, &response);
+
+            stat_sender.send_async(response_stat.into()).await?;
+        }
 
         Ok(response)
     }

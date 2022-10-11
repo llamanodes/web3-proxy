@@ -58,6 +58,7 @@ pub struct RequestMetadata {
     pub request_bytes: u64,
     /// if this is 0, there was a cache_hit
     pub backend_requests: AtomicU32,
+    pub no_servers: AtomicU32,
     pub error_response: AtomicBool,
     pub response_bytes: AtomicU64,
     pub response_millis: AtomicU64,

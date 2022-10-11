@@ -247,11 +247,45 @@ impl OpenRequestHandle {
                 error_handler
             };
 
-            // TODO: check for "execution reverted" here
+            // check for "execution reverted" here
+            let is_revert = if let ProviderError::JsonRpcClientError(err) = err {
+                // Http and Ws errors are very similar, but different types
+                let msg = match provider {
+                    Web3Provider::Http(_) => {
+                        if let Some(HttpClientError::JsonRpcError(err)) =
+                            err.downcast_ref::<HttpClientError>()
+                        {
+                            Some(&err.message)
+                        } else {
+                            None
+                        }
+                    }
+                    Web3Provider::Ws(_) => {
+                        if let Some(WsClientError::JsonRpcError(err)) =
+                            err.downcast_ref::<WsClientError>()
+                        {
+                            Some(&err.message)
+                        } else {
+                            None
+                        }
+                    }
+                };
+
+                if let Some(msg) = msg {
+                    msg.starts_with("execution reverted")
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
 
             match error_handler {
                 RequestErrorHandler::DebugLevel => {
-                    debug!(?err, %method, rpc=%self.conn, "bad response!");
+                    // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
+                    if !is_revert {
+                        debug!(?err, %method, rpc=%self.conn, "bad response!");
+                    }
                 }
                 RequestErrorHandler::ErrorLevel => {
                     error!(?err, %method, rpc=%self.conn, "bad response!");
@@ -260,55 +294,21 @@ impl OpenRequestHandle {
                     warn!(?err, %method, rpc=%self.conn, "bad response!");
                 }
                 RequestErrorHandler::SaveReverts => {
-                    // TODO: logging every one is going to flood the database
-                    // TODO: have a percent chance to do this. or maybe a "logged reverts per second"
-                    if let ProviderError::JsonRpcClientError(err) = err {
-                        // Http and Ws errors are very similar, but different types
-                        let msg = match provider {
-                            Web3Provider::Http(_) => {
-                                if let Some(HttpClientError::JsonRpcError(err)) =
-                                    err.downcast_ref::<HttpClientError>()
-                                {
-                                    Some(&err.message)
-                                } else {
-                                    None
-                                }
-                            }
-                            Web3Provider::Ws(_) => {
-                                if let Some(WsClientError::JsonRpcError(err)) =
-                                    err.downcast_ref::<WsClientError>()
-                                {
-                                    Some(&err.message)
-                                } else {
-                                    None
-                                }
-                            }
-                        };
+                    // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
+                    let method: Method = Method::try_from_value(&method.to_string()).unwrap();
 
-                        if let Some(msg) = msg {
-                            if msg.starts_with("execution reverted") {
-                                // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
-                                let method: Method =
-                                    Method::try_from_value(&method.to_string()).unwrap();
+                    // TODO: DO NOT UNWRAP! But also figure out the best way to keep returning ProviderErrors here
+                    let params: EthCallParams = serde_json::from_value(json!(params))
+                        .context("parsing params to EthCallParams")
+                        .unwrap();
 
-                                // TODO: DO NOT UNWRAP! But also figure out the best way to keep returning ProviderErrors here
-                                let params: EthCallParams = serde_json::from_value(json!(params))
-                                    .context("parsing params to EthCallParams")
-                                    .unwrap();
+                    // spawn saving to the database so we don't slow down the request
+                    let f = self
+                        .authorized_request
+                        .clone()
+                        .save_revert(method, params.0 .0);
 
-                                // spawn saving to the database so we don't slow down the request
-                                let f = self
-                                    .authorized_request
-                                    .clone()
-                                    .save_revert(method, params.0 .0);
-
-                                tokio::spawn(async move { f.await });
-                            } else {
-                                // TODO: log any of the errors?
-                                debug!(?err, %method, rpc=%self.conn, "bad response!");
-                            }
-                        }
-                    }
+                    tokio::spawn(f);
                 }
             }
         } else {

@@ -17,6 +17,7 @@ pub struct Model {
     pub frontend_requests: u32,
     pub backend_requests: u32,
     pub backend_retries: u32,
+    pub no_servers: u32,
     pub cache_misses: u32,
     pub cache_hits: u32,
     pub sum_request_bytes: u64,

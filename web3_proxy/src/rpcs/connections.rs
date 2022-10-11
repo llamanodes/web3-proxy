@@ -366,6 +366,7 @@ impl Web3Connections {
     pub async fn next_upstream_server(
         &self,
         authorized_request: Option<&Arc<AuthorizedRequest>>,
+        request_metadata: Option<&Arc<RequestMetadata>>,
         skip: &[Arc<Web3Connection>],
         min_block_needed: Option<&U64>,
     ) -> anyhow::Result<OpenRequestResult> {
@@ -444,11 +445,20 @@ impl Web3Connections {
 
         match earliest_retry_at {
             None => {
+                if let Some(request_metadata) = request_metadata {
+                    request_metadata.no_servers.fetch_add(1, Ordering::Release);
+                }
+
                 // TODO: error works, but maybe we should just wait a second?
                 Err(anyhow::anyhow!("no servers synced"))
             }
             Some(earliest_retry_at) => {
                 warn!("no servers on {:?}! {:?}", self, earliest_retry_at);
+
+                if let Some(request_metadata) = request_metadata {
+                    request_metadata.no_servers.fetch_add(1, Ordering::Release);
+                }
+
                 Ok(OpenRequestResult::RetryAt(earliest_retry_at))
             }
         }
@@ -513,7 +523,12 @@ impl Web3Connections {
                 break;
             }
             match self
-                .next_upstream_server(authorized_request, &skip_rpcs, min_block_needed)
+                .next_upstream_server(
+                    authorized_request,
+                    request_metadata,
+                    &skip_rpcs,
+                    min_block_needed,
+                )
                 .await?
             {
                 OpenRequestResult::Handle(active_request_handle) => {
@@ -593,6 +608,11 @@ impl Web3Connections {
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
                     warn!(?retry_at, "All rate limits exceeded. Sleeping");
 
+                    // TODO: have a separate column for rate limited?
+                    if let Some(request_metadata) = request_metadata {
+                        request_metadata.no_servers.fetch_add(1, Ordering::Release);
+                    }
+
                     sleep_until(retry_at).await;
 
                     continue;
@@ -600,12 +620,23 @@ impl Web3Connections {
                 OpenRequestResult::RetryNever => {
                     warn!(?self, "No server handles!");
 
+                    if let Some(request_metadata) = request_metadata {
+                        request_metadata.no_servers.fetch_add(1, Ordering::Release);
+                    }
+
                     // TODO: subscribe to something on synced connections. maybe it should just be a watch channel
                     sleep(Duration::from_millis(200)).await;
 
                     continue;
                 }
             }
+        }
+
+        // TODO: do we need this here, or do we do it somewhere else?
+        if let Some(request_metadata) = request_metadata {
+            request_metadata
+                .error_response
+                .store(true, Ordering::Release);
         }
 
         Err(anyhow::anyhow!("all {} tries exhausted", skip_rpcs.len()))
@@ -629,6 +660,13 @@ impl Web3Connections {
                     // TODO: benchmark this compared to waiting on unbounded futures
                     // TODO: do something with this handle?
                     // TODO: this is not working right. simplify
+
+                    if let Some(request_metadata) = request_metadata {
+                        request_metadata
+                            .backend_requests
+                            .fetch_add(active_request_handles.len() as u32, Ordering::Release);
+                    }
+
                     let quorum_response = self
                         .try_send_parallel_requests(
                             active_request_handles,
@@ -649,6 +687,10 @@ impl Web3Connections {
                 Err(None) => {
                     warn!(?self, "No servers in sync! Retrying");
 
+                    if let Some(request_metadata) = &request_metadata {
+                        request_metadata.no_servers.fetch_add(1, Ordering::Release);
+                    }
+
                     // TODO: i don't think this will ever happen
                     // TODO: return a 502? if it does?
                     // return Err(anyhow::anyhow!("no available rpcs!"));
@@ -663,6 +705,10 @@ impl Web3Connections {
                     // sleep (TODO: with a lock?) until our rate limits should be available
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
                     warn!("All rate limits exceeded. Sleeping");
+
+                    if let Some(request_metadata) = &request_metadata {
+                        request_metadata.no_servers.fetch_add(1, Ordering::Release);
+                    }
 
                     sleep_until(retry_at).await;
 
