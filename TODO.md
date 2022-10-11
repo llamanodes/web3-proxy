@@ -220,6 +220,7 @@ These are roughly in order of completition
 - [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
 - [ ] BUG?  WARN web3_proxy::rpcs::blockchain: Missing connection_head_block in block_hashes. Fetching now connection_head_hash=0x4b7a…14b5 conn_name=local_erigon_alpha_archive rpc=local_erigon_alpha_archive
   - i see this a lot more than expected. why is it happening so much? better logs needed
+- [ ] don't use unix timestamps for response_millis since leap seconds will confuse itt
 
 ## V1
 
@@ -443,3 +444,7 @@ in another repo: event subscriber
 - [ ] replace serde_json::Value with https://lib.rs/crates/ijson (more memory efficient)
 - [ ] have a log all option? instead of just reverts, log all request/responses? can be very useful for debugging but would flood our database. maybe better for them to do that on their client side
 - [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
+- [ ] WARN http_request:request: web3_proxy::block_number: could not get block from params err=unexpected params length id=01GF4HTRKM4JV6NX52XSF9AYMW method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })
+- [ ] document "backend requests is cache_misses + backend_retries"
+- [ ] having tons of worker threads can actually make us slower if they keep waking to steal work from eachother. need benchmarks
+- [ ] change the wrk data to log requests and errors to a file
