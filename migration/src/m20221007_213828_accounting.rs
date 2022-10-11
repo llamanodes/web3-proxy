@@ -28,53 +28,154 @@ impl MigrationTrait for Migration {
                             .big_unsigned()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(RpcAccounting::Timestamp)
-                            .timestamp()
-                            .not_null(),
-                    )
                     .col(ColumnDef::new(RpcAccounting::Method).string().not_null())
-                    .col(
-                        ColumnDef::new(RpcAccounting::FrontendRequests)
-                            .unsigned()
-                            .not_null(),
-                    )
-                    .col(
-                        // 0 means cache hit
-                        // 1 is hopefully what most require
-                        // but there might be more if retries were necessary
-                        ColumnDef::new(RpcAccounting::BackendRequests)
-                            .unsigned()
-                            .not_null(),
-                    )
                     .col(
                         ColumnDef::new(RpcAccounting::ErrorResponse)
                             .boolean()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(RpcAccounting::QueryMillis)
-                            .unsigned()
+                        ColumnDef::new(RpcAccounting::PeriodDatetime)
+                            .timestamp()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(RpcAccounting::RequestBytes)
-                            .unsigned()
+                        ColumnDef::new(RpcAccounting::FrontendRequests)
+                            .big_unsigned()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(RpcAccounting::ResponseBytes)
-                            .unsigned()
+                        ColumnDef::new(RpcAccounting::BackendRequests)
+                            .big_unsigned()
                             .not_null(),
                     )
-                    .index(sea_query::Index::create().col(RpcAccounting::Timestamp))
-                    .index(sea_query::Index::create().col(RpcAccounting::Method))
-                    .index(sea_query::Index::create().col(RpcAccounting::BackendRequests))
+                    .col(
+                        ColumnDef::new(RpcAccounting::BackendRetries)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::CacheMisses)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::CacheHits)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::SumRequestBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::MinRequestBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::MeanRequestBytes)
+                            .float_len(64)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::P50RequestBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::P90RequestBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::P99RequestBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::MaxRequestBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::SumResponseMillis)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::MinResponseMillis)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::MeanResponseMillis)
+                            .float_len(64)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::P50ResponseMillis)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::P90ResponseMillis)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::P99ResponseMillis)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::MaxResponseMillis)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::SumResponseBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::MinResponseBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::MeanResponseBytes)
+                            .float_len(64)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::P50ResponseBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::P90ResponseBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::P99ResponseBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RpcAccounting::MaxResponseBytes)
+                            .big_unsigned()
+                            .not_null(),
+                    )
                     .foreign_key(
                         sea_query::ForeignKey::create()
                             .from(RpcAccounting::Table, RpcAccounting::UserKeyId)
                             .to(UserKeys::Table, UserKeys::Id),
                     )
+                    .index(sea_query::Index::create().col(RpcAccounting::PeriodDatetime))
+                    .index(sea_query::Index::create().col(RpcAccounting::Method))
                     .to_owned(),
             )
             .await
@@ -98,14 +199,35 @@ pub enum UserKeys {
 enum RpcAccounting {
     Table,
     Id,
-    Timestamp,
     UserKeyId,
     ChainId,
     Method,
+    ErrorResponse,
+    PeriodDatetime,
     FrontendRequests,
     BackendRequests,
-    ErrorResponse,
-    QueryMillis,
-    RequestBytes,
-    ResponseBytes,
+    BackendRetries,
+    CacheMisses,
+    CacheHits,
+    SumRequestBytes,
+    MinRequestBytes,
+    MeanRequestBytes,
+    P50RequestBytes,
+    P90RequestBytes,
+    P99RequestBytes,
+    MaxRequestBytes,
+    SumResponseMillis,
+    MinResponseMillis,
+    MeanResponseMillis,
+    P50ResponseMillis,
+    P90ResponseMillis,
+    P99ResponseMillis,
+    MaxResponseMillis,
+    SumResponseBytes,
+    MinResponseBytes,
+    MeanResponseBytes,
+    P50ResponseBytes,
+    P90ResponseBytes,
+    P99ResponseBytes,
+    MaxResponseBytes,
 }

@@ -3,7 +3,7 @@ use crate::app::{UserKeyData, Web3ProxyApp};
 use crate::jsonrpc::JsonRpcRequest;
 use anyhow::Context;
 use axum::headers::{authorization::Bearer, Origin, Referer, UserAgent};
-use chrono::{Utc};
+use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::user_keys;
 use ipnet::IpNet;
@@ -13,7 +13,7 @@ use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use serde::Serialize;
 use std::fmt::Display;
 use std::mem::size_of_val;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64};
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
@@ -55,11 +55,11 @@ pub struct AuthorizedKey {
 #[derive(Debug, Default, Serialize)]
 pub struct RequestMetadata {
     pub timestamp: u64,
-    pub request_bytes: AtomicUsize,
+    pub request_bytes: AtomicU64,
     pub backend_requests: AtomicU16,
     pub error_response: AtomicBool,
-    pub response_bytes: AtomicUsize,
-    pub response_millis: AtomicU32,
+    pub response_bytes: AtomicU64,
+    pub response_millis: AtomicU64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -74,7 +74,7 @@ pub enum AuthorizedRequest {
 
 impl RequestMetadata {
     pub fn new(request: &JsonRpcRequest) -> Self {
-        let request_bytes = size_of_val(request);
+        let request_bytes = size_of_val(request) as u64;
 
         Self {
             request_bytes: request_bytes.into(),

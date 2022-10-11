@@ -3,20 +3,43 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "rpc_accounting")]
+/// TODO: make migrations match these items
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: u64,
     pub user_key_id: u64,
     pub chain_id: u64,
-    pub timestamp: DateTimeUtc,
     pub method: String,
-    pub backend_requests: u32,
     pub error_response: bool,
-    pub query_millis: u32,
-    pub request_bytes: u32,
-    pub response_bytes: u32,
+    pub period_datetime: DateTimeUtc,
+    pub frontend_requests: u32,
+    pub backend_requests: u32,
+    pub backend_retries: u32,
+    pub cache_misses: u32,
+    pub cache_hits: u32,
+    pub sum_request_bytes: u64,
+    pub min_request_bytes: u64,
+    pub mean_request_bytes: f64,
+    pub p50_request_bytes: u64,
+    pub p90_request_bytes: u64,
+    pub p99_request_bytes: u64,
+    pub max_request_bytes: u64,
+    pub sum_response_millis: u64,
+    pub min_response_millis: u64,
+    pub mean_response_millis: f64,
+    pub p50_response_millis: u64,
+    pub p90_response_millis: u64,
+    pub p99_response_millis: u64,
+    pub max_response_millis: u64,
+    pub sum_response_bytes: u64,
+    pub min_response_bytes: u64,
+    pub mean_response_bytes: f64,
+    pub p50_response_bytes: u64,
+    pub p90_response_bytes: u64,
+    pub p99_response_bytes: u64,
+    pub max_response_bytes: u64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

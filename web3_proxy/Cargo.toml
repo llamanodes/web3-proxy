@@ -35,6 +35,7 @@ fdlimit = "0.2.1"
 flume = "0.10.14"
 futures = { version = "0.3.24", features = ["thread-pool"] }
 hashbrown = { version = "0.12.3", features = ["serde"] }
+hdrhistogram = "7.5.2"
 http = "0.2.8"
 ipnet = "2.5.0"
 metered = { version = "0.9.0", features = ["serialize"] }
