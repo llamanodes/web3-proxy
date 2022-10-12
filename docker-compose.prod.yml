@@ -12,7 +12,7 @@ services:
     image: mysql
     environment:
       MYSQL_ROOT_PASSWORD: web3_proxy
-      MYSQL_DATAweb3-proxy: web3_proxy
+      MYSQL_DATABASE: web3_proxy
     ports:
       - 127.0.0.1:3307:3306
     volumes:
@@ -28,28 +28,17 @@ services:
     environment:
       ADMINER_DEFAULT_SERVER: db
 
-  influxdb:
-    image: influxdb:latest
-    ports:
-      - '127.0.0.1:8087:8086'
+  arbitrum:
+    extends:
+      file: docker-compose.common.yml
+      service: web3-proxy
     volumes:
-      - ./data/influxdb:/var/lib/influxdb
-    environment:
-      - INFLUXDB_DB=db0
-      - INFLUXDB_ADMIN_USER=web3_proxy
-      - INFLUXDB_ADMIN_PASSWORD=web3_proxy
-
-  # arbitrum:
-  #   extends:
-  #     file: docker-compose.common.yml
-  #     service: web3-proxy
-  #   volumes:
-  #     - ./config/production-arbitrum.toml:/config.toml
-  #   ports:
-  #     - mode: host
-  #       protocol: tcp
-  #       published: 7700
-  #       target: 8544
+      - ./config/production-arbitrum.toml:/config.toml
+    ports:
+      - mode: host
+        protocol: tcp
+        published: 7700
+        target: 8544
 
   # avalanche-c:
   #   extends:
@@ -87,6 +76,7 @@ services:
         protocol: tcp
         published: 7703
         target: 8544
+
   # fantom:
   #   extends:
   #     file: docker-compose.common.yml
@@ -99,42 +89,41 @@ services:
   #       published: 7704
   #       target: 8544
 
-  # gnosis:
-  #   extends:
-  #     file: docker-compose.common.yml
-  #     service: web3-proxy
-  #   volumes:
-  #     - ./config/production-gnosis.toml:/config.toml
-  #   ports:
-  #     - mode: host
-  #       protocol: tcp
-  #       published: 7705
-  #       target: 8544
+  gnosis:
+    extends:
+      file: docker-compose.common.yml
+      service: web3-proxy
+    volumes:
+      - ./config/production-gnosis.toml:/config.toml
+    ports:
+      - mode: host
+        protocol: tcp
+        published: 7705
+        target: 8544
 
-  # goerli:
-  #   extends:
-  #     file: docker-compose.common.yml
-  #     service: web3-proxy
-  #   volumes:
-  #     - ./config/production-goerli.toml:/config.toml
-  #   ports:
-  #    - mode: host
-  #      protocol: tcp
-  #      published: 7706
-  #      target: 8544
+  goerli:
+    extends:
+      file: docker-compose.common.yml
+      service: web3-proxy
+    volumes:
+      - ./config/production-goerli.toml:/config.toml
+    ports:
+      - mode: host
+        protocol: tcp
+        published: 7706
+        target: 8544
 
-  # optimism:
-  #   extends:
-  #     file: docker-compose.common.yml
-  #     service: web3-proxy
-  #   volumes:
-  #     - ./config/production-optimism.toml:/config.toml
-  #   ports:
-  #     - mode: host
-  #       protocol: tcp
-  #       published: 7707
-  #       target: 8544
-
+  optimism:
+    extends:
+      file: docker-compose.common.yml
+      service: web3-proxy
+    volumes:
+      - ./config/production-optimism.toml:/config.toml
+    ports:
+      - mode: host
+        protocol: tcp
+        published: 7707
+        target: 8544
   # polygon:
   #   extends:
   #     file: docker-compose.common.yml

@@ -180,6 +180,7 @@ These are roughly in order of completition
 - [x] user create script should allow a description field
 - [x] change stats to using the database
 - [x] emit user stat on retry
+- [ ] include if archive query or not in the stats
 - [ ] ability to generate a key from a web endpoint
   - this is already partially done, but we need to double check it works. preferrably with tests
 - [ ] ability to domain lock or ip lock said key
@@ -221,6 +222,10 @@ These are roughly in order of completition
 - [ ] BUG?  WARN web3_proxy::rpcs::blockchain: Missing connection_head_block in block_hashes. Fetching now connection_head_hash=0x4b7a…14b5 conn_name=local_erigon_alpha_archive rpc=local_erigon_alpha_archive
   - i see this a lot more than expected. why is it happening so much? better logs needed
 - [ ] don't use unix timestamps for response_millis since leap seconds will confuse itt
+- [ ] from what i thought, /status should show hashes > numbers!
+  - but block numbers count is maxed out (10k)
+  - and block hashes count is tiny (83)
+  - what is going on?
 
 ## V1
 
@@ -295,6 +300,10 @@ new endpoints for users (not totally sure about the exact paths, but these featu
   - opt-in link email address
   - checks for api key in session cookie or header
   - allows modifying user settings
+- [ ] sometimes when fetching a txid through the proxy it fails, but fetching from the backends works fine
+  - check flashprofits logs for examples
+- [ ] relevant erigon changelogs: add pendingTransactionWithBody subscription method (#5675)
+
 
 ## V2
 
