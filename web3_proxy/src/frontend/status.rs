@@ -1,10 +1,15 @@
+//! Used by admins for health checks and inspecting global statistics.
+//!
+//! For ease of development, users can currently access these endponts.
+//! They will eventually move to another port.
+
 use crate::app::Web3ProxyApp;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use moka::future::ConcurrentCacheExt;
 use serde_json::json;
 use std::sync::Arc;
 
-/// Health check page for load balancers to use
+/// Health check page for load balancers to use.
 pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     // TODO: also check that the head block is not too old
     if app.balanced_rpcs.synced() {
@@ -14,13 +19,15 @@ pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoRe
     }
 }
 
-/// Prometheus metrics
+/// Prometheus metrics.
+///
 /// TODO: when done debugging, remove this and only allow access on a different port
 pub async fn prometheus(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     app.prometheus_metrics()
 }
 
-/// Very basic status page
+/// Very basic status page.
+///
 /// TODO: replace this with proper stats and monitoring
 pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     app.pending_transactions.sync();

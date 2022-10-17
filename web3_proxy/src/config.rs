@@ -91,9 +91,9 @@ pub struct AppConfig {
     #[serde(default = "default_response_cache_max_bytes")]
     pub response_cache_max_bytes: usize,
     /// the stats page url for an anonymous user.
-    pub redirect_public_url: String,
-    /// the stats page url for a logged in user. it must contain "{user_id}"
-    pub redirect_user_url: String,
+    pub redirect_public_url: Option<String>,
+    /// the stats page url for a logged in user. if set, must contain "{user_id}"
+    pub redirect_user_url: Option<String>,
 }
 
 /// This might cause a thundering herd!

@@ -78,7 +78,7 @@ fn run(
         let prometheus_handle = tokio::spawn(metrics_frontend::serve(app, app_prometheus_port));
 
         // if everything is working, these should both run forever
-        // TODO: join these instead and use shutdown handler properly
+        // TODO: join these instead and use shutdown handler properly. probably use tokio's ctrl+c helper
         tokio::select! {
             x = app_handle => {
                 match x {
@@ -220,8 +220,8 @@ mod tests {
                 min_synced_rpcs: 1,
                 frontend_rate_limit_per_minute: 1_000_000,
                 response_cache_max_bytes: 10_usize.pow(7),
-                redirect_public_url: "example.com/".to_string(),
-                redirect_user_url: "example.com/{{user_id}}".to_string(),
+                redirect_public_url: Some("example.com/".to_string()),
+                redirect_user_url: Some("example.com/{{user_id}}".to_string()),
                 ..Default::default()
             },
             balanced_rpcs: HashMap::from([

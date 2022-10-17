@@ -1,3 +1,5 @@
+//! Utilities for authorization of logged in and anonymous users.
+
 use super::errors::FrontendErrorResponse;
 use crate::app::{UserKeyData, Web3ProxyApp};
 use crate::jsonrpc::JsonRpcRequest;
@@ -21,6 +23,7 @@ use ulid::Ulid;
 use uuid::Uuid;
 
 /// This lets us use UUID and ULID while we transition to only ULIDs
+/// TODO: include the key's description.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub enum UserKey {
     Ulid(Ulid),

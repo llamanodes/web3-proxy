@@ -1,9 +1,12 @@
+//! `frontend` contains HTTP and websocket endpoints for use by users and admins.
+
 pub mod authorization;
 mod errors;
-mod rpc_proxy_http;
-mod rpc_proxy_ws;
-mod status;
-mod users;
+// TODO: these are only public so docs are generated. What's a better way to do this?
+pub mod rpc_proxy_http;
+pub mod rpc_proxy_ws;
+pub mod status;
+pub mod users;
 
 use crate::app::Web3ProxyApp;
 use axum::{
@@ -23,7 +26,7 @@ use tower_http::trace::TraceLayer;
 use tower_request_id::{RequestId, RequestIdLayer};
 use tracing::{error_span, info};
 
-/// http and websocket frontend for customers
+/// Start the frontend server.
 pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
     // create a tracing span for each request with a random request id and the method
     // GET: websocket or static pages
@@ -48,7 +51,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
 
     // build our axum Router
     let app = Router::new()
-        // routes should be order most to least common
+        // routes should be ordered most to least common
         .route("/rpc", post(rpc_proxy_http::proxy_web3_rpc))
         .route("/rpc", get(rpc_proxy_ws::websocket_handler))
         .route(
@@ -60,17 +63,21 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
             get(rpc_proxy_ws::websocket_handler_with_key),
         )
         .route("/health", get(status::health))
+        .route("/user/login/:user_address", get(users::user_login_get))
+        .route(
+            "/user/login/:user_address/:message_eip",
+            get(users::user_login_get),
+        )
+        .route("/user/login", post(users::user_login_post))
+        .route("/user/balance", get(users::user_balance_get))
+        .route("/user/balance/:txid", post(users::user_balance_post))
+        .route("/user/profile", get(users::user_profile_get))
+        .route("/user/profile", post(users::user_profile_post))
+        .route("/user/stats", get(users::user_stats_get))
+        .route("/user/logout", post(users::user_logout_post))
         .route("/status", get(status::status))
         // TODO: make this optional or remove it since it is available on another port
         .route("/prometheus", get(status::prometheus))
-        .route("/user/login/:user_address", get(users::get_login))
-        .route(
-            "/user/login/:user_address/:message_eip",
-            get(users::get_login),
-        )
-        .route("/user/login", post(users::post_login))
-        .route("/user", post(users::post_user))
-        .route("/user/logout", get(users::get_logout))
         // layers are ordered bottom up
         // the last layer is first for requests and last for responses
         // Mark the `Authorization` request header as sensitive so it doesn't show in logs
@@ -112,8 +119,9 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
 }
 
 /// Tokio signal handler that will wait for a user to press CTRL+C.
-/// We use this in our hyper `Server` method `with_graceful_shutdown`.
+/// Used in our hyper `Server` method `with_graceful_shutdown`.
 async fn signal_shutdown() {
+    // TODO: take a shutdown_receiver and select on ctrl_c and it
     info!("ctrl-c to quit");
     tokio::signal::ctrl_c()
         .await

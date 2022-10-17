@@ -178,10 +178,12 @@ impl Web3ProxyApp {
         Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
     )> {
         // safety checks on the config
-        assert!(
-            top_config.app.redirect_user_url.contains("{{user_id}}"),
-            "redirect user url must contain \"{{user_id}}\""
-        );
+        if let Some(redirect) = &top_config.app.redirect_user_url {
+            assert!(
+                redirect.contains("{{user_id}}"),
+                "redirect_user_url user url must contain \"{{user_id}}\""
+            );
+        }
 
         // setup metrics
         let app_metrics = Default::default();

@@ -1,3 +1,7 @@
+//! Take a user's WebSocket JSON-RPC requests and either respond from local data or proxy the request to a backend rpc server.
+//!
+//! WebSockets are the preferred method of receiving requests, but not all clients have good support.
+
 use super::authorization::{
     bearer_is_authorized, ip_is_authorized, key_is_authorized, AuthorizedRequest,
 };
@@ -28,6 +32,8 @@ use crate::{
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
 };
 
+/// Public entrypoint for WebSocket JSON-RPC requests.
+/// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
 #[debug_handler]
 pub async fn websocket_handler(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
@@ -66,12 +72,23 @@ pub async fn websocket_handler(
             })
             .into_response()),
         None => {
-            // this is not a websocket. redirect to a friendly page
-            Ok(Redirect::to(&app.config.redirect_public_url).into_response())
+            if let Some(redirect) = &app.config.redirect_public_url {
+                // this is not a websocket. redirect to a friendly page
+                Ok(Redirect::to(redirect).into_response())
+            } else {
+                // TODO: do not use an anyhow error. send the user a 400
+                Err(
+                    anyhow::anyhow!("redirect_public_url not set. only websockets work here")
+                        .into(),
+                )
+            }
         }
     }
 }
 
+/// Authenticated entrypoint for WebSocket JSON-RPC requests. Web3 wallets use this.
+/// Rate limit and billing based on the api key in the url.
+/// Can optionally authorized based on origin, referer, or user agent.
 #[debug_handler]
 pub async fn websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -107,20 +124,25 @@ pub async fn websocket_handler_with_key(
             proxy_web3_socket(app, authorized_request, socket).instrument(request_span)
         })),
         None => {
-            // TODO: store this on the app and use register_template?
-            let reg = Handlebars::new();
+            if let Some(redirect) = &app.config.redirect_user_url {
+                // TODO: store this on the app and use register_template?
+                let reg = Handlebars::new();
 
-            // TODO: show the user's address, not their id (remember to update the checks for {{user_id}}} in app.rs)
-            // TODO: query to get the user's address. expose that instead of user_id
-            let user_url = reg
-                .render_template(
-                    &app.config.redirect_user_url,
-                    &json!({ "authorized_request": authorized_request }),
-                )
-                .expect("templating should always work");
+                // TODO: show the user's address, not their id (remember to update the checks for {{user_id}}} in app.rs)
+                // TODO: query to get the user's address. expose that instead of user_id
+                let user_url = reg
+                    .render_template(
+                        redirect,
+                        &json!({ "authorized_request": authorized_request }),
+                    )
+                    .expect("templating should always work");
 
-            // this is not a websocket. redirect to a page for this user
-            Ok(Redirect::to(&user_url).into_response())
+                // this is not a websocket. redirect to a page for this user
+                Ok(Redirect::to(&user_url).into_response())
+            } else {
+                // TODO: do not use an anyhow error. send the user a 400
+                Err(anyhow::anyhow!("redirect_user_url not set. only websockets work here").into())
+            }
         }
     }
 }

@@ -1,3 +1,5 @@
+//! Utlities for logging errors for admins and displaying errors to users.
+
 use crate::{app::UserKeyData, jsonrpc::JsonRpcForwardedResponse};
 use axum::{
     http::StatusCode,

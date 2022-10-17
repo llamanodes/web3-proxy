@@ -1,3 +1,5 @@
+//! Take a user's HTTP JSON-RPC requests and either respond from local data or proxy the request to a backend rpc server.
+
 use super::authorization::{bearer_is_authorized, ip_is_authorized, key_is_authorized};
 use super::errors::FrontendResult;
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
@@ -10,6 +12,9 @@ use axum_client_ip::ClientIp;
 use std::sync::Arc;
 use tracing::{error_span, Instrument};
 
+/// POST /rpc -- Public entrypoint for HTTP JSON-RPC requests. Web3 wallets use this.
+/// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
+/// If possible, please use a WebSocket instead.
 pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
@@ -40,6 +45,7 @@ pub async fn proxy_web3_rpc(
 
     let authorized_request = Arc::new(authorized_request);
 
+    // TODO: spawn earlier?
     let f = tokio::spawn(async move {
         app.proxy_web3_rpc(authorized_request, payload)
             .instrument(request_span)
@@ -51,6 +57,10 @@ pub async fn proxy_web3_rpc(
     Ok(Json(&response).into_response())
 }
 
+/// Authenticated entrypoint for HTTP JSON-RPC requests. Web3 wallets use this.
+/// Rate limit and billing based on the api key in the url.
+/// Can optionally authorized based on origin, referer, or user agent.
+/// If possible, please use a WebSocket instead.
 pub async fn proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -64,7 +74,6 @@ pub async fn proxy_web3_rpc_with_key(
 
     let request_span = error_span!("request", %ip, ?referer, ?user_agent);
 
-    // TODO: this should probably return the user_key_id instead? or maybe both?
     let (authorized_request, _semaphore) = key_is_authorized(
         &app,
         user_key,
@@ -80,6 +89,8 @@ pub async fn proxy_web3_rpc_with_key(
 
     let authorized_request = Arc::new(authorized_request);
 
+    // the request can take a while, so we spawn so that we can start serving another request
+    // TODO: spawn even earlier?
     let f = tokio::spawn(async move {
         app.proxy_web3_rpc(authorized_request, payload)
             .instrument(request_span)

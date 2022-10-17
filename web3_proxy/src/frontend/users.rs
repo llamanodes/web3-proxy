@@ -1,11 +1,4 @@
-// So the API needs to show for any given user:
-// - show balance in USD
-// - show deposits history (currency, amounts, transaction id)
-// - show number of requests used (so we can calculate average spending over a month, burn rate for a user etc, something like "Your balance will be depleted in xx days)
-// - the email address of a user if he opted in to get contacted via email
-// - all the monitoring and stats but that will come from someplace else if I understand corectly?
-// I wonder how we handle payment
-// probably have to do manual withdrawals
+//! Handle registration, logins, and managing account data.
 
 use super::authorization::{login_is_authorized, UserKey};
 use super::errors::FrontendResult;
@@ -32,9 +25,20 @@ use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
 
-// TODO: how do we customize axum's error response? I think we probably want an enum that implements IntoResponse instead
+/// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
+///
+/// `message_eip`s accepted:
+///   - eip191_bytes
+///   - eip191_hash
+///   - eip4361 (default)
+///
+/// Coming soon: eip1271
+///
+/// This is the initial entrypoint for logging in. Take the response from this endpoint and give it to your user's wallet for singing. POST the response to `/user/login`.
+///
+/// Rate limited by IP address.
 #[debug_handler]
-pub async fn get_login(
+pub async fn user_login_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
     // TODO: what does axum's error handling look like if the path fails to parse?
@@ -69,6 +73,7 @@ pub async fn get_login(
 
     // TODO: get most of these from the app config
     let message = Message {
+        // TODO: should domain be llamanodes, or llamarpc?
         domain: "staging.llamanodes.com".parse().unwrap(),
         address: user_address.to_fixed_bytes(),
         statement: Some("🦙🦙🦙🦙🦙".to_string()),
@@ -95,6 +100,7 @@ pub async fn get_login(
         .await?;
 
     // there are multiple ways to sign messages and not all wallets support them
+    // TODO: default message eip from config?
     let message_eip = params
         .remove("message_eip")
         .unwrap_or_else(|| "eip4361".to_string());
@@ -112,35 +118,41 @@ pub async fn get_login(
     Ok(message.into_response())
 }
 
-/// Query params to our `post_login` handler.
+/// Query params for our `post_login` handler.
 #[derive(Debug, Deserialize)]
 pub struct PostLoginQuery {
-    invite_code: Option<String>,
+    /// While we are in alpha/beta, we require users to supply an invite code.
+    /// The invite code (if any) is set in the application's config.
+    /// This may eventually provide some sort of referral bonus.
+    pub invite_code: Option<String>,
 }
 
 /// JSON body to our `post_login` handler.
-/// TODO: this should be an enum with the different login methods having different structs
+/// Currently only siwe logins that send an address, msg, and sig are allowed.
 #[derive(Deserialize)]
 pub struct PostLogin {
-    address: Address,
-    msg: String,
-    sig: Bytes,
+    pub address: Address,
+    pub msg: String,
+    pub sig: Bytes,
     // TODO: do we care about these? we should probably check the version is something we expect
     // version: String,
     // signer: String,
 }
 
-/// TODO: what information should we return?
+/// Successful logins receive a bearer_token and all of the user's api keys.
 #[derive(Serialize)]
 pub struct PostLoginResponse {
+    /// Used for authenticating additonal requests.
     bearer_token: Ulid,
+    /// Used for authenticating with the RPC endpoints.
     api_keys: Vec<UserKey>,
 }
 
-/// Post to the user endpoint to register or login.
-/// It is recommended to save the returned bearer this in a cookie and send bac
+/// `POST /user/login` - Register or login by posting a signed "siwe" message.
+/// It is recommended to save the returned bearer token in a cookie.
+/// The bearer token can be used to authenticate other requests, such as getting the user's stats or modifying the user's profile.
 #[debug_handler]
-pub async fn post_login(
+pub async fn user_login_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
     Json(payload): Json<PostLogin>,
@@ -266,9 +278,9 @@ pub async fn post_login(
     Ok(response)
 }
 
-/// Log out the user connected to the given Authentication header.
+/// `POST /user/logout` - Forget the bearer token in the `Authentication` header.
 #[debug_handler]
-pub async fn get_logout(
+pub async fn user_logout_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
@@ -293,9 +305,9 @@ pub struct PostUser {
     // TODO: make them sign this JSON? cookie in session id is hard because its on a different domain
 }
 
+/// `POST /user/profile` -- modify the account connected to the bearer token in the `Authentication` header.
 #[debug_handler]
-/// post to the user endpoint to modify your existing account
-pub async fn post_user(
+pub async fn user_profile_post(
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     ClientIp(ip): ClientIp,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -330,17 +342,101 @@ pub async fn post_user(
     todo!("finish post_user");
 }
 
+/// `GET /user/balance` -- Use a bearer token to get the user's balance and spend.
+///
+/// - show balance in USD
+/// - show deposits history (currency, amounts, transaction id)
+///
+/// TODO: one key per request? maybe /user/balance/:api_key?
+/// TODO: this will change as we add better support for secondary users.
+#[debug_handler]
+pub async fn user_balance_get(
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+) -> FrontendResult {
+    todo!("user_balance_get");
+}
+
+/// `POST /user/balance` -- Manually process a confirmed txid to update a user's balance.
+///
+/// We will subscribe to events to watch for any user deposits, but sometimes events can be missed.
+///
+/// TODO: rate limit by user
+/// TODO: one key per request? maybe /user/balance/:api_key?
+/// TODO: this will change as we add better support for secondary users.
+#[debug_handler]
+pub async fn user_balance_post(
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+) -> FrontendResult {
+    todo!("user_balance_post");
+}
+
+/// `GET /user/keys` -- Use a bearer token to get the user's api keys and their settings.
+///
+/// TODO: one key per request? maybe /user/keys/:api_key?
+#[debug_handler]
+pub async fn user_keys_get(
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+) -> FrontendResult {
+    todo!("user_keys_get");
+}
+
+/// `POST /user/keys` -- Use a bearer token to create a new key or modify an existing key.
+///
+/// TODO: read json from the request body
+/// TODO: one key per request? maybe /user/keys/:api_key?
+#[debug_handler]
+pub async fn user_keys_post(
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+) -> FrontendResult {
+    todo!("user_keys_post");
+}
+
+/// `GET /user/profile` -- Use a bearer token to get the user's profile.
+///
+/// - the email address of a user if they opted in to get contacted via email
+///
+/// TODO: this will change as we add better support for secondary users.
+#[debug_handler]
+pub async fn user_profile_get(
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+) -> FrontendResult {
+    todo!("get_user_profile");
+}
+
+/// `GET /user/stats` -- Use a bearer token to get the user's key stats such as bandwidth used and methods requested.
+///
+/// - show number of requests used (so we can calculate average spending over a month, burn rate for a user etc, something like "Your balance will be depleted in xx days)
+///
+/// TODO: one key per request? maybe /user/stats/:api_key?
+/// TODO: this will change as we add better support for secondary users.
+#[debug_handler]
+pub async fn user_stats_get(
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+) -> FrontendResult {
+    todo!("get_user_stats");
+}
+
+/// `GET /user/profile` -- Use a bearer token to get the user's profile such as their optional email address.
+/// Handle authorization for a given address and bearer token.
 // TODO: what roles should exist?
 enum ProtectedAction {
     PostUser,
 }
 
 impl ProtectedAction {
+    /// Verify that the given bearer token and address are allowed to take the specified action.
     async fn verify(
         self,
         app: &Web3ProxyApp,
         // TODO: i don't think we want Bearer here. we want user_key and a helper for bearer -> user_key
         bearer: Bearer,
+        // TODO: what about secondary addresses? maybe an enum for primary or secondary?
         primary_address: &Address,
     ) -> anyhow::Result<user::Model> {
         // get the attached address from redis for the given auth_token.
