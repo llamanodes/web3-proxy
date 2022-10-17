@@ -405,7 +405,7 @@ pub async fn user_profile_get(
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
 ) -> FrontendResult {
-    todo!("get_user_profile");
+    todo!("user_profile_get");
 }
 
 /// `GET /user/stats` -- Use a bearer token to get the user's key stats such as bandwidth used and methods requested.
@@ -419,7 +419,7 @@ pub async fn user_stats_get(
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
 ) -> FrontendResult {
-    todo!("get_user_stats");
+    todo!("user_stats_get");
 }
 
 /// `GET /user/profile` -- Use a bearer token to get the user's profile such as their optional email address.
