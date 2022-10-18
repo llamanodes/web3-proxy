@@ -1,4 +1,4 @@
-[shared]
+[app]
 chain_id = 1
 
 # TODO: how do we find the optimal db_max_connections? too high actually ends up being slower
@@ -15,6 +15,7 @@ volatile_redis_url = "redis://dev-vredis:6379/"
 redirect_public_url = "https://llamanodes.com/free-rpc-stats"
 redirect_user_url = "https://llamanodes.com/user-rpc-stats/{{user_id}}"
 
+# 0 = block all public requests
 public_requests_per_minute = 0
 
 # 1GB of cache
