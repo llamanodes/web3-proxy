@@ -349,9 +349,8 @@ impl Web3ProxyApp {
                 block_map,
                 // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
                 None,
-                // minimum doesn't really matter on private rpcs
-                1,
-                1,
+                0,
+                0,
                 // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits
                 None,
                 pending_transactions.clone(),
@@ -376,7 +375,11 @@ impl Web3ProxyApp {
             let rpc_rrl = RedisRateLimiter::new(
                 "web3_proxy",
                 "frontend",
-                top_config.app.frontend_rate_limit_per_minute,
+                // TODO: think about this unwrapping
+                top_config
+                    .app
+                    .public_requests_per_minute
+                    .unwrap_or(u64::MAX),
                 60.0,
                 redis_pool.clone(),
             );

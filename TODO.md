@@ -180,8 +180,11 @@ These are roughly in order of completition
 - [x] user create script should allow a description field
 - [x] change stats to using the database
 - [x] emit user stat on retry
-- [ ] include if archive query or not in the stats
-  - this is already partially done, but we need to double check it works. preferrably with tests
+- [x] improve `web3_proxy_cli check_config`
+  - print out warnings if important settings are missing
+- [x] if unknown config items, error
+  - unknown configs are almost always a mistake. usually from me changing config parsing on my side and old fields not being updated to the new way
+  - [x] also need to change how we disable rpcs since i was using an unknown field
 - [-] ability to domain lock or ip lock said key
   - the code to check the database and use these entries already exists, but users don't have a way to set them
 - [-] new endpoints for users (not totally sure about the exact paths, but these features are all needed):
@@ -198,6 +201,8 @@ These are roughly in order of completition
     - allow setting things such as private relay, revert logging, ip/origin/etc checks
   - [ ] GET logged reverts on an endpoint that requires authentication.
 - [ ] endpoint for creating/modifying api keys and their advanced security features
+- [ ] include if archive query or not in the stats
+  - this is already partially done, but we need to double check it works. preferrably with tests
 - [ ] WARN http_request:request: web3_proxy::block_number: could not get block from params err=unexpected params length id=01GF4HTRKM4JV6NX52XSF9AYMW method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })
 - ERROR http_request:request:try_send_all_upstream_servers: web3_proxy::rpcs::request: bad response! err=JsonRpcClientError(JsonRpcError(JsonRpcError { code: -32000, message: "INTERNAL_ERROR: existing tx with same hash", data: None })) method=eth_sendRawTransaction rpc=local_erigon_alpha_archive id=01GF4HV03Y4ZNKQV8DW5NDQ5CG method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 }) self=Web3Connections { conns: {"local_erigon_alpha_archive_ws": Web3Connection { name: "local_erigon_alpha_archive_ws", blocks: "all", .. }, "local_geth_ws": Web3Connection { name: "local_geth_ws", blocks: 64, .. }, "local_erigon_alpha_archive": Web3Connection { name: "local_erigon_alpha_archive", blocks: "all", .. }}, .. } authorized_request=Some(User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })) request=JsonRpcRequest { id: RawValue(39), method: "eth_sendRawTransaction", .. } request_metadata=Some(RequestMetadata { datetime: 2022-10-11T22:14:57.406829095Z, period_seconds: 60, request_bytes: 633, backend_requests: 0, no_servers: 0, error_response: false, response_bytes: 0, response_millis: 0 }) block_needed=None
   - why is it failing to get the block from params when its set to None? That should be the simple case

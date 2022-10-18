@@ -215,10 +215,10 @@ mod tests {
         let app_config = TopConfig {
             app: AppConfig {
                 chain_id: 31337,
-                default_requests_per_minute: Some(6_000_000),
+                default_user_requests_per_minute: Some(6_000_000),
                 min_sum_soft_limit: 1,
                 min_synced_rpcs: 1,
-                frontend_rate_limit_per_minute: 1_000_000,
+                public_requests_per_minute: Some(1_000_000),
                 response_cache_max_bytes: 10_usize.pow(7),
                 redirect_public_url: Some("example.com/".to_string()),
                 redirect_user_url: Some("example.com/{{user_id}}".to_string()),
@@ -227,11 +227,11 @@ mod tests {
             balanced_rpcs: HashMap::from([
                 (
                     "anvil".to_string(),
-                    Web3ConnectionConfig::new(anvil.endpoint(), 100, None, 1, Some(false)),
+                    Web3ConnectionConfig::new(false, anvil.endpoint(), 100, None, 1, Some(false)),
                 ),
                 (
                     "anvil_ws".to_string(),
-                    Web3ConnectionConfig::new(anvil.ws_endpoint(), 100, None, 0, Some(true)),
+                    Web3ConnectionConfig::new(false, anvil.ws_endpoint(), 100, None, 0, Some(true)),
                 ),
             ]),
             private_rpcs: None,

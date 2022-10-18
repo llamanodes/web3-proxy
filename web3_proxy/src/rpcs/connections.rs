@@ -113,7 +113,11 @@ impl Web3Connections {
         // TODO: move this into a helper function. then we can use it when configs change (will need a remove function too)
         let spawn_handles: Vec<_> = server_configs
             .into_iter()
-            .map(|(server_name, server_config)| {
+            .filter_map(|(server_name, server_config)| {
+                if server_config.disabled {
+                    return None;
+                }
+
                 let http_client = http_client.clone();
                 let redis_pool = redis_pool.clone();
                 let http_interval_sender = http_interval_sender.clone();
@@ -128,7 +132,7 @@ impl Web3Connections {
                 let block_map = block_map.clone();
                 let open_request_handle_metrics = open_request_handle_metrics.clone();
 
-                tokio::spawn(async move {
+                let handle = tokio::spawn(async move {
                     server_config
                         .spawn(
                             server_name,
@@ -142,7 +146,9 @@ impl Web3Connections {
                             open_request_handle_metrics,
                         )
                         .await
-                })
+                });
+
+                Some(handle)
             })
             .collect();
 
@@ -169,9 +175,10 @@ impl Web3Connections {
             }
         }
 
+        // TODO: now this errors for private rpcs when we disable all!
         if connections.len() < min_synced_rpcs {
             return Err(anyhow::anyhow!(
-                "Only {}/{} connections!",
+                "Only {}/{} connections! Add more connections or reduce min_synced_rpcs.",
                 connections.len(),
                 min_synced_rpcs
             ));

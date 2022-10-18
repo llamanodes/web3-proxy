@@ -221,7 +221,7 @@ pub async fn user_login_post(
             let uk = user_keys::ActiveModel {
                 user_id: sea_orm::Set(u.id),
                 api_key: sea_orm::Set(user_key.into()),
-                requests_per_minute: sea_orm::Set(app.config.default_requests_per_minute),
+                requests_per_minute: sea_orm::Set(app.config.default_user_requests_per_minute),
                 ..Default::default()
             };
 

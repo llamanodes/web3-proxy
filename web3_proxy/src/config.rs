@@ -38,6 +38,7 @@ pub struct CliConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TopConfig {
     pub app: AppConfig,
     pub balanced_rpcs: HashMap<String, Web3ConnectionConfig>,
@@ -47,6 +48,7 @@ pub struct TopConfig {
 /// shared configuration between Web3Connections
 // TODO: no String, only &str
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AppConfig {
     /// EVM chain id. 1 for ETH
     /// TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
@@ -63,7 +65,7 @@ pub struct AppConfig {
     /// Default request limit for registered users.
     /// 0 = block all requests
     /// None = allow all requests
-    pub default_requests_per_minute: Option<u64>,
+    pub default_user_requests_per_minute: Option<u64>,
     /// Restrict user registration.
     /// None = no code needed
     pub invite_code: Option<String>,
@@ -74,9 +76,10 @@ pub struct AppConfig {
     #[serde(default = "default_min_synced_rpcs")]
     pub min_synced_rpcs: usize,
     /// Request limit for anonymous users.
-    /// Set to 0 to block all anonymous requests.
-    #[serde(default = "default_frontend_rate_limit_per_minute")]
-    pub frontend_rate_limit_per_minute: u64,
+    /// Some(0) = block all requests
+    /// None = allow all requests
+    #[serde(default = "default_public_requests_per_minute")]
+    pub public_requests_per_minute: Option<u64>,
     /// Rate limit for the login entrypoint.
     /// This is separate from the rpc limits.
     #[serde(default = "default_login_rate_limit_per_minute")]
@@ -107,8 +110,8 @@ fn default_min_synced_rpcs() -> usize {
 }
 
 /// 0 blocks anonymous requests by default.
-fn default_frontend_rate_limit_per_minute() -> u64 {
-    0
+fn default_public_requests_per_minute() -> Option<u64> {
+    Some(0)
 }
 
 /// Having a low amount of requests per minute for login is safest.
@@ -122,19 +125,25 @@ fn default_response_cache_max_bytes() -> usize {
     10_usize.pow(8)
 }
 
+/// Configuration for a backend web3 RPC server
 #[derive(Debug, Deserialize, Constructor)]
+#[serde(deny_unknown_fields)]
 pub struct Web3ConnectionConfig {
+    /// simple way to disable a connection without deleting the row
+    #[serde(default)]
+    pub disabled: bool,
     /// websocket (or http if no websocket)
-    url: String,
+    pub url: String,
     /// the requests per second at which the server starts slowing down
-    soft_limit: u32,
+    pub soft_limit: u32,
     /// the requests per second at which the server throws errors (rate limit or otherwise)
-    hard_limit: Option<u64>,
+    pub hard_limit: Option<u64>,
     /// All else equal, a server with a lower weight receives requests
-    weight: u32,
+    pub weight: u32,
     /// Subscribe to the firehose of pending transactions
     /// Don't do this with free rpcs
-    subscribe_txs: Option<bool>,
+    #[serde(default)]
+    pub subscribe_txs: Option<bool>,
 }
 
 impl Web3ConnectionConfig {
