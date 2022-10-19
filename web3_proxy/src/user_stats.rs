@@ -4,15 +4,15 @@ use sea_orm::{
     ColumnTrait, Condition, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect,
     RelationTrait,
 };
-use tracing::debug;
+use tracing::{debug, info, trace};
 
 pub async fn get_aggregate_stats(
     chain_id: u64,
     db: &DatabaseConnection,
     query_start: chrono::NaiveDateTime,
-    user_id: Option<u64>,
+    user_id: u64,
 ) -> anyhow::Result<Vec<serde_json::Value>> {
-    debug!(?chain_id, %query_start, ?user_id, "get_aggregate_stats");
+    trace!(?chain_id, %query_start, ?user_id, "get_aggregate_stats");
 
     // TODO: how do we get count reverts compared to other errors? does it matter? what about http errors to our users?
     // TODO: how do we count uptime?
@@ -47,42 +47,47 @@ pub async fn get_aggregate_stats(
 
     let condition = Condition::all().add(rpc_accounting::Column::PeriodDatetime.gte(query_start));
 
-    /*
-    let (q, condition) = if chain_id.is_zero() {
+    let (condition, q) = if chain_id.is_zero() {
         // fetch all the chains. don't filter
         // TODO: wait. do we want chain id on the logs? we can get that by joining key
         let q = q
             .column(rpc_accounting::Column::ChainId)
             .group_by(rpc_accounting::Column::ChainId);
 
-        (q, condition)
+        (condition, q)
     } else {
         let condition = condition.add(rpc_accounting::Column::ChainId.eq(chain_id));
 
-        (q, condition)
+        (condition, q)
     };
-     */
+
+    let (condition, q) = if user_id.is_zero() {
+        // 0 means everyone. don't filter on user
+        (condition, q)
+    } else {
+        // TODO: authentication here? or should that be higher in the stack? here sems safest
+        // TODO: only join some columns
+        // TODO: are these joins correct?
+        // TODO: what about keys where they are the secondary users?
+        let q = q
+            .join(
+                JoinType::InnerJoin,
+                rpc_accounting::Relation::UserKeys.def(),
+            )
+            .column(user_keys::Column::UserId)
+            .group_by(user_keys::Column::UserId);
+
+        let condition = condition.add(user_keys::Column::UserId.eq(user_id));
+
+        (condition, q)
+    };
 
     let q = q.filter(condition);
 
-    // // TODO: also check secondary users
-    // let q = if let Some(user_id) = user_id {
-    //     // TODO: authentication here? or should that be higher in the stack? here sems safest
-    //     // TODO: only join some columns
-    //     // TODO: are these joins correct?
-    //     q.join(
-    //         JoinType::InnerJoin,
-    //         rpc_accounting::Relation::UserKeys.def(),
-    //     )
-    //     .join(JoinType::InnerJoin, user_keys::Relation::User.def())
-    //     .filter(user::Column::Id.eq(user_id))
-    // } else {
-    //     q
-    // };
-
-    // TODO: if user key id is set, use that
-    // TODO: if user id is set, use that
+    // TODO: enum between searching on user_key_id on user_id
     // TODO: handle secondary users, too
+
+    // log query here. i think sea orm has a useful log level for this
 
     let r = q.into_json().all(db).await?;
 

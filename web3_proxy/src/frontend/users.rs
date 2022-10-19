@@ -25,7 +25,7 @@ use siwe::{Message, VerificationOpts};
 use std::ops::Add;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
-use tracing::debug;
+use tracing::{debug, info, warn};
 use ulid::Ulid;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
@@ -480,7 +480,7 @@ pub async fn user_stats_get(
             },
         )?;
 
-    let x = get_aggregate_stats(chain_id, &db, query_start, Some(user_id)).await?;
+    let x = get_aggregate_stats(chain_id, &db, query_start, user_id).await?;
 
     Ok(Json(x).into_response())
 }
@@ -488,11 +488,42 @@ pub async fn user_stats_get(
 /// `GET /user/stats/aggregate` -- Public endpoint for aggregate stats such as bandwidth used and methods requested.
 #[debug_handler]
 pub async fn user_stats_aggregate_get(
+    bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    // TODO: how is this supposed to be used?
-    let db = app.db_conn.clone().context("no db")?;
+    // TODO: how is db_conn supposed to be used?
+    let db = app.db_conn.clone().context("connecting to db")?;
+
+    // get the attached address from redis for the given auth_token.
+    let mut redis_conn = app.redis_conn().await.context("connecting to redis")?;
+
+    let user_id = match (bearer, params.get("user_id")) {
+        (Some(bearer), Some(params)) => {
+            // check for the bearer cache key
+            // TODO: move this to a helper function
+            let bearer_cache_key = format!("bearer:{}", bearer.token());
+
+            // get the user id that is attached to this bearer token
+            redis_conn
+                .get::<_, u64>(bearer_cache_key)
+                .await
+                // TODO: this should be a 403
+                .context("fetching user_key_id from redis with bearer_cache_key")?
+        }
+        (_, None) => {
+            // they have a bearer token. we don't care about it on public pages
+            // 0 means all
+            0
+        }
+        (None, Some(x)) => {
+            // they do not have a bearer token, but requested a specific id. block
+            // TODO: proper error code
+            // TODO: maybe instead of this sharp edged warn, we have a config value?
+            warn!("this should maybe be an access denied");
+            x.parse().context("Parsing user_id param")?
+        }
+    };
 
     let chain_id = params
         .get("chain_id")
@@ -500,6 +531,8 @@ pub async fn user_stats_aggregate_get(
             || Ok(app.config.chain_id),
             |c| {
                 let c = c.parse()?;
+
+                info!("user supplied chain_id");
 
                 Ok(c)
             },
@@ -527,7 +560,7 @@ pub async fn user_stats_aggregate_get(
         )?;
 
     // TODO: optionally no chain id?
-    let x = get_aggregate_stats(chain_id, &db, query_start, None).await?;
+    let x = get_aggregate_stats(chain_id, &db, query_start, user_id).await?;
 
     Ok(Json(x).into_response())
 }
