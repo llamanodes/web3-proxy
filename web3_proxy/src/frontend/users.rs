@@ -47,7 +47,6 @@ pub async fn user_login_get(
     // TODO: what does axum's error handling look like if the path fails to parse?
     // TODO: allow ENS names here?
     Path(mut params): Path<HashMap<String, String>>,
-    Query(query): Query<HashMap<String, String>>,
 ) -> FrontendResult {
     // give these named variables so that we drop them at the very end of this function
     let (_, _semaphore) = login_is_authorized(&app, ip).await?;
