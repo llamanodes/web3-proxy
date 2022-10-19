@@ -205,6 +205,7 @@ These are roughly in order of completition
 - [ ] graceful shutdown. stop taking new requests and don't stop until all outstanding queries are handled
   - https://github.com/tokio-rs/mini-redis/blob/master/src/shutdown.rs
   - we need this because we need to be sure all the queries are saved in the db. maybe put stuff in Drop
+  - need an flume::watch on unflushed stats that we can subscribe to. wait for it to flip to true
 - [ ] include if archive query or not in the stats
   - this is already partially done, but we need to double check it works. preferrably with tests
 - [ ] WARN http_request:request: web3_proxy::block_number: could not get block from params err=unexpected params length id=01GF4HTRKM4JV6NX52XSF9AYMW method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })

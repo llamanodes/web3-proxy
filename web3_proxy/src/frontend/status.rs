@@ -8,8 +8,10 @@ use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use moka::future::ConcurrentCacheExt;
 use serde_json::json;
 use std::sync::Arc;
+use axum_macros::debug_handler;
 
 /// Health check page for load balancers to use.
+#[debug_handler]
 pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     // TODO: also check that the head block is not too old
     if app.balanced_rpcs.synced() {
@@ -22,6 +24,7 @@ pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoRe
 /// Prometheus metrics.
 ///
 /// TODO: when done debugging, remove this and only allow access on a different port
+#[debug_handler]
 pub async fn prometheus(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     app.prometheus_metrics()
 }
@@ -29,6 +32,7 @@ pub async fn prometheus(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl In
 /// Very basic status page.
 ///
 /// TODO: replace this with proper stats and monitoring
+#[debug_handler]
 pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     app.pending_transactions.sync();
     app.user_key_cache.sync();

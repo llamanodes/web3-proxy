@@ -6,6 +6,14 @@ use sea_orm::{
 };
 use tracing::{debug, info, trace};
 
+pub async fn get_rpc_stats(chain_id: u64) -> u64 {
+    todo!();
+}
+
+pub async fn get_user_stats() -> u64 {
+    todo!();
+}
+
 pub async fn get_aggregate_stats(
     chain_id: u64,
     db: &DatabaseConnection,
