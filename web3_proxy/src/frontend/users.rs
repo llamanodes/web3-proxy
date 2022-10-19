@@ -46,7 +46,7 @@ pub async fn user_login_get(
     ClientIp(ip): ClientIp,
     // TODO: what does axum's error handling look like if the path fails to parse?
     // TODO: allow ENS names here?
-    Path((user_address, message_eip)): Path<(Address, Option<String>)>,
+    Path(mut params): Path<HashMap<String, String>>,
     Query(query): Query<HashMap<String, String>>,
 ) -> FrontendResult {
     // give these named variables so that we drop them at the very end of this function
@@ -68,6 +68,14 @@ pub async fn user_login_get(
     let issued_at = OffsetDateTime::now_utc();
 
     let expiration_time = issued_at.add(Duration::new(expire_seconds as i64, 0));
+
+    let user_address: Address = params
+        .remove("user_address")
+        // TODO: map_err so this becomes a 500. routing must be bad
+        .context("impossible")?
+        .parse()
+        // TODO: map_err so this becomes a 401
+        .context("bad input")?;
 
     // TODO: get most of these from the app config
     let message = Message {
@@ -100,7 +108,9 @@ pub async fn user_login_get(
 
     // there are multiple ways to sign messages and not all wallets support them
     // TODO: default message eip from config?
-    let message_eip = message_eip.unwrap_or_else(|| "eip4361".to_string());
+    let message_eip = params
+        .remove("message_eip")
+        .unwrap_or_else(|| "eip4361".to_string());
 
     let message: String = match message_eip.as_str() {
         "eip191_bytes" => Bytes::from(message.eip191_bytes().unwrap()).to_string(),
