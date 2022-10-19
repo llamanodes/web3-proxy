@@ -3,7 +3,7 @@
 use super::authorization::{login_is_authorized, UserKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
-use crate::user_stats::get_aggregate_stats;
+use crate::user_stats::{get_aggregate_rpc_stats, get_detailed_stats};
 use anyhow::Context;
 use axum::{
     extract::{Path, Query},
@@ -416,38 +416,57 @@ pub async fn user_profile_get(
     todo!("user_profile_get");
 }
 
-/// `GET /user/stats` -- Use a bearer token to get the user's key stats such as bandwidth used and methods requested.
+/// `GET /user/stats/detailed` -- Use a bearer token to get the user's key stats such as bandwidth used and methods requested.
+///
+/// If no bearer is provided, detailed stats for all users will be shown
 ///
 /// - show number of requests used (so we can calculate average spending over a month, burn rate for a user etc, something like "Your balance will be depleted in xx days)
 ///
 /// TODO: one key per request? maybe /user/stats/:api_key?
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
-pub async fn user_stats_get(
+pub async fn user_stats_detailed_get(
     // TODO: turn this back on when done debugging. maybe add a path field for this
     // TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+    bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    /*
+    // TODO: how is db_conn supposed to be used?
+    let db = app.db_conn.clone().context("connecting to db")?;
+
     // get the attached address from redis for the given auth_token.
-    let mut redis_conn = app.redis_conn().await?;
+    let mut redis_conn = app.redis_conn().await.context("connecting to redis")?;
 
-    // check for the bearer cache key
-    // TODO: move this to a helper function
-    let bearer_cache_key = format!("bearer:{}", bearer.token());
-    let user_id = redis_conn
-        .get::<_, u64>(bearer_cache_key)
-        .await
-        // TODO: this should be a 403
-        .context("fetching user_key_id from redis with bearer_cache_key")?;
+    // TODO: DRY
+    let user_id = match (bearer, params.get("user_id")) {
+        (Some(bearer), Some(params)) => {
+            // check for the bearer cache key
+            // TODO: move this to a helper function
+            let bearer_cache_key = format!("bearer:{}", bearer.token());
 
-    */
-    // TODO: remove this and get the user id that matches the bearer
-    let user_id = params.get("user_id").unwrap().parse().unwrap();
+            // get the user id that is attached to this bearer token
+            redis_conn
+                .get::<_, u64>(bearer_cache_key)
+                .await
+                // TODO: this should be a 403
+                .context("fetching user_key_id from redis with bearer_cache_key")?
+        }
+        (_, None) => {
+            // they have a bearer token. we don't care about it on public pages
+            // 0 means all
+            0
+        }
+        (None, Some(x)) => {
+            // they do not have a bearer token, but requested a specific id. block
+            // TODO: proper error code
+            // TODO: maybe instead of this sharp edged warn, we have a config value?
+            warn!("this should maybe be an access denied");
+            x.parse().context("Parsing user_id param")?
+        }
+    };
 
-    let db = app.db_conn.clone().context("no db")?;
-
+    // TODO: DRY
     let chain_id = params
         .get("chain_id")
         .map_or_else::<anyhow::Result<u64>, _, _>(
@@ -459,6 +478,7 @@ pub async fn user_stats_get(
             },
         )?;
 
+    // TODO: DRY
     let query_start = params
         .get("timestamp")
         .map_or_else::<anyhow::Result<NaiveDateTime>, _, _>(
@@ -480,7 +500,7 @@ pub async fn user_stats_get(
             },
         )?;
 
-    let x = get_aggregate_stats(chain_id, &db, query_start, user_id).await?;
+    let x = get_detailed_stats(chain_id, &db, query_start, user_id).await?;
 
     Ok(Json(x).into_response())
 }
@@ -560,7 +580,7 @@ pub async fn user_stats_aggregate_get(
         )?;
 
     // TODO: optionally no chain id?
-    let x = get_aggregate_stats(chain_id, &db, query_start, user_id).await?;
+    let x = get_aggregate_rpc_stats(chain_id, &db, query_start, user_id).await?;
 
     Ok(Json(x).into_response())
 }
