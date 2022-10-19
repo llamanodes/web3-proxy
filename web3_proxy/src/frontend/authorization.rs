@@ -291,7 +291,7 @@ pub async fn bearer_is_authorized(
 
     // turn user key id into a user key
     let user_key_data = user_keys::Entity::find_by_id(user_key_id)
-        .one(db_conn)
+        .one(&db_conn)
         .await
         .context("fetching user key by id")?
         .context("unknown user id")?;
@@ -486,7 +486,7 @@ impl Web3ProxyApp {
                 match user_keys::Entity::find()
                     .filter(user_keys::Column::ApiKey.eq(user_uuid))
                     .filter(user_keys::Column::Active.eq(true))
-                    .one(db)
+                    .one(&db)
                     .await?
                 {
                     Some(user_key_model) => {

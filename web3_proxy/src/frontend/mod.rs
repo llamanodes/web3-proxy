@@ -74,6 +74,10 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/user/profile", get(users::user_profile_get))
         .route("/user/profile", post(users::user_profile_post))
         .route("/user/stats", get(users::user_stats_get))
+        .route(
+            "/user/stats/aggregate",
+            get(users::user_stats_aggregate_get),
+        )
         .route("/user/logout", post(users::user_logout_post))
         .route("/status", get(status::status))
         // TODO: make this optional or remove it since it is available on another port

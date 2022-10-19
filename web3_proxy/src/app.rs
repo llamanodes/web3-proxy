@@ -764,8 +764,9 @@ impl Web3ProxyApp {
         Ok(collected)
     }
 
-    pub fn db_conn(&self) -> Option<&DatabaseConnection> {
-        self.db_conn.as_ref()
+    /// TODO: i don't think we want or need this. just use app.db_conn, or maybe app.db_conn.clone() or app.db_conn.as_ref()
+    pub fn db_conn(&self) -> Option<DatabaseConnection> {
+        self.db_conn.clone()
     }
 
     pub async fn redis_conn(&self) -> anyhow::Result<redis_rate_limiter::RedisConnection> {

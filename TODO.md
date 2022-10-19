@@ -197,6 +197,7 @@ These are roughly in order of completition
     - [ ] display requests per second per api key (only with authentication!)
     - [ ] display concurrent requests per api key (only with authentication!)
     - [ ] display distribution of methods per api key (eth_call, eth_getLogs, etc.) (only with authentication!)
+  - [x] get aggregate stats endpoint
   - [ ] POST key endpoint
     - allow setting things such as private relay, revert logging, ip/origin/etc checks
   - [ ] GET logged reverts on an endpoint that requires authentication.
@@ -445,3 +446,4 @@ in another repo: event subscriber
 - [ ] document "backend requests is cache_misses + backend_retries"
 - [ ] having tons of worker threads can actually make us slower if they keep waking to steal work from eachother. need benchmarks
 - [ ] change the wrk data to log requests and errors to a file
+- [ ] if redis is not set and login page is visited, users get a 502. should be 501
