@@ -1,6 +1,6 @@
 //! Take a user's HTTP JSON-RPC requests and either respond from local data or proxy the request to a backend rpc server.
 
-use super::authorization::{bearer_is_authorized, ip_is_authorized, key_is_authorized};
+use super::authorization::{ip_is_authorized, key_is_authorized};
 use super::errors::FrontendResult;
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::Path;

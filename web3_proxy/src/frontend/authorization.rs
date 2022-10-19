@@ -7,7 +7,7 @@ use anyhow::Context;
 use axum::headers::{authorization::Bearer, Origin, Referer, UserAgent};
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
-use entities::user_keys;
+use entities::{user, user_keys};
 use ipnet::IpNet;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
@@ -282,7 +282,7 @@ pub async fn bearer_is_authorized(
     let bearer_cache_key = format!("bearer:{}", bearer.token());
 
     // turn bearer into a user key id
-    let user_key_id: u64 = redis_conn
+    let user_id: u64 = redis_conn
         .get(bearer_cache_key)
         .await
         .context("unknown bearer token")?;
@@ -290,21 +290,22 @@ pub async fn bearer_is_authorized(
     let db_conn = app.db_conn().context("Getting database connection")?;
 
     // turn user key id into a user key
-    let user_key_data = user_keys::Entity::find_by_id(user_key_id)
+    let user_key_data = user::Entity::find_by_id(user_id)
         .one(&db_conn)
         .await
-        .context("fetching user key by id")?
+        .context("fetching user by id")?
         .context("unknown user id")?;
 
-    key_is_authorized(
-        app,
-        user_key_data.api_key.into(),
-        ip,
-        origin,
-        referer,
-        user_agent,
-    )
-    .await
+    todo!("api_key is wrong. we should check user ids instead")
+    // key_is_authorized(
+    //     app,
+    //     user_key_data.api_key.into(),
+    //     ip,
+    //     origin,
+    //     referer,
+    //     user_agent,
+    // )
+    // .await
 }
 
 pub async fn ip_is_authorized(

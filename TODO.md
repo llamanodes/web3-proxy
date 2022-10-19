@@ -243,6 +243,7 @@ These are roughly in order of completition
 
 These are not yet ordered.
 
+- [ ] admin-only page for viewing user stat pages
 - [ ] geth sometimes gives an empty response instead of an error response. figure out a good way to catch this and not serve it
 - [ ] GET balance endpoint
 - [ ] POST balance endpoint

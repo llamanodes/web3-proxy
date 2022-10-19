@@ -324,8 +324,8 @@ pub async fn user_profile_post(
     // give these named variables so that we drop them at the very end of this function
     let (_, _semaphore) = login_is_authorized(&app, ip).await?;
 
-    let user = ProtectedAction::PostUser
-        .verify(app.as_ref(), bearer_token, &payload.primary_address)
+    let user = ProtectedAction::PostUser(payload.primary_address)
+        .verify(app.as_ref(), bearer_token)
         .await?;
 
     let mut user: user::ActiveModel = user.into();
@@ -424,10 +424,65 @@ pub async fn user_profile_get(
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
 pub async fn user_stats_get(
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    // TODO: turn this back on when done debugging. maybe add a path field for this
+    // TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    todo!("user_stats_get");
+    /*
+    // get the attached address from redis for the given auth_token.
+    let mut redis_conn = app.redis_conn().await?;
+
+    // check for the bearer cache key
+    // TODO: move this to a helper function
+    let bearer_cache_key = format!("bearer:{}", bearer.token());
+    let user_id = redis_conn
+        .get::<_, u64>(bearer_cache_key)
+        .await
+        // TODO: this should be a 403
+        .context("fetching user_key_id from redis with bearer_cache_key")?;
+
+    */
+    // TODO: remove this and get the user id that matches the bearer
+    let user_id = params.get("user_id").unwrap().parse().unwrap();
+
+    let db = app.db_conn.clone().context("no db")?;
+
+    let chain_id = params
+        .get("chain_id")
+        .map_or_else::<anyhow::Result<u64>, _, _>(
+            || Ok(app.config.chain_id),
+            |c| {
+                let c = c.parse()?;
+
+                Ok(c)
+            },
+        )?;
+
+    let query_start = params
+        .get("timestamp")
+        .map_or_else::<anyhow::Result<NaiveDateTime>, _, _>(
+            || {
+                // no timestamp in params. set default
+                let x = chrono::Utc::now() - chrono::Duration::days(30);
+
+                Ok(x.naive_utc())
+            },
+            |x: &String| {
+                // parse the given timestamp
+                let x = x.parse::<i64>().context("parsing timestamp query param")?;
+
+                // TODO: error code 401
+                let x = NaiveDateTime::from_timestamp_opt(x, 0)
+                    .context("parsing timestamp query param")?;
+
+                Ok(x)
+            },
+        )?;
+
+    let x = get_aggregate_stats(chain_id, &db, query_start, Some(user_id)).await?;
+
+    Ok(Json(x).into_response())
 }
 
 /// `GET /user/stats/aggregate` -- Public endpoint for aggregate stats such as bandwidth used and methods requested.
@@ -451,7 +506,7 @@ pub async fn user_stats_aggregate_get(
         )?;
 
     let query_start = params
-        .get("start_timestamp")
+        .get("timestamp")
         .map_or_else::<anyhow::Result<NaiveDateTime>, _, _>(
             || {
                 // no timestamp in params. set default
@@ -472,7 +527,7 @@ pub async fn user_stats_aggregate_get(
         )?;
 
     // TODO: optionally no chain id?
-    let x = get_aggregate_stats(chain_id, &db, query_start).await?;
+    let x = get_aggregate_stats(chain_id, &db, query_start, None).await?;
 
     Ok(Json(x).into_response())
 }
@@ -481,7 +536,7 @@ pub async fn user_stats_aggregate_get(
 /// Handle authorization for a given address and bearer token.
 // TODO: what roles should exist?
 enum ProtectedAction {
-    PostUser,
+    PostUser(Address),
 }
 
 impl ProtectedAction {
@@ -491,15 +546,15 @@ impl ProtectedAction {
         app: &Web3ProxyApp,
         // TODO: i don't think we want Bearer here. we want user_key and a helper for bearer -> user_key
         bearer: Bearer,
-        // TODO: what about secondary addresses? maybe an enum for primary or secondary?
-        primary_address: &Address,
     ) -> anyhow::Result<user::Model> {
         // get the attached address from redis for the given auth_token.
         let mut redis_conn = app.redis_conn().await?;
 
+        // TODO: move this to a helper function
         let bearer_cache_key = format!("bearer:{}", bearer.token());
 
-        let user_key_id: Option<u64> = redis_conn
+        // TODO: move this to a helper function
+        let user_id: Option<u64> = redis_conn
             .get(bearer_cache_key)
             .await
             .context("fetching bearer cache key from redis")?;
