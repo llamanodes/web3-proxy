@@ -1,5 +1,6 @@
 // TODO: this file is way too big now. move things into other modules
 
+use crate::app_stats::{ProxyResponseStat, StatEmitter, Web3ProxyStat};
 use crate::block_number::block_needed;
 use crate::config::{AppConfig, TopConfig};
 use crate::frontend::authorization::{AuthorizedRequest, RequestMetadata};
@@ -11,7 +12,6 @@ use crate::rpcs::blockchain::{ArcBlock, BlockId};
 use crate::rpcs::connections::Web3Connections;
 use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
-use crate::stats::{ProxyResponseStat, StatEmitter, Web3ProxyStat};
 use anyhow::Context;
 use axum::extract::ws::Message;
 use axum::headers::{Referer, UserAgent};

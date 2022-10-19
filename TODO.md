@@ -202,6 +202,9 @@ These are roughly in order of completition
     - allow setting things such as private relay, revert logging, ip/origin/etc checks
   - [ ] GET logged reverts on an endpoint that requires authentication.
 - [ ] endpoint for creating/modifying api keys and their advanced security features
+- [ ] graceful shutdown. stop taking new requests and don't stop until all outstanding queries are handled
+  - https://github.com/tokio-rs/mini-redis/blob/master/src/shutdown.rs
+  - we need this because we need to be sure all the queries are saved in the db. maybe put stuff in Drop
 - [ ] include if archive query or not in the stats
   - this is already partially done, but we need to double check it works. preferrably with tests
 - [ ] WARN http_request:request: web3_proxy::block_number: could not get block from params err=unexpected params length id=01GF4HTRKM4JV6NX52XSF9AYMW method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })
@@ -347,8 +350,6 @@ in another repo: event subscriber
 - [ ] have a low-latency option that always tries at least two servers in parallel and then returns the first success?
   - this doubles our request load though. maybe only if the first one doesn't respond very quickly? 
 - [ ] zero downtime deploys
-- [ ] graceful shutdown. stop taking new requests and don't stop until all outstanding queries are handled
-  - https://github.com/tokio-rs/mini-redis/blob/master/src/shutdown.rs
 - [ ] are we using Acquire/Release/AcqRel properly? or do we need other modes?
 - [ ] use https://github.com/ledgerwatch/interfaces to talk to erigon directly instead of through erigon's rpcdaemon (possible example code which uses ledgerwatch/interfaces: https://github.com/akula-bft/akula/tree/master)
 - [ ] subscribe to pending transactions and build an intelligent gas estimator
