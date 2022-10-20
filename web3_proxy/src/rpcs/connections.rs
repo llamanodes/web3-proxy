@@ -38,7 +38,7 @@ use tracing::{error, info, instrument, trace, warn};
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
 pub struct Web3Connections {
-    pub(super) conns: HashMap<String, Arc<Web3Connection>>,
+    pub(crate) conns: HashMap<String, Arc<Web3Connection>>,
     /// any requests will be forwarded to one (or more) of these connections
     pub(super) synced_connections: ArcSwap<SyncedConnections>,
     pub(super) pending_transactions:

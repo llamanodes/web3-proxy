@@ -359,10 +359,14 @@ impl Web3ProxyApp {
             .await
             .context("spawning private_rpcs")?;
 
-            // save the handle to catch any errors
-            handles.push(private_handle);
+            if private_rpcs.conns.len() == 0 {
+                None
+            } else {
+                // save the handle to catch any errors
+                handles.push(private_handle);
 
-            Some(private_rpcs)
+                Some(private_rpcs)
+            }
         };
 
         // create rate limiters
