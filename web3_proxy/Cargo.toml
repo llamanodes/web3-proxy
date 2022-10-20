@@ -33,7 +33,7 @@ dotenv = "0.15.0"
 ethers = { version = "0.17.0", features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 flume = "0.10.14"
-futures = { version = "0.3.24", features = ["thread-pool"] }
+futures = { version = "0.3.25", features = ["thread-pool"] }
 hashbrown = { version = "0.12.3", features = ["serde"] }
 hdrhistogram = "7.5.2"
 http = "0.2.8"
@@ -56,7 +56,7 @@ rustc-hash = "1.1.0"
 siwe = "0.5.0"
 sea-orm = { version = "0.9.3", features = ["macros"] }
 serde = { version = "1.0.145", features = [] }
-serde_json = { version = "1.0.86", default-features = false, features = ["alloc", "raw_value"] }
+serde_json = { version = "1.0.87", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.1.6"
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 time = "0.3.15"
