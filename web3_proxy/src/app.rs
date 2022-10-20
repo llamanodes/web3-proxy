@@ -359,7 +359,7 @@ impl Web3ProxyApp {
             .await
             .context("spawning private_rpcs")?;
 
-            if private_rpcs.conns.len() == 0 {
+            if private_rpcs.conns.is_empty() {
                 None
             } else {
                 // save the handle to catch any errors

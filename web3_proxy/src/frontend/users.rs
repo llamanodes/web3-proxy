@@ -22,8 +22,10 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Transacti
 use serde::{Deserialize, Serialize};
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
+use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
+use tracing::{info, warn};
 use ulid::Ulid;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
@@ -134,12 +136,8 @@ pub struct PostLoginQuery {
 /// Email/password and other login methods are planned.
 #[derive(Deserialize)]
 pub struct PostLogin {
-    pub address: Address,
-    pub msg: String,
-    pub sig: Bytes,
-    // TODO: do we care about these? we should probably check the version is something we expect
-    // version: String,
-    // signer: String,
+    sig: String,
+    msg: String,
 }
 
 /// Successful logins receive a bearer_token and all of the user's api keys.
@@ -169,18 +167,38 @@ pub async fn user_login_post(
         // we don't do per-user referral codes because we shouldn't collect what we don't need.
         // we don't need to build a social graph between addresses like that.
         if query.invite_code.as_ref() != Some(invite_code) {
-            todo!("if address is already registered, allow login! else, error")
+            warn!("if address is already registered, allow login! else, error");
+
+            // TODO: this return doesn't seem right
+            return Err(anyhow::anyhow!("checking invite_code"))?;
         }
     }
 
     // we can't trust that they didn't tamper with the message in some way
-    let their_msg: siwe::Message = payload.msg.parse().context("parsing user's message")?;
+    // TODO: it seems like some clients do things unexpectedly. these don't always parse
+    // let their_msg: siwe::Message = payload.msg.parse().context("parsing user's message")?;
 
-    let their_sig: [u8; 65] = payload
-        .sig
-        .as_ref()
-        .try_into()
-        .context("parsing signature")?;
+    // TODO: do this safely
+    let their_sig_bytes = Bytes::from_str(&payload.sig).context("parsing sig")?;
+    if their_sig_bytes.len() != 65 {
+        return Err(anyhow::anyhow!("checking signature length"))?;
+    }
+    let mut their_sig: [u8; 65] = [0; 65];
+    for x in 0..65 {
+        their_sig[x] = their_sig_bytes[x]
+    }
+
+    let their_msg: String = if payload.msg.starts_with("0x") {
+        let their_msg_bytes = Bytes::from_str(&payload.msg).context("parsing payload message")?;
+
+        String::from_utf8_lossy(their_msg_bytes.as_ref()).to_string()
+    } else {
+        payload.msg
+    };
+
+    let their_msg = their_msg
+        .parse::<siwe::Message>()
+        .context("parsing string message")?;
 
     // TODO: this is fragile
     let login_nonce_key = format!("login_nonce:{}", &their_msg.nonce);
@@ -193,17 +211,32 @@ pub async fn user_login_post(
 
     let our_msg: siwe::Message = our_msg.parse().context("parsing siwe message")?;
 
+    // TODO: info for now
+    info!(?our_msg, ?their_msg);
+
+    // TODO: check the domain and a nonce?
+    // let timestamp be automatic
     let verify_config = VerificationOpts {
         // domain: Some(our_msg.domain.clone()),
         // nonce: Some(our_msg.nonce.clone()),
         ..Default::default()
     };
 
-    // check the domain and a nonce. let timestamp be automatic
-    our_msg
+    // let their_verification = their_msg
+    //     .verify(&their_sig, &verify_config)
+    //     .await
+    //     .context("verifying signature in their message");
+
+    let our_verification = our_msg
         .verify(&their_sig, &verify_config)
         .await
-        .context("verifying signature")?;
+        .context("verifying signature in our message");
+
+    info!(?our_verification);
+
+    // TODO: proper error code. 5
+    // their_verification?;
+    our_verification?;
 
     let bearer_token = Ulid::new();
 
@@ -223,7 +256,7 @@ pub async fn user_login_post(
             // the only thing we need from them is an address
             // everything else is optional
             let u = user::ActiveModel {
-                address: sea_orm::Set(payload.address.to_fixed_bytes().into()),
+                address: sea_orm::Set(our_msg.address.into()),
                 ..Default::default()
             };
 
