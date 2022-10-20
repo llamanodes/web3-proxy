@@ -50,9 +50,9 @@ async fn main() -> anyhow::Result<()> {
 
     match cli_config.sub_command {
         SubCommand::CreateUser(x) => {
-            let db = get_migrated_db(cli_config.db_url, 1, 1).await?;
+            let db_conn = get_migrated_db(cli_config.db_url, 1, 1).await?;
 
-            x.main(&db).await
+            x.main(&db_conn).await
         }
         SubCommand::CheckConfig(x) => x.main().await,
     }

@@ -3,7 +3,7 @@
 use super::authorization::{login_is_authorized, UserKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
-use crate::user_stats::{get_aggregate_rpc_stats, get_detailed_stats};
+use crate::user_queries::{get_aggregate_rpc_stats_from_params, get_detailed_stats};
 use anyhow::Context;
 use axum::{
     extract::{Path, Query},
@@ -19,13 +19,14 @@ use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;
 use redis_rate_limiter::redis::AsyncCommands;
+use redis_rate_limiter::RedisConnection;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
-use tracing::{info, warn};
+use tracing::warn;
 use ulid::Ulid;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
@@ -202,18 +203,18 @@ pub async fn user_login_post(
 
     let bearer_token = Ulid::new();
 
-    let db = app.db_conn().context("Getting database connection")?;
+    let db_conn = app.db_conn().context("Getting database connection")?;
 
     // TODO: limit columns or load whole user?
     let u = user::Entity::find()
         .filter(user::Column::Address.eq(our_msg.address.as_ref()))
-        .one(&db)
+        .one(&db_conn)
         .await
         .unwrap();
 
     let (u, _uks, response) = match u {
         None => {
-            let txn = db.begin().await?;
+            let txn = db_conn.begin().await?;
 
             // the only thing we need from them is an address
             // everything else is optional
@@ -256,7 +257,7 @@ pub async fn user_login_post(
             // the user is already registered
             let uks = user_keys::Entity::find()
                 .filter(user_keys::Column::UserId.eq(u.id))
-                .all(&db)
+                .all(&db_conn)
                 .await
                 .context("failed loading user's key")?;
 
@@ -343,9 +344,9 @@ pub async fn user_profile_post(
         }
     }
 
-    let db = app.db_conn().context("Getting database connection")?;
+    let db_conn = app.db_conn().context("Getting database connection")?;
 
-    user.save(&db).await?;
+    user.save(&db_conn).await?;
 
     todo!("finish post_user");
 }
@@ -416,6 +417,15 @@ pub async fn user_profile_get(
     todo!("user_profile_get");
 }
 
+/// `GET /user/revert_logs` -- Use a bearer token to get the user's revert logs.
+#[debug_handler]
+pub async fn user_revert_logs_get(
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+) -> FrontendResult {
+    todo!("user_revert_logs_get");
+}
+
 /// `GET /user/stats/detailed` -- Use a bearer token to get the user's key stats such as bandwidth used and methods requested.
 ///
 /// If no bearer is provided, detailed stats for all users will be shown.
@@ -433,120 +443,10 @@ pub async fn user_stats_detailed_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    // TODO: how is db_conn supposed to be used?
-    let db = app.db_conn.clone().context("connecting to db")?;
+    let db_conn = app.db_conn().context("connecting to db")?;
+    let redis_conn = app.redis_conn().await.context("connecting to redis")?;
 
-    // get the attached address from redis for the given auth_token.
-    let mut redis_conn = app.redis_conn().await.context("connecting to redis")?;
-
-    // TODO: DRY
-    let user_id = match (bearer, params.get("user_id")) {
-        (Some(bearer), Some(params)) => {
-            // check for the bearer cache key
-            // TODO: move this to a helper function
-            let bearer_cache_key = format!("bearer:{}", bearer.token());
-
-            // get the user id that is attached to this bearer token
-            redis_conn
-                .get::<_, u64>(bearer_cache_key)
-                .await
-                // TODO: this should be a 403
-                .context("fetching user_key_id from redis with bearer_cache_key")?
-        }
-        (_, None) => {
-            // they have a bearer token. we don't care about it on public pages
-            // 0 means all
-            0
-        }
-        (None, Some(x)) => {
-            // they do not have a bearer token, but requested a specific id. block
-            // TODO: proper error code
-            // TODO: maybe instead of this sharp edged warn, we have a config value?
-            warn!("this should maybe be an access denied");
-            x.parse().context("Parsing user_id param")?
-        }
-    };
-
-    // only allow user_key to be set if user_id is also set
-    // this will keep people from reading someone else's keys
-    let user_key = if user_id > 0 {
-        params
-            .get("user_key")
-            .map_or_else::<anyhow::Result<u64>, _, _>(
-                || Ok(0),
-                |c| {
-                    let c = c.parse()?;
-
-                    Ok(c)
-                },
-            )?
-    } else {
-        0
-    };
-
-    // TODO: DRY
-    let chain_id = params
-        .get("chain_id")
-        .map_or_else::<anyhow::Result<u64>, _, _>(
-            || Ok(app.config.chain_id),
-            |c| {
-                let c = c.parse()?;
-
-                Ok(c)
-            },
-        )?;
-
-    // TODO: DRY
-    let query_start = params
-        .get("timestamp")
-        .map_or_else::<anyhow::Result<NaiveDateTime>, _, _>(
-            || {
-                // no timestamp in params. set default
-                let x = chrono::Utc::now() - chrono::Duration::days(30);
-
-                Ok(x.naive_utc())
-            },
-            |x: &String| {
-                // parse the given timestamp
-                let x = x.parse::<i64>().context("parsing timestamp query param")?;
-
-                // TODO: error code 401
-                let x = NaiveDateTime::from_timestamp_opt(x, 0)
-                    .context("parsing timestamp query param")?;
-
-                Ok(x)
-            },
-        )?;
-
-    let page = params
-        .get("page")
-        .map_or_else::<anyhow::Result<usize>, _, _>(
-            || {
-                // no page in params. set default
-                Ok(0)
-            },
-            |x: &String| {
-                // parse the given timestamp
-                // TODO: error code 401
-                let x = x.parse::<usize>().context("parsing page query param")?;
-
-                Ok(x)
-            },
-        )?;
-
-    // TODO: page size from config
-    let page_size = 200;
-
-    let x = get_detailed_stats(
-        chain_id,
-        &db,
-        page,
-        page_size,
-        query_start,
-        user_key,
-        user_id,
-    )
-    .await?;
+    let x = get_detailed_stats(&app, bearer, db_conn, redis_conn, params).await?;
 
     Ok(Json(x).into_response())
 }
@@ -558,121 +458,7 @@ pub async fn user_stats_aggregate_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    // TODO: how is db_conn supposed to be used?
-    let db_conn = app.db_conn.clone().context("connecting to db")?;
-
-    // get the attached address from redis for the given auth_token.
-    let mut redis_conn = app.redis_conn().await.context("connecting to redis")?;
-
-    let user_id = match (bearer, params.get("user_id")) {
-        (Some(bearer), Some(params)) => {
-            // check for the bearer cache key
-            // TODO: move this to a helper function
-            let bearer_cache_key = format!("bearer:{}", bearer.token());
-
-            // get the user id that is attached to this bearer token
-            redis_conn
-                .get::<_, u64>(bearer_cache_key)
-                .await
-                // TODO: this should be a 403
-                .context("fetching user_key_id from redis with bearer_cache_key")?
-        }
-        (_, None) => {
-            // they have a bearer token. we don't care about it on public pages
-            // 0 means all
-            0
-        }
-        (None, Some(x)) => {
-            // they do not have a bearer token, but requested a specific id. block
-            // TODO: proper error code
-            // TODO: maybe instead of this sharp edged warn, we have a config value?
-            warn!("this should maybe be an access denied");
-            x.parse().context("Parsing user_id param")?
-        }
-    };
-
-    let chain_id = params
-        .get("chain_id")
-        .map_or_else::<anyhow::Result<u64>, _, _>(
-            || Ok(app.config.chain_id),
-            |c| {
-                let c = c.parse()?;
-
-                Ok(c)
-            },
-        )?;
-
-    let query_start = params
-        .get("timestamp")
-        .map_or_else::<anyhow::Result<NaiveDateTime>, _, _>(
-            || {
-                // no timestamp in params. set default
-                let x = chrono::Utc::now() - chrono::Duration::days(30);
-
-                Ok(x.naive_utc())
-            },
-            |x: &String| {
-                // parse the given timestamp
-                let x = x.parse::<i64>().context("parsing timestamp query param")?;
-
-                // TODO: error code 401
-                let x = NaiveDateTime::from_timestamp_opt(x, 0)
-                    .context("parsing timestamp query param")?;
-
-                Ok(x)
-            },
-        )?;
-
-    let query_window_seconds = params
-        .get("query_window_seconds")
-        .map_or_else::<anyhow::Result<Option<u64>>, _, _>(
-            || {
-                // no page in params. set default
-                Ok(None)
-            },
-            |x: &String| {
-                // parse the given timestamp
-                // TODO: error code 401
-                let x = x.parse::<u64>().context("parsing page query param")?;
-
-                if x == 0 {
-                    Ok(None)
-                } else {
-                    Ok(Some(x))
-                }
-            },
-        )?;
-
-    let page = params
-        .get("page")
-        .map_or_else::<anyhow::Result<usize>, _, _>(
-            || {
-                // no page in params. set None
-                Ok(0)
-            },
-            |x: &String| {
-                // parse the given timestamp
-                // TODO: error code 401
-                let x = x.parse().context("parsing page query param")?;
-
-                Ok(x)
-            },
-        )?;
-
-    // TODO: page size from config
-    let page_size = 200;
-
-    // TODO: optionally no chain id?
-    let x = get_aggregate_rpc_stats(
-        chain_id,
-        &db_conn,
-        page,
-        page_size,
-        query_start,
-        query_window_seconds,
-        user_id,
-    )
-    .await?;
+    let x = get_aggregate_rpc_stats_from_params(&app, bearer, params).await?;
 
     Ok(Json(x).into_response())
 }

@@ -296,7 +296,7 @@ pub async fn bearer_is_authorized(
         .context("fetching user by id")?
         .context("unknown user id")?;
 
-    todo!("api_key is wrong. we should check user ids instead")
+    todo!("rewrite this. key_is_authorized is wrong. we should check user ids instead")
     // key_is_authorized(
     //     app,
     //     user_key_data.api_key.into(),
@@ -348,9 +348,9 @@ pub async fn key_is_authorized(
 
     let authorized_user = AuthorizedKey::try_new(ip, origin, referer, user_agent, user_data)?;
 
-    let db = app.db_conn.clone();
+    let db_conn = app.db_conn.clone();
 
-    Ok((AuthorizedRequest::User(db, authorized_user), semaphore))
+    Ok((AuthorizedRequest::User(db_conn, authorized_user), semaphore))
 }
 
 impl Web3ProxyApp {
@@ -479,7 +479,7 @@ impl Web3ProxyApp {
             .try_get_with(user_key.into(), async move {
                 trace!(?user_key, "user_cache miss");
 
-                let db = self.db_conn().context("Getting database connection")?;
+                let db_conn = self.db_conn().context("Getting database connection")?;
 
                 let user_uuid: Uuid = user_key.into();
 
@@ -487,7 +487,7 @@ impl Web3ProxyApp {
                 match user_keys::Entity::find()
                     .filter(user_keys::Column::ApiKey.eq(user_uuid))
                     .filter(user_keys::Column::Active.eq(true))
-                    .one(&db)
+                    .one(&db_conn)
                     .await?
                 {
                     Some(user_key_model) => {

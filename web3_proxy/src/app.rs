@@ -159,12 +159,12 @@ pub async fn get_migrated_db(
         .sqlx_logging(false);
     // .sqlx_logging_level(log::LevelFilter::Info);
 
-    let db = sea_orm::Database::connect(db_opt).await?;
+    let db_conn = sea_orm::Database::connect(db_opt).await?;
 
     // TODO: if error, roll back?
-    Migrator::up(&db, None).await?;
+    Migrator::up(&db_conn, None).await?;
 
-    Ok(db)
+    Ok(db_conn)
 }
 
 #[metered(registry = Web3ProxyAppMetrics, registry_expr = self.app_metrics, visibility = pub)]
@@ -202,9 +202,9 @@ impl Web3ProxyApp {
                 .db_max_connections
                 .unwrap_or(db_min_connections * 2);
 
-            let db = get_migrated_db(db_url, db_min_connections, db_max_connections).await?;
+            let db_conn = get_migrated_db(db_url, db_min_connections, db_max_connections).await?;
 
-            Some(db)
+            Some(db_conn)
         } else {
             info!("no database");
             None
