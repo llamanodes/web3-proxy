@@ -191,6 +191,7 @@ pub async fn user_login_post(
     let their_msg: String = if payload.msg.starts_with("0x") {
         let their_msg_bytes = Bytes::from_str(&payload.msg).context("parsing payload message")?;
 
+        // TODO: lossy or no?
         String::from_utf8_lossy(their_msg_bytes.as_ref()).to_string()
     } else {
         payload.msg
@@ -227,16 +228,25 @@ pub async fn user_login_post(
     //     .await
     //     .context("verifying signature in their message");
 
-    let our_verification = our_msg
+    // TODO: verify or verify_eip191?
+    // TODO: save this when we save the message type to redis? we still need to check both
+    if let Err(err_1) = our_msg
         .verify(&their_sig, &verify_config)
         .await
-        .context("verifying signature in our message");
-
-    info!(?our_verification);
-
-    // TODO: proper error code. 5
-    // their_verification?;
-    our_verification?;
+        .context("verifying signature against our local message")
+    {
+        // verification method 1 failed. try eip191
+        if let Err(err_191) = our_msg
+            .verify_eip191(&their_sig)
+            .context("verifying eip191 signature against our local message")
+        {
+            return Err(anyhow::anyhow!(
+                "both the primary and eip191 verify failed: {:#?}; {:#?}",
+                err_1,
+                err_191
+            ))?;
+        }
+    }
 
     let bearer_token = Ulid::new();
 
