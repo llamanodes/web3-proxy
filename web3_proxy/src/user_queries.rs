@@ -61,7 +61,7 @@ fn get_user_key_id_from_params(
     params: &HashMap<String, String>,
 ) -> anyhow::Result<u64> {
     if user_id > 0 {
-        params.get("user_key").map_or_else(
+        params.get("user_key_id").map_or_else(
             || Ok(0),
             |c| {
                 let c = c.parse()?;
