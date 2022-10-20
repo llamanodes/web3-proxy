@@ -22,7 +22,7 @@ redis-rate-limiter = { path = "../redis-rate-limiter" }
 anyhow = { version = "1.0.65", features = ["backtrace"] }
 arc-swap = "1.5.1"
 argh = "0.1.9"
-axum = { version = "0.5.16", features = ["headers", "serde_json", "tokio-tungstenite", "ws"] }
+axum = { version = "0.5.17", features = ["headers", "serde_json", "tokio-tungstenite", "ws"] }
 axum-client-ip = "0.2.0"
 axum-macros = "0.2.3"
 # TODO: import chrono from sea-orm so we always have the same version

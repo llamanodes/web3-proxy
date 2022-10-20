@@ -10,7 +10,7 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::{sync::atomic::AtomicU32, time::Duration};
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{broadcast, Mutex as AsyncMutex};
 use tokio::task::JoinHandle;
 use tracing::{error, info, trace};
 
@@ -173,6 +173,7 @@ impl StatEmitter {
 
     pub async fn spawn(
         self: Arc<Self>,
+        shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<(
         flume::Sender<Web3ProxyStat>,
         JoinHandle<anyhow::Result<()>>,
@@ -181,8 +182,11 @@ impl StatEmitter {
         let (aggregate_tx, aggregate_rx) = flume::unbounded::<Web3ProxyStat>();
 
         // TODO: join and flatten these handles
-        let aggregate_handle = tokio::spawn(self.clone().aggregate_stats_loop(aggregate_rx));
-        let save_handle = { tokio::spawn(self.save_stats_loop()) };
+        let aggregate_handle = tokio::spawn(
+            self.clone()
+                .aggregate_stats_loop(aggregate_rx, shutdown_receiver),
+        );
+        let save_handle = tokio::spawn(self.save_stats_loop());
 
         Ok((aggregate_tx, aggregate_handle, save_handle))
     }
@@ -191,28 +195,42 @@ impl StatEmitter {
     async fn aggregate_stats_loop(
         self: Arc<Self>,
         aggregate_rx: flume::Receiver<Web3ProxyStat>,
+        mut shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<()> {
         // TODO: select on shutdown handle so we can be sure to save every aggregate!
-        while let Ok(x) = aggregate_rx.recv_async().await {
-            trace!(?x, "aggregating stat");
+        tokio::select! {
+            x = aggregate_rx.recv_async() => {
+                match x {
+                    Ok(x) => {
+                        trace!(?x, "aggregating stat");
 
-            // TODO: increment global stats (in redis? in local cache for prometheus?)
+                        // TODO: increment global stats (in redis? in local cache for prometheus?)
 
-            // TODO: batch stats? spawn this?
-            // TODO: where can we wait on this handle?
-            let clone = self.clone();
-            tokio::spawn(async move { clone.aggregate_stat(x).await });
-
-            // no need to save manually. they save on expire
+                        // TODO: batch stats?
+                        // TODO: where can we wait on this handle?
+                        let clone = self.clone();
+                        tokio::spawn(async move { clone.aggregate_stat(x).await });
+                    },
+                    Err(err) => {
+                        error!(?err, "aggregate_rx");
+                    }
+                }
+            }
+            x = shutdown_receiver.recv() => {
+                match x {
+                    Ok(_) => info!("aggregate stats loop shutting down"),
+                    Err(err) => error!(?err, "shutdown receiver"),
+                }
+            }
         }
 
-        // shutting down. force a save
+        // shutting down. force a save of any pending stats
         // we do not use invalidate_all because that is done on a background thread
         for (key, _) in self.aggregated_proxy_responses.into_iter() {
             self.aggregated_proxy_responses.invalidate(&key).await;
         }
 
-        info!("stat aggregator exited");
+        info!("aggregate stats loop finished");
 
         Ok(())
     }

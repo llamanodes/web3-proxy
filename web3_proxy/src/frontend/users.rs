@@ -423,8 +423,8 @@ pub async fn user_balance_get(
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
 pub async fn user_balance_post(
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
     todo!("user_balance_post");
 }
@@ -434,8 +434,8 @@ pub async fn user_balance_post(
 /// TODO: one key per request? maybe /user/keys/:api_key?
 #[debug_handler]
 pub async fn user_keys_get(
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
     todo!("user_keys_get");
 }
@@ -446,8 +446,8 @@ pub async fn user_keys_get(
 /// TODO: one key per request? maybe /user/keys/:api_key?
 #[debug_handler]
 pub async fn user_keys_post(
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
     todo!("user_keys_post");
 }
@@ -459,8 +459,8 @@ pub async fn user_keys_post(
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
 pub async fn user_profile_get(
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
     todo!("user_profile_get");
 }
@@ -468,8 +468,8 @@ pub async fn user_profile_get(
 /// `GET /user/revert_logs` -- Use a bearer token to get the user's revert logs.
 #[debug_handler]
 pub async fn user_revert_logs_get(
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
     todo!("user_revert_logs_get");
 }
@@ -485,10 +485,8 @@ pub async fn user_revert_logs_get(
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
 pub async fn user_stats_detailed_get(
-    // TODO: turn this back on when done debugging. maybe add a path field for this
-    // TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-    bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
     let x = get_detailed_stats(&app, bearer, params).await?;

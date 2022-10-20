@@ -23,7 +23,6 @@ use futures::future::Abortable;
 use futures::future::{join_all, AbortHandle};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
-use futures::Future;
 use hashbrown::HashMap;
 use ipnet::IpNet;
 use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
@@ -36,7 +35,6 @@ use serde::Serialize;
 use serde_json::json;
 use std::fmt;
 use std::net::IpAddr;
-use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
@@ -173,9 +171,13 @@ impl Web3ProxyApp {
     pub async fn spawn(
         top_config: TopConfig,
         num_workers: usize,
+        shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<(
         Arc<Web3ProxyApp>,
-        Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
+        // this handle is the main loops that we can cancel. select on this
+        FuturesUnordered<AnyhowJoinHandle<()>>,
+        // this handle is the state saving background loops that we must let finish. join_all on this
+        FuturesUnordered<AnyhowJoinHandle<()>>,
     )> {
         // safety checks on the config
         if let Some(redirect) = &top_config.app.redirect_user_url {
@@ -213,8 +215,10 @@ impl Web3ProxyApp {
         let balanced_rpcs = top_config.balanced_rpcs;
         let private_rpcs = top_config.private_rpcs.unwrap_or_default();
 
-        // TODO: try_join_all instead?
-        let handles = FuturesUnordered::new();
+        // these are safe to cancel
+        let cancellable_handles = FuturesUnordered::new();
+        // we must wait for these to end on their own (and they need to subscribe to shutdown_sender)
+        let important_background_handles = FuturesUnordered::new();
 
         // make a http shared client
         // TODO: can we configure the connection pool? should we?
@@ -267,15 +271,15 @@ impl Web3ProxyApp {
         // we do this in a channel so we don't slow down our response to the users
         let stat_sender = if let Some(db_conn) = db_conn.clone() {
             // TODO: sender and receiver here are a little confusing. because the thing that reads the receiver is what actually submits the stats
-            let (stat_sender, stat_handle, save_handle) = {
+            let (stat_sender, save_handle, stat_handle) = {
                 // TODO: period from config instead of always being 60 seconds
                 let emitter = StatEmitter::new(top_config.app.chain_id, db_conn, 60);
 
-                emitter.spawn().await?
+                emitter.spawn(shutdown_receiver).await?
             };
 
-            handles.push(stat_handle);
-            handles.push(save_handle);
+            cancellable_handles.push(stat_handle);
+            important_background_handles.push(save_handle);
 
             Some(stat_sender)
         } else {
@@ -332,7 +336,7 @@ impl Web3ProxyApp {
         .context("spawning balanced rpcs")?;
 
         // save the handle to catch any errors
-        handles.push(balanced_handle);
+        cancellable_handles.push(balanced_handle);
 
         // connect to the private rpcs
         // only some chains have this, so this is optional
@@ -363,7 +367,7 @@ impl Web3ProxyApp {
                 None
             } else {
                 // save the handle to catch any errors
-                handles.push(private_handle);
+                cancellable_handles.push(private_handle);
 
                 Some(private_rpcs)
             }
@@ -477,9 +481,7 @@ impl Web3ProxyApp {
 
         let app = Arc::new(app);
 
-        let handle = Box::pin(flatten_handles(handles));
-
-        Ok((app, handle))
+        Ok((app, cancellable_handles, important_background_handles))
     }
 
     pub fn prometheus_metrics(&self) -> String {

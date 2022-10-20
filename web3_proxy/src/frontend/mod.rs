@@ -94,7 +94,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         // create a unique id for each request
         .layer(RequestIdLayer)
         // application state
-        .layer(Extension(proxy_app))
+        .layer(Extension(proxy_app.clone()))
         // 404 for any unknown routes
         .fallback(errors::handler_404.into_service());
 
@@ -118,18 +118,6 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
     axum::Server::bind(&addr)
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .serve(service)
-        .with_graceful_shutdown(signal_shutdown())
         .await
         .map_err(Into::into)
-}
-
-/// Tokio signal handler that will wait for a user to press CTRL+C.
-/// Used in our hyper `Server` method `with_graceful_shutdown`.
-async fn signal_shutdown() {
-    // TODO: take a shutdown_receiver and select on ctrl_c and it
-    info!("ctrl-c to quit");
-    tokio::signal::ctrl_c()
-        .await
-        .expect("expect tokio signal ctrl-c");
-    info!("signal shutdown");
 }

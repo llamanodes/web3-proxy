@@ -8,20 +8,22 @@
 //#![warn(missing_docs)]
 #![forbid(unsafe_code)]
 
+use futures::StreamExt;
 use parking_lot::deadlock;
 use std::fs;
 use std::sync::atomic::{self, AtomicUsize};
 use std::thread;
 use tokio::runtime;
+use tokio::sync::broadcast;
 use tokio::time::Duration;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
-use web3_proxy::app::{flatten_handle, Web3ProxyApp};
+use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use web3_proxy::config::{CliConfig, TopConfig};
 use web3_proxy::{frontend, metrics_frontend};
 
 fn run(
-    shutdown_receiver: flume::Receiver<()>,
+    shutdown_sender: broadcast::Sender<()>,
     cli_config: CliConfig,
     top_config: TopConfig,
 ) -> anyhow::Result<()> {
@@ -71,7 +73,8 @@ fn run(
         let app_frontend_port = cli_config.port;
         let app_prometheus_port = cli_config.prometheus_port;
 
-        let (app, app_handle) = Web3ProxyApp::spawn(top_config, num_workers).await?;
+        let (app, app_handles, mut important_background_handles) =
+            Web3ProxyApp::spawn(top_config, num_workers, shutdown_sender.subscribe()).await?;
 
         let frontend_handle = tokio::spawn(frontend::serve(app_frontend_port, app.clone()));
 
@@ -80,7 +83,7 @@ fn run(
         // if everything is working, these should both run forever
         // TODO: join these instead and use shutdown handler properly. probably use tokio's ctrl+c helper
         tokio::select! {
-            x = app_handle => {
+            x = flatten_handles(app_handles) => {
                 match x {
                     Ok(_) => info!("app_handle exited"),
                     Err(e) => {
@@ -104,17 +107,27 @@ fn run(
                     }
                 }
             }
-            _ = shutdown_receiver.recv_async() => {
-                // TODO: think more about this. we need some way for tests to tell the app to stop
-                info!("received shutdown signal");
-
-                // TODO: wait for outstanding requests to complete. graceful shutdown will make our users happier
-
-                return Ok(())
+            x = tokio::signal::ctrl_c() => {
+                match x {
+                    Ok(_) => info!("quiting from ctrl-c"),
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                }
             }
         };
 
-        // TODO: wait on all the handles to stop
+        // one of the handles stopped. send a value so the others know to shut down
+        shutdown_sender.send(())?;
+
+        // wait on all the important background tasks (like saving stats to the database) to complete
+        while let Some(x) = important_background_handles.next().await {
+            match x {
+                Err(e) => return Err(e.into()),
+                Ok(Err(e)) => return Err(e),
+                Ok(Ok(_)) => continue,
+            }
+        }
 
         info!("finished");
 
@@ -154,9 +167,9 @@ fn main() -> anyhow::Result<()> {
 
     // tokio has code for catching ctrl+c so we use that
     // this shutdown sender is currently only used in tests, but we might make a /shutdown endpoint or something
-    let (_shutdown_sender, shutdown_receiver) = flume::bounded(1);
+    let (shutdown_sender, _shutdown_receiver) = broadcast::channel(1);
 
-    run(shutdown_receiver, cli_config, top_config)
+    run(shutdown_sender, cli_config, top_config)
 }
 
 #[cfg(test)]
@@ -237,11 +250,15 @@ mod tests {
             private_rpcs: None,
         };
 
-        let (shutdown_sender, shutdown_receiver) = flume::bounded(1);
+        let (shutdown_sender, _shutdown_receiver) = broadcast::channel(1);
 
         // spawn another thread for running the app
         // TODO: allow launching into the local tokio runtime instead of creating a new one?
-        let handle = thread::spawn(move || run(shutdown_receiver, cli_config, app_config));
+        let handle = {
+            let shutdown_sender = shutdown_sender.clone();
+
+            thread::spawn(move || run(shutdown_sender, cli_config, app_config))
+        };
 
         // TODO: do something to the node. query latest block, mine another block, query again
         let proxy_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
