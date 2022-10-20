@@ -194,16 +194,16 @@ pub async fn user_login_post(
     let our_msg: siwe::Message = our_msg.parse().context("parsing siwe message")?;
 
     let verify_config = VerificationOpts {
-        domain: Some(our_msg.domain),
-        nonce: Some(our_msg.nonce),
+        // domain: Some(our_msg.domain.clone()),
+        // nonce: Some(our_msg.nonce.clone()),
         ..Default::default()
     };
 
     // check the domain and a nonce. let timestamp be automatic
-    if let Err(e) = their_msg.verify(&their_sig, &verify_config).await {
-        // message cannot be correctly authenticated
-        todo!("proper error message: {}", e)
-    }
+    our_msg
+        .verify(&their_sig, &verify_config)
+        .await
+        .context("verifying signature")?;
 
     let bearer_token = Ulid::new();
 
