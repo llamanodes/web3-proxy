@@ -10,8 +10,8 @@ use migration::Expr;
 use num::Zero;
 use redis_rate_limiter::{redis::AsyncCommands, RedisConnection};
 use sea_orm::{
-    ColumnTrait, Condition, DatabaseConnection, EntityTrait, JoinType, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, RelationTrait,
+    ColumnTrait, Condition, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, RelationTrait,
 };
 use tracing::trace;
 
@@ -19,7 +19,7 @@ use crate::app::Web3ProxyApp;
 
 /// get the attached address from redis for the given auth_token.
 /// 0 means all users
-async fn get_user_from_params(
+async fn get_user_id_from_params(
     mut redis_conn: RedisConnection,
     // this is a long type. should we strip it down?
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
@@ -56,7 +56,10 @@ async fn get_user_from_params(
 /// only allow user_key to be set if user_id is also set.
 /// this will keep people from reading someone else's keys.
 /// 0 means none.
-fn get_user_key_from_params(user_id: u64, params: &HashMap<String, String>) -> anyhow::Result<u64> {
+fn get_user_key_id_from_params(
+    user_id: u64,
+    params: &HashMap<String, String>,
+) -> anyhow::Result<u64> {
     if user_id > 0 {
         params.get("user_key").map_or_else(
             || Ok(0),
@@ -153,11 +156,11 @@ pub async fn get_aggregate_rpc_stats_from_params(
     let db_conn = app.db_conn().context("connecting to db")?;
     let redis_conn = app.redis_conn().await.context("connecting to redis")?;
 
-    let user_id = get_user_from_params(redis_conn, bearer, &params).await?;
+    let user_id = get_user_id_from_params(redis_conn, bearer, &params).await?;
     let chain_id = get_chain_id_from_params(app, &params)?;
     let query_start = get_query_start_from_params(&params)?;
-    let page = get_page_from_params(&params)?;
     let query_window_seconds = get_query_window_seconds_from_params(&params)?;
+    let page = get_page_from_params(&params)?;
 
     // TODO: warn if unknown fields in params
 
@@ -175,9 +178,15 @@ pub async fn get_aggregate_rpc_stats_from_params(
     response.insert("chain_id", serde_json::to_value(chain_id)?);
     response.insert(
         "query_start",
-        serde_json::to_value(query_start.timestamp())?,
+        serde_json::to_value(query_start.timestamp() as u64)?,
     );
 
+    if query_window_seconds != 0 {
+        response.insert(
+            "query_window_seconds",
+            serde_json::to_value(query_window_seconds)?,
+        );
+    }
     // TODO: how do we get count reverts compared to other errors? does it matter? what about http errors to our users?
     // TODO: how do we count uptime?
     let q = rpc_accounting::Entity::find()
@@ -210,6 +219,7 @@ pub async fn get_aggregate_rpc_stats_from_params(
         )
         .order_by_asc(rpc_accounting::Column::PeriodDatetime.min());
 
+    // TODO: DRYer
     let q = if query_window_seconds != 0 {
         /*
         let query_start_timestamp: u64 = query_start
@@ -233,7 +243,7 @@ pub async fn get_aggregate_rpc_stats_from_params(
             .group_by(Expr::cust("query_window"))
     } else {
         // TODO: order by more than this?
-        // query_window_seconds
+        // query_window_seconds is not set so we aggregate all records
         q
     };
 
@@ -297,20 +307,21 @@ pub async fn get_user_stats(chain_id: u64) -> u64 {
 }
 
 /// stats grouped by key_id and error_repsponse and method and key
-///
-/// TODO: take a "timebucket" duration in minutes that will make a more advanced
 pub async fn get_detailed_stats(
     app: &Web3ProxyApp,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
-    db_conn: DatabaseConnection,
-    redis_conn: RedisConnection,
     params: HashMap<String, String>,
 ) -> anyhow::Result<HashMap<&str, serde_json::Value>> {
-    let user_id = get_user_from_params(redis_conn, bearer, &params).await?;
-    let user_key = get_user_key_from_params(user_id, &params)?;
+    let db_conn = app.db_conn().context("connecting to db")?;
+    let redis_conn = app.redis_conn().await.context("connecting to redis")?;
+
+    let user_id = get_user_id_from_params(redis_conn, bearer, &params).await?;
+    let user_key_id = get_user_key_id_from_params(user_id, &params)?;
     let chain_id = get_chain_id_from_params(app, &params)?;
     let query_start = get_query_start_from_params(&params)?;
+    let query_window_seconds = get_query_window_seconds_from_params(&params)?;
     let page = get_page_from_params(&params)?;
+    // TODO: handle secondary users, too
 
     // TODO: page size from config
     let page_size = 200;
@@ -324,8 +335,15 @@ pub async fn get_detailed_stats(
     response.insert("chain_id", serde_json::to_value(chain_id)?);
     response.insert(
         "query_start",
-        serde_json::to_value(query_start.timestamp())?,
+        serde_json::to_value(query_start.timestamp() as u64)?,
     );
+
+    if query_window_seconds != 0 {
+        response.insert(
+            "query_window_seconds",
+            serde_json::to_value(query_window_seconds)?,
+        );
+    }
 
     // TODO: how do we get count reverts compared to other errors? does it matter? what about http errors to our users?
     // TODO: how do we count uptime?
@@ -382,7 +400,7 @@ pub async fn get_detailed_stats(
         (condition, q)
     };
 
-    let (condition, q) = if user_id.is_zero() {
+    let (condition, q) = if user_id == 0 {
         // 0 means everyone. don't filter on user
         (condition, q)
     } else {
@@ -394,20 +412,25 @@ pub async fn get_detailed_stats(
                 rpc_accounting::Relation::UserKeys.def(),
             )
             .column(user_keys::Column::UserId)
-            // no need to group_by user_id when we are grouping by key_id
-            // .group_by(user_keys::Column::UserId)
-            .column(user_keys::Column::Id)
-            .group_by(user_keys::Column::Id);
+            .group_by(user_keys::Column::UserId);
 
         let condition = condition.add(user_keys::Column::UserId.eq(user_id));
+
+        let q = if user_key_id == 0 {
+            q.column(user_keys::Column::UserId)
+                .group_by(user_keys::Column::UserId)
+        } else {
+            response.insert("user_key_id", serde_json::to_value(user_key_id)?);
+
+            // no need to group_by user_id when we are grouping by key_id
+            q.column(user_keys::Column::Id)
+                .group_by(user_keys::Column::Id)
+        };
 
         (condition, q)
     };
 
     let q = q.filter(condition);
-
-    // TODO: enum between searching on user_key_id on user_id
-    // TODO: handle secondary users, too
 
     // log query here. i think sea orm has a useful log level for this
 
@@ -431,18 +454,20 @@ pub async fn get_detailed_stats(
 ///
 /// TODO: take a "timebucket" duration in minutes that will make a more advanced
 pub async fn get_revert_logs(
-    chain_id: u64,
-    db_conn: &DatabaseConnection,
-    page: usize,
-    page_size: usize,
-    query_start: chrono::NaiveDateTime,
-    user_id: u64,
-    user_key_id: u64,
+    app: &Web3ProxyApp,
+    bearer: Option<TypedHeader<Authorization<Bearer>>>,
+    params: HashMap<String, String>,
 ) -> anyhow::Result<HashMap<&str, serde_json::Value>> {
-    // aggregate stats, but grouped by method and error
-    trace!(?chain_id, %query_start, ?user_id, "get_aggregate_stats");
+    let db_conn = app.db_conn().context("connecting to db")?;
+    let redis_conn = app.redis_conn().await.context("connecting to redis")?;
 
-    // TODO: minimum query_start of 90 days ago?
+    let user_id = get_user_id_from_params(redis_conn, bearer, &params).await?;
+    let user_key_id = get_user_key_id_from_params(user_id, &params)?;
+    let chain_id = get_chain_id_from_params(app, &params)?;
+    let query_start = get_query_start_from_params(&params)?;
+    let query_window_seconds = get_query_window_seconds_from_params(&params)?;
+    let page = get_page_from_params(&params)?;
+    let page_size = get_page_from_params(&params)?;
 
     let mut response = HashMap::new();
 
@@ -451,8 +476,15 @@ pub async fn get_revert_logs(
     response.insert("chain_id", serde_json::to_value(chain_id)?);
     response.insert(
         "query_start",
-        serde_json::to_value(query_start.timestamp())?,
+        serde_json::to_value(query_start.timestamp() as u64)?,
     );
+
+    if query_window_seconds != 0 {
+        response.insert(
+            "query_window_seconds",
+            serde_json::to_value(query_window_seconds)?,
+        );
+    }
 
     // TODO: how do we get count reverts compared to other errors? does it matter? what about http errors to our users?
     // TODO: how do we count uptime?
@@ -545,7 +577,7 @@ pub async fn get_revert_logs(
     // TODO: transform this into a nested hashmap instead of a giant table?
     let r = q
         .into_json()
-        .paginate(db_conn, page_size)
+        .paginate(&db_conn, page_size)
         .fetch_page(page)
         .await?;
 

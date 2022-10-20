@@ -13,20 +13,17 @@ use axum::{
 };
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
-use chrono::NaiveDateTime;
 use entities::{user, user_keys};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;
 use redis_rate_limiter::redis::AsyncCommands;
-use redis_rate_limiter::RedisConnection;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
-use tracing::warn;
 use ulid::Ulid;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
@@ -60,8 +57,7 @@ pub async fn user_login_get(
     // create a message and save it in redis
 
     // TODO: how many seconds? get from config?
-    // TODO: while developing, we put a giant number here
-    let expire_seconds: usize = 28800;
+    let expire_seconds: usize = 20 * 60;
 
     let nonce = Ulid::new();
 
@@ -94,13 +90,12 @@ pub async fn user_login_get(
         resources: vec![],
     };
 
-    let session_key = format!("pending:{}", nonce);
-
     // TODO: if no redis server, store in local cache? at least give a better error. right now this seems to be a 502
     // the address isn't enough. we need to save the actual message so we can read the nonce
     // TODO: what message format is the most efficient to store in redis? probably eip191_bytes
     // we add 1 to expire_seconds just to be sure redis has the key for the full expiration_time
     // TODO: store a maximum number of attempted logins? anyone can request so we don't want to allow DOS attacks
+    let session_key = format!("login_nonce:{}", nonce);
     app.redis_conn()
         .await?
         .set_ex(session_key, message.to_string(), expire_seconds + 1)
@@ -179,15 +174,24 @@ pub async fn user_login_post(
     }
 
     // we can't trust that they didn't tamper with the message in some way
-    let their_msg: siwe::Message = payload.msg.parse().unwrap();
+    let their_msg: siwe::Message = payload.msg.parse().context("parsing user's message")?;
 
-    let their_sig: [u8; 65] = payload.sig.as_ref().try_into().unwrap();
+    let their_sig: [u8; 65] = payload
+        .sig
+        .as_ref()
+        .try_into()
+        .context("parsing signature")?;
+
+    // TODO: this is fragile
+    let login_nonce_key = format!("login_nonce:{}", &their_msg.nonce);
 
     // fetch the message we gave them from our redis
     // TODO: use getdel
-    let our_msg: String = app.redis_conn().await?.get(&their_msg.nonce).await?;
+    let our_msg: Option<String> = app.redis_conn().await?.get(&login_nonce_key).await?;
 
-    let our_msg: siwe::Message = our_msg.parse().unwrap();
+    let our_msg: String = our_msg.context("login nonce not found")?;
+
+    let our_msg: siwe::Message = our_msg.parse().context("parsing siwe message")?;
 
     let verify_config = VerificationOpts {
         domain: Some(our_msg.domain),
@@ -446,7 +450,7 @@ pub async fn user_stats_detailed_get(
     let db_conn = app.db_conn().context("connecting to db")?;
     let redis_conn = app.redis_conn().await.context("connecting to redis")?;
 
-    let x = get_detailed_stats(&app, bearer, db_conn, redis_conn, params).await?;
+    let x = get_detailed_stats(&app, bearer, params).await?;
 
     Ok(Json(x).into_response())
 }

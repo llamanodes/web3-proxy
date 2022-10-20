@@ -130,7 +130,7 @@ impl Web3Connection {
                 // TODO: there has to be a cleaner way to do this
                 if chain_id != found_chain_id.as_u64() {
                     return Err(anyhow::anyhow!(
-                        "incorrect chain id! Expected {}. Found {}",
+                        "incorrect chain id! Config has {}, but RPC has {}",
                         chain_id,
                         found_chain_id
                     )
