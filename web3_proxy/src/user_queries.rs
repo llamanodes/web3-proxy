@@ -239,8 +239,8 @@ pub async fn get_aggregate_rpc_stats_from_params(
             serde_json::to_value(query_window_seconds)?,
         );
 
-        q.column_as(expr, "query_window")
-            .group_by(Expr::cust("query_window"))
+        q.column_as(expr, "query_window_seconds")
+            .group_by(Expr::cust("query_window_seconds"))
     } else {
         // TODO: order by more than this?
         // query_window_seconds is not set so we aggregate all records
@@ -338,13 +338,6 @@ pub async fn get_detailed_stats(
         serde_json::to_value(query_start.timestamp() as u64)?,
     );
 
-    if query_window_seconds != 0 {
-        response.insert(
-            "query_window_seconds",
-            serde_json::to_value(query_window_seconds)?,
-        );
-    }
-
     // TODO: how do we get count reverts compared to other errors? does it matter? what about http errors to our users?
     // TODO: how do we count uptime?
     let q = rpc_accounting::Entity::find()
@@ -431,6 +424,33 @@ pub async fn get_detailed_stats(
     };
 
     let q = q.filter(condition);
+
+    let q = if query_window_seconds != 0 {
+        /*
+        let query_start_timestamp: u64 = query_start
+            .timestamp()
+            .try_into()
+            .context("query_start to timestamp")?;
+        */
+        // TODO: is there a better way to do this? how can we get "period_datetime" into this with types?
+        // TODO: how can we get the first window to start at query_start_timestamp
+        let expr = Expr::cust_with_values(
+            "FLOOR(UNIX_TIMESTAMP(rpc_accounting.period_datetime) / ?) * ?",
+            [query_window_seconds, query_window_seconds],
+        );
+
+        response.insert(
+            "query_window_seconds",
+            serde_json::to_value(query_window_seconds)?,
+        );
+
+        q.column_as(expr, "query_window_seconds")
+            .group_by(Expr::cust("query_window_seconds"))
+    } else {
+        // TODO: order by more than this?
+        // query_window_seconds is not set so we aggregate all records
+        q
+    };
 
     // log query here. i think sea orm has a useful log level for this
 
