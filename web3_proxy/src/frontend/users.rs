@@ -3,6 +3,7 @@
 use super::authorization::{login_is_authorized, UserKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
+use crate::frontend::authorization::bearer_is_authorized;
 use crate::user_queries::{get_aggregate_rpc_stats_from_params, get_detailed_stats};
 use anyhow::Context;
 use axum::{
@@ -323,7 +324,10 @@ pub async fn user_login_post(
         .await?;
 
     if let Err(err) = redis_conn.del::<_, u64>(&login_nonce_key).await {
-        warn!("Failed to delete login_nonce_key: {}", login_nonce_key);
+        warn!(
+            "Failed to delete login_nonce_key {}: {}",
+            login_nonce_key, err
+        );
     }
 
     Ok(response)
@@ -402,9 +406,11 @@ pub async fn user_profile_post(
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
 pub async fn user_balance_get(
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
+    let (authorized_request, _semaphore) = bearer_is_authorized(&app, bearer).await?;
+
     todo!("user_balance_get");
 }
 
@@ -485,9 +491,6 @@ pub async fn user_stats_detailed_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    let db_conn = app.db_conn().context("connecting to db")?;
-    let redis_conn = app.redis_conn().await.context("connecting to redis")?;
-
     let x = get_detailed_stats(&app, bearer, params).await?;
 
     Ok(Json(x).into_response())

@@ -168,10 +168,10 @@ impl AuthorizedKey {
         origin: Option<Origin>,
         referer: Option<Referer>,
         user_agent: Option<UserAgent>,
-        user_data: UserKeyData,
+        user_key_data: UserKeyData,
     ) -> anyhow::Result<Self> {
         // check ip
-        match &user_data.allowed_ips {
+        match &user_key_data.allowed_ips {
             None => {}
             Some(allowed_ips) => {
                 if !allowed_ips.iter().any(|x| x.contains(&ip)) {
@@ -183,7 +183,7 @@ impl AuthorizedKey {
         // check origin
         // TODO: do this with the Origin type instead of a String?
         let origin = origin.map(|x| x.to_string());
-        match (&origin, &user_data.allowed_origins) {
+        match (&origin, &user_key_data.allowed_origins) {
             (None, None) => {}
             (Some(_), None) => {}
             (None, Some(_)) => return Err(anyhow::anyhow!("Origin required")),
@@ -197,7 +197,7 @@ impl AuthorizedKey {
         }
 
         // check referer
-        match (referer, &user_data.allowed_referers) {
+        match (referer, &user_key_data.allowed_referers) {
             (None, None) => {}
             (Some(_), None) => {}
             (None, Some(_)) => return Err(anyhow::anyhow!("Referer required")),
@@ -209,7 +209,7 @@ impl AuthorizedKey {
         }
 
         // check user_agent
-        match (user_agent, &user_data.allowed_user_agents) {
+        match (user_agent, &user_key_data.allowed_user_agents) {
             (None, None) => {}
             (Some(_), None) => {}
             (None, Some(_)) => return Err(anyhow::anyhow!("User agent required")),
@@ -223,8 +223,8 @@ impl AuthorizedKey {
         Ok(Self {
             ip,
             origin,
-            user_key_id: user_data.user_key_id,
-            log_revert_chance: user_data.log_revert_chance,
+            user_key_id: user_key_data.user_key_id,
+            log_revert_chance: user_key_data.log_revert_chance,
         })
     }
 }
@@ -268,13 +268,10 @@ pub async fn login_is_authorized(
     Ok((AuthorizedRequest::Ip(ip), semaphore))
 }
 
+// TODO: where should we use this?
 pub async fn bearer_is_authorized(
     app: &Web3ProxyApp,
     bearer: Bearer,
-    ip: IpAddr,
-    origin: Option<Origin>,
-    referer: Option<Referer>,
-    user_agent: Option<UserAgent>,
 ) -> Result<(AuthorizedRequest, Option<OwnedSemaphorePermit>), FrontendErrorResponse> {
     let mut redis_conn = app.redis_conn().await.context("Getting redis connection")?;
 
@@ -290,22 +287,13 @@ pub async fn bearer_is_authorized(
     let db_conn = app.db_conn().context("Getting database connection")?;
 
     // turn user key id into a user key
-    let user_key_data = user::Entity::find_by_id(user_id)
+    let user_data = user::Entity::find_by_id(user_id)
         .one(&db_conn)
         .await
         .context("fetching user by id")?
         .context("unknown user id")?;
 
     todo!("rewrite this. key_is_authorized is wrong. we should check user ids instead")
-    // key_is_authorized(
-    //     app,
-    //     user_key_data.api_key.into(),
-    //     ip,
-    //     origin,
-    //     referer,
-    //     user_agent,
-    // )
-    // .await
 }
 
 pub async fn ip_is_authorized(

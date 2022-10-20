@@ -423,8 +423,6 @@ pub async fn get_detailed_stats(
         (condition, q)
     };
 
-    let q = q.filter(condition);
-
     let q = if query_window_seconds != 0 {
         /*
         let query_start_timestamp: u64 = query_start
@@ -451,6 +449,8 @@ pub async fn get_detailed_stats(
         // query_window_seconds is not set so we aggregate all records
         q
     };
+
+    let q = q.filter(condition);
 
     // log query here. i think sea orm has a useful log level for this
 

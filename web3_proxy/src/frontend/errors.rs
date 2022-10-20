@@ -13,9 +13,10 @@ use std::{error::Error, net::IpAddr};
 use tokio::time::Instant;
 use tracing::warn;
 
-// TODO: take "IntoResult" instead?
+// TODO: take "IntoResponse" instead of Response?
 pub type FrontendResult = Result<Response, FrontendErrorResponse>;
 
+// TODO:
 #[derive(From)]
 pub enum FrontendErrorResponse {
     Anyhow(anyhow::Error),
@@ -25,6 +26,8 @@ pub enum FrontendErrorResponse {
     Database(DbErr),
     RateLimitedUser(UserKeyData, Option<Instant>),
     RateLimitedIp(IpAddr, Option<Instant>),
+    /// simple way to return an error message to the user and an anyhow to our logs
+    StatusCode(StatusCode, String, anyhow::Error),
     UnknownKey,
     NotFound,
 }
@@ -71,6 +74,17 @@ impl IntoResponse for FrontendErrorResponse {
             Self::Response(r) => {
                 debug_assert_ne!(r.status(), StatusCode::OK);
                 return r;
+            }
+            Self::StatusCode(status_code, err_msg, err) => {
+                warn!(?status_code, ?err_msg, ?err);
+                (
+                    status_code,
+                    JsonRpcForwardedResponse::from_str(
+                        &err_msg,
+                        Some(status_code.as_u16().into()),
+                        None,
+                    ),
+                )
             }
             Self::Database(err) => {
                 warn!(?err, "database");

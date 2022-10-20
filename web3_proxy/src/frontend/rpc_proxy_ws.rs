@@ -2,11 +2,9 @@
 //!
 //! WebSockets are the preferred method of receiving requests, but not all clients have good support.
 
-use super::authorization::{
-    bearer_is_authorized, ip_is_authorized, key_is_authorized, AuthorizedRequest,
-};
+use super::authorization::{ip_is_authorized, key_is_authorized, AuthorizedRequest};
 use super::errors::FrontendResult;
-use axum::headers::{authorization::Bearer, Authorization, Origin, Referer, UserAgent};
+use axum::headers::{Origin, Referer, UserAgent};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::Path,
@@ -36,30 +34,15 @@ use crate::{
 /// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
 #[debug_handler]
 pub async fn websocket_handler(
-    bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
-    origin: Option<TypedHeader<Origin>>,
-    referer: Option<TypedHeader<Referer>>,
-    user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    let request_span = error_span!("request", %ip, ?referer, ?user_agent);
+    // TODO: i don't like logging ips. move this to trace level?
+    let request_span = error_span!("request", %ip);
 
-    let (authorized_request, _semaphore) = if let Some(TypedHeader(Authorization(bearer))) = bearer
-    {
-        let origin = origin.map(|x| x.0);
-        let referer = referer.map(|x| x.0);
-        let user_agent = user_agent.map(|x| x.0);
-
-        bearer_is_authorized(&app, bearer, ip, origin, referer, user_agent)
-            .instrument(request_span.clone())
-            .await?
-    } else {
-        ip_is_authorized(&app, ip)
-            .instrument(request_span.clone())
-            .await?
-    };
+    let (authorized_request, _semaphore) =
+        ip_is_authorized(&app, ip).instrument(request_span).await?;
 
     let request_span = error_span!("request", ?authorized_request);
 
