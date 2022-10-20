@@ -205,8 +205,9 @@ pub async fn user_login_post(
     let login_nonce_key = format!("login_nonce:{}", &their_msg.nonce);
 
     // fetch the message we gave them from our redis
-    // TODO: use getdel
-    let our_msg: Option<String> = app.redis_conn().await?.get(&login_nonce_key).await?;
+    let mut redis_conn = app.redis_conn().await?;
+
+    let our_msg: Option<String> = redis_conn.get(&login_nonce_key).await?;
 
     let our_msg: String = our_msg.context("login nonce not found")?;
 
@@ -215,18 +216,9 @@ pub async fn user_login_post(
     // TODO: info for now
     info!(?our_msg, ?their_msg);
 
-    // TODO: check the domain and a nonce?
     // let timestamp be automatic
-    let verify_config = VerificationOpts {
-        // domain: Some(our_msg.domain.clone()),
-        // nonce: Some(our_msg.nonce.clone()),
-        ..Default::default()
-    };
-
-    // let their_verification = their_msg
-    //     .verify(&their_sig, &verify_config)
-    //     .await
-    //     .context("verifying signature in their message");
+    // we don't need to check domain or nonce because we store the message safely locally
+    let verify_config = VerificationOpts::default();
 
     // TODO: verify or verify_eip191?
     // TODO: save this when we save the message type to redis? we still need to check both
@@ -320,16 +312,19 @@ pub async fn user_login_post(
     };
 
     // add bearer to redis
-    let mut redis_conn = app.redis_conn().await?;
-
     let bearer_redis_key = format!("bearer:{}", bearer_token);
 
     // expire in 4 weeks
+    // TODO: do this with a pipe
     // TODO: get expiration time from app config
     // TODO: do we use this?
     redis_conn
         .set_ex(bearer_redis_key, u.id.to_string(), 2_419_200)
         .await?;
+
+    if let Err(err) = redis_conn.del::<_, u64>(&login_nonce_key).await {
+        warn!("Failed to delete login_nonce_key: {}", login_nonce_key);
+    }
 
     Ok(response)
 }
