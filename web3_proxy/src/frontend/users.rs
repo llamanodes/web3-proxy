@@ -25,7 +25,7 @@ use siwe::{Message, VerificationOpts};
 use std::ops::Add;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use ulid::Ulid;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
@@ -418,11 +418,12 @@ pub async fn user_profile_get(
 
 /// `GET /user/stats/detailed` -- Use a bearer token to get the user's key stats such as bandwidth used and methods requested.
 ///
-/// If no bearer is provided, detailed stats for all users will be shown
+/// If no bearer is provided, detailed stats for all users will be shown.
+/// View a single user with `?user_id=$x`.
+/// View a single chain with `?chain_id=$x`.
 ///
-/// - show number of requests used (so we can calculate average spending over a month, burn rate for a user etc, something like "Your balance will be depleted in xx days)
+/// Set `$x` to zero to see all.
 ///
-/// TODO: one key per request? maybe /user/stats/:api_key?
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
 pub async fn user_stats_detailed_get(
@@ -466,6 +467,23 @@ pub async fn user_stats_detailed_get(
         }
     };
 
+    // only allow user_key to be set if user_id is also set
+    // this will keep people from reading someone else's keys
+    let user_key = if user_id > 0 {
+        params
+            .get("user_key")
+            .map_or_else::<anyhow::Result<u64>, _, _>(
+                || Ok(0),
+                |c| {
+                    let c = c.parse()?;
+
+                    Ok(c)
+                },
+            )?
+    } else {
+        0
+    };
+
     // TODO: DRY
     let chain_id = params
         .get("chain_id")
@@ -500,7 +518,35 @@ pub async fn user_stats_detailed_get(
             },
         )?;
 
-    let x = get_detailed_stats(chain_id, &db, query_start, user_id).await?;
+    let page = params
+        .get("page")
+        .map_or_else::<anyhow::Result<usize>, _, _>(
+            || {
+                // no page in params. set default
+                Ok(0)
+            },
+            |x: &String| {
+                // parse the given timestamp
+                // TODO: error code 401
+                let x = x.parse::<usize>().context("parsing page query param")?;
+
+                Ok(x)
+            },
+        )?;
+
+    // TODO: page size from config
+    let page_size = 200;
+
+    let x = get_detailed_stats(
+        chain_id,
+        &db,
+        page,
+        page_size,
+        query_start,
+        user_key,
+        user_id,
+    )
+    .await?;
 
     Ok(Json(x).into_response())
 }
@@ -513,7 +559,7 @@ pub async fn user_stats_aggregate_get(
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
     // TODO: how is db_conn supposed to be used?
-    let db = app.db_conn.clone().context("connecting to db")?;
+    let db_conn = app.db_conn.clone().context("connecting to db")?;
 
     // get the attached address from redis for the given auth_token.
     let mut redis_conn = app.redis_conn().await.context("connecting to redis")?;
@@ -552,8 +598,6 @@ pub async fn user_stats_aggregate_get(
             |c| {
                 let c = c.parse()?;
 
-                info!("user supplied chain_id");
-
                 Ok(c)
             },
         )?;
@@ -579,8 +623,56 @@ pub async fn user_stats_aggregate_get(
             },
         )?;
 
+    let query_window_seconds = params
+        .get("query_window_seconds")
+        .map_or_else::<anyhow::Result<Option<u64>>, _, _>(
+            || {
+                // no page in params. set default
+                Ok(None)
+            },
+            |x: &String| {
+                // parse the given timestamp
+                // TODO: error code 401
+                let x = x.parse::<u64>().context("parsing page query param")?;
+
+                if x == 0 {
+                    Ok(None)
+                } else {
+                    Ok(Some(x))
+                }
+            },
+        )?;
+
+    let page = params
+        .get("page")
+        .map_or_else::<anyhow::Result<usize>, _, _>(
+            || {
+                // no page in params. set None
+                Ok(0)
+            },
+            |x: &String| {
+                // parse the given timestamp
+                // TODO: error code 401
+                let x = x.parse().context("parsing page query param")?;
+
+                Ok(x)
+            },
+        )?;
+
+    // TODO: page size from config
+    let page_size = 200;
+
     // TODO: optionally no chain id?
-    let x = get_aggregate_rpc_stats(chain_id, &db, query_start, user_id).await?;
+    let x = get_aggregate_rpc_stats(
+        chain_id,
+        &db_conn,
+        page,
+        page_size,
+        query_start,
+        query_window_seconds,
+        user_id,
+    )
+    .await?;
 
     Ok(Json(x).into_response())
 }
