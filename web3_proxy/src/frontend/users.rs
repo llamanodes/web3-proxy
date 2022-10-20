@@ -233,7 +233,7 @@ pub async fn user_login_post(
             .context("verifying eip191 signature against our local message")
         {
             return Err(anyhow::anyhow!(
-                "both the primary and eip191 verify failed: {:#?}; {:#?}",
+                "both the primary and eip191 verification failed: {:#?}; {:#?}",
                 err_1,
                 err_191
             ))?;
