@@ -452,7 +452,9 @@ impl Web3Connections {
 
                         self.save_block(&consensus_head_block, true).await?;
 
-                        head_block_sender.send(consensus_head_block)?;
+                        head_block_sender
+                            .send(consensus_head_block)
+                            .context("head_block_sender sending consensus_head_block")?;
                     }
                     Some(old_block_id) => {
                         // TODO: do this log item better
@@ -473,9 +475,13 @@ impl Web3Connections {
                                     debug!(con_head=%consensus_head_block_id, old=%old_block_id, rpc_head=%rpc_head_str, %rpc, "unc {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                                     // todo!("handle equal by updating the cannonical chain");
-                                    self.save_block(&consensus_head_block, true).await?;
+                                    self.save_block(&consensus_head_block, true)
+                                        .await
+                                        .context("save consensus_head_block as heaviest chain")?;
 
-                                    head_block_sender.send(consensus_head_block)?;
+                                    head_block_sender.send(consensus_head_block).context(
+                                        "head_block_sender sending consensus_head_block",
+                                    )?;
                                 }
                             }
                             Ordering::Less => {
@@ -484,9 +490,13 @@ impl Web3Connections {
                                 warn!(con_head=%consensus_head_block_id, old_head=%old_block_id, rpc_head=%rpc_head_str, %rpc, "chain rolled back {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
                                 // TODO: tell save_block to remove any higher block numbers from the cache. not needed because we have other checks on requested blocks being > head, but still seems slike a good idea
-                                self.save_block(&consensus_head_block, true).await?;
+                                self.save_block(&consensus_head_block, true).await.context(
+                                    "save_block sending consensus_head_block as heaviest chain",
+                                )?;
 
-                                head_block_sender.send(consensus_head_block)?;
+                                head_block_sender
+                                    .send(consensus_head_block)
+                                    .context("head_block_sender sending consensus_head_block")?;
                             }
                             Ordering::Greater => {
                                 debug!(con_head=%consensus_head_block_id, rpc_head=%rpc_head_str, %rpc, "new {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);

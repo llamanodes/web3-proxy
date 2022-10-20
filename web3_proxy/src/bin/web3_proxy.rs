@@ -16,7 +16,7 @@ use std::thread;
 use tokio::runtime;
 use tokio::sync::broadcast;
 use tokio::time::Duration;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use web3_proxy::config::{CliConfig, TopConfig};
@@ -118,7 +118,9 @@ fn run(
         };
 
         // one of the handles stopped. send a value so the others know to shut down
-        shutdown_sender.send(())?;
+        if let Err(err) = shutdown_sender.send(()) {
+            warn!(?err, "shutdown sender");
+        };
 
         // wait on all the important background tasks (like saving stats to the database) to complete
         while let Some(x) = important_background_handles.next().await {

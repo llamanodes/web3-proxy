@@ -54,9 +54,11 @@ pub struct AuthorizedKey {
     pub log_revert_chance: Decimal,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug)]
 pub struct RequestMetadata {
-    pub datetime: chrono::DateTime<Utc>,
+    pub start_datetime: chrono::DateTime<Utc>,
+    pub start_instant: tokio::time::Instant,
+    // TODO: better name for this
     pub period_seconds: u64,
     pub request_bytes: u64,
     /// if this is 0, there was a cache_hit
@@ -86,10 +88,15 @@ impl RequestMetadata {
             .try_into()?;
 
         let new = Self {
+            start_instant: Instant::now(),
+            start_datetime: Utc::now(),
             period_seconds,
             request_bytes,
-            datetime: Utc::now(),
-            ..Default::default()
+            backend_requests: 0.into(),
+            no_servers: 0.into(),
+            error_response: false.into(),
+            response_bytes: 0.into(),
+            response_millis: 0.into(),
         };
 
         Ok(new)

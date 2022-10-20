@@ -1071,7 +1071,10 @@ impl Web3ProxyApp {
                         &response,
                     );
 
-                    stat_sender.send_async(response_stat.into()).await?;
+                    stat_sender
+                        .send_async(response_stat.into())
+                        .await
+                        .context("stat_sender sending response_stat")?;
                 }
 
                 return Ok(response);
@@ -1087,7 +1090,10 @@ impl Web3ProxyApp {
             let response_stat =
                 ProxyResponseStat::new(request.method, authorized_key, request_metadata, &response);
 
-            stat_sender.send_async(response_stat.into()).await?;
+            stat_sender
+                .send_async(response_stat.into())
+                .await
+                .context("stat_sender sending response stat")?;
         }
 
         Ok(response)
