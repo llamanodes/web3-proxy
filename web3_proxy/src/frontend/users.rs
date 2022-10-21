@@ -148,6 +148,7 @@ pub struct PostLoginResponse {
     bearer_token: Ulid,
     /// Used for authenticating with the RPC endpoints.
     api_keys: Vec<UserKey>,
+    user_id: u64,
     // TODO: what else?
 }
 
@@ -287,6 +288,7 @@ pub async fn user_login_post(
             let response_json = PostLoginResponse {
                 bearer_token,
                 api_keys: uks.iter().map(|uk| uk.api_key.into()).collect(),
+                user_id: u.id,
             };
 
             let response = (StatusCode::CREATED, Json(response_json)).into_response();
@@ -304,6 +306,7 @@ pub async fn user_login_post(
             let response_json = PostLoginResponse {
                 bearer_token,
                 api_keys: uks.iter().map(|uk| uk.api_key.into()).collect(),
+                user_id: u.id,
             };
 
             let response = (StatusCode::OK, Json(response_json)).into_response();
