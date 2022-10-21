@@ -80,6 +80,8 @@ pub struct AppConfig {
     /// None = allow all requests
     #[serde(default = "default_public_requests_per_minute")]
     pub public_requests_per_minute: Option<u64>,
+    /// Request limit for allowed origins for anonymous users.
+    pub allowed_origin_requests_per_minute: HashMap<String, u64>,
     /// Rate limit for the login entrypoint.
     /// This is separate from the rpc limits.
     #[serde(default = "default_login_rate_limit_per_minute")]

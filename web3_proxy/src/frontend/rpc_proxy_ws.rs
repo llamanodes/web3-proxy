@@ -36,13 +36,15 @@ use crate::{
 pub async fn websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
+    origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
     // TODO: i don't like logging ips. move this to trace level?
-    let request_span = error_span!("request", %ip);
+    let request_span = error_span!("request", %ip, ?origin);
 
-    let (authorized_request, _semaphore) =
-        ip_is_authorized(&app, ip).instrument(request_span).await?;
+    let (authorized_request, _semaphore) = ip_is_authorized(&app, ip, origin)
+        .instrument(request_span)
+        .await?;
 
     let request_span = error_span!("request", ?authorized_request);
 
@@ -113,15 +115,17 @@ pub async fn websocket_handler_with_key(
 
                 // TODO: show the user's address, not their id (remember to update the checks for {{user_id}}} in app.rs)
                 // TODO: query to get the user's address. expose that instead of user_id
-                let user_url = reg
-                    .render_template(
-                        redirect,
-                        &json!({ "authorized_request": authorized_request }),
-                    )
-                    .expect("templating should always work");
+                if let AuthorizedRequest::User(_, authorized_key) = authorized_request.as_ref() {
+                    let user_url = reg
+                        .render_template(redirect, &json!({ "user_id": authorized_key.user_id }))
+                        .expect("templating should always work");
 
-                // this is not a websocket. redirect to a page for this user
-                Ok(Redirect::to(&user_url).into_response())
+                    // this is not a websocket. redirect to a page for this user
+                    Ok(Redirect::to(&user_url).into_response())
+                } else {
+                    // TODO: i think this is impossible
+                    Err(anyhow::anyhow!("this page is for rpcs").into())
+                }
             } else {
                 // TODO: do not use an anyhow error. send the user a 400
                 Err(anyhow::anyhow!("redirect_user_url not set. only websockets work here").into())

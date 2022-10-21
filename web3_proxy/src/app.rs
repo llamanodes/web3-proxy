@@ -65,6 +65,9 @@ pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 #[derive(Clone, Debug, Default, From)]
 /// TODO: rename this?
 pub struct UserKeyData {
+    /// database id of the primary user
+    pub user_id: u64,
+    /// database id of the api key
     pub user_key_id: u64,
     /// if None, allow unlimited queries
     pub max_requests_per_period: Option<u64>,

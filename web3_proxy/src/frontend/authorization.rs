@@ -5,6 +5,7 @@ use crate::app::{UserKeyData, Web3ProxyApp};
 use crate::jsonrpc::JsonRpcRequest;
 use anyhow::Context;
 use axum::headers::{authorization::Bearer, Origin, Referer, UserAgent};
+use axum::TypedHeader;
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::{user, user_keys};
@@ -49,6 +50,7 @@ pub enum RateLimitResult {
 pub struct AuthorizedKey {
     pub ip: IpAddr,
     pub origin: Option<String>,
+    pub user_id: u64,
     pub user_key_id: u64,
     // TODO: just use an f32? even an f16 is probably fine
     pub log_revert_chance: Decimal,
@@ -69,14 +71,14 @@ pub struct RequestMetadata {
     pub response_millis: AtomicU64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub enum AuthorizedRequest {
     /// Request from this app
     Internal,
     /// Request from an anonymous IP address
-    Ip(#[serde(skip)] IpAddr),
+    Ip(IpAddr, Option<Origin>),
     /// Request from an authenticated and authorized user
-    User(#[serde(skip)] Option<DatabaseConnection>, AuthorizedKey),
+    User(Option<DatabaseConnection>, AuthorizedKey),
 }
 
 impl RequestMetadata {
@@ -230,6 +232,7 @@ impl AuthorizedKey {
         Ok(Self {
             ip,
             origin,
+            user_id: user_key_data.user_id,
             user_key_id: user_key_data.user_key_id,
             log_revert_chance: user_key_data.log_revert_chance,
         })
@@ -240,9 +243,8 @@ impl AuthorizedRequest {
     /// Only User has a database connection in case it needs to save a revert to the database.
     pub fn db_conn(&self) -> Option<&DatabaseConnection> {
         match self {
-            Self::Internal => None,
-            Self::Ip(_) => None,
             Self::User(x, _) => x.as_ref(),
+            _ => None,
         }
     }
 }
@@ -251,7 +253,7 @@ impl Display for &AuthorizedRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AuthorizedRequest::Internal => f.write_str("int"),
-            AuthorizedRequest::Ip(x) => f.write_str(&format!("ip-{}", x)),
+            AuthorizedRequest::Ip(x, _) => f.write_str(&format!("ip-{}", x)),
             AuthorizedRequest::User(_, x) => f.write_str(&format!("uk-{}", x.user_key_id)),
         }
     }
@@ -272,7 +274,7 @@ pub async fn login_is_authorized(
         x => unimplemented!("rate_limit_login shouldn't ever see these: {:?}", x),
     };
 
-    Ok((AuthorizedRequest::Ip(ip), semaphore))
+    Ok((AuthorizedRequest::Ip(ip, None), semaphore))
 }
 
 // TODO: where should we use this?
@@ -306,10 +308,13 @@ pub async fn bearer_is_authorized(
 pub async fn ip_is_authorized(
     app: &Web3ProxyApp,
     ip: IpAddr,
+    origin: Option<TypedHeader<Origin>>,
 ) -> Result<(AuthorizedRequest, Option<OwnedSemaphorePermit>), FrontendErrorResponse> {
+    let origin = origin.map(|x| x.0);
+
     // TODO: i think we could write an `impl From` for this
     // TODO: move this to an AuthorizedUser extrator
-    let (ip, semaphore) = match app.rate_limit_by_ip(ip).await? {
+    let (ip, semaphore) = match app.rate_limit_by_ip(ip, origin.as_ref()).await? {
         RateLimitResult::AllowedIp(ip, semaphore) => (ip, Some(semaphore)),
         RateLimitResult::RateLimitedIp(x, retry_at) => {
             return Err(FrontendErrorResponse::RateLimitedIp(x, retry_at));
@@ -319,7 +324,7 @@ pub async fn ip_is_authorized(
     };
 
     // semaphore won't ever be None, but its easier if key auth and ip auth work the same way
-    Ok((AuthorizedRequest::Ip(ip), semaphore))
+    Ok((AuthorizedRequest::Ip(ip, origin), semaphore))
 }
 
 pub async fn key_is_authorized(
@@ -432,12 +437,25 @@ impl Web3ProxyApp {
         }
     }
 
-    pub async fn rate_limit_by_ip(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
+    pub async fn rate_limit_by_ip(
+        &self,
+        ip: IpAddr,
+        origin: Option<&Origin>,
+    ) -> anyhow::Result<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_key
         let semaphore = self.ip_semaphore(ip).await?;
 
         if let Some(rate_limiter) = &self.frontend_ip_rate_limiter {
-            match rate_limiter.throttle(ip, None, 1).await {
+            let max_requests_per_period = origin
+                .map(|origin| {
+                    self.config
+                        .allowed_origin_requests_per_minute
+                        .get(&origin.to_string())
+                        .cloned()
+                })
+                .unwrap_or_default();
+
+            match rate_limiter.throttle(ip, max_requests_per_period, 1).await {
                 Ok(DeferredRateLimitResult::Allowed) => {
                     Ok(RateLimitResult::AllowedIp(ip, semaphore))
                 }
@@ -533,6 +551,7 @@ impl Web3ProxyApp {
                                 });
 
                         Ok(UserKeyData {
+                            user_id: user_key_model.user_id,
                             user_key_id: user_key_model.id,
                             max_requests_per_period: user_key_model.requests_per_minute,
                             max_concurrent_requests: user_key_model.max_concurrent_requests,

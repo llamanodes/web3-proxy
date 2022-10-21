@@ -19,12 +19,14 @@ use tracing::{error_span, Instrument};
 pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
+    origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> FrontendResult {
     let request_span = error_span!("request", %ip);
 
-    let (authorized_request, _semaphore) =
-        ip_is_authorized(&app, ip).instrument(request_span).await?;
+    let (authorized_request, _semaphore) = ip_is_authorized(&app, ip, origin)
+        .instrument(request_span)
+        .await?;
 
     let request_span = error_span!("request", ?authorized_request);
 
