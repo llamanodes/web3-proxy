@@ -54,8 +54,6 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         // routes should be ordered most to least common
         .route("/", post(rpc_proxy_http::proxy_web3_rpc))
         .route("/", get(rpc_proxy_ws::websocket_handler))
-        .route("/rpc", post(rpc_proxy_http::proxy_web3_rpc))
-        .route("/rpc", get(rpc_proxy_ws::websocket_handler))
         .route(
             "/rpc/:user_key",
             post(rpc_proxy_http::proxy_web3_rpc_with_key),
