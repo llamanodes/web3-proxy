@@ -208,6 +208,7 @@ These are roughly in order of completition
     - [ ] generate a new key from a web endpoint
     - [ ] modifying key settings such as private relay, revert logging, ip/origin/etc checks
   - [ ] GET logged reverts on an endpoint that **requires authentication**.
+- [ ] add config for concurrent requests from public requests
 - [ ] per-user stats should probably be locked behind authentication. the code is written but disabled for easy development
   - if we do this, we should also have an admin-only endpoint for seeing these for support requests
 - [ ] endpoint for creating/modifying api keys and their advanced security features
