@@ -22,7 +22,7 @@ public_requests_per_minute = 0
 response_cache_max_bytes = 10_000_000_000
 
 [app.allowed_origin_requests_per_minute]
-"https://chainlist.org" = 10_000
+"https://chainlist.org" = 1_000
 
 [balanced_rpcs]
 
