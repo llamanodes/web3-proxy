@@ -11,7 +11,6 @@ All other requests are sent to an RPC server on the latest block (alchemy, moral
 Each server has different limits to configure. The `soft_limit` is the number of parallel active requests where a server starts to slow down. The `hard_limit` is where a server starts giving rate limits or other errors.
 
 ```
-$ cargo install sea-orm-cli
 $ cargo run --release -- --help
 ```
 ```
@@ -71,6 +70,9 @@ This command only needs to be run during development. Production should use the 
 
 When developing new database migrations, **after you migrate**, run this command to generate updated entity files. It's best to keep the migration and entity changes in the same commit.
 
+```
+cargo install sea-orm-cli
+```
 ```
 sea-orm-cli generate entity -u mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy -o entities/src --with-serde both
 ```
