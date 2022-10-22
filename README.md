@@ -2,7 +2,7 @@
 
 Web3_proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
 
-**Under construction!** This code is under active development. The basics seem to work, but theres lots of tests and features to write still.
+**Under construction!** This code is under active development. If you want to run this proxy youself, send me a message on [Twitter](twitter.com/StittsHappening) and I can explain things that aren't documented yet. Most RPC methods are supported, but filters are coming soon. And of course, more tests are always needed.
 
 Signed transactions (eth_sendRawTransaction) are sent in parallel to the configured private RPCs (eden, ethermine, flashbots, etc.).
 
