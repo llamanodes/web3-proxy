@@ -50,55 +50,73 @@ pub struct TopConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppConfig {
+    /// Request limit for allowed origins for anonymous users.
+    pub allowed_origin_requests_per_minute: HashMap<String, u64>,
+
     /// EVM chain id. 1 for ETH
     /// TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
     pub chain_id: u64,
+
     /// Database is used for user data.
     /// Currently supports mysql or compatible backend.
     pub db_url: Option<String>,
+
     /// minimum size of the connection pool for the database.
     /// If none, the number of workers are used.
     pub db_min_connections: Option<u32>,
+
     /// maximum size of the connection pool for the database.
     /// If none, the minimum * 2 is used.
     pub db_max_connections: Option<u32>,
+
     /// Default request limit for registered users.
     /// 0 = block all requests
     /// None = allow all requests
     pub default_user_requests_per_minute: Option<u64>,
+
     /// Restrict user registration.
     /// None = no code needed
     pub invite_code: Option<String>,
+
     /// The soft limit prevents thundering herds as new blocks are seen.
     #[serde(default = "default_min_sum_soft_limit")]
     pub min_sum_soft_limit: u32,
+
     /// Another knob for preventing thundering herds as new blocks are seen.
     #[serde(default = "default_min_synced_rpcs")]
     pub min_synced_rpcs: usize,
+
     /// Request limit for anonymous users.
     /// Some(0) = block all requests
     /// None = allow all requests
     #[serde(default = "default_public_requests_per_minute")]
     pub public_requests_per_minute: Option<u64>,
-    /// Request limit for allowed origins for anonymous users.
-    pub allowed_origin_requests_per_minute: HashMap<String, u64>,
+
     /// Rate limit for the login entrypoint.
     /// This is separate from the rpc limits.
     #[serde(default = "default_login_rate_limit_per_minute")]
     pub login_rate_limit_per_minute: u64,
+
     /// Track rate limits in a redis (or compatible backend)
     /// It is okay if this data is lost.
     pub volatile_redis_url: Option<String>,
+
     /// maximum size of the connection pool for the cache
     /// If none, the minimum * 2 is used
     pub volatile_redis_max_connections: Option<usize>,
+
     /// RPC responses are cached locally
     #[serde(default = "default_response_cache_max_bytes")]
     pub response_cache_max_bytes: usize,
+
     /// the stats page url for an anonymous user.
     pub redirect_public_url: Option<String>,
+
     /// the stats page url for a logged in user. if set, must contain "{user_id}"
     pub redirect_user_url: Option<String>,
+
+    /// https://sentry.io
+    pub sentry_url: Option<String>,
 }
 
 /// This might cause a thundering herd!

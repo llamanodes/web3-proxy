@@ -7,8 +7,10 @@ members = [
   "web3_proxy",
 ]
 
+[profile.release]
+# we leave debug = true on so that sentry can give us line numbers
+debug = true
 # TODO: enable lto (and maybe other things proven with benchmarks) once rapid development is done
-# TODO: we can't do panic = abort because the websockets disconnect by panicking sometimes
-#[profile.release]
-#debug = true
 #lto = true
+
+# TODO: we can't do panic = abort because the websockets disconnect by panicking sometimes

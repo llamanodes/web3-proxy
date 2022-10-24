@@ -17,6 +17,7 @@ use tokio::runtime;
 use tokio::sync::broadcast;
 use tokio::time::Duration;
 use tracing::{debug, info, warn};
+use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use web3_proxy::config::{CliConfig, TopConfig};
@@ -147,12 +148,6 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    // install global collector configured based on RUST_LOG env var.
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .compact()
-        .init();
-
     // this probably won't matter for us in docker, but better safe than sorry
     fdlimit::raise_fd_limit();
 
@@ -160,12 +155,49 @@ fn main() -> anyhow::Result<()> {
     let cli_config: CliConfig = argh::from_env();
 
     // advanced configuration is on disk
-    info!("Loading config @ {}", cli_config.config);
     let top_config: String = fs::read_to_string(cli_config.config.clone())?;
     let top_config: TopConfig = toml::from_str(&top_config)?;
 
     // TODO: this doesn't seem to do anything
     proctitle::set_title(format!("web3_proxy-{}", top_config.app.chain_id));
+
+    // connect to sentry for error reporting
+    // if no sentry, only log to stdout
+    let _sentry_guard = if let Some(sentry_url) = top_config.app.sentry_url.clone() {
+        let guard = sentry::init((
+            sentry_url,
+            sentry::ClientOptions {
+                release: sentry::release_name!(),
+                // TODO: Set this a to lower value (from config) in production
+                traces_sample_rate: 1.0,
+                ..Default::default()
+            },
+        ));
+
+        // TODO: how do we put the EnvFilter on this?
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .compact()
+                    .with_filter(EnvFilter::from_default_env()),
+            )
+            .with(sentry_tracing::layer())
+            .init();
+
+        Some(guard)
+    } else {
+        // install global collector configured based on RUST_LOG env var.
+        // TODO: attach sentry here
+        tracing_subscriber::fmt()
+            .compact()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+
+        None
+    };
+
+    // we used to do this earlier, but now we attach sentry
+    debug!("CLI config @ {:#?}", cli_config.config);
 
     // tokio has code for catching ctrl+c so we use that
     // this shutdown sender is currently only used in tests, but we might make a /shutdown endpoint or something
@@ -198,6 +230,7 @@ mod tests {
         // TODO: option for super verbose logs
         std::env::set_var("RUST_LOG", "info,web3_proxy=debug");
         // install global collector configured based on RUST_LOG env var.
+        // TODO: sentry is needed here!
         tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
             .compact()

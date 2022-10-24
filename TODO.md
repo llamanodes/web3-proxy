@@ -192,6 +192,7 @@ These are roughly in order of completition
   - need an flume::watch on unflushed stats that we can subscribe to. wait for it to flip to true
 - [x] don't use unix timestamps for response_millis since leap seconds will confuse it
 - [x] config to allow origins even on the anonymous endpoints
+- [ ] log errors to sentry
 - [-] ability to domain lock or ip lock said key
   - the code to check the database and use these entries already exists, but users don't have a way to set them
 - [-] new endpoints for users (not totally sure about the exact paths, but these features are all needed):

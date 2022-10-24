@@ -55,11 +55,13 @@ handlebars = "4.3.5"
 rustc-hash = "1.1.0"
 siwe = "0.5.0"
 sea-orm = { version = "0.9.3", features = ["macros"] }
+sentry = { version = "0.27.0", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls"] }
+sentry-tracing = "0.27.0"
 serde = { version = "1.0.147", features = [] }
 serde_json = { version = "1.0.87", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.1.6"
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
-time = "0.3.15"
+time = "0.3.16"
 tokio = { version = "1.21.2", features = ["full", "tracing"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.11", features = ["sync"] }
@@ -74,3 +76,4 @@ tracing-subscriber = { version = "0.3.16", features = ["env-filter", "parking_lo
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.3.1"
 uuid = "1.2.1"
+
