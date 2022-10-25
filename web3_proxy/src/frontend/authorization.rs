@@ -354,14 +354,12 @@ impl Web3ProxyApp {
         if let Some(max_concurrent_requests) = user_data.max_concurrent_requests {
             let semaphore = self
                 .user_key_semaphores
-                .try_get_with(user_data.user_key_id, async move {
+                .get_with(user_data.user_key_id, async move {
                     let s = Semaphore::new(max_concurrent_requests as usize);
                     trace!("new semaphore for user_key_id {}", user_data.user_key_id);
-                    Ok::<_, anyhow::Error>(Arc::new(s))
+                    Arc::new(s)
                 })
-                .await
-                // TODO: is this the best way to handle an arc
-                .map_err(|err| anyhow::anyhow!(err))?;
+                .await;
 
             // if semaphore.available_permits() == 0 {
             //     // TODO: concurrent limit hit! emit a stat

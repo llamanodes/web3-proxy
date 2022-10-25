@@ -25,6 +25,7 @@ use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
+use tokio::sync::Semaphore;
 use tracing::{info, warn};
 use ulid::Ulid;
 
@@ -351,11 +352,11 @@ pub async fn user_logout_post(
     Ok("goodbye".into_response())
 }
 
-/// the JSON input to the `post_user` handler
-/// This handles updating
+/// the JSON input to the `post_user` handler.
 #[derive(Deserialize)]
 pub struct UserProfilePost {
     primary_address: Address,
+    new_primary_address: Option<Address>,
     // TODO: make sure the email address is valid. probably have a "verified" column in the database
     email: Option<String>,
 }
@@ -363,28 +364,35 @@ pub struct UserProfilePost {
 /// `POST /user/profile` -- modify the account connected to the bearer token in the `Authentication` header.
 #[debug_handler]
 pub async fn user_profile_post(
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
-    ClientIp(ip): ClientIp,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<UserProfilePost>,
 ) -> FrontendResult {
-    login_is_authorized(&app, ip).await?;
-
-    let user = ProtectedAction::PostUser(payload.primary_address)
-        .verify(app.as_ref(), bearer_token)
+    let user = ProtectedAction::UserProfilePost(payload.primary_address)
+        .authorize(app.as_ref(), bearer_token)
         .await?;
 
     let mut user: user::ActiveModel = user.into();
 
-    // TODO: rate limit by user, too?
+    // TODO: require a message from the new address to finish the change
+    if let Some(new_primary_address) = payload.new_primary_address {
+        if new_primary_address.is_zero() {
+            // TODO: allow this if some other authentication method is set
+            return Err(anyhow::anyhow!("cannot clear primary address").into());
+        } else {
+            let new_primary_address = Vec::from(new_primary_address.as_ref());
 
-    // TODO: allow changing the primary address, too. require a message from the new address to finish the change
+            user.address = sea_orm::Set(new_primary_address)
+        }
+    }
 
     if let Some(x) = payload.email {
         // TODO: only Set if no change
         if x.is_empty() {
             user.email = sea_orm::Set(None);
         } else {
+            // TODO: do some basic validation
+            // TODO: don't set immediatly, send a confirmation email first
             user.email = sea_orm::Set(Some(x));
         }
     }
@@ -393,7 +401,8 @@ pub async fn user_profile_post(
 
     user.save(&db_conn).await?;
 
-    todo!("finish post_user");
+    // TODO: what should this return? the user?
+    Ok("success".into_response())
 }
 
 /// `GET /user/balance` -- Use a bearer token to get the user's balance and spend.
@@ -411,7 +420,7 @@ pub async fn user_balance_get(
     todo!("user_balance_get");
 }
 
-/// `POST /user/balance` -- Manually process a confirmed txid to update a user's balance.
+/// `POST /user/balance/:txhash` -- Manually process a confirmed txid to update a user's balance.
 ///
 /// We will subscribe to events to watch for any user deposits, but sometimes events can be missed.
 ///
@@ -434,6 +443,10 @@ pub async fn user_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
+    let user = ProtectedAction::UserKeysGet
+        .authorize(app.as_ref(), bearer_token)
+        .await?;
+
     todo!("user_keys_get");
 }
 
@@ -507,16 +520,29 @@ pub async fn user_stats_aggregate_get(
 /// Handle authorization for a given address and bearer token.
 // TODO: what roles should exist?
 enum ProtectedAction {
-    PostUser(Address),
+    UserKeysGet,
+    UserProfilePost(Address),
 }
 
 impl ProtectedAction {
     /// Verify that the given bearer token and address are allowed to take the specified action.
-    async fn verify(self, app: &Web3ProxyApp, bearer: Bearer) -> anyhow::Result<user::Model> {
+    /// This includes concurrent request limiting.
+    async fn authorize(self, app: &Web3ProxyApp, bearer: Bearer) -> anyhow::Result<user::Model> {
         // get the attached address from redis for the given auth_token.
         let mut redis_conn = app.redis_conn().await?;
 
-        // TODO: move this to a helper function
+        // limit concurrent requests
+        let semaphore = app
+            .bearer_token_semaphores
+            .get_with(bearer.token().to_string(), async move {
+                let s = Semaphore::new(app.config.bearer_token_max_concurrent_requests as usize);
+                Arc::new(s)
+            })
+            .await;
+        let _semaphore_permit = semaphore.acquire().await?;
+
+        // get the user id for this bearer token
+        // TODO: move redis key building to a helper function
         let bearer_cache_key = format!("bearer:{}", bearer.token());
 
         // TODO: move this to a helper function
@@ -526,18 +552,20 @@ impl ProtectedAction {
             .context("fetching bearer cache key from redis")?
             .context("unknown bearer token")?;
 
+        // turn user id into a user
         let db_conn = app.db_conn().context("Getting database connection")?;
-
-        // turn user key id into a user key
-        let user_data = user::Entity::find_by_id(user_id)
+        let user = user::Entity::find_by_id(user_id)
             .one(&db_conn)
             .await
             .context("fetching user from db by id")?
             .context("unknown user id")?;
 
         match self {
-            Self::PostUser(primary_address) => {
-                let user_address = Address::from_slice(&user_data.address);
+            Self::UserKeysGet => {
+                // no extra checks needed. bearer token gave us a user
+            }
+            Self::UserProfilePost(primary_address) => {
+                let user_address = Address::from_slice(&user.address);
 
                 if user_address != primary_address {
                     // TODO: check secondary users
@@ -546,6 +574,6 @@ impl ProtectedAction {
             }
         }
 
-        Ok(user_data)
+        Ok(user)
     }
 }

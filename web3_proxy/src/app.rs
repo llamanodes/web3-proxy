@@ -112,6 +112,8 @@ pub struct Web3ProxyApp {
     pub user_key_cache: Cache<Ulid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
     pub user_key_semaphores: Cache<u64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
+    pub bearer_token_semaphores:
+        Cache<String, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub stat_sender: Option<flume::Sender<Web3ProxyStat>>,
 }
 
@@ -396,6 +398,7 @@ impl Web3ProxyApp {
             );
 
             // these two rate limiters can share the base limiter
+            // these are deferred rate limiters because we don't want redis network requests on the hot path
             // TODO: take cache_size from config
             frontend_ip_rate_limiter = Some(DeferredRateLimiter::<IpAddr>::new(
                 10_000,
@@ -407,7 +410,6 @@ impl Web3ProxyApp {
                 10_000, "key", rpc_rrl, None,
             ));
 
-            // don't defer this one because it will have a low request per peiod
             login_rate_limiter = Some(RedisRateLimiter::new(
                 "web3_proxy",
                 "login",
@@ -454,10 +456,13 @@ impl Web3ProxyApp {
 
         // create semaphores for concurrent connection limits
         // TODO: what should tti be for semaphores?
-        let user_key_semaphores = Cache::builder()
+        let bearer_token_semaphores = Cache::builder()
             .time_to_idle(Duration::from_secs(120))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
         let ip_semaphores = Cache::builder()
+            .time_to_idle(Duration::from_secs(120))
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+        let user_key_semaphores = Cache::builder()
             .time_to_idle(Duration::from_secs(120))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
@@ -477,8 +482,9 @@ impl Web3ProxyApp {
             app_metrics,
             open_request_handle_metrics,
             user_key_cache,
-            user_key_semaphores,
+            bearer_token_semaphores,
             ip_semaphores,
+            user_key_semaphores,
             stat_sender,
         };
 

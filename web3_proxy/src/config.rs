@@ -79,6 +79,11 @@ pub struct AppConfig {
     /// None = no code needed
     pub invite_code: Option<String>,
 
+    /// Rate limit for bearer token authenticated entrypoints.
+    /// This is separate from the rpc limits.
+    #[serde(default = "default_bearer_token_max_concurrent_requests")]
+    pub bearer_token_max_concurrent_requests: u64,
+
     /// Rate limit for the login entrypoint.
     /// This is separate from the rpc limits.
     #[serde(default = "default_login_rate_limit_per_minute")]
@@ -146,6 +151,11 @@ fn default_public_max_concurrent_requests() -> Option<usize> {
 /// 0 blocks anonymous requests by default.
 fn default_public_requests_per_minute() -> Option<u64> {
     Some(0)
+}
+
+/// Having a low amount of concurrent requests for bearer tokens keeps us from hammering the database.
+fn default_bearer_token_max_concurrent_requests() -> u64 {
+    2
 }
 
 /// Having a low amount of requests per minute for login is safest.
