@@ -192,7 +192,7 @@ These are roughly in order of completition
   - need an flume::watch on unflushed stats that we can subscribe to. wait for it to flip to true
 - [x] don't use unix timestamps for response_millis since leap seconds will confuse it
 - [x] config to allow origins even on the anonymous endpoints
-- [ ] log errors to sentry
+- [x] send logs to sentry
 - [-] ability to domain lock or ip lock said key
   - the code to check the database and use these entries already exists, but users don't have a way to set them
 - [-] new endpoints for users (not totally sure about the exact paths, but these features are all needed):
@@ -353,7 +353,6 @@ in another repo: event subscriber
     - [ ] test /api/getGaugesmethod
         - usually times out after vercel's 60 second timeout
         - one time got: Error invalid Json response ""
-- [ ] send logs to sentry
 - [ ] i think all the async methods in ethers need tracing instrument. something like `cfgif(tracing, tracing::instrument)`
   - if they do that, i think my request_id will show up on their logs
 - [ ] page that prints a graphviz dotfile of the blockchain

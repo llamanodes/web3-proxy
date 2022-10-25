@@ -35,7 +35,7 @@ pub enum UserKey {
 pub enum RateLimitResult {
     /// contains the IP of the anonymous user
     /// TODO: option inside or outside the arc?
-    AllowedIp(IpAddr, OwnedSemaphorePermit),
+    AllowedIp(IpAddr, Option<OwnedSemaphorePermit>),
     /// contains the user_key_id of an authenticated user
     AllowedUser(UserKeyData, Option<OwnedSemaphorePermit>),
     /// contains the IP and retry_at of the anonymous user
@@ -262,10 +262,10 @@ impl Display for &AuthorizedRequest {
 pub async fn login_is_authorized(
     app: &Web3ProxyApp,
     ip: IpAddr,
-) -> Result<(AuthorizedRequest, OwnedSemaphorePermit), FrontendErrorResponse> {
+) -> Result<AuthorizedRequest, FrontendErrorResponse> {
     // TODO: i think we could write an `impl From` for this
     // TODO: move this to an AuthorizedUser extrator
-    let (ip, semaphore) = match app.rate_limit_login(ip).await? {
+    let (ip, _semaphore) = match app.rate_limit_login(ip).await? {
         RateLimitResult::AllowedIp(x, semaphore) => (x, semaphore),
         RateLimitResult::RateLimitedIp(x, retry_at) => {
             return Err(FrontendErrorResponse::RateLimitedIp(x, retry_at));
@@ -274,7 +274,7 @@ pub async fn login_is_authorized(
         x => unimplemented!("rate_limit_login shouldn't ever see these: {:?}", x),
     };
 
-    Ok((AuthorizedRequest::Ip(ip, None), semaphore))
+    Ok(AuthorizedRequest::Ip(ip, None))
 }
 
 // TODO: where should we use this?
@@ -315,7 +315,7 @@ pub async fn ip_is_authorized(
     // TODO: i think we could write an `impl From` for this
     // TODO: move this to an AuthorizedUser extrator
     let (ip, semaphore) = match app.rate_limit_by_ip(ip, origin.as_ref()).await? {
-        RateLimitResult::AllowedIp(ip, semaphore) => (ip, Some(semaphore)),
+        RateLimitResult::AllowedIp(ip, semaphore) => (ip, semaphore),
         RateLimitResult::RateLimitedIp(x, retry_at) => {
             return Err(FrontendErrorResponse::RateLimitedIp(x, retry_at));
         }
@@ -354,24 +354,28 @@ pub async fn key_is_authorized(
 }
 
 impl Web3ProxyApp {
-    pub async fn ip_semaphore(&self, ip: IpAddr) -> anyhow::Result<OwnedSemaphorePermit> {
-        let semaphore = self
-            .ip_semaphores
-            .get_with(ip, async move {
-                // TODO: get semaphore size from app config
-                let s = Semaphore::const_new(10);
-                Arc::new(s)
-            })
-            .await;
+    pub async fn ip_semaphore(&self, ip: IpAddr) -> anyhow::Result<Option<OwnedSemaphorePermit>> {
+        if let Some(max_concurrent_requests) = self.config.public_max_concurrent_requests {
+            let semaphore = self
+                .ip_semaphores
+                .get_with(ip, async move {
+                    // TODO: set max_concurrent_requests dynamically based on load?
+                    let s = Semaphore::const_new(max_concurrent_requests);
+                    Arc::new(s)
+                })
+                .await;
 
-        // if semaphore.available_permits() == 0 {
-        //     // TODO: concurrent limit hit! emit a stat? less important for anon users
-        //     // TODO: there is probably a race here
-        // }
+            // if semaphore.available_permits() == 0 {
+            //     // TODO: concurrent limit hit! emit a stat? less important for anon users
+            //     // TODO: there is probably a race here
+            // }
 
-        let semaphore_permit = semaphore.acquire_owned().await?;
+            let semaphore_permit = semaphore.acquire_owned().await?;
 
-        Ok(semaphore_permit)
+            Ok(Some(semaphore_permit))
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn user_key_semaphore(
@@ -404,13 +408,10 @@ impl Web3ProxyApp {
 
     pub async fn rate_limit_login(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_key
-        let semaphore = self.ip_semaphore(ip).await?;
-
+        // TODO: do we ant semafores here?
         if let Some(rate_limiter) = &self.login_rate_limiter {
             match rate_limiter.throttle_label(&ip.to_string(), None, 1).await {
-                Ok(RedisRateLimitResult::Allowed(_)) => {
-                    Ok(RateLimitResult::AllowedIp(ip, semaphore))
-                }
+                Ok(RedisRateLimitResult::Allowed(_)) => Ok(RateLimitResult::AllowedIp(ip, None)),
                 Ok(RedisRateLimitResult::RetryAt(retry_at, _)) => {
                     // TODO: set headers so they know when they can retry
                     // TODO: debug or trace?
@@ -428,7 +429,7 @@ impl Web3ProxyApp {
                     // TODO: i really want axum to do this for us in a single place.
                     error!(?err, "login rate limiter is unhappy. allowing ip");
 
-                    Ok(RateLimitResult::AllowedIp(ip, semaphore))
+                    Ok(RateLimitResult::AllowedIp(ip, None))
                 }
             }
         } else {

@@ -49,8 +49,7 @@ pub async fn user_login_get(
     // TODO: allow ENS names here?
     Path(mut params): Path<HashMap<String, String>>,
 ) -> FrontendResult {
-    // give these named variables so that we drop them at the very end of this function
-    let (_, _semaphore) = login_is_authorized(&app, ip).await?;
+    login_is_authorized(&app, ip).await?;
 
     // at first i thought about checking that user_address is in our db
     // but theres no need to separate the registration and login flows
@@ -162,8 +161,7 @@ pub async fn user_login_post(
     Json(payload): Json<PostLogin>,
     Query(query): Query<PostLoginQuery>,
 ) -> FrontendResult {
-    // give these named variables so that we drop them at the very end of this function
-    let (_, _semaphore) = login_is_authorized(&app, ip).await?;
+    login_is_authorized(&app, ip).await?;
 
     if let Some(invite_code) = &app.config.invite_code {
         // we don't do per-user referral codes because we shouldn't collect what we don't need.
@@ -371,8 +369,7 @@ pub async fn user_profile_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Json(payload): Json<PostUser>,
 ) -> FrontendResult {
-    // give these named variables so that we drop them at the very end of this function
-    let (_, _semaphore) = login_is_authorized(&app, ip).await?;
+    login_is_authorized(&app, ip).await?;
 
     let user = ProtectedAction::PostUser(payload.primary_address)
         .verify(app.as_ref(), bearer_token)
