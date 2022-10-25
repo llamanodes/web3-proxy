@@ -283,8 +283,8 @@ pub async fn user_login_post(
             txn.commit().await?;
 
             let response_json = PostLoginResponse {
-                bearer_token,
                 api_keys: uks.iter().map(|uk| uk.api_key.into()).collect(),
+                bearer_token,
                 user_id: u.id,
             };
 
@@ -301,8 +301,8 @@ pub async fn user_login_post(
                 .context("failed loading user's key")?;
 
             let response_json = PostLoginResponse {
-                bearer_token,
                 api_keys: uks.iter().map(|uk| uk.api_key.into()).collect(),
+                bearer_token,
                 user_id: u.id,
             };
 
