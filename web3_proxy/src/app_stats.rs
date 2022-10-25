@@ -80,7 +80,6 @@ pub struct UserProxyResponseKey {
     error_response: bool,
 }
 
-/// key is the (user_key_id, method, error_response)
 pub type UserProxyResponseCache = Cache<
     UserProxyResponseKey,
     Arc<ProxyResponseAggregate>,

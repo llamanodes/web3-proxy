@@ -145,7 +145,7 @@ pub struct PostLoginResponse {
     /// Used for authenticating additonal requests.
     bearer_token: Ulid,
     /// Used for authenticating with the RPC endpoints.
-    api_keys: Vec<UserKey>,
+    api_keys: HashMap<u64, UserKey>,
     user_id: u64,
     // TODO: what else?
 }
@@ -162,45 +162,36 @@ pub async fn user_login_post(
 ) -> FrontendResult {
     login_is_authorized(&app, ip).await?;
 
-    if let Some(invite_code) = &app.config.invite_code {
-        // we don't do per-user referral codes because we shouldn't collect what we don't need.
-        // we don't need to build a social graph between addresses like that.
-        if query.invite_code.as_ref() != Some(invite_code) {
-            warn!("if address is already registered, allow login! else, error");
-
-            // TODO: this return doesn't seem right
-            return Err(anyhow::anyhow!("checking invite_code"))?;
-        }
-    }
-
     // we can't trust that they didn't tamper with the message in some way
     // TODO: it seems like some clients do things unexpectedly. these don't always parse
     // let their_msg: siwe::Message = payload.msg.parse().context("parsing user's message")?;
 
-    // TODO: do this safely
+    // TODO: this seems too verbose. how can we simply convert a String into a [u8; 65]
     let their_sig_bytes = Bytes::from_str(&payload.sig).context("parsing sig")?;
     if their_sig_bytes.len() != 65 {
-        return Err(anyhow::anyhow!("checking signature length"))?;
+        return Err(anyhow::anyhow!("checking signature length").into());
     }
     let mut their_sig: [u8; 65] = [0; 65];
     for x in 0..65 {
         their_sig[x] = their_sig_bytes[x]
     }
 
-    let their_msg: String = if payload.msg.starts_with("0x") {
+    // TODO: checking 0x seems fragile, but I think it will be fine
+    let their_msg: Message = if payload.msg.starts_with("0x") {
         let their_msg_bytes = Bytes::from_str(&payload.msg).context("parsing payload message")?;
 
         // TODO: lossy or no?
-        String::from_utf8_lossy(their_msg_bytes.as_ref()).to_string()
+        String::from_utf8_lossy(their_msg_bytes.as_ref())
+            .parse::<siwe::Message>()
+            .context("parsing hex string message")?
     } else {
-        payload.msg
+        payload
+            .msg
+            .parse::<siwe::Message>()
+            .context("parsing string message")?
     };
 
-    let their_msg = their_msg
-        .parse::<siwe::Message>()
-        .context("parsing string message")?;
-
-    // TODO: this is fragile
+    // TODO: this is fragile. have a helper function/struct for redis keys
     let login_nonce_key = format!("login_nonce:{}", &their_msg.nonce);
 
     // fetch the message we gave them from our redis
@@ -235,11 +226,10 @@ pub async fn user_login_post(
                 "both the primary and eip191 verification failed: {:#?}; {:#?}",
                 err_1,
                 err_191
-            ))?;
+            )
+            .into());
         }
     }
-
-    let bearer_token = Ulid::new();
 
     let db_conn = app.db_conn().context("Getting database connection")?;
 
@@ -250,8 +240,17 @@ pub async fn user_login_post(
         .await
         .unwrap();
 
-    let (u, _uks, response) = match u {
+    let (u, uks, status_code) = match u {
         None => {
+            // user does not exist yet
+
+            // check the invite code
+            if let Some(invite_code) = &app.config.invite_code {
+                if query.invite_code.as_ref() != Some(invite_code) {
+                    return Err(anyhow::anyhow!("checking invite_code").into());
+                }
+            }
+
             let txn = db_conn.begin().await?;
 
             // the only thing we need from them is an address
@@ -263,8 +262,11 @@ pub async fn user_login_post(
 
             let u = u.insert(&txn).await?;
 
+            // create the user's first api key
+            // TODO: rename to UserApiKey? RpcApiKey?
             let user_key = UserKey::new();
 
+            // TODO: variable requests per minute depending on the invite code
             let uk = user_keys::ActiveModel {
                 user_id: sea_orm::Set(u.id),
                 api_key: sea_orm::Set(user_key.into()),
@@ -272,7 +274,6 @@ pub async fn user_login_post(
                 ..Default::default()
             };
 
-            // TODO: if this fails, revert adding the user, too
             let uk = uk
                 .insert(&txn)
                 .await
@@ -280,17 +281,10 @@ pub async fn user_login_post(
 
             let uks = vec![uk];
 
+            // save the user and key to the database
             txn.commit().await?;
 
-            let response_json = PostLoginResponse {
-                api_keys: uks.iter().map(|uk| uk.api_key.into()).collect(),
-                bearer_token,
-                user_id: u.id,
-            };
-
-            let response = (StatusCode::CREATED, Json(response_json)).into_response();
-
-            (u, uks, response)
+            (u, uks, StatusCode::CREATED)
         }
         Some(u) => {
             // the user is already registered
@@ -300,19 +294,26 @@ pub async fn user_login_post(
                 .await
                 .context("failed loading user's key")?;
 
-            let response_json = PostLoginResponse {
-                api_keys: uks.iter().map(|uk| uk.api_key.into()).collect(),
-                bearer_token,
-                user_id: u.id,
-            };
-
-            let response = (StatusCode::OK, Json(response_json)).into_response();
-
-            (u, uks, response)
+            (u, uks, StatusCode::OK)
         }
     };
 
+    // create a bearer token for the user.
+    let bearer_token = Ulid::new();
+
+    let response_json = PostLoginResponse {
+        api_keys: uks
+            .into_iter()
+            .map(|uk| (uk.id, uk.api_key.into()))
+            .collect(),
+        bearer_token,
+        user_id: u.id,
+    };
+
+    let response = (status_code, Json(response_json)).into_response();
+
     // add bearer to redis
+    // TODO: use a helper function/struct for this
     let bearer_redis_key = format!("bearer:{}", bearer_token);
 
     // expire in 4 weeks
@@ -353,7 +354,7 @@ pub async fn user_logout_post(
 /// the JSON input to the `post_user` handler
 /// This handles updating
 #[derive(Deserialize)]
-pub struct PostUser {
+pub struct UserProfilePost {
     primary_address: Address,
     // TODO: make sure the email address is valid. probably have a "verified" column in the database
     email: Option<String>,
@@ -365,7 +366,7 @@ pub async fn user_profile_post(
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     ClientIp(ip): ClientIp,
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    Json(payload): Json<PostUser>,
+    Json(payload): Json<UserProfilePost>,
 ) -> FrontendResult {
     login_is_authorized(&app, ip).await?;
 

@@ -87,7 +87,11 @@ Flame graphs make a developer's join of finding slow code painless:
     1
     $ echo 0 | sudo tee /proc/sys/kernel/kptr_restrict
     0
-    $ CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph
+    $ cat /proc/sys/kernel/perf_event_paranoid
+    4
+    $ echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
+    0
+    $ CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --bin web3_proxy
 
 
 ## GDB
