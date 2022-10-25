@@ -263,8 +263,6 @@ pub async fn login_is_authorized(
     app: &Web3ProxyApp,
     ip: IpAddr,
 ) -> Result<AuthorizedRequest, FrontendErrorResponse> {
-    // TODO: i think we could write an `impl From` for this
-    // TODO: move this to an AuthorizedUser extrator
     let (ip, _semaphore) = match app.rate_limit_login(ip).await? {
         RateLimitResult::AllowedIp(x, semaphore) => (x, semaphore),
         RateLimitResult::RateLimitedIp(x, retry_at) => {
@@ -275,34 +273,6 @@ pub async fn login_is_authorized(
     };
 
     Ok(AuthorizedRequest::Ip(ip, None))
-}
-
-// TODO: where should we use this?
-pub async fn bearer_is_authorized(
-    app: &Web3ProxyApp,
-    bearer: Bearer,
-) -> Result<(AuthorizedRequest, Option<OwnedSemaphorePermit>), FrontendErrorResponse> {
-    let mut redis_conn = app.redis_conn().await.context("Getting redis connection")?;
-
-    // TODO: verify that bearer.token() is a Ulid?
-    let bearer_cache_key = format!("bearer:{}", bearer.token());
-
-    // turn bearer into a user key id
-    let user_id: u64 = redis_conn
-        .get(bearer_cache_key)
-        .await
-        .context("unknown bearer token")?;
-
-    let db_conn = app.db_conn().context("Getting database connection")?;
-
-    // turn user key id into a user key
-    let user_data = user::Entity::find_by_id(user_id)
-        .one(&db_conn)
-        .await
-        .context("fetching user by id")?
-        .context("unknown user id")?;
-
-    todo!("rewrite this. key_is_authorized is wrong. we should check user ids instead")
 }
 
 pub async fn ip_is_authorized(
@@ -408,7 +378,7 @@ impl Web3ProxyApp {
 
     pub async fn rate_limit_login(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_key
-        // TODO: do we ant semafores here?
+        // TODO: do we want a semaphore here?
         if let Some(rate_limiter) = &self.login_rate_limiter {
             match rate_limiter.throttle_label(&ip.to_string(), None, 1).await {
                 Ok(RedisRateLimitResult::Allowed(_)) => Ok(RateLimitResult::AllowedIp(ip, None)),

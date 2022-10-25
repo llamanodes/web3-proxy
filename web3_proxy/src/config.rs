@@ -121,7 +121,7 @@ pub struct AppConfig {
     /// the stats page url for a logged in user. if set, must contain "{user_id}"
     pub redirect_user_url: Option<String>,
 
-    /// https://sentry.io
+    /// Optionally send errors to <https://sentry.io>
     pub sentry_url: Option<String>,
 }
 

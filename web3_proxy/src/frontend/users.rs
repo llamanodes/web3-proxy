@@ -3,7 +3,6 @@
 use super::authorization::{login_is_authorized, UserKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
-use crate::frontend::authorization::bearer_is_authorized;
 use crate::user_queries::{get_aggregate_rpc_stats_from_params, get_detailed_stats};
 use anyhow::Context;
 use axum::{
@@ -358,7 +357,6 @@ pub struct PostUser {
     primary_address: Address,
     // TODO: make sure the email address is valid. probably have a "verified" column in the database
     email: Option<String>,
-    // TODO: make them sign this JSON? cookie in session id is hard because its on a different domain
 }
 
 /// `POST /user/profile` -- modify the account connected to the bearer token in the `Authentication` header.
@@ -409,8 +407,6 @@ pub async fn user_balance_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
-    let (authorized_request, _semaphore) = bearer_is_authorized(&app, bearer).await?;
-
     todo!("user_balance_get");
 }
 
@@ -515,12 +511,7 @@ enum ProtectedAction {
 
 impl ProtectedAction {
     /// Verify that the given bearer token and address are allowed to take the specified action.
-    async fn verify(
-        self,
-        app: &Web3ProxyApp,
-        // TODO: i don't think we want Bearer here. we want user_key and a helper for bearer -> user_key
-        bearer: Bearer,
-    ) -> anyhow::Result<user::Model> {
+    async fn verify(self, app: &Web3ProxyApp, bearer: Bearer) -> anyhow::Result<user::Model> {
         // get the attached address from redis for the given auth_token.
         let mut redis_conn = app.redis_conn().await?;
 
@@ -528,13 +519,32 @@ impl ProtectedAction {
         let bearer_cache_key = format!("bearer:{}", bearer.token());
 
         // TODO: move this to a helper function
-        let user_id: Option<u64> = redis_conn
-            .get(bearer_cache_key)
+        let user_id: u64 = redis_conn
+            .get::<_, Option<u64>>(bearer_cache_key)
             .await
-            .context("fetching bearer cache key from redis")?;
+            .context("fetching bearer cache key from redis")?
+            .context("unknown bearer token")?;
 
-        // TODO: if auth_address == primary_address, allow
-        // TODO: if auth_address != primary_address, only allow if they are a secondary user with the correct role
-        todo!("verify token for the given user");
+        let db_conn = app.db_conn().context("Getting database connection")?;
+
+        // turn user key id into a user key
+        let user_data = user::Entity::find_by_id(user_id)
+            .one(&db_conn)
+            .await
+            .context("fetching user from db by id")?
+            .context("unknown user id")?;
+
+        match self {
+            Self::PostUser(primary_address) => {
+                let user_address = Address::from_slice(&user_data.address);
+
+                if user_address != primary_address {
+                    // TODO: check secondary users
+                    return Err(anyhow::anyhow!("user address mismatch"));
+                }
+            }
+        }
+
+        Ok(user_data)
     }
 }

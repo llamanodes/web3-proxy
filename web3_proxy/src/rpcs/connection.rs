@@ -259,7 +259,7 @@ impl Web3Connection {
     }
 
     /// reconnect to the provider. errors are retried forever with exponential backoff with jitter.
-    /// We use the "Decorrelated" jitter from https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+    /// We use the "Decorrelated" jitter from <https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/>
     /// TODO: maybe it would be better to use "Full Jitter". The "Full Jitter" approach uses less work, but slightly more time.
     pub async fn retrying_reconnect(
         self: &Arc<Self>,
