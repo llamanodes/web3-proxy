@@ -5,7 +5,6 @@ use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
 use crate::user_queries::{
     get_aggregate_rpc_stats_from_params, get_detailed_stats, get_page_from_params,
-    get_query_window_seconds_from_params,
 };
 use crate::user_queries::{get_chain_id_from_params, get_query_start_from_params};
 use anyhow::Context;
@@ -24,7 +23,7 @@ use http::StatusCode;
 use redis_rate_limiter::redis::AsyncCommands;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, TransactionTrait,
+    TransactionTrait,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -33,7 +32,6 @@ use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
-use tokio::sync::Semaphore;
 use tracing::warn;
 use ulid::Ulid;
 
