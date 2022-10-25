@@ -330,7 +330,7 @@ impl Web3ProxyApp {
                 .ip_semaphores
                 .get_with(ip, async move {
                     // TODO: set max_concurrent_requests dynamically based on load?
-                    let s = Semaphore::const_new(max_concurrent_requests);
+                    let s = Semaphore::new(max_concurrent_requests);
                     Arc::new(s)
                 })
                 .await;
@@ -356,7 +356,7 @@ impl Web3ProxyApp {
             let semaphore = self
                 .user_key_semaphores
                 .try_get_with(user_data.user_key_id, async move {
-                    let s = Semaphore::const_new(max_concurrent_requests.try_into()?);
+                    let s = Semaphore::new(max_concurrent_requests as usize);
                     trace!("new semaphore for user_key_id {}", user_data.user_key_id);
                     Ok::<_, anyhow::Error>(Arc::new(s))
                 })
