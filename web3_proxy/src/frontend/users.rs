@@ -19,14 +19,15 @@ use hashbrown::HashMap;
 use http::StatusCode;
 use redis_rate_limiter::redis::AsyncCommands;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde_json::json;
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use tokio::sync::Semaphore;
-use tracing::{info, warn};
+use tracing::warn;
 use ulid::Ulid;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
@@ -140,17 +141,6 @@ pub struct PostLogin {
     msg: String,
 }
 
-/// Successful logins receive a bearer_token and all of the user's api keys.
-#[derive(Serialize)]
-pub struct PostLoginResponse {
-    /// Used for authenticating additonal requests.
-    bearer_token: Ulid,
-    /// Used for authenticating with the RPC endpoints.
-    api_keys: HashMap<u64, UserKey>,
-    user_id: u64,
-    // TODO: what else?
-}
-
 /// `POST /user/login` - Register or login by posting a signed "siwe" message.
 /// It is recommended to save the returned bearer token in a cookie.
 /// The bearer token can be used to authenticate other requests, such as getting the user's stats or modifying the user's profile.
@@ -163,10 +153,6 @@ pub async fn user_login_post(
 ) -> FrontendResult {
     login_is_authorized(&app, ip).await?;
 
-    // we can't trust that they didn't tamper with the message in some way
-    // TODO: it seems like some clients do things unexpectedly. these don't always parse
-    // let their_msg: siwe::Message = payload.msg.parse().context("parsing user's message")?;
-
     // TODO: this seems too verbose. how can we simply convert a String into a [u8; 65]
     let their_sig_bytes = Bytes::from_str(&payload.sig).context("parsing sig")?;
     if their_sig_bytes.len() != 65 {
@@ -177,7 +163,8 @@ pub async fn user_login_post(
         their_sig[x] = their_sig_bytes[x]
     }
 
-    // TODO: checking 0x seems fragile, but I think it will be fine
+    // we can't trust that they didn't tamper with the message in some way. like some clients return it hex encoded
+    // TODO: checking 0x seems fragile, but I think it will be fine. siwe message text shouldn't ever start with 0x
     let their_msg: Message = if payload.msg.starts_with("0x") {
         let their_msg_bytes = Bytes::from_str(&payload.msg).context("parsing payload message")?;
 
@@ -192,6 +179,7 @@ pub async fn user_login_post(
             .context("parsing string message")?
     };
 
+    // the only part of the message we will trust is their nonce
     // TODO: this is fragile. have a helper function/struct for redis keys
     let login_nonce_key = format!("login_nonce:{}", &their_msg.nonce);
 
@@ -204,15 +192,10 @@ pub async fn user_login_post(
 
     let our_msg: siwe::Message = our_msg.parse().context("parsing siwe message")?;
 
-    // TODO: info for now
-    info!(?our_msg, ?their_msg);
-
-    // let timestamp be automatic
-    // we don't need to check domain or nonce because we store the message safely locally
+    // default options are fine. the message includes timestamp and domain and nonce
     let verify_config = VerificationOpts::default();
 
-    // TODO: verify or verify_eip191?
-    // TODO: save this when we save the message type to redis? we still need to check both
+    // Check with both verify and verify_eip191
     if let Err(err_1) = our_msg
         .verify(&their_sig, &verify_config)
         .await
@@ -246,6 +229,7 @@ pub async fn user_login_post(
             // user does not exist yet
 
             // check the invite code
+            // TODO: more advanced invite codes that set different request/minute and concurrency limits
             if let Some(invite_code) = &app.config.invite_code {
                 if query.invite_code.as_ref() != Some(invite_code) {
                     return Err(anyhow::anyhow!("checking invite_code").into());
@@ -302,14 +286,14 @@ pub async fn user_login_post(
     // create a bearer token for the user.
     let bearer_token = Ulid::new();
 
-    let response_json = PostLoginResponse {
-        api_keys: uks
+    let response_json = json!({
+        "api_keys": uks
             .into_iter()
-            .map(|uk| (uk.id, uk.api_key.into()))
-            .collect(),
-        bearer_token,
-        user_id: u.id,
-    };
+            .map(|uk| (uk.id, uk))
+            .collect::<HashMap<_, _>>(),
+        "bearer_token": bearer_token,
+        "user_id": u.id,
+    });
 
     let response = (status_code, Json(response_json)).into_response();
 
@@ -443,11 +427,28 @@ pub async fn user_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
-    let user = ProtectedAction::UserKeysGet
+    let user = ProtectedAction::UserKeys
         .authorize(app.as_ref(), bearer_token)
         .await?;
 
-    todo!("user_keys_get");
+    let db_conn = app.db_conn().context("getting db to fetch user's keys")?;
+
+    let uks = user_keys::Entity::find()
+        .filter(user_keys::Column::UserId.eq(user.id))
+        .all(&db_conn)
+        .await
+        .context("failed loading user's key")?;
+
+    // TODO: stricter type on this?
+    let response_json = json!({
+        "api_keys": uks
+            .into_iter()
+            .map(|uk| (uk.id, uk))
+            .collect::<HashMap::<_, _>>(),
+        "user_id": user.id,
+    });
+
+    Ok(Json(response_json).into_response())
 }
 
 /// `POST /user/keys` -- Use a bearer token to create a new key or modify an existing key.
@@ -520,7 +521,7 @@ pub async fn user_stats_aggregate_get(
 /// Handle authorization for a given address and bearer token.
 // TODO: what roles should exist?
 enum ProtectedAction {
-    UserKeysGet,
+    UserKeys,
     UserProfilePost(Address),
 }
 
@@ -561,7 +562,7 @@ impl ProtectedAction {
             .context("unknown user id")?;
 
         match self {
-            Self::UserKeysGet => {
+            Self::UserKeys => {
                 // no extra checks needed. bearer token gave us a user
             }
             Self::UserProfilePost(primary_address) => {
