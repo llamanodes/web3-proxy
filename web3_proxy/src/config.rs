@@ -51,6 +51,7 @@ pub struct TopConfig {
 #[serde(deny_unknown_fields)]
 pub struct AppConfig {
     /// Request limit for allowed origins for anonymous users.
+    /// These requests get rate limited by IP.
     pub allowed_origin_requests_per_minute: HashMap<String, u64>,
 
     /// EVM chain id. 1 for ETH
@@ -78,6 +79,11 @@ pub struct AppConfig {
     /// None = no code needed
     pub invite_code: Option<String>,
 
+    /// Rate limit for the login entrypoint.
+    /// This is separate from the rpc limits.
+    #[serde(default = "default_login_rate_limit_per_minute")]
+    pub login_rate_limit_per_minute: u64,
+
     /// The soft limit prevents thundering herds as new blocks are seen.
     #[serde(default = "default_min_sum_soft_limit")]
     pub min_sum_soft_limit: u32,
@@ -86,30 +92,17 @@ pub struct AppConfig {
     #[serde(default = "default_min_synced_rpcs")]
     pub min_synced_rpcs: usize,
 
-    /// Request limit for anonymous users.
-    /// Some(0) = block all requests
-    /// None = allow all requests
-    #[serde(default = "default_public_requests_per_minute")]
-    pub public_requests_per_minute: Option<u64>,
-
     /// Concurrent request limit for anonymous users.
     /// Some(0) = block all requests
     /// None = allow all requests
     #[serde(default = "default_public_max_concurrent_requests")]
     pub public_max_concurrent_requests: Option<usize>,
 
-    /// Rate limit for the login entrypoint.
-    /// This is separate from the rpc limits.
-    #[serde(default = "default_login_rate_limit_per_minute")]
-    pub login_rate_limit_per_minute: u64,
-
-    /// Track rate limits in a redis (or compatible backend)
-    /// It is okay if this data is lost.
-    pub volatile_redis_url: Option<String>,
-
-    /// maximum size of the connection pool for the cache
-    /// If none, the minimum * 2 is used
-    pub volatile_redis_max_connections: Option<usize>,
+    /// Request limit for anonymous users.
+    /// Some(0) = block all requests
+    /// None = allow all requests
+    #[serde(default = "default_public_requests_per_minute")]
+    pub public_requests_per_minute: Option<u64>,
 
     /// RPC responses are cached locally
     #[serde(default = "default_response_cache_max_bytes")]
@@ -123,6 +116,14 @@ pub struct AppConfig {
 
     /// Optionally send errors to <https://sentry.io>
     pub sentry_url: Option<String>,
+
+    /// Track rate limits in a redis (or compatible backend)
+    /// It is okay if this data is lost.
+    pub volatile_redis_url: Option<String>,
+
+    /// maximum size of the connection pool for the cache
+    /// If none, the minimum * 2 is used
+    pub volatile_redis_max_connections: Option<usize>,
 }
 
 /// This might cause a thundering herd!
