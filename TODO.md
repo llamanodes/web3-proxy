@@ -249,6 +249,7 @@ These are roughly in order of completition
   - but block numbers count is maxed out (10k)
   - and block hashes count is tiny (83)
   - what is going on?
+- [ ] after adding semaphores (or maybe something else), CPU load seems a lot higher. investigate
 
 ## V1
 
