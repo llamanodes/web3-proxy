@@ -56,7 +56,7 @@ async fn get_user_id_from_params(
 /// only allow user_key to be set if user_id is also set.
 /// this will keep people from reading someone else's keys.
 /// 0 means none.
-fn get_user_key_id_from_params(
+pub fn get_user_key_id_from_params(
     user_id: u64,
     params: &HashMap<String, String>,
 ) -> anyhow::Result<u64> {
@@ -74,7 +74,7 @@ fn get_user_key_id_from_params(
     }
 }
 
-fn get_chain_id_from_params(
+pub fn get_chain_id_from_params(
     app: &Web3ProxyApp,
     params: &HashMap<String, String>,
 ) -> anyhow::Result<u64> {
@@ -88,7 +88,7 @@ fn get_chain_id_from_params(
     )
 }
 
-fn get_query_start_from_params(
+pub fn get_query_start_from_params(
     params: &HashMap<String, String>,
 ) -> anyhow::Result<chrono::NaiveDateTime> {
     params.get("query_start").map_or_else(
@@ -111,7 +111,7 @@ fn get_query_start_from_params(
     )
 }
 
-fn get_page_from_params(params: &HashMap<String, String>) -> anyhow::Result<u64> {
+pub fn get_page_from_params(params: &HashMap<String, String>) -> anyhow::Result<u64> {
     params.get("page").map_or_else::<anyhow::Result<u64>, _, _>(
         || {
             // no page in params. set default
@@ -127,7 +127,9 @@ fn get_page_from_params(params: &HashMap<String, String>) -> anyhow::Result<u64>
     )
 }
 
-fn get_query_window_seconds_from_params(params: &HashMap<String, String>) -> anyhow::Result<u64> {
+pub fn get_query_window_seconds_from_params(
+    params: &HashMap<String, String>,
+) -> anyhow::Result<u64> {
     params.get("query_window_seconds").map_or_else(
         || {
             // no page in params. set default
@@ -179,12 +181,6 @@ pub async fn get_aggregate_rpc_stats_from_params(
         serde_json::to_value(query_start.timestamp() as u64)?,
     );
 
-    if query_window_seconds != 0 {
-        response.insert(
-            "query_window_seconds",
-            serde_json::to_value(query_window_seconds)?,
-        );
-    }
     // TODO: how do we get count reverts compared to other errors? does it matter? what about http errors to our users?
     // TODO: how do we count uptime?
     let q = rpc_accounting::Entity::find()
@@ -449,146 +445,6 @@ pub async fn get_detailed_stats(
     };
 
     let q = q.filter(condition);
-
-    // log query here. i think sea orm has a useful log level for this
-
-    // TODO: transform this into a nested hashmap instead of a giant table?
-    let r = q
-        .into_json()
-        .paginate(&db_conn, page_size)
-        .fetch_page(page)
-        .await?;
-
-    response.insert("detailed_aggregate", serde_json::Value::Array(r));
-
-    // number of keys
-    // number of secondary keys
-    // avg and max concurrent requests per second per api key
-
-    Ok(response)
-}
-
-/// revert logs for a single key
-///
-/// TODO: take a "timebucket" duration in minutes that will make a more advanced
-pub async fn get_revert_logs(
-    app: &Web3ProxyApp,
-    bearer: Option<TypedHeader<Authorization<Bearer>>>,
-    params: HashMap<String, String>,
-) -> anyhow::Result<HashMap<&str, serde_json::Value>> {
-    let db_conn = app.db_conn().context("connecting to db")?;
-    let redis_conn = app.redis_conn().await.context("connecting to redis")?;
-
-    let user_id = get_user_id_from_params(redis_conn, bearer, &params).await?;
-    let user_key_id = get_user_key_id_from_params(user_id, &params)?;
-    let chain_id = get_chain_id_from_params(app, &params)?;
-    let query_start = get_query_start_from_params(&params)?;
-    let query_window_seconds = get_query_window_seconds_from_params(&params)?;
-    let page = get_page_from_params(&params)?;
-    let page_size = get_page_from_params(&params)?;
-
-    let mut response = HashMap::new();
-
-    response.insert("page", serde_json::to_value(page)?);
-    response.insert("page_size", serde_json::to_value(page_size)?);
-    response.insert("chain_id", serde_json::to_value(chain_id)?);
-    response.insert(
-        "query_start",
-        serde_json::to_value(query_start.timestamp() as u64)?,
-    );
-
-    if query_window_seconds != 0 {
-        response.insert(
-            "query_window_seconds",
-            serde_json::to_value(query_window_seconds)?,
-        );
-    }
-
-    // TODO: how do we get count reverts compared to other errors? does it matter? what about http errors to our users?
-    // TODO: how do we count uptime?
-    let q = rpc_accounting::Entity::find()
-        .select_only()
-        // groups
-        .column(rpc_accounting::Column::ErrorResponse)
-        .group_by(rpc_accounting::Column::ErrorResponse)
-        .column(rpc_accounting::Column::Method)
-        .group_by(rpc_accounting::Column::Method)
-        // aggregate columns
-        .column_as(
-            rpc_accounting::Column::FrontendRequests.sum(),
-            "total_requests",
-        )
-        .column_as(
-            rpc_accounting::Column::CacheMisses.sum(),
-            "total_cache_misses",
-        )
-        .column_as(rpc_accounting::Column::CacheHits.sum(), "total_cache_hits")
-        .column_as(
-            rpc_accounting::Column::BackendRetries.sum(),
-            "total_backend_retries",
-        )
-        .column_as(
-            rpc_accounting::Column::SumResponseBytes.sum(),
-            "total_response_bytes",
-        )
-        .column_as(
-            // TODO: can we sum bools like this?
-            rpc_accounting::Column::ErrorResponse.sum(),
-            "total_error_responses",
-        )
-        .column_as(
-            rpc_accounting::Column::SumResponseMillis.sum(),
-            "total_response_millis",
-        )
-        // TODO: order on method next?
-        .order_by_asc(rpc_accounting::Column::PeriodDatetime.min());
-
-    let condition = Condition::all().add(rpc_accounting::Column::PeriodDatetime.gte(query_start));
-
-    let (condition, q) = if chain_id.is_zero() {
-        // fetch all the chains. don't filter
-        // TODO: wait. do we want chain id on the logs? we can get that by joining key
-        let q = q
-            .column(rpc_accounting::Column::ChainId)
-            .group_by(rpc_accounting::Column::ChainId);
-
-        (condition, q)
-    } else {
-        let condition = condition.add(rpc_accounting::Column::ChainId.eq(chain_id));
-
-        (condition, q)
-    };
-
-    let (condition, q) = if user_id == 0 {
-        // 0 means everyone. don't filter on user
-        (condition, q)
-    } else {
-        // TODO: move authentication here?
-        // TODO: what about keys where this user is a secondary user?
-        let q = q
-            .join(
-                JoinType::InnerJoin,
-                rpc_accounting::Relation::UserKeys.def(),
-            )
-            .column(user_keys::Column::UserId)
-            // no need to group_by user_id when we are grouping by key_id
-            // .group_by(user_keys::Column::UserId)
-            .column(user_keys::Column::Id)
-            .group_by(user_keys::Column::Id);
-
-        let condition = condition.add(user_keys::Column::UserId.eq(user_id));
-
-        if user_key_id != 0 {
-            todo!("wip");
-        }
-
-        (condition, q)
-    };
-
-    let q = q.filter(condition);
-
-    // TODO: enum between searching on user_key_id on user_id
-    // TODO: handle secondary users, too
 
     // log query here. i think sea orm has a useful log level for this
 

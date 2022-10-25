@@ -4,12 +4,14 @@ use super::errors::FrontendErrorResponse;
 use crate::app::{UserKeyData, Web3ProxyApp};
 use crate::jsonrpc::JsonRpcRequest;
 use anyhow::Context;
+use axum::headers::authorization::Bearer;
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::TypedHeader;
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
-use entities::user_keys;
+use entities::{user, user_keys};
 use ipnet::IpNet;
+use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
 use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
@@ -25,7 +27,7 @@ use uuid::Uuid;
 /// This lets us use UUID and ULID while we transition to only ULIDs
 /// TODO: include the key's description.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub enum UserKey {
+pub enum RpcApiKey {
     Ulid(Ulid),
     Uuid(Uuid),
 }
@@ -104,13 +106,19 @@ impl RequestMetadata {
     }
 }
 
-impl UserKey {
+impl RpcApiKey {
     pub fn new() -> Self {
         Ulid::new().into()
     }
 }
 
-impl Display for UserKey {
+impl Default for RpcApiKey {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Display for RpcApiKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // TODO: do this without dereferencing
         let ulid: Ulid = (*self).into();
@@ -119,13 +127,7 @@ impl Display for UserKey {
     }
 }
 
-impl Default for UserKey {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FromStr for UserKey {
+impl FromStr for RpcApiKey {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -140,32 +142,32 @@ impl FromStr for UserKey {
     }
 }
 
-impl From<Ulid> for UserKey {
+impl From<Ulid> for RpcApiKey {
     fn from(x: Ulid) -> Self {
-        UserKey::Ulid(x)
+        RpcApiKey::Ulid(x)
     }
 }
 
-impl From<Uuid> for UserKey {
+impl From<Uuid> for RpcApiKey {
     fn from(x: Uuid) -> Self {
-        UserKey::Uuid(x)
+        RpcApiKey::Uuid(x)
     }
 }
 
-impl From<UserKey> for Ulid {
-    fn from(x: UserKey) -> Self {
+impl From<RpcApiKey> for Ulid {
+    fn from(x: RpcApiKey) -> Self {
         match x {
-            UserKey::Ulid(x) => x,
-            UserKey::Uuid(x) => Ulid::from(x.as_u128()),
+            RpcApiKey::Ulid(x) => x,
+            RpcApiKey::Uuid(x) => Ulid::from(x.as_u128()),
         }
     }
 }
 
-impl From<UserKey> for Uuid {
-    fn from(x: UserKey) -> Self {
+impl From<RpcApiKey> for Uuid {
+    fn from(x: RpcApiKey) -> Self {
         match x {
-            UserKey::Ulid(x) => Uuid::from_u128(x.0),
-            UserKey::Uuid(x) => x,
+            RpcApiKey::Ulid(x) => Uuid::from_u128(x.0),
+            RpcApiKey::Uuid(x) => x,
         }
     }
 }
@@ -298,7 +300,7 @@ pub async fn ip_is_authorized(
 
 pub async fn key_is_authorized(
     app: &Web3ProxyApp,
-    user_key: UserKey,
+    user_key: RpcApiKey,
     ip: IpAddr,
     origin: Option<Origin>,
     referer: Option<Referer>,
@@ -371,6 +373,47 @@ impl Web3ProxyApp {
         } else {
             Ok(None)
         }
+    }
+
+    /// Verify that the given bearer token and address are allowed to take the specified action.
+    /// This includes concurrent request limiting.
+    pub async fn bearer_is_authorized(
+        &self,
+        bearer: Bearer,
+    ) -> anyhow::Result<(user::Model, OwnedSemaphorePermit)> {
+        // limit concurrent requests
+        let semaphore = self
+            .bearer_token_semaphores
+            .get_with(bearer.token().to_string(), async move {
+                let s = Semaphore::new(self.config.bearer_token_max_concurrent_requests as usize);
+                Arc::new(s)
+            })
+            .await;
+
+        let semaphore_permit = semaphore.acquire_owned().await?;
+
+        // get the user id for this bearer token
+        // TODO: move redis key building to a helper function
+        let bearer_cache_key = format!("bearer:{}", bearer.token());
+
+        // get the attached address from redis for the given auth_token.
+        let mut redis_conn = self.redis_conn().await?;
+
+        let user_id: u64 = redis_conn
+            .get::<_, Option<u64>>(bearer_cache_key)
+            .await
+            .context("fetching bearer cache key from redis")?
+            .context("unknown bearer token")?;
+
+        // turn user id into a user
+        let db_conn = self.db_conn().context("Getting database connection")?;
+        let user = user::Entity::find_by_id(user_id)
+            .one(&db_conn)
+            .await
+            .context("fetching user from db by id")?
+            .context("unknown user id")?;
+
+        Ok((user, semaphore_permit))
     }
 
     pub async fn rate_limit_login(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
@@ -454,7 +497,7 @@ impl Web3ProxyApp {
     }
 
     // check the local cache for user data, or query the database
-    pub(crate) async fn user_data(&self, user_key: UserKey) -> anyhow::Result<UserKeyData> {
+    pub(crate) async fn user_data(&self, user_key: RpcApiKey) -> anyhow::Result<UserKeyData> {
         let user_data: Result<_, Arc<anyhow::Error>> = self
             .user_key_cache
             .try_get_with(user_key.into(), async move {
@@ -539,7 +582,7 @@ impl Web3ProxyApp {
         user_data.map_err(|err| anyhow::anyhow!(err))
     }
 
-    pub async fn rate_limit_by_key(&self, user_key: UserKey) -> anyhow::Result<RateLimitResult> {
+    pub async fn rate_limit_by_key(&self, user_key: RpcApiKey) -> anyhow::Result<RateLimitResult> {
         let user_data = self.user_data(user_key).await?;
 
         if user_data.user_key_id == 0 {

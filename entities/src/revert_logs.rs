@@ -15,6 +15,7 @@ pub struct Model {
     pub to: Vec<u8>,
     #[sea_orm(column_type = "Text", nullable)]
     pub call_data: Option<String>,
+    pub chain_id: u64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

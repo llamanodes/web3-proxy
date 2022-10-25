@@ -6,34 +6,34 @@ use sea_orm::{ActiveModelTrait, TransactionTrait};
 use tracing::info;
 use ulid::Ulid;
 use uuid::Uuid;
-use web3_proxy::frontend::authorization::UserKey;
+use web3_proxy::frontend::authorization::RpcApiKey;
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 /// Create a new user and api key
 #[argh(subcommand, name = "create_user")]
 pub struct CreateUserSubCommand {
-    #[argh(option)]
     /// the user's ethereum address or descriptive string.
     /// If a string is given, it will be converted to hex and potentially truncated.
     /// Users from strings are only for testing since they won't be able to log in.
+    #[argh(option)]
     address: String,
 
-    #[argh(option)]
     /// the user's optional email.
+    #[argh(option)]
     email: Option<String>,
 
-    #[argh(option, default = "UserKey::new()")]
     /// the user's first api ULID or UUID key.
     /// If none given, one will be created.
-    api_key: UserKey,
-
     #[argh(option)]
-    /// maximum requests per minute.
-    /// default to "None" which the code sees as "unlimited" requests.
+    api_key: RpcApiKey,
+
+    /// the key's maximum requests per minute.
+    /// Default to "None" which the code sees as "unlimited" requests.
+    #[argh(option)]
     rpm: Option<u64>,
 
+    /// an optional short description of the key's purpose.
     #[argh(option)]
-    /// a short description of the key's purpose
     description: Option<String>,
 }
 

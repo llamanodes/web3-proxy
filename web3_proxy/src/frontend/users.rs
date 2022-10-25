@@ -1,9 +1,13 @@
 //! Handle registration, logins, and managing account data.
 
-use super::authorization::{login_is_authorized, UserKey};
+use super::authorization::{login_is_authorized, RpcApiKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
-use crate::user_queries::{get_aggregate_rpc_stats_from_params, get_detailed_stats};
+use crate::user_queries::{
+    get_aggregate_rpc_stats_from_params, get_detailed_stats, get_page_from_params,
+    get_query_window_seconds_from_params,
+};
+use crate::user_queries::{get_chain_id_from_params, get_query_start_from_params};
 use anyhow::Context;
 use axum::{
     extract::{Path, Query},
@@ -13,12 +17,15 @@ use axum::{
 };
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
-use entities::{user, user_keys};
+use entities::{revert_logs, user, user_keys};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;
 use redis_rate_limiter::redis::AsyncCommands;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, TransactionTrait,
+};
 use serde::Deserialize;
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
@@ -42,23 +49,21 @@ use ulid::Ulid;
 /// This is the initial entrypoint for logging in. Take the response from this endpoint and give it to your user's wallet for singing. POST the response to `/user/login`.
 ///
 /// Rate limited by IP address.
+///
+/// At first i thought about checking that user_address is in our db,
+/// But theres no need to separate the registration and login flows.
+/// It is a better UX to just click "login with ethereum" and have the account created if it doesn't exist.
+/// We can prompt for an email and and payment after they log in.
 #[debug_handler]
 pub async fn user_login_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
     // TODO: what does axum's error handling look like if the path fails to parse?
-    // TODO: allow ENS names here?
     Path(mut params): Path<HashMap<String, String>>,
 ) -> FrontendResult {
     login_is_authorized(&app, ip).await?;
 
-    // at first i thought about checking that user_address is in our db
-    // but theres no need to separate the registration and login flows
-    // its a better UX to just click "login with ethereum" and have the account created if it doesn't exist
-    // we can prompt for an email and and payment after they log in
-
     // create a message and save it in redis
-
     // TODO: how many seconds? get from config?
     let expire_seconds: usize = 20 * 60;
 
@@ -68,6 +73,7 @@ pub async fn user_login_get(
 
     let expiration_time = issued_at.add(Duration::new(expire_seconds as i64, 0));
 
+    // TODO: allow ENS names here?
     let user_address: Address = params
         .remove("user_address")
         // TODO: map_err so this becomes a 500. routing must be bad
@@ -249,12 +255,13 @@ pub async fn user_login_post(
 
             // create the user's first api key
             // TODO: rename to UserApiKey? RpcApiKey?
-            let user_key = UserKey::new();
+            let rpc_key = RpcApiKey::new();
 
             // TODO: variable requests per minute depending on the invite code
             let uk = user_keys::ActiveModel {
                 user_id: sea_orm::Set(u.id),
-                api_key: sea_orm::Set(user_key.into()),
+                api_key: sea_orm::Set(rpc_key.into()),
+                description: sea_orm::Set(Some("first".to_string())),
                 requests_per_minute: sea_orm::Set(app.config.default_user_requests_per_minute),
                 ..Default::default()
             };
@@ -286,13 +293,15 @@ pub async fn user_login_post(
     // create a bearer token for the user.
     let bearer_token = Ulid::new();
 
+    // json response with everything in it
+    // we could return just the bearer token, but I think they will always request api keys and the user profile
     let response_json = json!({
         "api_keys": uks
             .into_iter()
             .map(|uk| (uk.id, uk))
             .collect::<HashMap<_, _>>(),
         "bearer_token": bearer_token,
-        "user_id": u.id,
+        "user": u,
     });
 
     let response = (status_code, Json(response_json)).into_response();
@@ -302,9 +311,7 @@ pub async fn user_login_post(
     let bearer_redis_key = format!("bearer:{}", bearer_token);
 
     // expire in 4 weeks
-    // TODO: do this with a pipe
     // TODO: get expiration time from app config
-    // TODO: do we use this?
     redis_conn
         .set_ex(bearer_redis_key, u.id.to_string(), 2_419_200)
         .await?;
@@ -339,54 +346,8 @@ pub async fn user_logout_post(
 /// the JSON input to the `post_user` handler.
 #[derive(Deserialize)]
 pub struct UserProfilePost {
-    primary_address: Address,
-    new_primary_address: Option<Address>,
     // TODO: make sure the email address is valid. probably have a "verified" column in the database
     email: Option<String>,
-}
-
-/// `POST /user/profile` -- modify the account connected to the bearer token in the `Authentication` header.
-#[debug_handler]
-pub async fn user_profile_post(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
-    Json(payload): Json<UserProfilePost>,
-) -> FrontendResult {
-    let user = ProtectedAction::UserProfilePost(payload.primary_address)
-        .authorize(app.as_ref(), bearer_token)
-        .await?;
-
-    let mut user: user::ActiveModel = user.into();
-
-    // TODO: require a message from the new address to finish the change
-    if let Some(new_primary_address) = payload.new_primary_address {
-        if new_primary_address.is_zero() {
-            // TODO: allow this if some other authentication method is set
-            return Err(anyhow::anyhow!("cannot clear primary address").into());
-        } else {
-            let new_primary_address = Vec::from(new_primary_address.as_ref());
-
-            user.address = sea_orm::Set(new_primary_address)
-        }
-    }
-
-    if let Some(x) = payload.email {
-        // TODO: only Set if no change
-        if x.is_empty() {
-            user.email = sea_orm::Set(None);
-        } else {
-            // TODO: do some basic validation
-            // TODO: don't set immediatly, send a confirmation email first
-            user.email = sea_orm::Set(Some(x));
-        }
-    }
-
-    let db_conn = app.db_conn().context("Getting database connection")?;
-
-    user.save(&db_conn).await?;
-
-    // TODO: what should this return? the user?
-    Ok("success".into_response())
 }
 
 /// `GET /user/balance` -- Use a bearer token to get the user's balance and spend.
@@ -427,9 +388,7 @@ pub async fn user_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
-    let user = ProtectedAction::UserKeys
-        .authorize(app.as_ref(), bearer_token)
-        .await?;
+    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
 
     let db_conn = app.db_conn().context("getting db to fetch user's keys")?;
 
@@ -441,11 +400,11 @@ pub async fn user_keys_get(
 
     // TODO: stricter type on this?
     let response_json = json!({
-        "api_keys": uks
+        "user_id": user.id,
+        "user_rpc_keys": uks
             .into_iter()
             .map(|uk| (uk.id, uk))
             .collect::<HashMap::<_, _>>(),
-        "user_id": user.id,
     });
 
     Ok(Json(response_json).into_response())
@@ -463,17 +422,59 @@ pub async fn user_keys_post(
     todo!("user_keys_post");
 }
 
-/// `GET /user/profile` -- Use a bearer token to get the user's profile.
+/// `GET /user` -- Use a bearer token to get the user's profile.
 ///
 /// - the email address of a user if they opted in to get contacted via email
 ///
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
-pub async fn user_profile_get(
+pub async fn user_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
-    todo!("user_profile_get");
+    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
+
+    Ok(Json(user).into_response())
+}
+
+/// `POST /user` -- modify the account connected to the bearer token in the `Authentication` header.
+#[debug_handler]
+pub async fn user_post(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    Json(payload): Json<UserProfilePost>,
+) -> FrontendResult {
+    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
+
+    let mut user: user::ActiveModel = user.into();
+
+    // update the email address
+    if let Some(x) = payload.email {
+        // TODO: only Set if no change
+        if x.is_empty() {
+            user.email = sea_orm::Set(None);
+        } else {
+            // TODO: do some basic validation
+            // TODO: don't set immediatly, send a confirmation email first
+            // TODO: compare first? or is sea orm smart enough to do that for us?
+            user.email = sea_orm::Set(Some(x));
+        }
+    }
+
+    // TODO: what else can we update here? password hash? subscription to newsletter?
+
+    let user = if user.is_changed() {
+        let db_conn = app.db_conn().context("Getting database connection")?;
+
+        user.save(&db_conn).await?
+    } else {
+        // no changes. no need to touch the database
+        user
+    };
+
+    let user: user::Model = user.try_into().context("Returning updated user")?;
+
+    Ok(Json(user).into_response())
 }
 
 /// `GET /user/revert_logs` -- Use a bearer token to get the user's revert logs.
@@ -481,8 +482,54 @@ pub async fn user_profile_get(
 pub async fn user_revert_logs_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    todo!("user_revert_logs_get");
+    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
+
+    let chain_id = get_chain_id_from_params(app.as_ref(), &params)?;
+    let query_start = get_query_start_from_params(&params)?;
+    let page = get_page_from_params(&params)?;
+
+    // TODO: page size from config
+    let page_size = 200;
+
+    let mut response = HashMap::new();
+
+    response.insert("page", json!(page));
+    response.insert("page_size", json!(page_size));
+    response.insert("chain_id", json!(chain_id));
+    response.insert("query_start", json!(query_start.timestamp() as u64));
+
+    let db_conn = app.db_conn().context("getting db for user's revert logs")?;
+
+    let uks = user_keys::Entity::find()
+        .filter(user_keys::Column::UserId.eq(user.id))
+        .all(&db_conn)
+        .await
+        .context("failed loading user's key")?;
+
+    // TODO: only select the ids
+    let uks: Vec<_> = uks.into_iter().map(|x| x.id).collect();
+
+    // get paginated logs
+    let q = revert_logs::Entity::find()
+        .filter(revert_logs::Column::Timestamp.gte(query_start))
+        .filter(revert_logs::Column::UserKeyId.is_in(uks))
+        .order_by_asc(revert_logs::Column::Timestamp);
+
+    let q = if chain_id == 0 {
+        // don't do anything
+        q
+    } else {
+        // filter on chain id
+        q.filter(revert_logs::Column::ChainId.eq(chain_id))
+    };
+
+    let revert_logs = q.paginate(&db_conn, page_size).fetch_page(page).await?;
+
+    response.insert("revert_logs", json!(revert_logs));
+
+    Ok(Json(response).into_response())
 }
 
 /// `GET /user/stats/detailed` -- Use a bearer token to get the user's key stats such as bandwidth used and methods requested.
@@ -515,66 +562,4 @@ pub async fn user_stats_aggregate_get(
     let x = get_aggregate_rpc_stats_from_params(&app, bearer, params).await?;
 
     Ok(Json(x).into_response())
-}
-
-/// `GET /user/profile` -- Use a bearer token to get the user's profile such as their optional email address.
-/// Handle authorization for a given address and bearer token.
-// TODO: what roles should exist?
-enum ProtectedAction {
-    UserKeys,
-    UserProfilePost(Address),
-}
-
-impl ProtectedAction {
-    /// Verify that the given bearer token and address are allowed to take the specified action.
-    /// This includes concurrent request limiting.
-    async fn authorize(self, app: &Web3ProxyApp, bearer: Bearer) -> anyhow::Result<user::Model> {
-        // get the attached address from redis for the given auth_token.
-        let mut redis_conn = app.redis_conn().await?;
-
-        // limit concurrent requests
-        let semaphore = app
-            .bearer_token_semaphores
-            .get_with(bearer.token().to_string(), async move {
-                let s = Semaphore::new(app.config.bearer_token_max_concurrent_requests as usize);
-                Arc::new(s)
-            })
-            .await;
-        let _semaphore_permit = semaphore.acquire().await?;
-
-        // get the user id for this bearer token
-        // TODO: move redis key building to a helper function
-        let bearer_cache_key = format!("bearer:{}", bearer.token());
-
-        // TODO: move this to a helper function
-        let user_id: u64 = redis_conn
-            .get::<_, Option<u64>>(bearer_cache_key)
-            .await
-            .context("fetching bearer cache key from redis")?
-            .context("unknown bearer token")?;
-
-        // turn user id into a user
-        let db_conn = app.db_conn().context("Getting database connection")?;
-        let user = user::Entity::find_by_id(user_id)
-            .one(&db_conn)
-            .await
-            .context("fetching user from db by id")?
-            .context("unknown user id")?;
-
-        match self {
-            Self::UserKeys => {
-                // no extra checks needed. bearer token gave us a user
-            }
-            Self::UserProfilePost(primary_address) => {
-                let user_address = Address::from_slice(&user.address);
-
-                if user_address != primary_address {
-                    // TODO: check secondary users
-                    return Err(anyhow::anyhow!("user address mismatch"));
-                }
-            }
-        }
-
-        Ok(user)
-    }
 }

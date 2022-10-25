@@ -30,7 +30,6 @@ impl MigrationTrait for Migration {
             .alter_table(
                 sea_query::Table::alter()
                     .table(UserKeys::Table)
-                    .to_owned()
                     .drop_column(UserKeys::MaxConcurrentRequests)
                     .to_owned(),
             )
