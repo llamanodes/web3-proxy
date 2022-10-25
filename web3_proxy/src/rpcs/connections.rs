@@ -671,7 +671,7 @@ impl Web3Connections {
                     if let Some(request_metadata) = request_metadata {
                         request_metadata
                             .backend_requests
-                            .fetch_add(active_request_handles.len() as u32, Ordering::Release);
+                            .fetch_add(active_request_handles.len() as u64, Ordering::Release);
                     }
 
                     let quorum_response = self

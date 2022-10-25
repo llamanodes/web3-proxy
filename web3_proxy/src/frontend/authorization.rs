@@ -15,7 +15,7 @@ use redis_rate_limiter::RedisRateLimitResult;
 use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::fmt::Display;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
@@ -64,8 +64,8 @@ pub struct RequestMetadata {
     pub period_seconds: u64,
     pub request_bytes: u64,
     /// if this is 0, there was a cache_hit
-    pub backend_requests: AtomicU32,
-    pub no_servers: AtomicU32,
+    pub backend_requests: AtomicU64,
+    pub no_servers: AtomicU64,
     pub error_response: AtomicBool,
     pub response_bytes: AtomicU64,
     pub response_millis: AtomicU64,

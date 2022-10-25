@@ -56,7 +56,14 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(SecondaryUser::Email).string())
                     .col(
                         ColumnDef::new(SecondaryUser::Role)
-                            .enumeration("role", ["owner", "admin", "collaborator"])
+                            .enumeration(
+                                Alias::new("role"),
+                                [
+                                    Alias::new("owner"),
+                                    Alias::new("admin"),
+                                    Alias::new("collaborator"),
+                                ],
+                            )
                             .not_null(),
                     )
                     .index(sea_query::Index::create().col(SecondaryUser::Address))

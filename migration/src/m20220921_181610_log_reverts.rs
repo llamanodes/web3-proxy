@@ -55,8 +55,12 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(RevertLogs::Method)
                             .enumeration(
-                                "method",
-                                ["eth_call", "eth_estimateGas", "eth_sendRawTransaction"],
+                                Alias::new("method"),
+                                [
+                                    Alias::new("eth_call"),
+                                    Alias::new("eth_estimateGas"),
+                                    Alias::new("eth_sendRawTransaction"),
+                                ],
                             )
                             .not_null(),
                     )

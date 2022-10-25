@@ -111,22 +111,20 @@ fn get_query_start_from_params(
     )
 }
 
-fn get_page_from_params(params: &HashMap<String, String>) -> anyhow::Result<usize> {
-    params
-        .get("page")
-        .map_or_else::<anyhow::Result<usize>, _, _>(
-            || {
-                // no page in params. set default
-                Ok(0)
-            },
-            |x: &String| {
-                // parse the given timestamp
-                // TODO: error code 401
-                let x = x.parse().context("parsing page query from params")?;
+fn get_page_from_params(params: &HashMap<String, String>) -> anyhow::Result<u64> {
+    params.get("page").map_or_else::<anyhow::Result<u64>, _, _>(
+        || {
+            // no page in params. set default
+            Ok(0)
+        },
+        |x: &String| {
+            // parse the given timestamp
+            // TODO: error code 401
+            let x = x.parse().context("parsing page query from params")?;
 
-                Ok(x)
-            },
-        )
+            Ok(x)
+        },
+    )
 }
 
 fn get_query_window_seconds_from_params(params: &HashMap<String, String>) -> anyhow::Result<u64> {

@@ -9,7 +9,7 @@ use moka::future::{Cache, CacheBuilder};
 use sea_orm::{ActiveModelTrait, DatabaseConnection};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::{sync::atomic::AtomicU32, time::Duration};
+use std::time::Duration;
 use tokio::sync::{broadcast, Mutex as AsyncMutex};
 use tokio::task::JoinHandle;
 use tracing::{error, info, trace};
@@ -24,7 +24,7 @@ pub struct ProxyResponseStat {
     period_timestamp: u64,
     request_bytes: u64,
     /// if this is 0, there was a cache_hit
-    backend_requests: u32,
+    backend_requests: u64,
     error_response: bool,
     response_bytes: u64,
     response_millis: u64,
@@ -61,12 +61,12 @@ pub struct ProxyResponseAggregate {
     // error_response: bool,
     // TODO: this is the grandparent key. get it from there somehow
     period_timestamp: u64,
-    frontend_requests: AtomicU32,
-    backend_requests: AtomicU32,
-    backend_retries: AtomicU32,
-    no_servers: AtomicU32,
-    cache_misses: AtomicU32,
-    cache_hits: AtomicU32,
+    frontend_requests: AtomicU64,
+    backend_requests: AtomicU64,
+    backend_retries: AtomicU64,
+    no_servers: AtomicU64,
+    cache_misses: AtomicU64,
+    cache_hits: AtomicU64,
     sum_request_bytes: AtomicU64,
     sum_response_bytes: AtomicU64,
     sum_response_millis: AtomicU64,
