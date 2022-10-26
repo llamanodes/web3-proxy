@@ -14,9 +14,12 @@ pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> U64 {
             // modified is false because we want the backend to see "pending"
             U64::zero()
         }
+        BlockNumber::Finalized => {
+            warn!("finalized block requested! not yet implemented!");
+            latest_block - 10
+        }
         BlockNumber::Latest => {
             // change "latest" to a number
-            // modified is true because we want the backend to see the height and not "latest"
             latest_block
         }
         BlockNumber::Number(x) => {
@@ -25,8 +28,11 @@ pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> U64 {
         }
         BlockNumber::Pending => {
             // TODO: think more about how to handle Pending
-            // modified is false because we want the backend to see "pending"
             latest_block
+        }
+        BlockNumber::Safe => {
+            warn!("finalized block requested! not yet implemented!");
+            latest_block - 3
         }
     }
 }
@@ -134,7 +140,8 @@ pub async fn block_needed(
 
                 let block_num = block_num_to_u64(block_num, head_block_num);
 
-                *x = serde_json::to_value(block_num).expect("U64 can always be a serde_json::Value");
+                *x =
+                    serde_json::to_value(block_num).expect("U64 can always be a serde_json::Value");
 
                 // TODO: maybe don't return. instead check toBlock too?
                 // TODO: if there is a very wide fromBlock and toBlock, we need to check that our rpcs have both!

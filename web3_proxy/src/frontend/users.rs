@@ -363,7 +363,6 @@ pub async fn user_get(
 /// the JSON input to the `post_user` handler.
 #[derive(Deserialize)]
 pub struct UserPost {
-    // TODO: make sure the email address is valid. probably have a "verified" column in the database
     email: Option<String>,
 }
 
@@ -419,6 +418,8 @@ pub async fn user_balance_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
+    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+
     todo!("user_balance_get");
 }
 
@@ -432,8 +433,10 @@ pub async fn user_balance_get(
 #[debug_handler]
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
+    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+
     todo!("user_balance_post");
 }
 
@@ -443,9 +446,9 @@ pub async fn user_balance_post(
 #[debug_handler]
 pub async fn user_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
+    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     let db_conn = app.db_conn().context("getting db to fetch user's keys")?;
 
@@ -492,10 +495,10 @@ pub struct UserKeysPost {
 #[debug_handler]
 pub async fn user_keys_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<UserKeysPost>,
 ) -> FrontendResult {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
+    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     let db_conn = app.db_conn().context("getting db for user's keys")?;
 
@@ -667,10 +670,10 @@ pub async fn user_keys_post(
 #[debug_handler]
 pub async fn user_revert_logs_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
+    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     let chain_id = get_chain_id_from_params(app.as_ref(), &params)?;
     let query_start = get_query_start_from_params(&params)?;

@@ -194,9 +194,8 @@ These are roughly in order of completition
 - [x] config to allow origins even on the anonymous endpoints
 - [x] send logs to sentry
 - [x] login should return the user id
-- [-] ability to domain lock or ip lock said key
-  - the code to check the database and use these entries already exists, but users don't have a way to set them
-- [-] new endpoints for users (not totally sure about the exact paths, but these features are all needed):
+- [x] when we show keys, also show the key's id
+- [x] new endpoints for users (not totally sure about the exact paths, but these features are all needed):
   - [x] sign in
   - [x] sign out
   - [x] GET profile endpoint
@@ -205,13 +204,12 @@ These are roughly in order of completition
     - [x] display distribution of methods per api key (eth_call, eth_getLogs, etc.) (only with authentication!)
   - [x] get aggregate stats endpoint
     - [x] display requests per second per api key (only with authentication!)
-  - [ ] POST key endpoint
-    - [ ] generate a new key from a web endpoint
-    - [ ] modifying key settings such as private relay, revert logging, ip/origin/etc checks
+  - [x] POST key endpoint
+    - [x] generate a new key from a web endpoint
+    - [x] modifying key settings such as private relay, revert logging, ip/origin/etc checks
   - [x] GET logged reverts on an endpoint that **requires authentication**.
 - [ ] add config for concurrent requests from public requests
-- [ ] per-user stats should probably be locked behind authentication. the code is written but disabled for easy development
-  - if we do this, we should also have an admin-only endpoint for seeing these for support requests
+- [ ] document url params with examples
 - [ ] display concurrent requests per api key (only with authentication!)
 - [ ] endpoint for creating/modifying api keys and their advanced security features
 - [ ] include if archive query or not in the stats
@@ -222,13 +220,7 @@ These are roughly in order of completition
 - [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
   - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
-- [ ] document url params with examples
 - [ ] endpoint to list keys without having to sign a message to log in again
-- [ ] when we show keys, also show the key's id
-- [ ] WARN http_request:request: web3_proxy::block_number: could not get block from params err=unexpected params length id=01GF4HTRKM4JV6NX52XSF9AYMW method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })
-- ERROR http_request:request:try_send_all_upstream_servers: web3_proxy::rpcs::request: bad response! err=JsonRpcClientError(JsonRpcError(JsonRpcError { code: -32000, message: "INTERNAL_ERROR: existing tx with same hash", data: None })) method=eth_sendRawTransaction rpc=local_erigon_alpha_archive id=01GF4HV03Y4ZNKQV8DW5NDQ5CG method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 }) self=Web3Connections { conns: {"local_erigon_alpha_archive_ws": Web3Connection { name: "local_erigon_alpha_archive_ws", blocks: "all", .. }, "local_geth_ws": Web3Connection { name: "local_geth_ws", blocks: 64, .. }, "local_erigon_alpha_archive": Web3Connection { name: "local_erigon_alpha_archive", blocks: "all", .. }}, .. } authorized_request=Some(User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })) request=JsonRpcRequest { id: RawValue(39), method: "eth_sendRawTransaction", .. } request_metadata=Some(RequestMetadata { datetime: 2022-10-11T22:14:57.406829095Z, period_seconds: 60, request_bytes: 633, backend_requests: 0, no_servers: 0, error_response: false, response_bytes: 0, response_millis: 0 }) block_needed=None
-  - why is it failing to get the block from params when its set to None? That should be the simple case
-- [ ] if user-specific caches have evictions that aren't from timeouts, log a warning
 - [ ] make the "not synced" error more verbose
   - I think there is a bug in our synced_rpcs filtering. likely in has_block_data
   - seeing "not synced" when I load https://vfat.tools/esd/
@@ -241,16 +233,6 @@ These are roughly in order of completition
 - [ ] if no bearer token found in redis (likely because it expired), send 401 unauthorized
 - [ ] user create script should allow multiple keys per user
 - [ ] somehow the proxy thought latest was hours behind. need internal health check that forces reconnect if this happens
-- [ ] WARN http_request: web3_proxy::frontend::errors: anyhow err=UserKey was not a ULID or UUID id=01GER4VBTS0FDHEBR96D1JRDZF method=POST
-  - if invalid user id given, we give a 500. should be a different error code instead
-- [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
-- [ ] BUG? WARN web3_proxy::rpcs::blockchain: Missing connection_head_block in block_hashes. Fetching now connection_head_hash=0x4b7a…14b5 conn_name=local_erigon_alpha_archive rpc=local_erigon_alpha_archive
-  - i see this a lot more than expected. why is it happening so much? better logs needed
-- [ ] from what i thought, /status should show hashes > numbers!
-  - but block numbers count is maxed out (10k)
-  - and block hashes count is tiny (83)
-  - what is going on? when the server fist launches they are in sync
-- [ ] after adding semaphores (or maybe something else), CPU load seems a lot higher. investigate
 - [ ] Ulid instead of Uuid for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
 - [ ] add pruning or aggregating or something to log revert trace. otherwise our databases are going to grow really big
@@ -260,6 +242,25 @@ These are roughly in order of completition
 
 These are not yet ordered.
 
+- [ ] BUG! if sending transactions gets "INTERNAL_ERROR: existing tx with same hash", fake a success message
+  - ERROR http_request:request:try_send_all_upstream_servers: web3_proxy::rpcs::request: bad response! err=JsonRpcClientError(JsonRpcError(JsonRpcError { code: -32000, message: "INTERNAL_ERROR: existing tx with same hash", data: None })) method=eth_sendRawTransaction rpc=local_erigon_alpha_archive id=01GF4HV03Y4ZNKQV8DW5NDQ5CG method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 }) self=Web3Connections { conns: {"local_erigon_alpha_archive_ws": Web3Connection { name: "local_erigon_alpha_archive_ws", blocks: "all", .. }, "local_geth_ws": Web3Connection { name: "local_geth_ws", blocks: 64, .. }, "local_erigon_alpha_archive": Web3Connection { name: "local_erigon_alpha_archive", blocks: "all", .. }}, .. } authorized_request=Some(User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })) request=JsonRpcRequest { id: RawValue(39), method: "eth_sendRawTransaction", .. } request_metadata=Some(RequestMetadata { datetime: 2022-10-11T22:14:57.406829095Z, period_seconds: 60, request_bytes: 633, backend_requests: 0, no_servers: 0, error_response: false, response_bytes: 0, response_millis: 0 }) block_needed=None
+- [ ] BUG? WARN http_request:request: web3_proxy::block_number: could not get block from params err=unexpected params length id=01GF4HTRKM4JV6NX52XSF9AYMW method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })
+  - why is it failing to get the block from params when its set to None? That should be the simple case
+- [ ] BUG: i think if all backend servers stop, the server doesn't properly reconnect. It appears to stop listening on 8854, but not shut down.
+- [ ] if user-specific caches have evictions that aren't from timeouts, log a warning
+- [ ] make sure the email address is valid. probably have a "verified" column in the database
+- [ ] if invalid user id given, we give a 500. should be a different error code instead
+  - WARN http_request: web3_proxy::frontend::errors: anyhow err=UserKey was not a ULID or UUID id=01GER4VBTS0FDHEBR96D1JRDZF method=POST
+- [ ] admin-only endpoint for seeing a user's stats for support requests
+- [ ] from what i thought, /status should show hashes > numbers!
+  - but block numbers count is maxed out (10k)
+  - and block hashes count is tiny (83)
+  - what is going on? when the server fist launches they are in sync
+  - [ ] related BUG? WARN web3_proxy::rpcs::blockchain: Missing connection_head_block in block_hashes. Fetching now connection_head_hash=0x4b7a…14b5 conn_name=local_erigon_alpha_archive rpc=local_erigon_alpha_archive
+  - i see this a lot more than expected. why is it happening so much? better logs needed
+
+- [ ] after adding semaphores (or maybe something else), CPU load seems a lot higher. investigate
+- [ ] proper support for Finalized and Safe block queries
 - [ ] admin-only page for viewing user stat pages
 - [ ] geth sometimes gives an empty response instead of an error response. figure out a good way to catch this and not serve it
 - [ ] GET balance endpoint
@@ -463,3 +464,4 @@ in another repo: event subscriber
 - [ ] having tons of worker threads can actually make us slower if they keep waking to steal work from eachother. need benchmarks
 - [ ] change the wrk data to log requests and errors to a file
 - [ ] if redis is not set and login page is visited, users get a 502. should be 501
+- [ ] allow passing the authorization header to the anonymous rpc endpoint

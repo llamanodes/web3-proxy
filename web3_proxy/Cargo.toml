@@ -30,7 +30,7 @@ chrono = "0.4.22"
 counter = "0.5.7"
 derive_more = "0.99.17"
 dotenv = "0.15.0"
-ethers = { version = "0.17.0", features = ["rustls", "ws"] }
+ethers = { version = "1.0.0", features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 flume = "0.10.14"
 futures = { version = "0.3.25", features = ["thread-pool"] }
