@@ -199,20 +199,20 @@ These are roughly in order of completition
 - [-] new endpoints for users (not totally sure about the exact paths, but these features are all needed):
   - [x] sign in
   - [x] sign out
-  - [-] GET profile endpoint
-  - [-] POST profile endpoint
+  - [x] GET profile endpoint
+  - [x] POST profile endpoint
   - [x] GET stats endpoint
-    - [x] display requests per second per api key (only with authentication!)
-    - [x] display concurrent requests per api key (only with authentication!)
     - [x] display distribution of methods per api key (eth_call, eth_getLogs, etc.) (only with authentication!)
   - [x] get aggregate stats endpoint
+    - [x] display requests per second per api key (only with authentication!)
   - [ ] POST key endpoint
     - [ ] generate a new key from a web endpoint
     - [ ] modifying key settings such as private relay, revert logging, ip/origin/etc checks
-  - [ ] GET logged reverts on an endpoint that **requires authentication**.
+  - [x] GET logged reverts on an endpoint that **requires authentication**.
 - [ ] add config for concurrent requests from public requests
 - [ ] per-user stats should probably be locked behind authentication. the code is written but disabled for easy development
   - if we do this, we should also have an admin-only endpoint for seeing these for support requests
+- [ ] display concurrent requests per api key (only with authentication!)
 - [ ] endpoint for creating/modifying api keys and their advanced security features
 - [ ] include if archive query or not in the stats
   - this is already partially done, but we need to double check it works. preferrably with tests
@@ -249,10 +249,12 @@ These are roughly in order of completition
 - [ ] from what i thought, /status should show hashes > numbers!
   - but block numbers count is maxed out (10k)
   - and block hashes count is tiny (83)
-  - what is going on?
+  - what is going on? when the server fist launches they are in sync
 - [ ] after adding semaphores (or maybe something else), CPU load seems a lot higher. investigate
 - [ ] Ulid instead of Uuid for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
+- [ ] add pruning or aggregating or something to log revert trace. otherwise our databases are going to grow really big
+  - [ ] after adding this, allow posting to /user/keys to turn on revert logging
 
 ## V1
 

@@ -5,16 +5,16 @@ use crate::app::{UserKeyData, Web3ProxyApp};
 use crate::jsonrpc::JsonRpcRequest;
 use anyhow::Context;
 use axum::headers::authorization::Bearer;
-use axum::headers::{Origin, Referer, UserAgent};
+use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::TypedHeader;
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::{user, user_keys};
+use http::HeaderValue;
 use ipnet::IpNet;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
 use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use serde::Serialize;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::{net::IpAddr, str::FromStr, sync::Arc};
@@ -47,10 +47,10 @@ pub enum RateLimitResult {
     UnknownKey,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct AuthorizedKey {
     pub ip: IpAddr,
-    pub origin: Option<String>,
+    pub origin: Option<Origin>,
     pub user_id: u64,
     pub user_key_id: u64,
     // TODO: just use an f32? even an f16 is probably fine
@@ -191,16 +191,12 @@ impl AuthorizedKey {
         }
 
         // check origin
-        // TODO: do this with the Origin type instead of a String?
-        let origin = origin.map(|x| x.to_string());
         match (&origin, &user_key_data.allowed_origins) {
             (None, None) => {}
             (Some(_), None) => {}
             (None, Some(_)) => return Err(anyhow::anyhow!("Origin required")),
             (Some(origin), Some(allowed_origins)) => {
-                let origin = origin.to_string();
-
-                if !allowed_origins.contains(&origin) {
+                if !allowed_origins.contains(origin) {
                     return Err(anyhow::anyhow!("IP is not allowed!"));
                 }
             }
@@ -444,7 +440,7 @@ impl Web3ProxyApp {
             }
         } else {
             // TODO: if no redis, rate limit with a local cache? "warn!" probably isn't right
-            todo!("no rate limiter");
+            Ok(RateLimitResult::AllowedIp(ip, None))
         }
     }
 
@@ -508,6 +504,7 @@ impl Web3ProxyApp {
                 let user_uuid: Uuid = user_key.into();
 
                 // TODO: join the user table to this to return the User? we don't always need it
+                // TODO: also attach secondary users
                 match user_keys::Entity::find()
                     .filter(user_keys::Column::ApiKey.eq(user_uuid))
                     .filter(user_keys::Column::Active.eq(true))
@@ -515,51 +512,59 @@ impl Web3ProxyApp {
                     .await?
                 {
                     Some(user_key_model) => {
+                        // TODO: move these splits into helper functions
+                        // TODO: can we have sea orm handle this for us?
+
                         let allowed_ips: Option<Vec<IpNet>> =
-                            user_key_model.allowed_ips.map(|allowed_ips| {
-                                serde_json::from_str::<Vec<String>>(&allowed_ips)
-                                    .expect("allowed_ips should always parse")
+                            if let Some(allowed_ips) = user_key_model.allowed_ips {
+                                let x = allowed_ips
+                                    .split(',')
+                                    .map(|x| x.parse::<IpNet>())
+                                    .collect::<Result<Vec<_>, _>>()?;
+                                Some(x)
+                            } else {
+                                None
+                            };
+
+                        let allowed_origins: Option<Vec<Origin>> =
+                            if let Some(allowed_origins) = user_key_model.allowed_origins {
+                                // TODO: do this without collecting twice?
+                                let x = allowed_origins
+                                    .split(',')
+                                    .map(HeaderValue::from_str)
+                                    .collect::<Result<Vec<_>, _>>()?
                                     .into_iter()
-                                    // TODO: try_for_each
-                                    .map(|x| {
-                                        x.parse::<IpNet>().expect("ip address should always parse")
-                                    })
-                                    .collect()
-                            });
+                                    .map(|x| Origin::decode(&mut [x].iter()))
+                                    .collect::<Result<Vec<_>, _>>()?;
 
-                        // TODO: should this be an Option<Vec<Origin>>?
-                        let allowed_origins =
-                            user_key_model.allowed_origins.map(|allowed_origins| {
-                                serde_json::from_str::<Vec<String>>(&allowed_origins)
-                                    .expect("allowed_origins should always parse")
-                            });
+                                Some(x)
+                            } else {
+                                None
+                            };
 
-                        let allowed_referers =
-                            user_key_model.allowed_referers.map(|allowed_referers| {
-                                serde_json::from_str::<Vec<String>>(&allowed_referers)
-                                    .expect("allowed_referers should always parse")
-                                    .into_iter()
-                                    // TODO: try_for_each
-                                    .map(|x| {
-                                        x.parse::<Referer>().expect("referer should always parse")
-                                    })
-                                    .collect()
-                            });
+                        let allowed_referers: Option<Vec<Referer>> =
+                            if let Some(allowed_referers) = user_key_model.allowed_referers {
+                                let x = allowed_referers
+                                    .split(',')
+                                    .map(|x| x.parse::<Referer>())
+                                    .collect::<Result<Vec<_>, _>>()?;
 
-                        let allowed_user_agents =
-                            user_key_model
-                                .allowed_user_agents
-                                .map(|allowed_user_agents| {
-                                    serde_json::from_str::<Vec<String>>(&allowed_user_agents)
-                                        .expect("allowed_user_agents should always parse")
-                                        .into_iter()
-                                        // TODO: try_for_each
-                                        .map(|x| {
-                                            x.parse::<UserAgent>()
-                                                .expect("user agent should always parse")
-                                        })
-                                        .collect()
-                                });
+                                Some(x)
+                            } else {
+                                None
+                            };
+
+                        let allowed_user_agents: Option<Vec<UserAgent>> =
+                            if let Some(allowed_user_agents) = user_key_model.allowed_user_agents {
+                                let x: Result<Vec<_>, _> = allowed_user_agents
+                                    .split(',')
+                                    .map(|x| x.parse::<UserAgent>())
+                                    .collect();
+
+                                Some(x?)
+                            } else {
+                                None
+                            };
 
                         Ok(UserKeyData {
                             user_id: user_key_model.user_id,

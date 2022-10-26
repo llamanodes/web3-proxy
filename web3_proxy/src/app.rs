@@ -14,7 +14,7 @@ use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
 use anyhow::Context;
 use axum::extract::ws::Message;
-use axum::headers::{Referer, UserAgent};
+use axum::headers::{Origin, Referer, UserAgent};
 use deferred_rate_limiter::DeferredRateLimiter;
 use derive_more::From;
 use ethers::core::utils::keccak256;
@@ -74,7 +74,7 @@ pub struct UserKeyData {
     // if None, allow unlimited concurrent requests
     pub max_concurrent_requests: Option<u64>,
     /// if None, allow any Origin
-    pub allowed_origins: Option<Vec<String>>,
+    pub allowed_origins: Option<Vec<Origin>>,
     /// if None, allow any Referer
     pub allowed_referers: Option<Vec<Referer>>,
     /// if None, allow any UserAgent

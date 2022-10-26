@@ -2,12 +2,16 @@
 
 use crate::{app::UserKeyData, jsonrpc::JsonRpcForwardedResponse};
 use axum::{
+    headers,
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
 use derive_more::From;
+use http::header::InvalidHeaderValue;
+use ipnet::AddrParseError;
 use redis_rate_limiter::redis::RedisError;
+use reqwest::header::ToStrError;
 use sea_orm::DbErr;
 use std::{error::Error, net::IpAddr};
 use tokio::time::Instant;
@@ -21,15 +25,19 @@ pub type FrontendResult = Result<Response, FrontendErrorResponse>;
 pub enum FrontendErrorResponse {
     Anyhow(anyhow::Error),
     Box(Box<dyn Error>),
-    Redis(RedisError),
-    Response(Response),
     Database(DbErr),
+    HeadersError(headers::Error),
+    HeaderToString(ToStrError),
+    InvalidHeaderValue(InvalidHeaderValue),
+    IpAddrParse(AddrParseError),
+    NotFound,
     RateLimitedUser(UserKeyData, Option<Instant>),
     RateLimitedIp(IpAddr, Option<Instant>),
+    Redis(RedisError),
+    Response(Response),
     /// simple way to return an error message to the user and an anyhow to our logs
     StatusCode(StatusCode, String, anyhow::Error),
     UnknownKey,
-    NotFound,
 }
 
 impl IntoResponse for FrontendErrorResponse {
@@ -60,32 +68,6 @@ impl IntoResponse for FrontendErrorResponse {
                     ),
                 )
             }
-            Self::Redis(err) => {
-                warn!(?err, "redis");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "redis error!",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
-                )
-            }
-            Self::Response(r) => {
-                debug_assert_ne!(r.status(), StatusCode::OK);
-                return r;
-            }
-            Self::StatusCode(status_code, err_msg, err) => {
-                warn!(?status_code, ?err_msg, ?err);
-                (
-                    status_code,
-                    JsonRpcForwardedResponse::from_str(
-                        &err_msg,
-                        Some(status_code.as_u16().into()),
-                        None,
-                    ),
-                )
-            }
             Self::Database(err) => {
                 warn!(?err, "database");
                 (
@@ -93,6 +75,51 @@ impl IntoResponse for FrontendErrorResponse {
                     JsonRpcForwardedResponse::from_str(
                         "database error!",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::HeadersError(err) => {
+                warn!(?err, "HeadersError");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        &format!("{}", err),
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::IpAddrParse(err) => {
+                warn!(?err, "IpAddrParse");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        &format!("{}", err),
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::InvalidHeaderValue(err) => {
+                warn!(?err, "InvalidHeaderValue");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        &format!("{}", err),
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::NotFound => {
+                // TODO: emit a stat?
+                // TODO: instead of an error, show a normal html page for 404
+                (
+                    StatusCode::NOT_FOUND,
+                    JsonRpcForwardedResponse::from_str(
+                        "not found!",
+                        Some(StatusCode::NOT_FOUND.as_u16().into()),
                         None,
                     ),
                 )
@@ -124,6 +151,43 @@ impl IntoResponse for FrontendErrorResponse {
                     ),
                 )
             }
+            Self::Redis(err) => {
+                warn!(?err, "redis");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "redis error!",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::Response(r) => {
+                debug_assert_ne!(r.status(), StatusCode::OK);
+                return r;
+            }
+            Self::StatusCode(status_code, err_msg, err) => {
+                warn!(?status_code, ?err_msg, ?err);
+                (
+                    status_code,
+                    JsonRpcForwardedResponse::from_str(
+                        &err_msg,
+                        Some(status_code.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::HeaderToString(err) => {
+                warn!(?err, "HeaderToString");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        &format!("{}", err),
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             Self::UnknownKey => (
                 StatusCode::UNAUTHORIZED,
                 JsonRpcForwardedResponse::from_str(
@@ -132,18 +196,6 @@ impl IntoResponse for FrontendErrorResponse {
                     None,
                 ),
             ),
-            Self::NotFound => {
-                // TODO: emit a stat?
-                // TODO: instead of an error, show a normal html page for 404
-                (
-                    StatusCode::NOT_FOUND,
-                    JsonRpcForwardedResponse::from_str(
-                        "not found!",
-                        Some(StatusCode::NOT_FOUND.as_u16().into()),
-                        None,
-                    ),
-                )
-            }
         };
 
         (status_code, Json(response)).into_response()

@@ -296,10 +296,6 @@ pub async fn get_aggregate_rpc_stats_from_params(
     Ok(response)
 }
 
-pub async fn get_user_stats(chain_id: u64) -> u64 {
-    todo!();
-}
-
 /// stats grouped by key_id and error_repsponse and method and key
 pub async fn get_detailed_stats(
     app: &Web3ProxyApp,

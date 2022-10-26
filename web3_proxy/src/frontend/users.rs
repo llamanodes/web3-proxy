@@ -8,6 +8,7 @@ use crate::user_queries::{
 };
 use crate::user_queries::{get_chain_id_from_params, get_query_start_from_params};
 use anyhow::Context;
+use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -19,7 +20,9 @@ use axum_macros::debug_handler;
 use entities::{revert_logs, user, user_keys};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
-use http::StatusCode;
+use http::{HeaderValue, StatusCode};
+use ipnet::IpNet;
+use itertools::Itertools;
 use redis_rate_limiter::redis::AsyncCommands;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
@@ -34,6 +37,7 @@ use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use tracing::warn;
 use ulid::Ulid;
+use uuid::Uuid;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
 ///
@@ -470,6 +474,15 @@ pub struct UserKeysPost {
     existing_key_id: Option<u64>,
     existing_key: Option<RpcApiKey>,
     description: Option<String>,
+    private_txs: Option<bool>,
+    active: Option<bool>,
+    // TODO: enable log_revert_trace: Option<f32>,
+    allowed_ips: Option<String>,
+    allowed_origins: Option<String>,
+    allowed_referers: Option<String>,
+    allowed_user_agents: Option<String>,
+    // do not allow! `requests_per_minute: Option<u64>,`
+    // do not allow! `max_concurrent_requests: Option<u64>,`
 }
 
 /// `POST /user/keys` -- Use a bearer token to create a new key or modify an existing key.
@@ -484,19 +497,170 @@ pub async fn user_keys_post(
 ) -> FrontendResult {
     let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
 
-    if let Some(existing_key_id) = payload.existing_key_id {
+    let db_conn = app.db_conn().context("getting db for user's keys")?;
+
+    let mut uk = if let Some(existing_key_id) = payload.existing_key_id {
         // get the key and make sure it belongs to the user
-        todo!("existing by id");
+        let uk = user_keys::Entity::find()
+            .filter(user_keys::Column::UserId.eq(user.id))
+            .filter(user_keys::Column::Id.eq(existing_key_id))
+            .one(&db_conn)
+            .await
+            .context("failed loading user's key")?
+            .context("key does not exist or is not controlled by this bearer token")?;
+
+        uk.try_into().unwrap()
     } else if let Some(existing_key) = payload.existing_key {
         // get the key and make sure it belongs to the user
-        todo!("existing by key");
+        let uk = user_keys::Entity::find()
+            .filter(user_keys::Column::UserId.eq(user.id))
+            .filter(user_keys::Column::ApiKey.eq(Uuid::from(existing_key)))
+            .one(&db_conn)
+            .await
+            .context("failed loading user's key")?
+            .context("key does not exist or is not controlled by this bearer token")?;
+
+        uk.try_into().unwrap()
     } else {
         // make a new key
         // TODO: limit to 10 keys?
         let rpc_key = RpcApiKey::new();
 
-        todo!("new key");
+        user_keys::ActiveModel {
+            user_id: sea_orm::Set(user.id),
+            api_key: sea_orm::Set(rpc_key.into()),
+            requests_per_minute: sea_orm::Set(app.config.default_user_requests_per_minute),
+            ..Default::default()
+        }
+    };
+
+    // TODO: do we need null descriptions? default to empty string should be fine, right?
+    if let Some(description) = payload.description {
+        if description.is_empty() {
+            uk.description = sea_orm::Set(None);
+        } else {
+            uk.description = sea_orm::Set(Some(description));
+        }
     }
+
+    if let Some(private_txs) = payload.private_txs {
+        uk.private_txs = sea_orm::Set(private_txs);
+    }
+
+    if let Some(active) = payload.active {
+        uk.active = sea_orm::Set(active);
+    }
+
+    if let Some(allowed_ips) = payload.allowed_ips {
+        if allowed_ips.is_empty() {
+            uk.allowed_ips = sea_orm::Set(None);
+        } else {
+            // split allowed ips on ',' and try to parse them all. error on invalid input
+            let allowed_ips = allowed_ips
+                .split(',')
+                .map(|x| x.parse::<IpNet>())
+                .collect::<Result<Vec<_>, _>>()?
+                // parse worked. convert back to Strings
+                .into_iter()
+                .map(|x| x.to_string());
+
+            // and join them back together
+            let allowed_ips: String =
+                Itertools::intersperse(allowed_ips, ", ".to_string()).collect();
+
+            uk.allowed_ips = sea_orm::Set(Some(allowed_ips));
+        }
+    }
+
+    // TODO: this should actually be bytes
+    if let Some(allowed_origins) = payload.allowed_origins {
+        if allowed_origins.is_empty() {
+            uk.allowed_origins = sea_orm::Set(None);
+        } else {
+            // split allowed_origins on ',' and try to parse them all. error on invalid input
+            let allowed_origins = allowed_origins
+                .split(',')
+                .map(HeaderValue::from_str)
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|x| Origin::decode(&mut [x].iter()))
+                .collect::<Result<Vec<_>, _>>()?
+                // parse worked. convert back to String and join them back together
+                .into_iter()
+                .map(|x| x.to_string());
+
+            let allowed_origins: String =
+                Itertools::intersperse(allowed_origins, ", ".to_string()).collect();
+
+            uk.allowed_origins = sea_orm::Set(Some(allowed_origins));
+        }
+    }
+
+    // TODO: this should actually be bytes
+    if let Some(allowed_referers) = payload.allowed_referers {
+        if allowed_referers.is_empty() {
+            uk.allowed_referers = sea_orm::Set(None);
+        } else {
+            // split allowed ips on ',' and try to parse them all. error on invalid input
+            let allowed_referers = allowed_referers
+                .split(',')
+                .map(HeaderValue::from_str)
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|x| Referer::decode(&mut [x].iter()))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // parse worked. now we can put it back together.
+            // but we can't go directly to String.
+            // so we convert to HeaderValues first
+            let mut header_map = vec![];
+            for x in allowed_referers {
+                x.encode(&mut header_map);
+            }
+
+            // convert HeaderValues to Strings
+            // since we got these from strings, this should always work (unless we figure out using bytes)
+            let allowed_referers = header_map
+                .into_iter()
+                .map(|x| x.to_str().map(|x| x.to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // join strings together with commas
+            let allowed_referers: String =
+                Itertools::intersperse(allowed_referers.into_iter(), ", ".to_string()).collect();
+
+            uk.allowed_referers = sea_orm::Set(Some(allowed_referers));
+        }
+    }
+
+    if let Some(allowed_user_agents) = payload.allowed_user_agents {
+        if allowed_user_agents.is_empty() {
+            uk.allowed_user_agents = sea_orm::Set(None);
+        } else {
+            // split allowed_user_agents on ',' and try to parse them all. error on invalid input
+            let allowed_user_agents = allowed_user_agents
+                .split(',')
+                .filter_map(|x| x.parse::<UserAgent>().ok())
+                // parse worked. convert back to String
+                .map(|x| x.to_string());
+
+            // join the strings together
+            let allowed_user_agents: String =
+                Itertools::intersperse(allowed_user_agents, ", ".to_string()).collect();
+
+            uk.allowed_user_agents = sea_orm::Set(Some(allowed_user_agents));
+        }
+    }
+
+    let uk = if uk.is_changed() {
+        uk.save(&db_conn).await.context("Failed saving user key")?
+    } else {
+        uk
+    };
+
+    let uk: user_keys::Model = uk.try_into()?;
+
+    Ok(Json(uk).into_response())
 }
 
 /// `GET /user/revert_logs` -- Use a bearer token to get the user's revert logs.

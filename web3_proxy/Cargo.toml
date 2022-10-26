@@ -76,3 +76,4 @@ tracing-subscriber = { version = "0.3.16", features = ["env-filter", "parking_lo
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.3.1"
 uuid = "1.2.1"
+itertools = "0.10.5"

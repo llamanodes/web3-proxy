@@ -16,7 +16,7 @@ use serde_json::json;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Duration;
-use tracing::{debug, trace, warn, Level};
+use tracing::{debug, info, trace, warn, Level};
 
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
@@ -48,9 +48,9 @@ impl Web3Connections {
             return Ok(());
         }
 
-        let block_num = block.number.as_ref().context("no block num")?;
-
         let mut blockchain = self.blockchain_graphmap.write().await;
+
+        let block_num = block.number.as_ref().context("no block num")?;
 
         // TODO: think more about heaviest_chain. would be better to do the check inside this function
         if heaviest_chain {
@@ -65,7 +65,7 @@ impl Web3Connections {
             return Ok(());
         }
 
-        trace!(%block_hash, %block_num, "saving new block");
+        info!(%block_hash, %block_num, "saving new block");
 
         self.block_hashes
             .insert(*block_hash, block.to_owned())
@@ -328,7 +328,6 @@ impl Web3Connections {
             }
         }
 
-        // clone to release the read lock on self.block_hashes
         if let Some(mut maybe_head_block) = highest_num_block {
             // track rpcs on this heaviest chain so we can build a new SyncedConnections
             let mut highest_rpcs = HashSet::<&String>::new();
@@ -474,7 +473,6 @@ impl Web3Connections {
                                     // hash changed
                                     debug!(con_head=%consensus_head_block_id, old=%old_block_id, rpc_head=%rpc_head_str, %rpc, "unc {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
 
-                                    // todo!("handle equal by updating the cannonical chain");
                                     self.save_block(&consensus_head_block, true)
                                         .await
                                         .context("save consensus_head_block as heaviest chain")?;
