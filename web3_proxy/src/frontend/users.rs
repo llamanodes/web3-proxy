@@ -341,11 +341,66 @@ pub async fn user_logout_post(
     Ok("goodbye".into_response())
 }
 
+/// `GET /user` -- Use a bearer token to get the user's profile.
+///
+/// - the email address of a user if they opted in to get contacted via email
+///
+/// TODO: this will change as we add better support for secondary users.
+#[debug_handler]
+pub async fn user_get(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+) -> FrontendResult {
+    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
+
+    Ok(Json(user).into_response())
+}
+
 /// the JSON input to the `post_user` handler.
 #[derive(Deserialize)]
-pub struct UserProfilePost {
+pub struct UserPost {
     // TODO: make sure the email address is valid. probably have a "verified" column in the database
     email: Option<String>,
+}
+
+/// `POST /user` -- modify the account connected to the bearer token in the `Authentication` header.
+#[debug_handler]
+pub async fn user_post(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    Json(payload): Json<UserPost>,
+) -> FrontendResult {
+    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
+
+    let mut user: user::ActiveModel = user.into();
+
+    // update the email address
+    if let Some(x) = payload.email {
+        // TODO: only Set if no change
+        if x.is_empty() {
+            user.email = sea_orm::Set(None);
+        } else {
+            // TODO: do some basic validation
+            // TODO: don't set immediatly, send a confirmation email first
+            // TODO: compare first? or is sea orm smart enough to do that for us?
+            user.email = sea_orm::Set(Some(x));
+        }
+    }
+
+    // TODO: what else can we update here? password hash? subscription to newsletter?
+
+    let user = if user.is_changed() {
+        let db_conn = app.db_conn().context("Getting database connection")?;
+
+        user.save(&db_conn).await?
+    } else {
+        // no changes. no need to touch the database
+        user
+    };
+
+    let user: user::Model = user.try_into().context("Returning updated user")?;
+
+    Ok(Json(user).into_response())
 }
 
 /// `GET /user/balance` -- Use a bearer token to get the user's balance and spend.
@@ -408,6 +463,15 @@ pub async fn user_keys_get(
     Ok(Json(response_json).into_response())
 }
 
+/// the JSON input to the `user_keys_post` handler.
+#[derive(Deserialize)]
+pub struct UserKeysPost {
+    // TODO: make sure the email address is valid. probably have a "verified" column in the database
+    existing_key_id: Option<u64>,
+    existing_key: Option<RpcApiKey>,
+    description: Option<String>,
+}
+
 /// `POST /user/keys` -- Use a bearer token to create a new key or modify an existing key.
 ///
 /// TODO: read json from the request body
@@ -416,63 +480,23 @@ pub async fn user_keys_get(
 pub async fn user_keys_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
-    todo!("user_keys_post");
-}
-
-/// `GET /user` -- Use a bearer token to get the user's profile.
-///
-/// - the email address of a user if they opted in to get contacted via email
-///
-/// TODO: this will change as we add better support for secondary users.
-#[debug_handler]
-pub async fn user_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
+    Json(payload): Json<UserKeysPost>,
 ) -> FrontendResult {
     let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
 
-    Ok(Json(user).into_response())
-}
-
-/// `POST /user` -- modify the account connected to the bearer token in the `Authentication` header.
-#[debug_handler]
-pub async fn user_post(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
-    Json(payload): Json<UserProfilePost>,
-) -> FrontendResult {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
-
-    let mut user: user::ActiveModel = user.into();
-
-    // update the email address
-    if let Some(x) = payload.email {
-        // TODO: only Set if no change
-        if x.is_empty() {
-            user.email = sea_orm::Set(None);
-        } else {
-            // TODO: do some basic validation
-            // TODO: don't set immediatly, send a confirmation email first
-            // TODO: compare first? or is sea orm smart enough to do that for us?
-            user.email = sea_orm::Set(Some(x));
-        }
-    }
-
-    // TODO: what else can we update here? password hash? subscription to newsletter?
-
-    let user = if user.is_changed() {
-        let db_conn = app.db_conn().context("Getting database connection")?;
-
-        user.save(&db_conn).await?
+    if let Some(existing_key_id) = payload.existing_key_id {
+        // get the key and make sure it belongs to the user
+        todo!("existing by id");
+    } else if let Some(existing_key) = payload.existing_key {
+        // get the key and make sure it belongs to the user
+        todo!("existing by key");
     } else {
-        // no changes. no need to touch the database
-        user
-    };
+        // make a new key
+        // TODO: limit to 10 keys?
+        let rpc_key = RpcApiKey::new();
 
-    let user: user::Model = user.try_into().context("Returning updated user")?;
-
-    Ok(Json(user).into_response())
+        todo!("new key");
+    }
 }
 
 /// `GET /user/revert_logs` -- Use a bearer token to get the user's revert logs.
