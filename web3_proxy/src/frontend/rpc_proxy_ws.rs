@@ -78,19 +78,19 @@ pub async fn websocket_handler(
 pub async fn websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
-    Path(user_key): Path<String>,
+    Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    let user_key = user_key.parse()?;
+    let rpc_key = rpc_key.parse()?;
 
     let request_span = error_span!("request", %ip, ?referer, ?user_agent);
 
     let (authorized_request, _semaphore) = key_is_authorized(
         &app,
-        user_key,
+        rpc_key,
         ip,
         origin.map(|x| x.0),
         referer.map(|x| x.0),

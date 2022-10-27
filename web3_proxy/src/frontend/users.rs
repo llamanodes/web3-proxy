@@ -17,7 +17,7 @@ use axum::{
 };
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
-use entities::{revert_logs, user, user_keys};
+use entities::{revert_logs, rpc_keys, user};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
@@ -260,9 +260,9 @@ pub async fn user_login_post(
             let rpc_key = RpcApiKey::new();
 
             // TODO: variable requests per minute depending on the invite code
-            let uk = user_keys::ActiveModel {
+            let uk = rpc_keys::ActiveModel {
                 user_id: sea_orm::Set(u.id),
-                api_key: sea_orm::Set(rpc_key.into()),
+                rpc_key: sea_orm::Set(rpc_key.into()),
                 description: sea_orm::Set(Some("first".to_string())),
                 requests_per_minute: sea_orm::Set(app.config.default_user_requests_per_minute),
                 ..Default::default()
@@ -282,8 +282,8 @@ pub async fn user_login_post(
         }
         Some(u) => {
             // the user is already registered
-            let uks = user_keys::Entity::find()
-                .filter(user_keys::Column::UserId.eq(u.id))
+            let uks = rpc_keys::Entity::find()
+                .filter(rpc_keys::Column::UserId.eq(u.id))
                 .all(&db_conn)
                 .await
                 .context("failed loading user's key")?;
@@ -298,7 +298,7 @@ pub async fn user_login_post(
     // json response with everything in it
     // we could return just the bearer token, but I think they will always request api keys and the user profile
     let response_json = json!({
-        "api_keys": uks
+        "rpc_keys": uks
             .into_iter()
             .map(|uk| (uk.id, uk))
             .collect::<HashMap<_, _>>(),
@@ -411,7 +411,7 @@ pub async fn user_post(
 /// - show balance in USD
 /// - show deposits history (currency, amounts, transaction id)
 ///
-/// TODO: one key per request? maybe /user/balance/:api_key?
+/// TODO: one key per request? maybe /user/balance/:rpc_key?
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
 pub async fn user_balance_get(
@@ -428,7 +428,7 @@ pub async fn user_balance_get(
 /// We will subscribe to events to watch for any user deposits, but sometimes events can be missed.
 ///
 /// TODO: rate limit by user
-/// TODO: one key per request? maybe /user/balance/:api_key?
+/// TODO: one key per request? maybe /user/balance/:rpc_key?
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
 pub async fn user_balance_post(
@@ -442,9 +442,9 @@ pub async fn user_balance_post(
 
 /// `GET /user/keys` -- Use a bearer token to get the user's api keys and their settings.
 ///
-/// TODO: one key per request? maybe /user/keys/:api_key?
+/// TODO: one key per request? maybe /user/keys/:rpc_key?
 #[debug_handler]
-pub async fn user_keys_get(
+pub async fn rpc_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
@@ -452,8 +452,8 @@ pub async fn user_keys_get(
 
     let db_conn = app.db_conn().context("getting db to fetch user's keys")?;
 
-    let uks = user_keys::Entity::find()
-        .filter(user_keys::Column::UserId.eq(user.id))
+    let uks = rpc_keys::Entity::find()
+        .filter(rpc_keys::Column::UserId.eq(user.id))
         .all(&db_conn)
         .await
         .context("failed loading user's key")?;
@@ -470,7 +470,7 @@ pub async fn user_keys_get(
     Ok(Json(response_json).into_response())
 }
 
-/// the JSON input to the `user_keys_post` handler.
+/// the JSON input to the `rpc_keys_post` handler.
 #[derive(Deserialize)]
 pub struct UserKeysPost {
     // TODO: make sure the email address is valid. probably have a "verified" column in the database
@@ -491,9 +491,9 @@ pub struct UserKeysPost {
 /// `POST /user/keys` -- Use a bearer token to create a new key or modify an existing key.
 ///
 /// TODO: read json from the request body
-/// TODO: one key per request? maybe /user/keys/:api_key?
+/// TODO: one key per request? maybe /user/keys/:rpc_key?
 #[debug_handler]
-pub async fn user_keys_post(
+pub async fn rpc_keys_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<UserKeysPost>,
@@ -504,9 +504,9 @@ pub async fn user_keys_post(
 
     let mut uk = if let Some(existing_key_id) = payload.existing_key_id {
         // get the key and make sure it belongs to the user
-        let uk = user_keys::Entity::find()
-            .filter(user_keys::Column::UserId.eq(user.id))
-            .filter(user_keys::Column::Id.eq(existing_key_id))
+        let uk = rpc_keys::Entity::find()
+            .filter(rpc_keys::Column::UserId.eq(user.id))
+            .filter(rpc_keys::Column::Id.eq(existing_key_id))
             .one(&db_conn)
             .await
             .context("failed loading user's key")?
@@ -515,9 +515,9 @@ pub async fn user_keys_post(
         uk.try_into().unwrap()
     } else if let Some(existing_key) = payload.existing_key {
         // get the key and make sure it belongs to the user
-        let uk = user_keys::Entity::find()
-            .filter(user_keys::Column::UserId.eq(user.id))
-            .filter(user_keys::Column::ApiKey.eq(Uuid::from(existing_key)))
+        let uk = rpc_keys::Entity::find()
+            .filter(rpc_keys::Column::UserId.eq(user.id))
+            .filter(rpc_keys::Column::RpcKey.eq(Uuid::from(existing_key)))
             .one(&db_conn)
             .await
             .context("failed loading user's key")?
@@ -529,9 +529,9 @@ pub async fn user_keys_post(
         // TODO: limit to 10 keys?
         let rpc_key = RpcApiKey::new();
 
-        user_keys::ActiveModel {
+        rpc_keys::ActiveModel {
             user_id: sea_orm::Set(user.id),
-            api_key: sea_orm::Set(rpc_key.into()),
+            rpc_key: sea_orm::Set(rpc_key.into()),
             requests_per_minute: sea_orm::Set(app.config.default_user_requests_per_minute),
             ..Default::default()
         }
@@ -661,7 +661,7 @@ pub async fn user_keys_post(
         uk
     };
 
-    let uk: user_keys::Model = uk.try_into()?;
+    let uk: rpc_keys::Model = uk.try_into()?;
 
     Ok(Json(uk).into_response())
 }
@@ -691,8 +691,8 @@ pub async fn user_revert_logs_get(
 
     let db_conn = app.db_conn().context("getting db for user's revert logs")?;
 
-    let uks = user_keys::Entity::find()
-        .filter(user_keys::Column::UserId.eq(user.id))
+    let uks = rpc_keys::Entity::find()
+        .filter(rpc_keys::Column::UserId.eq(user.id))
         .all(&db_conn)
         .await
         .context("failed loading user's key")?;
@@ -703,7 +703,7 @@ pub async fn user_revert_logs_get(
     // get paginated logs
     let q = revert_logs::Entity::find()
         .filter(revert_logs::Column::Timestamp.gte(query_start))
-        .filter(revert_logs::Column::UserKeyId.is_in(uks))
+        .filter(revert_logs::Column::RpcKeyId.is_in(uks))
         .order_by_asc(revert_logs::Column::Timestamp);
 
     let q = if chain_id == 0 {

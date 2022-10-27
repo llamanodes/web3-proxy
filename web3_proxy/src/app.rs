@@ -63,12 +63,11 @@ type ResponseCache =
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
 #[derive(Clone, Debug, Default, From)]
-/// TODO: rename this?
 pub struct UserKeyData {
     /// database id of the primary user
     pub user_id: u64,
-    /// database id of the api key
-    pub user_key_id: u64,
+    /// database id of the rpc key
+    pub rpc_key_id: u64,
     /// if None, allow unlimited queries
     pub max_requests_per_period: Option<u64>,
     // if None, allow unlimited concurrent requests
@@ -109,8 +108,8 @@ pub struct Web3ProxyApp {
     pub frontend_key_rate_limiter: Option<DeferredRateLimiter<Ulid>>,
     pub login_rate_limiter: Option<RedisRateLimiter>,
     pub vredis_pool: Option<RedisPool>,
-    pub user_key_cache: Cache<Ulid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
-    pub user_key_semaphores: Cache<u64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
+    pub rpc_key_cache: Cache<Ulid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
+    pub rpc_key_semaphores: Cache<u64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub bearer_token_semaphores:
         Cache<String, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
@@ -449,7 +448,7 @@ impl Web3ProxyApp {
         // if there is no database of users, there will be no keys and so this will be empty
         // TODO: max_capacity from config
         // TODO: ttl from config
-        let user_key_cache = Cache::builder()
+        let rpc_key_cache = Cache::builder()
             .max_capacity(10_000)
             .time_to_live(Duration::from_secs(60))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
@@ -462,7 +461,7 @@ impl Web3ProxyApp {
         let ip_semaphores = Cache::builder()
             .time_to_idle(Duration::from_secs(120))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
-        let user_key_semaphores = Cache::builder()
+        let rpc_key_semaphores = Cache::builder()
             .time_to_idle(Duration::from_secs(120))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
@@ -481,10 +480,10 @@ impl Web3ProxyApp {
             vredis_pool,
             app_metrics,
             open_request_handle_metrics,
-            user_key_cache,
+            rpc_key_cache,
             bearer_token_semaphores,
             ip_semaphores,
-            user_key_semaphores,
+            rpc_key_semaphores,
             stat_sender,
         };
 

@@ -32,7 +32,7 @@ pub async fn proxy_web3_rpc(
 
     let authorized_request = Arc::new(authorized_request);
 
-    // TODO: spawn earlier?
+    // TODO: spawn earlier? i think we want ip_is_authorized in this future
     let f = tokio::spawn(async move {
         app.proxy_web3_rpc(authorized_request, payload)
             .instrument(request_span)
@@ -56,15 +56,15 @@ pub async fn proxy_web3_rpc_with_key(
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
-    Path(user_key): Path<String>,
+    Path(rpc_key): Path<String>,
 ) -> FrontendResult {
-    let user_key = user_key.parse()?;
+    let rpc_key = rpc_key.parse()?;
 
     let request_span = error_span!("request", %ip, ?referer, ?user_agent);
 
     let (authorized_request, _semaphore) = key_is_authorized(
         &app,
-        user_key,
+        rpc_key,
         ip,
         origin.map(|x| x.0),
         referer.map(|x| x.0),

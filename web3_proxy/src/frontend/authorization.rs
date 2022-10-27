@@ -9,7 +9,7 @@ use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::TypedHeader;
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
-use entities::{user, user_keys};
+use entities::{rpc_keys, user};
 use http::HeaderValue;
 use ipnet::IpNet;
 use redis_rate_limiter::redis::AsyncCommands;
@@ -37,11 +37,11 @@ pub enum RateLimitResult {
     /// contains the IP of the anonymous user
     /// TODO: option inside or outside the arc?
     AllowedIp(IpAddr, Option<OwnedSemaphorePermit>),
-    /// contains the user_key_id of an authenticated user
+    /// contains the rpc_key_id of an authenticated user
     AllowedUser(UserKeyData, Option<OwnedSemaphorePermit>),
     /// contains the IP and retry_at of the anonymous user
     RateLimitedIp(IpAddr, Option<Instant>),
-    /// contains the user_key_id and retry_at of an authenticated user key
+    /// contains the rpc_key_id and retry_at of an authenticated user key
     RateLimitedUser(UserKeyData, Option<Instant>),
     /// This key is not in our database. Deny access!
     UnknownKey,
@@ -52,7 +52,7 @@ pub struct AuthorizedKey {
     pub ip: IpAddr,
     pub origin: Option<Origin>,
     pub user_id: u64,
-    pub user_key_id: u64,
+    pub rpc_key_id: u64,
     // TODO: just use an f32? even an f16 is probably fine
     pub log_revert_chance: Decimal,
 }
@@ -178,10 +178,10 @@ impl AuthorizedKey {
         origin: Option<Origin>,
         referer: Option<Referer>,
         user_agent: Option<UserAgent>,
-        user_key_data: UserKeyData,
+        rpc_key_data: UserKeyData,
     ) -> anyhow::Result<Self> {
         // check ip
-        match &user_key_data.allowed_ips {
+        match &rpc_key_data.allowed_ips {
             None => {}
             Some(allowed_ips) => {
                 if !allowed_ips.iter().any(|x| x.contains(&ip)) {
@@ -191,7 +191,7 @@ impl AuthorizedKey {
         }
 
         // check origin
-        match (&origin, &user_key_data.allowed_origins) {
+        match (&origin, &rpc_key_data.allowed_origins) {
             (None, None) => {}
             (Some(_), None) => {}
             (None, Some(_)) => return Err(anyhow::anyhow!("Origin required")),
@@ -203,7 +203,7 @@ impl AuthorizedKey {
         }
 
         // check referer
-        match (referer, &user_key_data.allowed_referers) {
+        match (referer, &rpc_key_data.allowed_referers) {
             (None, None) => {}
             (Some(_), None) => {}
             (None, Some(_)) => return Err(anyhow::anyhow!("Referer required")),
@@ -215,7 +215,7 @@ impl AuthorizedKey {
         }
 
         // check user_agent
-        match (user_agent, &user_key_data.allowed_user_agents) {
+        match (user_agent, &rpc_key_data.allowed_user_agents) {
             (None, None) => {}
             (Some(_), None) => {}
             (None, Some(_)) => return Err(anyhow::anyhow!("User agent required")),
@@ -229,9 +229,9 @@ impl AuthorizedKey {
         Ok(Self {
             ip,
             origin,
-            user_id: user_key_data.user_id,
-            user_key_id: user_key_data.user_key_id,
-            log_revert_chance: user_key_data.log_revert_chance,
+            user_id: rpc_key_data.user_id,
+            rpc_key_id: rpc_key_data.rpc_key_id,
+            log_revert_chance: rpc_key_data.log_revert_chance,
         })
     }
 }
@@ -251,7 +251,7 @@ impl Display for &AuthorizedRequest {
         match self {
             AuthorizedRequest::Internal => f.write_str("int"),
             AuthorizedRequest::Ip(x, _) => f.write_str(&format!("ip-{}", x)),
-            AuthorizedRequest::User(_, x) => f.write_str(&format!("uk-{}", x.user_key_id)),
+            AuthorizedRequest::User(_, x) => f.write_str(&format!("uk-{}", x.rpc_key_id)),
         }
     }
 }
@@ -296,14 +296,14 @@ pub async fn ip_is_authorized(
 
 pub async fn key_is_authorized(
     app: &Web3ProxyApp,
-    user_key: RpcApiKey,
+    rpc_key: RpcApiKey,
     ip: IpAddr,
     origin: Option<Origin>,
     referer: Option<Referer>,
     user_agent: Option<UserAgent>,
 ) -> Result<(AuthorizedRequest, Option<OwnedSemaphorePermit>), FrontendErrorResponse> {
     // check the rate limits. error if over the limit
-    let (user_data, semaphore) = match app.rate_limit_by_key(user_key).await? {
+    let (user_data, semaphore) = match app.rate_limit_by_key(rpc_key).await? {
         RateLimitResult::AllowedUser(x, semaphore) => (x, semaphore),
         RateLimitResult::RateLimitedUser(x, retry_at) => {
             return Err(FrontendErrorResponse::RateLimitedUser(x, retry_at));
@@ -321,6 +321,7 @@ pub async fn key_is_authorized(
 }
 
 impl Web3ProxyApp {
+    /// Limit the number of concurrent requests from the given ip address.
     pub async fn ip_semaphore(&self, ip: IpAddr) -> anyhow::Result<Option<OwnedSemaphorePermit>> {
         if let Some(max_concurrent_requests) = self.config.public_max_concurrent_requests {
             let semaphore = self
@@ -345,16 +346,17 @@ impl Web3ProxyApp {
         }
     }
 
-    pub async fn user_key_semaphore(
+    /// Limit the number of concurrent requests from the given key address.
+    pub async fn user_rpc_key_semaphore(
         &self,
-        user_data: &UserKeyData,
+        rpc_key_data: &UserKeyData,
     ) -> anyhow::Result<Option<OwnedSemaphorePermit>> {
-        if let Some(max_concurrent_requests) = user_data.max_concurrent_requests {
+        if let Some(max_concurrent_requests) = rpc_key_data.max_concurrent_requests {
             let semaphore = self
-                .user_key_semaphores
-                .get_with(user_data.user_key_id, async move {
+                .rpc_key_semaphores
+                .get_with(rpc_key_data.rpc_key_id, async move {
                     let s = Semaphore::new(max_concurrent_requests as usize);
-                    trace!("new semaphore for user_key_id {}", user_data.user_key_id);
+                    trace!("new semaphore for rpc_key_id {}", rpc_key_data.rpc_key_id);
                     Arc::new(s)
                 })
                 .await;
@@ -493,30 +495,30 @@ impl Web3ProxyApp {
     }
 
     // check the local cache for user data, or query the database
-    pub(crate) async fn user_data(&self, user_key: RpcApiKey) -> anyhow::Result<UserKeyData> {
+    pub(crate) async fn user_data(&self, rpc_key: RpcApiKey) -> anyhow::Result<UserKeyData> {
         let user_data: Result<_, Arc<anyhow::Error>> = self
-            .user_key_cache
-            .try_get_with(user_key.into(), async move {
-                trace!(?user_key, "user_cache miss");
+            .rpc_key_cache
+            .try_get_with(rpc_key.into(), async move {
+                trace!(?rpc_key, "user_cache miss");
 
                 let db_conn = self.db_conn().context("Getting database connection")?;
 
-                let user_uuid: Uuid = user_key.into();
+                let rpc_key: Uuid = rpc_key.into();
 
                 // TODO: join the user table to this to return the User? we don't always need it
                 // TODO: also attach secondary users
-                match user_keys::Entity::find()
-                    .filter(user_keys::Column::ApiKey.eq(user_uuid))
-                    .filter(user_keys::Column::Active.eq(true))
+                match rpc_keys::Entity::find()
+                    .filter(rpc_keys::Column::RpcKey.eq(rpc_key))
+                    .filter(rpc_keys::Column::Active.eq(true))
                     .one(&db_conn)
                     .await?
                 {
-                    Some(user_key_model) => {
+                    Some(rpc_key_model) => {
                         // TODO: move these splits into helper functions
                         // TODO: can we have sea orm handle this for us?
 
                         let allowed_ips: Option<Vec<IpNet>> =
-                            if let Some(allowed_ips) = user_key_model.allowed_ips {
+                            if let Some(allowed_ips) = rpc_key_model.allowed_ips {
                                 let x = allowed_ips
                                     .split(',')
                                     .map(|x| x.parse::<IpNet>())
@@ -527,7 +529,7 @@ impl Web3ProxyApp {
                             };
 
                         let allowed_origins: Option<Vec<Origin>> =
-                            if let Some(allowed_origins) = user_key_model.allowed_origins {
+                            if let Some(allowed_origins) = rpc_key_model.allowed_origins {
                                 // TODO: do this without collecting twice?
                                 let x = allowed_origins
                                     .split(',')
@@ -543,7 +545,7 @@ impl Web3ProxyApp {
                             };
 
                         let allowed_referers: Option<Vec<Referer>> =
-                            if let Some(allowed_referers) = user_key_model.allowed_referers {
+                            if let Some(allowed_referers) = rpc_key_model.allowed_referers {
                                 let x = allowed_referers
                                     .split(',')
                                     .map(|x| x.parse::<Referer>())
@@ -555,7 +557,7 @@ impl Web3ProxyApp {
                             };
 
                         let allowed_user_agents: Option<Vec<UserAgent>> =
-                            if let Some(allowed_user_agents) = user_key_model.allowed_user_agents {
+                            if let Some(allowed_user_agents) = rpc_key_model.allowed_user_agents {
                                 let x: Result<Vec<_>, _> = allowed_user_agents
                                     .split(',')
                                     .map(|x| x.parse::<UserAgent>())
@@ -567,15 +569,15 @@ impl Web3ProxyApp {
                             };
 
                         Ok(UserKeyData {
-                            user_id: user_key_model.user_id,
-                            user_key_id: user_key_model.id,
-                            max_requests_per_period: user_key_model.requests_per_minute,
-                            max_concurrent_requests: user_key_model.max_concurrent_requests,
+                            user_id: rpc_key_model.user_id,
+                            rpc_key_id: rpc_key_model.id,
+                            max_requests_per_period: rpc_key_model.requests_per_minute,
+                            max_concurrent_requests: rpc_key_model.max_concurrent_requests,
                             allowed_ips,
                             allowed_origins,
                             allowed_referers,
                             allowed_user_agents,
-                            log_revert_chance: user_key_model.log_revert_chance,
+                            log_revert_chance: rpc_key_model.log_revert_chance,
                         })
                     }
                     None => Ok(UserKeyData::default()),
@@ -587,14 +589,14 @@ impl Web3ProxyApp {
         user_data.map_err(|err| anyhow::anyhow!(err))
     }
 
-    pub async fn rate_limit_by_key(&self, user_key: RpcApiKey) -> anyhow::Result<RateLimitResult> {
-        let user_data = self.user_data(user_key).await?;
+    pub async fn rate_limit_by_key(&self, rpc_key: RpcApiKey) -> anyhow::Result<RateLimitResult> {
+        let user_data = self.user_data(rpc_key).await?;
 
-        if user_data.user_key_id == 0 {
+        if user_data.rpc_key_id == 0 {
             return Ok(RateLimitResult::UnknownKey);
         }
 
-        let semaphore = self.user_key_semaphore(&user_data).await?;
+        let semaphore = self.user_rpc_key_semaphore(&user_data).await?;
 
         let user_max_requests_per_period = match user_data.max_requests_per_period {
             None => {
@@ -606,7 +608,7 @@ impl Web3ProxyApp {
         // user key is valid. now check rate limits
         if let Some(rate_limiter) = &self.frontend_key_rate_limiter {
             match rate_limiter
-                .throttle(user_key.into(), Some(user_max_requests_per_period), 1)
+                .throttle(rpc_key.into(), Some(user_max_requests_per_period), 1)
                 .await
             {
                 Ok(DeferredRateLimitResult::Allowed) => {
@@ -618,12 +620,12 @@ impl Web3ProxyApp {
                     // this is too verbose, but a stat might be good
                     // TODO: keys are secrets! use the id instead
                     // TODO: emit a stat
-                    trace!(?user_key, "rate limit exceeded until {:?}", retry_at);
+                    trace!(?rpc_key, "rate limit exceeded until {:?}", retry_at);
                     Ok(RateLimitResult::RateLimitedUser(user_data, Some(retry_at)))
                 }
                 Ok(DeferredRateLimitResult::RetryNever) => {
                     // TODO: keys are secret. don't log them!
-                    trace!(?user_key, "rate limit is 0");
+                    trace!(?rpc_key, "rate limit is 0");
                     // TODO: emit a stat
                     Ok(RateLimitResult::RateLimitedUser(user_data, None))
                 }

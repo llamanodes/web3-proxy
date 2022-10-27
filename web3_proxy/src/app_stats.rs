@@ -18,7 +18,7 @@ use tracing::{error, info, trace};
 /// TODO: can we use something inside sea_orm instead?
 #[derive(Debug)]
 pub struct ProxyResponseStat {
-    user_key_id: u64,
+    rpc_key_id: u64,
     method: String,
     period_seconds: u64,
     period_timestamp: u64,
@@ -56,7 +56,7 @@ impl Default for ProxyResponseHistograms {
 // TODO: impl From for our database model
 pub struct ProxyResponseAggregate {
     // these are the key
-    // user_key_id: u64,
+    // rpc_key_id: u64,
     // method: String,
     // error_response: bool,
     // TODO: this is the grandparent key. get it from there somehow
@@ -75,7 +75,7 @@ pub struct ProxyResponseAggregate {
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UserProxyResponseKey {
-    user_key_id: u64,
+    rpc_key_id: u64,
     method: String,
     error_response: bool,
 }
@@ -128,7 +128,7 @@ impl ProxyResponseStat {
         let response_millis = metadata.start_instant.elapsed().as_millis() as u64;
 
         Self {
-            user_key_id: authorized_key.user_key_id,
+            rpc_key_id: authorized_key.rpc_key_id,
             method,
             backend_requests,
             period_seconds,
@@ -286,7 +286,7 @@ impl StatEmitter {
                 let stat = rpc_accounting::ActiveModel {
                     id: sea_orm::NotSet,
 
-                    user_key_id: sea_orm::Set(k.user_key_id),
+                    rpc_key_id: sea_orm::Set(k.rpc_key_id),
                     chain_id: sea_orm::Set(self.chain_id),
                     method: sea_orm::Set(k.method.clone()),
                     error_response: sea_orm::Set(k.error_response),
@@ -356,7 +356,7 @@ impl StatEmitter {
                     })
                     .await;
 
-                let key = (stat.user_key_id, stat.method, stat.error_response).into();
+                let key = (stat.rpc_key_id, stat.method, stat.error_response).into();
 
                 let user_aggregate = user_cache
                     .get_with(key, async move {

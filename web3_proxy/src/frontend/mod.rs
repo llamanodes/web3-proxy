@@ -55,11 +55,11 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/", post(rpc_proxy_http::proxy_web3_rpc))
         .route("/", get(rpc_proxy_ws::websocket_handler))
         .route(
-            "/rpc/:user_key",
+            "/rpc/:rpc_key",
             post(rpc_proxy_http::proxy_web3_rpc_with_key),
         )
         .route(
-            "/rpc/:user_key",
+            "/rpc/:rpc_key",
             get(rpc_proxy_ws::websocket_handler_with_key),
         )
         .route("/health", get(status::health))
@@ -73,8 +73,8 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/user", post(users::user_post))
         .route("/user/balance", get(users::user_balance_get))
         .route("/user/balance/:txid", post(users::user_balance_post))
-        .route("/user/keys", get(users::user_keys_get))
-        .route("/user/keys", post(users::user_keys_post))
+        .route("/user/keys", get(users::rpc_keys_get))
+        .route("/user/keys", post(users::rpc_keys_post))
         .route("/user/revert_logs", get(users::user_revert_logs_get))
         .route(
             "/user/stats/aggregate",

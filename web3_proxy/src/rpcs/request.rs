@@ -95,7 +95,7 @@ impl AuthorizedRequest {
             let call_data = params.data.map(|x| format!("{}", x));
 
             let rl = revert_logs::ActiveModel {
-                user_key_id: sea_orm::Set(authorized_request.user_key_id),
+                rpc_key_id: sea_orm::Set(authorized_request.rpc_key_id),
                 method: sea_orm::Set(method),
                 to: sea_orm::Set(to),
                 call_data: sea_orm::Set(call_data),

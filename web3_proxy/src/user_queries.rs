@@ -4,7 +4,7 @@ use axum::{
     TypedHeader,
 };
 use chrono::NaiveDateTime;
-use entities::{rpc_accounting, user_keys};
+use entities::{rpc_accounting, rpc_keys};
 use hashbrown::HashMap;
 use migration::Expr;
 use num::Zero;
@@ -36,7 +36,7 @@ async fn get_user_id_from_params(
                 .get::<_, u64>(bearer_cache_key)
                 .await
                 // TODO: this should be a 403
-                .context("fetching user_key_id from redis with bearer_cache_key")
+                .context("fetching rpc_key_id from redis with bearer_cache_key")
         }
         (_, None) => {
             // they have a bearer token. we don't care about it on public pages
@@ -53,15 +53,15 @@ async fn get_user_id_from_params(
     }
 }
 
-/// only allow user_key to be set if user_id is also set.
+/// only allow rpc_key to be set if user_id is also set.
 /// this will keep people from reading someone else's keys.
 /// 0 means none.
-pub fn get_user_key_id_from_params(
+pub fn get_rpc_key_id_from_params(
     user_id: u64,
     params: &HashMap<String, String>,
 ) -> anyhow::Result<u64> {
     if user_id > 0 {
-        params.get("user_key_id").map_or_else(
+        params.get("rpc_key_id").map_or_else(
             || Ok(0),
             |c| {
                 let c = c.parse()?;
@@ -266,21 +266,18 @@ pub async fn get_aggregate_rpc_stats_from_params(
         // TODO: are these joins correct?
         // TODO: what about keys where they are the secondary users?
         let q = q
-            .join(
-                JoinType::InnerJoin,
-                rpc_accounting::Relation::UserKeys.def(),
-            )
-            .column(user_keys::Column::UserId)
-            .group_by(user_keys::Column::UserId);
+            .join(JoinType::InnerJoin, rpc_accounting::Relation::RpcKeys.def())
+            .column(rpc_keys::Column::UserId)
+            .group_by(rpc_keys::Column::UserId);
 
-        let condition = condition.add(user_keys::Column::UserId.eq(user_id));
+        let condition = condition.add(rpc_keys::Column::UserId.eq(user_id));
 
         (condition, q)
     };
 
     let q = q.filter(condition);
 
-    // TODO: enum between searching on user_key_id on user_id
+    // TODO: enum between searching on rpc_key_id on user_id
     // TODO: handle secondary users, too
 
     // log query here. i think sea orm has a useful log level for this
@@ -306,7 +303,7 @@ pub async fn get_detailed_stats(
     let redis_conn = app.redis_conn().await.context("connecting to redis")?;
 
     let user_id = get_user_id_from_params(redis_conn, bearer, &params).await?;
-    let user_key_id = get_user_key_id_from_params(user_id, &params)?;
+    let rpc_key_id = get_rpc_key_id_from_params(user_id, &params)?;
     let chain_id = get_chain_id_from_params(app, &params)?;
     let query_start = get_query_start_from_params(&params)?;
     let query_window_seconds = get_query_window_seconds_from_params(&params)?;
@@ -390,24 +387,21 @@ pub async fn get_detailed_stats(
         // TODO: move authentication here?
         // TODO: what about keys where this user is a secondary user?
         let q = q
-            .join(
-                JoinType::InnerJoin,
-                rpc_accounting::Relation::UserKeys.def(),
-            )
-            .column(user_keys::Column::UserId)
-            .group_by(user_keys::Column::UserId);
+            .join(JoinType::InnerJoin, rpc_accounting::Relation::RpcKeys.def())
+            .column(rpc_keys::Column::UserId)
+            .group_by(rpc_keys::Column::UserId);
 
-        let condition = condition.add(user_keys::Column::UserId.eq(user_id));
+        let condition = condition.add(rpc_keys::Column::UserId.eq(user_id));
 
-        let q = if user_key_id == 0 {
-            q.column(user_keys::Column::UserId)
-                .group_by(user_keys::Column::UserId)
+        let q = if rpc_key_id == 0 {
+            q.column(rpc_keys::Column::UserId)
+                .group_by(rpc_keys::Column::UserId)
         } else {
-            response.insert("user_key_id", serde_json::to_value(user_key_id)?);
+            response.insert("rpc_key_id", serde_json::to_value(rpc_key_id)?);
 
             // no need to group_by user_id when we are grouping by key_id
-            q.column(user_keys::Column::Id)
-                .group_by(user_keys::Column::Id)
+            q.column(rpc_keys::Column::Id)
+                .group_by(rpc_keys::Column::Id)
         };
 
         (condition, q)

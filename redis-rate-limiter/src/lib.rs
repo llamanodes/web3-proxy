@@ -64,7 +64,7 @@ impl RedisRateLimiter {
         Instant::now().add(Duration::from_secs_f32(seconds_left_in_period))
     }
 
-    /// label might be an ip address or a user_key id.
+    /// label might be an ip address or a rpc_key id.
     /// if setting max_per_period, be sure to keep the period the same for all requests to this label
     pub async fn throttle_label(
         &self,

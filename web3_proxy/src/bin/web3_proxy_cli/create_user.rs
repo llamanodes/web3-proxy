@@ -1,6 +1,6 @@
 use anyhow::Context;
 use argh::FromArgs;
-use entities::{user, user_keys};
+use entities::{rpc_keys, user};
 use ethers::prelude::Address;
 use sea_orm::{ActiveModelTrait, TransactionTrait};
 use tracing::info;
@@ -25,7 +25,7 @@ pub struct CreateUserSubCommand {
     /// the user's first api ULID or UUID key.
     /// If none given, one will be created.
     #[argh(option)]
-    api_key: RpcApiKey,
+    rpc_key: RpcApiKey,
 
     /// the key's maximum requests per minute.
     /// Default to "None" which the code sees as "unlimited" requests.
@@ -74,9 +74,9 @@ impl CreateUserSubCommand {
         );
 
         // create a key for the new user
-        let uk = user_keys::ActiveModel {
+        let uk = rpc_keys::ActiveModel {
             user_id: u.id,
-            api_key: sea_orm::Set(self.api_key.into()),
+            rpc_key: sea_orm::Set(self.rpc_key.into()),
             requests_per_minute: sea_orm::Set(self.rpm),
             description: sea_orm::Set(self.description),
             ..Default::default()
@@ -87,8 +87,8 @@ impl CreateUserSubCommand {
 
         txn.commit().await?;
 
-        info!("user key as ULID: {}", Ulid::from(self.api_key));
-        info!("user key as UUID: {}", Uuid::from(self.api_key));
+        info!("user key as ULID: {}", Ulid::from(self.rpc_key));
+        info!("user key as UUID: {}", Uuid::from(self.rpc_key));
 
         Ok(())
     }

@@ -174,8 +174,8 @@ enum SecondaryUser {
 
 /*
 -- TODO: foreign keys
--- TODO: index on api_key
--- TODO: what size for api_key
+-- TODO: index on rpc_key
+-- TODO: what size for rpc_key
 -- TODO: track active with a timestamp?
 -- TODO: creation time?
 -- TODO: requests_per_day? requests_per_second?,

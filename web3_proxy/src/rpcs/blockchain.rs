@@ -65,7 +65,7 @@ impl Web3Connections {
             return Ok(());
         }
 
-        info!(%block_hash, %block_num, "saving new block");
+        trace!(%block_hash, %block_num, "saving new block");
 
         self.block_hashes
             .insert(*block_hash, block.to_owned())

@@ -4,13 +4,13 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
-#[sea_orm(table_name = "user_keys")]
+#[sea_orm(table_name = "rpc_keys")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: u64,
     pub user_id: u64,
     #[sea_orm(unique)]
-    pub api_key: Uuid,
+    pub rpc_key: Uuid,
     pub description: Option<String>,
     pub private_txs: bool,
     pub active: bool,

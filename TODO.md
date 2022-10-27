@@ -195,8 +195,10 @@ These are roughly in order of completition
 - [x] send logs to sentry
 - [x] login should return the user id
 - [x] when we show keys, also show the key's id
+- [x] add config for concurrent requests from public requests
 - [x] new endpoints for users (not totally sure about the exact paths, but these features are all needed):
   - [x] sign in
+    - [x] login should include the key id, not just the key ULID
   - [x] sign out
   - [x] GET profile endpoint
   - [x] POST profile endpoint
@@ -208,13 +210,13 @@ These are roughly in order of completition
     - [x] generate a new key from a web endpoint
     - [x] modifying key settings such as private relay, revert logging, ip/origin/etc checks
   - [x] GET logged reverts on an endpoint that **requires authentication**.
-- [ ] add config for concurrent requests from public requests
+- [ ] rename user_key to rpc_key
+  - [x] in code
+  - [ ] in database with a migration
 - [ ] document url params with examples
-- [ ] display concurrent requests per api key (only with authentication!)
-- [ ] endpoint for creating/modifying api keys and their advanced security features
+- [ ] instead of requests_per_minute on every key, have a "user_tier" that gets joined
 - [ ] include if archive query or not in the stats
   - this is already partially done, but we need to double check it works. preferrably with tests
-- [ ] login should include the key id, not just the key ULID
 - [-] add configurable size limits to all the Caches
   - [ ] instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
 - [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
@@ -237,6 +239,7 @@ These are roughly in order of completition
   - might have to use Uuid in sea-orm and then convert to Ulid on display
 - [ ] add pruning or aggregating or something to log revert trace. otherwise our databases are going to grow really big
   - [ ] after adding this, allow posting to /user/keys to turn on revert logging
+- [ ] display concurrent requests per api key (only with authentication!)
 
 ## V1
 

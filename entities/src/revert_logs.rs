@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: u64,
-    pub user_key_id: u64,
+    pub rpc_key_id: u64,
     pub timestamp: DateTimeUtc,
     pub method: Method,
     pub to: Vec<u8>,
@@ -21,16 +21,16 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::user_keys::Entity",
-        from = "Column::UserKeyId",
-        to = "super::user_keys::Column::Id",
+        belongs_to = "super::rpc_keys::Entity",
+        from = "Column::RpcKeyId",
+        to = "super::rpc_keys::Column::Id",
         on_update = "NoAction",
         on_delete = "NoAction"
     )]
     UserKeys,
 }
 
-impl Related<super::user_keys::Entity> for Entity {
+impl Related<super::rpc_keys::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::UserKeys.def()
     }
