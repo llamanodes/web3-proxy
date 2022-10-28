@@ -23,7 +23,7 @@ use hashbrown::HashMap;
 use serde_json::{json, value::RawValue};
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
-use tracing::{error, error_span, info, trace, Instrument};
+use tracing::{error, error_span, info, instrument, trace, Instrument};
 
 use crate::{
     app::Web3ProxyApp,
@@ -33,6 +33,7 @@ use crate::{
 /// Public entrypoint for WebSocket JSON-RPC requests.
 /// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -75,6 +76,7 @@ pub async fn websocket_handler(
 /// Rate limit and billing based on the api key in the url.
 /// Can optionally authorized based on origin, referer, or user agent.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -134,6 +136,7 @@ pub async fn websocket_handler_with_key(
     }
 }
 
+#[instrument(level = "trace")]
 async fn proxy_web3_socket(
     app: Arc<Web3ProxyApp>,
     authorized_request: Arc<AuthorizedRequest>,
@@ -155,6 +158,7 @@ async fn proxy_web3_socket(
 }
 
 /// websockets support a few more methods than http clients
+#[instrument(level = "trace")]
 async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
     authorized_request: Arc<AuthorizedRequest>,
@@ -245,6 +249,7 @@ async fn handle_socket_payload(
     Message::Text(response_str)
 }
 
+#[instrument(level = "trace")]
 async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
     authorized_request: Arc<AuthorizedRequest>,
@@ -303,6 +308,7 @@ async fn read_web3_socket(
     }
 }
 
+#[instrument(level = "trace")]
 async fn write_web3_socket(
     response_rx: flume::Receiver<Message>,
     mut ws_tx: SplitSink<WebSocket, Message>,

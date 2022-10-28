@@ -16,7 +16,7 @@ use serde_json::json;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Duration;
-use tracing::{debug, info, trace, warn, Level};
+use tracing::{debug, instrument, trace, warn, Level};
 
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
@@ -38,6 +38,7 @@ impl Display for BlockId {
 
 impl Web3Connections {
     /// add a block to our map and it's hash to our graphmap of the blockchain
+    #[instrument]
     pub async fn save_block(&self, block: &ArcBlock, heaviest_chain: bool) -> anyhow::Result<()> {
         // TODO: i think we can rearrange this function to make it faster on the hot path
         let block_hash = block.hash.as_ref().context("no block hash")?;
@@ -84,6 +85,7 @@ impl Web3Connections {
 
     /// Get a block from caches with fallback.
     /// Will query a specific node or the best available.
+    #[instrument(level = "trace")]
     pub async fn block(
         &self,
         authorized_request: Option<&Arc<AuthorizedRequest>>,

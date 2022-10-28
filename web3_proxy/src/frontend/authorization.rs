@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
-use tracing::{error, trace};
+use tracing::{error, instrument, trace};
 use ulid::Ulid;
 use uuid::Uuid;
 
@@ -322,6 +322,7 @@ pub async fn key_is_authorized(
 
 impl Web3ProxyApp {
     /// Limit the number of concurrent requests from the given ip address.
+    #[instrument(level = "trace")]
     pub async fn ip_semaphore(&self, ip: IpAddr) -> anyhow::Result<Option<OwnedSemaphorePermit>> {
         if let Some(max_concurrent_requests) = self.config.public_max_concurrent_requests {
             let semaphore = self
@@ -347,6 +348,7 @@ impl Web3ProxyApp {
     }
 
     /// Limit the number of concurrent requests from the given key address.
+    #[instrument(level = "trace")]
     pub async fn user_rpc_key_semaphore(
         &self,
         rpc_key_data: &UserKeyData,
@@ -375,6 +377,7 @@ impl Web3ProxyApp {
 
     /// Verify that the given bearer token and address are allowed to take the specified action.
     /// This includes concurrent request limiting.
+    #[instrument(level = "trace")]
     pub async fn bearer_is_authorized(
         &self,
         bearer: Bearer,
@@ -414,6 +417,7 @@ impl Web3ProxyApp {
         Ok((user, semaphore_permit))
     }
 
+    #[instrument(level = "trace")]
     pub async fn rate_limit_login(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_key
         // TODO: do we want a semaphore here?
@@ -446,6 +450,7 @@ impl Web3ProxyApp {
         }
     }
 
+    #[instrument(level = "trace")]
     pub async fn rate_limit_by_ip(
         &self,
         ip: IpAddr,
@@ -495,6 +500,7 @@ impl Web3ProxyApp {
     }
 
     // check the local cache for user data, or query the database
+    #[instrument(level = "trace")]
     pub(crate) async fn user_data(&self, rpc_key: RpcApiKey) -> anyhow::Result<UserKeyData> {
         let user_data: Result<_, Arc<anyhow::Error>> = self
             .rpc_key_cache
@@ -589,6 +595,7 @@ impl Web3ProxyApp {
         user_data.map_err(|err| anyhow::anyhow!(err))
     }
 
+    #[instrument(level = "trace")]
     pub async fn rate_limit_by_key(&self, rpc_key: RpcApiKey) -> anyhow::Result<RateLimitResult> {
         let user_data = self.user_data(rpc_key).await?;
 

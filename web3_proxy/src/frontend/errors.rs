@@ -15,13 +15,13 @@ use reqwest::header::ToStrError;
 use sea_orm::DbErr;
 use std::{error::Error, net::IpAddr};
 use tokio::time::Instant;
-use tracing::warn;
+use tracing::{instrument, warn};
 
 // TODO: take "IntoResponse" instead of Response?
 pub type FrontendResult = Result<Response, FrontendErrorResponse>;
 
 // TODO:
-#[derive(From)]
+#[derive(Debug, From)]
 pub enum FrontendErrorResponse {
     Anyhow(anyhow::Error),
     Box(Box<dyn Error>),
@@ -41,6 +41,7 @@ pub enum FrontendErrorResponse {
 }
 
 impl IntoResponse for FrontendErrorResponse {
+    #[instrument(level = "trace")]
     fn into_response(self) -> Response {
         // TODO: include the request id in these so that users can give us something that will point to logs
         let (status_code, response) = match self {
@@ -202,6 +203,7 @@ impl IntoResponse for FrontendErrorResponse {
     }
 }
 
+#[instrument(level = "trace")]
 pub async fn handler_404() -> Response {
     FrontendErrorResponse::NotFound.into_response()
 }

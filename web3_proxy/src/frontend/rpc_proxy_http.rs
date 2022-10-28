@@ -10,12 +10,13 @@ use axum::{response::IntoResponse, Extension, Json};
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
 use std::sync::Arc;
-use tracing::{error_span, Instrument};
+use tracing::{error_span, instrument, Instrument};
 
 /// POST /rpc -- Public entrypoint for HTTP JSON-RPC requests. Web3 wallets use this.
 /// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -49,6 +50,7 @@ pub async fn proxy_web3_rpc(
 /// Can optionally authorized based on origin, referer, or user agent.
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,

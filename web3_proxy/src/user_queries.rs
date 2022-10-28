@@ -13,12 +13,13 @@ use sea_orm::{
     ColumnTrait, Condition, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, RelationTrait,
 };
-use tracing::trace;
+use tracing::{instrument, trace};
 
 use crate::app::Web3ProxyApp;
 
 /// get the attached address from redis for the given auth_token.
 /// 0 means all users
+#[instrument(level = "trace", skip(redis_conn))]
 async fn get_user_id_from_params(
     mut redis_conn: RedisConnection,
     // this is a long type. should we strip it down?
@@ -56,6 +57,7 @@ async fn get_user_id_from_params(
 /// only allow rpc_key to be set if user_id is also set.
 /// this will keep people from reading someone else's keys.
 /// 0 means none.
+#[instrument(level = "trace")]
 pub fn get_rpc_key_id_from_params(
     user_id: u64,
     params: &HashMap<String, String>,
@@ -74,6 +76,7 @@ pub fn get_rpc_key_id_from_params(
     }
 }
 
+#[instrument(level = "trace")]
 pub fn get_chain_id_from_params(
     app: &Web3ProxyApp,
     params: &HashMap<String, String>,
@@ -88,6 +91,7 @@ pub fn get_chain_id_from_params(
     )
 }
 
+#[instrument(level = "trace")]
 pub fn get_query_start_from_params(
     params: &HashMap<String, String>,
 ) -> anyhow::Result<chrono::NaiveDateTime> {
@@ -111,6 +115,7 @@ pub fn get_query_start_from_params(
     )
 }
 
+#[instrument(level = "trace")]
 pub fn get_page_from_params(params: &HashMap<String, String>) -> anyhow::Result<u64> {
     params.get("page").map_or_else::<anyhow::Result<u64>, _, _>(
         || {
@@ -127,6 +132,7 @@ pub fn get_page_from_params(params: &HashMap<String, String>) -> anyhow::Result<
     )
 }
 
+#[instrument(level = "trace")]
 pub fn get_query_window_seconds_from_params(
     params: &HashMap<String, String>,
 ) -> anyhow::Result<u64> {
@@ -148,6 +154,7 @@ pub fn get_query_window_seconds_from_params(
 }
 
 /// stats aggregated across a large time period
+#[instrument(level = "trace")]
 pub async fn get_aggregate_rpc_stats_from_params(
     app: &Web3ProxyApp,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
@@ -294,6 +301,7 @@ pub async fn get_aggregate_rpc_stats_from_params(
 }
 
 /// stats grouped by key_id and error_repsponse and method and key
+#[instrument(level = "trace")]
 pub async fn get_detailed_stats(
     app: &Web3ProxyApp,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,

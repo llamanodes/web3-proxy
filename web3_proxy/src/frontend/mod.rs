@@ -24,9 +24,10 @@ use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::trace::TraceLayer;
 use tower_request_id::{RequestId, RequestIdLayer};
-use tracing::{error_span, info};
+use tracing::{error_span, info, instrument};
 
 /// Start the frontend server.
+#[instrument(level = "trace")]
 pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
     // create a tracing span for each request with a random request id and the method
     // GET: websocket or static pages

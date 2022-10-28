@@ -35,7 +35,7 @@ use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
-use tracing::warn;
+use tracing::{instrument, warn};
 use ulid::Ulid;
 use uuid::Uuid;
 
@@ -57,6 +57,7 @@ use uuid::Uuid;
 /// It is a better UX to just click "login with ethereum" and have the account created if it doesn't exist.
 /// We can prompt for an email and and payment after they log in.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn user_login_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -143,7 +144,7 @@ pub struct PostLoginQuery {
 /// JSON body to our `post_login` handler.
 /// Currently only siwe logins that send an address, msg, and sig are allowed.
 /// Email/password and other login methods are planned.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct PostLogin {
     sig: String,
     msg: String,
@@ -153,6 +154,7 @@ pub struct PostLogin {
 /// It is recommended to save the returned bearer token in a cookie.
 /// The bearer token can be used to authenticate other requests, such as getting the user's stats or modifying the user's profile.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn user_login_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -330,6 +332,7 @@ pub async fn user_login_post(
 
 /// `POST /user/logout` - Forget the bearer token in the `Authentication` header.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn user_logout_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
@@ -351,6 +354,7 @@ pub async fn user_logout_post(
 ///
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn user_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
@@ -361,13 +365,14 @@ pub async fn user_get(
 }
 
 /// the JSON input to the `post_user` handler.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct UserPost {
     email: Option<String>,
 }
 
 /// `POST /user` -- modify the account connected to the bearer token in the `Authentication` header.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn user_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
@@ -414,6 +419,7 @@ pub async fn user_post(
 /// TODO: one key per request? maybe /user/balance/:rpc_key?
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn user_balance_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
@@ -431,6 +437,7 @@ pub async fn user_balance_get(
 /// TODO: one key per request? maybe /user/balance/:rpc_key?
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
@@ -444,6 +451,7 @@ pub async fn user_balance_post(
 ///
 /// TODO: one key per request? maybe /user/keys/:rpc_key?
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn rpc_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
@@ -471,7 +479,7 @@ pub async fn rpc_keys_get(
 }
 
 /// the JSON input to the `rpc_keys_post` handler.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct UserKeysPost {
     // TODO: make sure the email address is valid. probably have a "verified" column in the database
     existing_key_id: Option<u64>,
@@ -493,6 +501,7 @@ pub struct UserKeysPost {
 /// TODO: read json from the request body
 /// TODO: one key per request? maybe /user/keys/:rpc_key?
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn rpc_keys_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
@@ -668,6 +677,7 @@ pub async fn rpc_keys_post(
 
 /// `GET /user/revert_logs` -- Use a bearer token to get the user's revert logs.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn user_revert_logs_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
@@ -731,6 +741,7 @@ pub async fn user_revert_logs_get(
 ///
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn user_stats_detailed_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
@@ -743,6 +754,7 @@ pub async fn user_stats_detailed_get(
 
 /// `GET /user/stats/aggregate` -- Public endpoint for aggregate stats such as bandwidth used and methods requested.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn user_stats_aggregate_get(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Extension(app): Extension<Arc<Web3ProxyApp>>,

@@ -4,7 +4,7 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
-use tracing::warn;
+use tracing::{instrument, warn};
 
 use crate::rpcs::connections::Web3Connections;
 
@@ -38,6 +38,7 @@ pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> U64 {
 }
 
 /// modify params to always have a block number and not "latest"
+#[instrument(level = "trace")]
 pub async fn clean_block_number(
     params: &mut serde_json::Value,
     block_param_id: usize,
@@ -95,6 +96,7 @@ pub async fn clean_block_number(
 }
 
 // TODO: change this to also return the hash needed?
+#[instrument(level = "trace")]
 pub async fn block_needed(
     method: &str,
     params: Option<&mut serde_json::Value>,
