@@ -1,0 +1,145 @@
+
+GET /
+    This entrypoint handles two things.
+    If connecting with a browser, it redirects to the public stat page on llamanodes.com.
+    If connecting with a websocket, it is rate limited by IP and routes to the Web3 RPC.
+
+POST /
+    This entrypoint handles two things.
+    If connecting with a browser, it redirects to the public stat page on llamanodes.com.
+    If connecting with a websocket, it is rate limited by IP and routes to the Web3 RPC.
+
+GET /rpc/:rpc_key
+    This entrypoint handles two things.
+    If connecting with a browser, it redirects to the key's stat page on llamanodes.com.
+    If connecting with a websocket, it is rate limited by key and routes to the Web3 RPC.
+
+POST /rpc/:rpc_key
+    This entrypoint handles two things.
+    If connecting with a browser, it redirects to the key's stat page on llamanodes.com.
+    If connecting with a websocket, it is rate limited by key and routes to the Web3 RPC.
+
+GET /health
+    If servers are synced, this gives a 200 "OK".
+    If no servers are synced, it gives a 502 ":("
+
+GET /user/login/:user_address
+    Displays a "Sign in With Ethereum" message to be signed by the address's private key.
+    Once signed, continue to `POST /user/login`
+
+GET /user/login/:user_address/:message_eip
+    Similar to `GET /user/login/:user_address` but gives the message in different formats depending on the eip.
+    Wallets have varying support. This shouldn't be needed by most users.
+    The message_eip should be hidden behind a small gear icon near the login button.
+    Once signed, continue to `POST /user/login`
+
+    Supported:
+        EIP191 as bytes
+        EIP191 as a hash
+        EIP4361 (the default)
+
+    Support coming soon:
+        EIP1271 for contract signing
+
+POST /user/login?invite_code=SOMETHING_SECRET
+    Verifies the user's signed message.
+
+    The post should have JSON data containing "sig" (the signature) and "msg" (the original message).
+
+    Optionally requires an invite_code.
+    The invite code is only needed for new users. Once registered, it is not necessary.
+
+    If the invite code and signature are valid, this returns JSON data containing "rpc_keys", "bearer_token" and the "user".
+
+    "rpc_keys" contains the key and settings for all of the user's keys.
+    If the user is new, an "rpc_key" will be created for them. 
+
+    The "bearer_token" is required by some endpoints. Include it in the "AUTHORIZATION" header in this format: "bearer :bearer_token".
+    The token is good for 4 weeks and the 4 week time will reset whenever the token is used.
+
+    The "user" just has an address at first, but you can prompt them to add an email address. See `POST /user`
+
+GET /user
+    Checks the "AUTHORIZATION" header for a valid bearer token.
+    If valid, display's the user's data as JSON.
+
+
+
+POST /user
+    POST the data in the same format that `GET /user` gives it.
+    If you do not want to update a field, do not include it in the POSTed JSON.
+    If you want to delete a field, include the data's key and set the value to an empty string.
+
+    Checks the "AUTHORIZATION" header for a valid bearer token.
+    If valid, updates the user's data and returns the updated data as JSON.
+
+GET /user/balance
+    Not yet implemented.
+    
+    Checks the "AUTHORIZATION" header for a valid bearer token.
+    If valid, displays data about the user's balance and payments as JSON.
+
+POST /user/balance/:txid
+    Not yet implemented. Rate limited by IP.
+
+    Checks the ":txid" for a transaction that updates a user's balance.
+    The backend will be watching for these transactions, so this should not be needed in the common case.
+    However, log susbcriptions are not perfect and so it might sometimes be needed.
+
+GET /user/keys
+    Checks the "AUTHORIZATION" header for a valid bearer token.
+    If valid, displays data about the user's keys as JSON.
+
+POST /user/keys
+    Checks the "AUTHORIZATION" header for a valid bearer token.
+    If valid, allows the user to change options on their keys.
+
+    The POSTed JSON can have these fields:
+        existing_key_id: Option<u64>,
+        existing_key: Option<RpcApiKey>,
+        description: Option<String>,
+        private_txs: Option<bool>,
+        active: Option<bool>,
+        allowed_ips: Option<String>,
+        allowed_origins: Option<String>,
+        allowed_referers: Option<String>,
+        allowed_user_agents: Option<String>,
+
+    You must set **either** `existing_key_id` **or** `existing_key`.
+
+    If you do not want to update a field, do not include it in the POSTed JSON.
+    If you want to delete a string field, include the data's key and set the value to an empty string.
+
+    `allowed_ips`, `allowed_origins`, `allowed_referers`, and `allowed_user_agents` can have multiple values by separating them with commas.
+    `allowed_ips` must be in CIDR Notation (ex: "10.1.1.0/24" for a network, "10.1.1.10/32" for a single address).
+    The spec technically allows for bytes in `allowed_origins` or `allowed_referers`, but our code currently only supports strings. If a customer needs bytes, then we can code support for them.
+
+    `private_txs` are not currently recommended. If high gas is not supplied then they will likely never be included. Improvements to this are in the works
+
+    Soon, the POST data will also have a `log_revert_trace: Option<f32>`. This will by the percent chance to log any calls that "revert" to the database. Large dapps probably want this to be a small percent, but development keys will probably want 100%. This will not be enabled until automatic pruning is coded.
+
+GET `/user/revert_logs`
+    Checks the "AUTHORIZATION" header for a valid bearer token.
+    If valid, fetches paginated revert logs for the user.
+    More documentation will be written here once revert logging is enabled.
+
+GET /user/stats/aggregate
+    Checks the "AUTHORIZATION" header for a valid bearer token.
+    If valid, fetches paginated aggregated stats for the user.
+    Pages are limited to 200 entries. The backend config can change this page size if necessary.
+    Can be filtered by:
+        `chain_id` - set to 0 for all. 0 is the default.
+        `query_start` - The start date in unix epoch time.
+        `query_window_seconds` - How many seconds to aggregate the stats over.
+        `page` - The page to request. Defaults to 0.
+
+GET /user/stats/detailed
+    Checks the "AUTHORIZATION" header for a valid bearer token.
+    If valid, fetches paginated stats for the user with more detail. The request method is included. For user privacy, we intentionally do not include the request's calldata.
+    Can be filtered the same as `GET /user/stats/aggregate`
+    Soon will also be filterable by "method"
+
+POST /user/logout
+    Checks the "AUTHORIZATION" header for a valid bearer token.
+    If valid, deletes the bearer token from the proxy.
+    The user will need to `POST /user/login` to get a new bearer token.
