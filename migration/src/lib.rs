@@ -6,6 +6,7 @@ mod m20220928_015108_concurrency_limits;
 mod m20221007_213828_accounting;
 mod m20221025_210326_add_chain_id_to_reverts;
 mod m20221026_230819_rename_user_keys;
+mod m20221027_002407_user_tiers;
 
 pub struct Migrator;
 
@@ -19,6 +20,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20221007_213828_accounting::Migration),
             Box::new(m20221025_210326_add_chain_id_to_reverts::Migration),
             Box::new(m20221026_230819_rename_user_keys::Migration),
+            Box::new(m20221027_002407_user_tiers::Migration),
         ]
     }
 }
