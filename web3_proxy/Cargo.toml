@@ -54,7 +54,7 @@ reqwest = { version = "0.11.12", default-features = false, features = ["json", "
 handlebars = "4.3.5"
 rustc-hash = "1.1.0"
 siwe = "0.5.0"
-sea-orm = { version = "0.10.0", features = ["macros"] }
+sea-orm = { version = "0.10.1", features = ["macros"] }
 sentry = { version = "0.27.0", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls"] }
 sentry-tracing = "0.27.0"
 serde = { version = "1.0.147", features = [] }
