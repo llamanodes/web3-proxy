@@ -12,7 +12,7 @@ use crate::app::Web3ProxyApp;
 use axum::{
     body::Body,
     handler::Handler,
-    routing::{get, post},
+    routing::{get, post, put},
     Extension, Router,
 };
 use http::header::AUTHORIZATION;
@@ -75,7 +75,8 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/user/balance", get(users::user_balance_get))
         .route("/user/balance/:txid", post(users::user_balance_post))
         .route("/user/keys", get(users::rpc_keys_get))
-        .route("/user/keys", post(users::rpc_keys_post))
+        .route("/user/keys", post(users::rpc_keys_management))
+        .route("/user/keys", put(users::rpc_keys_management))
         .route("/user/revert_logs", get(users::user_revert_logs_get))
         .route(
             "/user/stats/aggregate",

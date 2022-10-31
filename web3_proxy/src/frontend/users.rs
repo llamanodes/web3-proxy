@@ -38,7 +38,6 @@ use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use tracing::{instrument, warn};
 use ulid::Ulid;
-use uuid::Uuid;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
 ///
@@ -479,12 +478,25 @@ pub async fn rpc_keys_get(
     Ok(Json(response_json).into_response())
 }
 
-/// the JSON input to the `rpc_keys_post` handler.
+/// `DELETE /user/keys` -- Use a bearer token to delete an existing key.
+#[debug_handler]
+#[instrument(level = "trace")]
+pub async fn rpc_keys_delete(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+) -> FrontendResult {
+    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+
+    // TODO: think about how cascading deletes and billing should work
+    Err(anyhow::anyhow!("work in progress").into())
+}
+
+/// the JSON input to the `rpc_keys_management` handler.
+/// If `key_id` is set, it updates an existing key.
+/// If `key_id` is not set, it creates a new key.
 #[derive(Debug, Deserialize)]
-pub struct UserKeysPost {
-    // TODO: make sure the email address is valid. probably have a "verified" column in the database
-    existing_key_id: Option<u64>,
-    existing_key: Option<RpcApiKey>,
+pub struct UserKeyManagement {
+    key_id: Option<u64>,
     description: Option<String>,
     private_txs: Option<bool>,
     active: Option<bool>,
@@ -497,37 +509,25 @@ pub struct UserKeysPost {
     // do not allow! `max_concurrent_requests: Option<u64>,`
 }
 
-/// `POST /user/keys` -- Use a bearer token to create a new key or modify an existing key.
-///
-/// TODO: read json from the request body
-/// TODO: one key per request? maybe /user/keys/:rpc_key?
+/// `POST /user/keys` or `PUT /user/keys` -- Use a bearer token to create or update an existing key.
 #[debug_handler]
 #[instrument(level = "trace")]
-pub async fn rpc_keys_post(
+pub async fn rpc_keys_management(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-    Json(payload): Json<UserKeysPost>,
+    Json(payload): Json<UserKeyManagement>,
 ) -> FrontendResult {
+    // TODO: is there a way we can know if this is a PUT or POST? right now we can modify or create keys with either. though that probably doesn't matter
+
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     let db_conn = app.db_conn().context("getting db for user's keys")?;
 
-    let mut uk = if let Some(existing_key_id) = payload.existing_key_id {
+    let mut uk = if let Some(existing_key_id) = payload.key_id {
         // get the key and make sure it belongs to the user
         let uk = rpc_keys::Entity::find()
             .filter(rpc_keys::Column::UserId.eq(user.id))
             .filter(rpc_keys::Column::Id.eq(existing_key_id))
-            .one(&db_conn)
-            .await
-            .context("failed loading user's key")?
-            .context("key does not exist or is not controlled by this bearer token")?;
-
-        uk.try_into().unwrap()
-    } else if let Some(existing_key) = payload.existing_key {
-        // get the key and make sure it belongs to the user
-        let uk = rpc_keys::Entity::find()
-            .filter(rpc_keys::Column::UserId.eq(user.id))
-            .filter(rpc_keys::Column::RpcKey.eq(Uuid::from(existing_key)))
             .one(&db_conn)
             .await
             .context("failed loading user's key")?
