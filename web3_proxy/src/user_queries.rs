@@ -15,7 +15,7 @@ use sea_orm::{
 };
 use tracing::{instrument, trace};
 
-use crate::app::Web3ProxyApp;
+use crate::{app::Web3ProxyApp, user_token::UserBearerToken};
 
 /// get the attached address from redis for the given auth_token.
 /// 0 means all users
@@ -27,10 +27,9 @@ async fn get_user_id_from_params(
     params: &HashMap<String, String>,
 ) -> anyhow::Result<u64> {
     match (bearer, params.get("user_id")) {
-        (Some(bearer), Some(user_id)) => {
+        (Some(TypedHeader(Authorization(bearer))), Some(user_id)) => {
             // check for the bearer cache key
-            // TODO: move this to a helper function
-            let bearer_cache_key = format!("bearer:{}", bearer.token());
+            let bearer_cache_key = UserBearerToken::try_from(bearer)?.to_string();
 
             // get the user id that is attached to this bearer token
             redis_conn

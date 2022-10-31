@@ -8,3 +8,4 @@ pub mod metered;
 pub mod metrics_frontend;
 pub mod rpcs;
 pub mod user_queries;
+pub mod user_token;

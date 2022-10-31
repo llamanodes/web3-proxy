@@ -15,7 +15,7 @@ use reqwest::header::ToStrError;
 use sea_orm::DbErr;
 use std::{error::Error, net::IpAddr};
 use tokio::time::Instant;
-use tracing::{instrument, warn};
+use tracing::{instrument, trace, warn};
 
 // TODO: take "IntoResponse" instead of Response?
 pub type FrontendResult = Result<Response, FrontendErrorResponse>;
@@ -37,6 +37,7 @@ pub enum FrontendErrorResponse {
     Response(Response),
     /// simple way to return an error message to the user and an anyhow to our logs
     StatusCode(StatusCode, String, anyhow::Error),
+    UlidDecodeError(ulid::DecodeError),
     UnknownKey,
 }
 
@@ -168,7 +169,8 @@ impl IntoResponse for FrontendErrorResponse {
                 return r;
             }
             Self::StatusCode(status_code, err_msg, err) => {
-                warn!(?status_code, ?err_msg, ?err);
+                // TODO: warn is way too loud. different status codes should get different error levels. 500s should warn. 400s should stat
+                trace!(?status_code, ?err_msg, ?err);
                 (
                     status_code,
                     JsonRpcForwardedResponse::from_str(
@@ -179,7 +181,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::HeaderToString(err) => {
-                warn!(?err, "HeaderToString");
+                trace!(?err, "HeaderToString");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -189,6 +191,18 @@ impl IntoResponse for FrontendErrorResponse {
                     ),
                 )
             }
+            Self::UlidDecodeError(err) => {
+                trace!(?err, "UlidDecodeError");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        &format!("{}", err),
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            // TODO: stat?
             Self::UnknownKey => (
                 StatusCode::UNAUTHORIZED,
                 JsonRpcForwardedResponse::from_str(

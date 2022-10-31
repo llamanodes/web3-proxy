@@ -7,6 +7,7 @@ use crate::user_queries::{
     get_aggregate_rpc_stats_from_params, get_detailed_stats, get_page_from_params,
 };
 use crate::user_queries::{get_chain_id_from_params, get_query_start_from_params};
+use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::{
@@ -312,7 +313,7 @@ pub async fn user_login_post(
 
     // add bearer to redis
     // TODO: use a helper function/struct for this
-    let bearer_redis_key = format!("bearer:{}", bearer_token);
+    let bearer_redis_key = UserBearerToken(bearer_token).to_string();
 
     // expire in 4 weeks
     // TODO: get expiration time from app config
@@ -340,7 +341,7 @@ pub async fn user_logout_post(
     let mut redis_conn = app.redis_conn().await?;
 
     // TODO: i don't like this. move this to a helper function so it is less fragile
-    let bearer_cache_key = format!("bearer:{}", bearer.token());
+    let bearer_cache_key = UserBearerToken::try_from(bearer)?.to_string();
 
     redis_conn.del(bearer_cache_key).await?;
 

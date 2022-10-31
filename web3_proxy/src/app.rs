@@ -172,6 +172,16 @@ pub async fn get_migrated_db(
     Ok(db_conn)
 }
 
+#[derive(From)]
+pub struct Web3ProxyAppSpawn {
+    /// the app. probably clone this to use in other groups of handles
+    pub app: Arc<Web3ProxyApp>,
+    // cancellable handles
+    pub app_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
+    /// these are important and must be allowed to finish
+    pub background_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
+}
+
 #[metered(registry = Web3ProxyAppMetrics, registry_expr = self.app_metrics, visibility = pub)]
 impl Web3ProxyApp {
     /// The main entrypoint.
@@ -180,13 +190,7 @@ impl Web3ProxyApp {
         top_config: TopConfig,
         num_workers: usize,
         shutdown_receiver: broadcast::Receiver<()>,
-    ) -> anyhow::Result<(
-        Arc<Web3ProxyApp>,
-        // this handle is the main loops that we can cancel. select on this
-        FuturesUnordered<AnyhowJoinHandle<()>>,
-        // this handle is the state saving background loops that we must let finish. join_all on this
-        FuturesUnordered<AnyhowJoinHandle<()>>,
-    )> {
+    ) -> anyhow::Result<Web3ProxyAppSpawn> {
         // safety checks on the config
         if let Some(redirect) = &top_config.app.redirect_user_url {
             assert!(
@@ -493,7 +497,7 @@ impl Web3ProxyApp {
 
         let app = Arc::new(app);
 
-        Ok((app, cancellable_handles, important_background_handles))
+        Ok((app, cancellable_handles, important_background_handles).into())
     }
 
     #[instrument(level = "trace")]

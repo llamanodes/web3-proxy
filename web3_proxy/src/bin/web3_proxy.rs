@@ -74,17 +74,21 @@ fn run(
         let app_frontend_port = cli_config.port;
         let app_prometheus_port = cli_config.prometheus_port;
 
-        let (app, app_handles, mut important_background_handles) =
+        let mut spawned_app =
             Web3ProxyApp::spawn(top_config, num_workers, shutdown_sender.subscribe()).await?;
 
-        let frontend_handle = tokio::spawn(frontend::serve(app_frontend_port, app.clone()));
+        let frontend_handle =
+            tokio::spawn(frontend::serve(app_frontend_port, spawned_app.app.clone()));
 
-        let prometheus_handle = tokio::spawn(metrics_frontend::serve(app, app_prometheus_port));
+        let prometheus_handle = tokio::spawn(metrics_frontend::serve(
+            spawned_app.app,
+            app_prometheus_port,
+        ));
 
         // if everything is working, these should both run forever
         // TODO: join these instead and use shutdown handler properly. probably use tokio's ctrl+c helper
         tokio::select! {
-            x = flatten_handles(app_handles) => {
+            x = flatten_handles(spawned_app.app_handles) => {
                 match x {
                     Ok(_) => info!("app_handle exited"),
                     Err(e) => {
@@ -124,7 +128,7 @@ fn run(
         };
 
         // wait on all the important background tasks (like saving stats to the database) to complete
-        while let Some(x) = important_background_handles.next().await {
+        while let Some(x) = spawned_app.background_handles.next().await {
             match x {
                 Err(e) => return Err(e.into()),
                 Ok(Err(e)) => return Err(e),

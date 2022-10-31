@@ -3,6 +3,7 @@
 use super::errors::FrontendErrorResponse;
 use crate::app::{UserKeyData, Web3ProxyApp};
 use crate::jsonrpc::JsonRpcRequest;
+use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
@@ -395,7 +396,7 @@ impl Web3ProxyApp {
 
         // get the user id for this bearer token
         // TODO: move redis key building to a helper function
-        let bearer_cache_key = format!("bearer:{}", bearer.token());
+        let bearer_cache_key = UserBearerToken::try_from(bearer)?.to_string();
 
         // get the attached address from redis for the given auth_token.
         let mut redis_conn = self.redis_conn().await?;
