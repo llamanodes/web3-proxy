@@ -28,6 +28,7 @@ axum-macros = "0.2.3"
 # TODO: import chrono from sea-orm so we always have the same version
 chrono = "0.4.22"
 counter = "0.5.7"
+dashmap = "5.4.0"
 derive_more = "0.99.17"
 dotenv = "0.15.0"
 ethers = { version = "1.0.0", features = ["rustls", "ws"] }

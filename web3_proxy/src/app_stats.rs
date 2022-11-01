@@ -2,6 +2,8 @@ use crate::frontend::authorization::{AuthorizedKey, RequestMetadata};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use anyhow::Context;
 use chrono::{TimeZone, Utc};
+use dashmap::mapref::entry::Entry;
+use dashmap::DashMap;
 use derive_more::From;
 use entities::rpc_accounting;
 use hdrhistogram::Histogram;
@@ -80,11 +82,8 @@ pub struct UserProxyResponseKey {
     error_response: bool,
 }
 
-pub type UserProxyResponseCache = Cache<
-    UserProxyResponseKey,
-    Arc<ProxyResponseAggregate>,
-    hashbrown::hash_map::DefaultHashBuilder,
->;
+// TODO: think about nested maps more. does this need an arc?
+pub type UserProxyResponseCache = DashMap<UserProxyResponseKey, Arc<ProxyResponseAggregate>>;
 /// key is the "time bucket's timestamp" (timestamp / period * period)
 pub type TimeProxyResponseCache =
     Cache<TimeBucketTimestamp, UserProxyResponseCache, hashbrown::hash_map::DefaultHashBuilder>;
@@ -147,6 +146,7 @@ impl StatEmitter {
 
         // this needs to be long enough that there are definitely no outstanding queries
         // TODO: what should the "safe" multiplier be? what if something is late?
+        // TODO: in most cases this delays more than necessary. think of how to do this without dashmap which might let us proceed
         let ttl_seconds = period_seconds * 3;
 
         let aggregated_proxy_responses = CacheBuilder::default()
@@ -351,17 +351,17 @@ impl StatEmitter {
                 // TODO: i don't think this works right. maybe do DashMap entry api as the outer variable
                 let user_cache = self
                     .aggregated_proxy_responses
-                    .get_with_by_ref(&stat.period_timestamp, async move {
-                        CacheBuilder::default()
-                            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new())
-                    })
+                    .get_with_by_ref(&stat.period_timestamp, async move { Default::default() })
                     .await;
 
                 let key = (stat.rpc_key_id, stat.method, stat.error_response).into();
 
-                let user_aggregate = user_cache
-                    .get_with(key, async move {
+                let user_aggregate = match user_cache.entry(key) {
+                    Entry::Occupied(x) => x.get().clone(),
+                    Entry::Vacant(y) => {
                         let histograms = ProxyResponseHistograms::default();
+
+                        // TODO: create a counter here that we use to tell when it is safe to flush these? faster than waiting 3 periods
 
                         let aggregate = ProxyResponseAggregate {
                             period_timestamp: stat.period_timestamp,
@@ -378,9 +378,16 @@ impl StatEmitter {
                             histograms: AsyncMutex::new(histograms),
                         };
 
-                        Arc::new(aggregate)
-                    })
-                    .await;
+                        // TODO: store this arc in the map
+                        // TODO: does this have a race condition?
+
+                        let aggregate = Arc::new(aggregate);
+
+                        y.insert(aggregate.clone());
+
+                        aggregate
+                    }
+                };
 
                 // a stat always come from just 1 frontend request
                 user_aggregate
