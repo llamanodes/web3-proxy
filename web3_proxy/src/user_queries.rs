@@ -4,7 +4,7 @@ use axum::{
     TypedHeader,
 };
 use chrono::NaiveDateTime;
-use entities::{rpc_accounting, rpc_keys};
+use entities::{rpc_accounting, rpc_key};
 use hashbrown::HashMap;
 use migration::Expr;
 use num::Zero;
@@ -272,11 +272,11 @@ pub async fn get_aggregate_rpc_stats_from_params(
         // TODO: are these joins correct?
         // TODO: what about keys where they are the secondary users?
         let q = q
-            .join(JoinType::InnerJoin, rpc_accounting::Relation::RpcKeys.def())
-            .column(rpc_keys::Column::UserId)
-            .group_by(rpc_keys::Column::UserId);
+            .join(JoinType::InnerJoin, rpc_accounting::Relation::RpcKey.def())
+            .column(rpc_key::Column::UserId)
+            .group_by(rpc_key::Column::UserId);
 
-        let condition = condition.add(rpc_keys::Column::UserId.eq(user_id));
+        let condition = condition.add(rpc_key::Column::UserId.eq(user_id));
 
         (condition, q)
     };
@@ -394,21 +394,20 @@ pub async fn get_detailed_stats(
         // TODO: move authentication here?
         // TODO: what about keys where this user is a secondary user?
         let q = q
-            .join(JoinType::InnerJoin, rpc_accounting::Relation::RpcKeys.def())
-            .column(rpc_keys::Column::UserId)
-            .group_by(rpc_keys::Column::UserId);
+            .join(JoinType::InnerJoin, rpc_accounting::Relation::RpcKey.def())
+            .column(rpc_key::Column::UserId)
+            .group_by(rpc_key::Column::UserId);
 
-        let condition = condition.add(rpc_keys::Column::UserId.eq(user_id));
+        let condition = condition.add(rpc_key::Column::UserId.eq(user_id));
 
         let q = if rpc_key_id == 0 {
-            q.column(rpc_keys::Column::UserId)
-                .group_by(rpc_keys::Column::UserId)
+            q.column(rpc_key::Column::UserId)
+                .group_by(rpc_key::Column::UserId)
         } else {
             response.insert("rpc_key_id", serde_json::to_value(rpc_key_id)?);
 
             // no need to group_by user_id when we are grouping by key_id
-            q.column(rpc_keys::Column::Id)
-                .group_by(rpc_keys::Column::Id)
+            q.column(rpc_key::Column::Id).group_by(rpc_key::Column::Id)
         };
 
         (condition, q)

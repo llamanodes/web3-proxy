@@ -1,6 +1,6 @@
 //! Handle registration, logins, and managing account data.
 
-use super::authorization::{login_is_authorized, RpcApiKey};
+use super::authorization::{login_is_authorized, RpcSecretKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
 use crate::user_queries::{
@@ -18,7 +18,7 @@ use axum::{
 };
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
-use entities::{revert_logs, rpc_keys, user};
+use entities::{revert_log, rpc_key, user};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
@@ -250,6 +250,8 @@ pub async fn user_login_post(
 
             // the only thing we need from them is an address
             // everything else is optional
+            // TODO: different invite codes should allow different levels
+            // TODO: maybe decrement a count on the invite code?
             let u = user::ActiveModel {
                 address: sea_orm::Set(our_msg.address.into()),
                 ..Default::default()
@@ -259,14 +261,13 @@ pub async fn user_login_post(
 
             // create the user's first api key
             // TODO: rename to UserApiKey? RpcApiKey?
-            let rpc_key = RpcApiKey::new();
+            let rpc_secret_key = RpcSecretKey::new();
 
             // TODO: variable requests per minute depending on the invite code
-            let uk = rpc_keys::ActiveModel {
+            let uk = rpc_key::ActiveModel {
                 user_id: sea_orm::Set(u.id),
-                rpc_key: sea_orm::Set(rpc_key.into()),
+                secret_key: sea_orm::Set(rpc_secret_key.into()),
                 description: sea_orm::Set(Some("first".to_string())),
-                requests_per_minute: sea_orm::Set(app.config.default_user_requests_per_minute),
                 ..Default::default()
             };
 
@@ -284,8 +285,8 @@ pub async fn user_login_post(
         }
         Some(u) => {
             // the user is already registered
-            let uks = rpc_keys::Entity::find()
-                .filter(rpc_keys::Column::UserId.eq(u.id))
+            let uks = rpc_key::Entity::find()
+                .filter(rpc_key::Column::UserId.eq(u.id))
                 .all(&db_conn)
                 .await
                 .context("failed loading user's key")?;
@@ -460,8 +461,8 @@ pub async fn rpc_keys_get(
 
     let db_conn = app.db_conn().context("getting db to fetch user's keys")?;
 
-    let uks = rpc_keys::Entity::find()
-        .filter(rpc_keys::Column::UserId.eq(user.id))
+    let uks = rpc_key::Entity::find()
+        .filter(rpc_key::Column::UserId.eq(user.id))
         .all(&db_conn)
         .await
         .context("failed loading user's key")?;
@@ -525,9 +526,9 @@ pub async fn rpc_keys_management(
 
     let mut uk = if let Some(existing_key_id) = payload.key_id {
         // get the key and make sure it belongs to the user
-        let uk = rpc_keys::Entity::find()
-            .filter(rpc_keys::Column::UserId.eq(user.id))
-            .filter(rpc_keys::Column::Id.eq(existing_key_id))
+        let uk = rpc_key::Entity::find()
+            .filter(rpc_key::Column::UserId.eq(user.id))
+            .filter(rpc_key::Column::Id.eq(existing_key_id))
             .one(&db_conn)
             .await
             .context("failed loading user's key")?
@@ -537,12 +538,11 @@ pub async fn rpc_keys_management(
     } else {
         // make a new key
         // TODO: limit to 10 keys?
-        let rpc_key = RpcApiKey::new();
+        let secret_key = RpcSecretKey::new();
 
-        rpc_keys::ActiveModel {
+        rpc_key::ActiveModel {
             user_id: sea_orm::Set(user.id),
-            rpc_key: sea_orm::Set(rpc_key.into()),
-            requests_per_minute: sea_orm::Set(app.config.default_user_requests_per_minute),
+            secret_key: sea_orm::Set(secret_key.into()),
             ..Default::default()
         }
     };
@@ -671,7 +671,7 @@ pub async fn rpc_keys_management(
         uk
     };
 
-    let uk: rpc_keys::Model = uk.try_into()?;
+    let uk: rpc_key::Model = uk.try_into()?;
 
     Ok(Json(uk).into_response())
 }
@@ -702,8 +702,8 @@ pub async fn user_revert_logs_get(
 
     let db_conn = app.db_conn().context("getting db for user's revert logs")?;
 
-    let uks = rpc_keys::Entity::find()
-        .filter(rpc_keys::Column::UserId.eq(user.id))
+    let uks = rpc_key::Entity::find()
+        .filter(rpc_key::Column::UserId.eq(user.id))
         .all(&db_conn)
         .await
         .context("failed loading user's key")?;
@@ -712,17 +712,17 @@ pub async fn user_revert_logs_get(
     let uks: Vec<_> = uks.into_iter().map(|x| x.id).collect();
 
     // get paginated logs
-    let q = revert_logs::Entity::find()
-        .filter(revert_logs::Column::Timestamp.gte(query_start))
-        .filter(revert_logs::Column::RpcKeyId.is_in(uks))
-        .order_by_asc(revert_logs::Column::Timestamp);
+    let q = revert_log::Entity::find()
+        .filter(revert_log::Column::Timestamp.gte(query_start))
+        .filter(revert_log::Column::RpcKeyId.is_in(uks))
+        .order_by_asc(revert_log::Column::Timestamp);
 
     let q = if chain_id == 0 {
         // don't do anything
         q
     } else {
         // filter on chain id
-        q.filter(revert_logs::Column::ChainId.eq(chain_id))
+        q.filter(revert_log::Column::ChainId.eq(chain_id))
     };
 
     let revert_logs = q.paginate(&db_conn, page_size).fetch_page(page).await?;

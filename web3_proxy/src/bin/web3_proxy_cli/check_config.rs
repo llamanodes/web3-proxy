@@ -35,7 +35,7 @@ impl CheckConfigSubCommand {
             Some(_) => {}
         }
 
-        match top_config.app.default_user_requests_per_minute {
+        match top_config.app.default_user_max_requests_per_minute {
             None => {
                 info!("app.default_user_requests_per_minute is None. Fully open to registered requests!")
             }

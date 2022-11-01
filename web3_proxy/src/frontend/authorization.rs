@@ -10,12 +10,12 @@ use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::TypedHeader;
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
-use entities::{rpc_keys, user};
+use entities::{rpc_key, user, user_tier};
 use http::HeaderValue;
 use ipnet::IpNet;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
-use sea_orm::{prelude::Decimal, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::{net::IpAddr, str::FromStr, sync::Arc};
@@ -28,7 +28,7 @@ use uuid::Uuid;
 /// This lets us use UUID and ULID while we transition to only ULIDs
 /// TODO: include the key's description.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum RpcApiKey {
+pub enum RpcSecretKey {
     Ulid(Ulid),
     Uuid(Uuid),
 }
@@ -55,7 +55,7 @@ pub struct AuthorizedKey {
     pub user_id: u64,
     pub rpc_key_id: u64,
     // TODO: just use an f32? even an f16 is probably fine
-    pub log_revert_chance: Decimal,
+    pub log_revert_chance: f64,
 }
 
 #[derive(Debug)]
@@ -107,19 +107,19 @@ impl RequestMetadata {
     }
 }
 
-impl RpcApiKey {
+impl RpcSecretKey {
     pub fn new() -> Self {
         Ulid::new().into()
     }
 }
 
-impl Default for RpcApiKey {
+impl Default for RpcSecretKey {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Display for RpcApiKey {
+impl Display for RpcSecretKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // TODO: do this without dereferencing
         let ulid: Ulid = (*self).into();
@@ -128,7 +128,7 @@ impl Display for RpcApiKey {
     }
 }
 
-impl FromStr for RpcApiKey {
+impl FromStr for RpcSecretKey {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -143,32 +143,32 @@ impl FromStr for RpcApiKey {
     }
 }
 
-impl From<Ulid> for RpcApiKey {
+impl From<Ulid> for RpcSecretKey {
     fn from(x: Ulid) -> Self {
-        RpcApiKey::Ulid(x)
+        RpcSecretKey::Ulid(x)
     }
 }
 
-impl From<Uuid> for RpcApiKey {
+impl From<Uuid> for RpcSecretKey {
     fn from(x: Uuid) -> Self {
-        RpcApiKey::Uuid(x)
+        RpcSecretKey::Uuid(x)
     }
 }
 
-impl From<RpcApiKey> for Ulid {
-    fn from(x: RpcApiKey) -> Self {
+impl From<RpcSecretKey> for Ulid {
+    fn from(x: RpcSecretKey) -> Self {
         match x {
-            RpcApiKey::Ulid(x) => x,
-            RpcApiKey::Uuid(x) => Ulid::from(x.as_u128()),
+            RpcSecretKey::Ulid(x) => x,
+            RpcSecretKey::Uuid(x) => Ulid::from(x.as_u128()),
         }
     }
 }
 
-impl From<RpcApiKey> for Uuid {
-    fn from(x: RpcApiKey) -> Self {
+impl From<RpcSecretKey> for Uuid {
+    fn from(x: RpcSecretKey) -> Self {
         match x {
-            RpcApiKey::Ulid(x) => Uuid::from_u128(x.0),
-            RpcApiKey::Uuid(x) => x,
+            RpcSecretKey::Ulid(x) => Uuid::from_u128(x.0),
+            RpcSecretKey::Uuid(x) => x,
         }
     }
 }
@@ -297,7 +297,7 @@ pub async fn ip_is_authorized(
 
 pub async fn key_is_authorized(
     app: &Web3ProxyApp,
-    rpc_key: RpcApiKey,
+    rpc_key: RpcSecretKey,
     ip: IpAddr,
     origin: Option<Origin>,
     referer: Option<Referer>,
@@ -502,27 +502,32 @@ impl Web3ProxyApp {
 
     // check the local cache for user data, or query the database
     #[instrument(level = "trace")]
-    pub(crate) async fn user_data(&self, rpc_key: RpcApiKey) -> anyhow::Result<UserKeyData> {
+    pub(crate) async fn user_data(
+        &self,
+        rpc_secret_key: RpcSecretKey,
+    ) -> anyhow::Result<UserKeyData> {
         let user_data: Result<_, Arc<anyhow::Error>> = self
-            .rpc_key_cache
-            .try_get_with(rpc_key.into(), async move {
-                trace!(?rpc_key, "user_cache miss");
+            .rpc_secret_key_cache
+            .try_get_with(rpc_secret_key.into(), async move {
+                trace!(?rpc_secret_key, "user cache miss");
 
                 let db_conn = self.db_conn().context("Getting database connection")?;
 
-                let rpc_key: Uuid = rpc_key.into();
+                let rpc_secret_key: Uuid = rpc_secret_key.into();
 
                 // TODO: join the user table to this to return the User? we don't always need it
-                // TODO: also attach secondary users
-                match rpc_keys::Entity::find()
-                    .filter(rpc_keys::Column::RpcKey.eq(rpc_key))
-                    .filter(rpc_keys::Column::Active.eq(true))
+                // TODO: join on secondary users
+                // TODO: join on user tier
+                match rpc_key::Entity::find()
+                    .filter(rpc_key::Column::SecretKey.eq(rpc_secret_key))
+                    .filter(rpc_key::Column::Active.eq(true))
                     .one(&db_conn)
                     .await?
                 {
                     Some(rpc_key_model) => {
                         // TODO: move these splits into helper functions
                         // TODO: can we have sea orm handle this for us?
+                        // let user_tier_model = rpc_key_model.
 
                         let allowed_ips: Option<Vec<IpNet>> =
                             if let Some(allowed_ips) = rpc_key_model.allowed_ips {
@@ -575,16 +580,18 @@ impl Web3ProxyApp {
                                 None
                             };
 
+                        // let user_tier_model = user_tier
+
                         Ok(UserKeyData {
                             user_id: rpc_key_model.user_id,
                             rpc_key_id: rpc_key_model.id,
-                            max_requests_per_period: rpc_key_model.requests_per_minute,
-                            max_concurrent_requests: rpc_key_model.max_concurrent_requests,
                             allowed_ips,
                             allowed_origins,
                             allowed_referers,
                             allowed_user_agents,
                             log_revert_chance: rpc_key_model.log_revert_chance,
+                            max_concurrent_requests: None, // todo! user_tier_model.max_concurrent_requests,
+                            max_requests_per_period: None, // todo! user_tier_model.max_requests_per_period,
                         })
                     }
                     None => Ok(UserKeyData::default()),
@@ -597,7 +604,10 @@ impl Web3ProxyApp {
     }
 
     #[instrument(level = "trace")]
-    pub async fn rate_limit_by_key(&self, rpc_key: RpcApiKey) -> anyhow::Result<RateLimitResult> {
+    pub async fn rate_limit_by_key(
+        &self,
+        rpc_key: RpcSecretKey,
+    ) -> anyhow::Result<RateLimitResult> {
         let user_data = self.user_data(rpc_key).await?;
 
         if user_data.rpc_key_id == 0 {

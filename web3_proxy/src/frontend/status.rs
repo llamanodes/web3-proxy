@@ -39,14 +39,14 @@ pub async fn prometheus(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl In
 #[instrument(level = "trace")]
 pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     app.pending_transactions.sync();
-    app.rpc_key_cache.sync();
+    app.rpc_secret_key_cache.sync();
 
     // TODO: what else should we include? uptime, cache hit rates, cpu load
     let body = json!({
         "pending_transactions_count": app.pending_transactions.entry_count(),
         "pending_transactions_size": app.pending_transactions.weighted_size(),
-        "user_cache_count": app.rpc_key_cache.entry_count(),
-        "user_cache_size": app.rpc_key_cache.weighted_size(),
+        "user_cache_count": app.rpc_secret_key_cache.entry_count(),
+        "user_cache_size": app.rpc_secret_key_cache.weighted_size(),
         "balanced_rpcs": app.balanced_rpcs,
         "private_rpcs": app.private_rpcs,
     });

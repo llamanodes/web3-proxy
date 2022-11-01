@@ -267,7 +267,7 @@ mod tests {
         let app_config = TopConfig {
             app: AppConfig {
                 chain_id: 31337,
-                default_user_requests_per_minute: Some(6_000_000),
+                default_user_max_requests_per_minute: Some(6_000_000),
                 min_sum_soft_limit: 1,
                 min_synced_rpcs: 1,
                 public_requests_per_minute: Some(1_000_000),

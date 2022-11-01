@@ -402,7 +402,7 @@ impl Web3Connections {
                 // if we get here, something is wrong. clear synced connections
                 let empty_synced_connections = SyncedConnections::default();
 
-                let old_synced_connections = self
+                let _ = self
                     .synced_connections
                     .swap(Arc::new(empty_synced_connections));
 

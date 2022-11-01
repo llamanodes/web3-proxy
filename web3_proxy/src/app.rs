@@ -29,7 +29,6 @@ use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
 use migration::{Migrator, MigratorTrait};
 use moka::future::Cache;
 use redis_rate_limiter::{DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
-use sea_orm::prelude::Decimal;
 use sea_orm::DatabaseConnection;
 use serde::Serialize;
 use serde_json::json;
@@ -68,9 +67,9 @@ pub struct UserKeyData {
     pub user_id: u64,
     /// database id of the rpc key
     pub rpc_key_id: u64,
-    /// if None, allow unlimited queries
+    /// if None, allow unlimited queries. inherited from the user_tier
     pub max_requests_per_period: Option<u64>,
-    // if None, allow unlimited concurrent requests
+    // if None, allow unlimited concurrent requests. inherited from the user_tier
     pub max_concurrent_requests: Option<u64>,
     /// if None, allow any Origin
     pub allowed_origins: Option<Vec<Origin>>,
@@ -81,7 +80,8 @@ pub struct UserKeyData {
     /// if None, allow any IP Address
     pub allowed_ips: Option<Vec<IpNet>>,
     /// Chance to save reverting eth_call, eth_estimateGas, and eth_sendRawTransaction to the database.
-    pub log_revert_chance: Decimal,
+    /// TODO: f32 would be fine
+    pub log_revert_chance: f64,
 }
 
 /// The application
@@ -108,7 +108,8 @@ pub struct Web3ProxyApp {
     pub frontend_key_rate_limiter: Option<DeferredRateLimiter<Ulid>>,
     pub login_rate_limiter: Option<RedisRateLimiter>,
     pub vredis_pool: Option<RedisPool>,
-    pub rpc_key_cache: Cache<Ulid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
+    // TODO: this key should be our RpcSecretKey class, not Ulid
+    pub rpc_secret_key_cache: Cache<Ulid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
     pub rpc_key_semaphores: Cache<u64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub bearer_token_semaphores:
@@ -456,9 +457,9 @@ impl Web3ProxyApp {
         // if there is no database of users, there will be no keys and so this will be empty
         // TODO: max_capacity from config
         // TODO: ttl from config
-        let rpc_key_cache = Cache::builder()
+        let rpc_secret_key_cache = Cache::builder()
             .max_capacity(10_000)
-            .time_to_live(Duration::from_secs(60))
+            .time_to_live(Duration::from_secs(600))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 
         // create semaphores for concurrent connection limits
@@ -488,7 +489,7 @@ impl Web3ProxyApp {
             vredis_pool,
             app_metrics,
             open_request_handle_metrics,
-            rpc_key_cache,
+            rpc_secret_key_cache,
             bearer_token_semaphores,
             ip_semaphores,
             rpc_key_semaphores,

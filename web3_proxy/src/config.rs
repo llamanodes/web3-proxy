@@ -74,7 +74,7 @@ pub struct AppConfig {
     /// Default request limit for registered users.
     /// 0 = block all requests
     /// None = allow all requests
-    pub default_user_requests_per_minute: Option<u64>,
+    pub default_user_max_requests_per_minute: Option<u64>,
 
     /// Restrict user registration.
     /// None = no code needed

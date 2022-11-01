@@ -1,12 +1,12 @@
 use anyhow::Context;
 use argh::FromArgs;
-use entities::{rpc_keys, user};
+use entities::{rpc_key, user};
 use ethers::prelude::Address;
 use sea_orm::{ActiveModelTrait, TransactionTrait};
 use tracing::info;
 use ulid::Ulid;
 use uuid::Uuid;
-use web3_proxy::frontend::authorization::RpcApiKey;
+use web3_proxy::frontend::authorization::RpcSecretKey;
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 /// Create a new user and api key
@@ -25,12 +25,7 @@ pub struct CreateUserSubCommand {
     /// the user's first api ULID or UUID key.
     /// If none given, one will be created.
     #[argh(option)]
-    rpc_key: RpcApiKey,
-
-    /// the key's maximum requests per minute.
-    /// Default to "None" which the code sees as "unlimited" requests.
-    #[argh(option)]
-    rpm: Option<u64>,
+    rpc_secret_key: RpcSecretKey,
 
     /// an optional short description of the key's purpose.
     #[argh(option)]
@@ -74,10 +69,9 @@ impl CreateUserSubCommand {
         );
 
         // create a key for the new user
-        let uk = rpc_keys::ActiveModel {
+        let uk = rpc_key::ActiveModel {
             user_id: u.id,
-            rpc_key: sea_orm::Set(self.rpc_key.into()),
-            requests_per_minute: sea_orm::Set(self.rpm),
+            secret_key: sea_orm::Set(self.rpc_secret_key.into()),
             description: sea_orm::Set(self.description),
             ..Default::default()
         };
@@ -87,8 +81,8 @@ impl CreateUserSubCommand {
 
         txn.commit().await?;
 
-        info!("user key as ULID: {}", Ulid::from(self.rpc_key));
-        info!("user key as UUID: {}", Uuid::from(self.rpc_key));
+        info!("user key as ULID: {}", Ulid::from(self.rpc_secret_key));
+        info!("user key as UUID: {}", Uuid::from(self.rpc_secret_key));
 
         Ok(())
     }

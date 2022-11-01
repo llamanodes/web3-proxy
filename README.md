@@ -64,6 +64,13 @@ $ websocat ws://127.0.0.1:8544
 
 You can copy `config/example.toml` to `config/production-$CHAINNAME.toml` and then run `docker-compose up --build -d` start proxies for many chains.
 
+
+Run migrations (useful during development. in production, the migrations run on application start)
+```
+cd migration
+cargo run up
+```
+
 ## Database entities
 
 This command only needs to be run during development. Production should use the already generated entities.

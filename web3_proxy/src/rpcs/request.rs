@@ -4,7 +4,7 @@ use crate::frontend::authorization::AuthorizedRequest;
 use crate::metered::{JsonRpcErrorCount, ProviderErrorCount};
 use anyhow::Context;
 use chrono::Utc;
-use entities::revert_logs;
+use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::{HttpClientError, ProviderError, WsClientError};
 use ethers::types::{Address, Bytes};
@@ -12,9 +12,7 @@ use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
 use metered::Throughput;
-use num_traits::cast::FromPrimitive;
 use rand::Rng;
-use sea_orm::prelude::Decimal;
 use sea_orm::ActiveEnum;
 use sea_orm::ActiveModelTrait;
 use serde_json::json;
@@ -94,7 +92,7 @@ impl AuthorizedRequest {
                 .expect("address should always convert to a Vec<u8>");
             let call_data = params.data.map(|x| format!("{}", x));
 
-            let rl = revert_logs::ActiveModel {
+            let rl = revert_log::ActiveModel {
                 rpc_key_id: sea_orm::Set(authorized_request.rpc_key_id),
                 method: sea_orm::Set(method),
                 to: sea_orm::Set(to),
@@ -222,16 +220,13 @@ impl OpenRequestHandle {
                     } else {
                         let log_revert_chance = y.log_revert_chance;
 
-                        if log_revert_chance.is_zero() {
+                        if log_revert_chance == 0.0 {
                             trace!(%method, "no chance. skipping save on revert");
                             RequestErrorHandler::DebugLevel
-                        } else if log_revert_chance == Decimal::ONE {
+                        } else if log_revert_chance == 1.0 {
                             trace!(%method, "gaurenteed chance. SAVING on revert");
                             error_handler
-                        } else if Decimal::from_f32(rand::thread_rng().gen_range(0.0f32..=1.0))
-                            .expect("f32 should always convert to a Decimal")
-                            > log_revert_chance
-                        {
+                        } else if rand::thread_rng().gen_range(0.0f64..=1.0) > log_revert_chance {
                             trace!(%method, "missed chance. skipping save on revert");
                             RequestErrorHandler::DebugLevel
                         } else {
