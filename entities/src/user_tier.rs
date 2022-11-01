@@ -9,7 +9,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: u64,
     pub title: String,
-    pub max_requests_per_minute: Option<u64>,
+    pub max_requests_per_period: Option<u64>,
     pub max_concurrent_requests: Option<u32>,
 }
 

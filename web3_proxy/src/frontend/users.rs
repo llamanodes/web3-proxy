@@ -501,13 +501,12 @@ pub struct UserKeyManagement {
     description: Option<String>,
     private_txs: Option<bool>,
     active: Option<bool>,
-    // TODO: enable log_revert_trace: Option<f32>,
+    // TODO: enable log_revert_trace: Option<f64>,
     allowed_ips: Option<String>,
     allowed_origins: Option<String>,
     allowed_referers: Option<String>,
     allowed_user_agents: Option<String>,
-    // do not allow! `requests_per_minute: Option<u64>,`
-    // do not allow! `max_concurrent_requests: Option<u64>,`
+    // do not allow! `user_tier: Option<u64>,`
 }
 
 /// `POST /user/keys` or `PUT /user/keys` -- Use a bearer token to create or update an existing key.

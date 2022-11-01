@@ -25,23 +25,23 @@ impl CheckConfigSubCommand {
             warn!("app.db_url is not set! Some features disabled")
         }
 
-        match top_config.app.public_requests_per_minute {
+        match top_config.app.public_requests_per_period {
             None => {
-                info!("app.public_requests_per_minute is None. Fully open to public requests!")
+                info!("app.public_requests_per_period is None. Fully open to public requests!")
             }
             Some(0) => {
-                info!("app.public_requests_per_minute is 0. Public requests are blocked!")
+                info!("app.public_requests_per_period is 0. Public requests are blocked!")
             }
             Some(_) => {}
         }
 
-        match top_config.app.default_user_max_requests_per_minute {
+        match top_config.app.default_user_max_requests_per_period {
             None => {
-                info!("app.default_user_requests_per_minute is None. Fully open to registered requests!")
+                info!("app.default_user_requests_per_period is None. Fully open to registered requests!")
             }
-            Some(0) => warn!("app.default_user_requests_per_minute is 0. Registered user's requests are blocked! Are you sure you want that?"),
+            Some(0) => warn!("app.default_user_requests_per_period is 0. Registered user's requests are blocked! Are you sure you want that?"),
             Some(_) => {
-                // TODO: make sure this isn't < anonymous requests per minute
+                // TODO: make sure this isn't < anonymous requests per period
             }
         }
 
@@ -52,8 +52,8 @@ impl CheckConfigSubCommand {
 
         // TODO: check min_sum_soft_limit is a reasonable amount
         // TODO: check min_synced_rpcs is a reasonable amount
-        // TODO: check frontend_rate_limit_per_minute is a reasonable amount. requires redis
-        // TODO: check login_rate_limit_per_minute is a reasonable amount. requires redis
+        // TODO: check frontend_rate_limit_per_period is a reasonable amount. requires redis
+        // TODO: check login_rate_limit_per_period is a reasonable amount. requires redis
 
         if top_config.app.volatile_redis_url.is_none() {
             warn!("app.volatile_redis_url is not set! Some features disabled")

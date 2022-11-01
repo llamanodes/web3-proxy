@@ -53,7 +53,7 @@ pub struct TopConfig {
 pub struct AppConfig {
     /// Request limit for allowed origins for anonymous users.
     /// These requests get rate limited by IP.
-    pub allowed_origin_requests_per_minute: HashMap<String, u64>,
+    pub allowed_origin_requests_per_period: HashMap<String, u64>,
 
     /// EVM chain id. 1 for ETH
     /// TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
@@ -74,7 +74,7 @@ pub struct AppConfig {
     /// Default request limit for registered users.
     /// 0 = block all requests
     /// None = allow all requests
-    pub default_user_max_requests_per_minute: Option<u64>,
+    pub default_user_max_requests_per_period: Option<u64>,
 
     /// Restrict user registration.
     /// None = no code needed
@@ -87,8 +87,8 @@ pub struct AppConfig {
 
     /// Rate limit for the login entrypoint.
     /// This is separate from the rpc limits.
-    #[serde(default = "default_login_rate_limit_per_minute")]
-    pub login_rate_limit_per_minute: u64,
+    #[serde(default = "default_login_rate_limit_per_period")]
+    pub login_rate_limit_per_period: u64,
 
     /// The soft limit prevents thundering herds as new blocks are seen.
     #[serde(default = "default_min_sum_soft_limit")]
@@ -107,8 +107,8 @@ pub struct AppConfig {
     /// Request limit for anonymous users.
     /// Some(0) = block all requests
     /// None = allow all requests
-    #[serde(default = "default_public_requests_per_minute")]
-    pub public_requests_per_minute: Option<u64>,
+    #[serde(default = "default_public_requests_per_period")]
+    pub public_requests_per_period: Option<u64>,
 
     /// RPC responses are cached locally
     #[serde(default = "default_response_cache_max_bytes")]
@@ -150,7 +150,7 @@ fn default_public_max_concurrent_requests() -> Option<usize> {
 }
 
 /// 0 blocks anonymous requests by default.
-fn default_public_requests_per_minute() -> Option<u64> {
+fn default_public_requests_per_period() -> Option<u64> {
     Some(0)
 }
 
@@ -159,8 +159,8 @@ fn default_bearer_token_max_concurrent_requests() -> u64 {
     2
 }
 
-/// Having a low amount of requests per minute for login is safest.
-fn default_login_rate_limit_per_minute() -> u64 {
+/// Having a low amount of requests per period (usually minute) for login is safest.
+fn default_login_rate_limit_per_period() -> u64 {
     10
 }
 

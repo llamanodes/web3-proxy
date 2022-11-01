@@ -64,14 +64,14 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // on user_tier table, rename requests_per_minute to max_requests_per_minute
+        // on user_tier table, rename requests_per_minute to max_requests_per_period
         manager
             .alter_table(
                 Table::alter()
                     .table(Alias::new("user_tier"))
                     .rename_column(
                         Alias::new("requests_per_minute"),
-                        Alias::new("max_requests_per_minute"),
+                        Alias::new("max_requests_per_period"),
                     )
                     .to_owned(),
             )

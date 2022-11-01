@@ -70,7 +70,7 @@ pub struct UserKeyData {
     /// if None, allow unlimited queries. inherited from the user_tier
     pub max_requests_per_period: Option<u64>,
     // if None, allow unlimited concurrent requests. inherited from the user_tier
-    pub max_concurrent_requests: Option<u64>,
+    pub max_concurrent_requests: Option<u32>,
     /// if None, allow any Origin
     pub allowed_origins: Option<Vec<Origin>>,
     /// if None, allow any Referer
@@ -399,7 +399,7 @@ impl Web3ProxyApp {
                 // TODO: think about this unwrapping
                 top_config
                     .app
-                    .public_requests_per_minute
+                    .public_requests_per_period
                     .unwrap_or(u64::MAX),
                 60.0,
                 redis_pool.clone(),
@@ -421,7 +421,7 @@ impl Web3ProxyApp {
             login_rate_limiter = Some(RedisRateLimiter::new(
                 "web3_proxy",
                 "login",
-                top_config.app.login_rate_limit_per_minute,
+                top_config.app.login_rate_limit_per_period,
                 60.0,
                 redis_pool.clone(),
             ));

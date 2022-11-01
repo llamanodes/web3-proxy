@@ -32,23 +32,32 @@ async fn get_user_id_from_params(
             let bearer_cache_key = UserBearerToken::try_from(bearer)?.to_string();
 
             // get the user id that is attached to this bearer token
-            redis_conn
+            let bearer_user_id = redis_conn
                 .get::<_, u64>(bearer_cache_key)
                 .await
                 // TODO: this should be a 403
-                .context("fetching rpc_key_id from redis with bearer_cache_key")
+                .context("fetching rpc_key_id from redis with bearer_cache_key")?;
+
+            let user_id: u64 = user_id.parse().context("Parsing user_id param")?;
+
+            if bearer_user_id != user_id {
+                // TODO: proper HTTP Status code
+                Err(anyhow::anyhow!("permission denied"))
+            } else {
+                Ok(bearer_user_id)
+            }
         }
         (_, None) => {
             // they have a bearer token. we don't care about it on public pages
             // 0 means all
             Ok(0)
         }
-        (None, Some(x)) => {
+        (None, Some(_)) => {
             // they do not have a bearer token, but requested a specific id. block
             // TODO: proper error code
             // TODO: maybe instead of this sharp edged warn, we have a config value?
             // TODO: check config for if we should deny or allow this
-            x.parse().context("Parsing user_id param")
+            Err(anyhow::anyhow!("permission denied"))
         }
     }
 }

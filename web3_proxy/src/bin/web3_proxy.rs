@@ -267,10 +267,10 @@ mod tests {
         let app_config = TopConfig {
             app: AppConfig {
                 chain_id: 31337,
-                default_user_max_requests_per_minute: Some(6_000_000),
+                default_user_max_requests_per_period: Some(6_000_000),
                 min_sum_soft_limit: 1,
                 min_synced_rpcs: 1,
-                public_requests_per_minute: Some(1_000_000),
+                public_requests_per_period: Some(1_000_000),
                 response_cache_max_bytes: 10_usize.pow(7),
                 redirect_public_url: Some("example.com/".to_string()),
                 redirect_user_url: Some("example.com/{{user_id}}".to_string()),
