@@ -384,7 +384,7 @@ impl Web3Connection {
 
                 // if we already have this block saved, set new_head_block to that arc. otherwise store this copy
                 new_head_block = block_map
-                    .get_with(new_hash, async move { new_head_block })
+                    .get_with_by_ref(&new_hash, async move { new_head_block })
                     .await;
 
                 let new_num = new_head_block.number.unwrap_or_default();

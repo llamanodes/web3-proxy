@@ -77,7 +77,6 @@ where
 
         let redis_key = format!("{}:{}", self.prefix, key);
 
-        // TODO: DO NOT UNWRAP HERE. figure out how to handle anyhow error being wrapped in an Arc
         // TODO: i'm sure this could be a lot better. but race conditions make this hard to think through. brain needs sleep
         let local_key_count: Arc<AtomicU64> = {
             // clone things outside of the `async move`

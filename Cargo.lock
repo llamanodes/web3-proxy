@@ -2698,9 +2698,9 @@ dependencies = [
 
 [[package]]
 name = "moka"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd8256cf9fa396576521e5e94affadb95818ec48f5dbedca36714387688aea29"
+checksum = "e013c8176e5aae43f4c0a982733c44feebddc4e7ac0871a109a9655e668487af"
 dependencies = [
  "async-io",
  "async-lock",
@@ -2711,6 +2711,7 @@ dependencies = [
  "num_cpus",
  "once_cell",
  "parking_lot 0.12.1",
+ "rustc_version",
  "scheduled-thread-pool",
  "skeptic",
  "smallvec",
@@ -5527,7 +5528,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy"
-version = "0.6.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "arc-swap",

@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "0.6.0"
+version = "0.8.0"
 edition = "2021"
 default-run = "web3_proxy"
 
@@ -39,7 +39,7 @@ hdrhistogram = "7.5.2"
 http = "0.2.8"
 ipnet = "2.5.0"
 metered = { version = "0.9.0", features = ["serialize"] }
-moka = { version = "0.9.4", default-features = false, features = ["future"] }
+moka = { version = "0.9.5", default-features = false, features = ["future"] }
 notify = "5.0.0"
 num = "0.4.0"
 # TODO: import num_traits from sea-orm so we always have the same version

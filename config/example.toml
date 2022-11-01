@@ -18,12 +18,12 @@ redirect_user_url = "https://llamanodes.com/user-rpc-stats/{{user_id}}"
 # 0 = block all public requests
 public_max_concurrent_requests = 5
 # 0 = block all public requests
-public_requests_per_minute = 0
+public_requests_per_period = 0
 
 # 1GB of cache
 response_cache_max_bytes = 10_000_000_000
 
-[app.allowed_origin_requests_per_minute]
+[app.allowed_origin_requests_per_period]
 "https://chainlist.org" = 1_000
 
 [balanced_rpcs]

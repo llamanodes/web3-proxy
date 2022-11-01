@@ -348,9 +348,10 @@ impl StatEmitter {
                 debug_assert_eq!(stat.period_seconds, self.period_seconds);
 
                 // get the user cache for the current period
+                // TODO: i don't think this works right. maybe do DashMap entry api as the outer variable
                 let user_cache = self
                     .aggregated_proxy_responses
-                    .get_with(stat.period_timestamp, async move {
+                    .get_with_by_ref(&stat.period_timestamp, async move {
                         CacheBuilder::default()
                             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new())
                     })
