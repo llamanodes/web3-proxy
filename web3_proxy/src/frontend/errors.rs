@@ -14,7 +14,7 @@ use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
 use sea_orm::DbErr;
 use std::{error::Error, net::IpAddr};
-use tokio::time::Instant;
+use tokio::{task::JoinError, time::Instant};
 use tracing::{instrument, trace, warn};
 
 // TODO: take "IntoResponse" instead of Response?
@@ -30,6 +30,7 @@ pub enum FrontendErrorResponse {
     HeaderToString(ToStrError),
     InvalidHeaderValue(InvalidHeaderValue),
     IpAddrParse(AddrParseError),
+    JoinError(JoinError),
     NotFound,
     RateLimitedUser(UserKeyData, Option<Instant>),
     RateLimitedIp(IpAddr, Option<Instant>),
@@ -110,6 +111,17 @@ impl IntoResponse for FrontendErrorResponse {
                     JsonRpcForwardedResponse::from_str(
                         &format!("{}", err),
                         Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::JoinError(err) => {
+                warn!(?err, "JoinError. likely shutting down");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "Unable to complete request",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
                 )

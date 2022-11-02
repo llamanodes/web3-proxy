@@ -87,7 +87,8 @@ pub async fn proxy_web3_rpc_with_key(
             .await
     });
 
-    let response = f.await.expect("JoinHandle should always work")?;
+    // if this is an error, we are likely shutting down
+    let response = f.await??;
 
     Ok(Json(&response).into_response())
 }

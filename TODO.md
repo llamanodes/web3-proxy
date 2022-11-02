@@ -215,7 +215,8 @@ These are roughly in order of completition
   - [x] in code
   - [x] in database with a migration
 - [x] instead of requests_per_minute on every key, have a "user_tier" that gets joined
-- [ ] document url params with a test that works for examples
+- [x] document url params with examples
+- [x] improve "docs/http routes.txt"
 - [ ] include if archive query or not in the stats
   - this is already partially done, but we need to double check it works. preferrably with tests
 - [-] add configurable size limits to all the Caches
@@ -224,6 +225,15 @@ These are roughly in order of completition
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
   - [ ] automatic pruning of old revert logs once too many are collected
   - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
+
+## V1
+
+These are not yet ordered.
+
+- [ ] with a test that creates a user and modifies their key
+- [ ] Uuid/Ulid instead of big_unsigned for database ids
+  - might have to use Uuid in sea-orm and then convert to Ulid on display
+  - https://www.kostolansky.sk/posts/how-to-migrate-to-uuid/
 - [ ] make the "not synced" error more verbose
   - I think there is a bug in our synced_rpcs filtering. likely in has_block_data
   - seeing "not synced" when I load https://vfat.tools/esd/
@@ -236,15 +246,7 @@ These are roughly in order of completition
 - [ ] if no bearer token found in redis (likely because it expired), send 401 unauthorized
 - [ ] user create script should allow multiple keys per user
 - [ ] somehow the proxy thought latest was hours behind. need internal health check that forces reconnect if this happens
-- [ ] Uuid/Ulid instead of big_unsigned for database ids
-  - might have to use Uuid in sea-orm and then convert to Ulid on display
-  - https://www.kostolansky.sk/posts/how-to-migrate-to-uuid/
 - [ ] display concurrent requests per api key (only with authentication!)
-
-## V1
-
-These are not yet ordered.
-
 - [ ] change "remember me" to last until 4 weeks of no use, rather than 4 weeks since login
 - [ ] BUG! if sending transactions gets "INTERNAL_ERROR: existing tx with same hash", fake a success message
   - ERROR http_request:request:try_send_all_upstream_servers: web3_proxy::rpcs::request: bad response! err=JsonRpcClientError(JsonRpcError(JsonRpcError { code: -32000, message: "INTERNAL_ERROR: existing tx with same hash", data: None })) method=eth_sendRawTransaction rpc=local_erigon_alpha_archive id=01GF4HV03Y4ZNKQV8DW5NDQ5CG method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 }) self=Web3Connections { conns: {"local_erigon_alpha_archive_ws": Web3Connection { name: "local_erigon_alpha_archive_ws", blocks: "all", .. }, "local_geth_ws": Web3Connection { name: "local_geth_ws", blocks: 64, .. }, "local_erigon_alpha_archive": Web3Connection { name: "local_erigon_alpha_archive", blocks: "all", .. }}, .. } authorized_request=Some(User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })) request=JsonRpcRequest { id: RawValue(39), method: "eth_sendRawTransaction", .. } request_metadata=Some(RequestMetadata { datetime: 2022-10-11T22:14:57.406829095Z, period_seconds: 60, request_bytes: 633, backend_requests: 0, no_servers: 0, error_response: false, response_bytes: 0, response_millis: 0 }) block_needed=None

@@ -90,13 +90,12 @@ GET /user/keys
     Checks the "AUTHORIZATION" header for a valid bearer token.
     If valid, displays data about the user's keys as JSON.
 
-POST /user/keys
+POST or PUT /user/keys
     Checks the "AUTHORIZATION" header for a valid bearer token.
-    If valid, allows the user to change options on their keys.
+    If valid, allows the user to create a new key or  change options on their keys.
 
     The POSTed JSON can have these fields:
-        existing_key_id: Option<u64>,
-        existing_key: Option<RpcApiKey>,
+        key_id: Option<u64>,
         description: Option<String>,
         private_txs: Option<bool>,
         active: Option<bool>,
@@ -105,7 +104,7 @@ POST /user/keys
         allowed_referers: Option<String>,
         allowed_user_agents: Option<String>,
 
-    You must set **either** `existing_key_id` **or** `existing_key`.
+    The PUTed JSON has the same fields as the POSTed JSON, except for there is no `key_id`
 
     If you do not want to update a field, do not include it in the POSTed JSON.
     If you want to delete a string field, include the data's key and set the value to an empty string.

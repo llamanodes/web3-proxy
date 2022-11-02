@@ -65,6 +65,8 @@ pub struct RequestMetadata {
     // TODO: better name for this
     pub period_seconds: u64,
     pub request_bytes: u64,
+    // TODO: "archive" isn't really a boolean.
+    pub archive_request: AtomicBool,
     /// if this is 0, there was a cache_hit
     pub backend_requests: AtomicU64,
     pub no_servers: AtomicU64,
@@ -96,6 +98,7 @@ impl RequestMetadata {
             start_datetime: Utc::now(),
             period_seconds,
             request_bytes,
+            archive_request: false.into(),
             backend_requests: 0.into(),
             no_servers: 0.into(),
             error_response: false.into(),

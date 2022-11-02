@@ -139,25 +139,30 @@ impl Web3Connections {
     }
 
     /// Convenience method to get the cannonical block at a given block height.
-    pub async fn block_hash(&self, num: &U64) -> anyhow::Result<H256> {
-        let block = self.cannonical_block(num).await?;
+    pub async fn block_hash(&self, num: &U64) -> anyhow::Result<(H256, bool)> {
+        let (block, is_archive_block) = self.cannonical_block(num).await?;
 
-        let hash = block.hash.unwrap();
+        let hash = block.hash.expect("Saved blocks should always have hashes");
 
-        Ok(hash)
+        Ok((hash, is_archive_block))
     }
 
     /// Get the heaviest chain's block from cache or backend rpc
-    pub async fn cannonical_block(&self, num: &U64) -> anyhow::Result<ArcBlock> {
+    pub async fn cannonical_block(&self, num: &U64) -> anyhow::Result<(ArcBlock, bool)> {
         // we only have blocks by hash now
         // maybe save them during save_block in a blocks_by_number Cache<U64, Vec<ArcBlock>>
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
 
         // be sure the requested block num exists
         let head_block_num = self.head_block_num().context("no servers in sync")?;
+
+        // TODO: not 64 on all chains? get from config?
+        let archive_needed = num < &(head_block_num - U64::from(64));
+
         if num > &head_block_num {
             // TODO: i'm seeing this a lot when using ethspam. i dont know why though. i thought we delayed publishing
             // TODO: instead of error, maybe just sleep and try again?
+            // TODO: this should be a 401, not a 500
             return Err(anyhow::anyhow!(
                 "Head block is #{}, but #{} was requested",
                 head_block_num,
@@ -170,7 +175,9 @@ impl Web3Connections {
         if let Some(block_hash) = self.block_numbers.get(num) {
             // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
             // TODO: pass authorized_request through here?
-            return self.block(None, &block_hash, None).await;
+            let block = self.block(None, &block_hash, None).await?;
+
+            return Ok((block, archive_needed));
         }
 
         // block number not in cache. we need to ask an rpc for it
@@ -193,7 +200,7 @@ impl Web3Connections {
         // the block was fetched using eth_getBlockByNumber, so it should have all fields and be on the heaviest chain
         self.save_block(&block, true).await?;
 
-        Ok(block)
+        Ok((block, true))
     }
 
     pub(super) async fn process_incoming_blocks(

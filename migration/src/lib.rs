@@ -8,6 +8,7 @@ mod m20221025_210326_add_chain_id_to_reverts;
 mod m20221026_230819_rename_user_keys;
 mod m20221027_002407_user_tiers;
 mod m20221031_211916_clean_up;
+mod m20221101_222349_archive_request;
 
 pub struct Migrator;
 
@@ -23,6 +24,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20221026_230819_rename_user_keys::Migration),
             Box::new(m20221027_002407_user_tiers::Migration),
             Box::new(m20221031_211916_clean_up::Migration),
+            Box::new(m20221101_222349_archive_request::Migration),
         ]
     }
 }

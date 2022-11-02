@@ -283,20 +283,14 @@ impl Web3ProxyApp {
         // setup a channel for receiving stats (generally with a high cardinality, such as per-user)
         // we do this in a channel so we don't slow down our response to the users
         let stat_sender = if let Some(db_conn) = db_conn.clone() {
-            // TODO: sender and receiver here are a little confusing. because the thing that reads the receiver is what actually submits the stats
-            let (stat_sender, save_handle, stat_handle) = {
-                // TODO: period from config instead of always being 60 seconds
-                let emitter = StatEmitter::new(top_config.app.chain_id, db_conn, 60);
+            let emitter_spawn =
+                StatEmitter::spawn(top_config.app.chain_id, db_conn, 60, shutdown_receiver)?;
 
-                emitter.spawn(shutdown_receiver).await?
-            };
+            important_background_handles.push(emitter_spawn.background_handle);
 
-            cancellable_handles.push(stat_handle);
-            important_background_handles.push(save_handle);
-
-            Some(stat_sender)
+            Some(emitter_spawn.stat_sender)
         } else {
-            warn!("cannot store stats without a redis connection");
+            warn!("cannot store stats without a database connection");
 
             None
         };
@@ -1008,7 +1002,7 @@ impl Web3ProxyApp {
             method => {
                 // emit stats
 
-                // TODO: wait for them to be synced?
+                // TODO: if no servers synced, wait for them to be synced?
                 let head_block_id = self
                     .balanced_rpcs
                     .head_block_id()
@@ -1025,8 +1019,14 @@ impl Web3ProxyApp {
                 .await?
                 {
                     // TODO: maybe this should be on the app and not on balanced_rpcs
-                    let request_block_hash =
+                    let (request_block_hash, archive_needed) =
                         self.balanced_rpcs.block_hash(&request_block_needed).await?;
+
+                    if archive_needed {
+                        request_metadata
+                            .archive_request
+                            .store(true, atomic::Ordering::Relaxed);
+                    }
 
                     BlockId {
                         num: request_block_needed,

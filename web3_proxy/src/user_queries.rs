@@ -205,14 +205,14 @@ pub async fn get_aggregate_rpc_stats_from_params(
             "total_requests",
         )
         .column_as(
+            rpc_accounting::Column::BackendRequests.sum(),
+            "total_backend_retries",
+        )
+        .column_as(
             rpc_accounting::Column::CacheMisses.sum(),
             "total_cache_misses",
         )
         .column_as(rpc_accounting::Column::CacheHits.sum(), "total_cache_hits")
-        .column_as(
-            rpc_accounting::Column::BackendRetries.sum(),
-            "total_backend_retries",
-        )
         .column_as(
             rpc_accounting::Column::SumResponseBytes.sum(),
             "total_response_bytes",
@@ -356,14 +356,14 @@ pub async fn get_detailed_stats(
             "total_requests",
         )
         .column_as(
+            rpc_accounting::Column::BackendRequests.sum(),
+            "total_backend_requests",
+        )
+        .column_as(
             rpc_accounting::Column::CacheMisses.sum(),
             "total_cache_misses",
         )
         .column_as(rpc_accounting::Column::CacheHits.sum(), "total_cache_hits")
-        .column_as(
-            rpc_accounting::Column::BackendRetries.sum(),
-            "total_backend_retries",
-        )
         .column_as(
             rpc_accounting::Column::SumResponseBytes.sum(),
             "total_response_bytes",
