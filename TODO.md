@@ -217,6 +217,9 @@ These are roughly in order of completition
 - [x] instead of requests_per_minute on every key, have a "user_tier" that gets joined
 - [x] document url params with examples
 - [x] improve "docs/http routes.txt"
+- [x] remove request per minute and concurrency limits from the keys. those are on the user tiers now.
+- [x] revertLogs db table should have rpc_key_id on it
+- [x] the relation in Relation is wrong now. it is called user_key_id,  but point to the rpc key table
 - [ ] include if archive query or not in the stats
   - this is already partially done, but we need to double check it works. preferrably with tests
 - [-] add configurable size limits to all the Caches

@@ -380,7 +380,7 @@ impl Web3Connections {
         let mut earliest_retry_at = None;
 
         // filter the synced rpcs
-        // TODO: we are going to be checking "has_block_data" a lot now. i think we pretty much always have min_block_needed now that we override "latest"
+        // TODO: we are going to be checking "has_block_data" a lot now
         let mut synced_rpcs: Vec<Arc<Web3Connection>> =
             if let Some(min_block_needed) = min_block_needed {
                 self.conns
@@ -527,6 +527,7 @@ impl Web3Connections {
         // TODO: maximum retries? right now its the total number of servers
         loop {
             if skip_rpcs.len() == self.conns.len() {
+                // no servers to try
                 break;
             }
             match self
@@ -646,6 +647,7 @@ impl Web3Connections {
                 .store(true, Ordering::Release);
         }
 
+        // TODO: what error code? 502?
         Err(anyhow::anyhow!("all {} tries exhausted", skip_rpcs.len()))
     }
 

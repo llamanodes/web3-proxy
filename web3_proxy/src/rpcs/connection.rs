@@ -236,14 +236,12 @@ impl Web3Connection {
         Ok(limit)
     }
 
-    /// TODO: this might be too simple. different nodes can prune differently
+    /// TODO: this might be too simple. different nodes can prune differently. its possible we will have a block range
     pub fn block_data_limit(&self) -> U64 {
-        self.block_data_limit.load(atomic::Ordering::Acquire).into()
+        self.block_data_limit.load(atomic::Ordering::Relaxed).into()
     }
 
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
-        let block_data_limit: U64 = self.block_data_limit();
-
         let head_block_id = self.head_block_id.read().clone();
 
         let newest_block_num = match head_block_id {
@@ -251,11 +249,18 @@ impl Web3Connection {
             Some(x) => x.num,
         };
 
+        if needed_block_num > &newest_block_num {
+            return false;
+        }
+
+        // if this is a pruning node, we might not actually have the block
+        let block_data_limit: U64 = self.block_data_limit();
+
         let oldest_block_num = newest_block_num
             .saturating_sub(block_data_limit)
             .max(U64::one());
 
-        needed_block_num >= &oldest_block_num && needed_block_num <= &newest_block_num
+        needed_block_num >= &oldest_block_num
     }
 
     /// reconnect to the provider. errors are retried forever with exponential backoff with jitter.

@@ -15,6 +15,8 @@ volatile_redis_url = "redis://dev-vredis:6379/"
 redirect_public_url = "https://llamanodes.com/free-rpc-stats"
 redirect_user_url = "https://llamanodes.com/user-rpc-stats/{{user_id}}"
 
+sentry_url = "https://YOURKEYA.ingest.sentry.io/YOURKEYB"
+
 # 0 = block all public requests
 public_max_concurrent_requests = 5
 # 0 = block all public requests
