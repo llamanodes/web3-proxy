@@ -227,6 +227,7 @@ These are roughly in order of completition
   - [ ] instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
 - [ ] proper authentication on rpc_key_id
   - we have bearer token auth for user_id, but rpc_key_id needs more code
+- [ ] fix tests
 
 ## V1
 

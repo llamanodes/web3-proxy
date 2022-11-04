@@ -193,10 +193,10 @@ pub fn filter_query_window_seconds(
     );
 
     let q = q
-        .column_as(expr, "query_window")
-        .group_by(Expr::cust("query_window"))
+        .column_as(expr, "query_window_timestamp")
+        .group_by(Expr::cust("query_window_timestamp"))
         // TODO: is there a simpler way to order_by?
-        .order_by_asc(SimpleExpr::Custom("query_window".to_string()));
+        .order_by_asc(SimpleExpr::Custom("query_window_timestamp".to_string()));
 
     Ok(q)
 }
