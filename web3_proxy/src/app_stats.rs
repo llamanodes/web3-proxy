@@ -354,7 +354,7 @@ impl StatEmitter {
             }
         }
 
-        info!("saving {} stats", response_aggregate_map.len());
+        info!("saving {} pending stats", response_aggregate_map.len());
 
         for (key, aggregate) in response_aggregate_map.drain() {
             if let Err(err) = aggregate

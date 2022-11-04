@@ -1,7 +1,7 @@
 //! `frontend` contains HTTP and websocket endpoints for use by users and admins.
 
 pub mod authorization;
-mod errors;
+pub mod errors;
 // TODO: these are only public so docs are generated. What's a better way to do this?
 pub mod rpc_proxy_http;
 pub mod rpc_proxy_ws;

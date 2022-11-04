@@ -3,12 +3,10 @@
 use super::authorization::{login_is_authorized, RpcSecretKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::FrontendErrorResponse;
+use crate::user_queries::get_page_from_params;
 use crate::user_queries::{
-    get_chain_id_from_params, get_query_start_from_params, get_query_window_seconds_from_params,
-    get_user_id_from_params,
+    get_chain_id_from_params, get_query_start_from_params, query_user_stats, StatResponse,
 };
-use crate::user_queries::{get_detailed_rpc_stats_for_params, get_page_from_params};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::{Header, Origin, Referer, UserAgent};
@@ -20,17 +18,16 @@ use axum::{
 };
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
-use entities::{revert_log, rpc_accounting, rpc_key, user};
+use entities::{revert_log, rpc_key, user};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
 use itertools::Itertools;
-use migration::{Condition, Expr, SimpleExpr};
 use redis_rate_limiter::redis::AsyncCommands;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, TransactionTrait,
+    TransactionTrait,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -734,6 +731,19 @@ pub async fn user_revert_logs_get(
     Ok(Json(response).into_response())
 }
 
+/// `GET /user/stats/aggregate` -- Public endpoint for aggregate stats such as bandwidth used and methods requested.
+#[debug_handler]
+#[instrument(level = "trace")]
+pub async fn user_stats_aggregate_get(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    bearer: Option<TypedHeader<Authorization<Bearer>>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> FrontendResult {
+    let response = query_user_stats(&app, bearer, &params, StatResponse::Aggregate).await?;
+
+    Ok(Json(response).into_response())
+}
+
 /// `GET /user/stats/detailed` -- Use a bearer token to get the user's key stats such as bandwidth used and methods requested.
 ///
 /// If no bearer is provided, detailed stats for all users will be shown.
@@ -750,172 +760,7 @@ pub async fn user_stats_detailed_get(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    let x = get_detailed_rpc_stats_for_params(&app, bearer, params).await?;
-
-    Ok(Json(x).into_response())
-}
-
-/// `GET /user/stats/aggregate` -- Public endpoint for aggregate stats such as bandwidth used and methods requested.
-#[debug_handler]
-#[instrument(level = "trace")]
-pub async fn user_stats_aggregate_get(
-    bearer: Option<TypedHeader<Authorization<Bearer>>>,
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
-    Query(params): Query<HashMap<String, String>>,
-) -> FrontendResult {
-    let db_conn = app.db_conn().context("connecting to db")?;
-    let redis_conn = app.redis_conn().await.context("connecting to redis")?;
-
-    let mut response = HashMap::new();
-
-    let q = rpc_accounting::Entity::find()
-        .select_only()
-        .column_as(
-            rpc_accounting::Column::FrontendRequests.sum(),
-            "total_requests",
-        )
-        .column_as(
-            rpc_accounting::Column::BackendRequests.sum(),
-            "total_backend_retries",
-        )
-        .column_as(
-            rpc_accounting::Column::CacheMisses.sum(),
-            "total_cache_misses",
-        )
-        .column_as(rpc_accounting::Column::CacheHits.sum(), "total_cache_hits")
-        .column_as(
-            rpc_accounting::Column::SumResponseBytes.sum(),
-            "total_response_bytes",
-        )
-        .column_as(
-            // TODO: can we sum bools like this?
-            rpc_accounting::Column::ErrorResponse.sum(),
-            "total_error_responses",
-        )
-        .column_as(
-            rpc_accounting::Column::SumResponseMillis.sum(),
-            "total_response_millis",
-        );
-
-    let condition = Condition::all();
-
-    // TODO: DRYer! move this onto query_window_seconds_from_params?
-    let query_window_seconds = get_query_window_seconds_from_params(&params)?;
-    let q = if query_window_seconds == 0 {
-        // TODO: order by more than this?
-        // query_window_seconds is not set so we aggregate all records
-        // TODO: i am pretty sure we need to filter by something
-        q
-    } else {
-        // TODO: is there a better way to do this? how can we get "period_datetime" into this with types?
-        // TODO: how can we get the first window to start at query_start_timestamp
-        let expr = Expr::cust_with_values(
-            "FLOOR(UNIX_TIMESTAMP(rpc_accounting.period_datetime) / ?) * ?",
-            [query_window_seconds, query_window_seconds],
-        );
-
-        response.insert(
-            "query_window_seconds",
-            serde_json::Value::Number(query_window_seconds.into()),
-        );
-
-        q.column_as(expr, "query_window")
-            .group_by(Expr::cust("query_window"))
-            // TODO: is there a simpler way to order_by?
-            .order_by_asc(SimpleExpr::Custom("query_window".to_string()))
-    };
-
-    // aggregate stats after query_start
-    // TODO: minimum query_start of 90 days?
-    let query_start = get_query_start_from_params(&params)?;
-    // TODO: if no query_start, don't add to response or condition
-    response.insert(
-        "query_start",
-        serde_json::Value::Number(query_start.timestamp().into()),
-    );
-    let condition = condition.add(rpc_accounting::Column::PeriodDatetime.gte(query_start));
-
-    // filter on chain_id
-    let chain_id = get_chain_id_from_params(&app, &params)?;
-    let (condition, q) = if chain_id == 0 {
-        // fetch all the chains. don't filter or aggregate
-        (condition, q)
-    } else {
-        let condition = condition.add(rpc_accounting::Column::ChainId.eq(chain_id));
-
-        response.insert("chain_id", serde_json::Value::Number(chain_id.into()));
-
-        (condition, q)
-    };
-
-    // filter on rpc_key_id
-    // TODO: move getting the param and checking the bearer token into a helper function
-    let (condition, q) = if let Some(rpc_key_id) = params.get("rpc_key_id") {
-        let rpc_key_id = rpc_key_id.parse::<u64>().map_err(|e| {
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Unable to parse rpc_key_id".to_string(),
-                e.into(),
-            )
-        })?;
-
-        if rpc_key_id == 0 {
-            (condition, q)
-        } else {
-            // TODO: make sure that the bearer token is allowed to view this rpc_key_id
-            let q = q.group_by(rpc_accounting::Column::RpcKeyId);
-
-            let condition = condition.add(rpc_accounting::Column::RpcKeyId.eq(rpc_key_id));
-
-            response.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
-
-            (condition, q)
-        }
-    } else {
-        (condition, q)
-    };
-
-    // get_user_id_from_params checks that the bearer is connected to this user_id
-    let user_id = get_user_id_from_params(redis_conn, bearer, &params).await?;
-    let (condition, q) = if user_id == 0 {
-        // 0 means everyone. don't filter on user
-        (condition, q)
-    } else {
-        let q = q.left_join(rpc_key::Entity);
-
-        let condition = condition.add(rpc_key::Column::UserId.eq(user_id));
-
-        response.insert("user_id", serde_json::Value::Number(user_id.into()));
-
-        (condition, q)
-    };
-
-    // now that all the conditions are set up. add them to the query
-    let q = q.filter(condition);
-
-    // TODO: trace log query here? i think sea orm has a useful log level for this
-
-    // set up pagination
-    let page = get_page_from_params(&params)?;
-    response.insert("page", serde_json::to_value(page).expect("can't fail"));
-
-    // TODO: page size from param with a max from the config
-    let page_size = 200;
-    response.insert(
-        "page_size",
-        serde_json::to_value(page_size).expect("can't fail"),
-    );
-
-    // query the database
-    let aggregate = q
-        .into_json()
-        .paginate(&db_conn, page_size)
-        .fetch_page(page)
-        // TODO: timeouts here? or are they already set up on the connection
-        .await?;
-
-    // add the query response to the response
-    response.insert("aggregate", serde_json::Value::Array(aggregate));
+    let response = query_user_stats(&app, bearer, &params, StatResponse::Detailed).await?;
 
     Ok(Json(response).into_response())
 }
