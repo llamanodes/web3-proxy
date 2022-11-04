@@ -220,19 +220,45 @@ These are roughly in order of completition
 - [x] remove request per minute and concurrency limits from the keys. those are on the user tiers now.
 - [x] revertLogs db table should have rpc_key_id on it
 - [x] the relation in Relation is wrong now. it is called user_key_id,  but point to the rpc key table
-- [ ] include if archive query or not in the stats
+- [x] instruments are missing. maybe that is why sentry had broken traces
+- [x] description should default to an empty string instead of being nullable
+- [-] include if archive query or not in the stats
   - this is already partially done, but we need to double check it works. preferrably with tests
+- [ ] make archive request column show in the stat aggregation
+- [ ] i think our server picking is incorrect somehow.
+    we upgraded erigon to a version with a broken websocket
+    but that made it clear we still route to the lagged server sometimes. this is bad, but retries keep it from giving users bad data.
+- [ ] add indexes to speed up stat queries
 - [-] add configurable size limits to all the Caches
   - [ ] instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
-- [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
-  - this must be opt-in or spawned since it will slow things down and will make their calls less private
-  - [ ] automatic pruning of old revert logs once too many are collected
-  - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
+- [ ] when displaying the user's data, they just see an opaque id for their tier. We should join that data
+- [ ] detailed stats should also filterable by "method"
 
 ## V1
 
 These are not yet ordered.
 
+- [ ] the public rpc is rate limited by ip and the authenticated rpc is rate limit by key
+    - this means if a dapp uses the authenticated RPC on their website, they could get rate limited more easily
+- [ ] add cacheing to speed up stat queries
+- [ ] take an option to set a non-default role when creating a user
+- [ ] different prune levels for free tiers
+- [ ] have a test that runs ethspam and versus
+- [ ] status page show git hash of running version
+- [ ] Email confirmation
+    - [ ] we'll need a pretty template email that the backend will send.
+    - [ ] That will link them to a a page on llamanodes.com
+    - [ ] There, they click "confirm" (or JavaScript does it for them automatically) to POST to this new endpoint
+- [ ] test in the migration repo that sets up a sqlite database that runs up and down 
+- [ ] unbounded queues are risky. add limits
+- [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
+  - this must be opt-in or spawned since it will slow things down and will make their calls less private
+  - [ ] automatic pruning of old revert logs once too many are collected
+  - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
+- [ ] after running for a while, https://eth-ski.llamanodes.com/status is only at 157 blocks and hashes. i thought they would be near 10k after running for a while
+    - adding uptime to the status should help
+    - i think this is already in our todo list
+- [ ] improve private transactions. keep re-broadcasting until they are confirmed
 - [ ] with a test that creates a user and modifies their key
 - [ ] Uuid/Ulid instead of big_unsigned for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display

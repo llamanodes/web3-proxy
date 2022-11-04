@@ -354,6 +354,8 @@ impl StatEmitter {
             }
         }
 
+        info!("saving {} stats", response_aggregate_map.len());
+
         for (key, aggregate) in response_aggregate_map.drain() {
             if let Err(err) = aggregate
                 .save(self.chain_id, &self.db_conn, key, period_timestamp)
