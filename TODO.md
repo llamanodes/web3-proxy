@@ -222,22 +222,21 @@ These are roughly in order of completition
 - [x] the relation in Relation is wrong now. it is called user_key_id,  but point to the rpc key table
 - [x] instruments are missing. maybe that is why sentry had broken traces
 - [x] description should default to an empty string instead of being nullable
-- [-] include if archive query or not in the stats
-  - this is already partially done, but we need to double check it works. preferrably with tests
-- [ ] make archive request column show in the stat aggregation
-- [ ] i think our server picking is incorrect somehow.
-    we upgraded erigon to a version with a broken websocket
-    but that made it clear we still route to the lagged server sometimes. this is bad, but retries keep it from giving users bad data.
-- [ ] add indexes to speed up stat queries
+- [x] include if archive query or not in the stats
 - [-] add configurable size limits to all the Caches
   - [ ] instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
-- [ ] when displaying the user's data, they just see an opaque id for their tier. We should join that data
-- [ ] detailed stats should also filterable by "method"
+- [ ] proper authentication on rpc_key_id
+  - we have bearer token auth for user_id, but rpc_key_id needs more code
 
 ## V1
 
 These are not yet ordered.
 
+- [ ] i think our "best" server picking is incorrect somehow.
+    - we upgraded erigon to a version with a broken websocket
+    - that made it clear we still route to the lagged server sometimes. this is bad, but retries keep it from giving users bad data.
+- [ ] when displaying the user's data, they just see an opaque id for their tier. We should join that data
+- [ ] add indexes to speed up stat queries
 - [ ] the public rpc is rate limited by ip and the authenticated rpc is rate limit by key
     - this means if a dapp uses the authenticated RPC on their website, they could get rate limited more easily
 - [ ] add cacheing to speed up stat queries
