@@ -30,6 +30,8 @@ fn run(
 ) -> anyhow::Result<()> {
     debug!(?cli_config, ?top_config);
 
+    let mut shutdown_receiver = shutdown_sender.subscribe();
+
     // spawn a thread for deadlock detection
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(10));
@@ -120,6 +122,14 @@ fn run(
                     }
                 }
             }
+            x = shutdown_receiver.recv() => {
+                match x {
+                    Ok(_) => info!("quiting from shutdown receiver"),
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                }
+            }
         };
 
         // one of the handles stopped. send a value so the others know to shut down
@@ -205,7 +215,7 @@ fn main() -> anyhow::Result<()> {
 
     // tokio has code for catching ctrl+c so we use that
     // this shutdown sender is currently only used in tests, but we might make a /shutdown endpoint or something
-    let (shutdown_sender, _shutdown_receiver) = broadcast::channel(1);
+    let (shutdown_sender, _) = broadcast::channel(1);
 
     run(shutdown_sender, cli_config, top_config)
 }
@@ -289,7 +299,7 @@ mod tests {
             private_rpcs: None,
         };
 
-        let (shutdown_sender, _shutdown_receiver) = broadcast::channel(1);
+        let (shutdown_sender, _) = broadcast::channel(1);
 
         // spawn another thread for running the app
         // TODO: allow launching into the local tokio runtime instead of creating a new one?

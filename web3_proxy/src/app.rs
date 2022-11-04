@@ -292,6 +292,8 @@ impl Web3ProxyApp {
         } else {
             warn!("cannot store stats without a database connection");
 
+            // TODO: subscribe to the shutdown_receiver here since the stat emitter isn't running?
+
             None
         };
 
