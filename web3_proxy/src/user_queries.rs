@@ -285,6 +285,22 @@ pub async fn query_user_stats<'a>(
         (condition, q)
     };
 
+    // get_user_id_from_params checks that the bearer is connected to this user_id
+    // TODO: match on user_id and rpc_key_id?
+    let user_id = get_user_id_from_params(redis_conn, bearer, params).await?;
+    let (condition, q) = if user_id == 0 {
+        // 0 means everyone. don't filter on user
+        (condition, q)
+    } else {
+        let q = q.left_join(rpc_key::Entity);
+
+        let condition = condition.add(rpc_key::Column::UserId.eq(user_id));
+
+        response.insert("user_id", serde_json::Value::Number(user_id.into()));
+
+        (condition, q)
+    };
+
     // filter on rpc_key_id
     // TODO: move getting the param and checking the bearer token into a helper function
     let (condition, q) = if let Some(rpc_key_id) = params.get("rpc_key_id") {
@@ -299,31 +315,25 @@ pub async fn query_user_stats<'a>(
         if rpc_key_id == 0 {
             (condition, q)
         } else {
-            // TODO: make sure that the bearer token is allowed to view this rpc_key_id
-            let q = q.group_by(rpc_accounting::Column::RpcKeyId);
+            response.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
 
             let condition = condition.add(rpc_accounting::Column::RpcKeyId.eq(rpc_key_id));
 
-            response.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
+            let q = q.group_by(rpc_accounting::Column::RpcKeyId);
 
-            (condition, q)
+            if user_id == 0 {
+                // no user id, we did not join above
+                let q = q.left_join(rpc_key::Entity);
+
+                (condition, q)
+            } else {
+                // user_id added a join on rpc_key already. only filter on user_id
+                let condition = condition.add(rpc_key::Column::UserId.eq(user_id));
+
+                (condition, q)
+            }
         }
     } else {
-        (condition, q)
-    };
-
-    // get_user_id_from_params checks that the bearer is connected to this user_id
-    let user_id = get_user_id_from_params(redis_conn, bearer, &params).await?;
-    let (condition, q) = if user_id == 0 {
-        // 0 means everyone. don't filter on user
-        (condition, q)
-    } else {
-        let q = q.left_join(rpc_key::Entity);
-
-        let condition = condition.add(rpc_key::Column::UserId.eq(user_id));
-
-        response.insert("user_id", serde_json::Value::Number(user_id.into()));
-
         (condition, q)
     };
 

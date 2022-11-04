@@ -223,16 +223,19 @@ These are roughly in order of completition
 - [x] instruments are missing. maybe that is why sentry had broken traces
 - [x] description should default to an empty string instead of being nullable
 - [x] include if archive query or not in the stats
-- [-] add configurable size limits to all the Caches
-  - [ ] instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
-- [ ] proper authentication on rpc_key_id
+- [x] fix test not shutting down
+- [x] proper authentication on rpc_key_id
   - we have bearer token auth for user_id, but rpc_key_id needs more code
-- [ ] fix tests
+- [-] add configurable size limits to all the Caches
+  - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
+
+- [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
 
 ## V1
 
-These are not yet ordered.
+These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] logging of "bad response!" is way too verbose
 - [ ] config parsing is strict right now. this makes it hard to deploy on git push since configs need to change along with it
 - [ ] i think our "best" server picking is incorrect somehow.
     - we upgraded erigon to a version with a broken websocket
@@ -294,7 +297,6 @@ These are not yet ordered.
   - what is going on? when the server fist launches they are in sync
   - [ ] related BUG? WARN web3_proxy::rpcs::blockchain: Missing connection_head_block in block_hashes. Fetching now connection_head_hash=0x4b7a…14b5 conn_name=local_erigon_alpha_archive rpc=local_erigon_alpha_archive
   - i see this a lot more than expected. why is it happening so much? better logs needed
-
 - [ ] after adding semaphores (or maybe something else), CPU load seems a lot higher. investigate
 - [ ] proper support for Finalized and Safe block queries
 - [ ] admin-only page for viewing user stat pages
@@ -496,8 +498,8 @@ in another repo: event subscriber
 - [ ] have a log all option? instead of just reverts, log all request/responses? can be very useful for debugging but would flood our database. maybe better for them to do that on their client side
 - [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
 - [ ] WARN http_request:request: web3_proxy::block_number: could not get block from params err=unexpected params length id=01GF4HTRKM4JV6NX52XSF9AYMW method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })
-- [ ] document "backend requests is cache_misses + backend_retries"
 - [ ] having tons of worker threads can actually make us slower if they keep waking to steal work from eachother. need benchmarks
 - [ ] change the wrk data to log requests and errors to a file
 - [ ] if redis is not set and login page is visited, users get a 502. should be 501
 - [ ] allow passing the authorization header to the anonymous rpc endpoint
+- [ ] sentry profiling
