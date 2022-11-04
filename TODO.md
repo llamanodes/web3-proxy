@@ -232,6 +232,7 @@ These are roughly in order of completition
 
 These are not yet ordered.
 
+- [ ] config parsing is strict right now. this makes it hard to deploy on git push since configs need to change along with it
 - [ ] i think our "best" server picking is incorrect somehow.
     - we upgraded erigon to a version with a broken websocket
     - that made it clear we still route to the lagged server sometimes. this is bad, but retries keep it from giving users bad data.
