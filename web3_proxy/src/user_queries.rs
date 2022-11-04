@@ -221,7 +221,7 @@ pub async fn query_user_stats<'a>(
         .select_only()
         .column_as(
             rpc_accounting::Column::FrontendRequests.sum(),
-            "total_requests",
+            "total_frontend_requests",
         )
         .column_as(
             rpc_accounting::Column::BackendRequests.sum(),

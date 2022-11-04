@@ -45,10 +45,11 @@ response_cache_max_bytes = 10_000_000_000
     soft_limit = 1_000
     weight = 0
 
-    #[balanced_rpcs.mycryptoapi]
-    #url = "https://api.mycryptoapi.com/eth"
-    #soft_limit = 1_000
-    #weight = 0
+    [balanced_rpcs.mycryptoapi]
+    disabled = true
+    url = "https://api.mycryptoapi.com/eth"
+    soft_limit = 1_000
+    weight = 0
 
     [balanced_rpcs.runonflux]
     url = "https://ethereumnodelight.app.runonflux.io"
@@ -71,10 +72,11 @@ response_cache_max_bytes = 10_000_000_000
     weight = 2
 
     # load balanced light nodes are not very reliable
-    #[balanced_rpcs.linkpool-light]
-    #url = "https://main-light.eth.linkpool.io"
-    #soft_limit = 100
-    #weight = 3
+    [balanced_rpcs.linkpool-light]
+    disabled = true
+    url = "https://main-light.eth.linkpool.io"
+    soft_limit = 100
+    weight = 3
 
 [private_rpcs]
 
