@@ -171,7 +171,7 @@ pub fn filter_query_window_seconds(
     response: &mut HashMap<&str, serde_json::Value>,
     q: Select<rpc_accounting::Entity>,
 ) -> Result<Select<rpc_accounting::Entity>, FrontendErrorResponse> {
-    let query_window_seconds = get_query_window_seconds_from_params(&params)?;
+    let query_window_seconds = get_query_window_seconds_from_params(params)?;
 
     if query_window_seconds == 0 {
         // TODO: order by more than this?
@@ -343,7 +343,7 @@ pub async fn query_user_stats<'a>(
     // TODO: trace log query here? i think sea orm has a useful log level for this
 
     // set up pagination
-    let page = get_page_from_params(&params)?;
+    let page = get_page_from_params(params)?;
     response.insert("page", serde_json::to_value(page).expect("can't fail"));
 
     // TODO: page size from param with a max from the config

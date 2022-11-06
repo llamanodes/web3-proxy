@@ -6,7 +6,7 @@ use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
 use crate::frontend::authorization::AuthorizedRequest;
 use anyhow::Context;
-use ethers::prelude::{Block, Bytes, Middleware, ProviderError, TxHash, H256, U64};
+use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
 use parking_lot::RwLock;

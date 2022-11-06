@@ -10,6 +10,7 @@ use crate::config::{BlockAndRpc, TxHashAndRpc, Web3ConnectionConfig};
 use crate::frontend::authorization::{AuthorizedRequest, RequestMetadata};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
+use anyhow::Context;
 use arc_swap::ArcSwap;
 use counter::Counter;
 use derive_more::From;
@@ -379,30 +380,26 @@ impl Web3Connections {
     ) -> anyhow::Result<OpenRequestResult> {
         let mut earliest_retry_at = None;
 
+        let min_block_needed = if let Some(min_block_needed) = min_block_needed {
+            *min_block_needed
+        } else {
+            self.head_block_num().context("not servers are synced")?
+        };
+
         // filter the synced rpcs
         // TODO: we are going to be checking "has_block_data" a lot now
-        let mut synced_rpcs: Vec<Arc<Web3Connection>> =
-            if let Some(min_block_needed) = min_block_needed {
-                self.conns
-                    .values()
-                    .filter(|x| !skip.contains(x))
-                    .filter(|x| x.has_block_data(min_block_needed))
-                    .cloned()
-                    .collect()
-            } else {
-                self.synced_connections
-                    .load()
-                    .conns
-                    .iter()
-                    .filter(|x| !skip.contains(x))
-                    .cloned()
-                    .collect()
-            };
+        let mut synced_rpcs: Vec<Arc<Web3Connection>> = self
+            .conns
+            .values()
+            .filter(|x| !skip.contains(x))
+            .filter(|x| x.has_block_data(&min_block_needed))
+            .cloned()
+            .collect();
 
         if synced_rpcs.is_empty() {
             // TODO: what should happen here? automatic retry?
             // TODO: more detailed error
-            return Err(anyhow::anyhow!("not synced"));
+            return Err(anyhow::anyhow!("no servers are synced"));
         }
 
         // we sort on a bunch of values. cache them here so that we don't do this math multiple times.
