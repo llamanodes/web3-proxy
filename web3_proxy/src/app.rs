@@ -318,12 +318,12 @@ impl Web3ProxyApp {
         // keep 1GB of blocks in the cache
         // TODO: limits from config
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
-        // TODO: how can we do the weigher better? this is going to be slow!
+        // TODO: how can we do the weigher better?
         let block_map = Cache::builder()
             .max_capacity(1024 * 1024 * 1024)
-            .weigher(|_k, v: &Arc<Block<TxHash>>| {
+            .weigher(|_k, v: &ArcBlock| {
                 // TODO: is this good enough?
-                v.transactions.len().try_into().unwrap_or(u32::MAX)
+                1 + v.transactions.len().try_into().unwrap_or(u32::MAX)
             })
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
 

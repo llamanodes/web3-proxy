@@ -312,13 +312,15 @@ mod tests {
         // TODO: do something to the node. query latest block, mine another block, query again
         let proxy_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
-        let anvil_result: Block<TxHash> = anvil_provider
-            .request("eth_getBlockByNumber", ("latest", true))
+        let anvil_result = anvil_provider
+            .request::<_, Option<Block<TxHash>>>("eth_getBlockByNumber", ("latest", true))
             .await
+            .unwrap()
             .unwrap();
-        let proxy_result: Block<TxHash> = proxy_provider
-            .request("eth_getBlockByNumber", ("latest", true))
+        let proxy_result = proxy_provider
+            .request::<_, Option<Block<TxHash>>>("eth_getBlockByNumber", ("latest", true))
             .await
+            .unwrap()
             .unwrap();
 
         assert_eq!(anvil_result, proxy_result);
@@ -330,13 +332,15 @@ mod tests {
             .await
             .unwrap();
 
-        let anvil_result: Block<TxHash> = anvil_provider
-            .request("eth_getBlockByNumber", ("latest", true))
+        let anvil_result = anvil_provider
+            .request::<_, Option<Block<TxHash>>>("eth_getBlockByNumber", ("latest", true))
             .await
+            .unwrap()
             .unwrap();
-        let proxy_result: Block<TxHash> = proxy_provider
-            .request("eth_getBlockByNumber", ("latest", true))
+        let proxy_result = proxy_provider
+            .request::<_, Option<Block<TxHash>>>("eth_getBlockByNumber", ("latest", true))
             .await
+            .unwrap()
             .unwrap();
 
         assert_eq!(anvil_result, proxy_result);
