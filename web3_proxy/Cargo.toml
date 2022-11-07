@@ -37,9 +37,9 @@ futures = { version = "0.3.25", features = ["thread-pool"] }
 hashbrown = { version = "0.12.3", features = ["serde"] }
 hdrhistogram = "7.5.2"
 http = "0.2.8"
-ipnet = "2.5.0"
+ipnet = "2.5.1"
 metered = { version = "0.9.0", features = ["serialize"] }
-moka = { version = "0.9.5", default-features = false, features = ["future"] }
+moka = { version = "0.9.6", default-features = false, features = ["future"] }
 notify = "5.0.0"
 num = "0.4.0"
 # TODO: import num_traits from sea-orm so we always have the same version
@@ -49,19 +49,19 @@ petgraph = "0.6.2"
 proctitle = "0.1.1"
 rand = "0.8.5"
 # TODO: regex has several "perf" features that we might want to use
-regex = "1.6.0"
+regex = "1.7.0"
 reqwest = { version = "0.11.12", default-features = false, features = ["json", "tokio-rustls"] }
 handlebars = "4.3.5"
 rustc-hash = "1.1.0"
 siwe = "0.5.0"
-sea-orm = { version = "0.10.1", features = ["macros"] }
+sea-orm = { version = "0.10.2", features = ["macros"] }
 sentry = { version = "0.28.0", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls"] }
 sentry-tracing = "0.28.0"
 serde = { version = "1.0.147", features = [] }
 serde_json = { version = "1.0.87", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.1.6"
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
-time = "0.3.16"
+time = "0.3.17"
 tokio = { version = "1.21.2", features = ["full", "tracing"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.11", features = ["sync"] }
