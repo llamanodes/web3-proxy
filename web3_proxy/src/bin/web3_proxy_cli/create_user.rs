@@ -25,7 +25,7 @@ pub struct CreateUserSubCommand {
     /// the user's first api ULID or UUID key.
     /// If none given, one will be created.
     #[argh(option)]
-    rpc_secret_key: RpcSecretKey,
+    rpc_secret_key: Option<RpcSecretKey>,
 
     /// an optional short description of the key's purpose.
     #[argh(option)]
@@ -68,10 +68,12 @@ impl CreateUserSubCommand {
             Address::from_slice(u.address.as_ref())
         );
 
+        let rpc_secret_key = self.rpc_secret_key.unwrap_or_else(RpcSecretKey::new);
+
         // create a key for the new user
         let uk = rpc_key::ActiveModel {
             user_id: u.id,
-            secret_key: sea_orm::Set(self.rpc_secret_key.into()),
+            secret_key: sea_orm::Set(rpc_secret_key.into()),
             description: sea_orm::Set(self.description),
             ..Default::default()
         };
@@ -81,8 +83,8 @@ impl CreateUserSubCommand {
 
         txn.commit().await?;
 
-        info!("user key as ULID: {}", Ulid::from(self.rpc_secret_key));
-        info!("user key as UUID: {}", Uuid::from(self.rpc_secret_key));
+        info!("user key as ULID: {}", Ulid::from(rpc_secret_key));
+        info!("user key as UUID: {}", Uuid::from(rpc_secret_key));
 
         Ok(())
     }
