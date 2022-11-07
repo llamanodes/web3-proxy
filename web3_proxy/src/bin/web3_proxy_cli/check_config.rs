@@ -66,7 +66,7 @@ impl CheckConfigSubCommand {
         }
 
         if top_config.app.redirect_user_url.is_none() {
-            warn!("app.redirect_public_url is None. Registered users will get an error page instead of a redirect")
+            warn!("app.redirect_user_url is None. Registered users will get an error page instead of a redirect")
         }
 
         Ok(())

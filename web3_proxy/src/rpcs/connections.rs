@@ -413,6 +413,9 @@ impl Web3Connections {
 
                 let utilization = active_requests as f32 / soft_limit as f32;
 
+                // TODO: utilization isn't enough we need to sort on some combination of utilization and if a server is archive or not
+                // TODO: if a server's utilization is high and it has a low weight, it will keep getting requests. this isn't really what we want
+
                 // TODO: double check this sorts how we want
                 (rpc.clone(), (weight, utilization, Reverse(soft_limit)))
             })

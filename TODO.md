@@ -226,6 +226,8 @@ These are roughly in order of completition
 - [x] fix test not shutting down
 - [x] proper authentication on rpc_key_id
   - we have bearer token auth for user_id, but rpc_key_id needs more code
+- [x] use rpc_key_id instead of user_id in the redirect
+- [x] /status should include the server weights
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
 

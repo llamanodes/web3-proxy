@@ -111,6 +111,7 @@ pub async fn websocket_handler_with_key(
             proxy_web3_socket(app, authorized_request, socket).instrument(request_span)
         })),
         None => {
+            // if no websocket upgrade, this is probably a user loading the url with their browser
             if let Some(redirect) = &app.config.redirect_user_url {
                 // TODO: store this on the app and use register_template?
                 let reg = Handlebars::new();
@@ -119,7 +120,10 @@ pub async fn websocket_handler_with_key(
                 // TODO: query to get the user's address. expose that instead of user_id
                 if let AuthorizedRequest::User(_, authorized_key) = authorized_request.as_ref() {
                     let user_url = reg
-                        .render_template(redirect, &json!({ "user_id": authorized_key.user_id }))
+                        .render_template(
+                            redirect,
+                            &json!({ "rpc_key_id": authorized_key.rpc_key_id }),
+                        )
                         .expect("templating should always work");
 
                     // this is not a websocket. redirect to a page for this user

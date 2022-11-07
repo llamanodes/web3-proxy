@@ -896,7 +896,7 @@ impl Serialize for Web3Connection {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Connection", 6)?;
+        let mut state = serializer.serialize_struct("Web3Connection", 7)?;
 
         // the url is excluded because it likely includes private information. just show the name
         state.serialize_field("name", &self.name)?;
@@ -907,6 +907,8 @@ impl Serialize for Web3Connection {
         } else {
             state.serialize_field("block_data_limit", &block_data_limit)?;
         }
+
+        state.serialize_field("weight", &self.weight)?;
 
         state.serialize_field("soft_limit", &self.soft_limit)?;
 
