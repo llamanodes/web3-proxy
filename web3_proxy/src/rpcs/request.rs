@@ -279,14 +279,14 @@ impl OpenRequestHandle {
                 RequestErrorHandler::DebugLevel => {
                     // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
                     if !is_revert {
-                        debug!(?err, %method, rpc=%self.conn, "bad response!");
+                        debug!(?err, %method, ?params, rpc=%self.conn, "bad response!");
                     }
                 }
                 RequestErrorHandler::ErrorLevel => {
-                    error!(?err, %method, rpc=%self.conn, "bad response!");
+                    error!(?err, %method, ?params, rpc=%self.conn, "bad response!");
                 }
                 RequestErrorHandler::WarnLevel => {
-                    warn!(?err, %method, rpc=%self.conn, "bad response!");
+                    warn!(?err, %method, ?params, rpc=%self.conn, "bad response!");
                 }
                 RequestErrorHandler::SaveReverts => {
                     // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
