@@ -56,7 +56,7 @@ pub struct AppConfig {
     pub allowed_origin_requests_per_period: HashMap<String, u64>,
 
     /// EVM chain id. 1 for ETH
-    /// TODO: better type for chain_id? max of `u64::MAX / 2 - 36` https://github.com/ethereum/EIPs/issues/2294
+    /// TODO: better type for chain_id? max of `u64::MAX / 2 - 36` <https://github.com/ethereum/EIPs/issues/2294>
     pub chain_id: u64,
 
     /// Database is used for user data.
