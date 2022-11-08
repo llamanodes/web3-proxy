@@ -7,7 +7,7 @@ use super::request::{
 use super::synced_connections::SyncedConnections;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3ConnectionConfig};
-use crate::frontend::authorization::{AuthorizedRequest, RequestMetadata};
+use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
 use anyhow::Context;
@@ -21,6 +21,7 @@ use futures::StreamExt;
 use hashbrown::HashMap;
 use moka::future::{Cache, ConcurrentCacheExt};
 use petgraph::graphmap::DiGraphMap;
+use sea_orm::DatabaseConnection;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
@@ -61,6 +62,7 @@ impl Web3Connections {
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         chain_id: u64,
+        db_conn: Option<DatabaseConnection>,
         server_configs: HashMap<String, Web3ConnectionConfig>,
         http_client: Option<reqwest::Client>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
@@ -119,6 +121,7 @@ impl Web3Connections {
                     return None;
                 }
 
+                let db_conn = db_conn.clone();
                 let http_client = http_client.clone();
                 let redis_pool = redis_pool.clone();
                 let http_interval_sender = http_interval_sender.clone();
@@ -137,6 +140,7 @@ impl Web3Connections {
                     server_config
                         .spawn(
                             server_name,
+                            db_conn,
                             redis_pool,
                             chain_id,
                             http_client,
@@ -212,6 +216,8 @@ impl Web3Connections {
             min_synced_rpcs,
         });
 
+        let authorization = Arc::new(Authorization::local(db_conn.clone())?);
+
         let handle = {
             let connections = connections.clone();
 
@@ -219,6 +225,7 @@ impl Web3Connections {
                 // TODO: try_join_all with the other handles here
                 connections
                     .subscribe(
+                        authorization,
                         pending_tx_id_receiver,
                         block_receiver,
                         head_block_sender,
@@ -240,6 +247,7 @@ impl Web3Connections {
     /// transaction ids from all the `Web3Connection`s are deduplicated and forwarded to `pending_tx_sender`
     async fn subscribe(
         self: Arc<Self>,
+        authorization: Arc<Authorization>,
         pending_tx_id_receiver: flume::Receiver<TxHashAndRpc>,
         block_receiver: flume::Receiver<BlockAndRpc>,
         head_block_sender: Option<watch::Sender<ArcBlock>>,
@@ -253,10 +261,12 @@ impl Web3Connections {
         // forwards new transacitons to pending_tx_receipt_sender
         if let Some(pending_tx_sender) = pending_tx_sender.clone() {
             let clone = self.clone();
+            let authorization = authorization.clone();
             let handle = task::spawn(async move {
                 // TODO: set up this future the same as the block funnel
                 while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv_async().await {
                     let f = clone.clone().process_incoming_tx_id(
+                        authorization.clone(),
                         rpc,
                         pending_tx_id,
                         pending_tx_sender.clone(),
@@ -274,11 +284,13 @@ impl Web3Connections {
         if let Some(head_block_sender) = head_block_sender {
             let connections = Arc::clone(&self);
             let pending_tx_sender = pending_tx_sender.clone();
+
             let handle = task::Builder::default()
                 .name("process_incoming_blocks")
                 .spawn(async move {
                     connections
                         .process_incoming_blocks(
+                            &authorization,
                             block_receiver,
                             head_block_sender,
                             pending_tx_sender,
@@ -373,7 +385,7 @@ impl Web3Connections {
     /// get the best available rpc server
     pub async fn next_upstream_server(
         &self,
-        authorized_request: Option<&Arc<AuthorizedRequest>>,
+        authorization: &Arc<Authorization>,
         request_metadata: Option<&Arc<RequestMetadata>>,
         skip: &[Arc<Web3Connection>],
         min_block_needed: Option<&U64>,
@@ -432,7 +444,7 @@ impl Web3Connections {
         // now that the rpcs are sorted, try to get an active request handle for one of them
         for rpc in synced_rpcs.into_iter() {
             // increment our connection counter
-            match rpc.try_request_handle(authorized_request).await {
+            match rpc.try_request_handle(authorization).await {
                 Ok(OpenRequestResult::Handle(handle)) => {
                     trace!("next server on {:?}: {:?}", self, rpc);
                     return Ok(OpenRequestResult::Handle(handle));
@@ -476,7 +488,7 @@ impl Web3Connections {
     // TODO: better type on this that can return an anyhow::Result
     pub async fn upstream_servers(
         &self,
-        authorized_request: Option<&Arc<AuthorizedRequest>>,
+        authorization: &Arc<Authorization>,
         block_needed: Option<&U64>,
     ) -> Result<Vec<OpenRequestHandle>, Option<Instant>> {
         let mut earliest_retry_at = None;
@@ -491,7 +503,7 @@ impl Web3Connections {
             }
 
             // check rate limits and increment our connection counter
-            match connection.try_request_handle(authorized_request).await {
+            match connection.try_request_handle(authorization).await {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
@@ -517,7 +529,7 @@ impl Web3Connections {
     /// be sure there is a timeout on this or it might loop forever
     pub async fn try_send_best_upstream_server(
         &self,
-        authorized_request: Option<&Arc<AuthorizedRequest>>,
+        authorization: &Arc<Authorization>,
         request: JsonRpcRequest,
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
@@ -532,7 +544,7 @@ impl Web3Connections {
             }
             match self
                 .next_upstream_server(
-                    authorized_request,
+                    authorization,
                     request_metadata,
                     &skip_rpcs,
                     min_block_needed,
@@ -655,16 +667,13 @@ impl Web3Connections {
     #[instrument]
     pub async fn try_send_all_upstream_servers(
         &self,
-        authorized_request: Option<&Arc<AuthorizedRequest>>,
+        authorization: &Arc<Authorization>,
         request: JsonRpcRequest,
         request_metadata: Option<Arc<RequestMetadata>>,
         block_needed: Option<&U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
-            match self
-                .upstream_servers(authorized_request, block_needed)
-                .await
-            {
+            match self.upstream_servers(authorization, block_needed).await {
                 Ok(active_request_handles) => {
                     // TODO: benchmark this compared to waiting on unbounded futures
                     // TODO: do something with this handle?

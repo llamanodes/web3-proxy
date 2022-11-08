@@ -4,9 +4,10 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
+use std::sync::Arc;
 use tracing::{instrument, warn};
 
-use crate::rpcs::connections::Web3Connections;
+use crate::{frontend::authorization::Authorization, rpcs::connections::Web3Connections};
 
 pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> U64 {
     match block_num {
@@ -40,6 +41,7 @@ pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> U64 {
 /// modify params to always have a block number and not "latest"
 #[instrument(level = "trace")]
 pub async fn clean_block_number(
+    authorization: &Arc<Authorization>,
     params: &mut serde_json::Value,
     block_param_id: usize,
     latest_block: U64,
@@ -70,7 +72,7 @@ pub async fn clean_block_number(
                         let block_hash: H256 =
                             serde_json::from_value(block_hash).context("decoding blockHash")?;
 
-                        let block = rpcs.block(None, &block_hash, None).await?;
+                        let block = rpcs.block(authorization, &block_hash, None).await?;
 
                         block
                             .number
@@ -98,6 +100,7 @@ pub async fn clean_block_number(
 // TODO: change this to also return the hash needed?
 #[instrument(level = "trace")]
 pub async fn block_needed(
+    authorization: &Arc<Authorization>,
     method: &str,
     params: Option<&mut serde_json::Value>,
     head_block_num: U64,
@@ -203,7 +206,7 @@ pub async fn block_needed(
         }
     };
 
-    match clean_block_number(params, block_param_id, head_block_num, rpcs).await {
+    match clean_block_number(authorization, params, block_param_id, head_block_num, rpcs).await {
         Ok(block) => Ok(Some(block)),
         Err(err) => {
             // TODO: seems unlikely that we will get here

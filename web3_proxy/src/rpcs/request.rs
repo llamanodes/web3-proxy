@@ -1,6 +1,6 @@
 use super::connection::Web3Connection;
 use super::provider::Web3Provider;
-use crate::frontend::authorization::AuthorizedRequest;
+use crate::frontend::authorization::Authorization;
 use crate::metered::{JsonRpcErrorCount, ProviderErrorCount};
 use anyhow::Context;
 use chrono::Utc;
@@ -13,8 +13,8 @@ use metered::HitCount;
 use metered::ResponseTime;
 use metered::Throughput;
 use rand::Rng;
-use sea_orm::ActiveEnum;
 use sea_orm::ActiveModelTrait;
+use sea_orm::{ActiveEnum};
 use serde_json::json;
 use std::fmt;
 use std::sync::atomic::{self, AtomicBool, Ordering};
@@ -35,7 +35,7 @@ pub enum OpenRequestResult {
 /// Make RPC requests through this handle and drop it when you are done.
 #[derive(Debug)]
 pub struct OpenRequestHandle {
-    authorized_request: Arc<AuthorizedRequest>,
+    authorization: Arc<Authorization>,
     conn: Arc<Web3Connection>,
     // TODO: this is the same metrics on the conn. use a reference?
     metrics: Arc<OpenRequestHandleMetrics>,
@@ -75,41 +75,43 @@ impl From<Level> for RequestErrorHandler {
     }
 }
 
-impl AuthorizedRequest {
+impl Authorization {
     /// Save a RPC call that return "execution reverted" to the database.
     async fn save_revert(
         self: Arc<Self>,
         method: Method,
         params: EthCallFirstParams,
     ) -> anyhow::Result<()> {
-        if let Self::User(Some(db_conn), authorized_request) = &*self {
-            // TODO: should the database set the timestamp?
-            let timestamp = Utc::now();
-            let to: Vec<u8> = params
-                .to
-                .as_bytes()
-                .try_into()
-                .expect("address should always convert to a Vec<u8>");
-            let call_data = params.data.map(|x| format!("{}", x));
+        let db_conn = self.db_conn.as_ref().context("no database connection")?;
 
-            let rl = revert_log::ActiveModel {
-                rpc_key_id: sea_orm::Set(authorized_request.rpc_key_id),
-                method: sea_orm::Set(method),
-                to: sea_orm::Set(to),
-                call_data: sea_orm::Set(call_data),
-                timestamp: sea_orm::Set(timestamp),
-                ..Default::default()
-            };
+        // TODO: should the database set the timestamp?
+        // we intentionally use "now" and not the time the request started
+        // why? because we aggregate stats and setting one in the past could cause confusion
+        let timestamp = Utc::now();
+        let to: Vec<u8> = params
+            .to
+            .as_bytes()
+            .try_into()
+            .expect("address should always convert to a Vec<u8>");
+        let call_data = params.data.map(|x| format!("{}", x));
 
-            let rl = rl
-                .save(db_conn)
-                .await
-                .context("Failed saving new revert log")?;
+        let rl = revert_log::ActiveModel {
+            rpc_key_id: sea_orm::Set(self.checks.rpc_key_id),
+            method: sea_orm::Set(method),
+            to: sea_orm::Set(to),
+            call_data: sea_orm::Set(call_data),
+            timestamp: sea_orm::Set(timestamp),
+            ..Default::default()
+        };
 
-            // TODO: what log level?
-            // TODO: better format
-            trace!(?rl);
-        }
+        let rl = rl
+            .save(db_conn)
+            .await
+            .context("Failed saving new revert log")?;
+
+        // TODO: what log level?
+        // TODO: better format
+        trace!(?rl);
 
         // TODO: return something useful
         Ok(())
@@ -118,10 +120,7 @@ impl AuthorizedRequest {
 
 #[metered(registry = OpenRequestHandleMetrics, visibility = pub)]
 impl OpenRequestHandle {
-    pub fn new(
-        conn: Arc<Web3Connection>,
-        authorized_request: Option<Arc<AuthorizedRequest>>,
-    ) -> Self {
+    pub fn new(authorization: Arc<Authorization>, conn: Arc<Web3Connection>) -> Self {
         // TODO: take request_id as an argument?
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
@@ -136,11 +135,8 @@ impl OpenRequestHandle {
         let metrics = conn.open_request_handle_metrics.clone();
         let used = false.into();
 
-        let authorized_request =
-            authorized_request.unwrap_or_else(|| Arc::new(AuthorizedRequest::Internal));
-
         Self {
-            authorized_request,
+            authorization,
             conn,
             metrics,
             used,
@@ -176,7 +172,7 @@ impl OpenRequestHandle {
         // TODO: use tracing spans
         // TODO: requests from customers have request ids, but we should add
         // TODO: including params in this is way too verbose
-        // the authorized_request field is already on a parent span
+        // the authorization field is already on a parent span
         trace!(rpc=%self.conn, %method, "request");
 
         let mut provider = None;
@@ -209,33 +205,25 @@ impl OpenRequestHandle {
                 if !["eth_call", "eth_estimateGas"].contains(&method) {
                     trace!(%method, "skipping save on revert");
                     RequestErrorHandler::DebugLevel
-                } else if self.authorized_request.db_conn().is_none() {
-                    trace!(%method, "no database. skipping save on revert");
-                    RequestErrorHandler::DebugLevel
-                } else if let AuthorizedRequest::User(db_conn, y) = self.authorized_request.as_ref()
-                {
-                    if db_conn.is_none() {
-                        trace!(%method, "no database. skipping save on revert");
+                } else if self.authorization.db_conn.is_some() {
+                    let log_revert_chance = self.authorization.checks.log_revert_chance;
+
+                    if log_revert_chance == 0.0 {
+                        trace!(%method, "no chance. skipping save on revert");
+                        RequestErrorHandler::DebugLevel
+                    } else if log_revert_chance == 1.0 {
+                        trace!(%method, "gaurenteed chance. SAVING on revert");
+                        error_handler
+                    } else if rand::thread_rng().gen_range(0.0f64..=1.0) < log_revert_chance {
+                        trace!(%method, "missed chance. skipping save on revert");
                         RequestErrorHandler::DebugLevel
                     } else {
-                        let log_revert_chance = y.log_revert_chance;
-
-                        if log_revert_chance == 0.0 {
-                            trace!(%method, "no chance. skipping save on revert");
-                            RequestErrorHandler::DebugLevel
-                        } else if log_revert_chance == 1.0 {
-                            trace!(%method, "gaurenteed chance. SAVING on revert");
-                            error_handler
-                        } else if rand::thread_rng().gen_range(0.0f64..=1.0) > log_revert_chance {
-                            trace!(%method, "missed chance. skipping save on revert");
-                            RequestErrorHandler::DebugLevel
-                        } else {
-                            trace!("Saving on revert");
-                            // TODO: is always logging at debug level fine?
-                            error_handler
-                        }
+                        trace!("Saving on revert");
+                        // TODO: is always logging at debug level fine?
+                        error_handler
                     }
                 } else {
+                    trace!(%method, "no database. skipping save on revert");
                     RequestErrorHandler::DebugLevel
                 }
             } else {
@@ -298,10 +286,7 @@ impl OpenRequestHandle {
                         .unwrap();
 
                     // spawn saving to the database so we don't slow down the request
-                    let f = self
-                        .authorized_request
-                        .clone()
-                        .save_revert(method, params.0 .0);
+                    let f = self.authorization.clone().save_revert(method, params.0 .0);
 
                     tokio::spawn(f);
                 }

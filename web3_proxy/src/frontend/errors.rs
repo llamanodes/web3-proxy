@@ -1,6 +1,7 @@
 //! Utlities for logging errors for admins and displaying errors to users.
 
-use crate::{app::UserKeyData, jsonrpc::JsonRpcForwardedResponse};
+use super::authorization::Authorization;
+use crate::jsonrpc::JsonRpcForwardedResponse;
 use axum::{
     headers,
     http::StatusCode,
@@ -13,7 +14,7 @@ use ipnet::AddrParseError;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
 use sea_orm::DbErr;
-use std::{error::Error, net::IpAddr};
+use std::error::Error;
 use tokio::{task::JoinError, time::Instant};
 use tracing::{instrument, trace, warn};
 
@@ -32,12 +33,11 @@ pub enum FrontendErrorResponse {
     IpAddrParse(AddrParseError),
     JoinError(JoinError),
     NotFound,
-    RateLimitedUser(UserKeyData, Option<Instant>),
-    RateLimitedIp(IpAddr, Option<Instant>),
+    RateLimited(Authorization, Option<Instant>),
     Redis(RedisError),
     Response(Response),
     /// simple way to return an error message to the user and an anyhow to our logs
-    StatusCode(StatusCode, String, anyhow::Error),
+    StatusCode(StatusCode, String, Option<anyhow::Error>),
     UlidDecodeError(ulid::DecodeError),
     UnknownKey,
 }
@@ -138,28 +138,32 @@ impl IntoResponse for FrontendErrorResponse {
                     ),
                 )
             }
-            Self::RateLimitedIp(ip, _retry_at) => {
-                // TODO: emit a stat
-                // TODO: include retry_at in the error
-                // TODO: if retry_at is None, give an unauthorized status code?
-                (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    JsonRpcForwardedResponse::from_string(
-                        format!("too many requests from ip {}!", ip),
-                        Some(StatusCode::TOO_MANY_REQUESTS.as_u16().into()),
-                        None,
-                    ),
-                )
-            }
             // TODO: this should actually by the id of the key. multiple users might control one key
-            Self::RateLimitedUser(user_data, _retry_at) => {
+            Self::RateLimited(authorization, retry_at) => {
                 // TODO: emit a stat
-                // TODO: include retry_at in the error
+
+                let retry_msg = if let Some(retry_at) = retry_at {
+                    let retry_in = retry_at.duration_since(Instant::now()).as_secs();
+
+                    format!(" Retry in {} seconds", retry_in)
+                } else {
+                    "".to_string()
+                };
+
+                // create a string with either the IP or the rpc_key_id
+                let msg = if authorization.checks.rpc_key_id == 0 {
+                    format!("too many requests from {}.{}", authorization.ip, retry_msg)
+                } else {
+                    format!(
+                        "too many requests from rpc key #{}.{}",
+                        authorization.checks.rpc_key_id, retry_msg
+                    )
+                };
+
                 (
                     StatusCode::TOO_MANY_REQUESTS,
                     JsonRpcForwardedResponse::from_string(
-                        // TODO: better error
-                        format!("too many requests from {:?}!", user_data),
+                        msg,
                         Some(StatusCode::TOO_MANY_REQUESTS.as_u16().into()),
                         None,
                     ),

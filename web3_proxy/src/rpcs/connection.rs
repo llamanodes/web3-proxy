@@ -4,7 +4,7 @@ use super::provider::Web3Provider;
 use super::request::{OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
-use crate::frontend::authorization::AuthorizedRequest;
+use crate::frontend::authorization::Authorization;
 use anyhow::Context;
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
@@ -12,6 +12,7 @@ use futures::StreamExt;
 use parking_lot::RwLock;
 use rand::Rng;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
+use sea_orm::DatabaseConnection;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
@@ -63,6 +64,7 @@ impl Web3Connection {
     pub async fn spawn(
         name: String,
         chain_id: u64,
+        db_conn: Option<DatabaseConnection>,
         url_str: String,
         // optional because this is only used for http providers. websocket providers don't use it
         http_client: Option<reqwest::Client>,
@@ -111,12 +113,14 @@ impl Web3Connection {
             .retrying_reconnect(block_sender.as_ref(), false)
             .await?;
 
+        let authorization = Arc::new(Authorization::local(db_conn)?);
+
         // check the server's chain_id here
         // TODO: move this outside the `new` function and into a `start` function or something. that way we can do retries from there
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
         // TODO: what should the timeout be?
         let found_chain_id: Result<U64, _> = new_connection
-            .wait_for_request_handle(None, Duration::from_secs(30))
+            .wait_for_request_handle(&authorization, Duration::from_secs(30))
             .await?
             .request(
                 "eth_chainId",
@@ -149,9 +153,11 @@ impl Web3Connection {
         // TODO: make transaction subscription optional (just pass None for tx_id_sender)
         let handle = {
             let new_connection = new_connection.clone();
+            let authorization = authorization.clone();
             tokio::spawn(async move {
                 new_connection
                     .subscribe(
+                        &authorization,
                         http_interval_sender,
                         block_map,
                         block_sender,
@@ -174,13 +180,19 @@ impl Web3Connection {
             // TODO: i think instead of atomics, we could maybe use a watch channel
             sleep(Duration::from_millis(250)).await;
 
-            new_connection.check_block_data_limit().await?;
+            new_connection
+                .check_block_data_limit(&authorization)
+                .await?;
         }
 
         Ok((new_connection, handle))
     }
 
-    async fn check_block_data_limit(self: &Arc<Self>) -> anyhow::Result<Option<u64>> {
+    /// TODO: should check_block_data_limit take authorization?
+    async fn check_block_data_limit(
+        self: &Arc<Self>,
+        authorization: &Arc<Authorization>,
+    ) -> anyhow::Result<Option<u64>> {
         let mut limit = None;
 
         for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
@@ -206,7 +218,7 @@ impl Web3Connection {
             // TODO: wait for the handle BEFORE we check the current block number. it might be delayed too!
             // TODO: what should the request be?
             let archive_result: Result<Bytes, _> = self
-                .wait_for_request_handle(None, Duration::from_secs(30))
+                .wait_for_request_handle(authorization, Duration::from_secs(30))
                 .await?
                 .request(
                     "eth_getCode",
@@ -453,6 +465,7 @@ impl Web3Connection {
     /// subscribe to blocks and transactions with automatic reconnects
     async fn subscribe(
         self: Arc<Self>,
+        authorization: &Arc<Authorization>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         block_map: BlockHashesCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
@@ -468,6 +481,7 @@ impl Web3Connection {
 
             if let Some(block_sender) = &block_sender {
                 let f = self.clone().subscribe_new_heads(
+                    authorization.clone(),
                     http_interval_receiver,
                     block_sender.clone(),
                     block_map.clone(),
@@ -479,7 +493,7 @@ impl Web3Connection {
             if let Some(tx_id_sender) = &tx_id_sender {
                 let f = self
                     .clone()
-                    .subscribe_pending_transactions(tx_id_sender.clone());
+                    .subscribe_pending_transactions(authorization.clone(), tx_id_sender.clone());
 
                 futures.push(flatten_handle(tokio::spawn(f)));
             }
@@ -540,6 +554,7 @@ impl Web3Connection {
     /// Subscribe to new blocks. If `reconnect` is true, this runs forever.
     async fn subscribe_new_heads(
         self: Arc<Self>,
+        authorization: Arc<Authorization>,
         http_interval_receiver: Option<broadcast::Receiver<()>>,
         block_sender: flume::Sender<BlockAndRpc>,
         block_map: BlockHashesCache,
@@ -560,7 +575,7 @@ impl Web3Connection {
                     loop {
                         // TODO: what should the max_wait be?
                         match self
-                            .wait_for_request_handle(None, Duration::from_secs(30))
+                            .wait_for_request_handle(&authorization, Duration::from_secs(30))
                             .await
                         {
                             Ok(active_request_handle) => {
@@ -648,7 +663,7 @@ impl Web3Connection {
                 Web3Provider::Ws(provider) => {
                     // todo: move subscribe_blocks onto the request handle?
                     let active_request_handle = self
-                        .wait_for_request_handle(None, Duration::from_secs(30))
+                        .wait_for_request_handle(&authorization, Duration::from_secs(30))
                         .await;
                     let mut stream = provider.subscribe_blocks().await?;
                     drop(active_request_handle);
@@ -658,7 +673,7 @@ impl Web3Connection {
                     // all it does is print "new block" for the same block as current block
                     // TODO: how does this get wrapped in an arc? does ethers handle that?
                     let block: Result<Option<ArcBlock>, _> = self
-                        .wait_for_request_handle(None, Duration::from_secs(30))
+                        .wait_for_request_handle(&authorization, Duration::from_secs(30))
                         .await?
                         .request(
                             "eth_getBlockByNumber",
@@ -715,6 +730,7 @@ impl Web3Connection {
 
     async fn subscribe_pending_transactions(
         self: Arc<Self>,
+        authorization: Arc<Authorization>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
     ) -> anyhow::Result<()> {
         info!(%self, "watching pending transactions");
@@ -752,7 +768,7 @@ impl Web3Connection {
                 Web3Provider::Ws(provider) => {
                     // TODO: maybe the subscribe_pending_txs function should be on the active_request_handle
                     let active_request_handle = self
-                        .wait_for_request_handle(None, Duration::from_secs(30))
+                        .wait_for_request_handle(&authorization, Duration::from_secs(30))
                         .await;
 
                     let mut stream = provider.subscribe_pending_txs().await?;
@@ -783,13 +799,13 @@ impl Web3Connection {
     #[instrument]
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
-        authorized_request: Option<&Arc<AuthorizedRequest>>,
+        authorization: &Arc<Authorization>,
         max_wait: Duration,
     ) -> anyhow::Result<OpenRequestHandle> {
         let max_wait = Instant::now() + max_wait;
 
         loop {
-            let x = self.try_request_handle(authorized_request).await;
+            let x = self.try_request_handle(authorization).await;
 
             trace!(?x, "try_request_handle");
 
@@ -819,7 +835,7 @@ impl Web3Connection {
     #[instrument]
     pub async fn try_request_handle(
         self: &Arc<Self>,
-        authorized_request: Option<&Arc<AuthorizedRequest>>,
+        authorization: &Arc<Authorization>,
     ) -> anyhow::Result<OpenRequestResult> {
         // check that we are connected
         if !self.has_provider().await {
@@ -850,7 +866,7 @@ impl Web3Connection {
             }
         };
 
-        let handle = OpenRequestHandle::new(self.clone(), authorized_request.cloned());
+        let handle = OpenRequestHandle::new(authorization.clone(), self.clone());
 
         Ok(OpenRequestResult::Handle(handle))
     }

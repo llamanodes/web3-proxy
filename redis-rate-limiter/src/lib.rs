@@ -22,7 +22,9 @@ pub struct RedisRateLimiter {
 }
 
 pub enum RedisRateLimitResult {
+    /// TODO: what is the inner value?
     Allowed(u64),
+    /// TODO: what is the inner value?
     RetryAt(Instant, u64),
     RetryNever,
 }

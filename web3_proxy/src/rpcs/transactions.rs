@@ -1,3 +1,5 @@
+use crate::frontend::authorization::Authorization;
+
 ///! Load balanced communication with a group of web3 providers
 use super::connection::Web3Connection;
 use super::connections::Web3Connections;
@@ -18,6 +20,7 @@ pub enum TxStatus {
 impl Web3Connections {
     async fn query_transaction_status(
         &self,
+        authorization: &Arc<Authorization>,
         rpc: Arc<Web3Connection>,
         pending_tx_id: TxHash,
     ) -> Result<Option<TxStatus>, ProviderError> {
@@ -25,7 +28,7 @@ impl Web3Connections {
         // TODO: might not be a race. might be a nonce thats higher than the current account nonce. geth discards chains
         // TODO: yearn devs have had better luck with batching these, but i think that's likely just adding a delay itself
         // TODO: if one rpc fails, try another?
-        let tx: Transaction = match rpc.try_request_handle(None).await {
+        let tx: Transaction = match rpc.try_request_handle(authorization).await {
             Ok(OpenRequestResult::Handle(handle)) => {
                 handle
                     .request(
@@ -62,6 +65,7 @@ impl Web3Connections {
     /// dedupe transaction and send them to any listening clients
     pub(super) async fn process_incoming_tx_id(
         self: Arc<Self>,
+        authorization: Arc<Authorization>,
         rpc: Arc<Web3Connection>,
         pending_tx_id: TxHash,
         pending_tx_sender: broadcast::Sender<TxStatus>,
@@ -84,7 +88,7 @@ impl Web3Connections {
         // query the rpc for this transaction
         // it is possible that another rpc is also being queried. thats fine. we want the fastest response
         match self
-            .query_transaction_status(rpc.clone(), pending_tx_id)
+            .query_transaction_status(&authorization, rpc.clone(), pending_tx_id)
             .await
         {
             Ok(Some(tx_state)) => {

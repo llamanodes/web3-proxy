@@ -3,7 +3,7 @@
 use crate::app_stats::{ProxyResponseStat, StatEmitter, Web3ProxyStat};
 use crate::block_number::block_needed;
 use crate::config::{AppConfig, TopConfig};
-use crate::frontend::authorization::{AuthorizedRequest, RequestMetadata};
+use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
@@ -46,7 +46,7 @@ use tracing::{error, info, instrument, trace, warn};
 use ulid::Ulid;
 
 // TODO: make this customizable?
-static APP_USER_AGENT: &str = concat!(
+pub static APP_USER_AGENT: &str = concat!(
     "satoshiandkin/",
     env!("CARGO_PKG_NAME"),
     "/",
@@ -62,10 +62,12 @@ type ResponseCache =
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
 #[derive(Clone, Debug, Default, From)]
-pub struct UserKeyData {
-    /// database id of the primary user
+pub struct AuthorizationChecks {
+    /// database id of the primary user.
+    /// TODO: do we need this? its on the authorization so probably not
     pub user_id: u64,
     /// database id of the rpc key
+    /// if this is 0, then this request is being rate limited by ip
     pub rpc_key_id: u64,
     /// if None, allow unlimited queries. inherited from the user_tier
     pub max_requests_per_period: Option<u64>,
@@ -109,7 +111,8 @@ pub struct Web3ProxyApp {
     pub login_rate_limiter: Option<RedisRateLimiter>,
     pub vredis_pool: Option<RedisPool>,
     // TODO: this key should be our RpcSecretKey class, not Ulid
-    pub rpc_secret_key_cache: Cache<Ulid, UserKeyData, hashbrown::hash_map::DefaultHashBuilder>,
+    pub rpc_secret_key_cache:
+        Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>,
     pub rpc_key_semaphores: Cache<u64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub bearer_token_semaphores:
@@ -193,7 +196,7 @@ impl Web3ProxyApp {
         shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         // safety checks on the config
-        if let Some(redirect) = &top_config.app.redirect_user_url {
+        if let Some(redirect) = &top_config.app.redirect_rpc_key_url {
             assert!(
                 redirect.contains("{rpc_key_id}"),
                 "redirect_user_url user url must contain \"{{rpc_key_id}}\""
@@ -330,6 +333,7 @@ impl Web3ProxyApp {
         // connect to the load balanced rpcs
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
             top_config.app.chain_id,
+            db_conn.clone(),
             balanced_rpcs,
             http_client.clone(),
             vredis_pool.clone(),
@@ -356,6 +360,7 @@ impl Web3ProxyApp {
         } else {
             let (private_rpcs, private_handle) = Web3Connections::spawn(
                 top_config.app.chain_id,
+                db_conn.clone(),
                 private_rpcs,
                 http_client.clone(),
                 vredis_pool.clone(),
@@ -522,7 +527,7 @@ impl Web3ProxyApp {
     #[instrument(level = "trace")]
     pub async fn eth_subscribe<'a>(
         self: &'a Arc<Self>,
-        authorized_request: Arc<AuthorizedRequest>,
+        authorization: Arc<Authorization>,
         payload: JsonRpcRequest,
         subscription_count: &'a AtomicUsize,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
@@ -719,7 +724,7 @@ impl Web3ProxyApp {
     #[instrument(level = "trace")]
     pub async fn proxy_web3_rpc(
         self: &Arc<Self>,
-        authorized_request: Arc<AuthorizedRequest>,
+        authorization: Arc<Authorization>,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         // TODO: this should probably be trace level
@@ -734,14 +739,14 @@ impl Web3ProxyApp {
             JsonRpcRequestEnum::Single(request) => JsonRpcForwardedResponseEnum::Single(
                 timeout(
                     max_time,
-                    self.proxy_web3_rpc_request(authorized_request, request),
+                    self.proxy_web3_rpc_request(&authorization, request),
                 )
                 .await??,
             ),
             JsonRpcRequestEnum::Batch(requests) => JsonRpcForwardedResponseEnum::Batch(
                 timeout(
                     max_time,
-                    self.proxy_web3_rpc_requests(authorized_request, requests),
+                    self.proxy_web3_rpc_requests(&authorization, requests),
                 )
                 .await??,
             ),
@@ -758,27 +763,24 @@ impl Web3ProxyApp {
     #[instrument(level = "trace")]
     async fn proxy_web3_rpc_requests(
         self: &Arc<Self>,
-        authorized_request: Arc<AuthorizedRequest>,
+        authorization: &Arc<Authorization>,
         requests: Vec<JsonRpcRequest>,
     ) -> anyhow::Result<Vec<JsonRpcForwardedResponse>> {
         // TODO: we should probably change ethers-rs to support this directly
         let num_requests = requests.len();
 
+        // TODO: spawn so the requests go in parallel
+        // TODO: i think we will need to flatten
         let responses = join_all(
             requests
                 .into_iter()
-                .map(|request| {
-                    let authorized_request = authorized_request.clone();
-
-                    // TODO: spawn so the requests go in parallel
-                    // TODO: i think we will need to flatten
-                    self.proxy_web3_rpc_request(authorized_request, request)
-                })
+                .map(|request| self.proxy_web3_rpc_request(authorization, request))
                 .collect::<Vec<_>>(),
         )
         .await;
 
-        // TODO: i'm sure this could be done better with iterators
+        // TODO: i'm sure this could be done better with iterators. we could return the error earlier then, too
+        // TODO: stream the response?
         let mut collected: Vec<JsonRpcForwardedResponse> = Vec::with_capacity(num_requests);
         for response in responses {
             collected.push(response?);
@@ -809,7 +811,7 @@ impl Web3ProxyApp {
     #[instrument(level = "trace")]
     async fn proxy_web3_rpc_request(
         self: &Arc<Self>,
-        authorized_request: Arc<AuthorizedRequest>,
+        authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         trace!("Received request: {:?}", request);
@@ -818,7 +820,7 @@ impl Web3ProxyApp {
         let request_metadata = Arc::new(RequestMetadata::new(60, &request)?);
 
         // save the id so we can attach it to the response
-        // TODO: instead of cloning, take the id out
+        // TODO: instead of cloning, take the id out?
         let request_id = request.id.clone();
 
         // TODO: if eth_chainId or net_version, serve those without querying the backend
@@ -947,7 +949,7 @@ impl Web3ProxyApp {
 
                 return rpcs
                     .try_send_all_upstream_servers(
-                        Some(&authorized_request),
+                        authorization,
                         request,
                         Some(request_metadata),
                         None,
@@ -1013,6 +1015,7 @@ impl Web3ProxyApp {
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
                 let request_block_id = if let Some(request_block_needed) = block_needed(
+                    authorization,
                     method,
                     request.params.as_mut(),
                     head_block_id.num,
@@ -1021,8 +1024,10 @@ impl Web3ProxyApp {
                 .await?
                 {
                     // TODO: maybe this should be on the app and not on balanced_rpcs
-                    let (request_block_hash, archive_needed) =
-                        self.balanced_rpcs.block_hash(&request_block_needed).await?;
+                    let (request_block_hash, archive_needed) = self
+                        .balanced_rpcs
+                        .block_hash(authorization, &request_block_needed)
+                        .await?;
 
                     if archive_needed {
                         request_metadata
@@ -1049,7 +1054,7 @@ impl Web3ProxyApp {
                 let mut response = {
                     let request_metadata = request_metadata.clone();
 
-                    let authorized_request = authorized_request.clone();
+                    let authorization = authorization.clone();
 
                     self.response_cache
                         .try_get_with(cache_key, async move {
@@ -1059,7 +1064,7 @@ impl Web3ProxyApp {
                             let mut response = self
                                 .balanced_rpcs
                                 .try_send_best_upstream_server(
-                                    Some(&authorized_request),
+                                    &authorization,
                                     request,
                                     Some(&request_metadata),
                                     Some(&request_block_id.num),
@@ -1085,14 +1090,10 @@ impl Web3ProxyApp {
                 // replace the id with our request's id.
                 response.id = request_id;
 
-                // DRY this up by just returning the partial result (or error) here
-                if let (Some(stat_sender), Ok(AuthorizedRequest::User(Some(_), authorized_key))) = (
-                    self.stat_sender.as_ref(),
-                    Arc::try_unwrap(authorized_request),
-                ) {
+                if let Some(stat_sender) = self.stat_sender.as_ref() {
                     let response_stat = ProxyResponseStat::new(
                         method.to_string(),
-                        authorized_key,
+                        authorization.clone(),
                         request_metadata,
                         &response,
                     );
@@ -1109,12 +1110,13 @@ impl Web3ProxyApp {
 
         let response = JsonRpcForwardedResponse::from_value(partial_response, request_id);
 
-        if let (Some(stat_sender), Ok(AuthorizedRequest::User(Some(_), authorized_key))) = (
-            self.stat_sender.as_ref(),
-            Arc::try_unwrap(authorized_request),
-        ) {
-            let response_stat =
-                ProxyResponseStat::new(request.method, authorized_key, request_metadata, &response);
+        if let Some(stat_sender) = self.stat_sender.as_ref() {
+            let response_stat = ProxyResponseStat::new(
+                request.method,
+                authorization.clone(),
+                request_metadata,
+                &response,
+            );
 
             stat_sender
                 .send_async(response_stat.into())

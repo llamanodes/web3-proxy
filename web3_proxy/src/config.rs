@@ -6,6 +6,7 @@ use argh::FromArgs;
 use derive_more::Constructor;
 use ethers::prelude::TxHash;
 use hashbrown::HashMap;
+use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -118,7 +119,7 @@ pub struct AppConfig {
     pub redirect_public_url: Option<String>,
 
     /// the stats page url for a logged in user. if set, must contain "{rpc_key_id}"
-    pub redirect_user_url: Option<String>,
+    pub redirect_rpc_key_url: Option<String>,
 
     /// Optionally send errors to <https://sentry.io>
     pub sentry_url: Option<String>,
@@ -199,6 +200,7 @@ impl Web3ConnectionConfig {
     pub async fn spawn(
         self,
         name: String,
+        db_conn: Option<DatabaseConnection>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
         chain_id: u64,
         http_client: Option<reqwest::Client>,
@@ -228,6 +230,7 @@ impl Web3ConnectionConfig {
         Web3Connection::spawn(
             name,
             chain_id,
+            db_conn,
             self.url,
             http_client,
             http_interval_sender,

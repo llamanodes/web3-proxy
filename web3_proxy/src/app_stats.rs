@@ -1,4 +1,4 @@
-use crate::frontend::authorization::{AuthorizedKey, RequestMetadata};
+use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use chrono::{TimeZone, Utc};
 use derive_more::From;
@@ -18,15 +18,28 @@ use tracing::{error, info};
 /// TODO: can we use something inside sea_orm instead?
 #[derive(Debug)]
 pub struct ProxyResponseStat {
-    rpc_key_id: u64,
+    authorization: Arc<Authorization>,
     method: String,
     archive_request: bool,
+    error_response: bool,
     request_bytes: u64,
     /// if backend_requests is 0, there was a cache_hit
     backend_requests: u64,
-    error_response: bool,
     response_bytes: u64,
     response_millis: u64,
+}
+
+impl ProxyResponseStat {
+    /// TODO: think more about this. probably rename it
+    fn key(&self) -> ProxyResponseAggregateKey {
+        ProxyResponseAggregateKey {
+            rpc_key_id: self.authorization.checks.rpc_key_id,
+            // TODO: include Origin here?
+            method: self.method.clone(),
+            archive_request: self.archive_request,
+            error_response: self.error_response,
+        }
+    }
 }
 
 pub struct ProxyResponseHistograms {
@@ -50,6 +63,7 @@ impl Default for ProxyResponseHistograms {
     }
 }
 
+// TODO: think more about if we should include IP address in this
 #[derive(Clone, From, Hash, PartialEq, Eq)]
 struct ProxyResponseAggregateKey {
     rpc_key_id: u64,
@@ -62,9 +76,9 @@ struct ProxyResponseAggregateKey {
 pub struct ProxyResponseAggregate {
     frontend_requests: u64,
     backend_requests: u64,
-    // TODO: related to backend_requests. get this level of detail out
+    // TODO: related to backend_requests
     // backend_retries: u64,
-    // TODO: related to backend_requests. get this level of detail out
+    // TODO: related to backend_requests
     // no_servers: u64,
     cache_misses: u64,
     cache_hits: u64,
@@ -164,9 +178,10 @@ impl ProxyResponseAggregate {
         let p99_response_bytes = response_bytes.value_at_quantile(0.99);
         let max_response_bytes = response_bytes.max();
 
+        // TODO: Set origin and maybe other things on this model. probably not the ip though
         let aggregated_stat_model = rpc_accounting::ActiveModel {
             id: sea_orm::NotSet,
-
+            // origin: sea_orm::Set(key.authorization.origin.to_string()),
             rpc_key_id: sea_orm::Set(key.rpc_key_id),
             chain_id: sea_orm::Set(chain_id),
             method: sea_orm::Set(key.method),
@@ -215,7 +230,7 @@ impl ProxyResponseStat {
     // TODO: should RequestMetadata be in an arc? or can we handle refs here?
     pub fn new(
         method: String,
-        authorized_key: AuthorizedKey,
+        authorization: Arc<Authorization>,
         metadata: Arc<RequestMetadata>,
         response: &JsonRpcForwardedResponse,
     ) -> Self {
@@ -236,7 +251,7 @@ impl ProxyResponseStat {
         let response_millis = metadata.start_instant.elapsed().as_millis() as u64;
 
         Self {
-            rpc_key_id: authorized_key.rpc_key_id,
+            authorization,
             archive_request,
             method,
             backend_requests,
@@ -244,15 +259,6 @@ impl ProxyResponseStat {
             error_response,
             response_bytes,
             response_millis,
-        }
-    }
-
-    fn key(&self) -> ProxyResponseAggregateKey {
-        ProxyResponseAggregateKey {
-            rpc_key_id: self.rpc_key_id,
-            method: self.method.clone(),
-            error_response: self.error_response,
-            archive_request: self.archive_request,
         }
     }
 }

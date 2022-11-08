@@ -2,7 +2,7 @@
 use super::connection::Web3Connection;
 use super::connections::Web3Connections;
 use super::transactions::TxStatus;
-use crate::frontend::authorization::AuthorizedRequest;
+use crate::frontend::authorization::Authorization;
 use crate::{
     config::BlockAndRpc, jsonrpc::JsonRpcRequest, rpcs::synced_connections::SyncedConnections,
 };
@@ -88,7 +88,7 @@ impl Web3Connections {
     #[instrument(level = "trace")]
     pub async fn block(
         &self,
-        authorized_request: Option<&Arc<AuthorizedRequest>>,
+        authorization: &Arc<Authorization>,
         hash: &H256,
         rpc: Option<&Arc<Web3Connection>>,
     ) -> anyhow::Result<ArcBlock> {
@@ -103,7 +103,7 @@ impl Web3Connections {
         // TODO: if error, retry?
         let block: Block<TxHash> = match rpc {
             Some(rpc) => {
-                rpc.wait_for_request_handle(authorized_request, Duration::from_secs(30))
+                rpc.wait_for_request_handle(authorization, Duration::from_secs(30))
                     .await?
                     .request(
                         "eth_getBlockByHash",
@@ -118,9 +118,9 @@ impl Web3Connections {
                 let request = json!({ "id": "1", "method": "eth_getBlockByHash", "params": get_block_params });
                 let request: JsonRpcRequest = serde_json::from_value(request)?;
 
-                // TODO: request_metadata? maybe we should put it in the authorized_request?
+                // TODO: request_metadata? maybe we should put it in the authorization?
                 let response = self
-                    .try_send_best_upstream_server(authorized_request, request, None, None)
+                    .try_send_best_upstream_server(authorization, request, None, None)
                     .await?;
 
                 let block = response.result.unwrap();
@@ -139,8 +139,12 @@ impl Web3Connections {
     }
 
     /// Convenience method to get the cannonical block at a given block height.
-    pub async fn block_hash(&self, num: &U64) -> anyhow::Result<(H256, bool)> {
-        let (block, is_archive_block) = self.cannonical_block(num).await?;
+    pub async fn block_hash(
+        &self,
+        authorization: &Arc<Authorization>,
+        num: &U64,
+    ) -> anyhow::Result<(H256, bool)> {
+        let (block, is_archive_block) = self.cannonical_block(authorization, num).await?;
 
         let hash = block.hash.expect("Saved blocks should always have hashes");
 
@@ -148,7 +152,11 @@ impl Web3Connections {
     }
 
     /// Get the heaviest chain's block from cache or backend rpc
-    pub async fn cannonical_block(&self, num: &U64) -> anyhow::Result<(ArcBlock, bool)> {
+    pub async fn cannonical_block(
+        &self,
+        authorization: &Arc<Authorization>,
+        num: &U64,
+    ) -> anyhow::Result<(ArcBlock, bool)> {
         // we only have blocks by hash now
         // maybe save them during save_block in a blocks_by_number Cache<U64, Vec<ArcBlock>>
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
@@ -174,8 +182,8 @@ impl Web3Connections {
         // deref to not keep the lock open
         if let Some(block_hash) = self.block_numbers.get(num) {
             // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
-            // TODO: pass authorized_request through here?
-            let block = self.block(None, &block_hash, None).await?;
+            // TODO: pass authorization through here?
+            let block = self.block(authorization, &block_hash, None).await?;
 
             return Ok((block, archive_needed));
         }
@@ -186,9 +194,9 @@ impl Web3Connections {
         let request: JsonRpcRequest = serde_json::from_value(request)?;
 
         // TODO: if error, retry?
-        // TODO: request_metadata or authorized_request?
+        // TODO: request_metadata or authorization?
         let response = self
-            .try_send_best_upstream_server(None, request, None, Some(num))
+            .try_send_best_upstream_server(authorization, request, None, Some(num))
             .await?;
 
         let raw_block = response.result.context("no block result")?;
@@ -205,6 +213,7 @@ impl Web3Connections {
 
     pub(super) async fn process_incoming_blocks(
         &self,
+        authorization: &Arc<Authorization>,
         block_receiver: flume::Receiver<BlockAndRpc>,
         // TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
         // Geth's subscriptions have the same potential for skipping blocks.
@@ -219,6 +228,7 @@ impl Web3Connections {
             let rpc_name = rpc.name.clone();
             if let Err(err) = self
                 .process_block_from_rpc(
+                    authorization,
                     &mut connection_heads,
                     new_block,
                     rpc,
@@ -242,6 +252,7 @@ impl Web3Connections {
     /// TODO: return something?
     async fn process_block_from_rpc(
         &self,
+        authorization: &Arc<Authorization>,
         connection_heads: &mut HashMap<String, H256>,
         rpc_head_block: Option<ArcBlock>,
         rpc: Arc<Web3Connection>,
@@ -305,7 +316,10 @@ impl Web3Connections {
                 // this option should always be populated
                 let conn_rpc = self.conns.get(conn_name);
 
-                match self.block(None, connection_head_hash, conn_rpc).await {
+                match self
+                    .block(authorization, connection_head_hash, conn_rpc)
+                    .await
+                {
                     Ok(block) => block,
                     Err(err) => {
                         warn!(%connection_head_hash, %conn_name, %rpc, ?err, "Failed fetching connection_head_block for block_hashes");

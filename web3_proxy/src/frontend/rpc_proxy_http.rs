@@ -25,17 +25,20 @@ pub async fn proxy_web3_rpc(
 ) -> FrontendResult {
     let request_span = error_span!("request", %ip);
 
-    let (authorized_request, _semaphore) = ip_is_authorized(&app, ip, origin)
+    // TODO: do we care about keeping the TypedHeader wrapper?
+    let origin = origin.map(|x| x.0);
+
+    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin)
         .instrument(request_span)
         .await?;
 
-    let request_span = error_span!("request", ?authorized_request);
+    let request_span = error_span!("request", ?authorization);
 
-    let authorized_request = Arc::new(authorized_request);
+    let authorization = Arc::new(authorization);
 
     // TODO: spawn earlier? i think we want ip_is_authorized in this future
     let f = tokio::spawn(async move {
-        app.proxy_web3_rpc(authorized_request, payload)
+        app.proxy_web3_rpc(authorization, payload)
             .instrument(request_span)
             .await
     });
@@ -64,7 +67,8 @@ pub async fn proxy_web3_rpc_with_key(
 
     let request_span = error_span!("request", %ip, ?referer, ?user_agent);
 
-    let (authorized_request, _semaphore) = key_is_authorized(
+    // keep the semaphore until the end of the response
+    let (authorization, _semaphore) = key_is_authorized(
         &app,
         rpc_key,
         ip,
@@ -75,14 +79,14 @@ pub async fn proxy_web3_rpc_with_key(
     .instrument(request_span.clone())
     .await?;
 
-    let request_span = error_span!("request", ?authorized_request);
+    let request_span = error_span!("request", ?authorization);
 
-    let authorized_request = Arc::new(authorized_request);
+    let authorization = Arc::new(authorization);
 
     // the request can take a while, so we spawn so that we can start serving another request
     // TODO: spawn even earlier?
     let f = tokio::spawn(async move {
-        app.proxy_web3_rpc(authorized_request, payload)
+        app.proxy_web3_rpc(authorization, payload)
             .instrument(request_span)
             .await
     });

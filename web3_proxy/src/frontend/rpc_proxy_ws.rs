@@ -2,8 +2,8 @@
 //!
 //! WebSockets are the preferred method of receiving requests, but not all clients have good support.
 
-use super::authorization::{ip_is_authorized, key_is_authorized, AuthorizedRequest};
-use super::errors::FrontendResult;
+use super::authorization::{ip_is_authorized, key_is_authorized, Authorization};
+use super::errors::{FrontendErrorResponse, FrontendResult};
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -20,6 +20,7 @@ use futures::{
 };
 use handlebars::Handlebars;
 use hashbrown::HashMap;
+use http::StatusCode;
 use serde_json::{json, value::RawValue};
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
@@ -43,18 +44,20 @@ pub async fn websocket_handler(
     // TODO: i don't like logging ips. move this to trace level?
     let request_span = error_span!("request", %ip, ?origin);
 
-    let (authorized_request, _semaphore) = ip_is_authorized(&app, ip, origin)
+    let origin = origin.map(|x| x.0);
+
+    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin)
         .instrument(request_span)
         .await?;
 
-    let request_span = error_span!("request", ?authorized_request);
+    let request_span = error_span!("request", ?authorization);
 
-    let authorized_request = Arc::new(authorized_request);
+    let authorization = Arc::new(authorization);
 
     match ws_upgrade {
         Some(ws) => Ok(ws
             .on_upgrade(|socket| {
-                proxy_web3_socket(app, authorized_request, socket).instrument(request_span)
+                proxy_web3_socket(app, authorization, socket).instrument(request_span)
             })
             .into_response()),
         None => {
@@ -90,7 +93,7 @@ pub async fn websocket_handler_with_key(
 
     let request_span = error_span!("request", %ip, ?referer, ?user_agent);
 
-    let (authorized_request, _semaphore) = key_is_authorized(
+    let (authorization, _semaphore) = key_is_authorized(
         &app,
         rpc_key,
         ip,
@@ -102,39 +105,52 @@ pub async fn websocket_handler_with_key(
     .await?;
 
     // TODO: type that wraps Address and have it censor? would protect us from accidently logging addresses or other user info
-    let request_span = error_span!("request", ?authorized_request);
+    let request_span = error_span!("request", ?authorization);
 
-    let authorized_request = Arc::new(authorized_request);
+    let authorization = Arc::new(authorization);
 
     match ws_upgrade {
         Some(ws_upgrade) => Ok(ws_upgrade.on_upgrade(move |socket| {
-            proxy_web3_socket(app, authorized_request, socket).instrument(request_span)
+            proxy_web3_socket(app, authorization, socket).instrument(request_span)
         })),
         None => {
             // if no websocket upgrade, this is probably a user loading the url with their browser
-            if let Some(redirect) = &app.config.redirect_user_url {
-                // TODO: store this on the app and use register_template?
-                let reg = Handlebars::new();
-
-                // TODO: show the user's address, not their id (remember to update the checks for {{user_id}}} in app.rs)
-                // TODO: query to get the user's address. expose that instead of user_id
-                if let AuthorizedRequest::User(_, authorized_key) = authorized_request.as_ref() {
-                    let user_url = reg
-                        .render_template(
-                            redirect,
-                            &json!({ "rpc_key_id": authorized_key.rpc_key_id }),
-                        )
-                        .expect("templating should always work");
-
-                    // this is not a websocket. redirect to a page for this user
-                    Ok(Redirect::to(&user_url).into_response())
-                } else {
-                    // TODO: i think this is impossible
-                    Err(anyhow::anyhow!("this page is for rpcs").into())
+            match (
+                &app.config.redirect_public_url,
+                &app.config.redirect_rpc_key_url,
+                authorization.checks.rpc_key_id,
+            ) {
+                (None, None, _) => Err(anyhow::anyhow!(
+                    "redirect_rpc_key_url not set. only websockets work here"
+                )
+                .into()),
+                (Some(redirect_public_url), _, 0) => {
+                    Ok(Redirect::to(redirect_public_url).into_response())
                 }
-            } else {
-                // TODO: do not use an anyhow error. send the user a 400
-                Err(anyhow::anyhow!("redirect_user_url not set. only websockets work here").into())
+                (_, Some(redirect_rpc_key_url), rpc_key_id) => {
+                    let reg = Handlebars::new();
+
+                    if authorization.checks.rpc_key_id == 0 {
+                        // TODO: i think this is impossible
+                        Err(anyhow::anyhow!("this page is for rpcs").into())
+                    } else {
+                        let redirect_rpc_key_url = reg
+                            .render_template(
+                                redirect_rpc_key_url,
+                                &json!({ "rpc_key_id": rpc_key_id }),
+                            )
+                            .expect("templating should always work");
+
+                        // this is not a websocket. redirect to a page for this user
+                        Ok(Redirect::to(&redirect_rpc_key_url).into_response())
+                    }
+                }
+                // any other combinations get a simple error
+                _ => Err(FrontendErrorResponse::StatusCode(
+                    StatusCode::BAD_REQUEST,
+                    "this page is for rpcs".to_string(),
+                    None,
+                )),
             }
         }
     }
@@ -143,7 +159,7 @@ pub async fn websocket_handler_with_key(
 #[instrument(level = "trace")]
 async fn proxy_web3_socket(
     app: Arc<Web3ProxyApp>,
-    authorized_request: Arc<AuthorizedRequest>,
+    authorization: Arc<Authorization>,
     socket: WebSocket,
 ) {
     // split the websocket so we can read and write concurrently
@@ -153,19 +169,14 @@ async fn proxy_web3_socket(
     let (response_sender, response_receiver) = flume::unbounded::<Message>();
 
     tokio::spawn(write_web3_socket(response_receiver, ws_tx));
-    tokio::spawn(read_web3_socket(
-        app,
-        authorized_request,
-        ws_rx,
-        response_sender,
-    ));
+    tokio::spawn(read_web3_socket(app, authorization, ws_rx, response_sender));
 }
 
 /// websockets support a few more methods than http clients
 #[instrument(level = "trace")]
 async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
-    authorized_request: Arc<AuthorizedRequest>,
+    authorization: &Arc<Authorization>,
     payload: &str,
     response_sender: &flume::Sender<Message>,
     subscription_count: &AtomicUsize,
@@ -173,19 +184,21 @@ async fn handle_socket_payload(
 ) -> Message {
     // TODO: do any clients send batches over websockets?
     let (id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
-        Ok(payload) => {
+        Ok(json_request) => {
             // TODO: should we use this id for the subscription id? it should be unique and means we dont need an atomic
-            let id = payload.id.clone();
+            let id = json_request.id.clone();
 
-            let response: anyhow::Result<JsonRpcForwardedResponseEnum> = match &payload.method[..] {
+            let response: anyhow::Result<JsonRpcForwardedResponseEnum> = match &json_request.method
+                [..]
+            {
                 "eth_subscribe" => {
                     // TODO: what should go in this span?
                     let span = error_span!("eth_subscribe");
 
                     let response = app
                         .eth_subscribe(
-                            authorized_request,
-                            payload,
+                            authorization.clone(),
+                            json_request,
                             subscription_count,
                             response_sender.clone(),
                         )
@@ -213,7 +226,7 @@ async fn handle_socket_payload(
                 "eth_unsubscribe" => {
                     // TODO: how should handle rate limits and stats on this?
                     // TODO: handle invalid params
-                    let subscription_id = payload.params.unwrap().to_string();
+                    let subscription_id = json_request.params.unwrap().to_string();
 
                     let partial_response = match subscriptions.remove(&subscription_id) {
                         None => false,
@@ -228,7 +241,10 @@ async fn handle_socket_payload(
 
                     Ok(response.into())
                 }
-                _ => app.proxy_web3_rpc(authorized_request, payload.into()).await,
+                _ => {
+                    app.proxy_web3_rpc(authorization.clone(), json_request.into())
+                        .await
+                }
             };
 
             (id, response)
@@ -256,7 +272,7 @@ async fn handle_socket_payload(
 #[instrument(level = "trace")]
 async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
-    authorized_request: Arc<AuthorizedRequest>,
+    authorization: Arc<Authorization>,
     mut ws_rx: SplitStream<WebSocket>,
     response_sender: flume::Sender<Message>,
 ) {
@@ -269,7 +285,7 @@ async fn read_web3_socket(
             Message::Text(payload) => {
                 handle_socket_payload(
                     app.clone(),
-                    authorized_request.clone(),
+                    &authorization,
                     &payload,
                     &response_sender,
                     &subscription_count,
@@ -292,7 +308,7 @@ async fn read_web3_socket(
 
                 handle_socket_payload(
                     app.clone(),
-                    authorized_request.clone(),
+                    &authorization,
                     payload,
                     &response_sender,
                     &subscription_count,

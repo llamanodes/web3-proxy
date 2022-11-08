@@ -66,7 +66,7 @@ impl CheckConfigSubCommand {
         }
 
         // TODO: also check that it contains rpc_key_id!
-        match top_config.app.redirect_user_url {
+        match top_config.app.redirect_rpc_key_url {
             None => {
                 warn!("app.redirect_user_url is None. Registered users will get an error page instead of a redirect")
             }

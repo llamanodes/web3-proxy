@@ -283,7 +283,7 @@ mod tests {
                 public_requests_per_period: Some(1_000_000),
                 response_cache_max_bytes: 10_usize.pow(7),
                 redirect_public_url: Some("example.com/".to_string()),
-                redirect_user_url: Some("example.com/{{rpc_key_id}}".to_string()),
+                redirect_rpc_key_url: Some("example.com/{rpc_key_id}".to_string()),
                 ..Default::default()
             },
             balanced_rpcs: HashMap::from([

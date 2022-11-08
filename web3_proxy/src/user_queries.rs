@@ -159,7 +159,7 @@ pub fn get_query_window_seconds_from_params(
                 FrontendErrorResponse::StatusCode(
                     StatusCode::BAD_REQUEST,
                     "Unable to parse rpc_key_id".to_string(),
-                    e.into(),
+                    Some(e.into()),
                 )
             })
         },
@@ -290,6 +290,7 @@ pub async fn query_user_stats<'a>(
     let user_id = get_user_id_from_params(redis_conn, bearer, params).await?;
     let (condition, q) = if user_id == 0 {
         // 0 means everyone. don't filter on user
+        // TODO: 0 or None?
         (condition, q)
     } else {
         let q = q.left_join(rpc_key::Entity);
@@ -302,36 +303,33 @@ pub async fn query_user_stats<'a>(
     };
 
     // filter on rpc_key_id
+    // if rpc_key_id, all the requests without a key will be loaded
     // TODO: move getting the param and checking the bearer token into a helper function
     let (condition, q) = if let Some(rpc_key_id) = params.get("rpc_key_id") {
         let rpc_key_id = rpc_key_id.parse::<u64>().map_err(|e| {
             FrontendErrorResponse::StatusCode(
                 StatusCode::BAD_REQUEST,
                 "Unable to parse rpc_key_id".to_string(),
-                e.into(),
+                Some(e.into()),
             )
         })?;
 
-        if rpc_key_id == 0 {
+        response.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
+
+        let condition = condition.add(rpc_accounting::Column::RpcKeyId.eq(rpc_key_id));
+
+        let q = q.group_by(rpc_accounting::Column::RpcKeyId);
+
+        if user_id == 0 {
+            // no user id, we did not join above
+            let q = q.left_join(rpc_key::Entity);
+
             (condition, q)
         } else {
-            response.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
+            // user_id added a join on rpc_key already. only filter on user_id
+            let condition = condition.add(rpc_key::Column::UserId.eq(user_id));
 
-            let condition = condition.add(rpc_accounting::Column::RpcKeyId.eq(rpc_key_id));
-
-            let q = q.group_by(rpc_accounting::Column::RpcKeyId);
-
-            if user_id == 0 {
-                // no user id, we did not join above
-                let q = q.left_join(rpc_key::Entity);
-
-                (condition, q)
-            } else {
-                // user_id added a join on rpc_key already. only filter on user_id
-                let condition = condition.add(rpc_key::Column::UserId.eq(user_id));
-
-                (condition, q)
-            }
+            (condition, q)
         }
     } else {
         (condition, q)

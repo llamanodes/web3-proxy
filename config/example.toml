@@ -17,6 +17,7 @@ redirect_user_url = "https://llamanodes.com/dashboard/keys?key={rpc_key_id}"
 
 sentry_url = "https://SENTRY_KEY_A.ingest.sentry.io/SENTRY_KEY_B"
 
+# public limits are when no key is used. these are instead grouped by ip
 # 0 = block all public requests
 public_max_concurrent_requests = 3
 # 0 = block all public requests
