@@ -124,15 +124,15 @@ pub async fn websocket_handler_with_key(
                     "redirect_rpc_key_url not set. only websockets work here"
                 )
                 .into()),
-                (Some(redirect_public_url), _, 0) => {
+                (Some(redirect_public_url), _, None) => {
                     Ok(Redirect::to(redirect_public_url).into_response())
                 }
                 (_, Some(redirect_rpc_key_url), rpc_key_id) => {
                     let reg = Handlebars::new();
 
-                    if authorization.checks.rpc_key_id == 0 {
+                    if authorization.checks.rpc_key_id.is_none() {
                         // TODO: i think this is impossible
-                        Err(anyhow::anyhow!("this page is for rpcs").into())
+                        Err(anyhow::anyhow!("only authenticated websockets work here").into())
                     } else {
                         let redirect_rpc_key_url = reg
                             .render_template(

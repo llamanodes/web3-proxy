@@ -151,12 +151,13 @@ impl IntoResponse for FrontendErrorResponse {
                 };
 
                 // create a string with either the IP or the rpc_key_id
-                let msg = if authorization.checks.rpc_key_id == 0 {
+                let msg = if authorization.checks.rpc_key_id.is_none() {
                     format!("too many requests from {}.{}", authorization.ip, retry_msg)
                 } else {
                     format!(
                         "too many requests from rpc key #{}.{}",
-                        authorization.checks.rpc_key_id, retry_msg
+                        authorization.checks.rpc_key_id.unwrap(),
+                        retry_msg
                     )
                 };
 

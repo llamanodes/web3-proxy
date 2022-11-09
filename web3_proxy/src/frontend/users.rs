@@ -27,7 +27,7 @@ use itertools::Itertools;
 use redis_rate_limiter::redis::AsyncCommands;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
+    TransactionTrait, TryIntoModel,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -670,7 +670,7 @@ pub async fn rpc_keys_management(
         uk
     };
 
-    let uk: rpc_key::Model = uk.try_into()?;
+    let uk = uk.try_into_model()?;
 
     Ok(Json(uk).into_response())
 }

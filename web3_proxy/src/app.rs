@@ -34,6 +34,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::fmt;
 use std::net::IpAddr;
+use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
@@ -67,8 +68,8 @@ pub struct AuthorizationChecks {
     /// TODO: do we need this? its on the authorization so probably not
     pub user_id: u64,
     /// database id of the rpc key
-    /// if this is 0, then this request is being rate limited by ip
-    pub rpc_key_id: u64,
+    /// if this is None, then this request is being rate limited by ip
+    pub rpc_key_id: Option<NonZeroU64>,
     /// if None, allow unlimited queries. inherited from the user_tier
     pub max_requests_per_period: Option<u64>,
     // if None, allow unlimited concurrent requests. inherited from the user_tier
@@ -113,7 +114,8 @@ pub struct Web3ProxyApp {
     // TODO: this key should be our RpcSecretKey class, not Ulid
     pub rpc_secret_key_cache:
         Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>,
-    pub rpc_key_semaphores: Cache<u64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
+    pub rpc_key_semaphores:
+        Cache<NonZeroU64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub bearer_token_semaphores:
         Cache<String, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,

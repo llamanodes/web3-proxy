@@ -1,11 +1,13 @@
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::jsonrpc::JsonRpcForwardedResponse;
+use axum::headers::Origin;
 use chrono::{TimeZone, Utc};
 use derive_more::From;
 use entities::rpc_accounting;
 use hashbrown::HashMap;
 use hdrhistogram::{Histogram, RecordError};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr};
+use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -32,12 +34,31 @@ pub struct ProxyResponseStat {
 impl ProxyResponseStat {
     /// TODO: think more about this. probably rename it
     fn key(&self) -> ProxyResponseAggregateKey {
+        // include either the rpc_key_id or the origin
+        let (rpc_key_id, origin) = match (
+            self.authorization.checks.rpc_key_id,
+            &self.authorization.origin,
+        ) {
+            (Some(rpc_key_id), _) => {
+                // TODO: allow the user to opt into saving the origin
+                (Some(rpc_key_id), None)
+            }
+            (None, Some(origin)) => {
+                // we save the origin for anonymous access
+                (None, Some(origin.clone()))
+            }
+            (None, None) => {
+                // TODO: what should we do here? log ip? i really don't want to save any ips
+                (None, None)
+            }
+        };
+
         ProxyResponseAggregateKey {
-            rpc_key_id: self.authorization.checks.rpc_key_id,
-            // TODO: include Origin here?
-            method: self.method.clone(),
             archive_request: self.archive_request,
             error_response: self.error_response,
+            method: self.method.clone(),
+            origin,
+            rpc_key_id,
         }
     }
 }
@@ -66,10 +87,12 @@ impl Default for ProxyResponseHistograms {
 // TODO: think more about if we should include IP address in this
 #[derive(Clone, From, Hash, PartialEq, Eq)]
 struct ProxyResponseAggregateKey {
-    rpc_key_id: u64,
-    method: String,
-    error_response: bool,
     archive_request: bool,
+    error_response: bool,
+    rpc_key_id: Option<NonZeroU64>,
+    method: String,
+    /// TODO: should this be Origin or String?
+    origin: Option<Origin>,
 }
 
 #[derive(Default)]
@@ -182,7 +205,8 @@ impl ProxyResponseAggregate {
         let aggregated_stat_model = rpc_accounting::ActiveModel {
             id: sea_orm::NotSet,
             // origin: sea_orm::Set(key.authorization.origin.to_string()),
-            rpc_key_id: sea_orm::Set(key.rpc_key_id),
+            rpc_key_id: sea_orm::Set(key.rpc_key_id.map(Into::into)),
+            origin: sea_orm::Set(key.origin.map(|x| x.to_string())),
             chain_id: sea_orm::Set(chain_id),
             method: sea_orm::Set(key.method),
             archive_request: sea_orm::Set(key.archive_request),

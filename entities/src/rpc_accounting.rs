@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: u64,
-    pub rpc_key_id: u64,
+    pub rpc_key_id: Option<u64>,
     pub chain_id: u64,
     pub method: String,
     pub archive_request: bool,
@@ -41,6 +41,7 @@ pub struct Model {
     pub p90_response_bytes: u64,
     pub p99_response_bytes: u64,
     pub max_response_bytes: u64,
+    pub origin: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

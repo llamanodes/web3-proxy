@@ -13,8 +13,8 @@ use metered::HitCount;
 use metered::ResponseTime;
 use metered::Throughput;
 use rand::Rng;
+use sea_orm::ActiveEnum;
 use sea_orm::ActiveModelTrait;
-use sea_orm::{ActiveEnum};
 use serde_json::json;
 use std::fmt;
 use std::sync::atomic::{self, AtomicBool, Ordering};
@@ -82,6 +82,14 @@ impl Authorization {
         method: Method,
         params: EthCallFirstParams,
     ) -> anyhow::Result<()> {
+        let rpc_key_id = match self.checks.rpc_key_id {
+            Some(rpc_key_id) => rpc_key_id.into(),
+            None => {
+                trace!(?self, "cannot save revert without rpc_key_id");
+                return Ok(());
+            }
+        };
+
         let db_conn = self.db_conn.as_ref().context("no database connection")?;
 
         // TODO: should the database set the timestamp?
@@ -96,7 +104,7 @@ impl Authorization {
         let call_data = params.data.map(|x| format!("{}", x));
 
         let rl = revert_log::ActiveModel {
-            rpc_key_id: sea_orm::Set(self.checks.rpc_key_id),
+            rpc_key_id: sea_orm::Set(rpc_key_id),
             method: sea_orm::Set(method),
             to: sea_orm::Set(to),
             call_data: sea_orm::Set(call_data),

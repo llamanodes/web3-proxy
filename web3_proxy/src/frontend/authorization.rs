@@ -373,33 +373,34 @@ impl Web3ProxyApp {
         }
     }
 
-    /// Limit the number of concurrent requests from the given key address.
+    /// Limit the number of concurrent requests from the given rpc key.
     #[instrument(level = "trace")]
-    pub async fn authorization_checks_semaphore(
+    pub async fn rpc_key_semaphore(
         &self,
         authorization_checks: &AuthorizationChecks,
     ) -> anyhow::Result<Option<OwnedSemaphorePermit>> {
         if let Some(max_concurrent_requests) = authorization_checks.max_concurrent_requests {
+            let rpc_key_id = authorization_checks.rpc_key_id.context("no rpc_key_id")?;
+
             let semaphore = self
                 .rpc_key_semaphores
-                .get_with(authorization_checks.rpc_key_id, async move {
+                .get_with(rpc_key_id, async move {
                     let s = Semaphore::new(max_concurrent_requests as usize);
-                    trace!(
-                        "new semaphore for rpc_key_id {}",
-                        authorization_checks.rpc_key_id
-                    );
+                    trace!("new semaphore for rpc_key_id {}", rpc_key_id);
                     Arc::new(s)
                 })
                 .await;
 
             // if semaphore.available_permits() == 0 {
-            //     // TODO: concurrent limit hit! emit a stat
+            //     // TODO: concurrent limit hit! emit a stat? this has a race condition though.
+            //     // TODO: maybe have a stat on how long we wait to acquire the semaphore instead?
             // }
 
             let semaphore_permit = semaphore.acquire_owned().await?;
 
             Ok(Some(semaphore_permit))
         } else {
+            // unlimited requests allowed
             Ok(None)
         }
     }
@@ -645,9 +646,12 @@ impl Web3ProxyApp {
                                 None
                             };
 
+                        let rpc_key_id =
+                            Some(rpc_key_model.id.try_into().expect("db ids are never 0"));
+
                         Ok(AuthorizationChecks {
                             user_id: rpc_key_model.user_id,
-                            rpc_key_id: rpc_key_model.id,
+                            rpc_key_id,
                             allowed_ips,
                             allowed_origins,
                             allowed_referers,
@@ -679,15 +683,13 @@ impl Web3ProxyApp {
         let authorization_checks = self.authorization_checks(rpc_key).await?;
 
         // if no rpc_key_id matching the given rpc was found, then we can't rate limit by key
-        if authorization_checks.rpc_key_id == 0 {
+        if authorization_checks.rpc_key_id.is_none() {
             return Ok(RateLimitResult::UnknownKey);
         }
 
         // only allow this rpc_key to run a limited amount of concurrent requests
         // TODO: rate limit should be BEFORE the semaphore!
-        let semaphore = self
-            .authorization_checks_semaphore(&authorization_checks)
-            .await?;
+        let semaphore = self.rpc_key_semaphore(&authorization_checks).await?;
 
         let authorization = Authorization::try_new(
             authorization_checks,
