@@ -505,3 +505,4 @@ in another repo: event subscriber
 - [ ] if redis is not set and login page is visited, users get a 502. should be 501
 - [ ] allow passing the authorization header to the anonymous rpc endpoint
 - [ ] sentry profiling
+
