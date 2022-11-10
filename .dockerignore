@@ -1,3 +1,7 @@
+flamegraph.svg
+perf.data
+perf.data.old
+
 /config/*.toml
 /.git
 /bin/
@@ -6,6 +10,3 @@
 /Dockerfile
 /redis-cell-server/
 /target
-/web3_proxy/flamegraph.svg
-/web3_proxy/perf.data
-/web3_proxy/perf.data.old
