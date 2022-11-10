@@ -229,9 +229,15 @@ These are roughly in order of completition
 - [x] use rpc_key_id instead of user_id in the redirect
 - [x] /status should include the server weights
 - [x] improve rate limiting anon ips
+- [x] nullable rpc_key_id on revert log
+- [x] attach origin to revert_log
+    - opt-in origin logging
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
 - [ ] test that runs check_config against example.toml
+- [ ] improve sorting servers by weight
+    - if the utilization is > 100%, increase weight by 1? maybe just add utilization to the weight?
+    - if utilization is > hard limit, add a lot to the weight
 
 - [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
 
@@ -239,6 +245,11 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] refactor so configs can change while running
+  - this will probably be a rather large change, but is necessary when we have autoscaling
+  - create the app without applying any config to it
+  - have a blocking future watching the config file and calling app.apply_config() on first load and on change
+  - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
 - [ ] logging of "bad response!" is way too verbose
 - [ ] config parsing is strict right now. this makes it hard to deploy on git push since configs need to change along with it
 - [ ] i think our "best" server picking is incorrect somehow.
@@ -366,11 +377,6 @@ These are not ordered. I think some rows also accidently got deleted here. Check
   - [ ] separate daemon (or users themselves) call POST /users/process_transaction
     - checks a transaction to see if it modifies a user's balance. records results in a sql database
     - we will have our own event subscriber watching for "deposit" events, but sometimes events get missed and users might incorrectly "transfer" the tokens directly to an address instead of using the dapp
-- [ ] refactor so configs can change while running
-  - this will probably be a rather large change, but is necessary when we have autoscaling
-  - create the app without applying any config to it
-  - have a blocking future watching the config file and calling app.apply_config() on first load and on change
-  - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
 - [ ] if a rpc fails to connect at start, retry later instead of skipping it forever (need config hot reloads first)
 - [ ] jwt auth so people can easily switch from infura
 - [ ] automated soft limit
