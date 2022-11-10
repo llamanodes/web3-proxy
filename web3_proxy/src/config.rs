@@ -117,7 +117,7 @@ pub struct AppConfig {
     /// the stats page url for an anonymous user.
     pub redirect_public_url: Option<String>,
 
-    /// the stats page url for a logged in user. if set, must contain "{user_id}"
+    /// the stats page url for a logged in user. if set, must contain "{rpc_key_id}"
     pub redirect_user_url: Option<String>,
 
     /// Optionally send errors to <https://sentry.io>

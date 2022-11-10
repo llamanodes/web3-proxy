@@ -230,6 +230,7 @@ These are roughly in order of completition
 - [x] /status should include the server weights
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
+- [ ] test that runs check_config against example.toml
 
 - [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
 

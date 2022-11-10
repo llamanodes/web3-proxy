@@ -1,6 +1,6 @@
 use argh::FromArgs;
 use std::fs;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use web3_proxy::config::TopConfig;
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
@@ -65,8 +65,16 @@ impl CheckConfigSubCommand {
             warn!("app.redirect_public_url is None. Anonyoumous users will get an error page instead of a redirect")
         }
 
-        if top_config.app.redirect_user_url.is_none() {
-            warn!("app.redirect_user_url is None. Registered users will get an error page instead of a redirect")
+        // TODO: also check that it contains rpc_key_id!
+        match top_config.app.redirect_user_url {
+            None => {
+                warn!("app.redirect_user_url is None. Registered users will get an error page instead of a redirect")
+            }
+            Some(x) => {
+                if !x.contains("{rpc_key_id}") {
+                    error!("redirect_user_url user url must contain \"{{rpc_key_id}}\"")
+                }
+            }
         }
 
         Ok(())

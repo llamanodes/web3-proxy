@@ -13,7 +13,7 @@ volatile_redis_max_connections = 300
 volatile_redis_url = "redis://REDIS_DOMAIN:REDIS_PORT/"
 
 redirect_public_url = "https://llamanodes.com/public-rpc"
-redirect_user_url = "https://llamanodes.com/dashboard/keys?key={{rpc_key_id}}"
+redirect_user_url = "https://llamanodes.com/dashboard/keys?key={rpc_key_id}"
 
 sentry_url = "https://SENTRY_KEY_A.ingest.sentry.io/SENTRY_KEY_B"
 
