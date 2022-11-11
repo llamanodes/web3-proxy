@@ -232,9 +232,9 @@ These are roughly in order of completition
 - [x] nullable rpc_key_id on revert log
 - [x] attach origin to revert_log
     - opt-in origin logging
+- [x] test that runs check_config against example.toml
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
-- [ ] test that runs check_config against example.toml
 - [ ] improve sorting servers by weight
     - if the utilization is > 100%, increase weight by 1? maybe just add utilization to the weight?
     - if utilization is > hard limit, add a lot to the weight

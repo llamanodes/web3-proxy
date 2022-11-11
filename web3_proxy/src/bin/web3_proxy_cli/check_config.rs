@@ -14,6 +14,8 @@ pub struct CheckConfigSubCommand {
 
 impl CheckConfigSubCommand {
     pub async fn main(self) -> anyhow::Result<()> {
+        let mut num_errors = 0;
+
         info!("Loading config @ {}", self.path);
         let top_config: String = fs::read_to_string(self.path)?;
         let top_config: TopConfig = toml::from_str(&top_config)?;
@@ -72,11 +74,49 @@ impl CheckConfigSubCommand {
             }
             Some(x) => {
                 if !x.contains("{rpc_key_id}") {
+                    num_errors += 1;
                     error!("redirect_user_url user url must contain \"{{rpc_key_id}}\"")
                 }
             }
         }
 
-        Ok(())
+        // TODO: print num warnings and have a flag to fail even on warnings
+
+        if num_errors == 0 {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(format!(
+                "there were {} errors!",
+                num_errors
+            )))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::env;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn check_example_toml() {
+        let path = env::current_dir().expect("path");
+
+        let parent = path.parent().expect("always a parent");
+
+        let config_path = parent.join("config").join("example.toml");
+
+        let config_path_str = config_path.to_str().expect("always a valid path");
+
+        let check_config_command =
+            CheckConfigSubCommand::from_args(&["check_config"], &[config_path_str])
+                .expect("the command should have run");
+
+        let check_config_result = check_config_command.main().await;
+
+        println!("{:?}", check_config_result);
+
+        check_config_result.expect("the config should pass all checks");
     }
 }
