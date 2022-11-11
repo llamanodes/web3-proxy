@@ -318,7 +318,7 @@ impl Web3ProxyApp {
         // TODO: ttl on this? or is max_capacity fine?
         let pending_transactions = Cache::builder()
             .max_capacity(10_000)
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // keep 1GB of blocks in the cache
         // TODO: limits from config
@@ -330,7 +330,7 @@ impl Web3ProxyApp {
                 // TODO: is this good enough?
                 1 + v.transactions.len().try_into().unwrap_or(u32::MAX)
             })
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // connect to the load balanced rpcs
         let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
@@ -454,7 +454,7 @@ impl Web3ProxyApp {
                     u32::MAX
                 }
             })
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // all the users are the same size, so no need for a weigher
         // if there is no database of users, there will be no keys and so this will be empty
@@ -463,19 +463,19 @@ impl Web3ProxyApp {
         let rpc_secret_key_cache = Cache::builder()
             .max_capacity(10_000)
             .time_to_live(Duration::from_secs(600))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // create semaphores for concurrent connection limits
         // TODO: what should tti be for semaphores?
         let bearer_token_semaphores = Cache::builder()
             .time_to_idle(Duration::from_secs(120))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
         let ip_semaphores = Cache::builder()
             .time_to_idle(Duration::from_secs(120))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
         let rpc_key_semaphores = Cache::builder()
             .time_to_idle(Duration::from_secs(120))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         let app = Self {
             config: top_config.app,

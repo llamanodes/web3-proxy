@@ -198,12 +198,12 @@ impl Web3Connections {
         let block_hashes = Cache::builder()
             .time_to_idle(Duration::from_secs(600))
             .max_capacity(10_000)
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
         // all block numbers are the same size, so no need for weigher
         let block_numbers = Cache::builder()
             .time_to_idle(Duration::from_secs(600))
             .max_capacity(10_000)
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         let connections = Arc::new(Self {
             conns: connections,

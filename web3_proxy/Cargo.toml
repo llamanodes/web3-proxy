@@ -34,7 +34,7 @@ ethers = { version = "1.0.0", features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 flume = "0.10.14"
 futures = { version = "0.3.25", features = ["thread-pool"] }
-hashbrown = { version = "0.12.3", features = ["serde"] }
+hashbrown = { version = "0.13.1", features = ["serde"] }
 hdrhistogram = "7.5.2"
 http = "0.2.8"
 ipnet = "2.5.1"

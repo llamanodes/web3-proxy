@@ -46,7 +46,7 @@ where
             .time_to_live(Duration::from_secs(ttl))
             .max_capacity(cache_size)
             .name(prefix)
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::new());
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         Self {
             local_cache,
