@@ -245,6 +245,8 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] remove the "metered" crate now that we save aggregate queries?
+- [ ] remove/change the "active_requests" counter? maybe only once we have dynamic soft limits?
 - [ ] refactor so configs can change while running
   - this will probably be a rather large change, but is necessary when we have autoscaling
   - create the app without applying any config to it

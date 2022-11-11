@@ -54,6 +54,7 @@ pub struct TopConfig {
 pub struct AppConfig {
     /// Request limit for allowed origins for anonymous users.
     /// These requests get rate limited by IP.
+    #[serde(default = "default_allowed_origin_requests_per_period")]
     pub allowed_origin_requests_per_period: HashMap<String, u64>,
 
     /// EVM chain id. 1 for ETH
@@ -131,6 +132,10 @@ pub struct AppConfig {
     /// maximum size of the connection pool for the cache
     /// If none, the minimum * 2 is used
     pub volatile_redis_max_connections: Option<usize>,
+}
+
+fn default_allowed_origin_requests_per_period() -> HashMap<String, u64> {
+    HashMap::new()
 }
 
 /// This might cause a thundering herd!
