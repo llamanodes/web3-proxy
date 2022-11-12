@@ -9,7 +9,7 @@
 #![forbid(unsafe_code)]
 
 use futures::StreamExt;
-use log::{debug, info, warn, LevelFilter};
+use log::{debug, info, warn};
 use parking_lot::deadlock;
 use std::fs;
 use std::sync::atomic::{self, AtomicUsize};
@@ -153,13 +153,10 @@ fn run(
 
 fn main() -> anyhow::Result<()> {
     // if RUST_LOG isn't set, configure a default
-    // TODO: is there a better way to do this?
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var(
-            "RUST_LOG",
-            "info,ethers=debug,redis_rate_limit=debug,web3_proxy=debug",
-        );
-    }
+    let rust_log = match std::env::var("RUST_LOG") {
+        Ok(x) => x,
+        Err(_) => "info,ethers=debug,redis_rate_limit=debug,web3_proxy=debug".to_string(),
+    };
 
     // this probably won't matter for us in docker, but better safe than sorry
     fdlimit::raise_fd_limit();
@@ -174,15 +171,17 @@ fn main() -> anyhow::Result<()> {
     // TODO: this doesn't seem to do anything
     proctitle::set_title(format!("web3_proxy-{}", top_config.app.chain_id));
 
-    let mut log_builder = env_logger::builder();
+    let logger = env_logger::builder().parse_filters(&rust_log).build();
 
-    log_builder
-        .filter_level(LevelFilter::Off)
-        .parse_env("RUST_LOG");
+    let max_level = logger.filter();
 
     // connect to sentry for error reporting
     // if no sentry, only log to stdout
     let _sentry_guard = if let Some(sentry_url) = top_config.app.sentry_url.clone() {
+        let logger = sentry::integrations::log::SentryLogger::with_dest(logger);
+
+        log::set_boxed_logger(Box::new(logger)).unwrap();
+
         let guard = sentry::init((
             sentry_url,
             sentry::ClientOptions {
@@ -193,19 +192,14 @@ fn main() -> anyhow::Result<()> {
             },
         ));
 
-        let logger = sentry::integrations::log::SentryLogger::with_dest(log_builder.build());
-
-        log::set_boxed_logger(Box::new(logger)).unwrap();
-
         Some(guard)
     } else {
-        // install global collector configured based on RUST_LOG env var.
-        let logger = log_builder.build();
-
         log::set_boxed_logger(Box::new(logger)).unwrap();
 
         None
     };
+
+    log::set_max_level(max_level);
 
     // we used to do this earlier, but now we attach sentry
     debug!("CLI config @ {:#?}", cli_config.config);
