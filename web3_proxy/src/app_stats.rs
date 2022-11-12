@@ -172,7 +172,7 @@ impl ProxyResponseAggregate {
         period_timestamp: u64,
     ) -> Result<(), DbErr> {
         // this is a lot of variables
-        let period_datetime = Utc.timestamp(period_timestamp as i64, 0);
+        let period_datetime = Utc.timestamp_opt(period_timestamp as i64, 0).unwrap();
 
         let request_bytes = &self.histograms.request_bytes;
 
