@@ -1,7 +1,6 @@
 use anyhow::Context;
 use derive_more::From;
 use std::time::Duration;
-use tracing::{info_span, instrument, Instrument};
 
 /// Use HTTP and WS providers.
 // TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit <https://github.com/gakonst/ethers-rs/issues/592>
@@ -20,7 +19,6 @@ impl Web3Provider {
         }
     }
 
-    #[instrument]
     pub async fn from_str(
         url_str: &str,
         http_client: Option<reqwest::Client>,
@@ -38,10 +36,7 @@ impl Web3Provider {
                 .interval(Duration::from_secs(13))
                 .into()
         } else if url_str.starts_with("ws") {
-            // TODO: i dont think this instrument does much of anything. what level should it be?
-            let provider = ethers::providers::Ws::connect(url_str)
-                .instrument(info_span!("Web3Provider", %url_str))
-                .await?;
+            let provider = ethers::providers::Ws::connect(url_str).await?;
 
             // TODO: dry this up (needs https://github.com/gakonst/ethers-rs/issues/592)
             // TODO: i don't think this interval matters

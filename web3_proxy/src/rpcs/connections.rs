@@ -19,6 +19,7 @@ use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
+use log::{error, info, warn, Level};
 use moka::future::{Cache, ConcurrentCacheExt};
 use petgraph::graphmap::DiGraphMap;
 use sea_orm::DatabaseConnection;
@@ -34,7 +35,6 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{broadcast, watch};
 use tokio::task;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
-use tracing::{error, info, instrument, trace, warn};
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
@@ -95,7 +95,7 @@ impl Web3Connections {
                         // TODO: every time a head_block arrives (with a small delay for known slow servers), or on the interval.
                         interval.tick().await;
 
-                        trace!("http interval ready");
+                        // // trace!("http interval ready");
 
                         // errors are okay. they mean that all receivers have been dropped
                         let _ = sender.send(());
@@ -171,7 +171,7 @@ impl Web3Connections {
                 Ok(Err(err)) => {
                     // if we got an error here, it is not retryable
                     // TODO: include context about which connection failed
-                    error!(?err, "Unable to create connection");
+                    error!("Unable to create connection. err={:?}", err);
                 }
                 Err(err) => {
                     return Err(err.into());
@@ -337,7 +337,7 @@ impl Web3Connections {
             .into_iter()
             .map(|active_request_handle| async move {
                 let result: Result<Box<RawValue>, _> = active_request_handle
-                    .request(method, &json!(&params), tracing::Level::ERROR.into())
+                    .request(method, &json!(&params), Level::Error.into())
                     .await;
                 result
             })
@@ -472,7 +472,7 @@ impl Web3Connections {
             // increment our connection counter
             match rpc.try_request_handle(authorization).await {
                 Ok(OpenRequestResult::Handle(handle)) => {
-                    trace!("next server on {:?}: {:?}", self, rpc);
+                    // // trace!("next server on {:?}: {:?}", self, rpc);
                     return Ok(OpenRequestResult::Handle(handle));
                 }
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
@@ -483,7 +483,7 @@ impl Web3Connections {
                 }
                 Err(err) => {
                     // TODO: log a warning?
-                    warn!(?err, "No request handle for {}", rpc)
+                    warn!("No request handle for {}. err={:?}", rpc, err)
                 }
             }
         }
@@ -539,7 +539,10 @@ impl Web3Connections {
                     warn!("no request handle for {}", connection)
                 }
                 Err(err) => {
-                    warn!(?err, "error getting request handle for {}", connection)
+                    warn!(
+                        "error getting request handle for {}. err={:?}",
+                        connection, err
+                    )
                 }
             }
         }
@@ -602,7 +605,7 @@ impl Web3Connections {
                     ) {
                         Ok(response) => {
                             if let Some(error) = &response.error {
-                                trace!(?response, "rpc error");
+                                // // trace!(?response, "rpc error");
 
                                 if let Some(request_metadata) = request_metadata {
                                     request_metadata
@@ -629,17 +632,20 @@ impl Web3Connections {
                                     }
                                 }
                             } else {
-                                trace!(?response, "rpc success");
+                                // // trace!(?response, "rpc success");
                             }
 
                             return Ok(response);
                         }
-                        Err(e) => {
+                        Err(err) => {
                             let rpc = skip_rpcs
                                 .last()
                                 .expect("there must have been a provider if we got an error");
 
-                            warn!(%rpc, ?e, "Backend server error! Retrying on another");
+                            warn!(
+                                "Backend server error on {}! Retrying on another. err={:?}",
+                                rpc, err
+                            );
 
                             // TODO: sleep how long? until synced_connections changes or rate limits are available
                             // sleep(Duration::from_millis(100)).await;
@@ -652,7 +658,7 @@ impl Web3Connections {
                     // TODO: move this to a helper function
                     // sleep (TODO: with a lock?) until our rate limits should be available
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
-                    warn!(?retry_at, "All rate limits exceeded. Sleeping");
+                    warn!("All rate limits exceeded. Sleeping untill {:?}", retry_at);
 
                     // TODO: have a separate column for rate limited?
                     if let Some(request_metadata) = request_metadata {
@@ -664,7 +670,7 @@ impl Web3Connections {
                     continue;
                 }
                 OpenRequestResult::RetryNever => {
-                    warn!(?self, "No server handles!");
+                    warn!("No server handles! {:?}", self);
 
                     if let Some(request_metadata) = request_metadata {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
@@ -690,7 +696,7 @@ impl Web3Connections {
     }
 
     /// be sure there is a timeout on this or it might loop forever
-    #[instrument]
+
     pub async fn try_send_all_upstream_servers(
         &self,
         authorization: &Arc<Authorization>,
@@ -729,7 +735,7 @@ impl Web3Connections {
                     return Ok(response);
                 }
                 Err(None) => {
-                    warn!(?self, "No servers in sync! Retrying");
+                    warn!("No servers in sync on {:?}! Retrying", self);
 
                     if let Some(request_metadata) = &request_metadata {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);

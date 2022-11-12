@@ -3,7 +3,6 @@ use anyhow::Context;
 use std::ops::Add;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{Duration, Instant};
-use tracing::{debug, trace};
 
 pub use deadpool_redis::redis;
 pub use deadpool_redis::{
@@ -97,7 +96,6 @@ impl RedisRateLimiter {
         // TODO: at high concurency, this gives "connection reset by peer" errors. at least they are off the hot path
         // TODO: only set expire if this is a new key
 
-        trace!("redis incr+expire");
         // TODO: automatic retry
         let x: Vec<_> = redis::pipe()
             .atomic()
@@ -119,11 +117,8 @@ impl RedisRateLimiter {
             // TODO: this might actually be early if we are way over the count
             let retry_at = self.next_period(now);
 
-            debug!(%label, ?retry_at, "rate limited: {}/{}", new_count, max_per_period);
-
             Ok(RedisRateLimitResult::RetryAt(retry_at, new_count))
         } else {
-            trace!(%label, "NOT rate limited: {}/{}", new_count, max_per_period);
             Ok(RedisRateLimitResult::Allowed(new_count))
         }
     }

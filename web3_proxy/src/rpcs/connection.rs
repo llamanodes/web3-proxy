@@ -9,6 +9,7 @@ use anyhow::Context;
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
+use log::{debug, error, info, warn, Level};
 use parking_lot::RwLock;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use sea_orm::DatabaseConnection;
@@ -25,7 +26,6 @@ use thread_fast_rng::thread_fast_rng;
 use tokio::sync::broadcast;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
-use tracing::{debug, error, info, instrument, trace, warn, Level};
 
 /// An active connection to a Web3 RPC server like geth or erigon.
 pub struct Web3Connection {
@@ -58,7 +58,6 @@ pub struct Web3Connection {
 
 impl Web3Connection {
     /// Connect to a web3 rpc
-    // #[instrument(name = "spawn_Web3Connection", skip(hard_limit, http_client))]
     // TODO: have this take a builder (which will have channels attached)
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
@@ -128,7 +127,7 @@ impl Web3Connection {
             .request(
                 "eth_chainId",
                 &json!(Option::None::<()>),
-                Level::ERROR.into(),
+                Level::Error.into(),
             )
             .await;
 
@@ -203,7 +202,7 @@ impl Web3Connection {
 
             // TODO: subscribe to a channel instead of polling. subscribe to http_interval_sender?
             while head_block_id.is_none() {
-                warn!(rpc=%self, "no head block yet. retrying");
+                warn!("no head block yet. retrying rpc {}", self);
 
                 sleep(Duration::from_secs(13)).await;
 
@@ -230,11 +229,11 @@ impl Web3Connection {
                         maybe_archive_block,
                     )),
                     // error here are expected, so keep the level low
-                    tracing::Level::DEBUG.into(),
+                    Level::Debug.into(),
                 )
                 .await;
 
-            trace!(?archive_result, rpc=%self);
+            // // trace!(?archive_result, rpc=%self);
 
             if archive_result.is_ok() {
                 limit = Some(block_data_limit);
@@ -300,7 +299,7 @@ impl Web3Connection {
             );
             let reconnect_in = Duration::from_millis(first_sleep_ms);
 
-            warn!(rpc=%self, ?reconnect_in, "Reconnect in");
+            warn!("Reconnect to {} in {}ms", self, reconnect_in.as_millis());
 
             sleep(reconnect_in).await;
 
@@ -318,7 +317,12 @@ impl Web3Connection {
             );
 
             let retry_in = Duration::from_millis(sleep_ms);
-            warn!(rpc=%self, ?retry_in, ?err, "Failed to reconnect!");
+            warn!(
+                "Failed reconnect to {}! Retry in {}ms. err={:?}",
+                self,
+                retry_in.as_millis(),
+                err,
+            );
 
             sleep(retry_in).await;
         }
@@ -346,7 +350,7 @@ impl Web3Connection {
                 Web3Provider::Ws(_) => {}
             }
 
-            info!(rpc=%self, "reconnecting");
+            info!("Reconnecting to {}", self);
 
             // disconnect the current provider
             *provider_option = None;
@@ -365,7 +369,7 @@ impl Web3Connection {
                     .context("block_sender during connect")?;
             }
         } else {
-            info!(rpc=%self, "connecting");
+            info!("connecting to {}", self);
         }
 
         // TODO: if this fails, keep retrying! otherwise it crashes and doesn't try again!
@@ -373,7 +377,7 @@ impl Web3Connection {
 
         *provider_option = Some(Arc::new(new_provider));
 
-        info!(rpc=%self, "successfully connected");
+        info!("successfully connected to {}", self);
 
         Ok(())
     }
@@ -446,7 +450,7 @@ impl Web3Connection {
                     .context("block_sender")?;
             }
             Err(err) => {
-                warn!(?err, "unable to get block from {}", self);
+                warn!("unable to get block from {}. err={:?}", self, err);
 
                 {
                     let mut head_block_id = self.head_block_id.write();
@@ -477,7 +481,7 @@ impl Web3Connection {
         reconnect: bool,
     ) -> anyhow::Result<()> {
         loop {
-            debug!(rpc=%self, "subscribing");
+            debug!("subscribing to {}", self);
 
             let http_interval_receiver = http_interval_sender.as_ref().map(|x| x.subscribe());
 
@@ -510,9 +514,9 @@ impl Web3Connection {
                     loop {
                         if let Some(provider) = conn.provider.read().await.as_ref() {
                             if provider.ready() {
-                                trace!(rpc=%conn, "provider is ready");
+                                // // trace!(rpc=%conn, "provider is ready");
                             } else {
-                                warn!(rpc=%conn, "provider is NOT ready");
+                                warn!("rpc {} is NOT ready", conn);
                                 // returning error will trigger a reconnect
                                 // TODO: what if we just happened to have this check line up with another restart?
                                 return Err(anyhow::anyhow!("provider is not ready"));
@@ -535,22 +539,18 @@ impl Web3Connection {
                 }
                 Err(err) => {
                     if reconnect {
-                        warn!(
-                            rpc=%self,
-                            ?err,
-                            "subscription exited",
-                        );
+                        warn!("{} subscription exited. err={:?}", self, err);
 
                         self.retrying_reconnect(block_sender.as_ref(), true).await?;
                     } else {
-                        error!(rpc=%self, ?err, "subscription exited");
+                        error!("{} subscription exited. err={:?}", self, err);
                         return Err(err);
                     }
                 }
             }
         }
 
-        info!(rpc=%self, "all subscriptions complete");
+        info!("all subscriptions on {} completed", self);
 
         Ok(())
     }
@@ -563,7 +563,7 @@ impl Web3Connection {
         block_sender: flume::Sender<BlockAndRpc>,
         block_map: BlockHashesCache,
     ) -> anyhow::Result<()> {
-        info!(%self, "watching new heads");
+        info!("watching new heads on {}", self);
 
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
@@ -587,7 +587,7 @@ impl Web3Connection {
                                     .request(
                                         "eth_getBlockByNumber",
                                         &json!(("latest", false)),
-                                        tracing::Level::ERROR.into(),
+                                        Level::Error.into(),
                                     )
                                     .await;
 
@@ -632,7 +632,7 @@ impl Web3Connection {
                                 }
                             }
                             Err(err) => {
-                                warn!(?err, "Internal error on latest block from {}", self);
+                                warn!("Internal error on latest block from {}. {:?}", self, err);
 
                                 self.send_head_block_result(
                                     Ok(None),
@@ -656,12 +656,12 @@ impl Web3Connection {
                                 broadcast::error::RecvError::Lagged(lagged) => {
                                     // querying the block was delayed
                                     // this can happen if tokio is very busy or waiting for requests limits took too long
-                                    warn!(?err, rpc=%self, "http interval lagging by {}!", lagged);
+                                    warn!("http interval on {} lagging by {}!", self, lagged);
                                 }
                             }
                         }
 
-                        trace!(rpc=%self, "ok http interval");
+                        // // trace!(rpc=%self, "ok http interval");
                     }
                 }
                 Web3Provider::Ws(provider) => {
@@ -682,7 +682,7 @@ impl Web3Connection {
                         .request(
                             "eth_getBlockByNumber",
                             &json!(("latest", false)),
-                            tracing::Level::ERROR.into(),
+                            Level::Error.into(),
                         )
                         .await;
 
@@ -723,7 +723,7 @@ impl Web3Connection {
 
                     // TODO: is this always an error?
                     // TODO: we probably don't want a warn and to return error
-                    warn!(rpc=%self, "new_heads subscription ended");
+                    warn!("new_heads subscription to {} ended", self);
                     return Err(anyhow::anyhow!("new_heads subscription ended"));
                 }
             }
@@ -737,7 +737,7 @@ impl Web3Connection {
         authorization: Arc<Authorization>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
     ) -> anyhow::Result<()> {
-        info!(%self, "watching pending transactions");
+        info!( "watching pending transactions on {}", self);
 
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
@@ -790,7 +790,7 @@ impl Web3Connection {
 
                     // TODO: is this always an error?
                     // TODO: we probably don't want a warn and to return error
-                    warn!(rpc=%self, "pending_transactions subscription ended");
+                    warn!( "pending_transactions subscription ended on {}", self);
                     return Err(anyhow::anyhow!("pending_transactions subscription ended"));
                 }
             }
@@ -800,7 +800,7 @@ impl Web3Connection {
     }
 
     /// be careful with this; it might wait forever!
-    #[instrument]
+
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -811,13 +811,13 @@ impl Web3Connection {
         loop {
             let x = self.try_request_handle(authorization).await;
 
-            trace!(?x, "try_request_handle");
+            // // trace!(?x, "try_request_handle");
 
             match x {
                 Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
-                    trace!(?retry_at);
+                    // // trace!(?retry_at);
 
                     if retry_at > max_wait {
                         // break now since we will wait past our maximum wait time
@@ -836,7 +836,6 @@ impl Web3Connection {
         }
     }
 
-    #[instrument]
     pub async fn try_request_handle(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -853,14 +852,14 @@ impl Web3Connection {
             // TODO: how should we know if we should set expire or not?
             match ratelimiter.throttle().await? {
                 RedisRateLimitResult::Allowed(_) => {
-                    trace!("rate limit succeeded")
+                    // // trace!("rate limit succeeded")
                 }
                 RedisRateLimitResult::RetryAt(retry_at, _) => {
                     // rate limit failed
                     // save the smallest retry_after. if nothing succeeds, return an Err with retry_after in it
                     // TODO: use tracing better
                     // TODO: i'm seeing "Exhausted rate limit on moralis: 0ns". How is it getting 0?
-                    warn!(?retry_at, rpc=%self, "Exhausted rate limit");
+                    warn!( "Exhausted rate limit on {}. Retry at {:?}", self, retry_at);
 
                     return Ok(OpenRequestResult::RetryAt(retry_at));
                 }

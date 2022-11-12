@@ -8,6 +8,7 @@ use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::{HttpClientError, ProviderError, WsClientError};
 use ethers::types::{Address, Bytes};
+use log::{debug, error, warn, Level};
 use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
@@ -20,8 +21,6 @@ use std::sync::atomic::{self, AtomicBool, Ordering};
 use std::sync::Arc;
 use thread_fast_rng::rand::Rng;
 use tokio::time::{sleep, Duration, Instant};
-use tracing::Level;
-use tracing::{debug, error, trace, warn};
 
 #[derive(Debug)]
 pub enum OpenRequestResult {
@@ -67,9 +66,9 @@ struct EthCallFirstParams {
 impl From<Level> for RequestErrorHandler {
     fn from(level: Level) -> Self {
         match level {
-            Level::DEBUG => RequestErrorHandler::DebugLevel,
-            Level::ERROR => RequestErrorHandler::ErrorLevel,
-            Level::WARN => RequestErrorHandler::WarnLevel,
+            Level::Debug => RequestErrorHandler::DebugLevel,
+            Level::Error => RequestErrorHandler::ErrorLevel,
+            Level::Warn => RequestErrorHandler::WarnLevel,
             _ => unimplemented!("unexpected tracing Level"),
         }
     }
@@ -85,7 +84,7 @@ impl Authorization {
         let rpc_key_id = match self.checks.rpc_key_id {
             Some(rpc_key_id) => rpc_key_id.into(),
             None => {
-                trace!(?self, "cannot save revert without rpc_key_id");
+                // // trace!(?self, "cannot save revert without rpc_key_id");
                 return Ok(());
             }
         };
@@ -119,7 +118,7 @@ impl Authorization {
 
         // TODO: what log level?
         // TODO: better format
-        trace!(?rl);
+        // trace!(?rl);
 
         // TODO: return something useful
         Ok(())
@@ -181,14 +180,14 @@ impl OpenRequestHandle {
         // TODO: requests from customers have request ids, but we should add
         // TODO: including params in this is way too verbose
         // the authorization field is already on a parent span
-        trace!(rpc=%self.conn, %method, "request");
+        // trace!(rpc=%self.conn, %method, "request");
 
         let mut provider = None;
 
         while provider.is_none() {
             match self.conn.provider.read().await.clone() {
                 None => {
-                    warn!(rpc=%self.conn, "no provider!");
+                    warn!("no provider for {}!", self.conn);
                     // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
                     // TODO: sleep how long? subscribe to something instead? maybe use a watch handle?
                     // TODO: this is going to be way too verbose!
@@ -211,29 +210,29 @@ impl OpenRequestHandle {
             // TODO: do something special for eth_sendRawTransaction too
             let error_handler = if let RequestErrorHandler::SaveReverts = error_handler {
                 if !["eth_call", "eth_estimateGas"].contains(&method) {
-                    trace!(%method, "skipping save on revert");
+                    // trace!(%method, "skipping save on revert");
                     RequestErrorHandler::DebugLevel
                 } else if self.authorization.db_conn.is_some() {
                     let log_revert_chance = self.authorization.checks.log_revert_chance;
 
                     if log_revert_chance == 0.0 {
-                        trace!(%method, "no chance. skipping save on revert");
+                        // trace!(%method, "no chance. skipping save on revert");
                         RequestErrorHandler::DebugLevel
                     } else if log_revert_chance == 1.0 {
-                        trace!(%method, "gaurenteed chance. SAVING on revert");
+                        // trace!(%method, "gaurenteed chance. SAVING on revert");
                         error_handler
                     } else if thread_fast_rng::thread_fast_rng().gen_range(0.0f64..=1.0)
                         < log_revert_chance
                     {
-                        trace!(%method, "missed chance. skipping save on revert");
+                        // trace!(%method, "missed chance. skipping save on revert");
                         RequestErrorHandler::DebugLevel
                     } else {
-                        trace!("Saving on revert");
+                        // trace!("Saving on revert");
                         // TODO: is always logging at debug level fine?
                         error_handler
                     }
                 } else {
-                    trace!(%method, "no database. skipping save on revert");
+                    // trace!(%method, "no database. skipping save on revert");
                     RequestErrorHandler::DebugLevel
                 }
             } else {
@@ -277,14 +276,14 @@ impl OpenRequestHandle {
                 RequestErrorHandler::DebugLevel => {
                     // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
                     if !is_revert {
-                        debug!(?err, %method, ?params, rpc=%self.conn, "bad response!");
+                        debug!("bad response from {}! method={} params={:?} err={:?}", self.conn, method, params, err);
                     }
                 }
                 RequestErrorHandler::ErrorLevel => {
-                    error!(?err, %method, ?params, rpc=%self.conn, "bad response!");
+                    error!("bad response from {}! method={} params={:?} err={:?}", self.conn, method, params, err);
                 }
                 RequestErrorHandler::WarnLevel => {
-                    warn!(?err, %method, ?params, rpc=%self.conn, "bad response!");
+                    warn!("bad response from {}! method={} params={:?} err={:?}", self.conn, method, params, err);
                 }
                 RequestErrorHandler::SaveReverts => {
                     // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
@@ -304,8 +303,8 @@ impl OpenRequestHandle {
         } else {
             // TODO: i think ethers already has trace logging (and does it much more fancy)
             // TODO: opt-in response inspection to log reverts with their request. put into redis or what?
-            // trace!(rpc=%self.conn, %method, ?response);
-            trace!(%method, rpc=%self.conn, "response");
+            // // trace!(rpc=%self.conn, %method, ?response);
+            // trace!(%method, rpc=%self.conn, "response");
         }
 
         response

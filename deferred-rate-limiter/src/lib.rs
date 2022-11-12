@@ -1,4 +1,5 @@
 //#![warn(missing_docs)]
+use log::error;
 use moka::future::Cache;
 use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
 use std::cmp::Eq;
@@ -8,7 +9,6 @@ use std::sync::atomic::Ordering;
 use std::sync::{atomic::AtomicU64, Arc};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
-use tracing::{error, info_span, Instrument};
 
 /// A local cache that sits in front of a RedisRateLimiter
 /// Generic accross the key so it is simple to use with IPs or user keys
@@ -118,7 +118,7 @@ where
                             // if we get a redis error, just let the user through.
                             // if users are sticky on a server, local caches will work well enough
                             // though now that we do this, we need to reset rate limits every minute! cache must have ttl!
-                            error!(?err, "unable to rate limit! creating empty cache");
+                            error!("unable to rate limit! creating empty cache. err={:?}", err);
                             0
                         }
                     };
@@ -177,9 +177,9 @@ where
                             Err(err) => {
                                 // don't let redis errors block our users!
                                 error!(
-                                    ?key,
-                                    ?err,
-                                    "unable to query rate limits, but local cache is available"
+                                    "unable to query rate limits, but local cache is available. key={:?} err={:?}",
+                                    key,
+                                    err,
                                 );
                                 // TODO: we need to start a timer that resets this count every minute
                                 DeferredRateLimitResult::Allowed
@@ -194,11 +194,8 @@ where
                     // close to period. don't risk it. wait on redis
                     Ok(rate_limit_f.await)
                 } else {
-                    // TODO: pass the frontend request id through
-                    let span = info_span!("deferred rate limit");
-
                     // rate limit has enough headroom that it should be safe to do this in the background
-                    tokio::spawn(rate_limit_f.instrument(span));
+                    tokio::spawn(rate_limit_f);
 
                     Ok(DeferredRateLimitResult::Allowed)
                 }

@@ -21,10 +21,10 @@ use futures::{
 use handlebars::Handlebars;
 use hashbrown::HashMap;
 use http::StatusCode;
+use log::{error, info};
 use serde_json::{json, value::RawValue};
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
-use tracing::{error, error_span, info, instrument, trace, Instrument};
 
 use crate::{
     app::Web3ProxyApp,
@@ -34,7 +34,7 @@ use crate::{
 /// Public entrypoint for WebSocket JSON-RPC requests.
 /// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
 #[debug_handler]
-#[instrument(level = "trace")]
+
 pub async fn websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -42,23 +42,16 @@ pub async fn websocket_handler(
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
     // TODO: i don't like logging ips. move this to trace level?
-    let request_span = error_span!("request", %ip, ?origin);
 
     let origin = origin.map(|x| x.0);
 
-    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin)
-        .instrument(request_span)
-        .await?;
-
-    let request_span = error_span!("request", ?authorization);
+    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin).await?;
 
     let authorization = Arc::new(authorization);
 
     match ws_upgrade {
         Some(ws) => Ok(ws
-            .on_upgrade(|socket| {
-                proxy_web3_socket(app, authorization, socket).instrument(request_span)
-            })
+            .on_upgrade(|socket| proxy_web3_socket(app, authorization, socket))
             .into_response()),
         None => {
             if let Some(redirect) = &app.config.redirect_public_url {
@@ -79,7 +72,7 @@ pub async fn websocket_handler(
 /// Rate limit and billing based on the api key in the url.
 /// Can optionally authorized based on origin, referer, or user agent.
 #[debug_handler]
-#[instrument(level = "trace")]
+
 pub async fn websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -91,8 +84,6 @@ pub async fn websocket_handler_with_key(
 ) -> FrontendResult {
     let rpc_key = rpc_key.parse()?;
 
-    let request_span = error_span!("request", %ip, ?referer, ?user_agent);
-
     let (authorization, _semaphore) = key_is_authorized(
         &app,
         rpc_key,
@@ -101,18 +92,14 @@ pub async fn websocket_handler_with_key(
         referer.map(|x| x.0),
         user_agent.map(|x| x.0),
     )
-    .instrument(request_span.clone())
     .await?;
-
-    // TODO: type that wraps Address and have it censor? would protect us from accidently logging addresses or other user info
-    let request_span = error_span!("request", ?authorization);
 
     let authorization = Arc::new(authorization);
 
     match ws_upgrade {
-        Some(ws_upgrade) => Ok(ws_upgrade.on_upgrade(move |socket| {
-            proxy_web3_socket(app, authorization, socket).instrument(request_span)
-        })),
+        Some(ws_upgrade) => {
+            Ok(ws_upgrade.on_upgrade(move |socket| proxy_web3_socket(app, authorization, socket)))
+        }
         None => {
             // if no websocket upgrade, this is probably a user loading the url with their browser
             match (
@@ -156,7 +143,6 @@ pub async fn websocket_handler_with_key(
     }
 }
 
-#[instrument(level = "trace")]
 async fn proxy_web3_socket(
     app: Arc<Web3ProxyApp>,
     authorization: Arc<Authorization>,
@@ -173,7 +159,7 @@ async fn proxy_web3_socket(
 }
 
 /// websockets support a few more methods than http clients
-#[instrument(level = "trace")]
+
 async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
     authorization: &Arc<Authorization>,
@@ -193,7 +179,6 @@ async fn handle_socket_payload(
             {
                 "eth_subscribe" => {
                     // TODO: what should go in this span?
-                    let span = error_span!("eth_subscribe");
 
                     let response = app
                         .eth_subscribe(
@@ -202,7 +187,6 @@ async fn handle_socket_payload(
                             subscription_count,
                             response_sender.clone(),
                         )
-                        .instrument(span)
                         .await;
 
                     match response {
@@ -269,7 +253,6 @@ async fn handle_socket_payload(
     Message::Text(response_str)
 }
 
-#[instrument(level = "trace")]
 async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
     authorization: Arc<Authorization>,
@@ -295,7 +278,7 @@ async fn read_web3_socket(
             }
             Message::Ping(x) => Message::Pong(x),
             Message::Pong(x) => {
-                trace!("pong: {:?}", x);
+                // // trace!("pong: {:?}", x);
                 continue;
             }
             Message::Close(_) => {
@@ -328,7 +311,6 @@ async fn read_web3_socket(
     }
 }
 
-#[instrument(level = "trace")]
 async fn write_web3_socket(
     response_rx: flume::Receiver<Message>,
     mut ws_tx: SplitSink<WebSocket, Message>,
@@ -343,7 +325,7 @@ async fn write_web3_socket(
         // forward the response to through the websocket
         if let Err(err) = ws_tx.send(msg).await {
             // this isn't a problem. this is common and happens whenever a client disconnects
-            trace!(?err, "unable to write to websocket");
+            // trace!(?err, "unable to write to websocket");
             break;
         };
     }

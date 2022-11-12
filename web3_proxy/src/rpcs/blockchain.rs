@@ -10,13 +10,13 @@ use anyhow::Context;
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use hashbrown::{HashMap, HashSet};
+use log::{debug, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use serde_json::json;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Duration;
-use tracing::{debug, instrument, trace, warn, Level};
 
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
@@ -38,7 +38,7 @@ impl Display for BlockId {
 
 impl Web3Connections {
     /// add a block to our map and it's hash to our graphmap of the blockchain
-    #[instrument]
+
     pub async fn save_block(&self, block: &ArcBlock, heaviest_chain: bool) -> anyhow::Result<()> {
         // TODO: i think we can rearrange this function to make it faster on the hot path
         let block_hash = block.hash.as_ref().context("no block hash")?;
@@ -62,11 +62,11 @@ impl Web3Connections {
         }
 
         if blockchain.contains_node(*block_hash) {
-            trace!(%block_hash, %block_num, "block already saved");
+            // // trace!(%block_hash, %block_num, "block already saved");
             return Ok(());
         }
 
-        trace!(%block_hash, %block_num, "saving new block");
+        // // trace!(%block_hash, %block_num, "saving new block");
 
         self.block_hashes
             .insert(*block_hash, block.to_owned())
@@ -85,7 +85,6 @@ impl Web3Connections {
 
     /// Get a block from caches with fallback.
     /// Will query a specific node or the best available.
-    #[instrument(level = "trace")]
     pub async fn block(
         &self,
         authorization: &Arc<Authorization>,
@@ -108,7 +107,7 @@ impl Web3Connections {
                     .request(
                         "eth_getBlockByHash",
                         &json!(get_block_params),
-                        Level::ERROR.into(),
+                        Level::Error.into(),
                     )
                     .await?
             }
@@ -237,7 +236,7 @@ impl Web3Connections {
                 )
                 .await
             {
-                warn!(rpc=%rpc_name, ?err, "unable to process block from rpc");
+                warn!("unable to process block from rpc {}: {:?}", rpc_name, err);
             }
         }
 
@@ -267,7 +266,7 @@ impl Web3Connections {
 
                 if rpc_head_num.is_zero() {
                     // TODO: i don't think we can get to this anymore now that we use Options
-                    debug!(%rpc, "still syncing");
+                    debug!("{} still syncing", rpc);
 
                     connection_heads.remove(&rpc.name);
 
@@ -286,7 +285,7 @@ impl Web3Connections {
             }
             None => {
                 // TODO: warn is too verbose. this is expected if a node disconnects and has to reconnect
-                trace!(%rpc, "Block without number or hash!");
+                // // trace!(%rpc, "Block without number or hash!");
 
                 connection_heads.remove(&rpc.name);
 
@@ -311,7 +310,7 @@ impl Web3Connections {
                 // TODO: why does this happen?!?! seems to only happen with uncled blocks
                 // TODO: maybe we should do get_with?
                 // TODO: maybe we should just continue. this only seems to happen when an older block is received
-                warn!(%connection_head_hash, %conn_name, %rpc, "Missing connection_head_block in block_hashes. Fetching now");
+                warn!("Missing connection_head_block in block_hashes. Fetching now. hash={}. other={}. rpc={}", connection_head_hash, conn_name, rpc);
 
                 // this option should always be populated
                 let conn_rpc = self.conns.get(conn_name);
@@ -322,7 +321,7 @@ impl Web3Connections {
                 {
                     Ok(block) => block,
                     Err(err) => {
-                        warn!(%connection_head_hash, %conn_name, %rpc, ?err, "Failed fetching connection_head_block for block_hashes");
+                        warn!("Processing {}. Failed fetching connection_head_block for block_hashes. {} head hash={}. err={:?}", rpc, conn_name, connection_head_hash, err);
                         continue;
                     }
                 }
@@ -393,9 +392,9 @@ impl Web3Connections {
                     // not enough rpcs yet. check the parent
                     if let Some(parent_block) = self.block_hashes.get(&maybe_head_block.parent_hash)
                     {
-                        trace!(
-                            child=%maybe_head_hash, parent=%parent_block.hash.unwrap(), "avoiding thundering herd",
-                        );
+                        // // trace!(
+                        //     child=%maybe_head_hash, parent=%parent_block.hash.unwrap(), "avoiding thundering herd",
+                        // );
 
                         maybe_head_block = parent_block;
                         continue;
@@ -428,9 +427,12 @@ impl Web3Connections {
                     .swap(Arc::new(empty_synced_connections));
 
                 // TODO: log different things depending on old_synced_connections
-                warn!(%rpc, "no consensus head! {}/{}/{}", 0, num_connection_heads, total_conns);
+                warn!(
+                    "Processing {}. no consensus head! {}/{}/{}",
+                    rpc, 0, num_connection_heads, total_conns
+                );
             } else {
-                trace!(?highest_rpcs);
+                // // trace!(?highest_rpcs);
 
                 // TODO: if maybe_head_block.time() is old, ignore it
 
@@ -470,7 +472,14 @@ impl Web3Connections {
                 // TODO: if the rpc_head_block != consensus_head_block, log something?
                 match &old_synced_connections.head_block_id {
                     None => {
-                        debug!(block=%consensus_head_block_id, %rpc, "first {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
+                        debug!(
+                            "first {}/{}/{} block={}, rpc={}",
+                            num_consensus_rpcs,
+                            num_connection_heads,
+                            total_conns,
+                            consensus_head_block_id,
+                            rpc
+                        );
 
                         self.save_block(&consensus_head_block, true).await?;
 
@@ -491,10 +500,27 @@ impl Web3Connections {
                                 // multiple blocks with the same fork!
                                 if consensus_head_block_id.hash == old_block_id.hash {
                                     // no change in hash. no need to use head_block_sender
-                                    debug!(con_head=%consensus_head_block_id, rpc_head=%rpc_head_str, %rpc, "con {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns)
+                                    debug!(
+                                        "con {}/{}/{}. con head={}. rpc={}. rpc head={}",
+                                        num_consensus_rpcs,
+                                        num_connection_heads,
+                                        total_conns,
+                                        consensus_head_block_id,
+                                        rpc,
+                                        rpc_head_str
+                                    )
                                 } else {
                                     // hash changed
-                                    debug!(con_head=%consensus_head_block_id, old=%old_block_id, rpc_head=%rpc_head_str, %rpc, "unc {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
+                                    debug!(
+                                        "unc {}/{}/{} con_head={}. old={}. rpc_head={}. rpc={}",
+                                        num_consensus_rpcs,
+                                        num_connection_heads,
+                                        total_conns,
+                                        consensus_head_block_id,
+                                        old_block_id,
+                                        rpc_head_str,
+                                        rpc
+                                    );
 
                                     self.save_block(&consensus_head_block, true)
                                         .await
@@ -508,7 +534,7 @@ impl Web3Connections {
                             Ordering::Less => {
                                 // this is unlikely but possible
                                 // TODO: better log
-                                warn!(con_head=%consensus_head_block_id, old_head=%old_block_id, rpc_head=%rpc_head_str, %rpc, "chain rolled back {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
+                                warn!("chain rolled back {}/{}/{}. con_head={} old_head={}. rpc_head={}. rpc={}", num_consensus_rpcs, num_connection_heads, total_conns, consensus_head_block_id, old_block_id, rpc_head_str, rpc);
 
                                 // TODO: tell save_block to remove any higher block numbers from the cache. not needed because we have other checks on requested blocks being > head, but still seems slike a good idea
                                 self.save_block(&consensus_head_block, true).await.context(
@@ -520,7 +546,15 @@ impl Web3Connections {
                                     .context("head_block_sender sending consensus_head_block")?;
                             }
                             Ordering::Greater => {
-                                debug!(con_head=%consensus_head_block_id, rpc_head=%rpc_head_str, %rpc, "new {}/{}/{}", num_consensus_rpcs, num_connection_heads, total_conns);
+                                debug!(
+                                    "new {}/{}/{} conn_head={}. rpc_head={}. rpc={}",
+                                    num_consensus_rpcs,
+                                    num_connection_heads,
+                                    total_conns,
+                                    consensus_head_block_id,
+                                    rpc_head_str,
+                                    rpc
+                                );
 
                                 self.save_block(&consensus_head_block, true).await?;
 

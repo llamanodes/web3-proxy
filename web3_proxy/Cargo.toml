@@ -27,11 +27,12 @@ axum = { version = "0.5.17", features = ["headers", "serde_json", "tokio-tungste
 axum-client-ip = "0.2.0"
 axum-macros = "0.2.3"
 # TODO: import chrono from sea-orm so we always have the same version
-chrono = "0.4.22"
+chrono = "0.4.23"
 counter = "0.5.7"
 derive_more = "0.99.17"
 dotenv = "0.15.0"
-ethers = { version = "1.0.0", features = ["rustls", "ws"] }
+ethers = { version = "1.0.0", default-features = false, features = ["rustls", "ws"] }
+env_logger = "0.9.3"
 fdlimit = "0.2.1"
 flume = "0.10.14"
 futures = { version = "0.3.25", features = ["thread-pool"] }
@@ -39,6 +40,7 @@ hashbrown = { version = "0.13.1", features = ["serde"] }
 hdrhistogram = "7.5.2"
 http = "0.2.8"
 ipnet = "2.5.1"
+log = "0.4.17"
 metered = { version = "0.9.0", features = ["serialize"] }
 moka = { version = "0.9.6", default-features = false, features = ["future"] }
 notify = "5.0.0"
@@ -55,24 +57,18 @@ handlebars = "4.3.5"
 rustc-hash = "1.1.0"
 siwe = "0.5.0"
 sea-orm = { version = "0.10.2", features = ["macros"] }
-sentry = { version = "0.28.0", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls"] }
-sentry-tracing = "0.28.0"
+sentry = { version = "0.28.0", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
 serde = { version = "1.0.147", features = [] }
 serde_json = { version = "1.0.87", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.1.6"
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 time = "0.3.17"
-tokio = { version = "1.21.2", features = ["full", "tracing"] }
+tokio = { version = "1.21.2", features = ["full"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.11", features = ["sync"] }
 toml = "0.5.9"
 tower = "0.4.13"
-# TODO: i don't think we need this. we can use it from tower-http instead. though this seems to use ulid and not uuid?
-tower-request-id = "0.2.0"
-tower-http = { version = "0.3.4", features = ["cors", "sensitive-headers", "trace"] }
-tracing = "0.1.37"
-# TODO: tracing-subscriber has serde and serde_json features that we might want to use
-tracing-subscriber = { version = "0.3.16", features = ["env-filter", "parking_lot"] }
+tower-http = { version = "0.3.4", features = ["cors", "sensitive-headers"] }
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.3.1"
 uuid = "1.2.1"

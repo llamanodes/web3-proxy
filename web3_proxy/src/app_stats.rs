@@ -6,6 +6,7 @@ use derive_more::From;
 use entities::rpc_accounting;
 use hashbrown::HashMap;
 use hdrhistogram::{Histogram, RecordError};
+use log::{error, info};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr};
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
@@ -14,7 +15,6 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::{interval_at, Instant};
-use tracing::{error, info};
 
 /// TODO: where should this be defined?
 /// TODO: can we use something inside sea_orm instead?
@@ -351,7 +351,7 @@ impl StatEmitter {
 
                             if let Some(value) = response_aggregate_map.get_mut(&key) {
                                 if let Err(err) = value.add(stat) {
-                                    error!(?err, "unable to aggregate stats!");
+                                    error!( "unable to aggregate stats! err={:?}", err);
                                 };
                             } else {
                                 unimplemented!();
@@ -364,7 +364,7 @@ impl StatEmitter {
                     // TODO: batch these saves
                     for (key, aggregate) in response_aggregate_map.drain() {
                         if let Err(err) = aggregate.save(self.chain_id, &self.db_conn, key, period_timestamp).await {
-                            error!(?err, "Unable to save stat while shutting down!");
+                            error!("Unable to save stat while shutting down! {:?}", err);
                         };
                     }
                     // advance to the next period
@@ -377,7 +377,7 @@ impl StatEmitter {
                             info!("aggregate stat_loop shutting down");
                             // TODO: call aggregate_stat for all the
                         },
-                        Err(err) => error!(?err, "shutdown receiver"),
+                        Err(err) => error!("shutdown receiver. err={:?}", err),
                     }
                     break;
                 }
@@ -391,7 +391,7 @@ impl StatEmitter {
                 .save(self.chain_id, &self.db_conn, key, period_timestamp)
                 .await
             {
-                error!(?err, "Unable to save stat while shutting down!");
+                error!("Unable to save stat while shutting down! err={:?}", err);
             };
         }
 

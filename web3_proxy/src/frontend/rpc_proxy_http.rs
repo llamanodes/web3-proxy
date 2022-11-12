@@ -10,38 +10,27 @@ use axum::{response::IntoResponse, Extension, Json};
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
 use std::sync::Arc;
-use tracing::{error_span, instrument, Instrument};
 
 /// POST /rpc -- Public entrypoint for HTTP JSON-RPC requests. Web3 wallets use this.
 /// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
-#[instrument(level = "trace")]
+
 pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> FrontendResult {
-    let request_span = error_span!("request", %ip);
-
     // TODO: do we care about keeping the TypedHeader wrapper?
     let origin = origin.map(|x| x.0);
 
-    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin)
-        .instrument(request_span)
-        .await?;
-
-    let request_span = error_span!("request", ?authorization);
+    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin).await?;
 
     let authorization = Arc::new(authorization);
 
     // TODO: spawn earlier? i think we want ip_is_authorized in this future
-    let f = tokio::spawn(async move {
-        app.proxy_web3_rpc(authorization, payload)
-            .instrument(request_span)
-            .await
-    });
+    let f = tokio::spawn(async move { app.proxy_web3_rpc(authorization, payload).await });
 
     let response = f.await.expect("joinhandle should always work")?;
 
@@ -53,7 +42,7 @@ pub async fn proxy_web3_rpc(
 /// Can optionally authorized based on origin, referer, or user agent.
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
-#[instrument(level = "trace")]
+
 pub async fn proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -65,8 +54,6 @@ pub async fn proxy_web3_rpc_with_key(
 ) -> FrontendResult {
     let rpc_key = rpc_key.parse()?;
 
-    let request_span = error_span!("request", %ip, ?referer, ?user_agent);
-
     // keep the semaphore until the end of the response
     let (authorization, _semaphore) = key_is_authorized(
         &app,
@@ -76,10 +63,7 @@ pub async fn proxy_web3_rpc_with_key(
         referer.map(|x| x.0),
         user_agent.map(|x| x.0),
     )
-    .instrument(request_span.clone())
     .await?;
-
-    let request_span = error_span!("request", ?authorization);
 
     let authorization = Arc::new(authorization);
 
@@ -87,7 +71,6 @@ pub async fn proxy_web3_rpc_with_key(
     // TODO: spawn even earlier?
     let f = tokio::spawn(async move {
         app.proxy_web3_rpc(authorization, payload)
-            .instrument(request_span)
             .await
     });
 

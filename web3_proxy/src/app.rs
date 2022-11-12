@@ -25,6 +25,7 @@ use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use hashbrown::HashMap;
 use ipnet::IpNet;
+use log::{error, info, warn};
 use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
 use migration::{Migrator, MigratorTrait};
 use moka::future::Cache;
@@ -43,7 +44,6 @@ use tokio::sync::{broadcast, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
-use tracing::{error, info, instrument, trace, warn};
 use ulid::Ulid;
 
 // TODO: make this customizable?
@@ -124,7 +124,6 @@ pub struct Web3ProxyApp {
 
 /// flatten a JoinError into an anyhow error
 /// Useful when joining multiple futures.
-#[instrument(skip_all)]
 pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T> {
     match handle.await {
         Ok(Ok(result)) => Ok(result),
@@ -134,7 +133,7 @@ pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T>
 }
 
 /// return the first error or okay if everything worked
-#[instrument(skip_all)]
+
 pub async fn flatten_handles<T>(
     mut handles: FuturesUnordered<AnyhowJoinHandle<T>>,
 ) -> anyhow::Result<()> {
@@ -150,7 +149,6 @@ pub async fn flatten_handles<T>(
 }
 
 /// Connect to the database and run migrations
-#[instrument(level = "trace")]
 pub async fn get_migrated_db(
     db_url: String,
     min_connections: u32,
@@ -191,7 +189,6 @@ pub struct Web3ProxyAppSpawn {
 #[metered(registry = Web3ProxyAppMetrics, registry_expr = self.app_metrics, visibility = pub)]
 impl Web3ProxyApp {
     /// The main entrypoint.
-    #[instrument(level = "trace")]
     pub async fn spawn(
         top_config: TopConfig,
         num_workers: usize,
@@ -272,8 +269,8 @@ impl Web3ProxyApp {
                 // test the redis pool
                 if let Err(err) = redis_pool.get().await {
                     error!(
-                        ?err,
-                        "failed to connect to vredis. some features will be disabled"
+                        "failed to connect to vredis. some features will be disabled. err={:?}",
+                        err
                     );
                 };
 
@@ -504,7 +501,6 @@ impl Web3ProxyApp {
         Ok((app, cancellable_handles, important_background_handles).into())
     }
 
-    #[instrument(level = "trace")]
     pub fn prometheus_metrics(&self) -> String {
         let globals = HashMap::new();
         // TODO: what globals? should this be the hostname or what?
@@ -526,7 +522,6 @@ impl Web3ProxyApp {
     }
 
     #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
-    #[instrument(level = "trace")]
     pub async fn eth_subscribe<'a>(
         self: &'a Arc<Self>,
         authorization: Arc<Authorization>,
@@ -550,7 +545,7 @@ impl Web3ProxyApp {
             Some(x) if x == json!(["newHeads"]) => {
                 let head_block_receiver = self.head_block_receiver.clone();
 
-                trace!(?subscription_id, "new heads subscription");
+                // trace!("new heads subscription. id={:?}", subscription_id);
                 tokio::spawn(async move {
                     let mut head_block_receiver = Abortable::new(
                         WatchStream::new(head_block_receiver),
@@ -580,7 +575,7 @@ impl Web3ProxyApp {
                         };
                     }
 
-                    trace!(?subscription_id, "closed new heads subscription");
+                    // trace!("closed new heads subscription. id={:?}", subscription_id);
                 });
             }
             Some(x) if x == json!(["newPendingTransactions"]) => {
@@ -591,7 +586,7 @@ impl Web3ProxyApp {
                     subscription_registration,
                 );
 
-                trace!(?subscription_id, "pending transactions subscription");
+                // // trace!(?subscription_id, "pending transactions subscription");
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
                         let new_tx = match new_tx_state {
@@ -619,7 +614,7 @@ impl Web3ProxyApp {
                         };
                     }
 
-                    trace!(?subscription_id, "closed new heads subscription");
+                    // // trace!(?subscription_id, "closed new heads subscription");
                 });
             }
             Some(x) if x == json!(["newPendingFullTransactions"]) => {
@@ -631,7 +626,7 @@ impl Web3ProxyApp {
                     subscription_registration,
                 );
 
-                trace!(?subscription_id, "pending transactions subscription");
+                // // trace!(?subscription_id, "pending transactions subscription");
 
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
@@ -663,7 +658,7 @@ impl Web3ProxyApp {
                         };
                     }
 
-                    trace!(?subscription_id, "closed new heads subscription");
+                    // // trace!(?subscription_id, "closed new heads subscription");
                 });
             }
             Some(x) if x == json!(["newPendingRawTransactions"]) => {
@@ -675,7 +670,7 @@ impl Web3ProxyApp {
                     subscription_registration,
                 );
 
-                trace!(?subscription_id, "pending transactions subscription");
+                // // trace!(?subscription_id, "pending transactions subscription");
 
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
@@ -707,7 +702,7 @@ impl Web3ProxyApp {
                         };
                     }
 
-                    trace!(?subscription_id, "closed new heads subscription");
+                    // // trace!(?subscription_id, "closed new heads subscription");
                 });
             }
             _ => return Err(anyhow::anyhow!("unimplemented")),
@@ -723,14 +718,13 @@ impl Web3ProxyApp {
     }
 
     /// send the request or batch of requests to the approriate RPCs
-    #[instrument(level = "trace")]
     pub async fn proxy_web3_rpc(
         self: &Arc<Self>,
         authorization: Arc<Authorization>,
         request: JsonRpcRequestEnum,
     ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
         // TODO: this should probably be trace level
-        trace!(?request, "proxy_web3_rpc");
+        // // trace!(?request, "proxy_web3_rpc");
 
         // even though we have timeouts on the requests to our backend providers,
         // we need a timeout for the incoming request so that retries don't run forever
@@ -755,14 +749,13 @@ impl Web3ProxyApp {
         };
 
         // TODO: this should probably be trace level
-        trace!(?response, "Forwarding");
+        // // trace!(?response, "Forwarding");
 
         Ok(response)
     }
 
     /// cut up the request and send to potentually different servers
     /// TODO: make sure this isn't a problem
-    #[instrument(level = "trace")]
     async fn proxy_web3_rpc_requests(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -792,12 +785,10 @@ impl Web3ProxyApp {
     }
 
     /// TODO: i don't think we want or need this. just use app.db_conn, or maybe app.db_conn.clone() or app.db_conn.as_ref()
-    #[instrument(level = "trace")]
     pub fn db_conn(&self) -> Option<DatabaseConnection> {
         self.db_conn.clone()
     }
 
-    #[instrument(level = "trace")]
     pub async fn redis_conn(&self) -> anyhow::Result<redis_rate_limiter::RedisConnection> {
         match self.vredis_pool.as_ref() {
             None => Err(anyhow::anyhow!("no redis server configured")),
@@ -810,13 +801,12 @@ impl Web3ProxyApp {
     }
 
     #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
-    #[instrument(level = "trace")]
     async fn proxy_web3_rpc_request(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
-        trace!("Received request: {:?}", request);
+        // trace!("Received request: {:?}", request);
 
         // TODO: allow customizing the period?
         let request_metadata = Arc::new(RequestMetadata::new(60, &request)?);

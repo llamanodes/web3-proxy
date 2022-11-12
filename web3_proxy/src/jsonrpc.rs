@@ -4,7 +4,6 @@ use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::fmt;
-use tracing::instrument;
 
 // this is used by serde
 #[allow(dead_code)]
@@ -194,12 +193,10 @@ impl JsonRpcForwardedResponse {
         Self::from_string(message, code, id)
     }
 
-    #[instrument(level = "trace")]
     pub fn from_str(message: &str, code: Option<i64>, id: Option<Box<RawValue>>) -> Self {
         Self::from_string(message.to_string(), code, id)
     }
 
-    #[instrument(level = "trace")]
     pub fn from_string(message: String, code: Option<i64>, id: Option<Box<RawValue>>) -> Self {
         // TODO: this is too verbose. plenty of errors are valid, like users giving an invalid address. no need to log that
         // TODO: can we somehow get the initial request here? if we put that into a tracing span, will things slow down a ton?
@@ -217,7 +214,6 @@ impl JsonRpcForwardedResponse {
         }
     }
 
-    #[instrument(level = "trace")]
     pub fn from_response(partial_response: Box<RawValue>, id: Box<RawValue>) -> Self {
         JsonRpcForwardedResponse {
             jsonrpc: "2.0".to_string(),
@@ -228,7 +224,6 @@ impl JsonRpcForwardedResponse {
         }
     }
 
-    #[instrument(level = "trace")]
     pub fn from_value(partial_response: serde_json::Value, id: Box<RawValue>) -> Self {
         let partial_response =
             serde_json::to_string(&partial_response).expect("this should always work");
@@ -244,7 +239,6 @@ impl JsonRpcForwardedResponse {
         }
     }
 
-    #[instrument(level = "trace")]
     pub fn from_ethers_error(e: ProviderError, id: Box<RawValue>) -> anyhow::Result<Self> {
         // TODO: move turning ClientError into json to a helper function?
         let code;
@@ -304,7 +298,6 @@ impl JsonRpcForwardedResponse {
         })
     }
 
-    #[instrument(level = "trace")]
     pub fn try_from_response_result(
         result: Result<Box<RawValue>, ProviderError>,
         id: Box<RawValue>,

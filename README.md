@@ -98,8 +98,9 @@ Flame graphs make a developer's join of finding slow code painless:
     4
     $ echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
     -1
-    $ CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --bin web3_proxy
+    $ CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --bin web3_proxy --no-inline
 
+Be sure to use `--no-inline` or perf will be VERY slow
 
 ## GDB
 

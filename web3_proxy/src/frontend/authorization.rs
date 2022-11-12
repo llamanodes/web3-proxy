@@ -13,6 +13,7 @@ use entities::{rpc_key, user, user_tier};
 use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
+use log::error;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
@@ -21,7 +22,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
-use tracing::{error, instrument, trace};
 use ulid::Ulid;
 use uuid::Uuid;
 
@@ -348,7 +348,6 @@ pub async fn key_is_authorized(
 
 impl Web3ProxyApp {
     /// Limit the number of concurrent requests from the given ip address.
-    #[instrument(level = "trace")]
     pub async fn ip_semaphore(&self, ip: IpAddr) -> anyhow::Result<Option<OwnedSemaphorePermit>> {
         if let Some(max_concurrent_requests) = self.config.public_max_concurrent_requests {
             let semaphore = self
@@ -374,7 +373,6 @@ impl Web3ProxyApp {
     }
 
     /// Limit the number of concurrent requests from the given rpc key.
-    #[instrument(level = "trace")]
     pub async fn rpc_key_semaphore(
         &self,
         authorization_checks: &AuthorizationChecks,
@@ -386,7 +384,7 @@ impl Web3ProxyApp {
                 .rpc_key_semaphores
                 .get_with(rpc_key_id, async move {
                     let s = Semaphore::new(max_concurrent_requests as usize);
-                    trace!("new semaphore for rpc_key_id {}", rpc_key_id);
+                    // // trace!("new semaphore for rpc_key_id {}", rpc_key_id);
                     Arc::new(s)
                 })
                 .await;
@@ -407,7 +405,6 @@ impl Web3ProxyApp {
 
     /// Verify that the given bearer token and address are allowed to take the specified action.
     /// This includes concurrent request limiting.
-    #[instrument(level = "trace")]
     pub async fn bearer_is_authorized(
         &self,
         bearer: Bearer,
@@ -447,7 +444,6 @@ impl Web3ProxyApp {
         Ok((user, semaphore_permit))
     }
 
-    #[instrument(level = "trace")]
     pub async fn rate_limit_login(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_rpc_key?
 
@@ -474,19 +470,19 @@ impl Web3ProxyApp {
                     // TODO: set headers so they know when they can retry
                     // TODO: debug or trace?
                     // this is too verbose, but a stat might be good
-                    trace!(?ip, "login rate limit exceeded until {:?}", retry_at);
+                    // // trace!(?ip, "login rate limit exceeded until {:?}", retry_at);
 
                     Ok(RateLimitResult::RateLimited(authorization, Some(retry_at)))
                 }
                 Ok(RedisRateLimitResult::RetryNever) => {
                     // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
-                    trace!(?ip, "login rate limit is 0");
+                    // // trace!(?ip, "login rate limit is 0");
                     Ok(RateLimitResult::RateLimited(authorization, None))
                 }
                 Err(err) => {
                     // internal error, not rate limit being hit
                     // TODO: i really want axum to do this for us in a single place.
-                    error!(?err, "login rate limiter is unhappy. allowing ip");
+                    error!("login rate limiter is unhappy. allowing ip. err={:?}", err);
 
                     Ok(RateLimitResult::Allowed(authorization, None))
                 }
@@ -498,7 +494,6 @@ impl Web3ProxyApp {
     }
 
     /// origin is included because it can override the default rate limits
-    #[instrument(level = "trace")]
     pub async fn rate_limit_by_ip(
         &self,
         allowed_origin_requests_per_period: &HashMap<String, u64>,
@@ -529,18 +524,18 @@ impl Web3ProxyApp {
                 }
                 Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
                     // TODO: set headers so they know when they can retry
-                    trace!(?ip, "rate limit exceeded until {:?}", retry_at);
+                    // // trace!(?ip, "rate limit exceeded until {:?}", retry_at);
                     Ok(RateLimitResult::RateLimited(authorization, Some(retry_at)))
                 }
                 Ok(DeferredRateLimitResult::RetryNever) => {
                     // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
-                    trace!(?ip, "rate limit is 0");
+                    // // trace!(?ip, "rate limit is 0");
                     Ok(RateLimitResult::RateLimited(authorization, None))
                 }
                 Err(err) => {
                     // this an internal error of some kind, not the rate limit being hit
                     // TODO: i really want axum to do this for us in a single place.
-                    error!(?err, "rate limiter is unhappy. allowing ip");
+                    error!("rate limiter is unhappy. allowing ip. err={:?}", err);
 
                     // at least we can still check the semaphore
                     let semaphore = self.ip_semaphore(ip).await?;
@@ -558,7 +553,6 @@ impl Web3ProxyApp {
     }
 
     // check the local cache for user data, or query the database
-    #[instrument(level = "trace")]
     pub(crate) async fn authorization_checks(
         &self,
         rpc_secret_key: RpcSecretKey,
@@ -566,7 +560,7 @@ impl Web3ProxyApp {
         let authorization_checks: Result<_, Arc<anyhow::Error>> = self
             .rpc_secret_key_cache
             .try_get_with(rpc_secret_key.into(), async move {
-                trace!(?rpc_secret_key, "user cache miss");
+                // // trace!(?rpc_secret_key, "user cache miss");
 
                 let db_conn = self.db_conn().context("Getting database connection")?;
 
@@ -671,7 +665,6 @@ impl Web3ProxyApp {
     }
 
     /// Authorized the ip/origin/referer/useragent and rate limit and concurrency
-    #[instrument(level = "trace")]
     pub async fn rate_limit_by_rpc_key(
         &self,
         ip: IpAddr,
@@ -722,19 +715,19 @@ impl Web3ProxyApp {
                     // this is too verbose, but a stat might be good
                     // TODO: keys are secrets! use the id instead
                     // TODO: emit a stat
-                    trace!(?rpc_key, "rate limit exceeded until {:?}", retry_at);
+                    // // trace!(?rpc_key, "rate limit exceeded until {:?}", retry_at);
                     Ok(RateLimitResult::RateLimited(authorization, Some(retry_at)))
                 }
                 Ok(DeferredRateLimitResult::RetryNever) => {
                     // TODO: keys are secret. don't log them!
-                    trace!(?rpc_key, "rate limit is 0");
+                    // // trace!(?rpc_key, "rate limit is 0");
                     // TODO: emit a stat
                     Ok(RateLimitResult::RateLimited(authorization, None))
                 }
                 Err(err) => {
                     // internal error, not rate limit being hit
                     // TODO: i really want axum to do this for us in a single place.
-                    error!(?err, "rate limiter is unhappy. allowing ip");
+                    error!("rate limiter is unhappy. allowing ip. err={:?}", err);
 
                     Ok(RateLimitResult::Allowed(authorization, semaphore))
                 }

@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 use futures::StreamExt;
+use log::{debug, info, warn, LevelFilter};
 use parking_lot::deadlock;
 use std::fs;
 use std::sync::atomic::{self, AtomicUsize};
@@ -16,9 +17,6 @@ use std::thread;
 use tokio::runtime;
 use tokio::sync::broadcast;
 use tokio::time::Duration;
-use tracing::{debug, info, warn};
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::EnvFilter;
 use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use web3_proxy::config::{CliConfig, TopConfig};
 use web3_proxy::{frontend, metrics_frontend};
@@ -28,7 +26,8 @@ fn run(
     cli_config: CliConfig,
     top_config: TopConfig,
 ) -> anyhow::Result<()> {
-    debug!(?cli_config, ?top_config);
+    debug!("{:?}", cli_config);
+    debug!("{:?}", top_config);
 
     let mut shutdown_receiver = shutdown_sender.subscribe();
 
@@ -70,7 +69,7 @@ fn run(
     let rt = rt_builder.build()?;
 
     let num_workers = rt.metrics().num_workers();
-    debug!(?num_workers);
+    debug!("num_workers: {}", num_workers);
 
     rt.block_on(async {
         let app_frontend_port = cli_config.port;
@@ -134,7 +133,7 @@ fn run(
 
         // one of the handles stopped. send a value so the others know to shut down
         if let Err(err) = shutdown_sender.send(()) {
-            warn!(?err, "shutdown sender");
+            warn!("shutdown sender err={:?}", err);
         };
 
         // wait on all the important background tasks (like saving stats to the database) to complete
@@ -175,6 +174,12 @@ fn main() -> anyhow::Result<()> {
     // TODO: this doesn't seem to do anything
     proctitle::set_title(format!("web3_proxy-{}", top_config.app.chain_id));
 
+    let mut log_builder = env_logger::builder();
+
+    log_builder
+        .filter_level(LevelFilter::Off)
+        .parse_env("RUST_LOG");
+
     // connect to sentry for error reporting
     // if no sentry, only log to stdout
     let _sentry_guard = if let Some(sentry_url) = top_config.app.sentry_url.clone() {
@@ -188,24 +193,16 @@ fn main() -> anyhow::Result<()> {
             },
         ));
 
-        // TODO: how do we put the EnvFilter on this?
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .compact()
-                    .with_filter(EnvFilter::from_default_env()),
-            )
-            .with(sentry_tracing::layer())
-            .init();
+        let logger = sentry::integrations::log::SentryLogger::with_dest(log_builder.build());
+
+        log::set_boxed_logger(Box::new(logger)).unwrap();
 
         Some(guard)
     } else {
         // install global collector configured based on RUST_LOG env var.
-        // TODO: attach sentry here
-        tracing_subscriber::fmt()
-            .compact()
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
+        let logger = log_builder.build();
+
+        log::set_boxed_logger(Box::new(logger)).unwrap();
 
         None
     };
@@ -243,13 +240,8 @@ mod tests {
         // TODO: how should we handle logs in this?
         // TODO: option for super verbose logs
         std::env::set_var("RUST_LOG", "info,web3_proxy=debug");
-        // install global collector configured based on RUST_LOG env var.
-        // TODO: sentry is needed here!
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
-            .compact()
-            .with_test_writer()
-            .init();
+
+        let _ = env_logger::builder().is_test(true).try_init();
 
         let anvil = Anvil::new().spawn();
 

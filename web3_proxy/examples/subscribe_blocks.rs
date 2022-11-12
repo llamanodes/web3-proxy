@@ -5,11 +5,6 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // install global collector configured based on RUST_LOG env var.
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .compact()
-        .init();
-
     fdlimit::raise_fd_limit();
 
     // erigon

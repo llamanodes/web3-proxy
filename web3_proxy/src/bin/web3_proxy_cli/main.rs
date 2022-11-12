@@ -37,11 +37,7 @@ async fn main() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "info,web3_proxy=debug,web3_proxy_cli=debug");
     }
 
-    // install global collector configured based on RUST_LOG env var.
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .compact()
-        .init();
+    env_logger::init();
 
     // this probably won't matter for us in docker, but better safe than sorry
     fdlimit::raise_fd_limit();

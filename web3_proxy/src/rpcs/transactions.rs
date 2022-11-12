@@ -5,9 +5,9 @@ use super::connection::Web3Connection;
 use super::connections::Web3Connections;
 use super::request::OpenRequestResult;
 use ethers::prelude::{ProviderError, Transaction, TxHash};
+use log::{debug, Level};
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{debug, trace, Level};
 
 // TODO: think more about TxState
 #[derive(Clone)]
@@ -34,7 +34,7 @@ impl Web3Connections {
                     .request(
                         "eth_getTransactionByHash",
                         &(pending_tx_id,),
-                        Level::ERROR.into(),
+                        Level::Error.into(),
                     )
                     .await?
             }
@@ -43,12 +43,12 @@ impl Web3Connections {
                 return Ok(None);
             }
             Err(err) => {
-                trace!(
-                    ?pending_tx_id,
-                    ?rpc,
-                    ?err,
-                    "cancelled funneling transaction"
-                );
+                // trace!(
+                //     ?pending_tx_id,
+                //     ?rpc,
+                //     ?err,
+                //     "cancelled funneling transaction"
+                // );
                 return Ok(None);
             }
         };
@@ -79,7 +79,7 @@ impl Web3Connections {
             return Ok(());
         }
 
-        trace!(?pending_tx_id, "checking pending_transactions on {}", rpc);
+        // trace!(?pending_tx_id, "checking pending_transactions on {}", rpc);
         if self.pending_transactions.contains_key(&pending_tx_id) {
             // this transaction has already been processed
             return Ok(());
@@ -94,14 +94,14 @@ impl Web3Connections {
             Ok(Some(tx_state)) => {
                 let _ = pending_tx_sender.send(tx_state);
 
-                trace!(?pending_tx_id, "sent");
+                // trace!(?pending_tx_id, "sent");
 
                 // we sent the transaction. return now. don't break looping because that gives a warning
                 return Ok(());
             }
             Ok(None) => {}
             Err(err) => {
-                trace!(?err, ?pending_tx_id, "failed fetching transaction");
+                // trace!(?err, ?pending_tx_id, "failed fetching transaction");
                 // unable to update the entry. sleep and try again soon
                 // TODO: retry with exponential backoff with jitter starting from a much smaller time
                 // sleep(Duration::from_millis(100)).await;
@@ -112,7 +112,7 @@ impl Web3Connections {
         // "There is a Pending txn with a lower account nonce. This txn can only be executed after confirmation of the earlier Txn Hash#"
         // sometimes it's been pending for many hours
         // sometimes it's maybe something else?
-        debug!(?pending_tx_id, "not found on {}", rpc);
+        debug!("txid {} not found on {}", pending_tx_id, rpc);
         Ok(())
     }
 }

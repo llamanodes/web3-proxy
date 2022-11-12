@@ -9,16 +9,15 @@ use chrono::NaiveDateTime;
 use entities::{rpc_accounting, rpc_key};
 use hashbrown::HashMap;
 use http::StatusCode;
+use log::warn;
 use migration::{Condition, Expr, SimpleExpr};
 use redis_rate_limiter::{redis::AsyncCommands, RedisConnection};
 use sea_orm::{
     ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Select,
 };
-use tracing::{instrument, warn};
 
 /// get the attached address from redis for the given auth_token.
 /// 0 means all users
-#[instrument(level = "trace", skip(redis_conn))]
 pub async fn get_user_id_from_params(
     mut redis_conn: RedisConnection,
     // this is a long type. should we strip it down?
@@ -68,7 +67,7 @@ pub async fn get_user_id_from_params(
 /// only allow rpc_key to be set if user_id is also set.
 /// this will keep people from reading someone else's keys.
 /// 0 means none.
-#[instrument(level = "trace")]
+
 pub fn get_rpc_key_id_from_params(
     user_id: u64,
     params: &HashMap<String, String>,
@@ -87,7 +86,6 @@ pub fn get_rpc_key_id_from_params(
     }
 }
 
-#[instrument(level = "trace")]
 pub fn get_chain_id_from_params(
     app: &Web3ProxyApp,
     params: &HashMap<String, String>,
@@ -102,7 +100,6 @@ pub fn get_chain_id_from_params(
     )
 }
 
-#[instrument(level = "trace")]
 pub fn get_query_start_from_params(
     params: &HashMap<String, String>,
 ) -> anyhow::Result<chrono::NaiveDateTime> {
@@ -126,7 +123,6 @@ pub fn get_query_start_from_params(
     )
 }
 
-#[instrument(level = "trace")]
 pub fn get_page_from_params(params: &HashMap<String, String>) -> anyhow::Result<u64> {
     params.get("page").map_or_else::<anyhow::Result<u64>, _, _>(
         || {
@@ -143,7 +139,6 @@ pub fn get_page_from_params(params: &HashMap<String, String>) -> anyhow::Result<
     )
 }
 
-#[instrument(level = "trace")]
 pub fn get_query_window_seconds_from_params(
     params: &HashMap<String, String>,
 ) -> Result<u64, FrontendErrorResponse> {

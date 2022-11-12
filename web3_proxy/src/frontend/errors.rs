@@ -11,12 +11,12 @@ use axum::{
 use derive_more::From;
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
+use log::warn;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
 use sea_orm::DbErr;
 use std::error::Error;
 use tokio::{task::JoinError, time::Instant};
-use tracing::{instrument, trace, warn};
 
 // TODO: take "IntoResponse" instead of Response?
 pub type FrontendResult = Result<Response, FrontendErrorResponse>;
@@ -43,12 +43,11 @@ pub enum FrontendErrorResponse {
 }
 
 impl IntoResponse for FrontendErrorResponse {
-    #[instrument(level = "trace")]
     fn into_response(self) -> Response {
         // TODO: include the request id in these so that users can give us something that will point to logs
         let (status_code, response) = match self {
             Self::Anyhow(err) => {
-                warn!(?err, "anyhow");
+                warn!("anyhow. err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_string(
@@ -60,7 +59,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::Box(err) => {
-                warn!(?err, "boxed");
+                warn!("boxed err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
@@ -72,7 +71,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::Database(err) => {
-                warn!(?err, "database");
+                warn!("database err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
@@ -83,7 +82,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::HeadersError(err) => {
-                warn!(?err, "HeadersError");
+                warn!("HeadersError {:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -94,7 +93,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::IpAddrParse(err) => {
-                warn!(?err, "IpAddrParse");
+                warn!("IpAddrParse err={:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -105,7 +104,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::InvalidHeaderValue(err) => {
-                warn!(?err, "InvalidHeaderValue");
+                warn!("InvalidHeaderValue err={:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -116,7 +115,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::JoinError(err) => {
-                warn!(?err, "JoinError. likely shutting down");
+                warn!("JoinError. likely shutting down. err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
@@ -171,7 +170,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::Redis(err) => {
-                warn!(?err, "redis");
+                warn!("redis err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
@@ -187,7 +186,7 @@ impl IntoResponse for FrontendErrorResponse {
             }
             Self::StatusCode(status_code, err_msg, err) => {
                 // TODO: warn is way too loud. different status codes should get different error levels. 500s should warn. 400s should stat
-                trace!(?status_code, ?err_msg, ?err);
+                // trace!(?status_code, ?err_msg, ?err);
                 (
                     status_code,
                     JsonRpcForwardedResponse::from_str(
@@ -198,7 +197,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::HeaderToString(err) => {
-                trace!(?err, "HeaderToString");
+                // // trace!(?err, "HeaderToString");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -209,7 +208,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::UlidDecodeError(err) => {
-                trace!(?err, "UlidDecodeError");
+                // // trace!(?err, "UlidDecodeError");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -234,7 +233,6 @@ impl IntoResponse for FrontendErrorResponse {
     }
 }
 
-#[instrument(level = "trace")]
 pub async fn handler_404() -> Response {
     FrontendErrorResponse::NotFound.into_response()
 }

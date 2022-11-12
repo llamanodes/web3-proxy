@@ -236,8 +236,11 @@ These are roughly in order of completition
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
 - [x] improve sorting servers by weight. don't force to lower weights, still have a probability that smaller weights might be 
+- [ ] flamegraphs show 52% of the time to be in tracing. figure out how to improve that
 - [ ] add block timestamp to the /status page
 - [ ] cache the status page for a second
+- [ ] probably need to turn more sentry log integrations (like anyhow) on!
+- [ ] tests should use `test-env-log = "0.2.8"`
 
 - [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
 
@@ -245,6 +248,7 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] flamegraphs show 25% of the time to be in moka-housekeeper. tune that
 - [ ] remove the "metered" crate now that we save aggregate queries?
 - [ ] remove/change the "active_requests" counter? maybe only once we have dynamic soft limits?
 - [ ] refactor so configs can change while running
@@ -410,8 +414,6 @@ in another repo: event subscriber
     - [ ] test /api/getGaugesmethod
         - usually times out after vercel's 60 second timeout
         - one time got: Error invalid Json response ""
-- [ ] i think all the async methods in ethers need tracing instrument. something like `cfgif(tracing, tracing::instrument)`
-  - if they do that, i think my request_id will show up on their logs
 - [ ] page that prints a graphviz dotfile of the blockchain
 - [ ] search for all the "TODO" and `todo!(...)` items in the code and move them here
 - [ ] add the backend server to the header?

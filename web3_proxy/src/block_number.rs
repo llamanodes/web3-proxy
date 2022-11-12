@@ -4,8 +4,8 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
+use log::{warn};
 use std::sync::Arc;
-use tracing::{instrument, warn};
 
 use crate::{frontend::authorization::Authorization, rpcs::connections::Web3Connections};
 
@@ -39,7 +39,7 @@ pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> U64 {
 }
 
 /// modify params to always have a block number and not "latest"
-#[instrument(level = "trace")]
+
 pub async fn clean_block_number(
     authorization: &Arc<Authorization>,
     params: &mut serde_json::Value,
@@ -98,7 +98,7 @@ pub async fn clean_block_number(
 }
 
 // TODO: change this to also return the hash needed?
-#[instrument(level = "trace")]
+
 pub async fn block_needed(
     authorization: &Arc<Authorization>,
     method: &str,
@@ -210,7 +210,7 @@ pub async fn block_needed(
         Ok(block) => Ok(Some(block)),
         Err(err) => {
             // TODO: seems unlikely that we will get here
-            warn!(?err, "could not get block from params");
+            warn!("could not get block from params. err={:?}", err);
             Ok(None)
         }
     }
