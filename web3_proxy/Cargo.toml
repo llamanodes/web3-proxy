@@ -18,6 +18,7 @@ deferred-rate-limiter = { path = "../deferred-rate-limiter" }
 entities = { path = "../entities" }
 migration = { path = "../migration" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
+thread-fast-rng = { path = "../thread-fast-rng" }
 
 anyhow = { version = "1.0.66", features = ["backtrace"] }
 arc-swap = "1.5.1"
@@ -47,7 +48,6 @@ num-traits = "0.2.15"
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 petgraph = "0.6.2"
 proctitle = "0.1.1"
-rand = "0.8.5"
 # TODO: regex has several "perf" features that we might want to use
 regex = "1.7.0"
 reqwest = { version = "0.11.12", default-features = false, features = ["json", "tokio-rustls"] }

@@ -189,7 +189,7 @@ pub struct Web3ConnectionConfig {
     pub soft_limit: u32,
     /// the requests per second at which the server throws errors (rate limit or otherwise)
     pub hard_limit: Option<u64>,
-    /// All else equal, a server with a lower weight receives requests
+    /// All else equal, a server with a lower weight receives more requests. Ranges 0-100
     pub weight: u32,
     /// Subscribe to the firehose of pending transactions
     /// Don't do this with free rpcs

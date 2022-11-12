@@ -3624,6 +3624,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_xoshiro"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f97cdb2a36ed4183de61b2f824cc45c9f1037f28afe0a322e9fff4c108b5aaa"
+dependencies = [
+ "rand_core 0.6.3",
+]
+
+[[package]]
 name = "rayon"
 version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4922,6 +4931,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread-fast-rng"
+version = "0.1.0"
+dependencies = [
+ "rand 0.8.5",
+ "rand_xoshiro",
+]
+
+[[package]]
 name = "thread-id"
 version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5608,7 +5625,6 @@ dependencies = [
  "parking_lot 0.12.1",
  "petgraph",
  "proctitle",
- "rand 0.8.5",
  "redis-rate-limiter",
  "regex",
  "reqwest",
@@ -5620,6 +5636,7 @@ dependencies = [
  "serde_json",
  "serde_prometheus",
  "siwe",
+ "thread-fast-rng",
  "time 0.3.17",
  "tokio",
  "tokio-stream",

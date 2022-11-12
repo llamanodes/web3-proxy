@@ -26,11 +26,10 @@ use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
-use std::cmp;
-use std::cmp::Reverse;
 use std::fmt;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use thread_fast_rng::rand::seq::SliceRandom;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{broadcast, watch};
 use tokio::task;
@@ -400,7 +399,7 @@ impl Web3Connections {
 
         // filter the synced rpcs
         // TODO: we are going to be checking "has_block_data" a lot now
-        let mut synced_rpcs: Vec<Arc<Web3Connection>> = self
+        let synced_rpcs: Vec<Arc<Web3Connection>> = self
             .conns
             .values()
             .filter(|x| !skip.contains(x))
@@ -414,35 +413,62 @@ impl Web3Connections {
             return Err(anyhow::anyhow!("no servers are synced"));
         }
 
+        let mut minimum = 0.0;
+
         // we sort on a bunch of values. cache them here so that we don't do this math multiple times.
-        let sort_cache: HashMap<_, _> = synced_rpcs
+        let weight_map: HashMap<_, f64> = synced_rpcs
             .iter()
             .map(|rpc| {
-                // TODO: get active requests and the soft limit out of redis?
+                // TODO: put this on the rpc object instead?
                 let weight = rpc.weight;
+
+                // TODO: are active requests what we want? do we want a counter for requests in the last second + any actives longer than that?
+                // TODO: get active requests out of redis?
+                // TODO: do something with hard limit instead?
                 let active_requests = rpc.active_requests();
                 let soft_limit = rpc.soft_limit;
 
-                let utilization = active_requests as f32 / soft_limit as f32;
+                // TODO: maybe store weight as the percentile
+                let available_requests = soft_limit as f64 * weight - active_requests as f64;
 
-                // TODO: utilization isn't enough we need to sort on some combination of utilization and if a server is archive or not
-                // TODO: if a server's utilization is high and it has a low weight, it will keep getting requests. this isn't really what we want
+                if available_requests < 0.0 {
+                    minimum = available_requests.min(minimum);
+                }
 
-                // TODO: double check this sorts how we want
-                (rpc.clone(), (weight, utilization, Reverse(soft_limit)))
+                (rpc.clone(), available_requests)
             })
             .collect();
 
-        synced_rpcs.sort_unstable_by(|a, b| {
-            let a_sorts = sort_cache.get(a).expect("sort_cache should always have a");
-            let b_sorts = sort_cache.get(b).expect("sort_cache should always have b");
+        // we can't have negative numbers. shift up if any are negative
+        let weight_map: HashMap<_, f64> = if minimum < 0.0 {
+            weight_map
+        } else {
+            weight_map
+                .into_iter()
+                .map(|(rpc, weight)| {
+                    // TODO: is simple addition the right way to shift everyone?
+                    let x = weight + minimum;
 
-            // partial_cmp because we are comparing floats
-            a_sorts.partial_cmp(b_sorts).unwrap_or(cmp::Ordering::Equal)
-        });
+                    (rpc, x)
+                })
+                .collect()
+        };
+
+        let sorted_rpcs = {
+            let mut rng = thread_fast_rng::thread_fast_rng();
+
+            synced_rpcs
+                .choose_multiple_weighted(&mut rng, synced_rpcs.len(), |rpc| {
+                    *weight_map
+                        .get(rpc)
+                        .expect("rpc should always be in the weight map")
+                })
+                .unwrap()
+                .collect::<Vec<_>>()
+        };
 
         // now that the rpcs are sorted, try to get an active request handle for one of them
-        for rpc in synced_rpcs.into_iter() {
+        for rpc in sorted_rpcs.into_iter() {
             // increment our connection counter
             match rpc.try_request_handle(authorization).await {
                 Ok(OpenRequestResult::Handle(handle)) => {

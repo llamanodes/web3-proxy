@@ -10,7 +10,6 @@ use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
 use parking_lot::RwLock;
-use rand::Rng;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use sea_orm::DatabaseConnection;
 use serde::ser::{SerializeStruct, Serializer};
@@ -21,6 +20,8 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::{cmp::Ordering, sync::Arc};
+use thread_fast_rng::rand::Rng;
+use thread_fast_rng::thread_fast_rng;
 use tokio::sync::broadcast;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
@@ -49,9 +50,8 @@ pub struct Web3Connection {
     pub(super) soft_limit: u32,
     /// TODO: have an enum for this so that "no limit" prints pretty?
     block_data_limit: AtomicU64,
-    /// Lower weight are higher priority when sending requests
-    pub(super) weight: u32,
-    // TODO: async lock?
+    /// Lower weight are higher priority when sending requests. 0 to 99.
+    pub(super) weight: f64,
     pub(super) head_block_id: RwLock<Option<BlockId>>,
     pub(super) open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
 }
@@ -84,17 +84,20 @@ impl Web3Connection {
             // TODO: is cache size 1 okay? i think we need
             RedisRateLimiter::new(
                 "web3_proxy",
-                &format!("{}:{}", chain_id, url_str),
+                &format!("{}:{}", chain_id, name),
                 hard_rate_limit,
                 60.0,
                 redis_pool,
             )
         });
 
+        // turn weight 0 into 100% and weight 100 into 0%
+        let weight = (100 - weight) as f64 / 100.0;
+
         let new_connection = Self {
             name,
             http_client,
-            url: url_str.clone(),
+            url: url_str,
             active_requests: 0.into(),
             total_requests: 0.into(),
             provider: AsyncRwLock::new(None),
@@ -293,7 +296,7 @@ impl Web3Connection {
         let mut sleep_ms = if initial_sleep {
             let first_sleep_ms = min(
                 cap_ms,
-                rand::thread_rng().gen_range(base_ms..(base_ms * range_multiplier)),
+                thread_fast_rng().gen_range(base_ms..(base_ms * range_multiplier)),
             );
             let reconnect_in = Duration::from_millis(first_sleep_ms);
 
@@ -308,9 +311,10 @@ impl Web3Connection {
 
         // retry until we succeed
         while let Err(err) = self.reconnect(block_sender).await {
+            // thread_rng is crytographically secure. we don't need that, but we don't need this super efficient so its fine
             sleep_ms = min(
                 cap_ms,
-                rand::thread_rng().gen_range(base_ms..(sleep_ms * range_multiplier)),
+                thread_fast_rng().gen_range(base_ms..(sleep_ms * range_multiplier)),
             );
 
             let retry_in = Duration::from_millis(sleep_ms);

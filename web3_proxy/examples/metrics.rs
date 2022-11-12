@@ -1,5 +1,6 @@
 use metered::{metered, HitCount, Throughput};
 use serde::Serialize;
+use thread_fast_rng::{rand::Rng, thread_fast_rng};
 
 #[derive(Default, Debug, Serialize)]
 pub struct Biz {
@@ -10,7 +11,7 @@ pub struct Biz {
 impl Biz {
     #[measure([HitCount, Throughput])]
     pub fn biz(&self) {
-        let delay = std::time::Duration::from_millis(rand::random::<u64>() % 200);
+        let delay = std::time::Duration::from_millis(thread_fast_rng().gen::<u64>() % 200);
         std::thread::sleep(delay);
     }
 }

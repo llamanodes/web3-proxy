@@ -4,6 +4,7 @@ members = [
   "entities",
   "migration",
   "redis-rate-limiter",
+  "thread-fast-rng",
   "web3_proxy",
 ]
 

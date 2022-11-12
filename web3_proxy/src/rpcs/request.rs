@@ -12,13 +12,13 @@ use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
 use metered::Throughput;
-use rand::Rng;
 use sea_orm::ActiveEnum;
 use sea_orm::ActiveModelTrait;
 use serde_json::json;
 use std::fmt;
 use std::sync::atomic::{self, AtomicBool, Ordering};
 use std::sync::Arc;
+use thread_fast_rng::rand::Rng;
 use tokio::time::{sleep, Duration, Instant};
 use tracing::Level;
 use tracing::{debug, error, trace, warn};
@@ -222,7 +222,9 @@ impl OpenRequestHandle {
                     } else if log_revert_chance == 1.0 {
                         trace!(%method, "gaurenteed chance. SAVING on revert");
                         error_handler
-                    } else if rand::thread_rng().gen_range(0.0f64..=1.0) < log_revert_chance {
+                    } else if thread_fast_rng::thread_fast_rng().gen_range(0.0f64..=1.0)
+                        < log_revert_chance
+                    {
                         trace!(%method, "missed chance. skipping save on revert");
                         RequestErrorHandler::DebugLevel
                     } else {

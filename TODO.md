@@ -235,9 +235,9 @@ These are roughly in order of completition
 - [x] test that runs check_config against example.toml
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
-- [ ] improve sorting servers by weight
-    - if the utilization is > 100%, increase weight by 1? maybe just add utilization to the weight?
-    - if utilization is > hard limit, add a lot to the weight
+- [x] improve sorting servers by weight. don't force to lower weights, still have a probability that smaller weights might be 
+- [ ] add block timestamp to the /status page
+- [ ] cache the status page for a second
 
 - [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
 
