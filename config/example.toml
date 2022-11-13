@@ -1,21 +1,25 @@
 [app]
 chain_id = 1
 
+# a database is optional. it is used for user authentication and accounting
 # TODO: how do we find the optimal db_max_connections? too high actually ends up being slower
 db_max_connections = 99
-db_url = "mysql://MYSQL_USER:MYSQL_PASSWORD@MYSQL_DOMAIN:MYSQL_PORT/MYSQL_DB"
+db_url = "mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy"
 
 min_sum_soft_limit = 2_000
 min_synced_rpcs = 2
 
+# redis is optional. it is used for rate limits set by `hard_limit`
 # TODO: how do we find the optimal redis_max_connections? too high actually ends up being slower
 volatile_redis_max_connections = 300
-volatile_redis_url = "redis://REDIS_DOMAIN:REDIS_PORT/"
+volatile_redis_url = "redis://127.0.0.1:16380/"
 
 redirect_public_url = "https://llamanodes.com/public-rpc"
+# redirect_rpc_key_url only does something if db_url is set
 redirect_rpc_key_url = "https://llamanodes.com/dashboard/keys?key={rpc_key_id}"
 
-sentry_url = "https://SENTRY_KEY_A.ingest.sentry.io/SENTRY_KEY_B"
+# sentry is optional. it is used for browsing error logs
+# sentry_url = "https://SENTRY_KEY_A.ingest.sentry.io/SENTRY_KEY_B"
 
 # public limits are when no key is used. these are instead grouped by ip
 # 0 = block all public requests
@@ -26,6 +30,7 @@ public_requests_per_period = 200
 # 10GB of cache
 response_cache_max_bytes = 10_000_000_000
 
+# allowed_origin_requests_per_period changes the min_sum_soft_limit for requests with the specified (AND SPOOFABLE) Origin header
 [app.allowed_origin_requests_per_period]
 "https://chainlist.org" = 1_000
 

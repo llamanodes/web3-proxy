@@ -10,6 +10,12 @@ All other requests are sent to an RPC server on the latest block (alchemy, moral
 
 Each server has different limits to configure. The `soft_limit` is the number of parallel active requests where a server starts to slow down. The `hard_limit` is where a server starts giving rate limits or other errors.
 
+## Quick development
+
+1. Run `docker-compose up -d` to start the database and caches. See `docker-compose.yml` for details.
+2. Copy `./config/example.toml` to `./config/development.toml` and change settings to match your setup.
+3. Run `cargo` commands:
+
 ```
 $ cargo run --release -- --help
 ```
@@ -28,10 +34,10 @@ Options:
   --help            display usage information
 ```
 
-Start the server with the defaults (listen on `http://localhost:8544` and use `./config/example.toml` which proxies to a bunch of public nodes:
+Start the server with the defaults (listen on `http://localhost:8544` and use `./config/development.toml` which uses the database and cache running under docker and proxies to a bunch of public nodes:
 
 ```
-cargo run --release -- --config ./config/example.toml
+cargo run --release
 ```
 
 ## Common commands

@@ -29,13 +29,4 @@ services:
       file: docker-compose.common.yml
       service: volatile_redis
     ports:
-      - 16380:6379
-  # dev-eth:
-  #   extends:
-  #     file: docker-compose.common.yml
-  #     service: web3-proxy
-  #   volumes:
-  #     - ./config/example.toml:/config.toml
-  #   ports:
-  #     - 8544:8544 # proxy (should be behind something handling HTTPS)
-  #     - 8543:8543 # prometheus
+      - 127.0.0.1:16379:6379
