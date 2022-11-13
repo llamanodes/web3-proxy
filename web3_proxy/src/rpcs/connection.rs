@@ -447,6 +447,7 @@ impl Web3Connection {
                     }
                 }
 
+                // send the block off to be saved
                 block_sender
                     .send_async((Some(new_head_block), self.clone()))
                     .await

@@ -68,6 +68,7 @@ impl Web3Connections {
 
         // // trace!(%block_hash, %block_num, "saving new block");
 
+        // TODO: this block is very likely already in block_hashes
         self.block_hashes
             .insert(*block_hash, block.to_owned())
             .await;

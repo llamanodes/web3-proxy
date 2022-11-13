@@ -235,6 +235,7 @@ These are roughly in order of completition
 - [x] test that runs check_config against example.toml
 - [x] improve sorting servers by weight. don't force to lower weights, still have a probability that smaller weights might be 
 - [x] flamegraphs show 52% of the time to be in tracing. replace with simpler logging
+- [x] add optional display name to rpc configs
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
 - [ ] add block timestamp to the /status page
