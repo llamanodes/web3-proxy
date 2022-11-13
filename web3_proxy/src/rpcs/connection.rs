@@ -30,6 +30,7 @@ use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBeh
 /// An active connection to a Web3 RPC server like geth or erigon.
 pub struct Web3Connection {
     pub name: String,
+    pub display_name: Option<String>,
     /// TODO: can we get this from the provider? do we even need it?
     url: String,
     /// Some connections use an http_client. we keep a clone for reconnecting
@@ -62,6 +63,7 @@ impl Web3Connection {
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         name: String,
+        display_name: Option<String>,
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
         url_str: String,
@@ -95,6 +97,7 @@ impl Web3Connection {
 
         let new_connection = Self {
             name,
+            display_name,
             http_client,
             url: url_str,
             active_requests: 0.into(),
@@ -737,7 +740,7 @@ impl Web3Connection {
         authorization: Arc<Authorization>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
     ) -> anyhow::Result<()> {
-        info!( "watching pending transactions on {}", self);
+        info!("watching pending transactions on {}", self);
 
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
@@ -790,7 +793,7 @@ impl Web3Connection {
 
                     // TODO: is this always an error?
                     // TODO: we probably don't want a warn and to return error
-                    warn!( "pending_transactions subscription ended on {}", self);
+                    warn!("pending_transactions subscription ended on {}", self);
                     return Err(anyhow::anyhow!("pending_transactions subscription ended"));
                 }
             }
@@ -859,7 +862,7 @@ impl Web3Connection {
                     // save the smallest retry_after. if nothing succeeds, return an Err with retry_after in it
                     // TODO: use tracing better
                     // TODO: i'm seeing "Exhausted rate limit on moralis: 0ns". How is it getting 0?
-                    warn!( "Exhausted rate limit on {}. Retry at {:?}", self, retry_at);
+                    warn!("Exhausted rate limit on {}. Retry at {:?}", self, retry_at);
 
                     return Ok(OpenRequestResult::RetryAt(retry_at));
                 }
@@ -915,10 +918,12 @@ impl Serialize for Web3Connection {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Connection", 7)?;
+        let mut state = serializer.serialize_struct("Web3Connection", 8)?;
 
-        // the url is excluded because it likely includes private information. just show the name
+        // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
+        // a longer name for display to users
+        state.serialize_field("display_name", &self.display_name)?;
 
         let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
         if block_data_limit == u64::MAX {

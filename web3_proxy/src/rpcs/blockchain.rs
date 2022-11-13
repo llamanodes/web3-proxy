@@ -501,7 +501,7 @@ impl Web3Connections {
                                 if consensus_head_block_id.hash == old_block_id.hash {
                                     // no change in hash. no need to use head_block_sender
                                     debug!(
-                                        "con {}/{}/{}. con head={}. rpc={}. rpc head={}",
+                                        "con {}/{}/{} con_head={} rpc={} rpc_head={}",
                                         num_consensus_rpcs,
                                         num_connection_heads,
                                         total_conns,
@@ -512,7 +512,7 @@ impl Web3Connections {
                                 } else {
                                     // hash changed
                                     debug!(
-                                        "unc {}/{}/{} con_head={}. old={}. rpc_head={}. rpc={}",
+                                        "unc {}/{}/{} con_head={} old={} rpc_head={} rpc={}",
                                         num_consensus_rpcs,
                                         num_connection_heads,
                                         total_conns,
@@ -534,7 +534,7 @@ impl Web3Connections {
                             Ordering::Less => {
                                 // this is unlikely but possible
                                 // TODO: better log
-                                warn!("chain rolled back {}/{}/{}. con_head={} old_head={}. rpc_head={}. rpc={}", num_consensus_rpcs, num_connection_heads, total_conns, consensus_head_block_id, old_block_id, rpc_head_str, rpc);
+                                warn!("chain rolled back {}/{}/{} con_head={} old_head={} rpc_head={} rpc={}", num_consensus_rpcs, num_connection_heads, total_conns, consensus_head_block_id, old_block_id, rpc_head_str, rpc);
 
                                 // TODO: tell save_block to remove any higher block numbers from the cache. not needed because we have other checks on requested blocks being > head, but still seems slike a good idea
                                 self.save_block(&consensus_head_block, true).await.context(
@@ -547,7 +547,7 @@ impl Web3Connections {
                             }
                             Ordering::Greater => {
                                 debug!(
-                                    "new {}/{}/{} conn_head={}. rpc_head={}. rpc={}",
+                                    "new {}/{}/{} con head={} rpc_head={} rpc={}",
                                     num_consensus_rpcs,
                                     num_connection_heads,
                                     total_conns,

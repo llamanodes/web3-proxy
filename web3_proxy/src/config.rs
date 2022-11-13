@@ -182,6 +182,8 @@ pub struct Web3ConnectionConfig {
     /// simple way to disable a connection without deleting the row
     #[serde(default)]
     pub disabled: bool,
+    /// a name used in /status and other user facing messages
+    pub display_name: Option<String>,
     /// websocket (or http if no websocket)
     pub url: String,
     /// the requests per second at which the server starts slowing down
@@ -189,6 +191,7 @@ pub struct Web3ConnectionConfig {
     /// the requests per second at which the server throws errors (rate limit or otherwise)
     pub hard_limit: Option<u64>,
     /// All else equal, a server with a lower weight receives more requests. Ranges 0-100
+    #[serde(default = "default_weight")]
     pub weight: u32,
     /// Subscribe to the firehose of pending transactions
     /// Don't do this with free rpcs
@@ -196,9 +199,13 @@ pub struct Web3ConnectionConfig {
     pub subscribe_txs: Option<bool>,
 }
 
+fn default_weight() -> u32 {
+    0
+}
+
 impl Web3ConnectionConfig {
     /// Create a Web3Connection from config
-    /// TODO: move this into Web3Connection (just need to make things pub(crate))
+    /// TODO: move this into Web3Connection? (just need to make things pub(crate))
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         self,
@@ -232,6 +239,7 @@ impl Web3ConnectionConfig {
 
         Web3Connection::spawn(
             name,
+            self.display_name,
             chain_id,
             db_conn,
             self.url,

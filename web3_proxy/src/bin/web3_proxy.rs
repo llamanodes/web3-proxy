@@ -275,11 +275,27 @@ mod tests {
             balanced_rpcs: HashMap::from([
                 (
                     "anvil".to_string(),
-                    Web3ConnectionConfig::new(false, anvil.endpoint(), 100, None, 1, Some(false)),
+                    Web3ConnectionConfig::new(
+                        false,
+                        None,
+                        anvil.endpoint(),
+                        100,
+                        None,
+                        1,
+                        Some(false),
+                    ),
                 ),
                 (
                     "anvil_ws".to_string(),
-                    Web3ConnectionConfig::new(false, anvil.ws_endpoint(), 100, None, 0, Some(true)),
+                    Web3ConnectionConfig::new(
+                        false,
+                        None,
+                        anvil.ws_endpoint(),
+                        100,
+                        None,
+                        0,
+                        Some(true),
+                    ),
                 ),
             ]),
             private_rpcs: None,
