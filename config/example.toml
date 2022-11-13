@@ -12,7 +12,7 @@ min_synced_rpcs = 2
 # redis is optional. it is used for rate limits set by `hard_limit`
 # TODO: how do we find the optimal redis_max_connections? too high actually ends up being slower
 volatile_redis_max_connections = 300
-volatile_redis_url = "redis://127.0.0.1:16380/"
+volatile_redis_url = "redis://127.0.0.1:16379/"
 
 redirect_public_url = "https://llamanodes.com/public-rpc"
 # redirect_rpc_key_url only does something if db_url is set
