@@ -6,7 +6,10 @@ chain_id = 1
 db_max_connections = 99
 db_url = "mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy"
 
+# thundering herd protection
+# only mark a block as the head block if the sum of their soft limits is greater than or equal to min_sum_soft_limit
 min_sum_soft_limit = 2_000
+# only mark a block as the head block if the number of servers with it is great than or equal to min_synced_rpcs
 min_synced_rpcs = 2
 
 # redis is optional. it is used for rate limits set by `hard_limit`
@@ -31,6 +34,7 @@ public_requests_per_period = 200
 response_cache_max_bytes = 10_000_000_000
 
 # allowed_origin_requests_per_period changes the min_sum_soft_limit for requests with the specified (AND SPOOFABLE) Origin header
+# origins not in the list for requests without an rpc_key will use public_requests_per_period instead
 [app.allowed_origin_requests_per_period]
 "https://chainlist.org" = 1_000
 
