@@ -237,6 +237,8 @@ These are roughly in order of completition
 - [x] flamegraphs show 52% of the time to be in tracing. replace with simpler logging
 - [x] add optional display name to rpc configs
 - [x] add locking around running migrations
+- [x] cli tool for checking config
+- [x] web3_proxy_cli command should read database settings from config
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
 - [ ] add block timestamp to the /status page
@@ -407,7 +409,6 @@ in another repo: event subscriber
   - after looking at my request logs, i think its worth doing this. no point hitting the backends with requests for blocks multiple times. will also help with cache hit rates since we can keep recent blocks in a separate cache
 - [ ] Public bsc server got “0” for block data limit (ninicoin)
 - [ ] cli tool for resetting api keys
-- [ ] cli tool for checking config
 - [ ] benchmarks of the different Cache implementations (futures vs dash)
 - [ ] Advanced load testing scripts so we can find optimal cost servers 
   - [ ] benchmarks from https://github.com/llamafolio/llamafolio-api/
@@ -499,7 +500,6 @@ in another repo: event subscriber
 - [ ] web3 on rpc1 exited without errors. maybe promote some shutdown messages from debug to info?
 - [ ] better handling for offline http servers
   - if we get a connection refused, we should remove the server's block info so it is taken out of rotation
-- [ ] web3_proxy_cli command should read database settings from config
 - [ ] how should we handle reverting transactions? they won't confirm for a while after we send them
 - [ ] allow configuration of the expiration time of bearer tokens. currently defaults to 4 weeks
 - [ ] emit stat when an IP/key goes over rate limits
