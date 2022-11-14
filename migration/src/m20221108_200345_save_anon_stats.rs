@@ -15,7 +15,7 @@ impl MigrationTrait for Migration {
                             .big_unsigned()
                             .null(),
                     )
-                    .add_column(ColumnDef::new(RpcAccounting::Origin).string().null())
+                    .add_column_if_not_exists(ColumnDef::new(RpcAccounting::Origin).string().null())
                     .to_owned(),
             )
             .await
