@@ -1,8 +1,9 @@
 mod check_config;
+mod clear_migration_lock;
 mod create_user;
 
 use argh::FromArgs;
-use web3_proxy::app::get_migrated_db;
+use web3_proxy::app::{get_db, get_migrated_db};
 
 #[derive(Debug, FromArgs)]
 /// Command line interface for admins to interact with web3_proxy
@@ -24,6 +25,7 @@ pub struct TopConfig {
 enum SubCommand {
     CreateUser(create_user::CreateUserSubCommand),
     CheckConfig(check_config::CheckConfigSubCommand),
+    DropMigrationLock(clear_migration_lock::DropMigrationLockSubCommand),
     // TODO: sub command to downgrade migrations?
     // TODO: sub command to add new api keys to an existing user?
 }
@@ -51,5 +53,10 @@ async fn main() -> anyhow::Result<()> {
             x.main(&db_conn).await
         }
         SubCommand::CheckConfig(x) => x.main().await,
+        SubCommand::DropMigrationLock(x) => {
+            let db_conn = get_db(cli_config.db_url, 1, 1).await?;
+
+            x.main(&db_conn).await
+        }
     }
 }

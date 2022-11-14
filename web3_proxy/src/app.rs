@@ -29,7 +29,7 @@ use log::{debug, error, info, warn};
 use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
 use migration::sea_orm::{self, ConnectionTrait, Database, DatabaseConnection};
 use migration::sea_query::table::ColumnDef;
-use migration::{Alias, Migrator, MigratorTrait, Table};
+use migration::{Alias, DbErr, Migrator, MigratorTrait, Table};
 use moka::future::Cache;
 use redis_rate_limiter::{DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use serde::Serialize;
@@ -149,12 +149,11 @@ pub async fn flatten_handles<T>(
     Ok(())
 }
 
-/// Connect to the database and run migrations
-pub async fn get_migrated_db(
+pub async fn get_db(
     db_url: String,
     min_connections: u32,
     max_connections: u32,
-) -> anyhow::Result<DatabaseConnection> {
+) -> Result<DatabaseConnection, DbErr> {
     // TODO: scrub credentials and then include the db_url in logs
     info!("Connecting to db");
 
@@ -169,19 +168,35 @@ pub async fn get_migrated_db(
         .sqlx_logging(false);
     // .sqlx_logging_level(log::LevelFilter::Info);
 
-    let db_conn = Database::connect(db_opt).await?;
+    Database::connect(db_opt).await
+}
 
+pub async fn drop_migration_lock(db_conn: &DatabaseConnection) -> Result<(), DbErr> {
     let db_backend = db_conn.get_database_backend();
 
-    let migration_lock_table_ref = Alias::new("migration_lock");
+    let drop_lock_statment = db_backend.build(Table::drop().table(Alias::new("migration_lock")));
+
+    db_conn.execute(drop_lock_statment).await?;
+
+    Ok(())
+}
+
+/// Connect to the database and run migrations
+pub async fn get_migrated_db(
+    db_url: String,
+    min_connections: u32,
+    max_connections: u32,
+) -> anyhow::Result<DatabaseConnection> {
+    let db_conn = get_db(db_url, min_connections, max_connections).await?;
+
+    let db_backend = db_conn.get_database_backend();
 
     // TODO: put the timestamp into this?
     let create_lock_statment = db_backend.build(
         Table::create()
-            .table(migration_lock_table_ref.clone())
+            .table(Alias::new("migration_lock"))
             .col(ColumnDef::new(Alias::new("locked")).boolean().default(true)),
     );
-    let drop_lock_statment = db_backend.build(Table::drop().table(migration_lock_table_ref));
 
     loop {
         if Migrator::get_pending_migrations(&db_conn).await?.is_empty() {
@@ -207,7 +222,7 @@ pub async fn get_migrated_db(
     let migration_result = Migrator::up(&db_conn, None).await;
 
     // drop the distributed lock
-    db_conn.execute(drop_lock_statment).await?;
+    drop_migration_lock(&db_conn).await?;
 
     // return if migrations erred
     migration_result?;
