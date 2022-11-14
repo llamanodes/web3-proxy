@@ -7,7 +7,7 @@ use entities::rpc_accounting;
 use hashbrown::HashMap;
 use hdrhistogram::{Histogram, RecordError};
 use log::{error, info};
-use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr};
+use migration::sea_orm::{self, ActiveModelTrait, DatabaseConnection, DbErr};
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;

@@ -6,7 +6,7 @@ use argh::FromArgs;
 use derive_more::Constructor;
 use ethers::prelude::TxHash;
 use hashbrown::HashMap;
-use sea_orm::DatabaseConnection;
+use migration::sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;

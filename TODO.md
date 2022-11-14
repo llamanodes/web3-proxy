@@ -236,12 +236,15 @@ These are roughly in order of completition
 - [x] improve sorting servers by weight. don't force to lower weights, still have a probability that smaller weights might be 
 - [x] flamegraphs show 52% of the time to be in tracing. replace with simpler logging
 - [x] add optional display name to rpc configs
+- [x] add locking around running migrations
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
 - [ ] add block timestamp to the /status page
 - [ ] cache the status page for a second
 - [ ] probably need to turn more sentry log integrations (like anyhow) on!
 - [ ] tests should use `test-env-log = "0.2.8"`
+- [ ] weighted random choice should still prioritize non-archive servers
+    - maybe shuffle randomly and then sort by (block_limit, random_index)?
 
 - [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
 

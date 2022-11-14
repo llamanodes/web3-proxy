@@ -25,11 +25,11 @@ use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
 use itertools::Itertools;
 use log::warn;
-use redis_rate_limiter::redis::AsyncCommands;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+use migration::sea_orm::{
+    self, ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     TransactionTrait, TryIntoModel,
 };
+use redis_rate_limiter::redis::AsyncCommands;
 use serde::Deserialize;
 use serde_json::json;
 use siwe::{Message, VerificationOpts};

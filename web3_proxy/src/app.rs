@@ -25,12 +25,13 @@ use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use hashbrown::HashMap;
 use ipnet::IpNet;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
-use migration::{Migrator, MigratorTrait};
+use migration::sea_orm::{self, ConnectionTrait, Database, DatabaseConnection};
+use migration::sea_query::table::ColumnDef;
+use migration::{Alias, Migrator, MigratorTrait, Table};
 use moka::future::Cache;
 use redis_rate_limiter::{DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
-use sea_orm::DatabaseConnection;
 use serde::Serialize;
 use serde_json::json;
 use std::fmt;
@@ -42,7 +43,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, watch, Semaphore};
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use ulid::Ulid;
 
@@ -168,10 +169,48 @@ pub async fn get_migrated_db(
         .sqlx_logging(false);
     // .sqlx_logging_level(log::LevelFilter::Info);
 
-    let db_conn = sea_orm::Database::connect(db_opt).await?;
+    let db_conn = Database::connect(db_opt).await?;
 
-    // TODO: if error, roll back?
-    Migrator::up(&db_conn, None).await?;
+    let db_backend = db_conn.get_database_backend();
+
+    let migration_lock_table_ref = Alias::new("migration_lock");
+
+    // TODO: put the timestamp into this?
+    let create_lock_statment = db_backend.build(
+        Table::create()
+            .table(migration_lock_table_ref.clone())
+            .col(ColumnDef::new(Alias::new("locked")).boolean().default(true)),
+    );
+    let drop_lock_statment = db_backend.build(Table::drop().table(migration_lock_table_ref));
+
+    loop {
+        if Migrator::get_pending_migrations(&db_conn).await?.is_empty() {
+            info!("no migrations to apply");
+            return Ok(db_conn);
+        }
+
+        // there are migrations to apply
+        // acquire a lock
+        if let Err(err) = db_conn.execute(create_lock_statment.clone()).await {
+            debug!("Unable to acquire lock. err={:?}", err);
+
+            // TODO: exponential backoff with jitter
+            sleep(Duration::from_secs(1)).await;
+
+            continue;
+        }
+
+        debug!("migration lock acquired");
+        break;
+    }
+
+    let migration_result = Migrator::up(&db_conn, None).await;
+
+    // drop the distributed lock
+    db_conn.execute(drop_lock_statment).await?;
+
+    // return if migrations erred
+    migration_result?;
 
     Ok(db_conn)
 }

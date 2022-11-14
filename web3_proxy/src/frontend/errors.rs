@@ -12,9 +12,9 @@ use derive_more::From;
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
 use log::warn;
+use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
-use sea_orm::DbErr;
 use std::error::Error;
 use tokio::{task::JoinError, time::Instant};
 

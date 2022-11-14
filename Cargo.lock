@@ -5468,7 +5468,6 @@ dependencies = [
  "regex",
  "reqwest",
  "rustc-hash",
- "sea-orm",
  "sentry",
  "serde",
  "serde_json",

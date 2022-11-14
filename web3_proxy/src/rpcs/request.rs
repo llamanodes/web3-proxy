@@ -13,8 +13,7 @@ use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
 use metered::Throughput;
-use sea_orm::ActiveEnum;
-use sea_orm::ActiveModelTrait;
+use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
 use serde_json::json;
 use std::fmt;
 use std::sync::atomic::{self, AtomicBool, Ordering};
@@ -276,14 +275,23 @@ impl OpenRequestHandle {
                 RequestErrorHandler::DebugLevel => {
                     // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
                     if !is_revert {
-                        debug!("bad response from {}! method={} params={:?} err={:?}", self.conn, method, params, err);
+                        debug!(
+                            "bad response from {}! method={} params={:?} err={:?}",
+                            self.conn, method, params, err
+                        );
                     }
                 }
                 RequestErrorHandler::ErrorLevel => {
-                    error!("bad response from {}! method={} params={:?} err={:?}", self.conn, method, params, err);
+                    error!(
+                        "bad response from {}! method={} params={:?} err={:?}",
+                        self.conn, method, params, err
+                    );
                 }
                 RequestErrorHandler::WarnLevel => {
-                    warn!("bad response from {}! method={} params={:?} err={:?}", self.conn, method, params, err);
+                    warn!(
+                        "bad response from {}! method={} params={:?} err={:?}",
+                        self.conn, method, params, err
+                    );
                 }
                 RequestErrorHandler::SaveReverts => {
                     // TODO: do not unwrap! (doesn't matter much since we check method as a string above)

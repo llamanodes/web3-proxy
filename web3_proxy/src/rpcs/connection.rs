@@ -10,9 +10,9 @@ use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
 use log::{debug, error, info, warn, Level};
+use migration::sea_orm::DatabaseConnection;
 use parking_lot::RwLock;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
-use sea_orm::DatabaseConnection;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
@@ -289,6 +289,7 @@ impl Web3Connection {
         initial_sleep: bool,
     ) -> anyhow::Result<()> {
         // there are several crates that have retry helpers, but they all seem more complex than necessary
+        // TODO: move this backoff logic into a helper function so we can use it when doing database locking
         let base_ms = 500;
         let cap_ms = 30_000;
         let range_multiplier = 3;
