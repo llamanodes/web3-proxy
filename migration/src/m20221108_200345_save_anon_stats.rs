@@ -6,6 +6,16 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // note: somehow this column got added in prod, but the migration wasn't marked as complete
+        let _ = manager
+            .alter_table(
+                Table::alter()
+                    .table(RpcAccounting::Table)
+                    .drop_column(RpcAccounting::Origin)
+                    .to_owned(),
+            )
+            .await;
+
         manager
             .alter_table(
                 Table::alter()
@@ -15,7 +25,7 @@ impl MigrationTrait for Migration {
                             .big_unsigned()
                             .null(),
                     )
-                    .add_column_if_not_exists(ColumnDef::new(RpcAccounting::Origin).string().null())
+                    .add_column(ColumnDef::new(RpcAccounting::Origin).string().null())
                     .to_owned(),
             )
             .await
