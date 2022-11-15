@@ -254,6 +254,7 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] cli flag to set prometheus port
 - [ ] flamegraphs show 25% of the time to be in moka-housekeeper. tune that
 - [ ] remove the "metered" crate now that we save aggregate queries?
 - [ ] remove/change the "active_requests" counter? maybe only once we have dynamic soft limits?
