@@ -51,7 +51,7 @@ petgraph = "0.6.2"
 proctitle = "0.1.1"
 # TODO: regex has several "perf" features that we might want to use
 regex = "1.7.0"
-reqwest = { version = "0.11.12", default-features = false, features = ["json", "tokio-rustls"] }
+reqwest = { version = "0.11.13", default-features = false, features = ["json", "tokio-rustls"] }
 handlebars = "4.3.5"
 rustc-hash = "1.1.0"
 siwe = "0.5.0"
