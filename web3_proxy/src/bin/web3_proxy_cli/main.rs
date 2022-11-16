@@ -1,10 +1,10 @@
+mod change_user_tier_by_key;
 mod check_config;
-mod clear_migration_lock;
 mod create_user;
-
-use std::fs;
+mod drop_migration_lock;
 
 use argh::FromArgs;
+use std::fs;
 use web3_proxy::{
     app::{get_db, get_migrated_db},
     config::TopConfig,
@@ -32,9 +32,10 @@ pub struct CliConfig {
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand)]
 enum SubCommand {
-    CreateUser(create_user::CreateUserSubCommand),
+    ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeyCommand),
     CheckConfig(check_config::CheckConfigSubCommand),
-    DropMigrationLock(clear_migration_lock::DropMigrationLockSubCommand),
+    CreateUser(create_user::CreateUserSubCommand),
+    DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
     // TODO: sub command to downgrade migrations?
     // TODO: sub command to add new api keys to an existing user?
     // TODO: sub command to change a user's tier
@@ -70,12 +71,17 @@ async fn main() -> anyhow::Result<()> {
     };
 
     match cli_config.sub_command {
+        SubCommand::ChangeUserTierByKey(x) => {
+            let db_conn = get_db(cli_config.db_url, 1, 1).await?;
+
+            x.main(&db_conn).await
+        }
+        SubCommand::CheckConfig(x) => x.main().await,
         SubCommand::CreateUser(x) => {
             let db_conn = get_migrated_db(cli_config.db_url, 1, 1).await?;
 
             x.main(&db_conn).await
         }
-        SubCommand::CheckConfig(x) => x.main().await,
         SubCommand::DropMigrationLock(x) => {
             let db_conn = get_db(cli_config.db_url, 1, 1).await?;
 
