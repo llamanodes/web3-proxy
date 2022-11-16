@@ -4,6 +4,8 @@ chain_id = 1
 # a database is optional. it is used for user authentication and accounting
 # TODO: how do we find the optimal db_max_connections? too high actually ends up being slower
 db_max_connections = 99
+# development runs cargo commands on the host and so uses "mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy" for db_url
+# production runs inside docker and so uses "mysql://root:web3_proxy@db:3306/web3_proxy" for db_url
 db_url = "mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy"
 
 # thundering herd protection
@@ -15,10 +17,14 @@ min_synced_rpcs = 2
 # redis is optional. it is used for rate limits set by `hard_limit`
 # TODO: how do we find the optimal redis_max_connections? too high actually ends up being slower
 volatile_redis_max_connections = 300
+# development runs cargo commands on the host and so uses "redis://127.0.0.1:16379/" for volatile_redis_url
+# production runs inside docker and so uses "redis://redis:6379/" for volatile_redis_url
 volatile_redis_url = "redis://127.0.0.1:16379/"
 
+# redirect_public_url is optional
 redirect_public_url = "https://llamanodes.com/public-rpc"
-# redirect_rpc_key_url only does something if db_url is set
+# redirect_rpc_key_url is optional
+# it only does something if db_url is set
 redirect_rpc_key_url = "https://llamanodes.com/dashboard/keys?key={rpc_key_id}"
 
 # sentry is optional. it is used for browsing error logs
