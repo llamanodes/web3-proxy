@@ -62,11 +62,11 @@ impl Web3Connections {
         }
 
         if blockchain.contains_node(*block_hash) {
-            // // trace!(%block_hash, %block_num, "block already saved");
+            // trace!(%block_hash, %block_num, "block already saved");
             return Ok(());
         }
 
-        // // trace!(%block_hash, %block_num, "saving new block");
+        // trace!(%block_hash, %block_num, "saving new block");
 
         // TODO: this block is very likely already in block_hashes
         self.block_hashes

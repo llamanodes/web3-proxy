@@ -263,6 +263,7 @@ async fn read_web3_socket(
     let subscription_count = AtomicUsize::new(1);
 
     while let Some(Ok(msg)) = ws_rx.next().await {
+        // TODO: spawn this?
         // new message from our client. forward to a backend and then send it through response_tx
         let response_msg = match msg {
             Message::Text(payload) => {
@@ -320,6 +321,7 @@ async fn write_web3_socket(
 ) {
     // TODO: increment counter for open websockets
 
+    // TODO: is there any way to make this stream receive.
     while let Ok(msg) = response_rx.recv_async().await {
         // a response is ready
 

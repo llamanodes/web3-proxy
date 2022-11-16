@@ -241,6 +241,8 @@ These are roughly in order of completition
 - [x] web3_proxy_cli command should read database settings from config
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
+- [-] more trace logging
+- [ ] add more to web3_proxy_cli
 - [ ] add block timestamp to the /status page
 - [ ] cache the status page for a second
 - [ ] probably need to turn more sentry log integrations (like anyhow) on!

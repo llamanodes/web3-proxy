@@ -25,7 +25,7 @@ use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use hashbrown::HashMap;
 use ipnet::IpNet;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
 use migration::sea_orm::{self, ConnectionTrait, Database, DatabaseConnection};
 use migration::sea_query::table::ColumnDef;
@@ -640,7 +640,12 @@ impl Web3ProxyApp {
                     subscription_registration,
                 );
 
-                // // trace!(?subscription_id, "pending transactions subscription");
+                trace!(
+                    "pending transactions subscription id: {:?}",
+                    subscription_id
+                );
+
+                // TODO: do something with this handle?
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
                         let new_tx = match new_tx_state {
@@ -668,7 +673,7 @@ impl Web3ProxyApp {
                         };
                     }
 
-                    // // trace!(?subscription_id, "closed new heads subscription");
+                    // trace!(?subscription_id, "closed new heads subscription");
                 });
             }
             Some(x) if x == json!(["newPendingFullTransactions"]) => {
@@ -712,7 +717,7 @@ impl Web3ProxyApp {
                         };
                     }
 
-                    // // trace!(?subscription_id, "closed new heads subscription");
+                    // trace!(?subscription_id, "closed new heads subscription");
                 });
             }
             Some(x) if x == json!(["newPendingRawTransactions"]) => {
@@ -724,7 +729,10 @@ impl Web3ProxyApp {
                     subscription_registration,
                 );
 
-                // // trace!(?subscription_id, "pending transactions subscription");
+                trace!(
+                    "pending transactions subscription id: {:?}",
+                    subscription_id
+                );
 
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
@@ -756,7 +764,7 @@ impl Web3ProxyApp {
                         };
                     }
 
-                    // // trace!(?subscription_id, "closed new heads subscription");
+                    trace!("closed new heads subscription: {:?}", subscription_id);
                 });
             }
             _ => return Err(anyhow::anyhow!("unimplemented")),
