@@ -5,7 +5,7 @@ use super::connection::Web3Connection;
 use super::connections::Web3Connections;
 use super::request::OpenRequestResult;
 use ethers::prelude::{ProviderError, Transaction, TxHash};
-use log::{debug, Level};
+use log::{debug, trace, Level};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -43,12 +43,12 @@ impl Web3Connections {
                 return Ok(None);
             }
             Err(err) => {
-                // trace!(
-                //     ?pending_tx_id,
-                //     ?rpc,
-                //     ?err,
-                //     "cancelled funneling transaction"
-                // );
+                trace!(
+                    "cancelled funneling transaction {} from {}: {:?}",
+                    pending_tx_id,
+                    rpc,
+                    err,
+                );
                 return Ok(None);
             }
         };
@@ -94,14 +94,14 @@ impl Web3Connections {
             Ok(Some(tx_state)) => {
                 let _ = pending_tx_sender.send(tx_state);
 
-                // trace!(?pending_tx_id, "sent");
+                trace!("sent tx {:?}", pending_tx_id);
 
                 // we sent the transaction. return now. don't break looping because that gives a warning
                 return Ok(());
             }
             Ok(None) => {}
             Err(err) => {
-                // trace!(?err, ?pending_tx_id, "failed fetching transaction");
+                trace!("failed fetching transaction {:?}: {:?}", pending_tx_id, err);
                 // unable to update the entry. sleep and try again soon
                 // TODO: retry with exponential backoff with jitter starting from a much smaller time
                 // sleep(Duration::from_millis(100)).await;

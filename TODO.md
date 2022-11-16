@@ -247,6 +247,10 @@ These are roughly in order of completition
 - [ ] tests should use `test-env-log = "0.2.8"`
 - [ ] weighted random choice should still prioritize non-archive servers
     - maybe shuffle randomly and then sort by (block_limit, random_index)?
+    - maybe sum available_requests grouped by archive/non-archive. only limit to non-archive if they have enough?
+- [ ] cli commands to search users by key
+- [ ] cli command to change user_tier by key
+- [ ] change invite codes to set the user_tier
 
 - [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
 

@@ -21,7 +21,7 @@ use futures::{
 use handlebars::Handlebars;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{error, info};
+use log::{error, info, trace};
 use serde_json::{json, value::RawValue};
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
@@ -276,9 +276,12 @@ async fn read_web3_socket(
                 )
                 .await
             }
-            Message::Ping(x) => Message::Pong(x),
+            Message::Ping(x) => {
+                trace!("ping: {:?}", x);
+                Message::Pong(x)
+            }
             Message::Pong(x) => {
-                // // trace!("pong: {:?}", x);
+                trace!("pong: {:?}", x);
                 continue;
             }
             Message::Close(_) => {
@@ -324,8 +327,8 @@ async fn write_web3_socket(
 
         // forward the response to through the websocket
         if let Err(err) = ws_tx.send(msg).await {
-            // this isn't a problem. this is common and happens whenever a client disconnects
-            // trace!(?err, "unable to write to websocket");
+            // this is common. it happens whenever a client disconnects
+            trace!("unable to write to websocket: {:?}", err);
             break;
         };
     }

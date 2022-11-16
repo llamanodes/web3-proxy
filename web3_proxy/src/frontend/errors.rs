@@ -11,7 +11,7 @@ use axum::{
 use derive_more::From;
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
-use log::warn;
+use log::{trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
@@ -185,15 +185,17 @@ impl IntoResponse for FrontendErrorResponse {
                 return r;
             }
             Self::StatusCode(status_code, err_msg, err) => {
-                // TODO: warn is way too loud. different status codes should get different error levels. 500s should warn. 400s should stat
-                // trace!(?status_code, ?err_msg, ?err);
+                // different status codes should get different error levels. 500s should warn. 400s should stat
+                let code = status_code.as_u16();
+                if (500..600).contains(&code) {
+                    warn!("user error {} {:?}: {:?}", code, err_msg, err);
+                } else {
+                    trace!("user error {} {:?}: {:?}", code, err_msg, err);
+                }
+
                 (
                     status_code,
-                    JsonRpcForwardedResponse::from_str(
-                        &err_msg,
-                        Some(status_code.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcForwardedResponse::from_str(&err_msg, Some(code.into()), None),
                 )
             }
             Self::HeaderToString(err) => {
