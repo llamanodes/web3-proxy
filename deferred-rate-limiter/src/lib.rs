@@ -34,6 +34,7 @@ where
     K: Copy + Debug + Display + Hash + Eq + Send + Sync + 'static,
 {
     pub fn new(
+        // TODO: change this to cache_size in bytes
         cache_size: u64,
         prefix: &str,
         rrl: RedisRateLimiter,
@@ -42,6 +43,7 @@ where
         let ttl = rrl.period as u64;
 
         // TODO: time to live is not exactly right. we want this ttl counter to start only after redis is down. this works for now
+        // TODO: what do these weigh?
         let local_cache = Cache::builder()
             .time_to_live(Duration::from_secs(ttl))
             .max_capacity(cache_size)

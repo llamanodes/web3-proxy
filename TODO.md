@@ -239,19 +239,15 @@ These are roughly in order of completition
 - [x] add locking around running migrations
 - [x] cli tool for checking config
 - [x] web3_proxy_cli command should read database settings from config
-- [-] add configurable size limits to all the Caches
-  - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
-- [-] more trace logging
-- [ ] add more to web3_proxy_cli
-- [ ] add block timestamp to the /status page
-- [ ] cache the status page for a second
-- [ ] probably need to turn more sentry log integrations (like anyhow) on!
-- [ ] tests should use `test-env-log = "0.2.8"`
+- [x] cli command to change user_tier by key
+- [x] cache the status page for a second
+- [ ] request accounting for websockets
 - [ ] weighted random choice should still prioritize non-archive servers
     - maybe shuffle randomly and then sort by (block_limit, random_index)?
     - maybe sum available_requests grouped by archive/non-archive. only limit to non-archive if they have enough?
-- [ ] cli commands to search users by key
-- [ ] cli command to change user_tier by key
+- [ ] add block timestamp to the /status page
+- [ ] probably need to turn more sentry log integrations (like anyhow) on!
+- [ ] tests should use `test-env-log = "0.2.8"`
 - [ ] change invite codes to set the user_tier
 
 - [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
@@ -260,6 +256,11 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] cli commands to search users by key
+- [-] more trace logging
+- [-] add configurable size limits to all the Caches
+  - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
+  - https://github.com/moka-rs/moka/issues/201
 - [ ] cli flag to set prometheus port
 - [ ] flamegraphs show 25% of the time to be in moka-housekeeper. tune that
 - [ ] remove the "metered" crate now that we save aggregate queries?
@@ -528,4 +529,6 @@ in another repo: event subscriber
 - [ ] if redis is not set and login page is visited, users get a 502. should be 501
 - [ ] allow passing the authorization header to the anonymous rpc endpoint
 - [ ] sentry profiling
-
+- [ ] use Stretto instead of Moka
+- [ ] support alchemy_minedTransactions
+- [ ] debug print of user::Model's address is a big vec of numbers. make that hex somehow
