@@ -1131,7 +1131,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef552e6f588e446098f6ba40d89ac146c8c7b64aade83c051ee00bb5d2bc18d"
 dependencies = [
  "serde",
- "uuid 1.2.1",
+ "uuid 1.2.2",
 ]
 
 [[package]]
@@ -1351,7 +1351,7 @@ version = "0.10.0"
 dependencies = [
  "sea-orm",
  "serde",
- "uuid 1.2.1",
+ "uuid 1.2.2",
 ]
 
 [[package]]
@@ -2723,7 +2723,7 @@ dependencies = [
  "tagptr",
  "thiserror",
  "triomphe",
- "uuid 1.2.1",
+ "uuid 1.2.2",
 ]
 
 [[package]]
@@ -3907,7 +3907,7 @@ dependencies = [
  "time 0.3.17",
  "tracing",
  "url",
- "uuid 1.2.1",
+ "uuid 1.2.2",
 ]
 
 [[package]]
@@ -3966,7 +3966,7 @@ dependencies = [
  "sea-query-derive",
  "serde_json",
  "time 0.3.17",
- "uuid 1.2.1",
+ "uuid 1.2.2",
 ]
 
 [[package]]
@@ -3981,7 +3981,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "time 0.3.17",
- "uuid 1.2.1",
+ "uuid 1.2.2",
 ]
 
 [[package]]
@@ -4176,7 +4176,7 @@ dependencies = [
  "thiserror",
  "time 0.3.17",
  "url",
- "uuid 1.2.1",
+ "uuid 1.2.2",
 ]
 
 [[package]]
@@ -4546,7 +4546,7 @@ dependencies = [
  "time 0.3.17",
  "tokio-stream",
  "url",
- "uuid 1.2.1",
+ "uuid 1.2.2",
  "webpki-roots",
 ]
 
@@ -5276,9 +5276,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.2.1"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "feb41e78f93363bb2df8b0e86a2ca30eed7806ea16ea0c790d757cf93f79be83"
+checksum = "422ee0de9031b5b948b97a8fc04e3aa35230001a722ddd27943e0be31564ce4c"
 dependencies = [
  "getrandom",
  "serde",
@@ -5481,7 +5481,7 @@ dependencies = [
  "tower-http",
  "ulid",
  "url",
- "uuid 1.2.1",
+ "uuid 1.2.2",
 ]
 
 [[package]]
