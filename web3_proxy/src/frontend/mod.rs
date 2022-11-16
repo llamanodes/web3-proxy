@@ -16,15 +16,31 @@ use axum::{
 };
 use http::header::AUTHORIZATION;
 use log::info;
-use std::iter::once;
+use moka::future::Cache;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::{iter::once, time::Duration};
 use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
-/// Start the frontend server.
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub enum FrontendResponseCaches {
+    Status,
+}
 
+// TODO: what should this cache's value be?
+pub type FrontendResponseCache =
+    Cache<FrontendResponseCaches, Arc<serde_json::Value>, hashbrown::hash_map::DefaultHashBuilder>;
+
+/// Start the frontend server.
 pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
+    // setup caches for whatever the frontend needs
+    // TODO: a moka cache is probably way overkill for this.
+    // no need for max items. only expire because of time to live
+    let response_cache: FrontendResponseCache = Cache::builder()
+        .time_to_live(Duration::from_secs(1))
+        .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+
     // build our axum Router
     let app = Router::new()
         // routes should be ordered most to least common
@@ -70,6 +86,8 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .layer(CorsLayer::very_permissive())
         // application state
         .layer(Extension(proxy_app.clone()))
+        // frontend caches
+        .layer(Extension(response_cache))
         // 404 for any unknown routes
         .fallback(errors::handler_404.into_service());
 

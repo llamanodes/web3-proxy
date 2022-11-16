@@ -3,6 +3,7 @@
 //! For ease of development, users can currently access these endponts.
 //! They will eventually move to another port.
 
+use super::{FrontendResponseCache, FrontendResponseCaches};
 use crate::app::Web3ProxyApp;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_macros::debug_handler;
@@ -36,19 +37,28 @@ pub async fn prometheus(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl In
 /// TODO: replace this with proper stats and monitoring
 #[debug_handler]
 
-pub async fn status(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
-    app.pending_transactions.sync();
-    app.rpc_secret_key_cache.sync();
+pub async fn status(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(response_cache): Extension<FrontendResponseCache>,
+) -> impl IntoResponse {
+    let body = response_cache
+        .get_with(FrontendResponseCaches::Status, async {
+            app.pending_transactions.sync();
+            app.rpc_secret_key_cache.sync();
 
-    // TODO: what else should we include? uptime, cache hit rates, cpu load
-    let body = json!({
-        "pending_transactions_count": app.pending_transactions.entry_count(),
-        "pending_transactions_size": app.pending_transactions.weighted_size(),
-        "user_cache_count": app.rpc_secret_key_cache.entry_count(),
-        "user_cache_size": app.rpc_secret_key_cache.weighted_size(),
-        "balanced_rpcs": app.balanced_rpcs,
-        "private_rpcs": app.private_rpcs,
-    });
+            // TODO: what else should we include? uptime, cache hit rates, cpu load
+            let body = json!({
+                "pending_transactions_count": app.pending_transactions.entry_count(),
+                "pending_transactions_size": app.pending_transactions.weighted_size(),
+                "user_cache_count": app.rpc_secret_key_cache.entry_count(),
+                "user_cache_size": app.rpc_secret_key_cache.weighted_size(),
+                "balanced_rpcs": app.balanced_rpcs,
+                "private_rpcs": app.private_rpcs,
+            });
+
+            Arc::new(body)
+        })
+        .await;
 
     Json(body)
 }
