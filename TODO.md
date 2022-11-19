@@ -241,13 +241,9 @@ These are roughly in order of completition
 - [x] web3_proxy_cli command should read database settings from config
 - [x] cli command to change user_tier by key
 - [x] cache the status page for a second
-- [ ] request accounting for websockets
-- [ ] weighted random choice should still prioritize non-archive servers
-    - maybe shuffle randomly and then sort by (block_limit, random_index)?
-    - maybe sum available_requests grouped by archive/non-archive. only limit to non-archive if they have enough?
+- [x] request accounting for websockets
 - [ ] add block timestamp to the /status page
-- [ ] probably need to turn more sentry log integrations (like anyhow) on!
-- [ ] tests should use `test-env-log = "0.2.8"`
+  - [ ] be sure to save the timestamp in a way that our request routing logic can make use of it
 - [ ] change invite codes to set the user_tier
 
 - [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
@@ -256,6 +252,15 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] eth_subscribe rpc_accounting has everything as cache_hits. should we instead count it as one background request?
+- [ ] implement filters
+- [ ] implement remaining subscriptions
+    - would be nice if our subscriptions had better gaurentees than geth/erigon do, but maybe simpler to just setup a broadcast channel and proxy all the respones to a backend instead
+- [ ] tests should use `test-env-log = "0.2.8"`
+- [ ] weighted random choice should still prioritize non-archive servers
+    - maybe shuffle randomly and then sort by (block_limit, random_index)?
+    - maybe sum available_requests grouped by archive/non-archive. only limit to non-archive if they have enough?
+- [ ] some places we call it "accounting" others a "stat". be consistent
 - [ ] cli commands to search users by key
 - [-] more trace logging
 - [-] add configurable size limits to all the Caches
@@ -342,9 +347,6 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - eth_sendRawTransaction should accept "INTERNAL_ERROR: existing tx with same hash" as a successful response. we just want to be sure that the server has our tx and in this case, it does.
 - [ ] EIP1271 for siwe
 - [ ] Limited throughput during high traffic
-- [ ] implement filters and other unimplemented rpc methods
-  - multiple teams need log filters and subscriptions.
-  - would be nice if our subscriptions had better gaurentees than geth/erigon do, but maybe simpler to just setup a broadcast channel and proxy all the respones to a backend instead
 - [ ] instead of Option<...> in our frontend function signatures, use result and then the try operator so that we get our errors wrapped in json
 - [ ] revert logs should have a maximum age and a maximum count to keep the database from being huge
 - [ ] user login should also return a jwt (jsonwebtoken rust crate should make it easy)

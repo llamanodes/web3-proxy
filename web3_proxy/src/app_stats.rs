@@ -1,5 +1,4 @@
 use crate::frontend::authorization::{Authorization, RequestMetadata};
-use crate::jsonrpc::JsonRpcForwardedResponse;
 use axum::headers::Origin;
 use chrono::{TimeZone, Utc};
 use derive_more::From;
@@ -251,18 +250,12 @@ impl ProxyResponseAggregate {
 }
 
 impl ProxyResponseStat {
-    // TODO: should RequestMetadata be in an arc? or can we handle refs here?
     pub fn new(
         method: String,
         authorization: Arc<Authorization>,
         metadata: Arc<RequestMetadata>,
-        response: &JsonRpcForwardedResponse,
+        response_bytes: usize,
     ) -> Self {
-        // TODO: do this without serializing to a string. this is going to slow us down!
-        let response_bytes = serde_json::to_string(response)
-            .expect("serializing here should always work")
-            .len() as u64;
-
         let archive_request = metadata.archive_request.load(Ordering::Acquire);
         let backend_requests = metadata.backend_requests.load(Ordering::Acquire);
         // let period_seconds = metadata.period_seconds;
@@ -273,6 +266,8 @@ impl ProxyResponseStat {
 
         // TODO: timestamps could get confused by leap seconds. need tokio time instead
         let response_millis = metadata.start_instant.elapsed().as_millis() as u64;
+
+        let response_bytes = response_bytes as u64;
 
         Self {
             authorization,

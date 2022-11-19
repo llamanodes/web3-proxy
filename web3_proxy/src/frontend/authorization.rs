@@ -2,7 +2,6 @@
 
 use super::errors::FrontendErrorResponse;
 use crate::app::{AuthorizationChecks, Web3ProxyApp, APP_USER_AGENT};
-use crate::jsonrpc::JsonRpcRequest;
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::authorization::Bearer;
@@ -76,12 +75,9 @@ pub struct RequestMetadata {
 }
 
 impl RequestMetadata {
-    pub fn new(period_seconds: u64, request: &JsonRpcRequest) -> anyhow::Result<Self> {
+    pub fn new(period_seconds: u64, request_bytes: usize) -> anyhow::Result<Self> {
         // TODO: how can we do this without turning it into a string first. this is going to slow us down!
-        let request_bytes = serde_json::to_string(request)
-            .context("finding request size")?
-            .len()
-            .try_into()?;
+        let request_bytes = request_bytes as u64;
 
         let new = Self {
             start_instant: Instant::now(),

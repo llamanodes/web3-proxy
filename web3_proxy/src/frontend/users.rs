@@ -438,7 +438,6 @@ pub async fn user_balance_get(
 /// TODO: one key per request? maybe /user/balance/:rpc_key?
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
-
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,

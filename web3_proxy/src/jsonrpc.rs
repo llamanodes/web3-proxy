@@ -182,6 +182,15 @@ impl fmt::Debug for JsonRpcForwardedResponse {
     }
 }
 
+impl JsonRpcRequest {
+    pub fn num_bytes(&self) -> usize {
+        // TODO: not sure how to do this without wasting a ton of allocations
+        serde_json::to_string(self)
+            .expect("this should always be valid json")
+            .len()
+    }
+}
+
 impl JsonRpcForwardedResponse {
     pub fn from_anyhow_error(
         err: anyhow::Error,
@@ -306,6 +315,13 @@ impl JsonRpcForwardedResponse {
             Ok(response) => Ok(Self::from_response(response, id)),
             Err(e) => Self::from_ethers_error(e, id),
         }
+    }
+
+    pub fn num_bytes(&self) -> usize {
+        // TODO: not sure how to do this without wasting a ton of allocations
+        serde_json::to_string(self)
+            .expect("this should always be valid json")
+            .len()
     }
 }
 

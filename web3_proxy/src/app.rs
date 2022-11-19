@@ -55,6 +55,9 @@ pub static APP_USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
 );
 
+/// TODO: allow customizing the request period?
+pub static REQUEST_PERIOD: u64 = 60;
+
 /// block hash, method, params
 // TODO: better name
 type ResponseCacheKey = (H256, String, Option<String>);
@@ -277,7 +280,7 @@ impl Web3ProxyApp {
 
             Some(db_conn)
         } else {
-            info!("no database");
+            warn!("no database. some features will be disabled");
             None
         };
 
@@ -579,11 +582,19 @@ impl Web3ProxyApp {
     pub async fn eth_subscribe<'a>(
         self: &'a Arc<Self>,
         authorization: Arc<Authorization>,
-        payload: JsonRpcRequest,
+        request_json: JsonRpcRequest,
         subscription_count: &'a AtomicUsize,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
         response_sender: flume::Sender<Message>,
     ) -> anyhow::Result<(AbortHandle, JsonRpcForwardedResponse)> {
+        // TODO: this is not efficient
+        let request_bytes = serde_json::to_string(&request_json)
+            .context("finding request size")?
+            .len();
+
+        let request_metadata =
+            Arc::new(RequestMetadata::new(REQUEST_PERIOD, request_bytes).unwrap());
+
         let (subscription_abort_handle, subscription_registration) = AbortHandle::new_pair();
 
         // TODO: this only needs to be unique per connection. we don't need it globably unique
@@ -591,15 +602,17 @@ impl Web3ProxyApp {
         let subscription_id = U64::from(subscription_id);
 
         // save the id so we can use it in the response
-        let id = payload.id.clone();
+        let id = request_json.id.clone();
 
         // TODO: calling json! on every request is probably not fast. but we can only match against
         // TODO: i think we need a stricter EthSubscribeRequest type that JsonRpcRequest can turn into
-        match payload.params {
-            Some(x) if x == json!(["newHeads"]) => {
+        match request_json.params.as_ref() {
+            Some(x) if x == &json!(["newHeads"]) => {
+                let authorization = authorization.clone();
                 let head_block_receiver = self.head_block_receiver.clone();
+                let stat_sender = self.stat_sender.clone();
 
-                // trace!("new heads subscription. id={:?}", subscription_id);
+                trace!("newHeads subscription {:?}", subscription_id);
                 tokio::spawn(async move {
                     let mut head_block_receiver = Abortable::new(
                         WatchStream::new(head_block_receiver),
@@ -607,8 +620,12 @@ impl Web3ProxyApp {
                     );
 
                     while let Some(new_head) = head_block_receiver.next().await {
+                        // TODO: what should the payload for RequestMetadata be?
+                        let request_metadata =
+                            Arc::new(RequestMetadata::new(REQUEST_PERIOD, 0).unwrap());
+
                         // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                        let msg = json!({
+                        let response_json = json!({
                             "jsonrpc": "2.0",
                             "method":"eth_subscription",
                             "params": {
@@ -618,22 +635,45 @@ impl Web3ProxyApp {
                             },
                         });
 
-                        // TODO: do clients support binary messages?
-                        let msg = Message::Text(
-                            serde_json::to_string(&msg).expect("this should always be valid json"),
-                        );
+                        let response_str = serde_json::to_string(&response_json)
+                            .expect("this should always be valid json");
 
-                        if response_sender.send_async(msg).await.is_err() {
+                        // we could use response.num_bytes() here, but since we already have the string, this is easier
+                        let response_bytes = response_str.len();
+
+                        // TODO: do clients support binary messages?
+                        let response_msg = Message::Text(response_str);
+
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
+
+                        if let Some(stat_sender) = stat_sender.as_ref() {
+                            let response_stat = ProxyResponseStat::new(
+                                "eth_subscription(newHeads)".to_string(),
+                                authorization.clone(),
+                                request_metadata.clone(),
+                                response_bytes,
+                            );
+
+                            if let Err(err) = stat_sender.send_async(response_stat.into()).await {
+                                // TODO: what should we do?
+                                warn!(
+                                    "stat_sender failed inside newPendingTransactions: {:?}",
+                                    err
+                                );
+                            }
+                        }
                     }
 
-                    // trace!("closed new heads subscription. id={:?}", subscription_id);
+                    trace!("closed newHeads subscription. id={:?}", subscription_id);
                 });
             }
-            Some(x) if x == json!(["newPendingTransactions"]) => {
+            Some(x) if x == &json!(["newPendingTransactions"]) => {
                 let pending_tx_receiver = self.pending_tx_sender.subscribe();
+                let stat_sender = self.stat_sender.clone();
+                let authorization = authorization.clone();
 
                 let mut pending_tx_receiver = Abortable::new(
                     BroadcastStream::new(pending_tx_receiver),
@@ -641,13 +681,16 @@ impl Web3ProxyApp {
                 );
 
                 trace!(
-                    "pending transactions subscription id: {:?}",
+                    "pending newPendingTransactions subscription id: {:?}",
                     subscription_id
                 );
 
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
+                        let request_metadata =
+                            Arc::new(RequestMetadata::new(REQUEST_PERIOD, 0).unwrap());
+
                         let new_tx = match new_tx_state {
                             TxStatus::Pending(tx) => tx,
                             TxStatus::Confirmed(..) => continue,
@@ -655,7 +698,7 @@ impl Web3ProxyApp {
                         };
 
                         // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                        let msg = json!({
+                        let response_json = json!({
                             "jsonrpc": "2.0",
                             "method": "eth_subscription",
                             "params": {
@@ -664,32 +707,66 @@ impl Web3ProxyApp {
                             },
                         });
 
-                        let msg =
-                            Message::Text(serde_json::to_string(&msg).expect("we made this `msg`"));
+                        let response_str = serde_json::to_string(&response_json)
+                            .expect("this should always be valid json");
 
-                        if response_sender.send_async(msg).await.is_err() {
+                        // we could use response.num_bytes() here, but since we already have the string, this is easier
+                        let response_bytes = response_str.len();
+
+                        // TODO: do clients support binary messages?
+                        let response_msg = Message::Text(response_str);
+
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
+
+                        if let Some(stat_sender) = stat_sender.as_ref() {
+                            let response_stat = ProxyResponseStat::new(
+                                "eth_subscription(newPendingTransactions)".to_string(),
+                                authorization.clone(),
+                                request_metadata.clone(),
+                                response_bytes,
+                            );
+
+                            if let Err(err) = stat_sender.send_async(response_stat.into()).await {
+                                // TODO: what should we do?
+                                warn!(
+                                    "stat_sender failed inside newPendingTransactions: {:?}",
+                                    err
+                                );
+                            }
+                        }
                     }
 
-                    // trace!(?subscription_id, "closed new heads subscription");
+                    trace!(
+                        "closed newPendingTransactions subscription: {:?}",
+                        subscription_id
+                    );
                 });
             }
-            Some(x) if x == json!(["newPendingFullTransactions"]) => {
+            Some(x) if x == &json!(["newPendingFullTransactions"]) => {
                 // TODO: too much copy/pasta with newPendingTransactions
+                let authorization = authorization.clone();
                 let pending_tx_receiver = self.pending_tx_sender.subscribe();
+                let stat_sender = self.stat_sender.clone();
 
                 let mut pending_tx_receiver = Abortable::new(
                     BroadcastStream::new(pending_tx_receiver),
                     subscription_registration,
                 );
 
-                // // trace!(?subscription_id, "pending transactions subscription");
+                trace!(
+                    "pending newPendingFullTransactions subscription: {:?}",
+                    subscription_id
+                );
 
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
+                        let request_metadata =
+                            Arc::new(RequestMetadata::new(REQUEST_PERIOD, 0).unwrap());
+
                         let new_tx = match new_tx_state {
                             TxStatus::Pending(tx) => tx,
                             TxStatus::Confirmed(..) => continue,
@@ -697,7 +774,7 @@ impl Web3ProxyApp {
                         };
 
                         // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                        let msg = json!({
+                        let response_json = json!({
                             "jsonrpc": "2.0",
                             "method": "eth_subscription",
                             "params": {
@@ -707,22 +784,49 @@ impl Web3ProxyApp {
                             },
                         });
 
-                        let msg = Message::Text(
-                            serde_json::to_string(&msg).expect("we made this message"),
-                        );
+                        let response_str = serde_json::to_string(&response_json)
+                            .expect("this should always be valid json");
 
-                        if response_sender.send_async(msg).await.is_err() {
+                        // we could use response.num_bytes() here, but since we already have the string, this is easier
+                        let response_bytes = response_str.len();
+
+                        // TODO: do clients support binary messages?
+                        let response_msg = Message::Text(response_str);
+
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
+
+                        if let Some(stat_sender) = stat_sender.as_ref() {
+                            let response_stat = ProxyResponseStat::new(
+                                "eth_subscription(newPendingFullTransactions)".to_string(),
+                                authorization.clone(),
+                                request_metadata.clone(),
+                                response_bytes,
+                            );
+
+                            if let Err(err) = stat_sender.send_async(response_stat.into()).await {
+                                // TODO: what should we do?
+                                warn!(
+                                    "stat_sender failed inside newPendingFullTransactions: {:?}",
+                                    err
+                                );
+                            }
+                        }
                     }
 
-                    // trace!(?subscription_id, "closed new heads subscription");
+                    trace!(
+                        "closed newPendingFullTransactions subscription: {:?}",
+                        subscription_id
+                    );
                 });
             }
-            Some(x) if x == json!(["newPendingRawTransactions"]) => {
+            Some(x) if x == &json!(["newPendingRawTransactions"]) => {
                 // TODO: too much copy/pasta with newPendingTransactions
+                let authorization = authorization.clone();
                 let pending_tx_receiver = self.pending_tx_sender.subscribe();
+                let stat_sender = self.stat_sender.clone();
 
                 let mut pending_tx_receiver = Abortable::new(
                     BroadcastStream::new(pending_tx_receiver),
@@ -737,6 +841,9 @@ impl Web3ProxyApp {
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
+                        let request_metadata =
+                            Arc::new(RequestMetadata::new(REQUEST_PERIOD, 0).unwrap());
+
                         let new_tx = match new_tx_state {
                             TxStatus::Pending(tx) => tx,
                             TxStatus::Confirmed(..) => continue,
@@ -744,7 +851,7 @@ impl Web3ProxyApp {
                         };
 
                         // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                        let msg = json!({
+                        let response_json = json!({
                             "jsonrpc": "2.0",
                             "method": "eth_subscription",
                             "params": {
@@ -754,17 +861,42 @@ impl Web3ProxyApp {
                             },
                         });
 
-                        let msg = Message::Text(
-                            serde_json::to_string(&msg).expect("this message was just built"),
-                        );
+                        let response_str = serde_json::to_string(&response_json)
+                            .expect("this should always be valid json");
 
-                        if response_sender.send_async(msg).await.is_err() {
+                        // we could use response.num_bytes() here, but since we already have the string, this is easier
+                        let response_bytes = response_str.len();
+
+                        // TODO: do clients support binary messages?
+                        let response_msg = Message::Text(response_str);
+
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
+
+                        if let Some(stat_sender) = stat_sender.as_ref() {
+                            let response_stat = ProxyResponseStat::new(
+                                "eth_subscription(newPendingRawTransactions)".to_string(),
+                                authorization.clone(),
+                                request_metadata.clone(),
+                                response_bytes,
+                            );
+
+                            if let Err(err) = stat_sender.send_async(response_stat.into()).await {
+                                // TODO: what should we do?
+                                warn!(
+                                    "stat_sender failed inside newPendingRawTransactions: {:?}",
+                                    err
+                                );
+                            }
+                        }
                     }
 
-                    trace!("closed new heads subscription: {:?}", subscription_id);
+                    trace!(
+                        "closed newPendingRawTransactions subscription: {:?}",
+                        subscription_id
+                    );
                 });
             }
             _ => return Err(anyhow::anyhow!("unimplemented")),
@@ -774,8 +906,21 @@ impl Web3ProxyApp {
 
         let response = JsonRpcForwardedResponse::from_value(json!(subscription_id), id);
 
-        // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?
+        if let Some(stat_sender) = self.stat_sender.as_ref() {
+            let response_stat = ProxyResponseStat::new(
+                request_json.method.clone(),
+                authorization.clone(),
+                request_metadata,
+                response.num_bytes(),
+            );
 
+            if let Err(err) = stat_sender.send_async(response_stat.into()).await {
+                // TODO: what should we do?
+                warn!("stat_sender failed inside websocket: {:?}", err);
+            }
+        }
+
+        // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?
         Ok((subscription_abort_handle, response))
     }
 
@@ -870,8 +1015,7 @@ impl Web3ProxyApp {
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         // trace!("Received request: {:?}", request);
 
-        // TODO: allow customizing the period?
-        let request_metadata = Arc::new(RequestMetadata::new(60, &request)?);
+        let request_metadata = Arc::new(RequestMetadata::new(REQUEST_PERIOD, request.num_bytes())?);
 
         // save the id so we can attach it to the response
         // TODO: instead of cloning, take the id out?
@@ -1149,7 +1293,7 @@ impl Web3ProxyApp {
                         method.to_string(),
                         authorization.clone(),
                         request_metadata,
-                        &response,
+                        response.num_bytes(),
                     );
 
                     stat_sender
@@ -1169,7 +1313,7 @@ impl Web3ProxyApp {
                 request.method,
                 authorization.clone(),
                 request_metadata,
-                &response,
+                response.num_bytes(),
             );
 
             stat_sender

@@ -266,6 +266,7 @@ impl Web3Connection {
             Some(x) => x.num,
         };
 
+        // this rpc doesn't have that block yet. still syncing
         if needed_block_num > &newest_block_num {
             return false;
         }

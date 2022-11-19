@@ -2,8 +2,14 @@
 //!
 //! WebSockets are the preferred method of receiving requests, but not all clients have good support.
 
-use super::authorization::{ip_is_authorized, key_is_authorized, Authorization};
+use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, RequestMetadata};
 use super::errors::{FrontendErrorResponse, FrontendResult};
+use crate::app::REQUEST_PERIOD;
+use crate::app_stats::ProxyResponseStat;
+use crate::{
+    app::Web3ProxyApp,
+    jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
+};
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -21,20 +27,14 @@ use futures::{
 use handlebars::Handlebars;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{error, info, trace};
+use log::{error, info, trace, warn};
 use serde_json::{json, value::RawValue};
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 
-use crate::{
-    app::Web3ProxyApp,
-    jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
-};
-
 /// Public entrypoint for WebSocket JSON-RPC requests.
 /// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
 #[debug_handler]
-
 pub async fn websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -178,18 +178,15 @@ async fn handle_socket_payload(
                 [..]
             {
                 "eth_subscribe" => {
-                    // TODO: what should go in this span?
-
-                    let response = app
+                    match app
                         .eth_subscribe(
                             authorization.clone(),
                             json_request,
                             subscription_count,
                             response_sender.clone(),
                         )
-                        .await;
-
-                    match response {
+                        .await
+                    {
                         Ok((handle, response)) => {
                             // TODO: better key
                             subscriptions.insert(
@@ -208,10 +205,15 @@ async fn handle_socket_payload(
                     }
                 }
                 "eth_unsubscribe" => {
-                    // TODO: how should handle rate limits and stats on this?
-                    // TODO: handle invalid params
+                    // TODO: move this logic into the app?
+                    let request_bytes = json_request.num_bytes();
+
+                    let request_metadata =
+                        Arc::new(RequestMetadata::new(REQUEST_PERIOD, request_bytes).unwrap());
+
                     let subscription_id = json_request.params.unwrap().to_string();
 
+                    // TODO: is this the right response?
                     let partial_response = match subscriptions.remove(&subscription_id) {
                         None => false,
                         Some(handle) => {
@@ -222,6 +224,20 @@ async fn handle_socket_payload(
 
                     let response =
                         JsonRpcForwardedResponse::from_value(json!(partial_response), id.clone());
+
+                    if let Some(stat_sender) = app.stat_sender.as_ref() {
+                        let response_stat = ProxyResponseStat::new(
+                            json_request.method.clone(),
+                            authorization.clone(),
+                            request_metadata,
+                            response.num_bytes(),
+                        );
+
+                        if let Err(err) = stat_sender.send_async(response_stat.into()).await {
+                            // TODO: what should we do?
+                            warn!("stat_sender failed during eth_unsubscribe: {:?}", err);
+                        }
+                    }
 
                     Ok(response.into())
                 }
@@ -234,6 +250,7 @@ async fn handle_socket_payload(
             (id, response)
         }
         Err(err) => {
+            // TODO: move this logic somewhere else and just set id to None here
             let id = RawValue::from_string("null".to_string()).expect("null can always be a value");
             (id, Err(err.into()))
         }
