@@ -262,7 +262,7 @@ mod tests {
         let anvil_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
         // mine a block because my code doesn't like being on block 0
-        // TODO: make block 0 okay?
+        // TODO: make block 0 okay? is it okay now?
         let _: U256 = anvil_provider
             .request("evm_mine", None::<()>)
             .await
@@ -277,7 +277,8 @@ mod tests {
             cookie_key_filename: "./does/not/exist/development_cookie_key".to_string(),
         };
 
-        // make a test AppConfig
+        // make a test TopConfig
+        // TODO: load TopConfig from a file? CliConfig could have `cli_config.load_top_config`
         let app_config = TopConfig {
             app: AppConfig {
                 chain_id: 31337,
@@ -367,7 +368,7 @@ mod tests {
 
         let second_block_num = anvil_result.number.unwrap();
 
-        assert_ne!(first_block_num, second_block_num);
+        assert_eq!(first_block_num, second_block_num - 1);
 
         // tell the test app to shut down
         shutdown_sender.send(()).unwrap();
