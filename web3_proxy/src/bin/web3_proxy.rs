@@ -8,10 +8,12 @@
 //#![warn(missing_docs)]
 #![forbid(unsafe_code)]
 
+use anyhow::Context;
 use futures::StreamExt;
 use log::{debug, info, warn};
 use parking_lot::deadlock;
 use std::fs;
+use std::path::Path;
 use std::sync::atomic::{self, AtomicUsize};
 use std::thread;
 use tokio::runtime;
@@ -32,6 +34,7 @@ fn run(
     let mut shutdown_receiver = shutdown_sender.subscribe();
 
     // spawn a thread for deadlock detection
+    // TODO: disable this feature during release mode and things should go faster
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(10));
         let deadlocks = deadlock::check_deadlock();
@@ -164,9 +167,20 @@ fn main() -> anyhow::Result<()> {
     // initial configuration from flags
     let cli_config: CliConfig = argh::from_env();
 
+    // convert to absolute path so error logging is most helpful
+    let config_path = Path::new(&cli_config.config)
+        .canonicalize()
+        .context(format!(
+            "checking full path of {} and {}",
+            ".", // TODO: get cwd somehow
+            cli_config.config
+        ))?;
+
     // advanced configuration is on disk
-    let top_config: String = fs::read_to_string(cli_config.config.clone())?;
-    let top_config: TopConfig = toml::from_str(&top_config)?;
+    let top_config: String = fs::read_to_string(config_path.clone())
+        .context(format!("reading config at {}", config_path.display()))?;
+    let top_config: TopConfig = toml::from_str(&top_config)
+        .context(format!("parsing config at {}", config_path.display()))?;
 
     // TODO: this doesn't seem to do anything
     proctitle::set_title(format!("web3_proxy-{}", top_config.app.chain_id));
