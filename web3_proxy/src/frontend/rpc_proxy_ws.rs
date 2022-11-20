@@ -72,7 +72,6 @@ pub async fn websocket_handler(
 /// Rate limit and billing based on the api key in the url.
 /// Can optionally authorized based on origin, referer, or user agent.
 #[debug_handler]
-
 pub async fn websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -94,6 +93,9 @@ pub async fn websocket_handler_with_key(
     )
     .await?;
 
+    // TODO: turn this logging down!
+    info!("websocket_handler_with_key {:?}", authorization);
+
     let authorization = Arc::new(authorization);
 
     match ws_upgrade {
@@ -102,15 +104,19 @@ pub async fn websocket_handler_with_key(
         }
         None => {
             // if no websocket upgrade, this is probably a user loading the url with their browser
+
+            // TODO: rate limit here? key_is_authorized might be enough
+
             match (
                 &app.config.redirect_public_url,
                 &app.config.redirect_rpc_key_url,
                 authorization.checks.rpc_key_id,
             ) {
-                (None, None, _) => Err(anyhow::anyhow!(
-                    "redirect_rpc_key_url not set. only websockets work here"
-                )
-                .into()),
+                (None, None, _) => Err(FrontendErrorResponse::StatusCode(
+                    StatusCode::BAD_REQUEST,
+                    "this page is for rpcs".to_string(),
+                    None,
+                )),
                 (Some(redirect_public_url), _, None) => {
                     Ok(Redirect::to(redirect_public_url).into_response())
                 }
@@ -118,8 +124,12 @@ pub async fn websocket_handler_with_key(
                     let reg = Handlebars::new();
 
                     if authorization.checks.rpc_key_id.is_none() {
-                        // TODO: i think this is impossible
-                        Err(anyhow::anyhow!("only authenticated websockets work here").into())
+                        // i don't think this is possible
+                        Err(FrontendErrorResponse::StatusCode(
+                            StatusCode::UNAUTHORIZED,
+                            "AUTHORIZATION header required".to_string(),
+                            None,
+                        ))
                     } else {
                         let redirect_rpc_key_url = reg
                             .render_template(
