@@ -220,6 +220,7 @@ fn main() -> anyhow::Result<()> {
 
     // tokio has code for catching ctrl+c so we use that
     // this shutdown sender is currently only used in tests, but we might make a /shutdown endpoint or something
+    // we do not need this receiver. new receivers are made by `shutdown_sender.subscribe()`
     let (shutdown_sender, _) = broadcast::channel(1);
 
     run(shutdown_sender, cli_config, top_config)
@@ -228,13 +229,16 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use ethers::{
-        prelude::{Block, Http, Provider, TxHash, U256},
+        prelude::{Http, Provider, U256},
         utils::Anvil,
     };
     use hashbrown::HashMap;
     use std::env;
 
-    use web3_proxy::config::{AppConfig, Web3ConnectionConfig};
+    use web3_proxy::{
+        config::{AppConfig, Web3ConnectionConfig},
+        rpcs::blockchain::ArcBlock,
+    };
 
     use super::*;
 
@@ -329,12 +333,12 @@ mod tests {
         let proxy_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
         let anvil_result = anvil_provider
-            .request::<_, Option<Block<TxHash>>>("eth_getBlockByNumber", ("latest", true))
+            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", true))
             .await
             .unwrap()
             .unwrap();
         let proxy_result = proxy_provider
-            .request::<_, Option<Block<TxHash>>>("eth_getBlockByNumber", ("latest", true))
+            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", true))
             .await
             .unwrap()
             .unwrap();
@@ -349,12 +353,12 @@ mod tests {
             .unwrap();
 
         let anvil_result = anvil_provider
-            .request::<_, Option<Block<TxHash>>>("eth_getBlockByNumber", ("latest", true))
+            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", true))
             .await
             .unwrap()
             .unwrap();
         let proxy_result = proxy_provider
-            .request::<_, Option<Block<TxHash>>>("eth_getBlockByNumber", ("latest", true))
+            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", true))
             .await
             .unwrap()
             .unwrap();

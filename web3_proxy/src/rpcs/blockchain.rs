@@ -101,7 +101,7 @@ impl Web3Connections {
         // block not in cache. we need to ask an rpc for it
         let get_block_params = (*hash, false);
         // TODO: if error, retry?
-        let block: Block<TxHash> = match rpc {
+        let block: ArcBlock = match rpc {
             Some(rpc) => {
                 rpc.wait_for_request_handle(authorization, Duration::from_secs(30))
                     .await?
@@ -128,8 +128,6 @@ impl Web3Connections {
                 serde_json::from_str(block.get())?
             }
         };
-
-        let block = Arc::new(block);
 
         // the block was fetched using eth_getBlockByHash, so it should have all fields
         // TODO: fill in heaviest_chain! if the block is old enough, is this definitely true?
@@ -201,9 +199,7 @@ impl Web3Connections {
 
         let raw_block = response.result.context("no block result")?;
 
-        let block: Block<TxHash> = serde_json::from_str(raw_block.get())?;
-
-        let block = Arc::new(block);
+        let block: ArcBlock = serde_json::from_str(raw_block.get())?;
 
         // the block was fetched using eth_getBlockByNumber, so it should have all fields and be on the heaviest chain
         self.save_block(&block, true).await?;
@@ -248,7 +244,7 @@ impl Web3Connections {
     }
 
     /// `connection_heads` is a mapping of rpc_names to head block hashes.
-    /// self.blockchain_map is a mapping of hashes to the complete Block<TxHash>.
+    /// self.blockchain_map is a mapping of hashes to the complete ArcBlock.
     /// TODO: return something?
     async fn process_block_from_rpc(
         &self,
