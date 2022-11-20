@@ -30,7 +30,7 @@ chrono = "0.4.23"
 counter = "0.5.7"
 derive_more = "0.99.17"
 dotenv = "0.15.0"
-ethers = { version = "1.0.0", default-features = false, features = ["rustls", "ws"] }
+ethers = { version = "1.0.1", default-features = false, features = ["rustls", "ws"] }
 env_logger = "0.9.3"
 fdlimit = "0.2.1"
 flume = "0.10.14"
@@ -55,13 +55,13 @@ reqwest = { version = "0.11.13", default-features = false, features = ["json", "
 handlebars = "4.3.5"
 rustc-hash = "1.1.0"
 siwe = "0.5.0"
-sentry = { version = "0.28.0", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
+sentry = { version = "0.29.0", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
 serde = { version = "1.0.147", features = [] }
-serde_json = { version = "1.0.87", default-features = false, features = ["alloc", "raw_value"] }
+serde_json = { version = "1.0.88", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.1.6"
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 time = "0.3.17"
-tokio = { version = "1.21.2", features = ["full"] }
+tokio = { version = "1.22.0", features = ["full"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.11", features = ["sync"] }
 toml = "0.5.9"
