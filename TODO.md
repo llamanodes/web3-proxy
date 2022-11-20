@@ -242,6 +242,7 @@ These are roughly in order of completition
 - [x] cli command to change user_tier by key
 - [x] cache the status page for a second
 - [x] request accounting for websockets
+- [ ] bug! websocket (and last ethspam) have no rpc_key_id attached to their rpc_accounting rows
 - [ ] add block timestamp to the /status page
   - [ ] be sure to save the timestamp in a way that our request routing logic can make use of it
 - [ ] change invite codes to set the user_tier
