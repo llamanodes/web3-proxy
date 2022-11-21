@@ -1061,6 +1061,7 @@ impl Web3ProxyApp {
             | "eth_signTransaction"
             | "eth_submitHashrate"
             | "eth_submitWork"
+            | "erigon_cacheCheck"
             | "les_addBalance"
             | "les_setClientParams"
             | "les_setDefaultParams"
