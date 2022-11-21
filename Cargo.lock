@@ -5446,6 +5446,7 @@ dependencies = [
  "fdlimit",
  "flume",
  "futures",
+ "glob",
  "handlebars",
  "hashbrown 0.13.1",
  "hdrhistogram",

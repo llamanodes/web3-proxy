@@ -4,7 +4,7 @@ use std::fs;
 use web3_proxy::config::TopConfig;
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
-/// Second subcommand.
+/// Check the config for any problems.
 #[argh(subcommand, name = "check_config")]
 pub struct CheckConfigSubCommand {
     #[argh(positional)]
