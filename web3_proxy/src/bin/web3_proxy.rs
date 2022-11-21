@@ -278,7 +278,7 @@ mod tests {
         };
 
         // make a test TopConfig
-        // TODO: load TopConfig from a file? CliConfig could have `cli_config.load_top_config`
+        // TODO: load TopConfig from a file? CliConfig could have `cli_config.load_top_config`. would need to inject our endpoint ports
         let app_config = TopConfig {
             app: AppConfig {
                 chain_id: 31337,
