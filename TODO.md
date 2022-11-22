@@ -544,3 +544,4 @@ in another repo: event subscriber
 - [ ] support alchemy_minedTransactions
 - [ ] debug print of user::Model's address is a big vec of numbers. make that hex somehow
 - [ ] should we combine the proxy and cli into one bin?
+- [ ] make it so you can put a string like "LN arbitrum" into the create_user script, and have it automatically turn it automatic into 0x4c4e20617262697472756d000000000000000000. if its too long, hash it and then replace the last 4 bytes with zeros (so they stand out)
