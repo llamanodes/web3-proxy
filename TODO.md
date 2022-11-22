@@ -544,4 +544,7 @@ in another repo: event subscriber
 - [ ] support alchemy_minedTransactions
 - [ ] debug print of user::Model's address is a big vec of numbers. make that hex somehow
 - [ ] should we combine the proxy and cli into one bin?
-- [ ] make it so you can put a string like "LN arbitrum" into the create_user script, and have it automatically turn it automatic into 0x4c4e20617262697472756d000000000000000000. if its too long, hash it and then replace the last 4 bytes with zeros (so they stand out)
+- [ ] make it so you can put a string like "LN arbitrum" into the create_user script, and have it automatically turn it into 0x4c4e20617262697472756d000000000000000000.
+  - [ ] if --address not given, use the --description
+  - [ ] if it is too long, (the last 4 bytes must be zero), give an error so descriptions like this stand out
+- [ ] we need to use docker-compose's proper environment variable handling. because now if someone tries to start dev containers in their prod, remove orphans stops and removes them
