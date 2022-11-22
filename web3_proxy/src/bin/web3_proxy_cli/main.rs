@@ -40,9 +40,10 @@ enum SubCommand {
     CreateUser(create_user::CreateUserSubCommand),
     DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
     UserExport(user_export::UserExportSubCommand),
-    UserImport(user_import::UserImportSubCommand), // TODO: sub command to downgrade migrations?
-                                                   // TODO: sub command to add new api keys to an existing user?
-                                                   // TODO: sub command to change a user's tier
+    UserImport(user_import::UserImportSubCommand),
+    // TODO: sub command to downgrade migrations? sea-orm has this but doing downgrades here would be easier+safer
+    // TODO: sub command to add new api keys to an existing user?
+    // TODO: sub command to change a user's tier
 }
 
 #[tokio::main]

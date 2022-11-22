@@ -242,15 +242,18 @@ These are roughly in order of completition
 - [x] cli command to change user_tier by key
 - [x] cache the status page for a second
 - [x] request accounting for websockets
-- [ ] database merge scripts
+- [x] database merge scripts
 - [ ] add block timestamp to the /status page
   - [ ] be sure to save the timestamp in a way that our request routing logic can make use of it
+- [ ] period_datetime should always be :00. right now it depends on start time 
+- [ ] two servers running will confuse rpc_accounting!
+    - one option: we need the insert to be an upsert, but how do we merge historgrams?
 - [ ] change invite codes to set the user_tier
 - [ ] period_datetime should always be :00. right now it depends on start time 
 - [ ] two servers running will confuse rpc_accounting!
   - it won't happen with users often because they should be sticky to one proxy, but unauthenticated users will definitely hit this
   - one option: we need the insert to be an upsert, but how do we merge historgrams?
-
+- [ ] ethspam on bsc and polygon gives 1/4 errors. fix whatever is causing this
     
 - [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
 
