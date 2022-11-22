@@ -244,7 +244,9 @@ These are roughly in order of completition
 - [x] request accounting for websockets
 - [x] database merge scripts
 - [x] test that sets up a Web3Connection and asks "has_block" for old and new blocks
-- [x] test that sets up Web3Connections with 2 nodes. one behind by several blocks. and see what the "next" server shows as- [ ] add block timestamp to the /status page
+- [x] test that sets up Web3Connections with 2 nodes. one behind by several blocks. and see what the "next" server shows as
+- [x] bugfix! we were using the whole connection list instead of just the synced connection list when picking servers. oops!
+- [ ] add block timestamp to the /status page
   - [ ] be sure to save the timestamp in a way that our request routing logic can make use of it
 - [ ] period_datetime should always be :00. right now it depends on start time 
   - [ ] two servers running will confuse rpc_accounting!
