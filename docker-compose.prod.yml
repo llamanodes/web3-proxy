@@ -71,6 +71,7 @@ services:
     command: --config /config.toml --workers 48
     volumes:
       - ./config/production-eth.toml:/config.toml
+      - ./data/scratch:/scratch
     ports:
       - mode: host
         protocol: tcp
