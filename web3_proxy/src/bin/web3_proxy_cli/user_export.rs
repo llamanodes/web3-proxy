@@ -26,7 +26,7 @@ impl UserExportSubCommand {
         let export_dir = Path::new(&self.output_dir);
 
         // get all the users from the database (paged)
-        let mut user_pages = user::Entity::find().into_json().paginate(db_conn, 1000);
+        let mut user_pages = user::Entity::find().paginate(db_conn, 1000);
 
         // TODO: for now all user_tier tables match in all databases, but in the future we might need to export/import this
 
@@ -50,7 +50,7 @@ impl UserExportSubCommand {
         );
 
         // get all the rpc keys from the database (paged)
-        let mut rpc_key_pages = rpc_key::Entity::find().into_json().paginate(db_conn, 1000);
+        let mut rpc_key_pages = rpc_key::Entity::find().paginate(db_conn, 1000);
 
         let mut rpc_key_file_count = 0;
         while let Some(rpc_keys) = rpc_key_pages.fetch_and_next().await? {
