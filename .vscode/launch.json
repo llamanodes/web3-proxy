@@ -1,0 +1,381 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'deferred-rate-limiter'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=deferred-rate-limiter"
+                ],
+                "filter": {
+                    "name": "deferred-rate-limiter",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'redis-rate-limiter'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=redis-rate-limiter"
+                ],
+                "filter": {
+                    "name": "redis-rate-limiter",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'entities'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=entities"
+                ],
+                "filter": {
+                    "name": "entities",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'migration'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=migration"
+                ],
+                "filter": {
+                    "name": "migration",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'migration'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=migration",
+                    "--package=migration"
+                ],
+                "filter": {
+                    "name": "migration",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'migration'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=migration",
+                    "--package=migration"
+                ],
+                "filter": {
+                    "name": "migration",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'thread-fast-rng'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=thread-fast-rng"
+                ],
+                "filter": {
+                    "name": "thread-fast-rng",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'web3_proxy'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "web3_proxy",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'web3_proxy'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=web3_proxy",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "web3_proxy",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'web3_proxy'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=web3_proxy",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "web3_proxy",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'curve_api_checks'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=curve_api_checks",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "curve_api_checks",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'curve_api_checks'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=curve_api_checks",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "curve_api_checks",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'web3_proxy_cli'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=web3_proxy_cli",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "web3_proxy_cli",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'web3_proxy_cli'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=web3_proxy_cli",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "web3_proxy_cli",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'subscribe_blocks'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=subscribe_blocks",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "subscribe_blocks",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'subscribe_blocks'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=subscribe_blocks",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "subscribe_blocks",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'metrics'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=metrics",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "metrics",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'metrics'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=metrics",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "metrics",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'watch_blocks'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=watch_blocks",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "watch_blocks",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'watch_blocks'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=watch_blocks",
+                    "--package=web3_proxy"
+                ],
+                "filter": {
+                    "name": "watch_blocks",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
