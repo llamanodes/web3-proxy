@@ -986,6 +986,7 @@ mod tests {
             hash: H256::random(),
             num: 1_000_000.into(),
         };
+        let block_data_limit = u64::MAX;
 
         let metrics = OpenRequestHandleMetrics::default();
 
@@ -999,7 +1000,7 @@ mod tests {
             provider: AsyncRwLock::new(None),
             hard_limit: None,
             soft_limit: 1_000,
-            block_data_limit: u64::MAX.into(),
+            block_data_limit: block_data_limit.into(),
             weight: 100.0,
             head_block_id: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(metrics),
@@ -1007,6 +1008,42 @@ mod tests {
 
         assert!(x.has_block_data(&0.into()));
         assert!(x.has_block_data(&1.into()));
+        assert!(x.has_block_data(&head_block.num));
+        assert!(!x.has_block_data(&(head_block.num + 1)));
+        assert!(!x.has_block_data(&(head_block.num + 1000)));
+    }
+
+    #[test]
+    fn test_pruned_node_has_block_data() {
+        let head_block = BlockId {
+            hash: H256::random(),
+            num: 1_000_000.into(),
+        };
+
+        let block_data_limit = 64;
+
+        let metrics = OpenRequestHandleMetrics::default();
+
+        let x = Web3Connection {
+            name: "name".to_string(),
+            display_name: None,
+            url: "ws://example.com".to_string(),
+            http_client: None,
+            active_requests: 0.into(),
+            total_requests: 0.into(),
+            provider: AsyncRwLock::new(None),
+            hard_limit: None,
+            soft_limit: 1_000,
+            block_data_limit: block_data_limit.into(),
+            weight: 100.0,
+            head_block_id: RwLock::new(Some(head_block.clone())),
+            open_request_handle_metrics: Arc::new(metrics),
+        };
+
+        assert!(!x.has_block_data(&0.into()));
+        assert!(!x.has_block_data(&1.into()));
+        assert!(!x.has_block_data(&(head_block.num - block_data_limit - 1)));
+        assert!(x.has_block_data(&(head_block.num - block_data_limit)));
         assert!(x.has_block_data(&head_block.num));
         assert!(!x.has_block_data(&(head_block.num + 1)));
         assert!(!x.has_block_data(&(head_block.num + 1000)));
