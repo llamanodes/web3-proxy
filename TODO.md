@@ -243,10 +243,11 @@ These are roughly in order of completition
 - [x] cache the status page for a second
 - [x] request accounting for websockets
 - [x] database merge scripts
-- [ ] add block timestamp to the /status page
+- [x] test that sets up a Web3Connection and asks "has_block" for old and new blocks
+- [x] test that sets up Web3Connections with 2 nodes. one behind by several blocks. and see what the "next" server shows as- [ ] add block timestamp to the /status page
   - [ ] be sure to save the timestamp in a way that our request routing logic can make use of it
 - [ ] period_datetime should always be :00. right now it depends on start time 
-- [ ] two servers running will confuse rpc_accounting!
+  - [ ] two servers running will confuse rpc_accounting!
     - one option: we need the insert to be an upsert, but how do we merge historgrams?
 - [ ] change invite codes to set the user_tier
 - [ ] period_datetime should always be :00. right now it depends on start time 

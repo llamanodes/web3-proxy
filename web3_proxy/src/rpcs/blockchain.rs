@@ -246,7 +246,7 @@ impl Web3Connections {
     /// `connection_heads` is a mapping of rpc_names to head block hashes.
     /// self.blockchain_map is a mapping of hashes to the complete ArcBlock.
     /// TODO: return something?
-    async fn process_block_from_rpc(
+    pub(crate) async fn process_block_from_rpc(
         &self,
         authorization: &Arc<Authorization>,
         connection_heads: &mut HashMap<String, H256>,
@@ -261,24 +261,15 @@ impl Web3Connections {
                 let rpc_head_num = rpc_head_block.number.unwrap();
                 let rpc_head_hash = rpc_head_block.hash.unwrap();
 
-                if rpc_head_num.is_zero() {
-                    // TODO: i don't think we can get to this anymore now that we use Options
-                    debug!("{} still syncing", rpc);
+                // we don't know if its on the heaviest chain yet
+                self.save_block(&rpc_head_block, false).await?;
 
-                    connection_heads.remove(&rpc.name);
+                connection_heads.insert(rpc.name.to_owned(), rpc_head_hash);
 
-                    None
-                } else {
-                    // we don't know if its on the heaviest chain yet
-                    self.save_block(&rpc_head_block, false).await?;
-
-                    connection_heads.insert(rpc.name.to_owned(), rpc_head_hash);
-
-                    Some(BlockId {
-                        hash: rpc_head_hash,
-                        num: rpc_head_num,
-                    })
-                }
+                Some(BlockId {
+                    hash: rpc_head_hash,
+                    num: rpc_head_num,
+                })
             }
             None => {
                 // TODO: warn is too verbose. this is expected if a node disconnects and has to reconnect
@@ -384,7 +375,7 @@ impl Web3Connections {
                 }
 
                 if highest_rpcs_sum_soft_limit < self.min_sum_soft_limit
-                    || highest_rpcs.len() < self.min_synced_rpcs
+                    || highest_rpcs.len() < self.min_head_rpcs
                 {
                     // not enough rpcs yet. check the parent
                     if let Some(parent_block) = self.block_hashes.get(&maybe_head_block.parent_hash)
@@ -401,7 +392,7 @@ impl Web3Connections {
                             highest_rpcs_sum_soft_limit,
                             self.min_sum_soft_limit,
                             highest_rpcs.len(),
-                            self.min_synced_rpcs,
+                            self.min_head_rpcs,
                             highest_rpcs_sum_soft_limit * 100 / self.min_sum_soft_limit
                         );
                         break;
@@ -447,8 +438,6 @@ impl Web3Connections {
                 let consensus_head_num = consensus_head_block
                     .number
                     .expect("head blocks always have numbers");
-
-                debug_assert_ne!(consensus_head_num, U64::zero());
 
                 let num_consensus_rpcs = conns.len();
 

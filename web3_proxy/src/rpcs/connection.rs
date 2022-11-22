@@ -32,9 +32,9 @@ pub struct Web3Connection {
     pub name: String,
     pub display_name: Option<String>,
     /// TODO: can we get this from the provider? do we even need it?
-    url: String,
+    pub(super) url: String,
     /// Some connections use an http_client. we keep a clone for reconnecting
-    http_client: Option<reqwest::Client>,
+    pub(super) http_client: Option<reqwest::Client>,
     /// keep track of currently open requests. We sort on this
     pub(super) active_requests: AtomicU32,
     /// keep track of total requests
@@ -46,11 +46,11 @@ pub struct Web3Connection {
     pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     /// We do not use the deferred rate limiter because going over limits would cause errors
-    hard_limit: Option<RedisRateLimiter>,
+    pub(super) hard_limit: Option<RedisRateLimiter>,
     /// used for load balancing to the least loaded server
     pub(super) soft_limit: u32,
     /// TODO: have an enum for this so that "no limit" prints pretty?
-    block_data_limit: AtomicU64,
+    pub(super) block_data_limit: AtomicU64,
     /// Lower weight are higher priority when sending requests. 0 to 99.
     pub(super) weight: f64,
     /// TODO: should this be an AsyncRwLock?
@@ -350,6 +350,7 @@ impl Web3Connection {
                     return Ok(());
                 }
                 Web3Provider::Ws(_) => {}
+                Web3Provider::Mock => return Ok(()),
             }
 
             info!("Reconnecting to {}", self);
@@ -571,6 +572,7 @@ impl Web3Connection {
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
             match &*provider {
+                Web3Provider::Mock => unimplemented!(),
                 Web3Provider::Http(_provider) => {
                     // there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
                     // TODO: try watch_blocks and fall back to this?
@@ -745,6 +747,7 @@ impl Web3Connection {
         // TODO: is a RwLock of an Option<Arc> the right thing here?
         if let Some(provider) = self.provider.read().await.clone() {
             match &*provider {
+                Web3Provider::Mock => unimplemented!(),
                 Web3Provider::Http(provider) => {
                     // there is a "watch_pending_transactions" function, but a lot of public nodes do not support the necessary rpc endpoints
                     // TODO: what should this interval be? probably automatically set to some fraction of block time

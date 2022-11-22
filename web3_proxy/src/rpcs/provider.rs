@@ -8,12 +8,15 @@ use std::time::Duration;
 pub enum Web3Provider {
     Http(ethers::providers::Provider<ethers::providers::Http>),
     Ws(ethers::providers::Provider<ethers::providers::Ws>),
+    // TODO: only include this for tests.
+    Mock,
 }
 
 impl Web3Provider {
     pub fn ready(&self) -> bool {
         // TODO: i'm not sure if this is enough
         match self {
+            Self::Mock => true,
             Self::Http(_) => true,
             Self::Ws(provider) => provider.as_ref().ready(),
         }

@@ -200,6 +200,7 @@ impl OpenRequestHandle {
 
         // TODO: really sucks that we have to clone here
         let response = match provider {
+            Web3Provider::Mock => unimplemented!(),
             Web3Provider::Http(provider) => provider.request(method, params).await,
             Web3Provider::Ws(provider) => provider.request(method, params).await,
         };
@@ -242,6 +243,7 @@ impl OpenRequestHandle {
             let is_revert = if let ProviderError::JsonRpcClientError(err) = err {
                 // Http and Ws errors are very similar, but different types
                 let msg = match provider {
+                    Web3Provider::Mock => unimplemented!(),
                     Web3Provider::Http(_) => {
                         if let Some(HttpClientError::JsonRpcError(err)) =
                             err.downcast_ref::<HttpClientError>()
