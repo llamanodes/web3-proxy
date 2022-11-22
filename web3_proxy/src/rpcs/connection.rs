@@ -53,6 +53,7 @@ pub struct Web3Connection {
     block_data_limit: AtomicU64,
     /// Lower weight are higher priority when sending requests. 0 to 99.
     pub(super) weight: f64,
+    /// TODO: should this be an AsyncRwLock?
     pub(super) head_block_id: RwLock<Option<BlockId>>,
     pub(super) open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
 }
@@ -259,24 +260,20 @@ impl Web3Connection {
     }
 
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
-        let head_block_id = self.head_block_id.read().clone();
-
-        let newest_block_num = match head_block_id {
+        let head_block_num = match self.head_block_id.read().clone() {
             None => return false,
             Some(x) => x.num,
         };
 
         // this rpc doesn't have that block yet. still syncing
-        if needed_block_num > &newest_block_num {
+        if needed_block_num > &head_block_num {
             return false;
         }
 
         // if this is a pruning node, we might not actually have the block
         let block_data_limit: U64 = self.block_data_limit();
 
-        let oldest_block_num = newest_block_num
-            .saturating_sub(block_data_limit)
-            .max(U64::one());
+        let oldest_block_num = head_block_num.saturating_sub(block_data_limit);
 
         needed_block_num >= &oldest_block_num
     }
@@ -977,5 +974,41 @@ impl fmt::Display for Web3Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: filter basic auth and api keys
         write!(f, "{}", &self.name)
+    }
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_archive_node_has_block_data() {
+        let head_block = BlockId {
+            hash: H256::random(),
+            num: 1_000_000.into(),
+        };
+
+        let metrics = OpenRequestHandleMetrics::default();
+
+        let x = Web3Connection {
+            name: "name".to_string(),
+            display_name: None,
+            url: "ws://example.com".to_string(),
+            http_client: None,
+            active_requests: 0.into(),
+            total_requests: 0.into(),
+            provider: AsyncRwLock::new(None),
+            hard_limit: None,
+            soft_limit: 1_000,
+            block_data_limit: u64::MAX.into(),
+            weight: 100.0,
+            head_block_id: RwLock::new(Some(head_block.clone())),
+            open_request_handle_metrics: Arc::new(metrics),
+        };
+
+        assert!(x.has_block_data(&0.into()));
+        assert!(x.has_block_data(&1.into()));
+        assert!(x.has_block_data(&head_block.num));
+        assert!(!x.has_block_data(&(head_block.num + 1)));
+        assert!(!x.has_block_data(&(head_block.num + 1000)));
     }
 }
