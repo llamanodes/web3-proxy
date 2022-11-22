@@ -72,7 +72,7 @@ fn run(
     let rt = rt_builder.build()?;
 
     let num_workers = rt.metrics().num_workers();
-    debug!("num_workers: {}", num_workers);
+    info!("num_workers: {}", num_workers);
 
     rt.block_on(async {
         let app_frontend_port = cli_config.port;
