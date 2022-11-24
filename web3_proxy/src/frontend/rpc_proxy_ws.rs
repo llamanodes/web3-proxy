@@ -93,8 +93,7 @@ pub async fn websocket_handler_with_key(
     )
     .await?;
 
-    // TODO: turn this logging down!
-    info!("websocket_handler_with_key {:?}", authorization);
+    trace!("websocket_handler_with_key {:?}", authorization);
 
     let authorization = Arc::new(authorization);
 

@@ -245,25 +245,25 @@ These are roughly in order of completition
 - [x] database merge scripts
 - [x] test that sets up a Web3Connection and asks "has_block" for old and new blocks
 - [x] test that sets up Web3Connections with 2 nodes. one behind by several blocks. and see what the "next" server shows as
-- [x] bugfix! we were using the whole connection list instead of just the synced connection list when picking servers. oops!
-- [ ] add block timestamp to the /status page
-  - [ ] be sure to save the timestamp in a way that our request routing logic can make use of it
-- [ ] period_datetime should always be :00. right now it depends on start time 
-  - [ ] two servers running will confuse rpc_accounting!
-    - one option: we need the insert to be an upsert, but how do we merge historgrams?
-- [ ] change invite codes to set the user_tier
+- [x] ethspam on bsc and polygon gives 1/4 errors. fix whatever is causing this
+  - bugfix! we were using the whole connection list instead of just the synced connection list when picking servers. oops!
 - [ ] period_datetime should always be :00. right now it depends on start time 
 - [ ] two servers running will confuse rpc_accounting!
   - it won't happen with users often because they should be sticky to one proxy, but unauthenticated users will definitely hit this
   - one option: we need the insert to be an upsert, but how do we merge historgrams?
-- [ ] ethspam on bsc and polygon gives 1/4 errors. fix whatever is causing this
-    
+- [ ] add block timestamp to the /status page
+  - [ ] be sure to save the timestamp in a way that our request routing logic can make use of it
+- [ ] change invite codes to set the user_tier
+- [ ] if a websocket connection hasn't received a new block in a while, do a reconnect or just query the block. its possible that the node was syncing when the proxy started
+
 - [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
 
 ## V1
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] figure out if "could not get block from params" is a problem worth logging
+    - maybe it was an ots request?
 - [ ] eth_subscribe rpc_accounting has everything as cache_hits. should we instead count it as one background request?
 - [ ] implement filters
 - [ ] implement remaining subscriptions
