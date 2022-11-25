@@ -26,8 +26,8 @@ pub enum OpenRequestResult {
     Handle(OpenRequestHandle),
     /// Unable to start a request. Retry at the given time.
     RetryAt(Instant),
-    /// Unable to start a request. Retrying will not succeed.
-    RetryNever,
+    /// Unable to start a request because the server is not synced
+    NotSynced,
 }
 
 /// Make RPC requests through this handle and drop it when you are done.

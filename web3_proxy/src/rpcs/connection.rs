@@ -841,14 +841,16 @@ impl Web3Connection {
 
                     if retry_at > max_wait {
                         // break now since we will wait past our maximum wait time
+                        // TODO: don't use anyhow. use specific error type
                         return Err(anyhow::anyhow!("timeout waiting for request handle"));
                     }
                     sleep_until(retry_at).await;
                 }
-                Ok(OpenRequestResult::RetryNever) => {
+                Ok(OpenRequestResult::NotSynced) => {
                     // TODO: when can this happen? log? emit a stat?
                     // TODO: subscribe to the head block on this
                     // TODO: sleep how long? maybe just error?
+                    // TODO: don't use anyhow. use specific error type
                     return Err(anyhow::anyhow!("unable to retry for request handle"));
                 }
                 Err(err) => return Err(err),
@@ -864,7 +866,7 @@ impl Web3Connection {
         if !self.has_provider().await {
             // TODO: emit a stat?
             // TODO: wait until we have a provider?
-            return Ok(OpenRequestResult::RetryNever);
+            return Ok(OpenRequestResult::NotSynced);
         }
 
         // check rate limits
@@ -884,7 +886,7 @@ impl Web3Connection {
                     return Ok(OpenRequestResult::RetryAt(retry_at));
                 }
                 RedisRateLimitResult::RetryNever => {
-                    return Ok(OpenRequestResult::RetryNever);
+                    return Ok(OpenRequestResult::NotSynced);
                 }
             }
         };
