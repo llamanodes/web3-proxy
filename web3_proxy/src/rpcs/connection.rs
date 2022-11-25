@@ -9,7 +9,7 @@ use anyhow::Context;
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use futures::future::try_join_all;
 use futures::StreamExt;
-use log::{debug, error, info, warn, Level};
+use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use parking_lot::RwLock;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
@@ -37,10 +37,10 @@ pub struct Web3Connection {
     pub(super) http_client: Option<reqwest::Client>,
     /// keep track of currently open requests. We sort on this
     pub(super) active_requests: AtomicU32,
-    /// keep track of total requests
-    /// TODO: is this type okay?
-    /// TODO: replace this with something in metered?
-    pub(super) total_requests: AtomicU64,
+    /// keep track of total requests from the frontend
+    pub(super) frontend_requests: AtomicU64,
+    /// keep track of total requests from web3-proxy itself
+    pub(super) internal_requests: AtomicU64,
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
     pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
@@ -75,6 +75,7 @@ impl Web3Connection {
         hard_limit: Option<(u64, RedisPool)>,
         // TODO: think more about this type
         soft_limit: u32,
+        block_data_limit: Option<u64>,
         block_map: BlockHashesCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
@@ -96,17 +97,20 @@ impl Web3Connection {
         // turn weight 0 into 100% and weight 100 into 0%
         let weight = (100 - weight) as f64 / 100.0;
 
+        let block_data_limit = block_data_limit.unwrap_or_default().into();
+
         let new_connection = Self {
             name,
             display_name,
             http_client,
             url: url_str,
             active_requests: 0.into(),
-            total_requests: 0.into(),
+            frontend_requests: 0.into(),
+            internal_requests: 0.into(),
             provider: AsyncRwLock::new(None),
             hard_limit,
             soft_limit,
-            block_data_limit: Default::default(),
+            block_data_limit,
             head_block_id: RwLock::new(Default::default()),
             weight,
             open_request_handle_metrics,
@@ -119,7 +123,7 @@ impl Web3Connection {
             .retrying_reconnect(block_sender.as_ref(), false)
             .await?;
 
-        let authorization = Arc::new(Authorization::local(db_conn)?);
+        let authorization = Arc::new(Authorization::internal(db_conn)?);
 
         // check the server's chain_id here
         // TODO: move this outside the `new` function and into a `start` function or something. that way we can do retries from there
@@ -153,7 +157,12 @@ impl Web3Connection {
             }
         }
 
-        let will_subscribe_to_blocks = block_sender.is_some();
+        // TODO: should we do this even if block_sender is None? then we would know limits on private relays
+        let check_block_limit_needed = (new_connection
+            .block_data_limit
+            .load(atomic::Ordering::Acquire)
+            == 0)
+            && block_sender.is_some();
 
         // subscribe to new blocks and new transactions
         // TODO: make transaction subscription optional (just pass None for tx_id_sender)
@@ -179,7 +188,7 @@ impl Web3Connection {
         // TODO: would be great if rpcs exposed this
         // TODO: move this to a helper function so we can recheck on errors or as the chain grows
         // TODO: move this to a helper function that checks
-        if will_subscribe_to_blocks {
+        if check_block_limit_needed {
             // TODO: make sure the server isn't still syncing
 
             // TODO: don't sleep. wait for new heads subscription instead
@@ -194,32 +203,30 @@ impl Web3Connection {
         Ok((new_connection, handle))
     }
 
-    /// TODO: should check_block_data_limit take authorization?
     async fn check_block_data_limit(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
     ) -> anyhow::Result<Option<u64>> {
         let mut limit = None;
 
-        for block_data_limit in [u64::MAX, 90_000, 128, 64, 32] {
+        // TODO: binary search between 90k and max?
+        // TODO: start at 0 or 1
+        for block_data_limit in [0, 32, 64, 128, 256, 512, 1024, 90_000, u64::MAX] {
             let mut head_block_id = self.head_block_id.read().clone();
 
             // TODO: subscribe to a channel instead of polling. subscribe to http_interval_sender?
             while head_block_id.is_none() {
                 warn!("no head block yet. retrying rpc {}", self);
 
+                // TODO: sleep for the block time, or maybe subscribe to a channel instead of this simple pull
                 sleep(Duration::from_secs(13)).await;
 
                 head_block_id = self.head_block_id.read().clone();
             }
             let head_block_num = head_block_id.expect("is_none was checked above").num;
 
-            debug_assert_ne!(head_block_num, U64::zero());
-
             // TODO: subtract 1 from block_data_limit for safety?
-            let maybe_archive_block = head_block_num
-                .saturating_sub((block_data_limit).into())
-                .max(U64::one());
+            let maybe_archive_block = head_block_num.saturating_sub((block_data_limit).into());
 
             // TODO: wait for the handle BEFORE we check the current block number. it might be delayed too!
             // TODO: what should the request be?
@@ -233,23 +240,30 @@ impl Web3Connection {
                         maybe_archive_block,
                     )),
                     // error here are expected, so keep the level low
-                    Level::Debug.into(),
+                    Level::Trace.into(),
                 )
                 .await;
 
-            // // trace!(?archive_result, rpc=%self);
+            trace!(
+                "archive_result on {} for {}: {:?}",
+                block_data_limit,
+                self.name,
+                archive_result
+            );
 
-            if archive_result.is_ok() {
-                limit = Some(block_data_limit);
-
+            if archive_result.is_err() {
                 break;
             }
+
+            limit = Some(block_data_limit);
         }
 
         if let Some(limit) = limit {
             self.block_data_limit
                 .store(limit, atomic::Ordering::Release);
         }
+
+        debug!("block data limit on {}: {:?}", self.name, limit);
 
         Ok(limit)
     }
@@ -946,7 +960,7 @@ impl Serialize for Web3Connection {
 
         state.serialize_field(
             "total_requests",
-            &self.total_requests.load(atomic::Ordering::Relaxed),
+            &self.frontend_requests.load(atomic::Ordering::Relaxed),
         )?;
 
         let head_block_id = &*self.head_block_id.read();
@@ -999,7 +1013,8 @@ mod tests {
             url: "ws://example.com".to_string(),
             http_client: None,
             active_requests: 0.into(),
-            total_requests: 0.into(),
+            frontend_requests: 0.into(),
+            internal_requests: 0.into(),
             provider: AsyncRwLock::new(None),
             hard_limit: None,
             soft_limit: 1_000,
@@ -1027,13 +1042,15 @@ mod tests {
 
         let metrics = OpenRequestHandleMetrics::default();
 
+        // TODO: this is getting long. have a `impl Default`
         let x = Web3Connection {
             name: "name".to_string(),
             display_name: None,
             url: "ws://example.com".to_string(),
             http_client: None,
             active_requests: 0.into(),
-            total_requests: 0.into(),
+            frontend_requests: 0.into(),
+            internal_requests: 0.into(),
             provider: AsyncRwLock::new(None),
             hard_limit: None,
             soft_limit: 1_000,

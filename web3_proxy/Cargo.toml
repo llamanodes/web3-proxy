@@ -31,7 +31,7 @@ counter = "0.5.7"
 derive_more = "0.99.17"
 dotenv = "0.15.0"
 ethers = { version = "1.0.1", default-features = false, features = ["rustls", "ws"] }
-env_logger = "0.9.3"
+env_logger = "0.10.0"
 fdlimit = "0.2.1"
 flume = "0.10.14"
 futures = { version = "0.3.25", features = ["thread-pool"] }

@@ -45,6 +45,12 @@ pub enum RateLimitResult {
     UnknownKey,
 }
 
+#[derive(Clone, Debug)]
+pub enum AuthorizatioType {
+    Internal,
+    Frontend,
+}
+
 /// TODO: include the authorization checks in this?
 #[derive(Clone, Debug)]
 pub struct Authorization {
@@ -54,6 +60,7 @@ pub struct Authorization {
     pub origin: Option<Origin>,
     pub referer: Option<Referer>,
     pub user_agent: Option<UserAgent>,
+    pub authorization_type: AuthorizatioType,
 }
 
 #[derive(Debug)]
@@ -163,7 +170,7 @@ impl From<RpcSecretKey> for Uuid {
 }
 
 impl Authorization {
-    pub fn local(db_conn: Option<DatabaseConnection>) -> anyhow::Result<Self> {
+    pub fn internal(db_conn: Option<DatabaseConnection>) -> anyhow::Result<Self> {
         let authorization_checks = AuthorizationChecks {
             // any error logs on a local (internal) query are likely problems. log them all
             log_revert_chance: 1.0,
@@ -174,10 +181,18 @@ impl Authorization {
         let ip: IpAddr = "127.0.0.1".parse().expect("localhost should always parse");
         let user_agent = UserAgent::from_str(APP_USER_AGENT).ok();
 
-        Self::try_new(authorization_checks, db_conn, ip, None, None, user_agent)
+        Self::try_new(
+            authorization_checks,
+            db_conn,
+            ip,
+            None,
+            None,
+            user_agent,
+            AuthorizatioType::Internal,
+        )
     }
 
-    pub fn public(
+    pub fn external(
         allowed_origin_requests_per_period: &HashMap<String, u64>,
         db_conn: Option<DatabaseConnection>,
         ip: IpAddr,
@@ -208,6 +223,7 @@ impl Authorization {
             origin,
             referer,
             user_agent,
+            AuthorizatioType::Frontend,
         )
     }
 
@@ -218,6 +234,7 @@ impl Authorization {
         origin: Option<Origin>,
         referer: Option<Referer>,
         user_agent: Option<UserAgent>,
+        authorization_type: AuthorizatioType,
     ) -> anyhow::Result<Self> {
         // check ip
         match &authorization_checks.allowed_ips {
@@ -272,6 +289,7 @@ impl Authorization {
             origin,
             referer,
             user_agent,
+            authorization_type,
         })
     }
 }
@@ -444,7 +462,7 @@ impl Web3ProxyApp {
         // TODO: dry this up with rate_limit_by_rpc_key?
 
         // we don't care about user agent or origin or referer
-        let authorization = Authorization::public(
+        let authorization = Authorization::external(
             &self.config.allowed_origin_requests_per_period,
             self.db_conn(),
             ip,
@@ -498,7 +516,7 @@ impl Web3ProxyApp {
     ) -> anyhow::Result<RateLimitResult> {
         // ip rate limits don't check referer or user agent
         // the do check
-        let authorization = Authorization::public(
+        let authorization = Authorization::external(
             allowed_origin_requests_per_period,
             self.db_conn.clone(),
             ip,
@@ -687,6 +705,7 @@ impl Web3ProxyApp {
             origin,
             referer,
             user_agent,
+            AuthorizatioType::Frontend,
         )?;
 
         let user_max_requests_per_period = match authorization.checks.max_requests_per_period {

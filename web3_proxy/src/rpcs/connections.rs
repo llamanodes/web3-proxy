@@ -215,7 +215,7 @@ impl Web3Connections {
             min_head_rpcs,
         });
 
-        let authorization = Arc::new(Authorization::local(db_conn.clone())?);
+        let authorization = Arc::new(Authorization::internal(db_conn.clone())?);
 
         let handle = {
             let connections = connections.clone();
@@ -857,7 +857,8 @@ mod tests {
             url: "ws://example.com/synced".to_string(),
             http_client: None,
             active_requests: 0.into(),
-            total_requests: 0.into(),
+            frontend_requests: 0.into(),
+            internal_requests: 0.into(),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             hard_limit: None,
             soft_limit: 1_000,
@@ -873,7 +874,8 @@ mod tests {
             url: "ws://example.com/lagged".to_string(),
             http_client: None,
             active_requests: 0.into(),
-            total_requests: 0.into(),
+            frontend_requests: 0.into(),
+            internal_requests: 0.into(),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             hard_limit: None,
             soft_limit: 1_000,
@@ -914,7 +916,7 @@ mod tests {
             min_sum_soft_limit: 1,
         };
 
-        let authorization = Arc::new(Authorization::local(None).unwrap());
+        let authorization = Arc::new(Authorization::internal(None).unwrap());
 
         let (head_block_sender, _head_block_receiver) =
             watch::channel::<ArcBlock>(Default::default());

@@ -3,7 +3,6 @@ use crate::rpcs::connection::Web3Connection;
 use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::{app::AnyhowJoinHandle, rpcs::blockchain::ArcBlock};
 use argh::FromArgs;
-use derive_more::Constructor;
 use ethers::prelude::TxHash;
 use hashbrown::HashMap;
 use migration::sea_orm::DatabaseConnection;
@@ -176,7 +175,7 @@ fn default_response_cache_max_bytes() -> usize {
 }
 
 /// Configuration for a backend web3 RPC server
-#[derive(Debug, Deserialize, Constructor)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Web3ConnectionConfig {
     /// simple way to disable a connection without deleting the row
@@ -186,6 +185,8 @@ pub struct Web3ConnectionConfig {
     pub display_name: Option<String>,
     /// websocket (or http if no websocket)
     pub url: String,
+    /// block data limit. If None, will be queried
+    pub block_data_limit: Option<u64>,
     /// the requests per second at which the server starts slowing down
     pub soft_limit: u32,
     /// the requests per second at which the server throws errors (rate limit or otherwise)
@@ -247,6 +248,7 @@ impl Web3ConnectionConfig {
             http_interval_sender,
             hard_limit,
             self.soft_limit,
+            self.block_data_limit,
             block_map,
             block_sender,
             tx_id_sender,

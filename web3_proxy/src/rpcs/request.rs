@@ -1,6 +1,6 @@
 use super::connection::Web3Connection;
 use super::provider::Web3Provider;
-use crate::frontend::authorization::Authorization;
+use crate::frontend::authorization::{AuthorizatioType, Authorization};
 use crate::metered::{JsonRpcErrorCount, ProviderErrorCount};
 use anyhow::Context;
 use chrono::Utc;
@@ -42,14 +42,16 @@ pub struct OpenRequestHandle {
 
 /// Depending on the context, RPC errors can require different handling.
 pub enum RequestErrorHandler {
-    /// Potentially save the revert. Users can tune how often this happens
-    SaveReverts,
+    /// Log at the trace level. Use when errors are expected.
+    TraceLevel,
     /// Log at the debug level. Use when errors are expected.
     DebugLevel,
     /// Log at the error level. Use when errors are bad.
     ErrorLevel,
     /// Log at the warn level. Use when errors do not cause problems.
     WarnLevel,
+    /// Potentially save the revert. Users can tune how often this happens
+    SaveReverts,
 }
 
 // TODO: second param could be skipped since we don't need it here
@@ -65,6 +67,7 @@ struct EthCallFirstParams {
 impl From<Level> for RequestErrorHandler {
     fn from(level: Level) -> Self {
         match level {
+            Level::Trace => RequestErrorHandler::TraceLevel,
             Level::Debug => RequestErrorHandler::DebugLevel,
             Level::Error => RequestErrorHandler::ErrorLevel,
             Level::Warn => RequestErrorHandler::WarnLevel,
@@ -136,7 +139,16 @@ impl OpenRequestHandle {
 
         // TODO: handle overflows?
         // TODO: what ordering?
-        conn.total_requests.fetch_add(1, atomic::Ordering::Relaxed);
+        match authorization.as_ref().authorization_type {
+            AuthorizatioType::Frontend => {
+                conn.frontend_requests
+                    .fetch_add(1, atomic::Ordering::Relaxed);
+            }
+            AuthorizatioType::Internal => {
+                conn.internal_requests
+                    .fetch_add(1, atomic::Ordering::Relaxed);
+            }
+        }
 
         let metrics = conn.open_request_handle_metrics.clone();
         let used = false.into();
@@ -273,6 +285,7 @@ impl OpenRequestHandle {
                 false
             };
 
+            // TODO: think more about the method and param logs. those can be sensitive information
             match error_handler {
                 RequestErrorHandler::DebugLevel => {
                     // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
@@ -283,19 +296,38 @@ impl OpenRequestHandle {
                         );
                     }
                 }
-                RequestErrorHandler::ErrorLevel => {
-                    error!(
+                RequestErrorHandler::TraceLevel => {
+                    trace!(
                         "bad response from {}! method={} params={:?} err={:?}",
-                        self.conn, method, params, err
+                        self.conn,
+                        method,
+                        params,
+                        err
+                    );
+                }
+                RequestErrorHandler::ErrorLevel => {
+                    // TODO: include params if not running in release mode
+                    error!(
+                        "bad response from {}! method={} err={:?}",
+                        self.conn, method, err
                     );
                 }
                 RequestErrorHandler::WarnLevel => {
+                    // TODO: include params if not running in release mode
                     warn!(
-                        "bad response from {}! method={} params={:?} err={:?}",
-                        self.conn, method, params, err
+                        "bad response from {}! method={} err={:?}",
+                        self.conn, method, err
                     );
                 }
                 RequestErrorHandler::SaveReverts => {
+                    trace!(
+                        "bad response from {}! method={} params={:?} err={:?}",
+                        self.conn,
+                        method,
+                        params,
+                        err
+                    );
+
                     // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
                     let method: Method = Method::try_from_value(&method.to_string()).unwrap();
 
