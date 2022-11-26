@@ -4,7 +4,7 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
-use log::{warn};
+use log::warn;
 use std::sync::Arc;
 
 use crate::{frontend::authorization::Authorization, rpcs::connections::Web3Connections};
@@ -128,6 +128,7 @@ pub async fn block_needed(
             // TODO: double check that any node can serve this
             return Ok(None);
         }
+        "eth_getBlockReceipts" => 0,
         "eth_getBlockTransactionCountByHash" => {
             // TODO: double check that any node can serve this
             return Ok(None);
