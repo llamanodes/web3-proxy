@@ -221,15 +221,16 @@ impl OpenRequestHandle {
             // only save reverts for some types of calls
             // TODO: do something special for eth_sendRawTransaction too
             let error_handler = if let RequestErrorHandler::SaveReverts = error_handler {
+                // TODO: should all these be Trace or Debug or a mix?
                 if !["eth_call", "eth_estimateGas"].contains(&method) {
                     // trace!(%method, "skipping save on revert");
-                    RequestErrorHandler::DebugLevel
+                    RequestErrorHandler::TraceLevel
                 } else if self.authorization.db_conn.is_some() {
                     let log_revert_chance = self.authorization.checks.log_revert_chance;
 
                     if log_revert_chance == 0.0 {
                         // trace!(%method, "no chance. skipping save on revert");
-                        RequestErrorHandler::DebugLevel
+                        RequestErrorHandler::TraceLevel
                     } else if log_revert_chance == 1.0 {
                         // trace!(%method, "gaurenteed chance. SAVING on revert");
                         error_handler
@@ -237,7 +238,7 @@ impl OpenRequestHandle {
                         < log_revert_chance
                     {
                         // trace!(%method, "missed chance. skipping save on revert");
-                        RequestErrorHandler::DebugLevel
+                        RequestErrorHandler::TraceLevel
                     } else {
                         // trace!("Saving on revert");
                         // TODO: is always logging at debug level fine?
@@ -245,7 +246,7 @@ impl OpenRequestHandle {
                     }
                 } else {
                     // trace!(%method, "no database. skipping save on revert");
-                    RequestErrorHandler::DebugLevel
+                    RequestErrorHandler::TraceLevel
                 }
             } else {
                 error_handler
