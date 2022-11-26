@@ -1,3 +1,4 @@
+mod change_user_tier;
 mod change_user_tier_by_key;
 mod check_config;
 mod create_user;
@@ -35,6 +36,7 @@ pub struct CliConfig {
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand)]
 enum SubCommand {
+    ChangeUserTier(change_user_tier::ChangeUserTierCommand),
     ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeyCommand),
     CheckConfig(check_config::CheckConfigSubCommand),
     CreateUser(create_user::CreateUserSubCommand),
@@ -76,6 +78,11 @@ async fn main() -> anyhow::Result<()> {
     };
 
     match cli_config.sub_command {
+        SubCommand::ChangeUserTier(x) => {
+            let db_conn = get_db(cli_config.db_url, 1, 1).await?;
+
+            x.main(&db_conn).await
+        }
         SubCommand::ChangeUserTierByKey(x) => {
             let db_conn = get_db(cli_config.db_url, 1, 1).await?;
 
