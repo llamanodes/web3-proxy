@@ -1,13 +1,11 @@
 use anyhow::Context;
 use argh::FromArgs;
-use entities::{rpc_key, user, user_tier};
+use entities::user_tier;
 use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
-use uuid::Uuid;
-use web3_proxy::frontend::authorization::RpcSecretKey;
 
 /// change a user's tier.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
