@@ -253,7 +253,6 @@ These are roughly in order of completition
   - one option: we need the insert to be an upsert, but how do we merge historgrams?
 - [ ] add block timestamp to the /status page
   - [ ] be sure to save the timestamp in a way that our request routing logic can make use of it
-- [ ] change invite codes to set the user_tier
 - [ ] if a websocket connection hasn't received a new block in a while, do a reconnect or just query the block. its possible that the node was syncing when the proxy started
 
 - [ ] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
@@ -551,3 +550,4 @@ in another repo: event subscriber
   - [ ] if --address not given, use the --description
   - [ ] if it is too long, (the last 4 bytes must be zero), give an error so descriptions like this stand out
 - [ ] we need to use docker-compose's proper environment variable handling. because now if someone tries to start dev containers in their prod, remove orphans stops and removes them
+- [ ] change invite codes to set the user_tier

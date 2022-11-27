@@ -52,14 +52,14 @@ pub async fn get_user_id_from_params(
         }
         (None, Some(x)) => {
             // they do not have a bearer token, but requested a specific id. block
-            // TODO: proper error code
+            // TODO: proper error code from a useful error code
             // TODO: maybe instead of this sharp edged warn, we have a config value?
             // TODO: check config for if we should deny or allow this
-            // Err(anyhow::anyhow!("permission denied"))
+            Err(anyhow::anyhow!("permission denied"))
 
-            // TODO: make this a flag
-            warn!("allowing without auth during development!");
-            Ok(x.parse()?)
+            // // TODO: make this a flag
+            // warn!("allowing without auth during development!");
+            // Ok(x.parse()?)
         }
     }
 }
