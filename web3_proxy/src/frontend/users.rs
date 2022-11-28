@@ -96,6 +96,7 @@ pub async fn user_login_get(
         // TODO: don't unwrap
         domain: login_domain.parse().unwrap(),
         address: user_address.to_fixed_bytes(),
+        // TODO: config for statement
         statement: Some("🦙🦙🦙🦙🦙".to_string()),
         // TODO: don't unwrap
         uri: format!("https://{}/", login_domain).parse().unwrap(),
