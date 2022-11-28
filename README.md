@@ -70,6 +70,12 @@ $ websocat ws://127.0.0.1:8544
 
 You can copy `config/example.toml` to `config/production-$CHAINNAME.toml` and then run `docker-compose up --build -d` start proxies for many chains.
 
+Compare 3 RPCs:
+
+```
+web3_proxy_cli health_compass https://eth.llamarpc.com https://eth-ski.llamarpc.com https://rpc.ankr.com/eth
+```
+
 ### Run migrations
 
 This is only really useful during development. The migrations run on application start.
