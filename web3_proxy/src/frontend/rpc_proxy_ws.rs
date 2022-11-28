@@ -56,7 +56,7 @@ pub async fn websocket_handler(
         None => {
             if let Some(redirect) = &app.config.redirect_public_url {
                 // this is not a websocket. redirect to a friendly page
-                Ok(Redirect::to(redirect).into_response())
+                Ok(Redirect::permanent(redirect).into_response())
             } else {
                 // TODO: do not use an anyhow error. send the user a 400
                 Err(
@@ -117,7 +117,7 @@ pub async fn websocket_handler_with_key(
                     None,
                 )),
                 (Some(redirect_public_url), _, None) => {
-                    Ok(Redirect::to(redirect_public_url).into_response())
+                    Ok(Redirect::permanent(redirect_public_url).into_response())
                 }
                 (_, Some(redirect_rpc_key_url), rpc_key_id) => {
                     let reg = Handlebars::new();
@@ -138,7 +138,7 @@ pub async fn websocket_handler_with_key(
                             .expect("templating should always work");
 
                         // this is not a websocket. redirect to a page for this user
-                        Ok(Redirect::to(&redirect_rpc_key_url).into_response())
+                        Ok(Redirect::permanent(&redirect_rpc_key_url).into_response())
                     }
                 }
                 // any other combinations get a simple error

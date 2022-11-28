@@ -79,6 +79,7 @@ pub struct AppConfig {
     /// Restrict user registration.
     /// None = no code needed
     pub invite_code: Option<String>,
+    pub login_domain: Option<String>,
 
     /// Rate limit for bearer token authenticated entrypoints.
     /// This is separate from the rpc limits.

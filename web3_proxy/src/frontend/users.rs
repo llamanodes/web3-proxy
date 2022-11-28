@@ -85,13 +85,20 @@ pub async fn user_login_get(
         // TODO: map_err so this becomes a 401
         .context("bad input")?;
 
+    let login_domain = app
+        .config
+        .login_domain
+        .clone()
+        .unwrap_or_else(|| "llamanodes.com".to_string());
+
     // TODO: get most of these from the app config
     let message = Message {
-        // TODO: get this from app config
-        domain: "llamanodes.com".parse().unwrap(),
+        // TODO: don't unwrap
+        domain: login_domain.parse().unwrap(),
         address: user_address.to_fixed_bytes(),
         statement: Some("🦙🦙🦙🦙🦙".to_string()),
-        uri: "https://llamanodes.com/".parse().unwrap(),
+        // TODO: don't unwrap
+        uri: format!("https://{}/", login_domain).parse().unwrap(),
         version: siwe::Version::V1,
         chain_id: 1,
         expiration_time: Some(expiration_time.into()),

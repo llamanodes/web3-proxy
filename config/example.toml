@@ -35,6 +35,7 @@ redirect_rpc_key_url = "https://llamanodes.com/dashboard/keys?key={rpc_key_id}"
 public_max_concurrent_requests = 3
 # 0 = block all public requests
 public_requests_per_period = 200
+login_domain = "llamanodes.com"
 
 # 10GB of cache
 response_cache_max_bytes = 10_000_000_000
