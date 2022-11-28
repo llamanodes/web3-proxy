@@ -418,7 +418,7 @@ impl Web3Connections {
 
         match head_rpcs.len() {
             0 => {
-                trace!("no head rpcs: {:?}", self);
+                warn!("no head rpcs: {:?} (skipped {:?})", self, skip);
                 // TODO: what should happen here? automatic retry?
                 // TODO: more detailed error
                 return Ok(OpenRequestResult::NotSynced);
@@ -709,7 +709,7 @@ impl Web3Connections {
                     continue;
                 }
                 OpenRequestResult::NotSynced => {
-                    warn!("No server handles! {:?}", self);
+                    warn!("No synced servers! {:?}", self);
 
                     if let Some(request_metadata) = request_metadata {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);

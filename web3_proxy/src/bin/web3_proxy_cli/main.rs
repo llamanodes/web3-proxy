@@ -3,6 +3,7 @@ mod change_user_tier_by_key;
 mod check_config;
 mod create_user;
 mod drop_migration_lock;
+mod health_compass;
 mod list_user_tier;
 mod user_export;
 mod user_import;
@@ -41,6 +42,7 @@ enum SubCommand {
     CheckConfig(check_config::CheckConfigSubCommand),
     CreateUser(create_user::CreateUserSubCommand),
     DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
+    HealthCompass(health_compass::HealthCompassSubCommand),
     UserExport(user_export::UserExportSubCommand),
     UserImport(user_import::UserImportSubCommand),
     // TODO: sub command to downgrade migrations? sea-orm has this but doing downgrades here would be easier+safer
@@ -100,6 +102,7 @@ async fn main() -> anyhow::Result<()> {
 
             x.main(&db_conn).await
         }
+        SubCommand::HealthCompass(x) => x.main().await,
         SubCommand::UserExport(x) => {
             let db_conn = get_migrated_db(cli_config.db_url, 1, 1).await?;
 

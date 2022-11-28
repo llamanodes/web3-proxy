@@ -149,7 +149,7 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
 
 // TODO: impl Error on this?
 /// All jsonrpc errors use this structure
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct JsonRpcErrorData {
     /// The error code
     pub code: i64,
