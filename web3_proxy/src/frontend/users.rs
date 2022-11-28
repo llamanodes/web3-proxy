@@ -87,11 +87,11 @@ pub async fn user_login_get(
 
     // TODO: get most of these from the app config
     let message = Message {
-        // TODO: should domain be llamanodes, or llamarpc, or the subdomain of llamarpc?
-        domain: "staging.llamanodes.com".parse().unwrap(),
+        // TODO: get this from app config
+        domain: "llamanodes.com".parse().unwrap(),
         address: user_address.to_fixed_bytes(),
         statement: Some("🦙🦙🦙🦙🦙".to_string()),
-        uri: "https://staging.llamanodes.com/".parse().unwrap(),
+        uri: "https://llamanodes.com/".parse().unwrap(),
         version: siwe::Version::V1,
         chain_id: 1,
         expiration_time: Some(expiration_time.into()),
