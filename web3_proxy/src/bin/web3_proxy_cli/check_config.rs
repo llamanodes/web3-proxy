@@ -73,7 +73,7 @@ impl CheckConfigSubCommand {
                 warn!("app.redirect_user_url is None. Registered users will get an error page instead of a redirect")
             }
             Some(x) => {
-                if !x.contains("{rpc_key_id}") {
+                if !x.contains("{{rpc_key_id}}") {
                     num_errors += 1;
                     error!("redirect_user_url user url must contain \"{{rpc_key_id}}\"")
                 }
