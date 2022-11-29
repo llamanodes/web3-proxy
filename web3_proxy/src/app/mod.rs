@@ -253,7 +253,7 @@ impl Web3ProxyApp {
         // safety checks on the config
         if let Some(redirect) = &top_config.app.redirect_rpc_key_url {
             assert!(
-                redirect.contains("{rpc_key_id}"),
+                redirect.contains("{{rpc_key_id}}"),
                 "redirect_user_url user url must contain \"{{rpc_key_id}}\""
             );
         }
