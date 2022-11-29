@@ -9,7 +9,6 @@ use chrono::NaiveDateTime;
 use entities::{rpc_accounting, rpc_key};
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::warn;
 use migration::sea_orm::{
     ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Select,
 };

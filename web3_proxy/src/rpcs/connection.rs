@@ -997,6 +997,7 @@ impl fmt::Display for Web3Connection {
 }
 
 mod tests {
+    #![allow(unused_imports)]
     use super::*;
 
     #[test]

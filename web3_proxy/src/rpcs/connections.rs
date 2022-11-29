@@ -846,6 +846,8 @@ impl Serialize for Web3Connections {
 }
 
 mod tests {
+    #![allow(unused_imports)]
+    // TODO: why is this allow needed? does tokio::test get in the way somehow?
     use super::*;
     use crate::rpcs::{blockchain::BlockId, provider::Web3Provider};
     use ethers::types::Block;
