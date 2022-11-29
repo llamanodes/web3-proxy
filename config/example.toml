@@ -25,7 +25,7 @@ volatile_redis_url = "redis://127.0.0.1:16379/"
 redirect_public_url = "https://llamanodes.com/public-rpc"
 # redirect_rpc_key_url is optional
 # it only does something if db_url is set
-redirect_rpc_key_url = "https://llamanodes.com/dashboard/keys?key={rpc_key_id}"
+redirect_rpc_key_url = "https://llamanodes.com/dashboard/keys?key={{rpc_key_id}}"
 
 # sentry is optional. it is used for browsing error logs
 # sentry_url = "https://SENTRY_KEY_A.ingest.sentry.io/SENTRY_KEY_B"
