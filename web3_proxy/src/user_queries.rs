@@ -240,6 +240,7 @@ pub async fn query_user_stats<'a>(
             "total_response_millis",
         );
 
+    // TODO: make this and q mutable and clean up the code below. no need for more `let q`
     let condition = Condition::all();
 
     let q = if let StatResponse::Detailed = stat_response_type {

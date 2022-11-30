@@ -99,6 +99,13 @@ Copy the ULID key (or UUID key) out of the above command, and put it into the fo
 web3_proxy_cli --db-url ... change_user_tier_by_key "$RPC_ULID_KEY_FROM_PREV_COMMAND" "Unlimited"
 ```
 
+### Health compass
+
+Health check 3 servers and error if the first one doesn't match the others.
+
+```
+web3_proxy_cli https://eth.llamarpc.com/ https://rpc.ankr.com/eth https://cloudflare-eth.com
+```
 
 ## Database entities
 
