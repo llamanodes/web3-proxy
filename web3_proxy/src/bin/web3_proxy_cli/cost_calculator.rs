@@ -161,6 +161,8 @@ impl CostCalculatorCommand {
 
         debug!("cost_seconds: {}", cost_seconds);
 
+        info!("$0.000005 = goal");
+
         let query_seconds: Decimal = query_response
             .last_period_datetime
             .signed_duration_since(query_response.first_period_datetime)
