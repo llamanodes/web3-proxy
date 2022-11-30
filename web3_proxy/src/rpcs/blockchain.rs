@@ -7,6 +7,7 @@ use crate::{
     config::BlockAndRpc, jsonrpc::JsonRpcRequest, rpcs::synced_connections::SyncedConnections,
 };
 use anyhow::Context;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use hashbrown::{HashMap, HashSet};
@@ -14,6 +15,7 @@ use log::{debug, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use serde_json::json;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Duration;
@@ -264,12 +266,31 @@ impl Web3Connections {
                 // we don't know if its on the heaviest chain yet
                 self.save_block(&rpc_head_block, false).await?;
 
-                connection_heads.insert(rpc.name.to_owned(), rpc_head_hash);
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .context("no time")?;
 
-                Some(BlockId {
-                    hash: rpc_head_hash,
-                    num: rpc_head_num,
-                })
+                // TODO: get this from config
+                let oldest_allowed = now - Duration::from_secs(120);
+
+                let block_timestamp = Duration::from_secs(rpc_head_block.timestamp.as_u64());
+
+                if block_timestamp < oldest_allowed {
+                    let behind_secs = (oldest_allowed - block_timestamp).as_secs();
+
+                    warn!("rpc is behind by {} seconds", behind_secs);
+
+                    connection_heads.remove(&rpc.name);
+
+                    None
+                } else {
+                    connection_heads.insert(rpc.name.to_owned(), rpc_head_hash);
+
+                    Some(BlockId {
+                        hash: rpc_head_hash,
+                        num: rpc_head_num,
+                    })
+                }
             }
             None => {
                 // TODO: warn is too verbose. this is expected if a node disconnects and has to reconnect

@@ -61,7 +61,8 @@ pub struct CostCalculatorCommand {
     /// the chain id to check. If none, check all.
     #[argh(option)]
     chain_id: Option<u64>,
-    // TODO: start and end dates?
+    // TODO: query start and end dates
+    // TODO: goal price
 }
 
 impl CostCalculatorCommand {
@@ -161,14 +162,14 @@ impl CostCalculatorCommand {
 
         debug!("cost_seconds: {}", cost_seconds);
 
-        info!("$0.000005 = goal");
-
         let query_seconds: Decimal = query_response
             .last_period_datetime
             .signed_duration_since(query_response.first_period_datetime)
             .num_seconds()
             .into();
         info!("query seconds: {}", query_seconds);
+
+        info!("$0.000005 = goal");
 
         let x = costs(
             query_response.total_frontend_requests,

@@ -847,10 +847,12 @@ impl Serialize for Web3Connections {
 
 mod tests {
     #![allow(unused_imports)]
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     // TODO: why is this allow needed? does tokio::test get in the way somehow?
     use super::*;
     use crate::rpcs::{blockchain::BlockId, provider::Web3Provider};
-    use ethers::types::Block;
+    use ethers::types::{Block, U256};
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
 
@@ -863,9 +865,16 @@ mod tests {
             .is_test(true)
             .try_init();
 
+        let now: U256 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .into();
+
         let lagged_block = Block {
             hash: Some(H256::random()),
             number: Some(0.into()),
+            timestamp: now - 1,
             ..Default::default()
         };
 
@@ -873,6 +882,7 @@ mod tests {
             hash: Some(H256::random()),
             number: Some(1.into()),
             parent_hash: lagged_block.hash.unwrap(),
+            timestamp: now,
             ..Default::default()
         };
 
@@ -1093,10 +1103,17 @@ mod tests {
             .is_test(true)
             .try_init();
 
+        let now: U256 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .into();
+
         let head_block: Block<TxHash> = Block {
             hash: Some(H256::random()),
             number: Some(1_000_000.into()),
             parent_hash: H256::random(),
+            timestamp: now,
             ..Default::default()
         };
 

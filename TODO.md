@@ -265,6 +265,7 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] get `oldest_allowed` out of config. or calculate automatically based on block time.
 - [ ] `change_user_tier_by_address` script
 - [ ] figure out if "could not get block from params" is a problem worth logging
     - maybe it was an ots request?
