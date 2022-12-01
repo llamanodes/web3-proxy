@@ -125,7 +125,7 @@ impl Web3Connections {
                     .try_send_best_upstream_server(authorization, request, None, None)
                     .await?;
 
-                let block = response.result.unwrap();
+                let block = response.result.context("failed fetching block")?;
 
                 serde_json::from_str(block.get())?
             }
@@ -278,9 +278,9 @@ impl Web3Connections {
                 if block_timestamp < oldest_allowed {
                     let behind_secs = (oldest_allowed - block_timestamp).as_secs();
 
-                    warn!("rpc is behind by {} seconds", behind_secs);
-
-                    connection_heads.remove(&rpc.name);
+                    if connection_heads.remove(&rpc.name).is_some() {
+                        warn!("{} is behind by {} seconds", &rpc.name, behind_secs);
+                    };
 
                     None
                 } else {
