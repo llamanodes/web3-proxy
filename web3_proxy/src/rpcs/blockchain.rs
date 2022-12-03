@@ -542,13 +542,13 @@ impl Web3Connections {
                                 if consensus_head_block.hash() == old_head_block.hash() {
                                     // no change in hash. no need to use head_block_sender
                                     debug!(
-                                        "con {}/{}/{} con_head={} rpc={} rpc_head={}",
+                                        "con {}/{}/{} con_head={} rpc_head={} rpc={}",
                                         num_consensus_rpcs,
                                         num_connection_heads,
                                         total_conns,
                                         consensus_head_block,
-                                        rpc,
                                         rpc_head_str
+                                        rpc,
                                     )
                                 } else {
                                     // hash changed
