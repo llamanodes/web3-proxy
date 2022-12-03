@@ -547,7 +547,7 @@ impl Web3Connections {
                                         num_connection_heads,
                                         total_conns,
                                         consensus_head_block,
-                                        rpc_head_str
+                                        rpc_head_str,
                                         rpc,
                                     )
                                 } else {
@@ -560,7 +560,7 @@ impl Web3Connections {
                                         consensus_head_block,
                                         old_head_block,
                                         rpc_head_str,
-                                        rpc
+                                        rpc,
                                     );
 
                                     self.save_block(&consensus_head_block.block, true)
