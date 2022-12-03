@@ -47,7 +47,6 @@ num = "0.4.0"
 # TODO: import num_traits from sea-orm so we always have the same version
 num-traits = "0.2.15"
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
-petgraph = "0.6.2"
 proctitle = "0.1.1"
 # TODO: regex has several "perf" features that we might want to use
 regex = "1.7.0"

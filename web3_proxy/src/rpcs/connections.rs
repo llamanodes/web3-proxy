@@ -21,7 +21,6 @@ use hashbrown::HashMap;
 use log::{error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use moka::future::{Cache, ConcurrentCacheExt};
-use petgraph::graphmap::DiGraphMap;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
@@ -30,7 +29,6 @@ use std::fmt;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use thread_fast_rng::rand::seq::SliceRandom;
-use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{broadcast, watch};
 use tokio::task;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
@@ -48,9 +46,6 @@ pub struct Web3Connections {
     pub(super) block_hashes: BlockHashesCache,
     /// blocks on the heaviest chain
     pub(super) block_numbers: Cache<U64, H256, hashbrown::hash_map::DefaultHashBuilder>,
-    /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
-    /// TODO: what should we use for edges?
-    pub(super) blockchain_graphmap: AsyncRwLock<DiGraphMap<H256, u32>>,
     pub(super) min_head_rpcs: usize,
     pub(super) min_sum_soft_limit: u32,
 }
@@ -209,7 +204,6 @@ impl Web3Connections {
             pending_transactions,
             block_hashes,
             block_numbers,
-            blockchain_graphmap: Default::default(),
             min_sum_soft_limit,
             min_head_rpcs,
         });
@@ -846,15 +840,15 @@ impl Serialize for Web3Connections {
 }
 
 mod tests {
-    #![allow(unused_imports)]
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     // TODO: why is this allow needed? does tokio::test get in the way somehow?
+    #![allow(unused_imports)]
     use super::*;
-    use crate::rpcs::{blockchain::BlockId, provider::Web3Provider};
+    use crate::rpcs::{blockchain::SavedBlock, provider::Web3Provider};
     use ethers::types::{Block, U256};
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::sync::RwLock as AsyncRwLock;
 
     #[tokio::test]
     async fn test_server_selection_by_height() {
@@ -886,18 +880,12 @@ mod tests {
             ..Default::default()
         };
 
-        // TODO: write a impl From for Block -> BlockId?
-        let lagged_block_id = BlockId {
-            hash: lagged_block.hash.unwrap(),
-            num: lagged_block.number.unwrap(),
-        };
-        let head_block_id = BlockId {
-            hash: head_block.hash.unwrap(),
-            num: head_block.number.unwrap(),
-        };
-
         let lagged_block = Arc::new(lagged_block);
         let head_block = Arc::new(head_block);
+
+        // TODO: write a impl From for Block -> BlockId?
+        let lagged_block: SavedBlock = lagged_block.into();
+        let head_block: SavedBlock = head_block.into();
 
         let block_data_limit = u64::MAX;
 
@@ -914,7 +902,7 @@ mod tests {
             soft_limit: 1_000,
             block_data_limit: block_data_limit.into(),
             weight: 100.0,
-            head_block_id: RwLock::new(Some(head_block_id)),
+            head_block: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(Default::default()),
         };
 
@@ -931,15 +919,15 @@ mod tests {
             soft_limit: 1_000,
             block_data_limit: block_data_limit.into(),
             weight: 100.0,
-            head_block_id: RwLock::new(Some(lagged_block_id)),
+            head_block: RwLock::new(Some(lagged_block.clone())),
             open_request_handle_metrics: Arc::new(Default::default()),
         };
 
-        assert!(head_rpc.has_block_data(&lagged_block.number.unwrap()));
-        assert!(head_rpc.has_block_data(&head_block.number.unwrap()));
+        assert!(head_rpc.has_block_data(&lagged_block.number()));
+        assert!(head_rpc.has_block_data(&head_block.number()));
 
-        assert!(lagged_rpc.has_block_data(&lagged_block.number.unwrap()));
-        assert!(!lagged_rpc.has_block_data(&head_block.number.unwrap()));
+        assert!(lagged_rpc.has_block_data(&lagged_block.number()));
+        assert!(!lagged_rpc.has_block_data(&head_block.number()));
 
         let head_rpc = Arc::new(head_rpc);
         let lagged_rpc = Arc::new(lagged_rpc);
@@ -961,7 +949,6 @@ mod tests {
             block_numbers: Cache::builder()
                 .max_capacity(10_000)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
-            blockchain_graphmap: Default::default(),
             min_head_rpcs: 1,
             min_sum_soft_limit: 1,
         };
@@ -1020,7 +1007,7 @@ mod tests {
         assert!(matches!(x, OpenRequestResult::NotSynced));
 
         // add lagged blocks to the conns. both servers should be allowed
-        conns.save_block(&lagged_block, true).await.unwrap();
+        conns.save_block(&lagged_block.block, true).await.unwrap();
 
         conns
             .process_block_from_rpc(
@@ -1048,7 +1035,7 @@ mod tests {
         assert_eq!(conns.num_synced_rpcs(), 2);
 
         // add head block to the conns. lagged_rpc should not be available
-        conns.save_block(&head_block, true).await.unwrap();
+        conns.save_block(&head_block.block, true).await.unwrap();
 
         conns
             .process_block_from_rpc(
@@ -1109,7 +1096,7 @@ mod tests {
             .as_secs()
             .into();
 
-        let head_block: Block<TxHash> = Block {
+        let head_block = Block {
             hash: Some(H256::random()),
             number: Some(1_000_000.into()),
             parent_hash: H256::random(),
@@ -1117,13 +1104,7 @@ mod tests {
             ..Default::default()
         };
 
-        // TODO: write a impl From for Block -> BlockId?
-        let head_block_id = BlockId {
-            hash: head_block.hash.unwrap(),
-            num: head_block.number.unwrap(),
-        };
-
-        let head_block = Arc::new(head_block);
+        let head_block: SavedBlock = Arc::new(head_block).into();
 
         let pruned_rpc = Web3Connection {
             name: "pruned".to_string(),
@@ -1138,7 +1119,7 @@ mod tests {
             soft_limit: 3_000,
             block_data_limit: 64.into(),
             weight: 1.0,
-            head_block_id: RwLock::new(Some(head_block_id.clone())),
+            head_block: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(Default::default()),
         };
 
@@ -1156,12 +1137,12 @@ mod tests {
             block_data_limit: u64::MAX.into(),
             // TODO: does weight = 0 work?
             weight: 0.01,
-            head_block_id: RwLock::new(Some(head_block_id)),
+            head_block: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(Default::default()),
         };
 
-        assert!(pruned_rpc.has_block_data(&head_block.number.unwrap()));
-        assert!(archive_rpc.has_block_data(&head_block.number.unwrap()));
+        assert!(pruned_rpc.has_block_data(&head_block.number()));
+        assert!(archive_rpc.has_block_data(&head_block.number()));
         assert!(!pruned_rpc.has_block_data(&1.into()));
         assert!(archive_rpc.has_block_data(&1.into()));
 
@@ -1185,7 +1166,6 @@ mod tests {
             block_numbers: Cache::builder()
                 .max_capacity(10)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
-            blockchain_graphmap: Default::default(),
             min_head_rpcs: 1,
             min_sum_soft_limit: 3_000,
         };
@@ -1223,7 +1203,7 @@ mod tests {
 
         // best_synced_backend_connection requires servers to be synced with the head block
         let best_head_server = conns
-            .best_synced_backend_connection(&authorization, None, &[], head_block.number.as_ref())
+            .best_synced_backend_connection(&authorization, None, &[], Some(&head_block.number()))
             .await;
 
         assert!(matches!(

@@ -10,7 +10,8 @@
 
 use anyhow::Context;
 use futures::StreamExt;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
+use num::Zero;
 use parking_lot::deadlock;
 use std::fs;
 use std::path::Path;
@@ -78,6 +79,7 @@ fn run(
         let app_frontend_port = cli_config.port;
         let app_prometheus_port = cli_config.prometheus_port;
 
+        // start the main app
         let mut spawned_app =
             Web3ProxyApp::spawn(top_config, num_workers, shutdown_sender.subscribe()).await?;
 
@@ -90,7 +92,6 @@ fn run(
         ));
 
         // if everything is working, these should both run forever
-        // TODO: join these instead and use shutdown handler properly. probably use tokio's ctrl+c helper
         tokio::select! {
             x = flatten_handles(spawned_app.app_handles) => {
                 match x {
@@ -139,16 +140,29 @@ fn run(
             warn!("shutdown sender err={:?}", err);
         };
 
-        // wait on all the important background tasks (like saving stats to the database) to complete
+        // wait for things like saving stats to the database to complete
+        info!("waiting on important background tasks");
+        let mut background_errors = 0;
         while let Some(x) = spawned_app.background_handles.next().await {
             match x {
-                Err(e) => return Err(e.into()),
-                Ok(Err(e)) => return Err(e),
+                Err(e) => {
+                    error!("{:?}", e);
+                    background_errors += 1;
+                }
+                Ok(Err(e)) => {
+                    error!("{:?}", e);
+                    background_errors += 1;
+                }
                 Ok(Ok(_)) => continue,
             }
         }
 
-        info!("finished");
+        if background_errors.is_zero() {
+            info!("finished");
+        } else {
+            // TODO: collect instead?
+            error!("finished with errors!")
+        }
 
         Ok(())
     })

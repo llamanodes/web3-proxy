@@ -1,5 +1,5 @@
 ///! Rate-limited communication with a web3 provider.
-use super::blockchain::{ArcBlock, BlockHashesCache, BlockId};
+use super::blockchain::{ArcBlock, BlockHashesCache, SavedBlock};
 use super::provider::Web3Provider;
 use super::request::{OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
@@ -54,7 +54,7 @@ pub struct Web3Connection {
     /// Lower weight are higher priority when sending requests. 0 to 99.
     pub(super) weight: f64,
     /// TODO: should this be an AsyncRwLock?
-    pub(super) head_block_id: RwLock<Option<BlockId>>,
+    pub(super) head_block: RwLock<Option<SavedBlock>>,
     pub(super) open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
 }
 
@@ -111,7 +111,7 @@ impl Web3Connection {
             hard_limit,
             soft_limit,
             block_data_limit,
-            head_block_id: RwLock::new(Default::default()),
+            head_block: RwLock::new(Default::default()),
             weight,
             open_request_handle_metrics,
         };
@@ -119,6 +119,7 @@ impl Web3Connection {
         let new_connection = Arc::new(new_connection);
 
         // connect to the server (with retries)
+        // TODO: PROBLEM! THIS RETRIES FOREVER AND BLOCKS THE APP STARTING
         new_connection
             .retrying_reconnect(block_sender.as_ref(), false)
             .await?;
@@ -148,11 +149,11 @@ impl Web3Connection {
                         chain_id,
                         found_chain_id
                     )
-                    .context(format!("failed @ {}", new_connection)));
+                    .context(format!("failed @ {}", new_connection.name)));
                 }
             }
             Err(e) => {
-                let e = anyhow::Error::from(e).context(format!("failed @ {}", new_connection));
+                let e = anyhow::Error::from(e).context(format!("failed @ {}", new_connection.name));
                 return Err(e);
             }
         }
@@ -212,7 +213,7 @@ impl Web3Connection {
         // TODO: binary search between 90k and max?
         // TODO: start at 0 or 1
         for block_data_limit in [0, 32, 64, 128, 256, 512, 1024, 90_000, u64::MAX] {
-            let mut head_block_id = self.head_block_id.read().clone();
+            let mut head_block_id = self.head_block.read().clone();
 
             // TODO: subscribe to a channel instead of polling. subscribe to http_interval_sender?
             while head_block_id.is_none() {
@@ -221,9 +222,9 @@ impl Web3Connection {
                 // TODO: sleep for the block time, or maybe subscribe to a channel instead of this simple pull
                 sleep(Duration::from_secs(13)).await;
 
-                head_block_id = self.head_block_id.read().clone();
+                head_block_id = self.head_block.read().clone();
             }
-            let head_block_num = head_block_id.expect("is_none was checked above").num;
+            let head_block_num = head_block_id.expect("is_none was checked above").number();
 
             // TODO: subtract 1 from block_data_limit for safety?
             let maybe_archive_block = head_block_num.saturating_sub((block_data_limit).into());
@@ -274,9 +275,9 @@ impl Web3Connection {
     }
 
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
-        let head_block_num = match self.head_block_id.read().clone() {
+        let head_block_num = match self.head_block.read().clone() {
             None => return false,
-            Some(x) => x.num,
+            Some(x) => x.number(),
         };
 
         // this rpc doesn't have that block yet. still syncing
@@ -374,7 +375,7 @@ impl Web3Connection {
 
             // reset sync status
             {
-                let mut head_block_id = self.head_block_id.write();
+                let mut head_block_id = self.head_block.write();
                 *head_block_id = None;
             }
 
@@ -415,75 +416,60 @@ impl Web3Connection {
         block_sender: &flume::Sender<BlockAndRpc>,
         block_map: BlockHashesCache,
     ) -> anyhow::Result<()> {
-        match new_head_block {
+        let new_head_block = match new_head_block {
             Ok(None) => {
-                // TODO: i think this should clear the local block and then update over the block sender
-                warn!("unsynced server {}", self);
-
                 {
-                    let mut head_block_id = self.head_block_id.write();
+                    let mut head_block_id = self.head_block.write();
+
+                    if head_block_id.is_none() {
+                        // we previously sent a None. return early
+                        return Ok(());
+                    }
+                    warn!("{} is not synced!", self);
 
                     *head_block_id = None;
                 }
 
-                block_sender
-                    .send_async((None, self.clone()))
-                    .await
-                    .context("clearing block_sender")?;
+                None
             }
             Ok(Some(new_head_block)) => {
-                // TODO: is unwrap_or_default ok? we might have an empty block
-                let new_hash = new_head_block.hash.unwrap_or_default();
+                let new_hash = new_head_block
+                    .hash
+                    .context("sending block to connections")?;
 
                 // if we already have this block saved, set new_head_block to that arc. otherwise store this copy
                 let new_head_block = block_map
                     .get_with(new_hash, async move { new_head_block })
                     .await;
 
-                let new_num = new_head_block.number.unwrap_or_default();
-
                 // save the block so we don't send the same one multiple times
                 // also save so that archive checks can know how far back to query
                 {
-                    let mut head_block_id = self.head_block_id.write();
+                    let mut head_block = self.head_block.write();
 
-                    if head_block_id.is_none() {
-                        *head_block_id = Some(BlockId {
-                            hash: new_hash,
-                            num: new_num,
-                        });
-                    } else {
-                        head_block_id.as_mut().map(|x| {
-                            x.hash = new_hash;
-                            x.num = new_num;
-                            x
-                        });
-                    }
+                    let _ = head_block.insert(new_head_block.clone().into());
                 }
 
-                // send the block off to be saved
-                block_sender
-                    .send_async((Some(new_head_block), self.clone()))
-                    .await
-                    .context("block_sender")?;
+                Some(new_head_block)
             }
             Err(err) => {
                 warn!("unable to get block from {}. err={:?}", self, err);
 
                 {
-                    let mut head_block_id = self.head_block_id.write();
+                    let mut head_block_id = self.head_block.write();
 
                     *head_block_id = None;
                 }
 
-                // send an empty block to take this server out of rotation
-                // TODO: this is NOT working!!!!
-                block_sender
-                    .send_async((None, self.clone()))
-                    .await
-                    .context("block_sender")?;
+                None
             }
-        }
+        };
+
+        // send an empty block to take this server out of rotation
+        block_sender
+            .send_async((new_head_block, self.clone()))
+            .await
+            .context("block_sender")?;
 
         Ok(())
     }
@@ -965,7 +951,7 @@ impl Serialize for Web3Connection {
             &self.frontend_requests.load(atomic::Ordering::Relaxed),
         )?;
 
-        let head_block_id = &*self.head_block_id.read();
+        let head_block_id = &*self.head_block.read();
         state.serialize_field("head_block_id", head_block_id)?;
 
         state.end()
@@ -999,13 +985,20 @@ impl fmt::Display for Web3Connection {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+    use ethers::types::Block;
 
     #[test]
     fn test_archive_node_has_block_data() {
-        let head_block = BlockId {
-            hash: H256::random(),
-            num: 1_000_000.into(),
+        let random_block = Block {
+            hash: Some(H256::random()),
+            number: Some(1_000_000.into()),
+            // TODO: timestamp?
+            ..Default::default()
         };
+
+        let random_block = Arc::new(random_block);
+
+        let head_block = SavedBlock::new(random_block);
         let block_data_limit = u64::MAX;
 
         let metrics = OpenRequestHandleMetrics::default();
@@ -1023,23 +1016,25 @@ mod tests {
             soft_limit: 1_000,
             block_data_limit: block_data_limit.into(),
             weight: 100.0,
-            head_block_id: RwLock::new(Some(head_block.clone())),
+            head_block: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(metrics),
         };
 
         assert!(x.has_block_data(&0.into()));
         assert!(x.has_block_data(&1.into()));
-        assert!(x.has_block_data(&head_block.num));
-        assert!(!x.has_block_data(&(head_block.num + 1)));
-        assert!(!x.has_block_data(&(head_block.num + 1000)));
+        assert!(x.has_block_data(&head_block.number()));
+        assert!(!x.has_block_data(&(head_block.number() + 1)));
+        assert!(!x.has_block_data(&(head_block.number() + 1000)));
     }
 
     #[test]
     fn test_pruned_node_has_block_data() {
-        let head_block = BlockId {
-            hash: H256::random(),
-            num: 1_000_000.into(),
-        };
+        let head_block: SavedBlock = Arc::new(Block {
+            hash: Some(H256::random()),
+            number: Some(1_000_000.into()),
+            ..Default::default()
+        })
+        .into();
 
         let block_data_limit = 64;
 
@@ -1059,16 +1054,16 @@ mod tests {
             soft_limit: 1_000,
             block_data_limit: block_data_limit.into(),
             weight: 100.0,
-            head_block_id: RwLock::new(Some(head_block.clone())),
+            head_block: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(metrics),
         };
 
         assert!(!x.has_block_data(&0.into()));
         assert!(!x.has_block_data(&1.into()));
-        assert!(!x.has_block_data(&(head_block.num - block_data_limit - 1)));
-        assert!(x.has_block_data(&(head_block.num - block_data_limit)));
-        assert!(x.has_block_data(&head_block.num));
-        assert!(!x.has_block_data(&(head_block.num + 1)));
-        assert!(!x.has_block_data(&(head_block.num + 1000)));
+        assert!(!x.has_block_data(&(head_block.number() - block_data_limit - 1)));
+        assert!(x.has_block_data(&(head_block.number() - block_data_limit)));
+        assert!(x.has_block_data(&head_block.number()));
+        assert!(!x.has_block_data(&(head_block.number() + 1)));
+        assert!(!x.has_block_data(&(head_block.number() + 1000)));
     }
 }

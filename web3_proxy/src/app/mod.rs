@@ -9,7 +9,7 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
-use crate::rpcs::blockchain::{ArcBlock, BlockId};
+use crate::rpcs::blockchain::{ArcBlock, SavedBlock};
 use crate::rpcs::connections::Web3Connections;
 use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
@@ -859,18 +859,18 @@ impl Web3ProxyApp {
                 // emit stats
 
                 // TODO: if no servers synced, wait for them to be synced?
-                let head_block_id = self
+                let head_block = self
                     .balanced_rpcs
                     .head_block_id()
                     .context("no servers synced")?;
 
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
-                let request_block_id = if let Some(request_block_needed) = block_needed(
+                let request_block = if let Some(request_block_needed) = block_needed(
                     authorization,
                     method,
                     request.params.as_mut(),
-                    head_block_id.num,
+                    head_block.number(),
                     &self.balanced_rpcs,
                 )
                 .await?
@@ -887,18 +887,20 @@ impl Web3ProxyApp {
                             .store(true, atomic::Ordering::Relaxed);
                     }
 
-                    BlockId {
-                        num: request_block_needed,
-                        hash: request_block_hash,
-                    }
+                    let request_block = self
+                        .balanced_rpcs
+                        .block(authorization, &request_block_hash, None)
+                        .await?;
+
+                    SavedBlock::new(request_block)
                 } else {
-                    head_block_id
+                    head_block
                 };
 
                 // TODO: struct for this?
                 // TODO: this can be rather large. is that okay?
                 let cache_key = (
-                    request_block_id.hash,
+                    request_block.hash(),
                     request.method.clone(),
                     request.params.clone().map(|x| x.to_string()),
                 );
@@ -919,7 +921,7 @@ impl Web3ProxyApp {
                                     &authorization,
                                     request,
                                     Some(&request_metadata),
-                                    Some(&request_block_id.num),
+                                    Some(&request_block.number()),
                                 )
                                 .await?;
 

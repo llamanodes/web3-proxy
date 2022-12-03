@@ -1,4 +1,4 @@
-use super::blockchain::BlockId;
+use super::blockchain::SavedBlock;
 use super::connection::Web3Connection;
 use super::connections::Web3Connections;
 use ethers::prelude::{H256, U64};
@@ -11,7 +11,7 @@ use std::sync::Arc;
 #[derive(Clone, Default, Serialize)]
 pub struct SyncedConnections {
     // TODO: store ArcBlock instead?
-    pub(super) head_block_id: Option<BlockId>,
+    pub(super) head_block_id: Option<SavedBlock>,
     // TODO: this should be able to serialize, but it isn't
     #[serde(skip_serializing)]
     pub(super) conns: Vec<Arc<Web3Connection>>,
@@ -29,7 +29,7 @@ impl fmt::Debug for SyncedConnections {
 }
 
 impl Web3Connections {
-    pub fn head_block_id(&self) -> Option<BlockId> {
+    pub fn head_block_id(&self) -> Option<SavedBlock> {
         self.synced_connections.load().head_block_id.clone()
     }
 
@@ -38,7 +38,7 @@ impl Web3Connections {
             .load()
             .head_block_id
             .as_ref()
-            .map(|head_block_id| head_block_id.hash)
+            .map(|head_block_id| head_block_id.hash())
     }
 
     pub fn head_block_num(&self) -> Option<U64> {
@@ -46,7 +46,7 @@ impl Web3Connections {
             .load()
             .head_block_id
             .as_ref()
-            .map(|head_block_id| head_block_id.num)
+            .map(|head_block_id| head_block_id.number())
     }
 
     pub fn synced(&self) -> bool {
