@@ -69,7 +69,7 @@ impl SavedBlock {
     }
 
     /// When the block was received, this node was still syncing
-    pub fn was_syncing(&self) -> bool {
+    pub fn syncing(&self) -> bool {
         // TODO: margin should come from a global config
         self.lag > 60
     }
@@ -85,7 +85,7 @@ impl Display for SavedBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} ({})", self.number(), self.hash())?;
 
-        if self.was_syncing() {
+        if self.syncing() {
             write!(f, " (behind by {} seconds)", self.lag)?;
         }
 
@@ -307,7 +307,7 @@ impl Web3Connections {
                 // we don't know if its on the heaviest chain yet
                 self.save_block(&rpc_head_block.block, false).await?;
 
-                if rpc_head_block.was_syncing() {
+                if rpc_head_block.syncing() {
                     if connection_heads.remove(&rpc.name).is_some() {
                         warn!("{} is behind by {} seconds", &rpc.name, rpc_head_block.lag);
                     };
@@ -590,7 +590,7 @@ impl Web3Connections {
                             }
                             Ordering::Greater => {
                                 debug!(
-                                    "new {}/{}/{} con head={} rpc_head={} rpc={}",
+                                    "new {}/{}/{} con_head={} rpc_head={} rpc={}",
                                     num_consensus_rpcs,
                                     num_connection_heads,
                                     total_conns,

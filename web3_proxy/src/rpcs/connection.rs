@@ -277,7 +277,15 @@ impl Web3Connection {
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
         let head_block_num = match self.head_block.read().clone() {
             None => return false,
-            Some(x) => x.number(),
+            Some(x) => {
+                if x.syncing() {
+                    // skip syncing nodes. even though they might be able to serve a query,
+                    // latency will be poor and
+                    return false;
+                }
+
+                x.number()
+            }
         };
 
         // this rpc doesn't have that block yet. still syncing
