@@ -248,6 +248,8 @@ These are roughly in order of completition
 - [x] ethspam on bsc and polygon gives 1/4 errors. fix whatever is causing this
   - bugfix! we were using the whole connection list instead of just the synced connection list when picking servers. oops!
 - [x] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
+- [x] smarter reconnection logic
+- [x] if a websocket connection hasn't received a new block in a while, do a reconnect or just query the block. its possible that the node was syncing when the proxy started
 - [ ] `cost estimate` script
   - sum bytes and number of requests. prompt hosting costs. divide
 - [ ] `stat delay` script 
@@ -258,7 +260,6 @@ These are roughly in order of completition
   - one option: we need the insert to be an upsert, but how do we merge historgrams?
 - [ ] add block timestamp to the /status page
   - [ ] be sure to save the timestamp in a way that our request routing logic can make use of it
-- [ ] if a websocket connection hasn't received a new block in a while, do a reconnect or just query the block. its possible that the node was syncing when the proxy started
 - [ ] put display name into our prod configs
 
 ## V1
