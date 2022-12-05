@@ -252,6 +252,8 @@ These are roughly in order of completition
 - [x] if a websocket connection hasn't received a new block in a while, do a reconnect or just query the block. its possible that the node was syncing when the proxy started
 - [x] on web3-proxy start, if a node fails to connect, it can hold up listening on 8544
     - need to do all the connections in parallel with spawns
+- [x] add block timestamp to the /status page
+  - [x] be sure to save the timestamp in a way that our request routing logic can make use of it
 - [ ] `cost estimate` script
   - sum bytes and number of requests. prompt hosting costs. divide
 - [ ] `stat delay` script 
@@ -260,8 +262,6 @@ These are roughly in order of completition
 - [ ] two servers running will confuse rpc_accounting!
   - it won't happen with users often because they should be sticky to one proxy, but unauthenticated users will definitely hit this
   - one option: we need the insert to be an upsert, but how do we merge historgrams?
-- [ ] add block timestamp to the /status page
-  - [ ] be sure to save the timestamp in a way that our request routing logic can make use of it
 - [ ] put display name into our prod configs
 
 ## V1
