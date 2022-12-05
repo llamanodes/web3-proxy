@@ -250,6 +250,8 @@ These are roughly in order of completition
 - [x] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
 - [x] smarter reconnection logic
 - [x] if a websocket connection hasn't received a new block in a while, do a reconnect or just query the block. its possible that the node was syncing when the proxy started
+- [x] on web3-proxy start, if a node fails to connect, it can hold up listening on 8544
+    - need to do all the connections in parallel with spawns
 - [ ] `cost estimate` script
   - sum bytes and number of requests. prompt hosting costs. divide
 - [ ] `stat delay` script 
@@ -266,6 +268,8 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] connection pool for websockets. use tokio-tungstenite directly. no need for ethers providers since serde_json is enough for us
+    - this should also get us closer to being able to do our own streaming json parser where we can 
 - [ ] get `oldest_allowed` out of config. or calculate automatically based on block time.
 - [ ] `change_user_tier_by_address` script
 - [ ] figure out if "could not get block from params" is a problem worth logging
