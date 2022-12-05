@@ -959,6 +959,7 @@ impl Serialize for Web3Connection {
             &self.frontend_requests.load(atomic::Ordering::Relaxed),
         )?;
 
+        // TODO: rename to head_block (need to work with the frontend team)
         let head_block_id = &*self.head_block.read();
         state.serialize_field("head_block_id", head_block_id)?;
 

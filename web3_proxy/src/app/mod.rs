@@ -284,6 +284,27 @@ impl Web3ProxyApp {
         };
 
         let balanced_rpcs = top_config.balanced_rpcs;
+
+        // safety check on balanced_rpcs
+        if balanced_rpcs.len() < top_config.app.min_synced_rpcs {
+            return Err(anyhow::anyhow!(
+                "Only {}/{} rpcs! Add more balanced_rpcs or reduce min_synced_rpcs.",
+                balanced_rpcs.len(),
+                top_config.app.min_synced_rpcs
+            ));
+        }
+
+        // safety check on sum soft limit
+        let sum_soft_limit = balanced_rpcs.values().fold(0, |acc, x| acc + x.soft_limit);
+
+        if sum_soft_limit < top_config.app.min_sum_soft_limit {
+            return Err(anyhow::anyhow!(
+                "Only {}/{} soft limit! Add more balanced_rpcs, increase soft limits, or reduce min_sum_soft_limit.",
+                sum_soft_limit,
+                top_config.app.min_sum_soft_limit
+            ));
+        }
+
         let private_rpcs = top_config.private_rpcs.unwrap_or_default();
 
         // these are safe to cancel

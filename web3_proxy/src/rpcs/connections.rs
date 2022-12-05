@@ -173,17 +173,6 @@ impl Web3Connections {
             }
         }
 
-        // TODO: now this errors for private rpcs when we disable all!
-        if connections.len() < min_head_rpcs {
-            return Err(anyhow::anyhow!(
-                "Only {}/{} connections! Add more connections or reduce min_head_rpcs.",
-                connections.len(),
-                min_head_rpcs
-            ));
-        }
-
-        // TODO: safety check on sum soft limit
-
         let synced_connections = SyncedConnections::default();
 
         // TODO: max_capacity and time_to_idle from config
