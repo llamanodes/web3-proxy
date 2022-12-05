@@ -882,7 +882,7 @@ impl Web3ProxyApp {
                 // TODO: if no servers synced, wait for them to be synced?
                 let head_block = self
                     .balanced_rpcs
-                    .head_block_id()
+                    .head_block()
                     .context("no servers synced")?;
 
                 // we do this check before checking caches because it might modify the request params

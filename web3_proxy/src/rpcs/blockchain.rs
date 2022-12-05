@@ -509,7 +509,7 @@ impl Web3Connections {
                 let consensus_head_block: SavedBlock = maybe_head_block.into();
 
                 let new_synced_connections = SyncedConnections {
-                    head_block_id: Some(consensus_head_block.clone()),
+                    head_block: Some(consensus_head_block.clone()),
                     conns,
                 };
 
@@ -518,7 +518,7 @@ impl Web3Connections {
                     .swap(Arc::new(new_synced_connections));
 
                 // TODO: if the rpc_head_block != consensus_head_block, log something?
-                match &old_synced_connections.head_block_id {
+                match &old_synced_connections.head_block {
                     None => {
                         debug!(
                             "first {}/{}/{} block={}, rpc={}",
@@ -543,7 +543,7 @@ impl Web3Connections {
 
                         match consensus_head_block.number().cmp(&old_head_block.number()) {
                             Ordering::Equal => {
-                                // TODO: if rpc_block_id != consensus_head_block_id, do a different log?
+                                // TODO: if rpc_block_id != consensus_head_block, do a different log?
 
                                 // multiple blocks with the same fork!
                                 if consensus_head_block.hash() == old_head_block.hash() {

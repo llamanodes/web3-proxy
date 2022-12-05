@@ -7,7 +7,7 @@ use crate::config::BlockAndRpc;
 use crate::frontend::authorization::Authorization;
 use anyhow::Context;
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
-use ethers::types::{Block, U256};
+use ethers::types::U256;
 use futures::future::try_join_all;
 use futures::StreamExt;
 use log::{debug, error, info, trace, warn, Level};
@@ -499,15 +499,15 @@ impl Web3Connection {
         let new_head_block = match new_head_block {
             Ok(None) => {
                 {
-                    let mut head_block_id = self.head_block.write();
+                    let mut head_block = self.head_block.write();
 
-                    if head_block_id.is_none() {
+                    if head_block.is_none() {
                         // we previously sent a None. return early
                         return Ok(());
                     }
                     warn!("{} is not synced!", self);
 
-                    *head_block_id = None;
+                    *head_block = None;
                 }
 
                 None
@@ -536,9 +536,9 @@ impl Web3Connection {
                 warn!("unable to get block from {}. err={:?}", self, err);
 
                 {
-                    let mut head_block_id = self.head_block.write();
+                    let mut head_block = self.head_block.write();
 
-                    *head_block_id = None;
+                    *head_block = None;
                 }
 
                 None
@@ -1082,8 +1082,8 @@ impl Serialize for Web3Connection {
         )?;
 
         // TODO: rename to head_block (need to work with the frontend team)
-        let head_block_id = &*self.head_block.read();
-        state.serialize_field("head_block_id", head_block_id)?;
+        let head_block = &*self.head_block.read();
+        state.serialize_field("head_block", head_block)?;
 
         state.end()
     }

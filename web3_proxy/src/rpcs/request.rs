@@ -8,7 +8,7 @@ use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::{HttpClientError, ProviderError, WsClientError};
 use ethers::types::{Address, Bytes};
-use log::{debug, error, info, trace, warn, Level};
+use log::{debug, error, trace, warn, Level};
 use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
