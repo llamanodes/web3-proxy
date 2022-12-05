@@ -154,7 +154,7 @@ impl Web3Connections {
         let mut connections = HashMap::new();
         let mut handles = vec![];
 
-        // TODO: futures unordered?
+        // TODO: do we need to join this?
         for x in join_all(spawn_handles).await {
             // TODO: how should we handle errors here? one rpc being down shouldn't cause the program to exit
             match x {
@@ -405,14 +405,14 @@ impl Web3Connections {
                 );
                 // TODO: what should happen here? automatic retry?
                 // TODO: more detailed error
-                return Ok(OpenRequestResult::NotSynced);
+                return Ok(OpenRequestResult::NotReady);
             }
             1 => {
                 let rpc = usable_rpcs.get(0).expect("len is 1");
 
                 // TODO: try or wait for a request handle?
                 let handle = rpc
-                    .wait_for_request_handle(authorization, Duration::from_secs(60))
+                    .wait_for_request_handle(authorization, Duration::from_secs(60), false)
                     .await?;
 
                 return Ok(OpenRequestResult::Handle(handle));
@@ -486,7 +486,7 @@ impl Web3Connections {
         // now that the rpcs are sorted, try to get an active request handle for one of them
         for rpc in sorted_rpcs.iter() {
             // increment our connection counter
-            match rpc.try_request_handle(authorization).await {
+            match rpc.try_request_handle(authorization, false).await {
                 Ok(OpenRequestResult::Handle(handle)) => {
                     // // trace!("next server on {:?}: {:?}", self, rpc);
                     return Ok(OpenRequestResult::Handle(handle));
@@ -494,7 +494,7 @@ impl Web3Connections {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                 }
-                Ok(OpenRequestResult::NotSynced) => {
+                Ok(OpenRequestResult::NotReady) => {
                     // TODO: log a warning?
                 }
                 Err(err) => {
@@ -516,7 +516,7 @@ impl Web3Connections {
                 let handle = sorted_rpcs
                     .get(0)
                     .expect("at least 1 is available")
-                    .wait_for_request_handle(authorization, Duration::from_secs(3))
+                    .wait_for_request_handle(authorization, Duration::from_secs(3), false)
                     .await?;
 
                 Ok(OpenRequestResult::Handle(handle))
@@ -553,13 +553,13 @@ impl Web3Connections {
             }
 
             // check rate limits and increment our connection counter
-            match connection.try_request_handle(authorization).await {
+            match connection.try_request_handle(authorization, false).await {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                 }
                 Ok(OpenRequestResult::Handle(handle)) => selected_rpcs.push(handle),
-                Ok(OpenRequestResult::NotSynced) => {
+                Ok(OpenRequestResult::NotReady) => {
                     warn!("no request handle for {}", connection)
                 }
                 Err(err) => {
@@ -682,7 +682,7 @@ impl Web3Connections {
                     // TODO: move this to a helper function
                     // sleep (TODO: with a lock?) until our rate limits should be available
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
-                    warn!("All rate limits exceeded. Sleeping untill {:?}", retry_at);
+                    warn!("All rate limits exceeded. Sleeping until {:?}", retry_at);
 
                     // TODO: have a separate column for rate limited?
                     if let Some(request_metadata) = request_metadata {
@@ -693,15 +693,12 @@ impl Web3Connections {
 
                     continue;
                 }
-                OpenRequestResult::NotSynced => {
+                OpenRequestResult::NotReady => {
                     if let Some(request_metadata) = request_metadata {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
-                    // TODO: subscribe to something on synced connections. maybe it should just be a watch channel
-                    sleep(Duration::from_millis(200)).await;
-
-                    continue;
+                    break;
                 }
             }
         }
@@ -832,7 +829,7 @@ mod tests {
     // TODO: why is this allow needed? does tokio::test get in the way somehow?
     #![allow(unused_imports)]
     use super::*;
-    use crate::rpcs::{blockchain::SavedBlock, provider::Web3Provider};
+    use crate::rpcs::{blockchain::SavedBlock, connection::ProviderState, provider::Web3Provider};
     use ethers::types::{Block, U256};
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
@@ -886,9 +883,10 @@ mod tests {
             active_requests: 0.into(),
             frontend_requests: 0.into(),
             internal_requests: 0.into(),
-            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            provider_state: AsyncRwLock::new(ProviderState::Ready(Arc::new(Web3Provider::Mock))),
             hard_limit: None,
             soft_limit: 1_000,
+            automatic_block_limit: true,
             block_data_limit: block_data_limit.into(),
             weight: 100.0,
             head_block: RwLock::new(Some(head_block.clone())),
@@ -903,9 +901,10 @@ mod tests {
             active_requests: 0.into(),
             frontend_requests: 0.into(),
             internal_requests: 0.into(),
-            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            provider_state: AsyncRwLock::new(ProviderState::Ready(Arc::new(Web3Provider::Mock))),
             hard_limit: None,
             soft_limit: 1_000,
+            automatic_block_limit: false,
             block_data_limit: block_data_limit.into(),
             weight: 100.0,
             head_block: RwLock::new(Some(lagged_block.clone())),
@@ -993,7 +992,7 @@ mod tests {
 
         dbg!(&x);
 
-        assert!(matches!(x, OpenRequestResult::NotSynced));
+        assert!(matches!(x, OpenRequestResult::NotReady));
 
         // add lagged blocks to the conns. both servers should be allowed
         conns.save_block(&lagged_block.block, true).await.unwrap();
@@ -1066,7 +1065,7 @@ mod tests {
             conns
                 .best_synced_backend_connection(&authorization, None, &[], Some(&2.into()))
                 .await,
-            Ok(OpenRequestResult::NotSynced)
+            Ok(OpenRequestResult::NotReady)
         ));
     }
 
@@ -1103,9 +1102,10 @@ mod tests {
             active_requests: 0.into(),
             frontend_requests: 0.into(),
             internal_requests: 0.into(),
-            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            provider_state: AsyncRwLock::new(ProviderState::Ready(Arc::new(Web3Provider::Mock))),
             hard_limit: None,
             soft_limit: 3_000,
+            automatic_block_limit: false,
             block_data_limit: 64.into(),
             weight: 1.0,
             head_block: RwLock::new(Some(head_block.clone())),
@@ -1120,9 +1120,10 @@ mod tests {
             active_requests: 0.into(),
             frontend_requests: 0.into(),
             internal_requests: 0.into(),
-            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            provider_state: AsyncRwLock::new(ProviderState::Ready(Arc::new(Web3Provider::Mock))),
             hard_limit: None,
             soft_limit: 1_000,
+            automatic_block_limit: false,
             block_data_limit: u64::MAX.into(),
             // TODO: does weight = 0 work?
             weight: 0.01,

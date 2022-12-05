@@ -22,7 +22,7 @@ pub async fn get_user_id_from_params(
     // this is a long type. should we strip it down?
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &HashMap<String, String>,
-) -> anyhow::Result<u64> {
+) -> Result<u64, FrontendErrorResponse> {
     match (bearer, params.get("user_id")) {
         (Some(TypedHeader(Authorization(bearer))), Some(user_id)) => {
             // check for the bearer cache key
@@ -38,8 +38,7 @@ pub async fn get_user_id_from_params(
             let user_id: u64 = user_id.parse().context("Parsing user_id param")?;
 
             if bearer_user_id != user_id {
-                // TODO: proper HTTP Status code
-                Err(anyhow::anyhow!("permission denied"))
+                Err(FrontendErrorResponse::AccessDenied)
             } else {
                 Ok(bearer_user_id)
             }
@@ -49,13 +48,12 @@ pub async fn get_user_id_from_params(
             // 0 means all
             Ok(0)
         }
-        (None, Some(x)) => {
+        (None, Some(_)) => {
             // they do not have a bearer token, but requested a specific id. block
             // TODO: proper error code from a useful error code
             // TODO: maybe instead of this sharp edged warn, we have a config value?
             // TODO: check config for if we should deny or allow this
-            Err(anyhow::anyhow!("permission denied"))
-
+            Err(FrontendErrorResponse::AccessDenied)
             // // TODO: make this a flag
             // warn!("allowing without auth during development!");
             // Ok(x.parse()?)

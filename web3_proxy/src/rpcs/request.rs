@@ -8,7 +8,7 @@ use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::{HttpClientError, ProviderError, WsClientError};
 use ethers::types::{Address, Bytes};
-use log::{debug, error, trace, warn, Level};
+use log::{debug, error, info, trace, warn, Level};
 use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
@@ -27,7 +27,7 @@ pub enum OpenRequestResult {
     /// Unable to start a request. Retry at the given time.
     RetryAt(Instant),
     /// Unable to start a request because the server is not synced
-    NotSynced,
+    NotReady,
 }
 
 /// Make RPC requests through this handle and drop it when you are done.
@@ -194,28 +194,46 @@ impl OpenRequestHandle {
         // trace!(rpc=%self.conn, %method, "request");
 
         let mut provider = None;
-
+        let mut logged = false;
         while provider.is_none() {
-            match self.conn.provider.read().await.clone() {
+            let ready_provider = self
+                .conn
+                .provider_state
+                .read()
+                .await
+                // TODO: hard code true, or take a bool in the `new` function?
+                .provider(true)
+                .await
+                .cloned();
+
+            match ready_provider {
                 None => {
-                    warn!("no provider for {}!", self.conn);
+                    if !logged {
+                        logged = true;
+                        warn!("no provider for {}!", self.conn);
+                    }
+
                     // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
                     // TODO: sleep how long? subscribe to something instead? maybe use a watch handle?
                     // TODO: this is going to be way too verbose!
                     sleep(Duration::from_millis(100)).await
                 }
-                Some(found_provider) => provider = Some(found_provider),
+                Some(x) => provider = Some(x),
             }
         }
 
-        let provider = &*provider.expect("provider was checked already");
+        let provider = provider.expect("provider was checked already");
+
+        // trace!("got provider for {:?}", self);
 
         // TODO: really sucks that we have to clone here
-        let response = match provider {
+        let response = match &*provider {
             Web3Provider::Mock => unimplemented!(),
             Web3Provider::Http(provider) => provider.request(method, params).await,
             Web3Provider::Ws(provider) => provider.request(method, params).await,
         };
+
+        // trace!("got response for {:?}: {:?}", self, response);
 
         if let Err(err) = &response {
             // only save reverts for some types of calls
@@ -255,7 +273,7 @@ impl OpenRequestHandle {
             // check for "execution reverted" here
             let is_revert = if let ProviderError::JsonRpcClientError(err) = err {
                 // Http and Ws errors are very similar, but different types
-                let msg = match provider {
+                let msg = match &*provider {
                     Web3Provider::Mock => unimplemented!(),
                     Web3Provider::Http(_) => {
                         if let Some(HttpClientError::JsonRpcError(err)) =

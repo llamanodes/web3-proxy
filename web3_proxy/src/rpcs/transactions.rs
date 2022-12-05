@@ -28,7 +28,7 @@ impl Web3Connections {
         // TODO: might not be a race. might be a nonce thats higher than the current account nonce. geth discards chains
         // TODO: yearn devs have had better luck with batching these, but i think that's likely just adding a delay itself
         // TODO: if one rpc fails, try another?
-        let tx: Transaction = match rpc.try_request_handle(authorization).await {
+        let tx: Transaction = match rpc.try_request_handle(authorization, false).await {
             Ok(OpenRequestResult::Handle(handle)) => {
                 handle
                     .request(

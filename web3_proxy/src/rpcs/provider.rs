@@ -14,7 +14,6 @@ pub enum Web3Provider {
 
 impl Web3Provider {
     pub fn ready(&self) -> bool {
-        // TODO: i'm not sure if this is enough
         match self {
             Self::Mock => true,
             Self::Http(_) => true,

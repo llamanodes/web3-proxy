@@ -29,11 +29,21 @@ pub type BlockHashesCache = Cache<H256, ArcBlock, hashbrown::hash_map::DefaultHa
 pub struct SavedBlock {
     pub block: ArcBlock,
     /// number of seconds this block was behind the current time when received
-    lag: u64,
+    pub lag: u64,
 }
 
 impl SavedBlock {
     pub fn new(block: ArcBlock) -> Self {
+        let mut x = Self { block, lag: 0 };
+
+        // no need to recalulate lag every time
+        // if the head block gets too old, a health check restarts this connection
+        x.lag = x.lag();
+
+        x
+    }
+
+    pub fn lag(&self) -> u64 {
         // TODO: read this from a global config. different chains should probably have different gaps.
         let allowed_lag: u64 = 60;
 
@@ -45,18 +55,15 @@ impl SavedBlock {
         // TODO: is this safe enough? what if something about the chain is actually lagged? what if its a chain like BTC with 10 minute blocks?
         let oldest_allowed = now - Duration::from_secs(allowed_lag);
 
-        let block_timestamp = Duration::from_secs(block.timestamp.as_u64());
+        let block_timestamp = Duration::from_secs(self.block.timestamp.as_u64());
 
-        // TODO: recalculate this every time?
-        let lag = if block_timestamp < oldest_allowed {
+        if block_timestamp < oldest_allowed {
             // this server is still syncing from too far away to serve requests
             // u64 is safe because ew checked equality above
             (oldest_allowed - block_timestamp).as_secs() as u64
         } else {
             0
-        };
-
-        Self { block, lag }
+        }
     }
 
     pub fn hash(&self) -> H256 {
@@ -143,7 +150,7 @@ impl Web3Connections {
         // TODO: if error, retry?
         let block: ArcBlock = match rpc {
             Some(rpc) => {
-                rpc.wait_for_request_handle(authorization, Duration::from_secs(30))
+                rpc.wait_for_request_handle(authorization, Duration::from_secs(30), false)
                     .await?
                     .request(
                         "eth_getBlockByHash",
@@ -301,9 +308,6 @@ impl Web3Connections {
         // add the rpc's block to connection_heads, or remove the rpc from connection_heads
         let rpc_head_block = match rpc_head_block {
             Some(rpc_head_block) => {
-                let rpc_head_num = rpc_head_block.number();
-                let rpc_head_hash = rpc_head_block.hash();
-
                 // we don't know if its on the heaviest chain yet
                 self.save_block(&rpc_head_block.block, false).await?;
 
@@ -314,6 +318,8 @@ impl Web3Connections {
 
                     None
                 } else {
+                    let rpc_head_hash = rpc_head_block.hash();
+
                     if let Some(prev_hash) =
                         connection_heads.insert(rpc.name.to_owned(), rpc_head_hash)
                     {
@@ -490,10 +496,11 @@ impl Web3Connections {
                     .filter_map(|conn_name| self.conns.get(conn_name).cloned())
                     .collect();
 
-                let consensus_head_hash = maybe_head_block
+                // TODO: DEBUG only check
+                let _ = maybe_head_block
                     .hash
                     .expect("head blocks always have hashes");
-                let consensus_head_num = maybe_head_block
+                let _ = maybe_head_block
                     .number
                     .expect("head blocks always have numbers");
 

@@ -24,6 +24,7 @@ pub type FrontendResult = Result<Response, FrontendErrorResponse>;
 // TODO:
 #[derive(Debug, From)]
 pub enum FrontendErrorResponse {
+    AccessDenied,
     Anyhow(anyhow::Error),
     Box(Box<dyn Error>),
     Database(DbErr),
@@ -45,7 +46,21 @@ pub enum FrontendErrorResponse {
 impl IntoResponse for FrontendErrorResponse {
     fn into_response(self) -> Response {
         // TODO: include the request id in these so that users can give us something that will point to logs
+        // TODO: status code is in the jsonrpc response and is also the first item in the tuple. DRY
         let (status_code, response) = match self {
+            Self::AccessDenied => {
+                // TODO: attach something to this trace. probably don't include much in the message though. don't want to leak creds by accident
+                trace!("access denied");
+                (
+                    StatusCode::FORBIDDEN,
+                    JsonRpcForwardedResponse::from_string(
+                        // TODO: is it safe to expose all of our anyhow strings?
+                        "FORBIDDEN".to_string(),
+                        Some(StatusCode::FORBIDDEN.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             Self::Anyhow(err) => {
                 warn!("anyhow. err={:?}", err);
                 (

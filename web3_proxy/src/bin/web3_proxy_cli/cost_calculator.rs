@@ -70,12 +70,12 @@ impl CostCalculatorCommand {
         #[derive(Debug, FromQueryResult)]
         struct SelectResult {
             pub total_frontend_requests: Decimal,
-            pub total_backend_retries: Decimal,
-            pub total_cache_misses: Decimal,
+            // pub total_backend_retries: Decimal,
+            // pub total_cache_misses: Decimal,
             pub total_cache_hits: Decimal,
             pub total_response_bytes: Decimal,
             pub total_error_responses: Decimal,
-            pub total_response_millis: Decimal,
+            // pub total_response_millis: Decimal,
             pub first_period_datetime: DateTimeUtc,
             pub last_period_datetime: DateTimeUtc,
         }
@@ -86,14 +86,14 @@ impl CostCalculatorCommand {
                 rpc_accounting::Column::FrontendRequests.sum(),
                 "total_frontend_requests",
             )
-            .column_as(
-                rpc_accounting::Column::BackendRequests.sum(),
-                "total_backend_retries",
-            )
-            .column_as(
-                rpc_accounting::Column::CacheMisses.sum(),
-                "total_cache_misses",
-            )
+            // .column_as(
+            //     rpc_accounting::Column::BackendRequests.sum(),
+            //     "total_backend_retries",
+            // )
+            // .column_as(
+            //     rpc_accounting::Column::CacheMisses.sum(),
+            //     "total_cache_misses",
+            // )
             .column_as(rpc_accounting::Column::CacheHits.sum(), "total_cache_hits")
             .column_as(
                 rpc_accounting::Column::SumResponseBytes.sum(),
@@ -104,10 +104,10 @@ impl CostCalculatorCommand {
                 rpc_accounting::Column::ErrorResponse.sum(),
                 "total_error_responses",
             )
-            .column_as(
-                rpc_accounting::Column::SumResponseMillis.sum(),
-                "total_response_millis",
-            )
+            // .column_as(
+            //     rpc_accounting::Column::SumResponseMillis.sum(),
+            //     "total_response_millis",
+            // )
             .column_as(
                 rpc_accounting::Column::PeriodDatetime.min(),
                 "first_period_datetime",
