@@ -617,7 +617,8 @@ impl Web3Connection {
                         if let Some(x) = &*conn.head_block.read() {
                             // if this block is too old, return an error so we reconnect
                             if x.lag() > 0 {
-                                return Err(anyhow::anyhow!("provider is lagged"));
+                                // TODO: instead of a full reconnect, we should maybe just set it to None
+                                return Err(anyhow::anyhow!("{} is lagged: {:?}", conn, x));
                             }
                         }
 
