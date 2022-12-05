@@ -993,14 +993,21 @@ impl fmt::Display for Web3Connection {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use ethers::types::Block;
+    use ethers::types::{Block, U256};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_archive_node_has_block_data() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("cannot tell the time")
+            .as_secs()
+            .into();
+
         let random_block = Block {
             hash: Some(H256::random()),
             number: Some(1_000_000.into()),
-            // TODO: timestamp?
+            timestamp: now,
             ..Default::default()
         };
 
@@ -1037,9 +1044,16 @@ mod tests {
 
     #[test]
     fn test_pruned_node_has_block_data() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("cannot tell the time")
+            .as_secs()
+            .into();
+
         let head_block: SavedBlock = Arc::new(Block {
             hash: Some(H256::random()),
             number: Some(1_000_000.into()),
+            timestamp: now,
             ..Default::default()
         })
         .into();
@@ -1071,6 +1085,53 @@ mod tests {
         assert!(!x.has_block_data(&(head_block.number() - block_data_limit - 1)));
         assert!(x.has_block_data(&(head_block.number() - block_data_limit)));
         assert!(x.has_block_data(&head_block.number()));
+        assert!(!x.has_block_data(&(head_block.number() + 1)));
+        assert!(!x.has_block_data(&(head_block.number() + 1000)));
+    }
+
+    #[test]
+    fn test_lagged_node_not_has_block_data() {
+        let now: U256 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("cannot tell the time")
+            .as_secs()
+            .into();
+
+        // head block is an hour old
+        let head_block = Block {
+            hash: Some(H256::random()),
+            number: Some(1_000_000.into()),
+            timestamp: now - 3600,
+            ..Default::default()
+        };
+
+        let head_block = Arc::new(head_block);
+
+        let head_block = SavedBlock::new(head_block);
+        let block_data_limit = u64::MAX;
+
+        let metrics = OpenRequestHandleMetrics::default();
+
+        let x = Web3Connection {
+            name: "name".to_string(),
+            display_name: None,
+            url: "ws://example.com".to_string(),
+            http_client: None,
+            active_requests: 0.into(),
+            frontend_requests: 0.into(),
+            internal_requests: 0.into(),
+            provider: AsyncRwLock::new(None),
+            hard_limit: None,
+            soft_limit: 1_000,
+            block_data_limit: block_data_limit.into(),
+            weight: 100.0,
+            head_block: RwLock::new(Some(head_block.clone())),
+            open_request_handle_metrics: Arc::new(metrics),
+        };
+
+        assert!(!x.has_block_data(&0.into()));
+        assert!(!x.has_block_data(&1.into()));
+        assert!(!x.has_block_data(&head_block.number()));
         assert!(!x.has_block_data(&(head_block.number() + 1)));
         assert!(!x.has_block_data(&(head_block.number() + 1000)));
     }
