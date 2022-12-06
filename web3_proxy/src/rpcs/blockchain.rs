@@ -453,8 +453,9 @@ impl Web3Connections {
                         maybe_head_block = parent_block;
                         continue;
                     } else {
+                        // TODO: this message
                         warn!(
-                            "no parent to check. soft limit only {}/{} from {}/{} rpcs: {}%",
+                            "soft limit {}/{} from {}/{} rpcs: {}%",
                             highest_rpcs_sum_soft_limit,
                             self.min_sum_soft_limit,
                             highest_rpcs.len(),

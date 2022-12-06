@@ -8,7 +8,7 @@ use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::{HttpClientError, ProviderError, WsClientError};
 use ethers::types::{Address, Bytes};
-use log::{debug, error, trace, warn, Level};
+use log::{debug, error, info, trace, warn, Level};
 use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
@@ -37,6 +37,7 @@ pub struct OpenRequestHandle {
     conn: Arc<Web3Connection>,
     // TODO: this is the same metrics on the conn. use a reference?
     metrics: Arc<OpenRequestHandleMetrics>,
+    provider: Arc<Web3Provider>,
     used: AtomicBool,
 }
 
@@ -129,13 +130,45 @@ impl Authorization {
 
 #[metered(registry = OpenRequestHandleMetrics, visibility = pub)]
 impl OpenRequestHandle {
-    pub fn new(authorization: Arc<Authorization>, conn: Arc<Web3Connection>) -> Self {
+    pub async fn new(authorization: Arc<Authorization>, conn: Arc<Web3Connection>) -> Self {
         // TODO: take request_id as an argument?
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
         // TODO: should we be using metered, or not? i think not because we want stats for each handle
         // TODO: these should maybe be sent to an influxdb instance?
         conn.active_requests.fetch_add(1, atomic::Ordering::Relaxed);
+
+        let mut provider = None;
+        let mut logged = false;
+        while provider.is_none() {
+            // trace!("waiting on provider: locking...");
+
+            let ready_provider = conn
+                .provider_state
+                .read()
+                .await
+                // TODO: hard code true, or take a bool in the `new` function?
+                .provider(true)
+                .await
+                .cloned();
+            // trace!("waiting on provider: unlocked!");
+
+            match ready_provider {
+                None => {
+                    if !logged {
+                        logged = true;
+                        warn!("no provider for {}!", conn);
+                    }
+
+                    // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
+                    // TODO: sleep how long? subscribe to something instead? maybe use a watch handle?
+                    // TODO: this is going to be way too verbose!
+                    sleep(Duration::from_millis(100)).await
+                }
+                Some(x) => provider = Some(x),
+            }
+        }
+        let provider = provider.expect("provider was checked already");
 
         // TODO: handle overflows?
         // TODO: what ordering?
@@ -157,6 +190,7 @@ impl OpenRequestHandle {
             authorization,
             conn,
             metrics,
+            provider,
             used,
         }
     }
@@ -193,41 +227,10 @@ impl OpenRequestHandle {
         // the authorization field is already on a parent span
         // trace!(rpc=%self.conn, %method, "request");
 
-        let mut provider = None;
-        let mut logged = false;
-        while provider.is_none() {
-            let ready_provider = self
-                .conn
-                .provider_state
-                .read()
-                .await
-                // TODO: hard code true, or take a bool in the `new` function?
-                .provider(true)
-                .await
-                .cloned();
-
-            match ready_provider {
-                None => {
-                    if !logged {
-                        logged = true;
-                        warn!("no provider for {}!", self.conn);
-                    }
-
-                    // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
-                    // TODO: sleep how long? subscribe to something instead? maybe use a watch handle?
-                    // TODO: this is going to be way too verbose!
-                    sleep(Duration::from_millis(100)).await
-                }
-                Some(x) => provider = Some(x),
-            }
-        }
-
-        let provider = provider.expect("provider was checked already");
-
         // trace!("got provider for {:?}", self);
 
         // TODO: really sucks that we have to clone here
-        let response = match &*provider {
+        let response = match &*self.provider {
             Web3Provider::Mock => unimplemented!(),
             Web3Provider::Http(provider) => provider.request(method, params).await,
             Web3Provider::Ws(provider) => provider.request(method, params).await,
@@ -273,7 +276,7 @@ impl OpenRequestHandle {
             // check for "execution reverted" here
             let is_revert = if let ProviderError::JsonRpcClientError(err) = err {
                 // Http and Ws errors are very similar, but different types
-                let msg = match &*provider {
+                let msg = match &*self.provider {
                     Web3Provider::Mock => unimplemented!(),
                     Web3Provider::Http(_) => {
                         if let Some(HttpClientError::JsonRpcError(err)) =
