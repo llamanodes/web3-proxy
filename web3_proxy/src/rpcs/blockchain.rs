@@ -316,6 +316,9 @@ impl Web3Connections {
                 if rpc_head_block.syncing() {
                     if connection_heads.remove(&rpc.name).is_some() {
                         warn!("{} is behind by {} seconds", &rpc.name, rpc_head_block.lag);
+                    } else {
+                        // we didn't remove anything and this block is old. exit early
+                        return Ok(());
                     };
 
                     None
@@ -336,7 +339,6 @@ impl Web3Connections {
                 }
             }
             None => {
-                // TODO: warn is too verbose. this is expected if a node disconnects and has to reconnect
                 // // trace!(%rpc, "Block without number or hash!");
 
                 if connection_heads.remove(&rpc.name).is_none() {
