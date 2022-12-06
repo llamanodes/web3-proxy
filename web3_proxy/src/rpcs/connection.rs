@@ -276,7 +276,7 @@ impl Web3Connection {
                 .store(limit, atomic::Ordering::Release);
         }
 
-        debug!("block data limit on {}: {:?}", self.name, limit);
+        info!("block data limit on {}: {:?}", self, limit);
 
         Ok(limit)
     }
