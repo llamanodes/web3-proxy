@@ -149,16 +149,16 @@ impl Web3Connections {
         let get_block_params = (*hash, false);
         // TODO: if error, retry?
         let block: ArcBlock = match rpc {
-            Some(rpc) => {
-                rpc.wait_for_request_handle(authorization, Duration::from_secs(30), false)
-                    .await?
-                    .request(
-                        "eth_getBlockByHash",
-                        &json!(get_block_params),
-                        Level::Error.into(),
-                    )
-                    .await?
-            }
+            Some(rpc) => rpc
+                .wait_for_request_handle(authorization, Duration::from_secs(30), false)
+                .await?
+                .request::<_, Option<_>>(
+                    "eth_getBlockByHash",
+                    &json!(get_block_params),
+                    Level::Error.into(),
+                )
+                .await?
+                .context("no block!")?,
             None => {
                 // TODO: helper for method+params => JsonRpcRequest
                 // TODO: does this id matter?
@@ -172,7 +172,9 @@ impl Web3Connections {
 
                 let block = response.result.context("failed fetching block")?;
 
-                serde_json::from_str(block.get())?
+                let block: Option<ArcBlock> = serde_json::from_str(block.get())?;
+
+                block.context("no block!")?
             }
         };
 

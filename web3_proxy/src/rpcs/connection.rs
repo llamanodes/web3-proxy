@@ -193,13 +193,14 @@ impl Web3Connection {
         let head_block: ArcBlock = self
             .wait_for_request_handle(authorization, Duration::from_secs(30), true)
             .await?
-            .request(
+            .request::<_, Option<_>>(
                 "eth_getBlockByNumber",
                 &json!(("latest", false)),
                 // error here are expected, so keep the level low
                 Level::Debug.into(),
             )
-            .await?;
+            .await?
+            .context("no block!")?;
 
         if SavedBlock::from(head_block).syncing() {
             // if the node is syncing, we can't check its block data limit
