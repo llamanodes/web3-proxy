@@ -200,7 +200,7 @@ impl Web3Connection {
                 Level::Debug.into(),
             )
             .await?
-            .context("no block!")?;
+            .context("no block during check_block_data_limit!")?;
 
         if SavedBlock::from(head_block).syncing() {
             // if the node is syncing, we can't check its block data limit

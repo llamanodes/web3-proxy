@@ -268,6 +268,10 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] soft limit needs more thought
+    - it should be the min of total_sum_soft_limit (from only non-lagged servers) and min_sum_soft_limit
+    - otherwise it won't track anything and will just give errors.
+    - but if web3 proxy has just started, we should give some time otherwise we will thundering herd the first server that responds
 - [ ] connection pool for websockets. use tokio-tungstenite directly. no need for ethers providers since serde_json is enough for us
     - this should also get us closer to being able to do our own streaming json parser where we can 
 - [ ] get `oldest_allowed` out of config. or calculate automatically based on block time.
