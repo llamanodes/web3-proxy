@@ -254,6 +254,9 @@ These are roughly in order of completition
     - need to do all the connections in parallel with spawns
 - [x] add block timestamp to the /status page
   - [x] be sure to save the timestamp in a way that our request routing logic can make use of it
+- [x] node selection still needs improvements. we still send to syncing nodes if they are close
+    - try consensus heads first! only if that is empty should we try others. and we should try them sorted by block height and then randomly chosen from there
+- [ ] having the whole block in status is very verbose. trim it down
 - [ ] `cost estimate` script
   - sum bytes and number of requests. prompt hosting costs. divide
 - [ ] `stat delay` script 

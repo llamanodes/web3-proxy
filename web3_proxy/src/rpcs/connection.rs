@@ -310,7 +310,7 @@ impl Web3Connection {
 
         let oldest_block_num = head_block_num.saturating_sub(block_data_limit);
 
-        needed_block_num >= &oldest_block_num
+        *needed_block_num >= oldest_block_num
     }
 
     /// reconnect to the provider. errors are retried forever with exponential backoff with jitter.
@@ -1017,6 +1017,19 @@ impl Web3Connection {
         // TODO? ready_provider: Option<&Arc<Web3Provider>>,
         allow_not_ready: bool,
     ) -> anyhow::Result<OpenRequestResult> {
+        // TODO: think more about this read block
+        if !allow_not_ready
+            && self
+                .provider_state
+                .read()
+                .await
+                .provider(allow_not_ready)
+                .await
+                .is_none()
+        {
+            return Ok(OpenRequestResult::NotReady);
+        }
+
         // check rate limits
         if let Some(ratelimiter) = self.hard_limit.as_ref() {
             // TODO: how should we know if we should set expire or not?

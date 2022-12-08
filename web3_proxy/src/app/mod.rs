@@ -189,6 +189,7 @@ pub async fn get_migrated_db(
     min_connections: u32,
     max_connections: u32,
 ) -> anyhow::Result<DatabaseConnection> {
+    // TODO: this seems to fail silently
     let db_conn = get_db(db_url, min_connections, max_connections).await?;
 
     let db_backend = db_conn.get_database_backend();
