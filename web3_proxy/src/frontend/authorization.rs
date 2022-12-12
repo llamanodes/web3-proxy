@@ -46,7 +46,7 @@ pub enum RateLimitResult {
 }
 
 #[derive(Clone, Debug)]
-pub enum AuthorizatioType {
+pub enum AuthorizationType {
     Internal,
     Frontend,
 }
@@ -60,7 +60,7 @@ pub struct Authorization {
     pub origin: Option<Origin>,
     pub referer: Option<Referer>,
     pub user_agent: Option<UserAgent>,
-    pub authorization_type: AuthorizatioType,
+    pub authorization_type: AuthorizationType,
 }
 
 #[derive(Debug)]
@@ -188,7 +188,7 @@ impl Authorization {
             None,
             None,
             user_agent,
-            AuthorizatioType::Internal,
+            AuthorizationType::Internal,
         )
     }
 
@@ -223,7 +223,7 @@ impl Authorization {
             origin,
             referer,
             user_agent,
-            AuthorizatioType::Frontend,
+            AuthorizationType::Frontend,
         )
     }
 
@@ -234,7 +234,7 @@ impl Authorization {
         origin: Option<Origin>,
         referer: Option<Referer>,
         user_agent: Option<UserAgent>,
-        authorization_type: AuthorizatioType,
+        authorization_type: AuthorizationType,
     ) -> anyhow::Result<Self> {
         // check ip
         match &authorization_checks.allowed_ips {
@@ -664,6 +664,7 @@ impl Web3ProxyApp {
                             allowed_origins,
                             allowed_referers,
                             allowed_user_agents,
+                            log_level: rpc_key_model.log_level,
                             log_revert_chance: rpc_key_model.log_revert_chance,
                             max_concurrent_requests: user_tier_model.max_concurrent_requests,
                             max_requests_per_period: user_tier_model.max_requests_per_period,
@@ -705,7 +706,7 @@ impl Web3ProxyApp {
             origin,
             referer,
             user_agent,
-            AuthorizatioType::Frontend,
+            AuthorizationType::Frontend,
         )?;
 
         let user_max_requests_per_period = match authorization.checks.max_requests_per_period {

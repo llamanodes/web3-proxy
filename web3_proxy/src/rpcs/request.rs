@@ -1,6 +1,6 @@
 use super::connection::Web3Connection;
 use super::provider::Web3Provider;
-use crate::frontend::authorization::{AuthorizatioType, Authorization};
+use crate::frontend::authorization::{Authorization, AuthorizationType};
 use crate::metered::{JsonRpcErrorCount, ProviderErrorCount};
 use anyhow::Context;
 use chrono::Utc;
@@ -173,11 +173,11 @@ impl OpenRequestHandle {
         // TODO: handle overflows?
         // TODO: what ordering?
         match authorization.as_ref().authorization_type {
-            AuthorizatioType::Frontend => {
+            AuthorizationType::Frontend => {
                 conn.frontend_requests
                     .fetch_add(1, atomic::Ordering::Relaxed);
             }
-            AuthorizatioType::Internal => {
+            AuthorizationType::Internal => {
                 conn.internal_requests
                     .fetch_add(1, atomic::Ordering::Relaxed);
             }

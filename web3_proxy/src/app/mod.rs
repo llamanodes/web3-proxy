@@ -17,6 +17,7 @@ use anyhow::Context;
 use axum::headers::{Origin, Referer, UserAgent};
 use deferred_rate_limiter::DeferredRateLimiter;
 use derive_more::From;
+use entities::sea_orm_active_enums::LogLevel;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, Bytes, TxHash, H256, U64};
 use futures::future::join_all;
@@ -84,6 +85,7 @@ pub struct AuthorizationChecks {
     pub allowed_user_agents: Option<Vec<UserAgent>>,
     /// if None, allow any IP Address
     pub allowed_ips: Option<Vec<IpNet>>,
+    pub log_level: LogLevel,
     /// Chance to save reverting eth_call, eth_estimateGas, and eth_sendRawTransaction to the database.
     /// TODO: f32 would be fine
     pub log_revert_chance: f64,
@@ -179,6 +181,8 @@ pub async fn drop_migration_lock(db_conn: &DatabaseConnection) -> Result<(), DbE
     let drop_lock_statment = db_backend.build(Table::drop().table(Alias::new("migration_lock")));
 
     db_conn.execute(drop_lock_statment).await?;
+
+    debug!("migration lock unlocked");
 
     Ok(())
 }

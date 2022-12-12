@@ -10,7 +10,6 @@ use crate::config::{BlockAndRpc, TxHashAndRpc, Web3ConnectionConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
-use anyhow::Context;
 use arc_swap::ArcSwap;
 use counter::Counter;
 use derive_more::From;

@@ -10,7 +10,7 @@ pub struct Model {
     pub id: u64,
     pub rpc_key_id: Option<u64>,
     pub chain_id: u64,
-    pub method: String,
+    pub method: Option<String>,
     pub archive_request: bool,
     pub error_response: bool,
     pub period_datetime: DateTimeUtc,

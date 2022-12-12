@@ -18,6 +18,7 @@ use axum::{
 };
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
+use entities::sea_orm_active_enums::LogLevel;
 use entities::{revert_log, rpc_key, user};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
@@ -26,8 +27,8 @@ use ipnet::IpNet;
 use itertools::Itertools;
 use log::warn;
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    TransactionTrait, TryIntoModel,
+    self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
+    QueryOrder, TransactionTrait, TryIntoModel,
 };
 use redis_rate_limiter::redis::AsyncCommands;
 use serde::Deserialize;
@@ -502,23 +503,24 @@ pub async fn rpc_keys_delete(
 /// the JSON input to the `rpc_keys_management` handler.
 /// If `key_id` is set, it updates an existing key.
 /// If `key_id` is not set, it creates a new key.
+/// `log_request_method` cannot be change once the key is created
+/// `user_tier` cannot be changed here
 #[derive(Debug, Deserialize)]
 pub struct UserKeyManagement {
     key_id: Option<u64>,
-    description: Option<String>,
-    private_txs: Option<bool>,
     active: Option<bool>,
-    // TODO: enable log_revert_trace: Option<f64>,
     allowed_ips: Option<String>,
     allowed_origins: Option<String>,
     allowed_referers: Option<String>,
     allowed_user_agents: Option<String>,
-    // do not allow! `user_tier: Option<u64>,`
+    description: Option<String>,
+    log_level: Option<LogLevel>,
+    // TODO: enable log_revert_trace: Option<f64>,
+    private_txs: Option<bool>,
 }
 
 /// `POST /user/keys` or `PUT /user/keys` -- Use a bearer token to create or update an existing key.
 #[debug_handler]
-
 pub async fn rpc_keys_management(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
@@ -532,15 +534,14 @@ pub async fn rpc_keys_management(
 
     let mut uk = if let Some(existing_key_id) = payload.key_id {
         // get the key and make sure it belongs to the user
-        let uk = rpc_key::Entity::find()
+        rpc_key::Entity::find()
             .filter(rpc_key::Column::UserId.eq(user.id))
             .filter(rpc_key::Column::Id.eq(existing_key_id))
             .one(&db_conn)
             .await
             .context("failed loading user's key")?
-            .context("key does not exist or is not controlled by this bearer token")?;
-
-        uk.try_into().unwrap()
+            .context("key does not exist or is not controlled by this bearer token")?
+            .into_active_model()
     } else {
         // make a new key
         // TODO: limit to 10 keys?
@@ -549,6 +550,7 @@ pub async fn rpc_keys_management(
         rpc_key::ActiveModel {
             user_id: sea_orm::Set(user.id),
             secret_key: sea_orm::Set(secret_key.into()),
+            log_level: sea_orm::Set(payload.log_level.unwrap_or(LogLevel::None)),
             ..Default::default()
         }
     };

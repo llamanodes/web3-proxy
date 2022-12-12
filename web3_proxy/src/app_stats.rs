@@ -3,6 +3,7 @@ use axum::headers::Origin;
 use chrono::{TimeZone, Utc};
 use derive_more::From;
 use entities::rpc_accounting;
+use entities::sea_orm_active_enums::LogLevel;
 use hashbrown::HashMap;
 use hdrhistogram::{Histogram, RecordError};
 use log::{error, info};
@@ -34,7 +35,7 @@ impl ProxyResponseStat {
     /// TODO: think more about this. probably rename it
     fn key(&self) -> ProxyResponseAggregateKey {
         // include either the rpc_key_id or the origin
-        let (rpc_key_id, origin) = match (
+        let (mut rpc_key_id, origin) = match (
             self.authorization.checks.rpc_key_id,
             &self.authorization.origin,
         ) {
@@ -52,10 +53,27 @@ impl ProxyResponseStat {
             }
         };
 
+        let method = match self.authorization.checks.log_level {
+            LogLevel::None => {
+                // No rpc_key logging. Only save fully anonymized metric
+                rpc_key_id = None;
+                // keep the method since the rpc key is not attached
+                Some(self.method.clone())
+            }
+            LogLevel::Aggregate => {
+                // Lose the method
+                None
+            }
+            LogLevel::Detailed => {
+                // include the method
+                Some(self.method.clone())
+            }
+        };
+
         ProxyResponseAggregateKey {
             archive_request: self.archive_request,
             error_response: self.error_response,
-            method: self.method.clone(),
+            method,
             origin,
             rpc_key_id,
         }
@@ -89,7 +107,7 @@ struct ProxyResponseAggregateKey {
     archive_request: bool,
     error_response: bool,
     rpc_key_id: Option<NonZeroU64>,
-    method: String,
+    method: Option<String>,
     /// TODO: should this be Origin or String?
     origin: Option<Origin>,
 }
