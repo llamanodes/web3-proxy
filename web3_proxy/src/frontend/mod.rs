@@ -71,7 +71,11 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/user/revert_logs", get(users::user_revert_logs_get))
         .route(
             "/user/stats/aggregate",
-            get(users::user_stats_aggregate_get),
+            get(users::user_stats_aggregated_get),
+        )
+        .route(
+            "/user/stats/aggregated",
+            get(users::user_stats_aggregated_get),
         )
         .route("/user/stats/detailed", get(users::user_stats_detailed_get))
         .route("/user/logout", post(users::user_logout_post))

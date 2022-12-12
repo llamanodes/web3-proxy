@@ -547,10 +547,14 @@ pub async fn rpc_keys_management(
         // TODO: limit to 10 keys?
         let secret_key = RpcSecretKey::new();
 
+        let log_level = payload
+            .log_level
+            .context("log level must be 'none', 'detailed', or 'aggregated'")?;
+
         rpc_key::ActiveModel {
             user_id: sea_orm::Set(user.id),
             secret_key: sea_orm::Set(secret_key.into()),
-            log_level: sea_orm::Set(payload.log_level.unwrap_or(LogLevel::None)),
+            log_level: sea_orm::Set(log_level),
             ..Default::default()
         }
     };
@@ -743,12 +747,12 @@ pub async fn user_revert_logs_get(
 /// `GET /user/stats/aggregate` -- Public endpoint for aggregate stats such as bandwidth used and methods requested.
 #[debug_handler]
 
-pub async fn user_stats_aggregate_get(
+pub async fn user_stats_aggregated_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    let response = query_user_stats(&app, bearer, &params, StatResponse::Aggregate).await?;
+    let response = query_user_stats(&app, bearer, &params, StatResponse::Aggregated).await?;
 
     Ok(Json(response).into_response())
 }

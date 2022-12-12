@@ -60,7 +60,7 @@ impl ProxyResponseStat {
                 // keep the method since the rpc key is not attached
                 Some(self.method.clone())
             }
-            LogLevel::Aggregate => {
+            LogLevel::Aggregated => {
                 // Lose the method
                 None
             }

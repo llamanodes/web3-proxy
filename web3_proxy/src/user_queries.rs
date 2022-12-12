@@ -194,7 +194,7 @@ pub fn filter_query_window_seconds(
 }
 
 pub enum StatResponse {
-    Aggregate,
+    Aggregated,
     Detailed,
 }
 
