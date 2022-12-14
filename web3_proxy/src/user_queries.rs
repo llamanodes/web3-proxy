@@ -265,6 +265,10 @@ pub async fn query_user_stats<'a>(
     let q = rpc_accounting::Entity::find()
         .select_only()
         .column_as(
+            rpc_accounting::Column::FrontendRequests.count(),
+            "total_rows",
+        )
+        .column_as(
             rpc_accounting::Column::FrontendRequests.sum(),
             "total_frontend_requests",
         )
