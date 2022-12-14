@@ -21,6 +21,7 @@ use derive_more::From;
 use entities::sea_orm_active_enums::LogLevel;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, Bytes, TxHash, H256, U64};
+use ethers::types::U256;
 use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
@@ -700,10 +701,11 @@ impl Web3ProxyApp {
         // save the id so we can attach it to the response
         // TODO: instead of cloning, take the id out?
         let request_id = request.id.clone();
+        let request_method = request.method.clone();
 
         // TODO: if eth_chainId or net_version, serve those without querying the backend
         // TODO: don't clone?
-        let partial_response: serde_json::Value = match request.method.clone().as_ref() {
+        let partial_response: serde_json::Value = match request_method.as_ref() {
             // lots of commands are blocked
             method @ ("admin_addPeer"
             | "admin_datadir"
@@ -810,7 +812,35 @@ impl Web3ProxyApp {
                 // no stats on this. its cheap
                 json!(Address::zero())
             }
-            // TODO: eth_estimateGas using anvil?
+            "eth_estimateGas" => {
+                // TODO: eth_estimateGas using anvil?
+                // TODO: modify the block requested?
+                let mut response = self
+                    .balanced_rpcs
+                    .try_send_best_upstream_server(
+                        authorization,
+                        request,
+                        Some(&request_metadata),
+                        None,
+                    )
+                    .await?;
+
+                let parsed_gas_estimate = if let Some(gas_estimate) = response.result.take() {
+                    let parsed_gas_estimate: U256 = serde_json::from_str(gas_estimate.get())
+                        .context("gas estimate result is not an U256")?;
+
+                    parsed_gas_estimate
+                } else {
+                    // i think this is always an error response
+                    return Ok(response);
+                };
+
+                // increase by 10.01%
+                let parsed_gas_estimate =
+                    parsed_gas_estimate * U256::from(110_010) / U256::from(100_000);
+
+                json!(parsed_gas_estimate)
+            }
             // TODO: eth_gasPrice that does awesome magic to predict the future
             "eth_hashrate" => {
                 // no stats on this. its cheap
@@ -993,7 +1023,7 @@ impl Web3ProxyApp {
 
         if let Some(stat_sender) = self.stat_sender.as_ref() {
             let response_stat = ProxyResponseStat::new(
-                request.method,
+                request_method,
                 authorization.clone(),
                 request_metadata,
                 response.num_bytes(),
