@@ -40,6 +40,7 @@ pub async fn get_user_id_from_params(
             let bearer_user_id = match redis_conn.get::<_, u64>(&user_redis_key).await {
                 Err(_) => {
                     // TODO: inspect the redis error? if redis is down we should warn
+                    // this also means redis being down will not kill our app. Everything will need a db read query though.
 
                     let user_login = login::Entity::find()
                         .filter(login::Column::BearerToken.eq(user_bearer_token.uuid()))
@@ -53,12 +54,13 @@ pub async fn get_user_id_from_params(
 
                     if now > user_login.expires_at {
                         // this row is expired! do not allow auth!
-
+                        // delete ALL expired rows.
                         let delete_result = login::Entity::delete_many()
                             .filter(login::Column::ExpiresAt.lte(now))
                             .exec(&db_conn)
                             .await?;
 
+                        // TODO: emit a stat? if this is high something weird might be happening
                         debug!("cleared expired pending_logins: {:?}", delete_result);
 
                         return Err(FrontendErrorResponse::AccessDenied);
@@ -69,8 +71,7 @@ pub async fn get_user_id_from_params(
                     user_login.user_id
                 }
                 Ok(x) => {
-                    // TODO: save it to redis again to extend the key?
-
+                    // TODO: push cache ttl further in the future?
                     x
                 }
             };
