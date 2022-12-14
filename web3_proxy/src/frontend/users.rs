@@ -18,19 +18,20 @@ use axum::{
 };
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
+use chrono::{TimeZone, Utc};
 use entities::sea_orm_active_enums::LogLevel;
-use entities::{revert_log, rpc_key, user};
+use entities::{login, pending_login, revert_log, rpc_key, user};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
 use itertools::Itertools;
 use log::warn;
+use migration::sea_orm::prelude::Uuid;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
     QueryOrder, TransactionTrait, TryIntoModel,
 };
-use redis_rate_limiter::redis::AsyncCommands;
 use serde::Deserialize;
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
@@ -84,7 +85,7 @@ pub async fn user_login_get(
         .context("impossible")?
         .parse()
         // TODO: map_err so this becomes a 401
-        .context("bad input")?;
+        .context("unable to parse address")?;
 
     let login_domain = app
         .config
@@ -95,6 +96,7 @@ pub async fn user_login_get(
     // TODO: get most of these from the app config
     let message = Message {
         // TODO: don't unwrap
+        // TODO: accept a login_domain from the request?
         domain: login_domain.parse().unwrap(),
         address: user_address.to_fixed_bytes(),
         // TODO: config for statement
@@ -111,16 +113,28 @@ pub async fn user_login_get(
         resources: vec![],
     };
 
-    // TODO: if no redis server, store in local cache? at least give a better error. right now this seems to be a 502
-    // the address isn't enough. we need to save the actual message so we can read the nonce
-    // TODO: what message format is the most efficient to store in redis? probably eip191_bytes
-    // we add 1 to expire_seconds just to be sure redis has the key for the full expiration_time
-    // TODO: store a maximum number of attempted logins? anyone can request so we don't want to allow DOS attacks
-    let session_key = format!("login_nonce:{}", nonce);
-    app.redis_conn()
-        .await?
-        .set_ex(session_key, message.to_string(), expire_seconds + 1)
-        .await?;
+    let db_conn = app.db_conn().context("login requires a database")?;
+
+    // massage types to fit in the database. sea-orm does not make this very elegant
+    let uuid = Uuid::from_u128(nonce.into());
+    // we add 1 to expire_seconds just to be sure the database has the key for the full expiration_time
+    let expires_at = Utc
+        .timestamp_opt(expiration_time.unix_timestamp() + 1, 0)
+        .unwrap();
+
+    // we do not store a maximum number of attempted logins. anyone can request so we don't want to allow DOS attacks
+    // add a row to the database for this user
+    let user_pending_login = pending_login::ActiveModel {
+        id: sea_orm::NotSet,
+        nonce: sea_orm::Set(uuid),
+        message: sea_orm::Set(message.to_string()),
+        expires_at: sea_orm::Set(expires_at),
+    };
+
+    user_pending_login
+        .save(&db_conn)
+        .await
+        .context("saving user's pending_login")?;
 
     // there are multiple ways to sign messages and not all wallets support them
     // TODO: default message eip from config?
@@ -163,12 +177,11 @@ pub struct PostLogin {
 /// It is recommended to save the returned bearer token in a cookie.
 /// The bearer token can be used to authenticate other requests, such as getting the user's stats or modifying the user's profile.
 #[debug_handler]
-
 pub async fn user_login_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
-    Json(payload): Json<PostLogin>,
     Query(query): Query<PostLoginQuery>,
+    Json(payload): Json<PostLogin>,
 ) -> FrontendResult {
     login_is_authorized(&app, ip).await?;
 
@@ -200,16 +213,25 @@ pub async fn user_login_post(
 
     // the only part of the message we will trust is their nonce
     // TODO: this is fragile. have a helper function/struct for redis keys
-    let login_nonce_key = format!("login_nonce:{}", &their_msg.nonce);
+    let login_nonce = UserBearerToken::from_str(&their_msg.nonce)?;
 
-    // fetch the message we gave them from our redis
-    let mut redis_conn = app.redis_conn().await?;
+    // fetch the message we gave them from our database
+    let db_conn = app.db_conn().context("Getting database connection")?;
 
-    let our_msg: Option<String> = redis_conn.get(&login_nonce_key).await?;
+    // massage type for the db
+    let login_nonce_uuid: Uuid = login_nonce.clone().into();
 
-    let our_msg: String = our_msg.context("login nonce not found")?;
+    let user_pending_login = pending_login::Entity::find()
+        .filter(pending_login::Column::Nonce.eq(login_nonce_uuid))
+        .one(&db_conn)
+        .await
+        .context("database error while finding pending_login")?
+        .context("login nonce not found")?;
 
-    let our_msg: siwe::Message = our_msg.parse().context("parsing siwe message")?;
+    let our_msg: siwe::Message = user_pending_login
+        .message
+        .parse()
+        .context("parsing siwe message")?;
 
     // default options are fine. the message includes timestamp and domain and nonce
     let verify_config = VerificationOpts::default();
@@ -233,8 +255,6 @@ pub async fn user_login_post(
             .into());
         }
     }
-
-    let db_conn = app.db_conn().context("Getting database connection")?;
 
     // TODO: limit columns or load whole user?
     let u = user::Entity::find()
@@ -305,7 +325,7 @@ pub async fn user_login_post(
     };
 
     // create a bearer token for the user.
-    let bearer_token = Ulid::new();
+    let user_bearer_token = UserBearerToken::default();
 
     // json response with everything in it
     // we could return just the bearer token, but I think they will always request api keys and the user profile
@@ -314,27 +334,37 @@ pub async fn user_login_post(
             .into_iter()
             .map(|uk| (uk.id, uk))
             .collect::<HashMap<_, _>>(),
-        "bearer_token": bearer_token,
+        "bearer_token": user_bearer_token,
         "user": u,
     });
 
     let response = (status_code, Json(response_json)).into_response();
 
-    // add bearer to redis
-    // TODO: use a helper function/struct for this
-    let bearer_redis_key = UserBearerToken(bearer_token).to_string();
+    // add bearer to the database
 
     // expire in 4 weeks
-    // TODO: get expiration time from app config
-    redis_conn
-        .set_ex(bearer_redis_key, u.id.to_string(), 2_419_200)
-        .await?;
+    let expires_at = Utc::now()
+        .checked_add_signed(chrono::Duration::weeks(4))
+        .unwrap();
 
-    if let Err(err) = redis_conn.del::<_, u64>(&login_nonce_key).await {
-        warn!(
-            "Failed to delete login_nonce_key {}: {}",
-            login_nonce_key, err
-        );
+    let user_login = login::ActiveModel {
+        id: sea_orm::NotSet,
+        bearer_token: sea_orm::Set(user_bearer_token.uuid()),
+        user_id: sea_orm::Set(u.id),
+        expires_at: sea_orm::Set(expires_at),
+    };
+
+    user_login
+        .save(&db_conn)
+        .await
+        .context("saving user login")?;
+
+    if let Err(err) = user_pending_login
+        .into_active_model()
+        .delete(&db_conn)
+        .await
+    {
+        warn!("Failed to delete nonce:{}: {}", login_nonce.0, err);
     }
 
     Ok(response)
@@ -342,17 +372,21 @@ pub async fn user_login_post(
 
 /// `POST /user/logout` - Forget the bearer token in the `Authentication` header.
 #[debug_handler]
-
 pub async fn user_logout_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
-    let mut redis_conn = app.redis_conn().await?;
+    let user_bearer = UserBearerToken::try_from(bearer)?;
 
-    // TODO: i don't like this. move this to a helper function so it is less fragile
-    let bearer_cache_key = UserBearerToken::try_from(bearer)?.to_string();
+    let db_conn = app.db_conn().context("database needed for user logout")?;
 
-    redis_conn.del(bearer_cache_key).await?;
+    if let Err(err) = login::Entity::delete_many()
+        .filter(login::Column::BearerToken.eq(user_bearer.uuid()))
+        .exec(&db_conn)
+        .await
+    {
+        warn!("Failed to delete {}: {}", user_bearer.redis_key(), err);
+    }
 
     // TODO: what should the response be? probably json something
     Ok("goodbye".into_response())

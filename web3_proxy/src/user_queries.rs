@@ -5,20 +5,24 @@ use axum::{
     headers::{authorization::Bearer, Authorization},
     TypedHeader,
 };
-use chrono::NaiveDateTime;
-use entities::{rpc_accounting, rpc_key};
+use chrono::{NaiveDateTime, Utc};
+use entities::{login, rpc_accounting, rpc_key};
 use hashbrown::HashMap;
 use http::StatusCode;
+use log::{debug, warn};
 use migration::sea_orm::{
-    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Select,
+    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, Select,
 };
 use migration::{Condition, Expr, SimpleExpr};
 use redis_rate_limiter::{redis::AsyncCommands, RedisConnection};
 
-/// get the attached address from redis for the given auth_token.
+/// get the attached address for the given bearer token.
+/// First checks redis. Then checks the database.
 /// 0 means all users
 pub async fn get_user_id_from_params(
     mut redis_conn: RedisConnection,
+    db_conn: DatabaseConnection,
     // this is a long type. should we strip it down?
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &HashMap<String, String>,
@@ -26,22 +30,70 @@ pub async fn get_user_id_from_params(
     match (bearer, params.get("user_id")) {
         (Some(TypedHeader(Authorization(bearer))), Some(user_id)) => {
             // check for the bearer cache key
-            let bearer_cache_key = UserBearerToken::try_from(bearer)?.to_string();
+            let user_bearer_token = UserBearerToken::try_from(bearer)?;
+
+            let user_redis_key = user_bearer_token.redis_key();
+
+            let mut save_to_redis = false;
 
             // get the user id that is attached to this bearer token
-            let bearer_user_id = redis_conn
-                .get::<_, u64>(bearer_cache_key)
-                .await
-                // TODO: this should be a 403
-                .context("fetching rpc_key_id from redis with bearer_cache_key")?;
+            let bearer_user_id = match redis_conn.get::<_, u64>(&user_redis_key).await {
+                Err(_) => {
+                    // TODO: inspect the redis error? if redis is down we should warn
+
+                    let user_login = login::Entity::find()
+                        .filter(login::Column::BearerToken.eq(user_bearer_token.uuid()))
+                        .one(&db_conn)
+                        .await
+                        .context("database error while querying for user")?
+                        .ok_or(FrontendErrorResponse::AccessDenied)?;
+
+                    // check expiration. if expired, delete ALL expired pending_logins
+                    let now = Utc::now();
+
+                    if now > user_login.expires_at {
+                        // this row is expired! do not allow auth!
+
+                        let delete_result = login::Entity::delete_many()
+                            .filter(login::Column::ExpiresAt.lte(now))
+                            .exec(&db_conn)
+                            .await?;
+
+                        debug!("cleared expired pending_logins: {:?}", delete_result);
+
+                        return Err(FrontendErrorResponse::AccessDenied);
+                    }
+
+                    save_to_redis = true;
+
+                    user_login.user_id
+                }
+                Ok(x) => {
+                    // TODO: save it to redis again to extend the key?
+
+                    x
+                }
+            };
 
             let user_id: u64 = user_id.parse().context("Parsing user_id param")?;
 
             if bearer_user_id != user_id {
-                Err(FrontendErrorResponse::AccessDenied)
-            } else {
-                Ok(bearer_user_id)
+                return Err(FrontendErrorResponse::AccessDenied);
             }
+
+            if save_to_redis {
+                // TODO: how long? we store in database for 4 weeks
+                let one_day = 60 * 60 * 24;
+
+                if let Err(err) = redis_conn
+                    .set_ex::<_, _, ()>(user_redis_key, user_id, one_day)
+                    .await
+                {
+                    warn!("Unable to save user bearer token to redis: {}", err)
+                }
+            }
+
+            Ok(bearer_user_id)
         }
         (_, None) => {
             // they have a bearer token. we don't care about it on public pages
@@ -280,7 +332,7 @@ pub async fn query_user_stats<'a>(
 
     // get_user_id_from_params checks that the bearer is connected to this user_id
     // TODO: match on user_id and rpc_key_id?
-    let user_id = get_user_id_from_params(redis_conn, bearer, params).await?;
+    let user_id = get_user_id_from_params(redis_conn, db_conn.clone(), bearer, params).await?;
     let (condition, q) = if user_id == 0 {
         // 0 means everyone. don't filter on user
         // TODO: 0 or None?

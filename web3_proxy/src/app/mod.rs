@@ -13,6 +13,7 @@ use crate::rpcs::blockchain::{ArcBlock, SavedBlock};
 use crate::rpcs::connections::Web3Connections;
 use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
+use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::{Origin, Referer, UserAgent};
 use deferred_rate_limiter::DeferredRateLimiter;
@@ -123,7 +124,7 @@ pub struct Web3ProxyApp {
         Cache<NonZeroU64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub bearer_token_semaphores:
-        Cache<String, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
+        Cache<UserBearerToken, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub stat_sender: Option<flume::Sender<Web3ProxyStat>>,
 }
 

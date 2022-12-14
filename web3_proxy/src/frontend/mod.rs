@@ -10,7 +10,6 @@ pub mod users;
 
 use crate::app::Web3ProxyApp;
 use axum::{
-    handler::Handler,
     routing::{get, post, put},
     Extension, Router,
 };
@@ -93,7 +92,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         // frontend caches
         .layer(Extension(response_cache))
         // 404 for any unknown routes
-        .fallback(errors::handler_404.into_service());
+        .fallback(errors::handler_404);
 
     // run our app with hyper
     // TODO: allow only listening on localhost? top_config.app.host.parse()?

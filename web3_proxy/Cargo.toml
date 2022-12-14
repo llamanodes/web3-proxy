@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
 default-run = "web3_proxy"
 
@@ -22,9 +22,9 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 anyhow = { version = "1.0.66", features = ["backtrace"] }
 arc-swap = "1.5.1"
 argh = "0.1.9"
-axum = { version = "0.5.17", features = ["headers", "serde_json", "tokio-tungstenite", "ws"] }
-axum-client-ip = "0.2.0"
-axum-macros = "0.2.3"
+axum = { version = "0.6.1", features = ["headers", "ws"] }
+axum-client-ip = "0.3.0"
+axum-macros = "0.3.0"
 # TODO: import chrono from sea-orm so we always have the same version
 chrono = "0.4.23"
 counter = "0.5.7"
@@ -38,7 +38,7 @@ futures = { version = "0.3.25", features = ["thread-pool"] }
 hashbrown = { version = "0.13.1", features = ["serde"] }
 hdrhistogram = "7.5.2"
 http = "0.2.8"
-ipnet = "2.5.1"
+ipnet = "2.7.0"
 log = "0.4.17"
 metered = { version = "0.9.0", features = ["serialize"] }
 moka = { version = "0.9.6", default-features = false, features = ["future"] }
@@ -55,12 +55,12 @@ handlebars = "4.3.5"
 rustc-hash = "1.1.0"
 siwe = "0.5.0"
 sentry = { version = "0.29.1", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
-serde = { version = "1.0.149", features = [] }
+serde = { version = "1.0.150", features = [] }
 serde_json = { version = "1.0.89", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.1.6"
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 time = "0.3.17"
-tokio = { version = "1.22.0", features = ["full"] }
+tokio = { version = "1.23.0", features = ["full"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.11", features = ["sync"] }
 toml = "0.5.9"

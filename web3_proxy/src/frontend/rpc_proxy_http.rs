@@ -15,7 +15,6 @@ use std::sync::Arc;
 /// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
-
 pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -42,15 +41,14 @@ pub async fn proxy_web3_rpc(
 /// Can optionally authorized based on origin, referer, or user agent.
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
-
 pub async fn proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
-    Json(payload): Json<JsonRpcRequestEnum>,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     Path(rpc_key): Path<String>,
+    Json(payload): Json<JsonRpcRequestEnum>,
 ) -> FrontendResult {
     let rpc_key = rpc_key.parse()?;
 
@@ -69,10 +67,7 @@ pub async fn proxy_web3_rpc_with_key(
 
     // the request can take a while, so we spawn so that we can start serving another request
     // TODO: spawn even earlier?
-    let f = tokio::spawn(async move {
-        app.proxy_web3_rpc(authorization, payload)
-            .await
-    });
+    let f = tokio::spawn(async move { app.proxy_web3_rpc(authorization, payload).await });
 
     // if this is an error, we are likely shutting down
     let response = f.await??;

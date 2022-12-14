@@ -16,7 +16,7 @@ use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
 use std::error::Error;
-use tokio::{task::JoinError, time::Instant};
+use tokio::{sync::AcquireError, task::JoinError, time::Instant};
 
 // TODO: take "IntoResponse" instead of Response?
 pub type FrontendResult = Result<Response, FrontendErrorResponse>;
@@ -26,6 +26,7 @@ pub type FrontendResult = Result<Response, FrontendErrorResponse>;
 pub enum FrontendErrorResponse {
     AccessDenied,
     Anyhow(anyhow::Error),
+    SemaphoreAcquireError(AcquireError),
     Box(Box<dyn Error>),
     Database(DbErr),
     HeadersError(headers::Error),
@@ -198,6 +199,18 @@ impl IntoResponse for FrontendErrorResponse {
             Self::Response(r) => {
                 debug_assert_ne!(r.status(), StatusCode::OK);
                 return r;
+            }
+            Self::SemaphoreAcquireError(err) => {
+                warn!("semaphore acquire err={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_string(
+                        // TODO: is it safe to expose all of our anyhow strings?
+                        "semaphore acquire error".to_string(),
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
             }
             Self::StatusCode(status_code, err_msg, err) => {
                 // different status codes should get different error levels. 500s should warn. 400s should stat

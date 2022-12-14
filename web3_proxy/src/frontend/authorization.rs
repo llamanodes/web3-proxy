@@ -8,13 +8,12 @@ use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
-use entities::{rpc_key, user, user_tier};
+use entities::{login, rpc_key, user, user_tier};
 use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
 use log::error;
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -422,11 +421,14 @@ impl Web3ProxyApp {
     pub async fn bearer_is_authorized(
         &self,
         bearer: Bearer,
-    ) -> anyhow::Result<(user::Model, OwnedSemaphorePermit)> {
+    ) -> Result<(user::Model, OwnedSemaphorePermit), FrontendErrorResponse> {
+        // get the user id for this bearer token
+        let user_bearer_token = UserBearerToken::try_from(bearer)?;
+
         // limit concurrent requests
         let semaphore = self
             .bearer_token_semaphores
-            .get_with(bearer.token().to_string(), async move {
+            .get_with(user_bearer_token.clone(), async move {
                 let s = Semaphore::new(self.config.bearer_token_max_concurrent_requests as usize);
                 Arc::new(s)
             })
@@ -434,26 +436,20 @@ impl Web3ProxyApp {
 
         let semaphore_permit = semaphore.acquire_owned().await?;
 
-        // get the user id for this bearer token
-        // TODO: move redis key building to a helper function
-        let bearer_cache_key = UserBearerToken::try_from(bearer)?.to_string();
+        // get the attached address from the database for the given auth_token.
+        let db_conn = self
+            .db_conn()
+            .context("checking if bearer token is authorized")?;
 
-        // get the attached address from redis for the given auth_token.
-        let mut redis_conn = self.redis_conn().await?;
+        let user_bearer_uuid: Uuid = user_bearer_token.into();
 
-        let user_id: u64 = redis_conn
-            .get::<_, Option<u64>>(bearer_cache_key)
-            .await
-            .context("fetching bearer cache key from redis")?
-            .context("unknown bearer token")?;
-
-        // turn user id into a user
-        let db_conn = self.db_conn().context("Getting database connection")?;
-        let user = user::Entity::find_by_id(user_id)
+        let user = user::Entity::find()
+            .left_join(login::Entity)
+            .filter(login::Column::BearerToken.eq(user_bearer_uuid))
             .one(&db_conn)
             .await
-            .context("fetching user from db by id")?
-            .context("unknown user id")?;
+            .context("fetching user from db by bearer token")?
+            .context("unknown bearer token")?;
 
         Ok((user, semaphore_permit))
     }
