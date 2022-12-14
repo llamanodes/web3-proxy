@@ -286,7 +286,6 @@ pub async fn query_user_stats<'a>(
             "total_response_bytes",
         )
         .column_as(
-            // TODO: can we sum bools like this?
             rpc_accounting::Column::ErrorResponse.sum(),
             "total_error_responses",
         )
