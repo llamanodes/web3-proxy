@@ -2,7 +2,6 @@ flamegraph.svg
 perf.data
 perf.data.old
 
-/config/*.toml
 /.git
 /bin/
 /data/
