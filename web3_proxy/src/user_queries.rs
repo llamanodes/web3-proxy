@@ -262,7 +262,7 @@ pub async fn query_user_stats<'a>(
 
     let mut response = HashMap::new();
 
-    let q = rpc_accounting::Entity::find()
+    let mut q = rpc_accounting::Entity::find()
         .select_only()
         .column_as(
             rpc_accounting::Column::FrontendRequests.sum(),
@@ -291,21 +291,20 @@ pub async fn query_user_stats<'a>(
         );
 
     // TODO: make this and q mutable and clean up the code below. no need for more `let q`
-    let condition = Condition::all();
+    let mut condition = Condition::all();
 
-    let q = if let StatResponse::Detailed = stat_response_type {
+    if let StatResponse::Detailed = stat_response_type {
         // group by the columns that we use as keys in other places of the code
-        q.column(rpc_accounting::Column::ErrorResponse)
+        q = q
+            .column(rpc_accounting::Column::ErrorResponse)
             .group_by(rpc_accounting::Column::ErrorResponse)
             .column(rpc_accounting::Column::Method)
             .group_by(rpc_accounting::Column::Method)
             .column(rpc_accounting::Column::ArchiveRequest)
-            .group_by(rpc_accounting::Column::ArchiveRequest)
-    } else {
-        q
-    };
+            .group_by(rpc_accounting::Column::ArchiveRequest);
+    }
 
-    let q = filter_query_window_seconds(params, &mut response, q)?;
+    q = filter_query_window_seconds(params, &mut response, q)?;
 
     // aggregate stats after query_start
     // TODO: minimum query_start of 90 days?
@@ -315,42 +314,35 @@ pub async fn query_user_stats<'a>(
         "query_start",
         serde_json::Value::Number(query_start.timestamp().into()),
     );
-    let condition = condition.add(rpc_accounting::Column::PeriodDatetime.gte(query_start));
+    condition = condition.add(rpc_accounting::Column::PeriodDatetime.gte(query_start));
 
     // filter on chain_id
     let chain_id = get_chain_id_from_params(app, params)?;
-    let (condition, q) = if chain_id == 0 {
-        // fetch all the chains. don't filter or aggregate
-        (condition, q)
+    if chain_id == 0 {
+        // fetch all the chains
     } else {
-        let condition = condition.add(rpc_accounting::Column::ChainId.eq(chain_id));
+        condition = condition.add(rpc_accounting::Column::ChainId.eq(chain_id));
 
         response.insert("chain_id", serde_json::Value::Number(chain_id.into()));
-
-        (condition, q)
-    };
+    }
 
     // get_user_id_from_params checks that the bearer is connected to this user_id
     // TODO: match on user_id and rpc_key_id?
     let user_id = get_user_id_from_params(redis_conn, db_conn.clone(), bearer, params).await?;
-    let (condition, q) = if user_id == 0 {
+    if user_id == 0 {
         // 0 means everyone. don't filter on user
-        // TODO: 0 or None?
-        (condition, q)
     } else {
-        let q = q.left_join(rpc_key::Entity);
+        q = q.left_join(rpc_key::Entity);
 
-        let condition = condition.add(rpc_key::Column::UserId.eq(user_id));
+        condition = condition.add(rpc_key::Column::UserId.eq(user_id));
 
         response.insert("user_id", serde_json::Value::Number(user_id.into()));
-
-        (condition, q)
-    };
+    }
 
     // filter on rpc_key_id
     // if rpc_key_id, all the requests without a key will be loaded
     // TODO: move getting the param and checking the bearer token into a helper function
-    let (condition, q) = if let Some(rpc_key_id) = params.get("rpc_key_id") {
+    if let Some(rpc_key_id) = params.get("rpc_key_id") {
         let rpc_key_id = rpc_key_id.parse::<u64>().map_err(|e| {
             FrontendErrorResponse::StatusCode(
                 StatusCode::BAD_REQUEST,
@@ -361,27 +353,21 @@ pub async fn query_user_stats<'a>(
 
         response.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
 
-        let condition = condition.add(rpc_accounting::Column::RpcKeyId.eq(rpc_key_id));
+        condition = condition.add(rpc_accounting::Column::RpcKeyId.eq(rpc_key_id));
 
-        let q = q.group_by(rpc_accounting::Column::RpcKeyId);
+        q = q.group_by(rpc_accounting::Column::RpcKeyId);
 
         if user_id == 0 {
             // no user id, we did not join above
-            let q = q.left_join(rpc_key::Entity);
-
-            (condition, q)
+            q = q.left_join(rpc_key::Entity);
         } else {
             // user_id added a join on rpc_key already. only filter on user_id
-            let condition = condition.add(rpc_key::Column::UserId.eq(user_id));
-
-            (condition, q)
+            condition = condition.add(rpc_key::Column::UserId.eq(user_id));
         }
-    } else {
-        (condition, q)
-    };
+    }
 
     // now that all the conditions are set up. add them to the query
-    let q = q.filter(condition);
+    q = q.filter(condition);
 
     // TODO: trace log query here? i think sea orm has a useful log level for this
 
