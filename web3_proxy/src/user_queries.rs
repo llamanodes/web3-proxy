@@ -265,10 +265,6 @@ pub async fn query_user_stats<'a>(
     let q = rpc_accounting::Entity::find()
         .select_only()
         .column_as(
-            rpc_accounting::Column::FrontendRequests.count(),
-            "total_rows",
-        )
-        .column_as(
             rpc_accounting::Column::FrontendRequests.sum(),
             "total_frontend_requests",
         )
@@ -400,7 +396,17 @@ pub async fn query_user_stats<'a>(
         serde_json::to_value(page_size).expect("can't fail"),
     );
 
-    // query the database
+    // query the database for number of items and pages
+    let pages_result = q
+        .clone()
+        .paginate(&db_conn, page_size)
+        .num_items_and_pages()
+        .await?;
+
+    response.insert("num_items", pages_result.number_of_items.into());
+    response.insert("num_pages", pages_result.number_of_pages.into());
+
+    // query the database (todo: combine with the pages_result query?)
     let query_response = q
         .into_json()
         .paginate(&db_conn, page_size)
