@@ -256,6 +256,11 @@ These are roughly in order of completition
   - [x] be sure to save the timestamp in a way that our request routing logic can make use of it
 - [x] node selection still needs improvements. we still send to syncing nodes if they are close
     - try consensus heads first! only if that is empty should we try others. and we should try them sorted by block height and then randomly chosen from there
+
+## V1
+
+These are not yet ordered. There might be duplicates. We might not actually need all of these.
+
 - [ ] having the whole block in status is very verbose. trim it down
 - [ ] `cost estimate` script
   - sum bytes and number of requests. prompt hosting costs. divide
@@ -266,11 +271,7 @@ These are roughly in order of completition
   - it won't happen with users often because they should be sticky to one proxy, but unauthenticated users will definitely hit this
   - one option: we need the insert to be an upsert, but how do we merge historgrams?
 - [ ] put display name into our prod configs
-
-## V1
-
-These are not yet ordered. There might be duplicates. We might not actually need all of these.
-
+- [ ] don't use systemtime. use chrono
 - [ ] soft limit needs more thought
     - it should be the min of total_sum_soft_limit (from only non-lagged servers) and min_sum_soft_limit
     - otherwise it won't track anything and will just give errors.

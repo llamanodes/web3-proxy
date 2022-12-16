@@ -107,20 +107,16 @@ Health check 3 servers and error if the first one doesn't match the others.
 web3_proxy_cli https://eth.llamarpc.com/ https://rpc.ankr.com/eth https://cloudflare-eth.com
 ```
 
-## Database entities
-
-This command only needs to be run during development. Production should use the already generated entities.
-
-When developing new database migrations, **after you migrate**, run this command to generate updated entity files. It's best to keep the migration and entity changes in the same commit.
+## Adding new database tables
 
 ```
 cargo install sea-orm-cli
 ```
-```
-sea-orm-cli generate entity -u mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy -o entities/src --with-serde both
-```
 
-After running the above, you will need to manually fix some columns: `Vec<u8>` -> `sea_orm::prelude::Uuid` and `i8` -> `bool`. Related: <https://github.com/SeaQL/sea-query/issues/375> <https://github.com/SeaQL/sea-orm/issues/924>
+1. (optional) drop the current dev db
+2. `sea-orm-cli migrate`
+3. `sea-orm-cli generate entity -u mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy -o entities/src --with-serde both`
+4. After running the above, you will need to manually fix some columns: `Vec<u8>` -> `sea_orm::prelude::Uuid` and `i8` -> `bool`. Related: <https://github.com/SeaQL/sea-query/issues/375> <https://github.com/SeaQL/sea-orm/issues/924>
 
 ## Flame Graphs
 
