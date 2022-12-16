@@ -71,6 +71,17 @@ pub struct AppConfig {
     /// If none, the minimum * 2 is used.
     pub db_max_connections: Option<u32>,
 
+    /// Read-only replica of db_url.
+    pub db_replica_url: Option<String>,
+
+    /// minimum size of the connection pool for the database replica.
+    /// If none, db_min_connections is used.
+    pub db_replica_min_connections: Option<u32>,
+
+    /// maximum size of the connection pool for the database replica.
+    /// If none, db_max_connections is used.
+    pub db_replica_max_connections: Option<u32>,
+
     /// Default request limit for registered users.
     /// 0 = block all requests
     /// None = allow all requests

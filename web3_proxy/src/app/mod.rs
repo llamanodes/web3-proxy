@@ -93,6 +93,18 @@ pub struct AuthorizationChecks {
     pub log_revert_chance: f64,
 }
 
+/// Simple wrapper so that we can keep track of read only connections.
+/// This does no blocking of writing in the compiler!
+#[derive(Clone)]
+pub struct DatabaseReplica(pub DatabaseConnection);
+
+// TODO: I feel like we could do something smart with DeRef or AsRef or Borrow, but that wasn't working for me
+impl DatabaseReplica {
+    pub fn conn(&self) -> &DatabaseConnection {
+        &self.0
+    }
+}
+
 /// The application
 // TODO: this debug impl is way too verbose. make something smaller
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
@@ -108,6 +120,7 @@ pub struct Web3ProxyApp {
     pending_tx_sender: broadcast::Sender<TxStatus>,
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
+    pub db_replica: Option<DatabaseReplica>,
     /// prometheus metrics
     app_metrics: Arc<Web3ProxyAppMetrics>,
     open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
@@ -269,8 +282,11 @@ impl Web3ProxyApp {
         let app_metrics = Default::default();
         let open_request_handle_metrics: Arc<OpenRequestHandleMetrics> = Default::default();
 
+        let mut db_conn = None::<DatabaseConnection>;
+        let mut db_replica = None::<DatabaseReplica>;
+
         // connect to mysql and make sure the latest migrations have run
-        let db_conn = if let Some(db_url) = top_config.app.db_url.clone() {
+        if let Some(db_url) = top_config.app.db_url.clone() {
             let db_min_connections = top_config
                 .app
                 .db_min_connections
@@ -282,12 +298,39 @@ impl Web3ProxyApp {
                 .db_max_connections
                 .unwrap_or(db_min_connections * 2);
 
-            let db_conn = get_migrated_db(db_url, db_min_connections, db_max_connections).await?;
+            db_conn = Some(get_migrated_db(db_url, db_min_connections, db_max_connections).await?);
 
-            Some(db_conn)
+            db_replica = if let Some(db_replica_url) = top_config.app.db_replica_url.clone() {
+                let db_replica_min_connections = top_config
+                    .app
+                    .db_replica_min_connections
+                    .unwrap_or(db_min_connections);
+
+                let db_replica_max_connections = top_config
+                    .app
+                    .db_replica_max_connections
+                    .unwrap_or(db_max_connections);
+
+                let db_replica = get_db(
+                    db_replica_url,
+                    db_replica_min_connections,
+                    db_replica_max_connections,
+                )
+                .await?;
+
+                Some(DatabaseReplica(db_replica))
+            } else {
+                // just clone so that we don't need a bunch of checks all over our code
+                db_conn.clone().map(DatabaseReplica)
+            };
         } else {
+            if top_config.app.db_replica_url.is_some() {
+                return Err(anyhow::anyhow!(
+                    "if there is a db_replica_url, there must be a db_url"
+                ));
+            }
+
             warn!("no database. some features will be disabled");
-            None
         };
 
         let balanced_rpcs = top_config.balanced_rpcs;
@@ -570,6 +613,7 @@ impl Web3ProxyApp {
             frontend_key_rate_limiter,
             login_rate_limiter,
             db_conn,
+            db_replica,
             vredis_pool,
             app_metrics,
             open_request_handle_metrics,
@@ -675,6 +719,10 @@ impl Web3ProxyApp {
     /// TODO: i don't think we want or need this. just use app.db_conn, or maybe app.db_conn.clone() or app.db_conn.as_ref()
     pub fn db_conn(&self) -> Option<DatabaseConnection> {
         self.db_conn.clone()
+    }
+
+    pub fn db_replica(&self) -> Option<DatabaseReplica> {
+        self.db_replica.clone()
     }
 
     pub async fn redis_conn(&self) -> anyhow::Result<redis_rate_limiter::RedisConnection> {

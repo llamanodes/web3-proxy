@@ -26,7 +26,7 @@ use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
 use itertools::Itertools;
-use log::warn;
+use log::{debug, warn};
 use migration::sea_orm::prelude::Uuid;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
@@ -59,7 +59,6 @@ use ulid::Ulid;
 /// It is a better UX to just click "login with ethereum" and have the account created if it doesn't exist.
 /// We can prompt for an email and and payment after they log in.
 #[debug_handler]
-
 pub async fn user_login_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ClientIp(ip): ClientIp,
@@ -216,14 +215,14 @@ pub async fn user_login_post(
     let login_nonce = UserBearerToken::from_str(&their_msg.nonce)?;
 
     // fetch the message we gave them from our database
-    let db_conn = app.db_conn().context("Getting database connection")?;
+    let db_replica = app.db_replica().context("Getting database connection")?;
 
     // massage type for the db
     let login_nonce_uuid: Uuid = login_nonce.clone().into();
 
     let user_pending_login = pending_login::Entity::find()
         .filter(pending_login::Column::Nonce.eq(login_nonce_uuid))
-        .one(&db_conn)
+        .one(db_replica.conn())
         .await
         .context("database error while finding pending_login")?
         .context("login nonce not found")?;
@@ -247,6 +246,20 @@ pub async fn user_login_post(
             .verify_eip191(&their_sig)
             .context("verifying eip191 signature against our local message")
         {
+            let db_conn = app
+                .db_conn()
+                .context("deleting expired pending logins requires a db")?;
+
+            // delete ALL expired rows.
+            let now = Utc::now();
+            let delete_result = pending_login::Entity::delete_many()
+                .filter(pending_login::Column::ExpiresAt.lte(now))
+                .exec(&db_conn)
+                .await?;
+
+            // TODO: emit a stat? if this is high something weird might be happening
+            debug!("cleared expired pending_logins: {:?}", delete_result);
+
             return Err(anyhow::anyhow!(
                 "both the primary and eip191 verification failed: {:#?}; {:#?}",
                 err_1,
@@ -259,9 +272,11 @@ pub async fn user_login_post(
     // TODO: limit columns or load whole user?
     let u = user::Entity::find()
         .filter(user::Column::Address.eq(our_msg.address.as_ref()))
-        .one(&db_conn)
+        .one(db_replica.conn())
         .await
         .unwrap();
+
+    let db_conn = app.db_conn().context("login requires a db")?;
 
     let (u, uks, status_code) = match u {
         None => {
@@ -316,7 +331,7 @@ pub async fn user_login_post(
             // the user is already registered
             let uks = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(u.id))
-                .all(&db_conn)
+                .all(db_replica.conn())
                 .await
                 .context("failed loading user's key")?;
 
@@ -385,8 +400,26 @@ pub async fn user_logout_post(
         .exec(&db_conn)
         .await
     {
-        warn!("Failed to delete {}: {}", user_bearer.redis_key(), err);
+        debug!("Failed to delete {}: {}", user_bearer.redis_key(), err);
     }
+
+    let now = Utc::now();
+
+    // also delete any expired logins
+    let delete_result = login::Entity::delete_many()
+        .filter(login::Column::ExpiresAt.lte(now))
+        .exec(&db_conn)
+        .await;
+
+    debug!("Deleted expired logins: {:?}", delete_result);
+
+    // also delete any expired pending logins
+    let delete_result = login::Entity::delete_many()
+        .filter(login::Column::ExpiresAt.lte(now))
+        .exec(&db_conn)
+        .await;
+
+    debug!("Deleted expired pending logins: {:?}", delete_result);
 
     // TODO: what should the response be? probably json something
     Ok("goodbye".into_response())
@@ -398,7 +431,6 @@ pub async fn user_logout_post(
 ///
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
-
 pub async fn user_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
@@ -416,7 +448,6 @@ pub struct UserPost {
 
 /// `POST /user` -- modify the account connected to the bearer token in the `Authentication` header.
 #[debug_handler]
-
 pub async fn user_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
@@ -463,7 +494,6 @@ pub async fn user_post(
 /// TODO: one key per request? maybe /user/balance/:rpc_key?
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
-
 pub async fn user_balance_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
@@ -494,18 +524,19 @@ pub async fn user_balance_post(
 ///
 /// TODO: one key per request? maybe /user/keys/:rpc_key?
 #[debug_handler]
-
 pub async fn rpc_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> FrontendResult {
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_conn = app.db_conn().context("getting db to fetch user's keys")?;
+    let db_replica = app
+        .db_replica()
+        .context("getting db to fetch user's keys")?;
 
     let uks = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(user.id))
-        .all(&db_conn)
+        .all(db_replica.conn())
         .await
         .context("failed loading user's key")?;
 
@@ -523,7 +554,6 @@ pub async fn rpc_keys_get(
 
 /// `DELETE /user/keys` -- Use a bearer token to delete an existing key.
 #[debug_handler]
-
 pub async fn rpc_keys_delete(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
@@ -564,14 +594,14 @@ pub async fn rpc_keys_management(
 
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_conn = app.db_conn().context("getting db for user's keys")?;
+    let db_replica = app.db_replica().context("getting db for user's keys")?;
 
     let mut uk = if let Some(existing_key_id) = payload.key_id {
         // get the key and make sure it belongs to the user
         rpc_key::Entity::find()
             .filter(rpc_key::Column::UserId.eq(user.id))
             .filter(rpc_key::Column::Id.eq(existing_key_id))
-            .one(&db_conn)
+            .one(db_replica.conn())
             .await
             .context("failed loading user's key")?
             .context("key does not exist or is not controlled by this bearer token")?
@@ -712,6 +742,8 @@ pub async fn rpc_keys_management(
     }
 
     let uk = if uk.is_changed() {
+        let db_conn = app.db_conn().context("login requires a db")?;
+
         uk.save(&db_conn).await.context("Failed saving user key")?
     } else {
         uk
@@ -745,11 +777,13 @@ pub async fn user_revert_logs_get(
     response.insert("chain_id", json!(chain_id));
     response.insert("query_start", json!(query_start.timestamp() as u64));
 
-    let db_conn = app.db_conn().context("getting db for user's revert logs")?;
+    let db_replica = app
+        .db_replica()
+        .context("getting replica db for user's revert logs")?;
 
     let uks = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(user.id))
-        .all(&db_conn)
+        .all(db_replica.conn())
         .await
         .context("failed loading user's key")?;
 
@@ -772,7 +806,7 @@ pub async fn user_revert_logs_get(
     // query the database for number of items and pages
     let pages_result = q
         .clone()
-        .paginate(&db_conn, page_size)
+        .paginate(db_replica.conn(), page_size)
         .num_items_and_pages()
         .await?;
 
@@ -780,7 +814,10 @@ pub async fn user_revert_logs_get(
     response.insert("num_pages", pages_result.number_of_pages.into());
 
     // query the database for the revert logs
-    let revert_logs = q.paginate(&db_conn, page_size).fetch_page(page).await?;
+    let revert_logs = q
+        .paginate(db_replica.conn(), page_size)
+        .fetch_page(page)
+        .await?;
 
     response.insert("revert_logs", json!(revert_logs));
 

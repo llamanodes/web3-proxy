@@ -261,6 +261,8 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [x] cache user stats in redis and with headers
+- [x] optional read-only database connection
 - [ ] rate limiting/throttling on query_user_stats 
 - [ ] minimum allowed query_start on query_user_stats
 - [ ] query_user_stats cache hit rate
@@ -573,3 +575,4 @@ in another repo: event subscriber
   - [ ] if it is too long, (the last 4 bytes must be zero), give an error so descriptions like this stand out
 - [ ] we need to use docker-compose's proper environment variable handling. because now if someone tries to start dev containers in their prod, remove orphans stops and removes them
 - [ ] change invite codes to set the user_tier
+- [ ] some cli commands should use the replica if possible

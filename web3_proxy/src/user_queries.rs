@@ -1,3 +1,4 @@
+use crate::app::DatabaseReplica;
 use crate::frontend::errors::FrontendErrorResponse;
 use crate::{app::Web3ProxyApp, user_token::UserBearerToken};
 use anyhow::Context;
@@ -27,7 +28,8 @@ use serde_json::json;
 /// This authenticates that the bearer is allowed to view this user_id's stats
 pub async fn get_user_id_from_params(
     redis_conn: &mut RedisConnection,
-    db_conn: DatabaseConnection,
+    db_conn: &DatabaseConnection,
+    db_replica: &DatabaseReplica,
     // this is a long type. should we strip it down?
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &HashMap<String, String>,
@@ -49,24 +51,23 @@ pub async fn get_user_id_from_params(
 
                     let user_login = login::Entity::find()
                         .filter(login::Column::BearerToken.eq(user_bearer_token.uuid()))
-                        .one(&db_conn)
+                        .one(db_replica.conn())
                         .await
                         .context("database error while querying for user")?
                         .ok_or(FrontendErrorResponse::AccessDenied)?;
 
-                    // check expiration. if expired, delete ALL expired pending_logins
+                    // if expired, delete ALL expired logins
                     let now = Utc::now();
-
                     if now > user_login.expires_at {
                         // this row is expired! do not allow auth!
-                        // delete ALL expired rows.
+                        // delete ALL expired logins.
                         let delete_result = login::Entity::delete_many()
                             .filter(login::Column::ExpiresAt.lte(now))
-                            .exec(&db_conn)
+                            .exec(db_conn)
                             .await?;
 
                         // TODO: emit a stat? if this is high something weird might be happening
-                        debug!("cleared expired pending_logins: {:?}", delete_result);
+                        debug!("cleared expired logins: {:?}", delete_result);
 
                         return Err(FrontendErrorResponse::AccessDenied);
                     }
@@ -260,11 +261,18 @@ pub async fn query_user_stats<'a>(
     params: &'a HashMap<String, String>,
     stat_response_type: StatResponse,
 ) -> Result<Response, FrontendErrorResponse> {
-    let db_conn = app.db_conn().context("connecting to db")?;
-    let mut redis_conn = app.redis_conn().await.context("connecting to redis")?;
+    let db_conn = app.db_conn().context("query_user_stats needs a db")?;
+    let db_replica = app
+        .db_replica()
+        .context("query_user_stats needs a db replica")?;
+    let mut redis_conn = app
+        .redis_conn()
+        .await
+        .context("query_user_stats needs a redis")?;
 
     // get the user id first. if it is 0, we should use a cache on the app
-    let user_id = get_user_id_from_params(&mut redis_conn, db_conn.clone(), bearer, params).await?;
+    let user_id =
+        get_user_id_from_params(&mut redis_conn, &db_conn, &db_replica, bearer, params).await?;
     // get the query window seconds now so that we can pick a cache with a good TTL
     // TODO: for now though, just do one cache. its easier
     let query_window_seconds = get_query_window_seconds_from_params(params)?;
@@ -307,7 +315,7 @@ pub async fn query_user_stats<'a>(
                         .expect("max-age should always parse"),
                 );
 
-                info!("served resposne from cache");
+                // TODO: emit a stat
 
                 return Ok(response);
             }
@@ -435,7 +443,7 @@ pub async fn query_user_stats<'a>(
     // query the database for number of items and pages
     let pages_result = q
         .clone()
-        .paginate(&db_conn, page_size)
+        .paginate(db_replica.conn(), page_size)
         .num_items_and_pages()
         .await?;
 
@@ -445,7 +453,7 @@ pub async fn query_user_stats<'a>(
     // query the database (todo: combine with the pages_result query?)
     let query_response = q
         .into_json()
-        .paginate(&db_conn, page_size)
+        .paginate(db_replica.conn(), page_size)
         .fetch_page(page)
         .await?;
 

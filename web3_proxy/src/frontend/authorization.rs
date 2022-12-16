@@ -54,6 +54,7 @@ pub enum AuthorizationType {
 #[derive(Clone, Debug)]
 pub struct Authorization {
     pub checks: AuthorizationChecks,
+    // TODO: instead of the conn, have a channel?
     pub db_conn: Option<DatabaseConnection>,
     pub ip: IpAddr,
     pub origin: Option<Origin>,
@@ -437,8 +438,8 @@ impl Web3ProxyApp {
         let semaphore_permit = semaphore.acquire_owned().await?;
 
         // get the attached address from the database for the given auth_token.
-        let db_conn = self
-            .db_conn()
+        let db_replica = self
+            .db_replica()
             .context("checking if bearer token is authorized")?;
 
         let user_bearer_uuid: Uuid = user_bearer_token.into();
@@ -446,7 +447,7 @@ impl Web3ProxyApp {
         let user = user::Entity::find()
             .left_join(login::Entity)
             .filter(login::Column::BearerToken.eq(user_bearer_uuid))
-            .one(&db_conn)
+            .one(db_replica.conn())
             .await
             .context("fetching user from db by bearer token")?
             .context("unknown bearer token")?;
@@ -570,9 +571,9 @@ impl Web3ProxyApp {
         let authorization_checks: Result<_, Arc<anyhow::Error>> = self
             .rpc_secret_key_cache
             .try_get_with(rpc_secret_key.into(), async move {
-                // // trace!(?rpc_secret_key, "user cache miss");
+                // trace!(?rpc_secret_key, "user cache miss");
 
-                let db_conn = self.db_conn().context("Getting database connection")?;
+                let db_replica = self.db_replica().context("Getting database connection")?;
 
                 let rpc_secret_key: Uuid = rpc_secret_key.into();
 
@@ -582,20 +583,20 @@ impl Web3ProxyApp {
                 match rpc_key::Entity::find()
                     .filter(rpc_key::Column::SecretKey.eq(rpc_secret_key))
                     .filter(rpc_key::Column::Active.eq(true))
-                    .one(&db_conn)
+                    .one(db_replica.conn())
                     .await?
                 {
                     Some(rpc_key_model) => {
                         // TODO: move these splits into helper functions
                         // TODO: can we have sea orm handle this for us?
                         let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
-                            .one(&db_conn)
+                            .one(db_replica.conn())
                             .await?
                             .expect("related user");
 
                         let user_tier_model =
                             user_tier::Entity::find_by_id(user_model.user_tier_id)
-                                .one(&db_conn)
+                                .one(db_replica.conn())
                                 .await?
                                 .expect("related user tier");
 
