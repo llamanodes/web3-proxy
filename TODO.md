@@ -261,6 +261,9 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] rate limiting/throttling on query_user_stats 
+- [ ] minimum allowed query_start on query_user_stats
+- [ ] query_user_stats cache hit rate
 - [ ] having the whole block in status is very verbose. trim it down
 - [ ] `cost estimate` script
   - sum bytes and number of requests. prompt hosting costs. divide

@@ -736,7 +736,7 @@ pub async fn user_revert_logs_get(
     let page = get_page_from_params(&params)?;
 
     // TODO: page size from config
-    let page_size = 200;
+    let page_size = 1_000;
 
     let mut response = HashMap::new();
 
@@ -756,20 +756,30 @@ pub async fn user_revert_logs_get(
     // TODO: only select the ids
     let uks: Vec<_> = uks.into_iter().map(|x| x.id).collect();
 
-    // get paginated logs
-    let q = revert_log::Entity::find()
+    // get revert logs
+    let mut q = revert_log::Entity::find()
         .filter(revert_log::Column::Timestamp.gte(query_start))
         .filter(revert_log::Column::RpcKeyId.is_in(uks))
         .order_by_asc(revert_log::Column::Timestamp);
 
-    let q = if chain_id == 0 {
+    if chain_id == 0 {
         // don't do anything
-        q
     } else {
         // filter on chain id
-        q.filter(revert_log::Column::ChainId.eq(chain_id))
-    };
+        q = q.filter(revert_log::Column::ChainId.eq(chain_id))
+    }
 
+    // query the database for number of items and pages
+    let pages_result = q
+        .clone()
+        .paginate(&db_conn, page_size)
+        .num_items_and_pages()
+        .await?;
+
+    response.insert("num_items", pages_result.number_of_items.into());
+    response.insert("num_pages", pages_result.number_of_pages.into());
+
+    // query the database for the revert logs
     let revert_logs = q.paginate(&db_conn, page_size).fetch_page(page).await?;
 
     response.insert("revert_logs", json!(revert_logs));
@@ -786,7 +796,7 @@ pub async fn user_stats_aggregated_get(
 ) -> FrontendResult {
     let response = query_user_stats(&app, bearer, &params, StatResponse::Aggregated).await?;
 
-    Ok(Json(response).into_response())
+    Ok(response)
 }
 
 /// `GET /user/stats/detailed` -- Use a bearer token to get the user's key stats such as bandwidth used and methods requested.
@@ -806,5 +816,5 @@ pub async fn user_stats_detailed_get(
 ) -> FrontendResult {
     let response = query_user_stats(&app, bearer, &params, StatResponse::Detailed).await?;
 
-    Ok(Json(response).into_response())
+    Ok(response)
 }
