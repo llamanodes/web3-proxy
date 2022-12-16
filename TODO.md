@@ -261,6 +261,7 @@ These are roughly in order of completition
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
+- [ ] if db is down, keep logins cached longer. at least only new logins will have trouble then
 - [x] cache user stats in redis and with headers
 - [x] optional read-only database connection
 - [ ] rate limiting/throttling on query_user_stats 
