@@ -2,7 +2,7 @@
 mod ws;
 
 use crate::app_stats::{ProxyResponseStat, StatEmitter, Web3ProxyStat};
-use crate::block_number::block_needed;
+use crate::block_number::{block_needed, BlockNeeded};
 use crate::config::{AppConfig, TopConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::jsonrpc::JsonRpcForwardedResponse;
@@ -37,6 +37,7 @@ use redis_rate_limiter::{DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimit
 use serde::Serialize;
 use serde_json::json;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::num::NonZeroU64;
 use std::str::FromStr;
@@ -59,9 +60,68 @@ pub static APP_USER_AGENT: &str = concat!(
 /// TODO: allow customizing the request period?
 pub static REQUEST_PERIOD: u64 = 60;
 
-/// block hash, method, params
-// TODO: better name
-type ResponseCacheKey = (H256, String, Option<String>);
+#[derive(From)]
+struct ResponseCacheKey {
+    // if none, this is cached until evicted
+    block: Option<SavedBlock>,
+    method: String,
+    // TODO: better type for this
+    params: Option<serde_json::Value>,
+    cache_errors: bool,
+}
+
+impl ResponseCacheKey {
+    fn weight(&self) -> usize {
+        let mut w = self.method.len();
+
+        if let Some(p) = self.params.as_ref() {
+            w += p.to_string().len();
+        }
+
+        w
+    }
+}
+
+impl PartialEq for ResponseCacheKey {
+    fn eq(&self, other: &Self) -> bool {
+        if self.cache_errors != other.cache_errors {
+            return false;
+        }
+
+        match (self.block.as_ref(), other.block.as_ref()) {
+            (None, None) => {}
+            (None, Some(_)) => {
+                return false;
+            }
+            (Some(_), None) => {
+                return false;
+            }
+            (Some(s), Some(o)) => {
+                if s != o {
+                    return false;
+                }
+            }
+        }
+
+        if self.method != other.method {
+            return false;
+        }
+
+        self.params == other.params
+    }
+}
+
+impl Eq for ResponseCacheKey {}
+
+impl Hash for ResponseCacheKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.block.as_ref().map(|x| x.hash()).hash(state);
+        self.method.hash(state);
+        self.params.as_ref().map(|x| x.to_string()).hash(state);
+        self.cache_errors.hash(state)
+    }
+}
+
 type ResponseCache =
     Cache<ResponseCacheKey, JsonRpcForwardedResponse, hashbrown::hash_map::DefaultHashBuilder>;
 
@@ -560,19 +620,13 @@ impl Web3ProxyApp {
         // TODO: don't allow any response to be bigger than X% of the cache
         let response_cache = Cache::builder()
             .max_capacity(1024 * 1024 * 1024)
-            .weigher(|k: &(H256, String, Option<String>), v| {
-                // TODO: make this weigher past. serializing json is not fast
-                let mut size = (k.1).len();
-
-                if let Some(params) = &k.2 {
-                    size += params.len()
-                }
-
+            .weigher(|k: &ResponseCacheKey, v| {
+                // TODO: is this good?
                 if let Ok(v) = serde_json::to_string(v) {
-                    size += v.len();
+                    let weight = k.weight() + v.len();
 
                     // the or in unwrap_or is probably never called
-                    size.try_into().unwrap_or(u32::MAX)
+                    weight.try_into().unwrap_or(u32::MAX)
                 } else {
                     // this seems impossible
                     u32::MAX
@@ -974,7 +1028,8 @@ impl Web3ProxyApp {
 
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
-                let request_block = if let Some(request_block_needed) = block_needed(
+                // TODO: this cache key can be rather large. is that okay?
+                let cache_key: Option<ResponseCacheKey> = match block_needed(
                     authorization,
                     method,
                     request.params.as_mut(),
@@ -983,69 +1038,96 @@ impl Web3ProxyApp {
                 )
                 .await?
                 {
-                    // TODO: maybe this should be on the app and not on balanced_rpcs
-                    let (request_block_hash, archive_needed) = self
-                        .balanced_rpcs
-                        .block_hash(authorization, &request_block_needed)
-                        .await?;
+                    BlockNeeded::CacheSuccessForever => Some(ResponseCacheKey {
+                        block: None,
+                        method: method.to_string(),
+                        params: request.params.clone(),
+                        cache_errors: false,
+                    }),
+                    BlockNeeded::CacheNever => None,
+                    BlockNeeded::Cache {
+                        block_num,
+                        cache_errors,
+                    } => {
+                        let (request_block_hash, archive_needed) = self
+                            .balanced_rpcs
+                            .block_hash(authorization, &block_num)
+                            .await?;
 
-                    if archive_needed {
-                        request_metadata
-                            .archive_request
-                            .store(true, atomic::Ordering::Relaxed);
+                        if archive_needed {
+                            request_metadata
+                                .archive_request
+                                .store(true, atomic::Ordering::Relaxed);
+                        }
+
+                        let request_block = self
+                            .balanced_rpcs
+                            .block(authorization, &request_block_hash, None)
+                            .await?;
+
+                        Some(ResponseCacheKey {
+                            block: Some(SavedBlock::new(request_block)),
+                            method: method.to_string(),
+                            // TODO: hash here?
+                            params: request.params.clone(),
+                            cache_errors,
+                        })
                     }
-
-                    let request_block = self
-                        .balanced_rpcs
-                        .block(authorization, &request_block_hash, None)
-                        .await?;
-
-                    SavedBlock::new(request_block)
-                } else {
-                    head_block
                 };
-
-                // TODO: struct for this?
-                // TODO: this can be rather large. is that okay?
-                let cache_key = (
-                    request_block.hash(),
-                    request.method.clone(),
-                    request.params.clone().map(|x| x.to_string()),
-                );
 
                 let mut response = {
                     let request_metadata = request_metadata.clone();
 
                     let authorization = authorization.clone();
 
-                    self.response_cache
-                        .try_get_with(cache_key, async move {
-                            // TODO: retry some failures automatically!
-                            // TODO: try private_rpcs if all the balanced_rpcs fail!
-                            // TODO: put the hash here instead?
-                            let mut response = self
-                                .balanced_rpcs
-                                .try_send_best_upstream_server(
-                                    &authorization,
-                                    request,
-                                    Some(&request_metadata),
-                                    Some(&request_block.number()),
-                                )
-                                .await?;
+                    if let Some(cache_key) = cache_key {
+                        let request_block_number = cache_key.block.as_ref().map(|x| x.number());
 
-                            // discard their id by replacing it with an empty
-                            response.id = Default::default();
+                        self.response_cache
+                            .try_get_with(cache_key, async move {
+                                // TODO: retry some failures automatically!
+                                // TODO: try private_rpcs if all the balanced_rpcs fail!
+                                // TODO: put the hash here instead?
+                                let mut response = self
+                                    .balanced_rpcs
+                                    .try_send_best_upstream_server(
+                                        &authorization,
+                                        request,
+                                        Some(&request_metadata),
+                                        request_block_number.as_ref(),
+                                    )
+                                    .await?;
 
-                            // TODO: only cache the inner response (or error)
-                            Ok::<_, anyhow::Error>(response)
-                        })
-                        .await
-                        // TODO: what is the best way to handle an Arc here?
-                        .map_err(|err| {
-                            // TODO: emit a stat for an error
-                            anyhow::anyhow!(err)
-                        })
-                        .context("caching response")?
+                                // discard their id by replacing it with an empty
+                                response.id = Default::default();
+
+                                // TODO: only cache the inner response (or error)
+                                Ok::<_, anyhow::Error>(response)
+                            })
+                            .await
+                            // TODO: what is the best way to handle an Arc here?
+                            .map_err(|err| {
+                                // TODO: emit a stat for an error
+                                anyhow::anyhow!(err)
+                            })
+                            .context("caching response")?
+                    } else {
+                        let mut response = self
+                            .balanced_rpcs
+                            .try_send_best_upstream_server(
+                                &authorization,
+                                request,
+                                Some(&request_metadata),
+                                None,
+                            )
+                            .await?;
+
+                        // discard their id by replacing it with an empty
+                        response.id = Default::default();
+
+                        // TODO: only cache the inner response (or error)
+                        response
+                    }
                 };
 
                 // since this data came likely out of a cache, the id is not going to match

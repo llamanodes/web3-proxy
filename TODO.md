@@ -577,3 +577,4 @@ in another repo: event subscriber
 - [ ] we need to use docker-compose's proper environment variable handling. because now if someone tries to start dev containers in their prod, remove orphans stops and removes them
 - [ ] change invite codes to set the user_tier
 - [ ] some cli commands should use the replica if possible
+- [ ] some third party rpcs have limits on the size of eth_getLogs. include those limits in server config

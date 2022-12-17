@@ -5,6 +5,7 @@ use ethers::{
     types::H256,
 };
 use log::warn;
+use serde_json::json;
 use std::sync::Arc;
 
 use crate::{frontend::authorization::Authorization, rpcs::connections::Web3Connections};
@@ -97,7 +98,12 @@ pub async fn clean_block_number(
     }
 }
 
-// TODO: change this to also return the hash needed?
+/// TODO: change this to also return the hash needed?
+pub enum BlockNeeded {
+    CacheSuccessForever,
+    CacheNever,
+    Cache { block_num: U64, cache_errors: bool },
+}
 
 pub async fn block_needed(
     authorization: &Arc<Authorization>,
@@ -105,12 +111,17 @@ pub async fn block_needed(
     params: Option<&mut serde_json::Value>,
     head_block_num: U64,
     rpcs: &Web3Connections,
-) -> anyhow::Result<Option<U64>> {
+) -> anyhow::Result<BlockNeeded> {
     // if no params, no block is needed
     let params = if let Some(params) = params {
         params
     } else {
-        return Ok(None);
+        // TODO: check all the methods with no params, some might not be cacheable
+        // caching for one block should always be okay
+        return Ok(BlockNeeded::Cache {
+            block_num: head_block_num,
+            cache_errors: true,
+        });
     };
 
     // get the index for the BlockNumber or return None to say no block is needed.
@@ -122,20 +133,26 @@ pub async fn block_needed(
         "eth_getBalance" => 1,
         "eth_getBlockByHash" => {
             // TODO: double check that any node can serve this
-            return Ok(None);
+            // TODO: can a block change? like what if it gets orphaned?
+            return Ok(BlockNeeded::CacheSuccessForever);
         }
         "eth_getBlockByNumber" => {
             // TODO: double check that any node can serve this
-            return Ok(None);
+            // TODO: CacheSuccessForever if the block is old enough
+            return Ok(BlockNeeded::Cache {
+                block_num: head_block_num,
+                cache_errors: true,
+            });
         }
         "eth_getBlockReceipts" => 0,
         "eth_getBlockTransactionCountByHash" => {
             // TODO: double check that any node can serve this
-            return Ok(None);
+            return Ok(BlockNeeded::CacheSuccessForever);
         }
         "eth_getBlockTransactionCountByNumber" => 0,
         "eth_getCode" => 1,
         "eth_getLogs" => {
+            // TODO: think about this more
             // TODO: jsonrpc has a specific code for this
             let obj = params[0]
                 .as_object_mut()
@@ -146,12 +163,14 @@ pub async fn block_needed(
 
                 let block_num = block_num_to_u64(block_num, head_block_num);
 
-                *x =
-                    serde_json::to_value(block_num).expect("U64 can always be a serde_json::Value");
+                *x = json!(block_num);
 
                 // TODO: maybe don't return. instead check toBlock too?
                 // TODO: if there is a very wide fromBlock and toBlock, we need to check that our rpcs have both!
-                return Ok(Some(block_num));
+                return Ok(BlockNeeded::Cache {
+                    block_num,
+                    cache_errors: false,
+                });
             }
 
             if let Some(x) = obj.get_mut("toBlock") {
@@ -159,60 +178,80 @@ pub async fn block_needed(
 
                 let block_num = block_num_to_u64(block_num, head_block_num);
 
-                *x = serde_json::to_value(block_num)
-                    .expect("block_num should always turn into a value");
+                *x = json!(block_num);
 
-                return Ok(Some(block_num));
+                return Ok(BlockNeeded::Cache {
+                    block_num,
+                    cache_errors: false,
+                });
             }
 
             if obj.contains_key("blockHash") {
                 1
             } else {
-                return Ok(None);
+                return Ok(BlockNeeded::Cache {
+                    block_num: head_block_num,
+                    cache_errors: true,
+                });
             }
         }
         "eth_getStorageAt" => 2,
         "eth_getTransactionByHash" => {
             // TODO: not sure how best to look these up
             // try full nodes first. retry will use archive
-            return Ok(None);
+            return Ok(BlockNeeded::Cache {
+                block_num: head_block_num,
+                cache_errors: true,
+            });
         }
         "eth_getTransactionByBlockHashAndIndex" => {
             // TODO: check a Cache of recent hashes
             // try full nodes first. retry will use archive
-            return Ok(None);
+            return Ok(BlockNeeded::CacheSuccessForever);
         }
         "eth_getTransactionByBlockNumberAndIndex" => 0,
         "eth_getTransactionCount" => 1,
         "eth_getTransactionReceipt" => {
             // TODO: not sure how best to look these up
             // try full nodes first. retry will use archive
-            return Ok(None);
+            return Ok(BlockNeeded::Cache {
+                block_num: head_block_num,
+                cache_errors: true,
+            });
         }
         "eth_getUncleByBlockHashAndIndex" => {
             // TODO: check a Cache of recent hashes
             // try full nodes first. retry will use archive
-            return Ok(None);
+            return Ok(BlockNeeded::CacheSuccessForever);
         }
         "eth_getUncleByBlockNumberAndIndex" => 0,
         "eth_getUncleCountByBlockHash" => {
             // TODO: check a Cache of recent hashes
             // try full nodes first. retry will use archive
-            return Ok(None);
+            return Ok(BlockNeeded::CacheSuccessForever);
         }
         "eth_getUncleCountByBlockNumber" => 0,
         _ => {
             // some other command that doesn't take block numbers as an argument
-            return Ok(None);
+            // since we are caching with the head block, it should be safe to cache_errors
+            return Ok(BlockNeeded::Cache {
+                block_num: head_block_num,
+                cache_errors: true,
+            });
         }
     };
 
     match clean_block_number(authorization, params, block_param_id, head_block_num, rpcs).await {
-        Ok(block) => Ok(Some(block)),
+        Ok(block_num) => Ok(BlockNeeded::Cache {
+            block_num,
+            cache_errors: true,
+        }),
         Err(err) => {
-            // TODO: seems unlikely that we will get here
             warn!("could not get block from params. err={:?}", err);
-            Ok(None)
+            Ok(BlockNeeded::Cache {
+                block_num: head_block_num,
+                cache_errors: true,
+            })
         }
     }
 }

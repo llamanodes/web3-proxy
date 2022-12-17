@@ -32,6 +32,17 @@ pub struct SavedBlock {
     pub lag: u64,
 }
 
+impl PartialEq for SavedBlock {
+    fn eq(&self, other: &Self) -> bool {
+        match (self.block.hash, other.block.hash) {
+            (None, None) => true,
+            (Some(_), None) => false,
+            (None, Some(_)) => false,
+            (Some(s), Some(o)) => s == o,
+        }
+    }
+}
+
 impl SavedBlock {
     pub fn new(block: ArcBlock) -> Self {
         let mut x = Self { block, lag: 0 };
@@ -67,12 +78,12 @@ impl SavedBlock {
     }
 
     pub fn hash(&self) -> H256 {
-        self.block.hash.unwrap()
+        self.block.hash.expect("saved blocks must have a hash")
     }
 
     // TODO: return as U64 or u64?
     pub fn number(&self) -> U64 {
-        self.block.number.unwrap()
+        self.block.number.expect("saved blocks must have a number")
     }
 
     /// When the block was received, this node was still syncing

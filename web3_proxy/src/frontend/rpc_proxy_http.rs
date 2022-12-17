@@ -31,7 +31,7 @@ pub async fn proxy_web3_rpc(
     // TODO: spawn earlier? i think we want ip_is_authorized in this future
     let f = tokio::spawn(async move { app.proxy_web3_rpc(authorization, payload).await });
 
-    let response = f.await.expect("joinhandle should always work")?;
+    let response = f.await??;
 
     Ok(Json(&response).into_response())
 }

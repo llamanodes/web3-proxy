@@ -18,7 +18,7 @@ use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
-use log::{error, info, trace, warn, Level};
+use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use moka::future::{Cache, ConcurrentCacheExt};
 use serde::ser::{SerializeStruct, Serializer};
@@ -663,7 +663,9 @@ impl Web3Connections {
                                 .last()
                                 .expect("there must have been a provider if we got an error");
 
-                            warn!(
+                            // TODO: emit a stat. if a server is getting skipped a lot, something is not right
+
+                            debug!(
                                 "Backend server error on {}! Retrying on another. err={:?}",
                                 rpc, err
                             );
