@@ -11,7 +11,7 @@ path = "src/mod.rs"
 
 [dependencies]
 sea-orm = "0.10.5"
-serde = "1.0.150"
+serde = "1.0.151"
 uuid = "1.2.2"
 ethers = "1.0.2"
 ulid = "1.0.0"
