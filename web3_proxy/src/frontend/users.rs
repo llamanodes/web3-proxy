@@ -304,14 +304,12 @@ pub async fn user_login_post(
             let u = u.insert(&txn).await?;
 
             // create the user's first api key
-            // TODO: rename to UserApiKey? RpcApiKey?
             let rpc_secret_key = RpcSecretKey::new();
 
-            // TODO: variable requests per minute depending on the invite code
             let uk = rpc_key::ActiveModel {
                 user_id: sea_orm::Set(u.id),
                 secret_key: sea_orm::Set(rpc_secret_key.into()),
-                description: sea_orm::Set(Some("first".to_string())),
+                description: sea_orm::Set(None),
                 ..Default::default()
             };
 
