@@ -1168,6 +1168,8 @@ impl Web3ProxyApp {
                 .context("stat_sender sending response stat")?;
         }
 
+        todo!("attach a header here");
+
         Ok(response)
     }
 }

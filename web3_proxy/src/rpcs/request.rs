@@ -195,6 +195,10 @@ impl OpenRequestHandle {
         }
     }
 
+    pub fn connection_name(&self) -> String {
+        self.conn.name.clone()
+    }
+
     #[inline]
     pub fn clone_connection(&self) -> Arc<Web3Connection> {
         self.conn.clone()

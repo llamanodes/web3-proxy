@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use crate::{frontend::authorization::Authorization, rpcs::connections::Web3Connections};
 
+#[allow(non_snake_case)]
 pub fn block_num_to_U64(block_num: BlockNumber, latest_block: U64) -> U64 {
     match block_num {
         BlockNumber::Earliest => {

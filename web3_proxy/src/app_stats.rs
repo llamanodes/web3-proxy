@@ -275,7 +275,7 @@ impl ProxyResponseStat {
         response_bytes: usize,
     ) -> Self {
         let archive_request = metadata.archive_request.load(Ordering::Acquire);
-        let backend_requests = metadata.backend_requests.load(Ordering::Acquire);
+        let backend_requests = metadata.backend_requests.lock().len() as u64;
         // let period_seconds = metadata.period_seconds;
         // let period_timestamp =
         //     (metadata.start_datetime.timestamp() as u64) / period_seconds * period_seconds;

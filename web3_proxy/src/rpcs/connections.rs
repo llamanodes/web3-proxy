@@ -607,9 +607,11 @@ impl Web3Connections {
                     skip_rpcs.push(active_request_handle.clone_connection());
 
                     if let Some(request_metadata) = request_metadata {
+                        // TODO: request_metadata.backend_requests instead of skip_rpcs
                         request_metadata
                             .backend_requests
-                            .fetch_add(1, Ordering::Acquire);
+                            .lock()
+                            .push(active_request_handle.clone_connection());
                     }
 
                     // TODO: get the log percent from the user data
@@ -627,7 +629,7 @@ impl Web3Connections {
                     ) {
                         Ok(response) => {
                             if let Some(error) = &response.error {
-                                // // trace!(?response, "rpc error");
+                                // trace!(?response, "rpc error");
 
                                 if let Some(request_metadata) = request_metadata {
                                     request_metadata
@@ -654,7 +656,7 @@ impl Web3Connections {
                                     }
                                 }
                             } else {
-                                // // trace!(?response, "rpc success");
+                                // trace!(?response, "rpc success");
                             }
 
                             return Ok(response);
@@ -710,7 +712,7 @@ impl Web3Connections {
                 .store(true, Ordering::Release);
         }
 
-        warn!("No synced servers! {:?}", self.synced_connections.load());
+        warn!("No synced servers! {:?}", self);
 
         // TODO: what error code? 502?
         Err(anyhow::anyhow!("all {} tries exhausted", skip_rpcs.len()))
@@ -738,7 +740,8 @@ impl Web3Connections {
                     if let Some(request_metadata) = request_metadata {
                         request_metadata
                             .backend_requests
-                            .fetch_add(active_request_handles.len() as u64, Ordering::Release);
+                            .lock()
+                            .extend(active_request_handles.iter().map(|x| x.clone_connection()));
                     }
 
                     let quorum_response = self

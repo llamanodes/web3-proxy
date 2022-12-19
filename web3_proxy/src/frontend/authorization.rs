@@ -2,6 +2,7 @@
 
 use super::errors::FrontendErrorResponse;
 use crate::app::{AuthorizationChecks, Web3ProxyApp, APP_USER_AGENT};
+use crate::rpcs::connection::Web3Connection;
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::authorization::Bearer;
@@ -14,6 +15,7 @@ use http::HeaderValue;
 use ipnet::IpNet;
 use log::error;
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use parking_lot::Mutex;
 use redis_rate_limiter::RedisRateLimitResult;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -73,8 +75,8 @@ pub struct RequestMetadata {
     // TODO: do we need atomics? seems like we should be able to pass a &mut around
     // TODO: "archive" isn't really a boolean.
     pub archive_request: AtomicBool,
-    /// if this is 0, there was a cache_hit
-    pub backend_requests: AtomicU64,
+    /// if this is empty, there was a cache_hit
+    pub backend_requests: Mutex<Vec<Arc<Web3Connection>>>,
     pub no_servers: AtomicU64,
     pub error_response: AtomicBool,
     pub response_bytes: AtomicU64,
@@ -92,7 +94,7 @@ impl RequestMetadata {
             period_seconds,
             request_bytes,
             archive_request: false.into(),
-            backend_requests: 0.into(),
+            backend_requests: Default::default(),
             no_servers: 0.into(),
             error_response: false.into(),
             response_bytes: 0.into(),
