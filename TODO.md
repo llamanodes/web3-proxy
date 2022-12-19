@@ -256,16 +256,52 @@ These are roughly in order of completition
   - [x] be sure to save the timestamp in a way that our request routing logic can make use of it
 - [x] node selection still needs improvements. we still send to syncing nodes if they are close
     - try consensus heads first! only if that is empty should we try others. and we should try them sorted by block height and then randomly chosen from there
+- [x] logging of "bad response!" is way too verbose
+- [x] i think our "best" server picking is incorrect somehow.
+    - we upgraded erigon to a version with a broken websocket
+    - that made it clear we still route to the lagged server sometimes. this is bad, but retries keep it from giving users bad data.
+- [x] more trace logging
+- [x] on ETH, we no longer need total difficulty
+- [x] cli for creating and editing a user's first api key
+- [x] benchmarks of the different Cache implementations (futures vs dash)
+  - futures is better
+- [x] if archive servers are added to the rotation while they are still syncing, they might get requests too soon. keep archive servers out of the configs until they are done syncing. full nodes should be fine to add to the configs even while syncing, though its a wasted connection
+- [x] subscribing to transactions should be configurable per server. listening to paid servers can get expensive
+- [x] status page leaks our urls which contain secrets. change that to use names
+- [x] for easier errors in the axum code, i think we need to have our own type that wraps anyhow::Result+Error
+- [x] hit counts seem wrong. how are we hitting the backend so much more than the frontend? retries on disconnect don't seem to fit that
+  web3_proxy_hit_count{path = "app/proxy_web3_rpc_request"} 857270
+  web3_proxy_hit_count{path = "backend_rpc/request"}       1396127
+  - this was because backend server ordering was including servers that were still syncing from too long ago
+- [x] keep it working without redis and a database
+- [x] manually tune database and redis connection pool size
+
 
 ## V1
 
 These are not yet ordered. There might be duplicates. We might not actually need all of these.
 
-- [ ] if db is down, keep logins cached longer. at least only new logins will have trouble then
 - [x] cache user stats in redis and with headers
 - [x] optional read-only database connection
+- [x] put display name into our prod configs
+- [x] sometimes when fetching a txid through the proxy it fails, but fetching from the backends works fine
+  - check flashprofits logs for examples
+  - we were caching too aggressively
+- [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
+  - this must be opt-in or spawned since it will slow things down and will make their calls less private
+  - [ ] automatic pruning of old revert logs once too many are collected
+  - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
+- [-] add configurable size limits to all the Caches
+  - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
+  - https://github.com/moka-rs/moka/issues/201
+- [ ] cli for adding rpc keys to an existing user
+- [ ] automatically tune database and redis connection pool size
+- [ ] if db is down, keep logins cached longer. at least only new logins will have trouble then
 - [ ] rate limiting/throttling on query_user_stats 
 - [ ] minimum allowed query_start on query_user_stats
+- [ ] some chains still use total_difficulty. have total_difficulty be used only if the chain needs it
+  - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
+  - if total difficulty is set and non-zero, use it for consensus instead of just the number
 - [ ] query_user_stats cache hit rate
 - [ ] having the whole block in status is very verbose. trim it down
 - [ ] `cost estimate` script
@@ -276,7 +312,6 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] two servers running will confuse rpc_accounting!
   - it won't happen with users often because they should be sticky to one proxy, but unauthenticated users will definitely hit this
   - one option: we need the insert to be an upsert, but how do we merge historgrams?
-- [ ] put display name into our prod configs
 - [ ] don't use systemtime. use chrono
 - [ ] soft limit needs more thought
     - it should be the min of total_sum_soft_limit (from only non-lagged servers) and min_sum_soft_limit
@@ -298,10 +333,6 @@ These are not yet ordered. There might be duplicates. We might not actually need
     - maybe sum available_requests grouped by archive/non-archive. only limit to non-archive if they have enough?
 - [ ] some places we call it "accounting" others a "stat". be consistent
 - [ ] cli commands to search users by key
-- [-] more trace logging
-- [-] add configurable size limits to all the Caches
-  - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
-  - https://github.com/moka-rs/moka/issues/201
 - [ ] cli flag to set prometheus port
 - [ ] flamegraphs show 25% of the time to be in moka-housekeeper. tune that
 - [ ] remove the "metered" crate now that we save aggregate queries?
@@ -311,11 +342,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - create the app without applying any config to it
   - have a blocking future watching the config file and calling app.apply_config() on first load and on change
   - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
-- [ ] logging of "bad response!" is way too verbose
 - [ ] config parsing is strict right now. this makes it hard to deploy on git push since configs need to change along with it
-- [ ] i think our "best" server picking is incorrect somehow.
-    - we upgraded erigon to a version with a broken websocket
-    - that made it clear we still route to the lagged server sometimes. this is bad, but retries keep it from giving users bad data.
 - [ ] when displaying the user's data, they just see an opaque id for their tier. We should join that data
 - [ ] add indexes to speed up stat queries
 - [ ] the public rpc is rate limited by ip and the authenticated rpc is rate limit by key
@@ -331,15 +358,11 @@ These are not yet ordered. There might be duplicates. We might not actually need
     - [ ] There, they click "confirm" (or JavaScript does it for them automatically) to POST to this new endpoint
 - [ ] test in the migration repo that sets up a sqlite database that runs up and down 
 - [ ] unbounded queues are risky. add limits
-- [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
-  - this must be opt-in or spawned since it will slow things down and will make their calls less private
-  - [ ] automatic pruning of old revert logs once too many are collected
-  - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
 - [ ] after running for a while, https://eth-ski.llamanodes.com/status is only at 157 blocks and hashes. i thought they would be near 10k after running for a while
     - adding uptime to the status should help
     - i think this is already in our todo list
 - [ ] improve private transactions. keep re-broadcasting until they are confirmed
-- [ ] with a test that creates a user and modifies their key
+- [ ] write a test that uses the cli to create a user and modifies their key
 - [ ] Uuid/Ulid instead of big_unsigned for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
   - https://www.kostolansky.sk/posts/how-to-migrate-to-uuid/
@@ -356,7 +379,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] user create script should allow multiple keys per user
 - [ ] somehow the proxy thought latest was hours behind. need internal health check that forces reconnect if this happens
 - [ ] display concurrent requests per api key (only with authentication!)
-- [ ] change "remember me" to last until 4 weeks of no use, rather than 4 weeks since login
+- [ ] change "remember me" to last until 4 weeks of no use, rather than 4 weeks since login? that will be a lot more database writes
 - [ ] BUG! if sending transactions gets "INTERNAL_ERROR: existing tx with same hash", fake a success message
   - ERROR http_request:request:try_send_all_upstream_servers: web3_proxy::rpcs::request: bad response! err=JsonRpcClientError(JsonRpcError(JsonRpcError { code: -32000, message: "INTERNAL_ERROR: existing tx with same hash", data: None })) method=eth_sendRawTransaction rpc=local_erigon_alpha_archive id=01GF4HV03Y4ZNKQV8DW5NDQ5CG method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 }) self=Web3Connections { conns: {"local_erigon_alpha_archive_ws": Web3Connection { name: "local_erigon_alpha_archive_ws", blocks: "all", .. }, "local_geth_ws": Web3Connection { name: "local_geth_ws", blocks: 64, .. }, "local_erigon_alpha_archive": Web3Connection { name: "local_erigon_alpha_archive", blocks: "all", .. }}, .. } authorized_request=Some(User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })) request=JsonRpcRequest { id: RawValue(39), method: "eth_sendRawTransaction", .. } request_metadata=Some(RequestMetadata { datetime: 2022-10-11T22:14:57.406829095Z, period_seconds: 60, request_bytes: 633, backend_requests: 0, no_servers: 0, error_response: false, response_bytes: 0, response_millis: 0 }) block_needed=None
 - [ ] BUG? WARN http_request:request: web3_proxy::block_number: could not get block from params err=unexpected params length id=01GF4HTRKM4JV6NX52XSF9AYMW method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })
@@ -386,11 +409,6 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] instead of Option<...> in our frontend function signatures, use result and then the try operator so that we get our errors wrapped in json
 - [ ] revert logs should have a maximum age and a maximum count to keep the database from being huge
 - [ ] user login should also return a jwt (jsonwebtoken rust crate should make it easy)
-- [-] if we request an old block, more servers can handle it than we currently use.
-    - [ ] instead of the one list of just heads, store our intermediate mappings (rpcs_by_hash, rpcs_by_num, blocks_by_hash) in SyncedConnections. this shouldn't be too much slower than what we have now
-    - [ ] remove the if/else where we optionally route to archive and refactor to require a BlockNumber enum
-    - [ ] then check syncedconnections for the blockNum. if num given, use the cannonical chain to figure out the winning hash
-    - [ ] this means if someone requests a recent but not ancient block, they can use all our servers, even the slower ones. need smart sorting for priority here
 - [ ] script that looks at config and estimates max memory used by caches
 - [ ] favicon
   - eth_1       | 2022-09-07T17:10:48.431536Z  WARN web3_proxy::jsonrpc: forwarding error err=nothing to see here
@@ -407,24 +425,19 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] cache more things locally or in redis
 - [ ] stats when forks are resolved (and what chain they were on?)
 - [ ] emit stats for user's successes, retries, failures, with the types of requests, chain, rpc
-- [ ] cli for creating and editing api keys
 - [ ] Only subscribe to transactions when someone is listening and if the server has opted in to it
 - [ ] When sending eth_sendRawTransaction, retry errors
 - [ ] If we need an archive server and no servers in sync, exit immediately with an error instead of waiting 60 seconds
-- [ ] 60 second timeout is too short. Maybe do that for free tier and larger timeout for paid. Problem is that some queries can take over 1000 seconds
+- [ ] 120 second timeout is too short. Maybe do that for free tier and larger timeout for paid. Problem is that some queries can take over 1000 seconds
 - [ ] when handling errors from axum parsing the Json...Enum, the errors don't get wrapped in json. i think we need a axum::Layer
 - [ ] don't "unwrap" anywhere. give proper errors
 - [ ] handle log subscriptions
   - probably as a paid feature
-- [ ] on ETH, we no longer use total difficulty, but other chains might
-  - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
-  - if total difficulty is set and non-zero, use it for consensus instead of just the number
 - [ ] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
 - [ ] add a "failover" tier that is only used if balanced_rpcs has "no servers synced"
   - use this tier (and private tier) to check timestamp on latest block. if we are behind that by more than a few seconds, something is wrong
-- [ ] sometimes when fetching a txid through the proxy it fails, but fetching from the backends works fine
-  - check flashprofits logs for examples
 - [ ] relevant erigon changelogs: add pendingTransactionWithBody subscription method (#5675)
+- [ ] change_user_tier_by_key should not show the rpc key id. that way our ansible playbook won't expose it
 
 
 ## V2
@@ -448,6 +461,9 @@ in another repo: event subscriber
 
 ## "Maybe some day" and other Miscellaneous Things
 
+- [-] ip detection needs work so that everything doesnt show up as 172.x.x.x
+  - i think this was done, but am not positive.
+
 - [ ] tool to revoke bearer tokens that clears redis
 - [ ] eth_getBlockByNumber and similar calls served from the block map
   - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
@@ -455,7 +471,6 @@ in another repo: event subscriber
   - after looking at my request logs, i think its worth doing this. no point hitting the backends with requests for blocks multiple times. will also help with cache hit rates since we can keep recent blocks in a separate cache
 - [ ] Public bsc server got “0” for block data limit (ninicoin)
 - [ ] cli tool for resetting api keys
-- [ ] benchmarks of the different Cache implementations (futures vs dash)
 - [ ] Advanced load testing scripts so we can find optimal cost servers 
   - [ ] benchmarks from https://github.com/llamafolio/llamafolio-api/
   - [ ] benchmarks from ethspam and versus
@@ -480,7 +495,6 @@ in another repo: event subscriber
 - [ ] if no redis set, but public rate limits are set, exit with an error
 - [ ] i saw "WebSocket connection closed unexpectedly" but no log about reconnecting
   - need better logs on this because afaict it did reconnect
-- [ ] if archive servers are added to the rotation while they are still syncing, they might get requests too soon. keep archive servers out of the configs until they are done syncing. full nodes should be fine to add to the configs even while syncing, though its a wasted connection
 - [ ] better document load tests: docker run --rm --name spam shazow/ethspam --rpc http://$LOCAL_IP:8544 | versus --concurrency=100 --stop-after=10000 http://$LOCAL_IP:8544; docker stop spam
 - [ ] if the call is something simple like "symbol" or "decimals", cache that too. though i think this could bite us.
 - [ ] add a subscription that returns the head block number and hash but nothing else
@@ -511,12 +525,9 @@ in another repo: event subscriber
 - [ ] better error handling. we warn too often for validation errors and use the same error code for most every request
 - [ ] use &str more instead of String. lifetime annotations get really annoying though
 - [ ] tarpit instead of reject requests (unless theres a lot)
-- [ ] tune database connection pool size. i think a single web3_proxy currently maxes out our server
-- [ ] subscribing to transactions should be configurable per server. listening to paid servers can get expensive
 - [ ] archive servers should be lowest priority
 - [ ] docker build context is really big. we must be including target or something
-- [ ] ip detection needs work so that everything doesnt show up as 172.x.x.x
-- [ ] status page leaks our urls which contain secrets. change that to use names
+- [ ] fix ip detection when running in dev
 - [ ] PR to add this to sea orm prelude:
   ```
   #[cfg(feature = "with-uuid")]
@@ -526,8 +537,6 @@ in another repo: event subscriber
   - if someone subscribes to all pending transactions, how should that count against rate limits
   - when those rate limits are hit, what should happen?
   - missing pending transactions might be okay, but not missing confirmed blocks 
-- [ ] for easier errors in the axum code, i think we need to have our own type that wraps anyhow::Result+Error
-- [ ] fix ip detection when running in dev
 - [ ] double check weight sorting code
 - [ ] sea-orm brings in async-std, but we are using tokio. benchmark switching 
 - [ ] this query always times out, but erigon can serve it quickly: `curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["latest"],"id":1}' 127.0.0.1:8544' 127.0.0.1:8544`
@@ -539,11 +548,6 @@ in another repo: event subscriber
 - [ ] when using a bunch of slow public servers, i see "no servers in sync" even when things should be right
   - maybe iterate connection heads by total weight? i still think we need to include parent hashes
 - [ ] i see "No block found" sometimes for a single server's block. Not sure why since reads should happen after writes
-- [ ] whats going on here? why is it rolling back? maybe total_difficulty was a LOT higher?
-  - 2022-09-05T19:21:39.763630Z  WARN web3_proxy::rpcs::blockchain: chain rolled back 1/6/7 head=15479604 (0xf809…6a2c) rpc=infura_free
-  - i wish i had more logs. its possible that 15479605 came immediatly after
-- [ ] keep it working without redis and a database
-- [ ] web3 on rpc1 exited without errors. maybe promote some shutdown messages from debug to info?
 - [ ] better handling for offline http servers
   - if we get a connection refused, we should remove the server's block info so it is taken out of rotation
 - [ ] how should we handle reverting transactions? they won't confirm for a while after we send them
@@ -555,9 +559,6 @@ in another repo: event subscriber
 - [ ] at concurrency 100, ethspam is getting 400 and 422 errors. figure out why. probably something with redis or mysql, but maybe its something else like spawning
 - [ ] emit per-key stats for latency of semaphore awaits. if this starts to grow, people will know they are hitting limits and need a higher tier
 - [ ] need a status page for your wallet's rpc. show head block information with age
-- [ ] hit counts seem wrong. how are we hitting the backend so much more than the frontend? retries on disconnect don't seem to fit that
-  web3_proxy_hit_count{path = "app/proxy_web3_rpc_request"} 857270
-  web3_proxy_hit_count{path = "backend_rpc/request"}       1396127
 - [ ] replace serde_json::Value with https://lib.rs/crates/ijson (more memory efficient)
 - [ ] have a log all option? instead of just reverts, log all request/responses? can be very useful for debugging but would flood our database. maybe better for them to do that on their client side
 - [ ] failsafe. if no blocks or transactions in some time, warn and reset the connection
@@ -567,7 +568,6 @@ in another repo: event subscriber
 - [ ] if redis is not set and login page is visited, users get a 502. should be 501
 - [ ] allow passing the authorization header to the anonymous rpc endpoint
 - [ ] sentry profiling
-- [ ] use Stretto instead of Moka
 - [ ] support alchemy_minedTransactions
 - [ ] debug print of user::Model's address is a big vec of numbers. make that hex somehow
 - [ ] should we combine the proxy and cli into one bin?
