@@ -485,17 +485,16 @@ impl Web3Connections {
                 // increment our connection counter
                 match best_rpc.try_request_handle(authorization, false).await {
                     Ok(OpenRequestResult::Handle(handle)) => {
-                        // // trace!("next server on {:?}: {:?}", self, best_rpc);
+                        trace!("opened handle: {}", best_rpc);
                         return Ok(OpenRequestResult::Handle(handle));
                     }
                     Ok(OpenRequestResult::RetryAt(retry_at)) => {
                         earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                     }
                     Ok(OpenRequestResult::NotReady) => {
-                        // TODO: log a warning?
+                        // TODO: log a warning? emit a stat?
                     }
                     Err(err) => {
-                        // TODO: log a warning?
                         warn!("No request handle for {}. err={:?}", best_rpc, err)
                     }
                 }
@@ -519,6 +518,8 @@ impl Web3Connections {
                 //     .wait_for_request_handle(authorization, Duration::from_secs(3), false)
                 //     .await?;
                 // Ok(OpenRequestResult::Handle(handle))
+
+                // TODO: should we log here?
 
                 Ok(OpenRequestResult::NotReady)
             }

@@ -236,7 +236,14 @@ impl OpenRequestHandle {
             Web3Provider::Ws(provider) => provider.request(method, params).await,
         };
 
-        // trace!("got response for {:?}: {:?}", self, response);
+        // TODO: i think ethers already has trace logging (and does it much more fancy)
+        trace!(
+            "response from {} for {} {:?}: {:?}",
+            self.conn,
+            method,
+            params,
+            response,
+        );
 
         if let Err(err) = &response {
             // only save reverts for some types of calls
@@ -307,6 +314,10 @@ impl OpenRequestHandle {
                 false
             };
 
+            if is_revert {
+                trace!("revert from {}", self.conn);
+            }
+
             // TODO: think more about the method and param logs. those can be sensitive information
             match error_handler {
                 RequestErrorHandler::DebugLevel => {
@@ -364,11 +375,6 @@ impl OpenRequestHandle {
                     tokio::spawn(f);
                 }
             }
-        } else {
-            // TODO: i think ethers already has trace logging (and does it much more fancy)
-            // TODO: opt-in response inspection to log reverts with their request. put into redis or what?
-            // // trace!(rpc=%self.conn, %method, ?response);
-            // trace!(%method, rpc=%self.conn, "response");
         }
 
         response

@@ -4,13 +4,13 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
-use log::warn;
+use log::{trace, warn};
 use serde_json::json;
 use std::sync::Arc;
 
 use crate::{frontend::authorization::Authorization, rpcs::connections::Web3Connections};
 
-pub fn block_num_to_u64(block_num: BlockNumber, latest_block: U64) -> U64 {
+pub fn block_num_to_U64(block_num: BlockNumber, latest_block: U64) -> U64 {
     match block_num {
         BlockNumber::Earliest => {
             // modified is false because we want the backend to see "pending"
@@ -66,6 +66,8 @@ pub async fn clean_block_number(
                 Ok(latest_block)
             }
             Some(x) => {
+                let start = x.clone();
+
                 // convert the json value to a BlockNumber
                 let block_num = if let Some(obj) = x.as_object_mut() {
                     // it might be a Map like `{"blockHash": String("0xa5626dc20d3a0a209b1de85521717a3e859698de8ce98bca1b16822b7501f74b")}`
@@ -86,11 +88,16 @@ pub async fn clean_block_number(
                     // TODO: "BlockNumber" needs a better name
                     let block_number = serde_json::from_value::<BlockNumber>(x.take())?;
 
-                    block_num_to_u64(block_number, latest_block)
+                    block_num_to_U64(block_number, latest_block)
                 };
 
                 // if we changed "latest" to a number, update the params to match
                 *x = serde_json::to_value(block_num)?;
+
+                // TODO: only do this if trace logging is enabled
+                if x.as_u64() != start.as_u64() {
+                    trace!("changed {} to {}", start, x);
+                }
 
                 Ok(block_num)
             }
@@ -161,7 +168,7 @@ pub async fn block_needed(
             if let Some(x) = obj.get_mut("fromBlock") {
                 let block_num: BlockNumber = serde_json::from_value(x.take())?;
 
-                let block_num = block_num_to_u64(block_num, head_block_num);
+                let block_num = block_num_to_U64(block_num, head_block_num);
 
                 *x = json!(block_num);
 
@@ -176,7 +183,7 @@ pub async fn block_needed(
             if let Some(x) = obj.get_mut("toBlock") {
                 let block_num: BlockNumber = serde_json::from_value(x.take())?;
 
-                let block_num = block_num_to_u64(block_num, head_block_num);
+                let block_num = block_num_to_U64(block_num, head_block_num);
 
                 *x = json!(block_num);
 

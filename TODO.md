@@ -294,11 +294,14 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
   - https://github.com/moka-rs/moka/issues/201
+- [-] ip detection needs work so that everything doesnt show up as 172.x.x.x
+  - i think this was done, but am not positive.
 - [ ] cli for adding rpc keys to an existing user
 - [ ] automatically tune database and redis connection pool size
 - [ ] if db is down, keep logins cached longer. at least only new logins will have trouble then
 - [ ] rate limiting/throttling on query_user_stats 
 - [ ] minimum allowed query_start on query_user_stats
+- [ ] during shutdown, mark the proxy unhealthy and send unsubscribe responses for any open websocket subscriptions
 - [ ] some chains still use total_difficulty. have total_difficulty be used only if the chain needs it
   - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
   - if total difficulty is set and non-zero, use it for consensus instead of just the number
@@ -461,9 +464,6 @@ in another repo: event subscriber
 
 ## "Maybe some day" and other Miscellaneous Things
 
-- [-] ip detection needs work so that everything doesnt show up as 172.x.x.x
-  - i think this was done, but am not positive.
-
 - [ ] tool to revoke bearer tokens that clears redis
 - [ ] eth_getBlockByNumber and similar calls served from the block map
   - will need all Block<TxHash> **and** Block<TransactionReceipt> in caches or fetched efficiently
@@ -578,3 +578,5 @@ in another repo: event subscriber
 - [ ] change invite codes to set the user_tier
 - [ ] some cli commands should use the replica if possible
 - [ ] some third party rpcs have limits on the size of eth_getLogs. include those limits in server config
+- [ ] some internal requests should go through app.proxy_rpc_request so that they get caching!
+    - be careful not to make an infinite loop
