@@ -165,7 +165,6 @@ async fn proxy_web3_socket(
 }
 
 /// websockets support a few more methods than http clients
-
 async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
     authorization: &Arc<Authorization>,
