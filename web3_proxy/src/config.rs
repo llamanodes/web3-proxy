@@ -113,13 +113,11 @@ pub struct AppConfig {
     /// Concurrent request limit for anonymous users.
     /// Some(0) = block all requests
     /// None = allow all requests
-    #[serde(default = "default_public_max_concurrent_requests")]
     pub public_max_concurrent_requests: Option<usize>,
 
     /// Request limit for anonymous users.
     /// Some(0) = block all requests
     /// None = allow all requests
-    #[serde(default = "default_public_requests_per_period")]
     pub public_requests_per_period: Option<u64>,
 
     /// RPC responses are cached locally
@@ -156,18 +154,6 @@ fn default_min_sum_soft_limit() -> u32 {
 /// Only require 1 server. This might cause a thundering herd!
 fn default_min_synced_rpcs() -> usize {
     1
-}
-
-/// 0 blocks anonymous requests.
-/// None allows unlimited concurrent requests
-// TODO: what is a reasonable default?
-fn default_public_max_concurrent_requests() -> Option<usize> {
-    Some(5)
-}
-
-/// 0 blocks anonymous requests by default.
-fn default_public_requests_per_period() -> Option<u64> {
-    Some(0)
 }
 
 /// Having a low amount of concurrent requests for bearer tokens keeps us from hammering the database.

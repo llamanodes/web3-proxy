@@ -33,7 +33,6 @@ use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 
 /// Public entrypoint for WebSocket JSON-RPC requests.
-/// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
 #[debug_handler]
 pub async fn websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -41,8 +40,6 @@ pub async fn websocket_handler(
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    // TODO: i don't like logging ips. move this to trace level?
-
     let origin = origin.map(|x| x.0);
 
     let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin).await?;

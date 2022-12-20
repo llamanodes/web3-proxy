@@ -301,6 +301,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] if db is down, keep logins cached longer. at least only new logins will have trouble then
 - [ ] rate limiting/throttling on query_user_stats 
 - [ ] minimum allowed query_start on query_user_stats
+- [ ] setting request limits to None is broken. it does maxu64 and then internal deferred rate limiter counts try to *99/100
 - [ ] during shutdown, mark the proxy unhealthy and send unsubscribe responses for any open websocket subscriptions
 - [ ] some chains still use total_difficulty. have total_difficulty be used only if the chain needs it
   - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
@@ -580,3 +581,4 @@ in another repo: event subscriber
 - [ ] some third party rpcs have limits on the size of eth_getLogs. include those limits in server config
 - [ ] some internal requests should go through app.proxy_rpc_request so that they get caching!
     - be careful not to make an infinite loop
+- [ ] request timeout messages should include the request id

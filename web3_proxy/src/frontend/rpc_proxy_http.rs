@@ -22,19 +22,20 @@ pub async fn proxy_web3_rpc(
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> FrontendResult {
-    // TODO: do we care about keeping the TypedHeader wrapper?
-    let origin = origin.map(|x| x.0);
-
-    // TODO: move ip_is_authorized/key_is_authorized into proxy_web3_rpc
     let f = tokio::spawn(async move {
-        let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin).await?;
+        // TODO: do we care about keeping the TypedHeader wrapper?
+        let origin = origin.map(|x| x.0);
+
+        let (authorization, semaphore) = ip_is_authorized(&app, ip, origin).await?;
 
         let authorization = Arc::new(authorization);
 
-        app.proxy_web3_rpc(authorization, payload).await
+        app.proxy_web3_rpc(authorization, payload)
+            .await
+            .map(|(x, y)| (x, y, semaphore))
     });
 
-    let (response, rpcs) = f.await??;
+    let (response, rpcs, _semaphore) = f.await??;
 
     let mut response = Json(&response).into_response();
 
@@ -65,27 +66,41 @@ pub async fn proxy_web3_rpc_with_key(
     Path(rpc_key): Path<String>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> FrontendResult {
-    let rpc_key = rpc_key.parse()?;
-
-    // keep the semaphore until the end of the response
-    let (authorization, _semaphore) = key_is_authorized(
-        &app,
-        rpc_key,
-        ip,
-        origin.map(|x| x.0),
-        referer.map(|x| x.0),
-        user_agent.map(|x| x.0),
-    )
-    .await?;
-
-    let authorization = Arc::new(authorization);
-
+    // TODO: DRY w/ proxy_web3_rpc
     // the request can take a while, so we spawn so that we can start serving another request
-    // TODO: spawn even earlier?
-    let f = tokio::spawn(async move { app.proxy_web3_rpc(authorization, payload).await });
+    let f = tokio::spawn(async move {
+        let rpc_key = rpc_key.parse()?;
 
-    // if this is an error, we are likely shutting down
-    let response = f.await??;
+        let (authorization, semaphore) = key_is_authorized(
+            &app,
+            rpc_key,
+            ip,
+            origin.map(|x| x.0),
+            referer.map(|x| x.0),
+            user_agent.map(|x| x.0),
+        )
+        .await?;
 
-    Ok(Json(&response).into_response())
+        let authorization = Arc::new(authorization);
+
+        app.proxy_web3_rpc(authorization, payload)
+            .await
+            .map(|(x, y)| (x, y, semaphore))
+    });
+
+    let (response, rpcs, _semaphore) = f.await??;
+
+    let mut response = Json(&response).into_response();
+
+    let headers = response.headers_mut();
+
+    // TODO: special string if no rpcs were used (cache hit)?
+    let rpcs: String = rpcs.into_iter().map(|x| x.name.clone()).join(",");
+
+    headers.insert(
+        "W3P-RPCs",
+        rpcs.parse().expect("W3P-RPCS should always parse"),
+    );
+
+    Ok(response)
 }
