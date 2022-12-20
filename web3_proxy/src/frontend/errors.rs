@@ -224,7 +224,7 @@ impl IntoResponse for FrontendErrorResponse {
                 // different status codes should get different error levels. 500s should warn. 400s should stat
                 let code = status_code.as_u16();
                 if (500..600).contains(&code) {
-                    warn!("user error {} {:?}: {:?}", code, err_msg, err);
+                    warn!("server error {} {:?}: {:?}", code, err_msg, err);
                 } else {
                     trace!("user error {} {:?}: {:?}", code, err_msg, err);
                 }
