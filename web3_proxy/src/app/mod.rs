@@ -359,27 +359,34 @@ impl Web3ProxyApp {
                 .db_max_connections
                 .unwrap_or(db_min_connections * 2);
 
-            db_conn = Some(get_migrated_db(db_url, db_min_connections, db_max_connections).await?);
+            db_conn = Some(
+                get_migrated_db(db_url.clone(), db_min_connections, db_max_connections).await?,
+            );
 
             db_replica = if let Some(db_replica_url) = top_config.app.db_replica_url.clone() {
-                let db_replica_min_connections = top_config
-                    .app
-                    .db_replica_min_connections
-                    .unwrap_or(db_min_connections);
+                if db_replica_url == db_url {
+                    // url is the same. do not make a new connection or we might go past our max connections
+                    db_conn.clone().map(DatabaseReplica)
+                } else {
+                    let db_replica_min_connections = top_config
+                        .app
+                        .db_replica_min_connections
+                        .unwrap_or(db_min_connections);
 
-                let db_replica_max_connections = top_config
-                    .app
-                    .db_replica_max_connections
-                    .unwrap_or(db_max_connections);
+                    let db_replica_max_connections = top_config
+                        .app
+                        .db_replica_max_connections
+                        .unwrap_or(db_max_connections);
 
-                let db_replica = get_db(
-                    db_replica_url,
-                    db_replica_min_connections,
-                    db_replica_max_connections,
-                )
-                .await?;
+                    let db_replica = get_db(
+                        db_replica_url,
+                        db_replica_min_connections,
+                        db_replica_max_connections,
+                    )
+                    .await?;
 
-                Some(DatabaseReplica(db_replica))
+                    Some(DatabaseReplica(db_replica))
+                }
             } else {
                 // just clone so that we don't need a bunch of checks all over our code
                 db_conn.clone().map(DatabaseReplica)
