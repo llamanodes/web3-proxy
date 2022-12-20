@@ -9,6 +9,7 @@ use axum::TypedHeader;
 use axum::{response::IntoResponse, Extension, Json};
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
+use itertools::Itertools;
 use std::sync::Arc;
 
 /// POST /rpc -- Public entrypoint for HTTP JSON-RPC requests. Web3 wallets use this.
@@ -24,16 +25,30 @@ pub async fn proxy_web3_rpc(
     // TODO: do we care about keeping the TypedHeader wrapper?
     let origin = origin.map(|x| x.0);
 
-    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin).await?;
+    // TODO: move ip_is_authorized/key_is_authorized into proxy_web3_rpc
+    let f = tokio::spawn(async move {
+        let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin).await?;
 
-    let authorization = Arc::new(authorization);
+        let authorization = Arc::new(authorization);
 
-    // TODO: spawn earlier? i think we want ip_is_authorized in this future
-    let f = tokio::spawn(async move { app.proxy_web3_rpc(authorization, payload).await });
+        app.proxy_web3_rpc(authorization, payload).await
+    });
 
-    let response = f.await??;
+    let (response, rpcs) = f.await??;
 
-    Ok(Json(&response).into_response())
+    let mut response = Json(&response).into_response();
+
+    let headers = response.headers_mut();
+
+    // TODO: special string if no rpcs were used (cache hit)?
+    let rpcs: String = rpcs.into_iter().map(|x| x.name.clone()).join(",");
+
+    headers.insert(
+        "W3P-RPCs",
+        rpcs.parse().expect("W3P-RPCS should always parse"),
+    );
+
+    Ok(response)
 }
 
 /// Authenticated entrypoint for HTTP JSON-RPC requests. Web3 wallets use this.

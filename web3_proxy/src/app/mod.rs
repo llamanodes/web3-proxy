@@ -5,11 +5,13 @@ use crate::app_stats::{ProxyResponseStat, StatEmitter, Web3ProxyStat};
 use crate::block_number::{block_needed, BlockNeeded};
 use crate::config::{AppConfig, TopConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
+use crate::frontend::errors::FrontendErrorResponse;
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcForwardedResponseEnum;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::jsonrpc::JsonRpcRequestEnum;
 use crate::rpcs::blockchain::{ArcBlock, SavedBlock};
+use crate::rpcs::connection::Web3Connection;
 use crate::rpcs::connections::Web3Connections;
 use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
@@ -21,11 +23,10 @@ use derive_more::From;
 use entities::sea_orm_active_enums::LogLevel;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, Bytes, TxHash, H256, U64};
-use ethers::types::U256;
 use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
 use log::{debug, error, info, warn};
 use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
@@ -708,7 +709,8 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: Arc<Authorization>,
         request: JsonRpcRequestEnum,
-    ) -> anyhow::Result<JsonRpcForwardedResponseEnum> {
+    ) -> Result<(JsonRpcForwardedResponseEnum, Vec<Arc<Web3Connection>>), FrontendErrorResponse>
+    {
         // TODO: this should probably be trace level
         // // trace!(?request, "proxy_web3_rpc");
 
@@ -718,24 +720,25 @@ impl Web3ProxyApp {
         let max_time = Duration::from_secs(120);
 
         let response = match request {
-            JsonRpcRequestEnum::Single(request) => JsonRpcForwardedResponseEnum::Single(
-                timeout(
+            JsonRpcRequestEnum::Single(request) => {
+                let (response, rpcs) = timeout(
                     max_time,
                     self.proxy_web3_rpc_request(&authorization, request),
                 )
-                .await??,
-            ),
-            JsonRpcRequestEnum::Batch(requests) => JsonRpcForwardedResponseEnum::Batch(
-                timeout(
+                .await??;
+
+                (JsonRpcForwardedResponseEnum::Single(response), rpcs)
+            }
+            JsonRpcRequestEnum::Batch(requests) => {
+                let (responses, rpcs) = timeout(
                     max_time,
                     self.proxy_web3_rpc_requests(&authorization, requests),
                 )
-                .await??,
-            ),
-        };
+                .await??;
 
-        // TODO: this should probably be trace level
-        // // trace!(?response, "Forwarding");
+                (JsonRpcForwardedResponseEnum::Batch(responses), rpcs)
+            }
+        };
 
         Ok(response)
     }
@@ -746,12 +749,12 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         requests: Vec<JsonRpcRequest>,
-    ) -> anyhow::Result<Vec<JsonRpcForwardedResponse>> {
-        // TODO: we should probably change ethers-rs to support this directly
+    ) -> anyhow::Result<(Vec<JsonRpcForwardedResponse>, Vec<Arc<Web3Connection>>)> {
+        // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
 
-        // TODO: spawn so the requests go in parallel
-        // TODO: i think we will need to flatten
+        // TODO: spawn so the requests go in parallel? need to think about rate limiting more if we do that
+        // TODO: improve flattening
         let responses = join_all(
             requests
                 .into_iter()
@@ -760,14 +763,21 @@ impl Web3ProxyApp {
         )
         .await;
 
-        // TODO: i'm sure this could be done better with iterators. we could return the error earlier then, too
+        // TODO: i'm sure this could be done better with iterators
         // TODO: stream the response?
         let mut collected: Vec<JsonRpcForwardedResponse> = Vec::with_capacity(num_requests);
+        let mut collected_rpcs: HashSet<Arc<Web3Connection>> = HashSet::new();
         for response in responses {
-            collected.push(response?);
+            // TODO: any way to attach the tried rpcs to the error? it is likely helpful
+            let (response, rpcs) = response?;
+
+            collected.push(response);
+            collected_rpcs.extend(rpcs.into_iter());
         }
 
-        Ok(collected)
+        let collected_rpcs: Vec<_> = collected_rpcs.into_iter().collect();
+
+        Ok((collected, collected_rpcs))
     }
 
     /// TODO: i don't think we want or need this. just use app.db_conn, or maybe app.db_conn.clone() or app.db_conn.as_ref()
@@ -795,7 +805,7 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
-    ) -> anyhow::Result<JsonRpcForwardedResponse> {
+    ) -> anyhow::Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Connection>>)> {
         // trace!("Received request: {:?}", request);
 
         let request_metadata = Arc::new(RequestMetadata::new(REQUEST_PERIOD, request.num_bytes())?);
@@ -917,6 +927,8 @@ impl Web3ProxyApp {
                 // no stats on this. its cheap
                 json!(Address::zero())
             }
+            /*
+            // erigon was giving bad estimates. but now it doesn't need it
             "eth_estimateGas" => {
                 // TODO: eth_estimateGas using anvil?
                 // TODO: modify the block requested?
@@ -937,15 +949,18 @@ impl Web3ProxyApp {
                     parsed_gas_estimate
                 } else {
                     // i think this is always an error response
-                    return Ok(response);
+                    let rpcs = request_metadata.backend_requests.lock().clone();
+
+                    return Ok((response, rpcs));
                 };
 
-                // increase by 10.01%
+                // increase by 1.01%
                 let parsed_gas_estimate =
-                    parsed_gas_estimate * U256::from(110_010) / U256::from(100_000);
+                    parsed_gas_estimate * U256::from(101_010) / U256::from(100_000);
 
                 json!(parsed_gas_estimate)
             }
+            */
             // TODO: eth_gasPrice that does awesome magic to predict the future
             "eth_hashrate" => {
                 // no stats on this. its cheap
@@ -959,16 +974,24 @@ impl Web3ProxyApp {
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => {
                 // emit stats
-                let rpcs = self.private_rpcs.as_ref().unwrap_or(&self.balanced_rpcs);
+                let private_rpcs = self.private_rpcs.as_ref().unwrap_or(&self.balanced_rpcs);
 
-                return rpcs
+                let mut response = private_rpcs
                     .try_send_all_upstream_servers(
                         authorization,
                         request,
-                        Some(request_metadata),
+                        Some(request_metadata.clone()),
                         None,
                     )
-                    .await;
+                    .await?;
+
+                response.id = request_id;
+
+                let rpcs = request_metadata.backend_requests.lock().clone();
+
+                // TODO! STATS!
+
+                return Ok((response, rpcs));
             }
             "eth_syncing" => {
                 // no stats on this. its cheap
@@ -1134,6 +1157,9 @@ impl Web3ProxyApp {
                 // replace the id with our request's id.
                 response.id = request_id;
 
+                // TODO: DRY!
+                let rpcs = request_metadata.backend_requests.lock().clone();
+
                 if let Some(stat_sender) = self.stat_sender.as_ref() {
                     let response_stat = ProxyResponseStat::new(
                         method.to_string(),
@@ -1148,11 +1174,14 @@ impl Web3ProxyApp {
                         .context("stat_sender sending response_stat")?;
                 }
 
-                return Ok(response);
+                return Ok((response, rpcs));
             }
         };
 
         let response = JsonRpcForwardedResponse::from_value(partial_response, request_id);
+
+        // TODO: DRY
+        let rpcs = request_metadata.backend_requests.lock().clone();
 
         if let Some(stat_sender) = self.stat_sender.as_ref() {
             let response_stat = ProxyResponseStat::new(
@@ -1168,9 +1197,7 @@ impl Web3ProxyApp {
                 .context("stat_sender sending response stat")?;
         }
 
-        todo!("attach a header here");
-
-        Ok(response)
+        Ok((response, rpcs))
     }
 }
 

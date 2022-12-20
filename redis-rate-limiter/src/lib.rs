@@ -108,7 +108,7 @@ impl RedisRateLimiter {
             // do the query
             .query_async(&mut *conn)
             .await
-            .context("increment rate limit and set expiration")?;
+            .context("cannot increment rate limit or set expiration")?;
 
         let new_count: u64 = *x.first().expect("check redis");
 

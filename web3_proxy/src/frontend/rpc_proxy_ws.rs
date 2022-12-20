@@ -180,7 +180,6 @@ async fn handle_socket_payload(
     // TODO: do any clients send batches over websockets?
     let (id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
         Ok(json_request) => {
-            // TODO: should we use this id for the subscription id? it should be unique and means we dont need an atomic
             let id = json_request.id.clone();
 
             let response: anyhow::Result<JsonRpcForwardedResponseEnum> = match &json_request.method
@@ -251,8 +250,13 @@ async fn handle_socket_payload(
                     Ok(response.into())
                 }
                 _ => {
-                    app.proxy_web3_rpc(authorization.clone(), json_request.into())
+                    let (response, _) = app
+                        .proxy_web3_rpc(authorization.clone(), json_request.into())
                         .await
+                        // TODO: DO NOT UNWRAP HERE! ANY FAILING MESSAGES WILL KEPP THE CONNECTION!
+                        .unwrap();
+
+                    Ok(response)
                 }
             };
 
@@ -266,15 +270,16 @@ async fn handle_socket_payload(
     };
 
     let response_str = match response {
-        Ok(x) => serde_json::to_string(&x),
+        Ok(x) => serde_json::to_string(&x).expect("to_string should always work here"),
         Err(err) => {
             // we have an anyhow error. turn it into a response
             let response = JsonRpcForwardedResponse::from_anyhow_error(err, None, Some(id));
-            serde_json::to_string(&response)
+
+            serde_json::to_string(&response).expect("to_string should always work here")
         }
-    }
+    };
+
     // TODO: what error should this be?
-    .unwrap();
 
     Message::Text(response_str)
 }

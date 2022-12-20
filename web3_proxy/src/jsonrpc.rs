@@ -1,11 +1,9 @@
-use crate::rpcs::connection::Web3Connection;
 use derive_more::From;
 use ethers::prelude::{HttpClientError, ProviderError, WsClientError};
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::fmt;
-use std::sync::Arc;
 
 // this is used by serde
 #[allow(dead_code)]

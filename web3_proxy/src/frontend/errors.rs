@@ -15,7 +15,6 @@ use log::{trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
-use std::error::Error;
 use tokio::{sync::AcquireError, task::JoinError, time::Instant};
 
 // TODO: take "IntoResponse" instead of Response?
@@ -27,7 +26,6 @@ pub enum FrontendErrorResponse {
     AccessDenied,
     Anyhow(anyhow::Error),
     SemaphoreAcquireError(AcquireError),
-    Box(Box<dyn Error>),
     Database(DbErr),
     HeadersError(headers::Error),
     HeaderToString(ToStrError),
@@ -40,6 +38,8 @@ pub enum FrontendErrorResponse {
     Response(Response),
     /// simple way to return an error message to the user and an anyhow to our logs
     StatusCode(StatusCode, String, Option<anyhow::Error>),
+    /// TODO: what should be attached to the timout?
+    Timeout(tokio::time::error::Elapsed),
     UlidDecodeError(ulid::DecodeError),
     UnknownKey,
 }
@@ -74,18 +74,18 @@ impl IntoResponse for FrontendErrorResponse {
                     ),
                 )
             }
-            Self::Box(err) => {
-                warn!("boxed err={:?}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        // TODO: make this better. maybe include the error type?
-                        "boxed error!",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
-                )
-            }
+            // Self::(err) => {
+            //     warn!("boxed err={:?}", err);
+            //     (
+            //         StatusCode::INTERNAL_SERVER_ERROR,
+            //         JsonRpcForwardedResponse::from_str(
+            //             // TODO: make this better. maybe include the error type?
+            //             "boxed error!",
+            //             Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+            //             None,
+            //         ),
+            //     )
+            // }
             Self::Database(err) => {
                 warn!("database err={:?}", err);
                 (
@@ -131,12 +131,20 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::JoinError(err) => {
-                warn!("JoinError. likely shutting down. err={:?}", err);
+                let code = if err.is_cancelled() {
+                    trace!("JoinError. likely shutting down. err={:?}", err);
+                    StatusCode::BAD_GATEWAY
+                } else {
+                    warn!("JoinError. err={:?}", err);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                };
+
                 (
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                    code,
                     JsonRpcForwardedResponse::from_str(
+                        // TODO: different messages, too?
                         "Unable to complete request",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        Some(code.as_u16().into()),
                         None,
                     ),
                 )
@@ -226,8 +234,17 @@ impl IntoResponse for FrontendErrorResponse {
                     JsonRpcForwardedResponse::from_str(&err_msg, Some(code.into()), None),
                 )
             }
+            Self::Timeout(x) => (
+                StatusCode::REQUEST_TIMEOUT,
+                JsonRpcForwardedResponse::from_str(
+                    &format!("request timed out: {:?}", x),
+                    Some(StatusCode::REQUEST_TIMEOUT.as_u16().into()),
+                    // TODO: include the actual id!
+                    None,
+                ),
+            ),
             Self::HeaderToString(err) => {
-                // // trace!(?err, "HeaderToString");
+                // trace!(?err, "HeaderToString");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -238,7 +255,7 @@ impl IntoResponse for FrontendErrorResponse {
                 )
             }
             Self::UlidDecodeError(err) => {
-                // // trace!(?err, "UlidDecodeError");
+                // trace!(?err, "UlidDecodeError");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
