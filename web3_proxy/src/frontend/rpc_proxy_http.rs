@@ -45,8 +45,8 @@ pub async fn proxy_web3_rpc(
     let rpcs: String = rpcs.into_iter().map(|x| x.name.clone()).join(",");
 
     headers.insert(
-        "W3P-RPCs",
-        rpcs.parse().expect("W3P-RPCS should always parse"),
+        "W3P-BACKEND-RPCs",
+        rpcs.parse().expect("W3P-BACKEND-RPCS should always parse"),
     );
 
     Ok(response)
@@ -98,8 +98,8 @@ pub async fn proxy_web3_rpc_with_key(
     let rpcs: String = rpcs.into_iter().map(|x| x.name.clone()).join(",");
 
     headers.insert(
-        "W3P-RPCs",
-        rpcs.parse().expect("W3P-RPCS should always parse"),
+        "W3P-BACKEND-RPCs",
+        rpcs.parse().expect("W3P-BACKEND-RPCS should always parse"),
     );
 
     Ok(response)
