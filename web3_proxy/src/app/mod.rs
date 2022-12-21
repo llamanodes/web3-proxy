@@ -28,6 +28,7 @@ use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
+use log::Level;
 use log::{debug, error, info, warn};
 use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
 use migration::sea_orm::{self, ConnectionTrait, Database, DatabaseConnection};
@@ -989,6 +990,7 @@ impl Web3ProxyApp {
                         request,
                         Some(request_metadata.clone()),
                         None,
+                        Level::Trace,
                     )
                     .await?;
 

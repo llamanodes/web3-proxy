@@ -312,6 +312,7 @@ impl Web3Connections {
         active_request_handles: Vec<OpenRequestHandle>,
         method: &str,
         params: Option<&serde_json::Value>,
+        error_level: Level,
         // TODO: remove this box once i figure out how to do the options
     ) -> Result<Box<RawValue>, ProviderError> {
         // TODO: if only 1 active_request_handles, do self.try_send_request?
@@ -320,7 +321,7 @@ impl Web3Connections {
             .into_iter()
             .map(|active_request_handle| async move {
                 let result: Result<Box<RawValue>, _> = active_request_handle
-                    .request(method, &json!(&params), Level::Error.into())
+                    .request(method, &json!(&params), error_level.into())
                     .await;
                 result
             })
@@ -361,7 +362,7 @@ impl Web3Connections {
         }
 
         // TODO: what should we do if we get here? i don't think we will
-        panic!("i don't think this is possible")
+        unimplemented!("this shouldn't be possible")
     }
 
     /// get the best available rpc server
@@ -732,6 +733,7 @@ impl Web3Connections {
         request: JsonRpcRequest,
         request_metadata: Option<Arc<RequestMetadata>>,
         block_needed: Option<&U64>,
+        error_level: Level,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
             match self
@@ -755,6 +757,7 @@ impl Web3Connections {
                             active_request_handles,
                             request.method.as_ref(),
                             request.params.as_ref(),
+                            error_level,
                         )
                         .await?;
 
