@@ -197,7 +197,7 @@ impl Web3Connection {
                 "eth_getBlockByNumber",
                 &json!(("latest", false)),
                 // error here are expected, so keep the level low
-                Level::Debug.into(),
+                Level::Warn.into(),
             )
             .await?
             .context("no block during check_block_data_limit!")?;
@@ -751,7 +751,7 @@ impl Web3Connection {
                                     .request(
                                         "eth_getBlockByNumber",
                                         &json!(("latest", false)),
-                                        Level::Error.into(),
+                                        Level::Warn.into(),
                                     )
                                     .await;
 
@@ -844,7 +844,7 @@ impl Web3Connection {
                         .request(
                             "eth_getBlockByNumber",
                             &json!(("latest", false)),
-                            Level::Error.into(),
+                            Level::Warn.into(),
                         )
                         .await;
 
