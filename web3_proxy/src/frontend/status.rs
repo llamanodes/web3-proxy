@@ -14,7 +14,7 @@ use std::sync::Arc;
 /// Health check page for load balancers to use.
 #[debug_handler]
 pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
-    // TODO: also check that the head block is not too old
+    // TODO: add a check that we aren't shutting down
     if app.balanced_rpcs.synced() {
         (StatusCode::OK, "OK")
     } else {

@@ -483,7 +483,10 @@ impl Web3Connections {
             // now that the rpcs are sorted, try to get an active request handle for one of them
             for best_rpc in sorted_rpcs.into_iter() {
                 // increment our connection counter
-                match best_rpc.try_request_handle(authorization, false).await {
+                match best_rpc
+                    .try_request_handle(authorization, min_block_needed.is_none())
+                    .await
+                {
                     Ok(OpenRequestResult::Handle(handle)) => {
                         trace!("opened handle: {}", best_rpc);
                         return Ok(OpenRequestResult::Handle(handle));
@@ -551,7 +554,10 @@ impl Web3Connections {
             }
 
             // check rate limits and increment our connection counter
-            match connection.try_request_handle(authorization, false).await {
+            match connection
+                .try_request_handle(authorization, block_needed.is_none())
+                .await
+            {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
