@@ -51,7 +51,7 @@ proctitle = "0.1.1"
 # TODO: regex has several "perf" features that we might want to use
 regex = "1.7.0"
 reqwest = { version = "0.11.13", default-features = false, features = ["json", "tokio-rustls"] }
-handlebars = "4.3.5"
+handlebars = "4.3.6"
 rustc-hash = "1.1.0"
 siwe = "0.5.0"
 sentry = { version = "0.29.1", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
