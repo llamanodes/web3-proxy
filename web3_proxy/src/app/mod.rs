@@ -1007,6 +1007,16 @@ impl Web3ProxyApp {
                 // TODO: return a real response if all backends are syncing or if no servers in sync
                 json!(false)
             }
+            "eth_subscribe" => {
+                return Err(anyhow::anyhow!(
+                    "notifications not supported. eth_subscribe is only available over a websocket"
+                ));
+            }
+            "eth_unsubscribe" => {
+                return Err(anyhow::anyhow!(
+                    "notifications not supported. eth_unsubscribe is only available over a websocket"
+                ));
+            }
             "net_listening" => {
                 // no stats on this. its cheap
                 // TODO: only if there are some backends on balanced_rpcs?
