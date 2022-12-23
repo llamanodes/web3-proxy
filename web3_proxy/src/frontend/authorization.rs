@@ -243,7 +243,7 @@ impl Authorization {
             None => {}
             Some(allowed_ips) => {
                 if !allowed_ips.iter().any(|x| x.contains(&ip)) {
-                    return Err(anyhow::anyhow!("IP is not allowed!"));
+                    return Err(anyhow::anyhow!("IP ({}) is not allowed!", ip));
                 }
             }
         }
@@ -255,7 +255,7 @@ impl Authorization {
             (None, Some(_)) => return Err(anyhow::anyhow!("Origin required")),
             (Some(origin), Some(allowed_origins)) => {
                 if !allowed_origins.contains(origin) {
-                    return Err(anyhow::anyhow!("IP is not allowed!"));
+                    return Err(anyhow::anyhow!("Origin ({}) is not allowed!", origin));
                 }
             }
         }
@@ -267,7 +267,7 @@ impl Authorization {
             (None, Some(_)) => return Err(anyhow::anyhow!("Referer required")),
             (Some(referer), Some(allowed_referers)) => {
                 if !allowed_referers.contains(referer) {
-                    return Err(anyhow::anyhow!("Referer is not allowed!"));
+                    return Err(anyhow::anyhow!("Referer ({:?}) is not allowed!", referer));
                 }
             }
         }
@@ -279,7 +279,10 @@ impl Authorization {
             (None, Some(_)) => return Err(anyhow::anyhow!("User agent required")),
             (Some(user_agent), Some(allowed_user_agents)) => {
                 if !allowed_user_agents.contains(user_agent) {
-                    return Err(anyhow::anyhow!("User agent is not allowed!"));
+                    return Err(anyhow::anyhow!(
+                        "User agent ({}) is not allowed!",
+                        user_agent
+                    ));
                 }
             }
         }

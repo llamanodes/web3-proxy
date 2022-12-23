@@ -253,7 +253,7 @@ async fn handle_socket_payload(
                             FrontendErrorResponse::Anyhow(err) => Err(err),
                             _ => {
                                 error!("handle this better! {:?}", err);
-                                Err(anyhow::anyhow!(format!("unexpected error! {:?}", err)))
+                                Err(anyhow::anyhow!("unexpected error! {:?}", err))
                             }
                         },
                         |(response, _)| Ok(response),

@@ -85,10 +85,7 @@ impl CheckConfigSubCommand {
         if num_errors == 0 {
             Ok(())
         } else {
-            Err(anyhow::anyhow!(format!(
-                "there were {} errors!",
-                num_errors
-            )))
+            Err(anyhow::anyhow!("there were {} errors!", num_errors))
         }
     }
 }
