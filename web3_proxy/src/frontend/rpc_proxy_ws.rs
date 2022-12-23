@@ -246,13 +246,19 @@ async fn handle_socket_payload(
                     Ok(response.into())
                 }
                 _ => {
-                    let (response, _) = app
+                    let x = app
                         .proxy_web3_rpc(authorization.clone(), json_request.into())
                         .await
-                        // TODO: DO NOT UNWRAP HERE! ANY FAILING MESSAGES WILL KEPP THE CONNECTION!
-                        .unwrap();
+                        // TODO: DO NOT UNWRAP HERE! ANY FAILING MESSAGES SHOULD KEEP THE CONNECTION!
+                        .map_or_else(
+                            |err| {
+                                // need to think about this
+                                todo!("do something to convert FrontendErrorResponse into a JsonRpcForwardedResponseEnum");                            
+                            }, 
+                            |(response, _)| response
+                        );
 
-                    Ok(response)
+                    Ok(x)
                 }
             };
 
