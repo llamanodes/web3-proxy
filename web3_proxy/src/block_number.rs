@@ -4,7 +4,7 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
-use log::{trace, warn};
+use log::{debug, trace, warn};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -56,14 +56,16 @@ pub async fn clean_block_number(
         }
         Some(params) => match params.get_mut(block_param_id) {
             None => {
-                if params.len() != block_param_id - 1 {
-                    // TODO: this needs the correct error code in the response
-                    return Err(anyhow::anyhow!("unexpected params length"));
+                if params.len() == block_param_id {
+                    // add the latest block number to the end of the params
+                    params.push(serde_json::to_value(latest_block)?);
+                } else {
+                    // don't modify the request. only cache with current block
+                    // TODO: more useful log that include the
+                    warn!("unexpected params length");
                 }
 
-                // add the latest block number to the end of the params
-                params.push(serde_json::to_value(latest_block)?);
-
+                // don't modify params, just cache with the current block
                 Ok(latest_block)
             }
             Some(x) => {
