@@ -4,7 +4,7 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
-use log::{debug, trace, warn};
+use log::{trace, warn};
 use serde_json::json;
 use std::sync::Arc;
 

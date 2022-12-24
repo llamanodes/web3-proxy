@@ -2,7 +2,8 @@ use derive_more::From;
 use ethers::prelude::{HttpClientError, ProviderError, WsClientError};
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
+use serde_json::json;
+use serde_json::value::{to_raw_value, RawValue};
 use std::fmt;
 
 // this is used by serde
@@ -161,7 +162,8 @@ pub struct JsonRpcErrorData {
 }
 
 /// A complete response
-#[derive(Clone, Deserialize, Serialize)]
+/// TODO: better Debug response
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct JsonRpcForwardedResponse {
     // TODO: jsonrpc a &str?
     #[serde(default = "default_jsonrpc")]
@@ -171,15 +173,6 @@ pub struct JsonRpcForwardedResponse {
     pub result: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<JsonRpcErrorData>,
-}
-
-/// TODO: the default formatter takes forever to write. this is too quiet though
-impl fmt::Debug for JsonRpcForwardedResponse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("JsonRpcForwardedResponse")
-            .field("id", &self.id)
-            .finish_non_exhaustive()
-    }
 }
 
 impl JsonRpcRequest {
@@ -212,7 +205,7 @@ impl JsonRpcForwardedResponse {
         JsonRpcForwardedResponse {
             jsonrpc: "2.0".to_string(),
             id: id.unwrap_or_else(|| {
-                RawValue::from_string("null".to_string()).expect("null id should always work")
+                to_raw_value(&json!(None::<Option<()>>)).expect("null id should always work")
             }),
             result: None,
             error: Some(JsonRpcErrorData {
@@ -235,10 +228,7 @@ impl JsonRpcForwardedResponse {
 
     pub fn from_value(partial_response: serde_json::Value, id: Box<RawValue>) -> Self {
         let partial_response =
-            serde_json::to_string(&partial_response).expect("this should always work");
-
-        let partial_response =
-            RawValue::from_string(partial_response).expect("this should always work");
+            to_raw_value(&partial_response).expect("Value to RawValue should always work");
 
         JsonRpcForwardedResponse {
             jsonrpc: "2.0".to_string(),

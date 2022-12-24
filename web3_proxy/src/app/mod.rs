@@ -23,6 +23,8 @@ use derive_more::From;
 use entities::sea_orm_active_enums::LogLevel;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, Bytes, TxHash, H256, U64};
+use ethers::types::Transaction;
+use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
@@ -38,6 +40,7 @@ use moka::future::Cache;
 use redis_rate_limiter::{DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use serde::Serialize;
 use serde_json::json;
+use serde_json::value::to_raw_value;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
@@ -984,17 +987,54 @@ impl Web3ProxyApp {
                 // emit stats
                 let private_rpcs = self.private_rpcs.as_ref().unwrap_or(&self.balanced_rpcs);
 
+                // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
                 let mut response = private_rpcs
                     .try_send_all_upstream_servers(
                         authorization,
-                        request,
+                        &request,
                         Some(request_metadata.clone()),
                         None,
                         Level::Trace,
                     )
                     .await?;
 
-                response.id = request_id;
+                // sometimes we get an error that the transaction is already known by our nodes,
+                // that's not really an error. Just return the hash like a successful response would.
+                if let Some(response_error) = response.error.as_ref() {
+                    if response_error.code == -32000
+                        && (response_error.message == "ALREADY_EXISTS: already known"
+                            || response_error.message
+                                == "INTERNAL_ERROR: existing tx with same hash")
+                    {
+                        let params = request
+                            .params
+                            .context("there must be params if we got this far")?;
+
+                        let params = params
+                            .as_array()
+                            .context("there must be an array if we got this far")?
+                            .get(0)
+                            .context("there must be an item if we got this far")?
+                            .as_str()
+                            .context("there must be a string if we got this far")?;
+
+                        let params = Bytes::from_str(params)
+                            .expect("there must be Bytes if we got this far");
+
+                        let rlp = Rlp::new(params.as_ref());
+
+                        if let Ok(tx) = Transaction::decode(&rlp) {
+                            let tx_hash = json!(tx.hash());
+
+                            debug!("tx_hash: {:#?}", tx_hash);
+
+                            let tx_hash = to_raw_value(&tx_hash).unwrap();
+
+                            response.error = None;
+                            response.result = Some(tx_hash);
+                        }
+                    }
+                }
 
                 let rpcs = request_metadata.backend_requests.lock().clone();
 
@@ -1143,7 +1183,7 @@ impl Web3ProxyApp {
                                 // discard their id by replacing it with an empty
                                 response.id = Default::default();
 
-                                // TODO: only cache the inner response (or error)
+                                // TODO: only cache the inner response
                                 Ok::<_, anyhow::Error>(response)
                             })
                             .await
@@ -1152,23 +1192,17 @@ impl Web3ProxyApp {
                                 // TODO: emit a stat for an error
                                 anyhow::anyhow!(err)
                             })
-                            .context("caching response")?
+                            .context("error while forwarding and caching response")?
                     } else {
-                        let mut response = self
-                            .balanced_rpcs
+                        self.balanced_rpcs
                             .try_send_best_upstream_server(
                                 &authorization,
                                 request,
                                 Some(&request_metadata),
                                 None,
                             )
-                            .await?;
-
-                        // discard their id by replacing it with an empty
-                        response.id = Default::default();
-
-                        // TODO: only cache the inner response (or error)
-                        response
+                            .await
+                            .context("error while forwarding response")?
                     }
                 };
 

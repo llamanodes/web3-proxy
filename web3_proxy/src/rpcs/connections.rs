@@ -310,11 +310,12 @@ impl Web3Connections {
     pub async fn try_send_parallel_requests(
         &self,
         active_request_handles: Vec<OpenRequestHandle>,
+        id: Box<RawValue>,
         method: &str,
         params: Option<&serde_json::Value>,
         error_level: Level,
         // TODO: remove this box once i figure out how to do the options
-    ) -> Result<Box<RawValue>, ProviderError> {
+    ) -> anyhow::Result<JsonRpcForwardedResponse> {
         // TODO: if only 1 active_request_handles, do self.try_send_request?
 
         let responses = active_request_handles
@@ -330,17 +331,24 @@ impl Web3Connections {
             .await;
 
         // TODO: Strings are not great keys, but we can't use RawValue or ProviderError as keys because they don't implement Hash or Eq
-        let mut count_map: HashMap<String, Result<Box<RawValue>, ProviderError>> = HashMap::new();
+        let mut count_map: HashMap<String, _> = HashMap::new();
         let mut counts: Counter<String> = Counter::new();
-        let mut any_ok = false;
-        for response in responses {
-            // TODO: i think we need to do something smarter with provider error. we at least need to wrap it up as JSON
-            // TODO: emit stats errors?
+        let mut any_ok_with_json_result = false;
+        let mut any_ok_but_maybe_json_error = false;
+        for partial_response in responses {
+            if partial_response.is_ok() {
+                any_ok_with_json_result = true;
+            }
+
+            let response =
+                JsonRpcForwardedResponse::try_from_response_result(partial_response, id.clone());
+
+            // TODO: better key?
             let s = format!("{:?}", response);
 
             if count_map.get(&s).is_none() {
                 if response.is_ok() {
-                    any_ok = true;
+                    any_ok_but_maybe_json_error = true;
                 }
 
                 count_map.insert(s.clone(), response);
@@ -350,14 +358,26 @@ impl Web3Connections {
         }
 
         for (most_common, _) in counts.most_common_ordered() {
-            let most_common = count_map.remove(&most_common).unwrap();
+            let most_common = count_map
+                .remove(&most_common)
+                .expect("most_common key must exist");
 
-            if any_ok && most_common.is_err() {
-                //  errors were more common, but we are going to skip them because we got an okay
-                continue;
-            } else {
-                // return the most common
-                return most_common;
+            match most_common {
+                Ok(x) => {
+                    if any_ok_with_json_result && x.error.is_some() {
+                        // this one may be an "Ok", but the json has an error inside it
+                        continue;
+                    }
+                    // return the most common success
+                    return Ok(x);
+                }
+                Err(err) => {
+                    if any_ok_but_maybe_json_error {
+                        // the most common is an error, but there is an Ok in here somewhere. loop to find it
+                        continue;
+                    }
+                    return Err(err);
+                }
             }
         }
 
@@ -719,18 +739,18 @@ impl Web3Connections {
                 .store(true, Ordering::Release);
         }
 
-        warn!("No synced servers! {:?}", self);
+        let num_conns = self.conns.len();
 
-        // TODO: what error code? 502?
-        Err(anyhow::anyhow!("all {} tries exhausted", skip_rpcs.len()))
+        error!("No servers synced ({} known)", num_conns);
+
+        Err(anyhow::anyhow!("No servers synced ({} known)", num_conns))
     }
 
     /// be sure there is a timeout on this or it might loop forever
-
     pub async fn try_send_all_upstream_servers(
         &self,
         authorization: &Arc<Authorization>,
-        request: JsonRpcRequest,
+        request: &JsonRpcRequest,
         request_metadata: Option<Arc<RequestMetadata>>,
         block_needed: Option<&U64>,
         error_level: Level,
@@ -752,23 +772,15 @@ impl Web3Connections {
                             .extend(active_request_handles.iter().map(|x| x.clone_connection()));
                     }
 
-                    let quorum_response = self
+                    return self
                         .try_send_parallel_requests(
                             active_request_handles,
+                            request.id.clone(),
                             request.method.as_ref(),
                             request.params.as_ref(),
                             error_level,
                         )
-                        .await?;
-
-                    let response = JsonRpcForwardedResponse {
-                        jsonrpc: "2.0".to_string(),
-                        id: request.id,
-                        result: Some(quorum_response),
-                        error: None,
-                    };
-
-                    return Ok(response);
+                        .await;
                 }
                 Err(None) => {
                     warn!("No servers in sync on {:?}! Retrying", self);

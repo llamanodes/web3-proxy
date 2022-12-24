@@ -28,7 +28,8 @@ use handlebars::Handlebars;
 use hashbrown::HashMap;
 use http::StatusCode;
 use log::{error, info, trace, warn};
-use serde_json::{json, value::RawValue};
+use serde_json::json;
+use serde_json::value::to_raw_value;
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 
@@ -264,7 +265,8 @@ async fn handle_socket_payload(
         }
         Err(err) => {
             // TODO: move this logic somewhere else and just set id to None here
-            let id = RawValue::from_string("null".to_string()).expect("null can always be a value");
+            let id =
+                to_raw_value(&json!(None::<Option::<()>>)).expect("None can always be a RawValue");
             (id, Err(err.into()))
         }
     };
