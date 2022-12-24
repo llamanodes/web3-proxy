@@ -192,7 +192,9 @@ where
 
                 // if close to max_per_period, wait for redis
                 // TODO: how close should we allow? depends on max expected concurent requests from one user
-                if expected_key_count > max_requests_per_period * 99 / 100 {
+                let limit: f64 = (max_requests_per_period as f64 * 0.99)
+                    .min(max_requests_per_period as f64 - 1.0);
+                if expected_key_count > limit as u64 {
                     // close to period. don't risk it. wait on redis
                     Ok(rate_limit_f.await)
                 } else {
