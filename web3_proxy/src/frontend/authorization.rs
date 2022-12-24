@@ -609,7 +609,7 @@ impl Web3ProxyApp {
                             if let Some(allowed_ips) = rpc_key_model.allowed_ips {
                                 let x = allowed_ips
                                     .split(',')
-                                    .map(|x| x.parse::<IpNet>())
+                                    .map(|x| x.trim().parse::<IpNet>())
                                     .collect::<Result<Vec<_>, _>>()?;
                                 Some(x)
                             } else {
@@ -621,7 +621,7 @@ impl Web3ProxyApp {
                                 // TODO: do this without collecting twice?
                                 let x = allowed_origins
                                     .split(',')
-                                    .map(HeaderValue::from_str)
+                                    .map(|x| HeaderValue::from_str(x.trim()))
                                     .collect::<Result<Vec<_>, _>>()?
                                     .into_iter()
                                     .map(|x| Origin::decode(&mut [x].iter()))
@@ -636,7 +636,7 @@ impl Web3ProxyApp {
                             if let Some(allowed_referers) = rpc_key_model.allowed_referers {
                                 let x = allowed_referers
                                     .split(',')
-                                    .map(|x| x.parse::<Referer>())
+                                    .map(|x| x.trim().parse::<Referer>())
                                     .collect::<Result<Vec<_>, _>>()?;
 
                                 Some(x)
@@ -648,7 +648,7 @@ impl Web3ProxyApp {
                             if let Some(allowed_user_agents) = rpc_key_model.allowed_user_agents {
                                 let x: Result<Vec<_>, _> = allowed_user_agents
                                     .split(',')
-                                    .map(|x| x.parse::<UserAgent>())
+                                    .map(|x| x.trim().parse::<UserAgent>())
                                     .collect();
 
                                 Some(x?)

@@ -645,7 +645,7 @@ pub async fn rpc_keys_management(
             // split allowed ips on ',' and try to parse them all. error on invalid input
             let allowed_ips = allowed_ips
                 .split(',')
-                .map(|x| x.parse::<IpNet>())
+                .map(|x| x.trim().parse::<IpNet>())
                 .collect::<Result<Vec<_>, _>>()?
                 // parse worked. convert back to Strings
                 .into_iter()
@@ -667,7 +667,7 @@ pub async fn rpc_keys_management(
             // split allowed_origins on ',' and try to parse them all. error on invalid input
             let allowed_origins = allowed_origins
                 .split(',')
-                .map(HeaderValue::from_str)
+                .map(|x| HeaderValue::from_str(x.trim()))
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .map(|x| Origin::decode(&mut [x].iter()))
@@ -691,7 +691,7 @@ pub async fn rpc_keys_management(
             // split allowed ips on ',' and try to parse them all. error on invalid input
             let allowed_referers = allowed_referers
                 .split(',')
-                .map(HeaderValue::from_str)
+                .map(|x| HeaderValue::from_str(x.trim()))
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .map(|x| Referer::decode(&mut [x].iter()))
@@ -727,7 +727,7 @@ pub async fn rpc_keys_management(
             // split allowed_user_agents on ',' and try to parse them all. error on invalid input
             let allowed_user_agents = allowed_user_agents
                 .split(',')
-                .filter_map(|x| x.parse::<UserAgent>().ok())
+                .filter_map(|x| x.trim().parse::<UserAgent>().ok())
                 // parse worked. convert back to String
                 .map(|x| x.to_string());
 
