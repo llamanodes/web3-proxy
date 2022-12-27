@@ -2,7 +2,6 @@ flamegraph.svg
 perf.data
 perf.data.old
 
-/.git
 /bin/
 /data/
 /docker-compose*
