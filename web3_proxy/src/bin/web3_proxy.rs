@@ -336,6 +336,7 @@ mod tests {
                 ),
             ]),
             private_rpcs: None,
+            extra: Default::default(),
         };
 
         let (shutdown_sender, _) = broadcast::channel(1);

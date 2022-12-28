@@ -1,13 +1,12 @@
 use anyhow::Context;
 use argh::FromArgs;
-use entities::{rpc_key, user, user_tier};
+use entities::{user, user_tier};
+use ethers::types::Address;
 use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
-use uuid::Uuid;
-use ethers::types::Address;
 
 /// change a user's tier.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
