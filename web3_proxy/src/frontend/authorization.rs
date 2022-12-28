@@ -331,11 +331,14 @@ pub async fn ip_is_authorized(
     {
         RateLimitResult::Allowed(authorization, semaphore) => (authorization, semaphore),
         RateLimitResult::RateLimited(authorization, retry_at) => {
+            // TODO: in the background, emit a stat (maybe simplest to use a channel?)
             return Err(FrontendErrorResponse::RateLimited(authorization, retry_at));
         }
         // TODO: don't panic. give the user an error
         x => unimplemented!("rate_limit_by_ip shouldn't ever see these: {:?}", x),
     };
+
+    // TODO: in the background, add the ip to a recent_users map
 
     Ok((authorization, semaphore))
 }

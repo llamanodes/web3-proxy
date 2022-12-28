@@ -22,25 +22,23 @@ pub async fn proxy_web3_rpc(
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> FrontendResult {
-    let f = tokio::spawn(async move {
-        // TODO: do we care about keeping the TypedHeader wrapper?
-        let origin = origin.map(|x| x.0);
+    // TODO: benchmark spawning this
+    // TODO: do we care about keeping the TypedHeader wrapper?
+    let origin = origin.map(|x| x.0);
 
-        let (authorization, semaphore) = ip_is_authorized(&app, ip, origin).await?;
+    let (authorization, semaphore) = ip_is_authorized(&app, ip, origin).await?;
 
-        let authorization = Arc::new(authorization);
+    let authorization = Arc::new(authorization);
 
-        app.proxy_web3_rpc(authorization, payload)
-            .await
-            .map(|(x, y)| (x, y, semaphore))
-    });
-
-    let (response, rpcs, _semaphore) = f.await??;
+    let (response, rpcs, _semaphore) = app.proxy_web3_rpc(authorization, payload)
+        .await
+        .map(|(x, y)| (x, y, semaphore))?;
 
     let mut response = Json(&response).into_response();
 
     let headers = response.headers_mut();
 
+    // TODO: this might be slow. think about this more
     // TODO: special string if no rpcs were used (cache hit)?
     let rpcs: String = rpcs.into_iter().map(|x| x.name.clone()).join(",");
 
@@ -68,27 +66,23 @@ pub async fn proxy_web3_rpc_with_key(
 ) -> FrontendResult {
     // TODO: DRY w/ proxy_web3_rpc
     // the request can take a while, so we spawn so that we can start serving another request
-    let f = tokio::spawn(async move {
-        let rpc_key = rpc_key.parse()?;
+    let rpc_key = rpc_key.parse()?;
 
-        let (authorization, semaphore) = key_is_authorized(
-            &app,
-            rpc_key,
-            ip,
-            origin.map(|x| x.0),
-            referer.map(|x| x.0),
-            user_agent.map(|x| x.0),
-        )
-        .await?;
+    let (authorization, semaphore) = key_is_authorized(
+        &app,
+        rpc_key,
+        ip,
+        origin.map(|x| x.0),
+        referer.map(|x| x.0),
+        user_agent.map(|x| x.0),
+    )
+    .await?;
 
-        let authorization = Arc::new(authorization);
+    let authorization = Arc::new(authorization);
 
-        app.proxy_web3_rpc(authorization, payload)
-            .await
-            .map(|(x, y)| (x, y, semaphore))
-    });
-
-    let (response, rpcs, _semaphore) = f.await??;
+    let (response, rpcs, _semaphore) = app.proxy_web3_rpc(authorization, payload)
+        .await
+        .map(|(x, y)| (x, y, semaphore))?;
 
     let mut response = Json(&response).into_response();
 
