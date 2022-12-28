@@ -22,14 +22,6 @@ pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoRe
     }
 }
 
-/// Prometheus metrics.
-///
-/// TODO: when done debugging, remove this and only allow access on a different port
-#[debug_handler]
-pub async fn prometheus(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
-    app.prometheus_metrics()
-}
-
 /// Very basic status page.
 ///
 /// TODO: replace this with proper stats and monitoring

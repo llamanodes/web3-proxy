@@ -18,6 +18,7 @@ use crate::rpcs::transactions::TxStatus;
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::{Origin, Referer, UserAgent};
+use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimiter;
 use derive_more::From;
 use entities::sea_orm_active_enums::LogLevel;
@@ -37,6 +38,7 @@ use migration::sea_orm::{self, ConnectionTrait, Database, DatabaseConnection};
 use migration::sea_query::table::ColumnDef;
 use migration::{Alias, DbErr, Migrator, MigratorTrait, Table};
 use moka::future::Cache;
+use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use serde::Serialize;
 use serde_json::json;
@@ -695,20 +697,53 @@ impl Web3ProxyApp {
         Ok((app, cancellable_handles, important_background_handles).into())
     }
 
-    pub fn prometheus_metrics(&self) -> String {
+    pub async fn prometheus_metrics(&self) -> String {
         let globals = HashMap::new();
         // TODO: what globals? should this be the hostname or what?
         // globals.insert("service", "web3_proxy");
 
         #[derive(Serialize)]
+        struct RecentIps(i64);
+
+        let recent_ips = if let Ok(mut redis_conn) = self.redis_conn().await {
+            // TODO: delete any hash entries where
+            const ONE_DAY: i64 = 86400;
+
+            let oldest = Utc::now().timestamp() - ONE_DAY;
+
+            let recent_ips_key = format!("recent_ips:{}", self.config.chain_id);
+
+            // delete any entries that are too old
+            // TODO: pipe
+            if let Err(err) = redis_conn
+                .zrembyscore::<_, _, _, u64>(recent_ips_key, i64::MIN, oldest)
+                .await
+            {
+                warn!("unable to clear recent_ips: {}", err);
+            }
+
+            match redis_conn.zcount(recent_ips_key, i64::MIN, i64::MAX).await {
+                Ok(count) => RecentIps(count),
+                Err(err) => {
+                    warn!("unable to count recent_ips: {}", err);
+                    RecentIps(-1)
+                }
+            }
+        } else {
+            RecentIps(-1)
+        };
+
+        #[derive(Serialize)]
         struct CombinedMetrics<'a> {
             app: &'a Web3ProxyAppMetrics,
             backend_rpc: &'a OpenRequestHandleMetrics,
+            recent_ips: RecentIps,
         }
 
         let metrics = CombinedMetrics {
             app: &self.app_metrics,
             backend_rpc: &self.open_request_handle_metrics,
+            recent_ips,
         };
 
         serde_prometheus::to_string(&metrics, Some("web3_proxy"), globals)

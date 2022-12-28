@@ -30,7 +30,8 @@ pub async fn proxy_web3_rpc(
 
     let authorization = Arc::new(authorization);
 
-    let (response, rpcs, _semaphore) = app.proxy_web3_rpc(authorization, payload)
+    let (response, rpcs, _semaphore) = app
+        .proxy_web3_rpc(authorization, payload)
         .await
         .map(|(x, y)| (x, y, semaphore))?;
 
@@ -80,7 +81,8 @@ pub async fn proxy_web3_rpc_with_key(
 
     let authorization = Arc::new(authorization);
 
-    let (response, rpcs, _semaphore) = app.proxy_web3_rpc(authorization, payload)
+    let (response, rpcs, _semaphore) = app
+        .proxy_web3_rpc(authorization, payload)
         .await
         .map(|(x, y)| (x, y, semaphore))?;
 

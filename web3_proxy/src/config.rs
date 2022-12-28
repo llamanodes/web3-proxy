@@ -120,6 +120,9 @@ pub struct AppConfig {
     /// None = allow all requests
     pub public_requests_per_period: Option<u64>,
 
+    /// Salt for hashing recent ips
+    pub public_recent_ips_salt: Option<String>,
+
     /// RPC responses are cached locally
     #[serde(default = "default_response_cache_max_bytes")]
     pub response_cache_max_bytes: usize,

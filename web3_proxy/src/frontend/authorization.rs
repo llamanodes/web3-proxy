@@ -10,12 +10,16 @@ use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::{login, rpc_key, user, user_tier};
+use ethers::types::Bytes;
+use ethers::utils::keccak256;
+use futures::TryFutureExt;
 use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
-use log::error;
+use log::{error, warn, debug};
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use parking_lot::Mutex;
+use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -319,7 +323,7 @@ pub async fn login_is_authorized(
 
 /// semaphore won't ever be None, but its easier if key auth and ip auth work the same way
 pub async fn ip_is_authorized(
-    app: &Web3ProxyApp,
+    app: &Arc<Web3ProxyApp>,
     ip: IpAddr,
     origin: Option<Origin>,
 ) -> Result<(Authorization, Option<OwnedSemaphorePermit>), FrontendErrorResponse> {
@@ -338,7 +342,42 @@ pub async fn ip_is_authorized(
         x => unimplemented!("rate_limit_by_ip shouldn't ever see these: {:?}", x),
     };
 
-    // TODO: in the background, add the ip to a recent_users map
+    let app = app.clone();
+
+    // TODO: in the background, add the ip to a recent_ips map
+    if app.config.public_recent_ips_salt.is_some() {
+        let f = async move {
+            let now = Utc::now().timestamp();
+
+            let mut redis_conn = app.redis_conn().await?;
+
+            let salt = app
+                .config
+                .public_recent_ips_salt
+                .as_ref()
+                .expect("public_recent_ips_salt must exist in here");
+
+            // TODO: how should we salt and hash the ips? do it faster?
+            let salted_ip = format!("{}:{}", salt, ip);
+
+            let hashed_ip = Bytes::from(keccak256(salted_ip.as_bytes()));
+
+            let recent_ips_key = format!("recent_ips:{}", app.config.chain_id);
+
+            redis_conn
+                .zadd(recent_ips_key, hashed_ip.to_string(), now)
+                .await?;
+
+            Ok::<_, anyhow::Error>(())
+        }
+        .map_err(|err| {
+            warn!("background update of recent_ips failed: {}", err);
+
+            err
+        });
+
+        tokio::spawn(f);
+    }
 
     Ok((authorization, semaphore))
 }

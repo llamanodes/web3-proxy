@@ -315,6 +315,7 @@ impl StatEmitter {
             period_seconds,
         };
 
+        // TODO: send any errors somewhere
         let handle =
             tokio::spawn(async move { new.stat_loop(stat_receiver, shutdown_receiver).await });
 

@@ -79,8 +79,6 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/user/stats/detailed", get(users::user_stats_detailed_get))
         .route("/user/logout", post(users::user_logout_post))
         .route("/status", get(status::status))
-        // TODO: make this optional or remove it since it is available on another port
-        .route("/prometheus", get(status::prometheus))
         // layers are ordered bottom up
         // the last layer is first for requests and last for responses
         // Mark the `Authorization` request header as sensitive so it doesn't show in logs

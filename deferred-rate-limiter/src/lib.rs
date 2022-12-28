@@ -199,6 +199,7 @@ where
                     Ok(rate_limit_f.await)
                 } else {
                     // rate limit has enough headroom that it should be safe to do this in the background
+                    // TODO: send an error here somewhere
                     tokio::spawn(rate_limit_f);
 
                     Ok(DeferredRateLimitResult::Allowed)
