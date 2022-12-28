@@ -716,7 +716,7 @@ impl Web3ProxyApp {
             // delete any entries that are too old
             // TODO: pipe
             if let Err(err) = redis_conn
-                .zrembyscore::<_, _, _, u64>(recent_ips_key, i64::MIN, oldest)
+                .zrembyscore::<_, _, _, u64>(recent_ips_key.clone(), i64::MIN, oldest)
                 .await
             {
                 warn!("unable to clear recent_ips: {}", err);
