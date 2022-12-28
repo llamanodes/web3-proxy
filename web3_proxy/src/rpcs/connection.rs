@@ -27,6 +27,7 @@ use thread_fast_rng::thread_fast_rng;
 use tokio::sync::{broadcast, oneshot, RwLock as AsyncRwLock};
 use tokio::time::{interval, sleep, sleep_until, timeout, Duration, Instant, MissedTickBehavior};
 
+// TODO: maybe provider state should have the block data limit in it. but it is inside an async lock and we can't Serialize then
 #[derive(Clone, Debug)]
 pub enum ProviderState {
     None,
@@ -178,16 +179,15 @@ impl Web3Connection {
         Ok((new_connection, handle))
     }
 
+    // TODO: would be great if rpcs exposed this. see https://github.com/ledgerwatch/erigon/issues/6391
     async fn check_block_data_limit(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
     ) -> anyhow::Result<Option<u64>> {
         if !self.automatic_block_limit {
-            // TODO: is this a good thing to return
+            // TODO: is this a good thing to return?
             return Ok(None);
         }
-
-        let mut limit = None;
 
         // check if we are synced
         let head_block: ArcBlock = self
@@ -204,12 +204,12 @@ impl Web3Connection {
 
         if SavedBlock::from(head_block).syncing() {
             // if the node is syncing, we can't check its block data limit
-            // TODO: once a node stops syncing, how do we make sure this is run?
-            self.block_data_limit.store(0, atomic::Ordering::Release);
-            return Ok(Some(0));
+            return Ok(None);
         }
 
         // TODO: add SavedBlock to self? probably best not to. we might not get marked Ready
+
+        let mut limit = None;
 
         // TODO: binary search between 90k and max?
         // TODO: start at 0 or 1?
@@ -292,7 +292,7 @@ impl Web3Connection {
             Some(x) => {
                 if x.syncing() {
                     // skip syncing nodes. even though they might be able to serve a query,
-                    // latency will be poor and
+                    // latency will be poor and it will get in the way of them syncing further
                     return false;
                 }
 
@@ -461,11 +461,6 @@ impl Web3Connection {
             }
         }
 
-        // we could take "archive" as a parameter, but we would want a safety check on it regardless
-        // check common archive thresholds
-        // TODO: would be great if rpcs exposed this
-        // TODO: move this to a helper function so we can recheck on errors or as the chain grows
-        // TODO: move this to a helper function that checks
         self.check_block_data_limit(&authorization).await?;
 
         {
@@ -1105,11 +1100,13 @@ impl Serialize for Web3Connection {
         // a longer name for display to users
         state.serialize_field("display_name", &self.display_name)?;
 
-        let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
-        if block_data_limit == u64::MAX {
-            state.serialize_field("block_data_limit", &None::<()>)?;
-        } else {
-            state.serialize_field("block_data_limit", &block_data_limit)?;
+        match self.block_data_limit.load(atomic::Ordering::Relaxed) {
+            u64::MAX => {
+                state.serialize_field("block_data_limit", &None::<()>)?;
+            }
+            block_data_limit => {
+                state.serialize_field("block_data_limit", &block_data_limit)?;
+            }
         }
 
         state.serialize_field("weight", &self.weight)?;
@@ -1126,9 +1123,11 @@ impl Serialize for Web3Connection {
             &self.frontend_requests.load(atomic::Ordering::Relaxed),
         )?;
 
-        // TODO: rename to head_block (need to work with the frontend team)
-        let head_block = &*self.head_block.read();
-        state.serialize_field("head_block", head_block)?;
+        {
+            // TODO: maybe this is too much data. serialize less?
+            let head_block = &*self.head_block.read();
+            state.serialize_field("head_block", head_block)?;
+        }
 
         state.end()
     }
