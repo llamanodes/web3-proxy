@@ -1,6 +1,7 @@
 mod change_user_address;
 mod change_user_address_by_key;
 mod change_user_tier;
+mod change_user_tier_by_address;
 mod change_user_tier_by_key;
 mod check_config;
 mod cost_calculator;
@@ -43,9 +44,10 @@ enum SubCommand {
     ChangeUserAddress(change_user_address::ChangeUserAddressCommand),
     ChangeUserAddressByKey(change_user_address_by_key::ChangeUserAddressByKeyCommand),
     ChangeUserTier(change_user_tier::ChangeUserTierCommand),
+    ChangeUserTierByAddress(change_user_tier_by_address::ChangeUserTierByAddressCommand),
     ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeyCommand),
-    CostCalculatorCommand(cost_calculator::CostCalculatorCommand),
     CheckConfig(check_config::CheckConfigSubCommand),
+    CostCalculatorCommand(cost_calculator::CostCalculatorCommand),
     CreateUser(create_user::CreateUserSubCommand),
     DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
     HealthCompass(health_compass::HealthCompassSubCommand),
@@ -97,6 +99,11 @@ async fn main() -> anyhow::Result<()> {
             x.main(&db_conn).await
         }
         SubCommand::ChangeUserTier(x) => {
+            let db_conn = get_db(cli_config.db_url, 1, 1).await?;
+
+            x.main(&db_conn).await
+        }
+        SubCommand::ChangeUserTierByAddress(x) => {
             let db_conn = get_db(cli_config.db_url, 1, 1).await?;
 
             x.main(&db_conn).await
