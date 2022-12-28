@@ -293,7 +293,7 @@ mod tests {
 
         // make a test TopConfig
         // TODO: load TopConfig from a file? CliConfig could have `cli_config.load_top_config`. would need to inject our endpoint ports
-        let app_config = TopConfig {
+        let top_config = TopConfig {
             app: AppConfig {
                 chain_id: 31337,
                 default_user_max_requests_per_period: Some(6_000_000),
@@ -317,6 +317,7 @@ mod tests {
                         hard_limit: None,
                         weight: 1,
                         subscribe_txs: Some(false),
+                        extra: Default::default(),
                     },
                 ),
                 (
@@ -330,6 +331,7 @@ mod tests {
                         hard_limit: None,
                         weight: 1,
                         subscribe_txs: Some(false),
+                        extra: Default::default(),
                     },
                 ),
             ]),
@@ -343,7 +345,7 @@ mod tests {
         let handle = {
             let shutdown_sender = shutdown_sender.clone();
 
-            thread::spawn(move || run(shutdown_sender, cli_config, app_config))
+            thread::spawn(move || run(shutdown_sender, cli_config, top_config))
         };
 
         // TODO: do something to the node. query latest block, mine another block, query again

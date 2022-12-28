@@ -345,6 +345,14 @@ impl Web3ProxyApp {
             );
         }
 
+        if !top_config.extra.is_empty() {
+            warn!("unknown TopConfig fields!: {:?}", top_config.app.extra.keys());
+        }
+
+        if !top_config.app.extra.is_empty() {
+            warn!("unknown Web3ProxyAppConfig fields!: {:?}", top_config.app.extra.keys());
+        }
+
         // setup metrics
         let app_metrics = Default::default();
         let open_request_handle_metrics: Arc<OpenRequestHandleMetrics> = Default::default();

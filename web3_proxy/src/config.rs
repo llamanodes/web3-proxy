@@ -5,6 +5,7 @@ use crate::{app::AnyhowJoinHandle, rpcs::blockchain::ArcBlock};
 use argh::FromArgs;
 use ethers::prelude::TxHash;
 use hashbrown::HashMap;
+use log::warn;
 use migration::sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -38,17 +39,19 @@ pub struct CliConfig {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct TopConfig {
     pub app: AppConfig,
     pub balanced_rpcs: HashMap<String, Web3ConnectionConfig>,
+    // TODO: instead of an option, give it a default
     pub private_rpcs: Option<HashMap<String, Web3ConnectionConfig>>,
+    /// unknown config options get put here
+    #[serde(flatten, default="HashMap::default")]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 /// shared configuration between Web3Connections
 // TODO: no String, only &str
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct AppConfig {
     /// Request limit for allowed origins for anonymous users.
     /// These requests get rate limited by IP.
@@ -143,6 +146,10 @@ pub struct AppConfig {
     /// maximum size of the connection pool for the cache
     /// If none, the minimum * 2 is used
     pub volatile_redis_max_connections: Option<usize>,
+
+    /// unknown config options get put here
+    #[serde(flatten, default="HashMap::default")]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 fn default_allowed_origin_requests_per_period() -> HashMap<String, u64> {
@@ -177,7 +184,6 @@ fn default_response_cache_max_bytes() -> usize {
 
 /// Configuration for a backend web3 RPC server
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Web3ConnectionConfig {
     /// simple way to disable a connection without deleting the row
     #[serde(default)]
@@ -199,6 +205,9 @@ pub struct Web3ConnectionConfig {
     /// Don't do this with free rpcs
     #[serde(default)]
     pub subscribe_txs: Option<bool>,
+    /// unknown config options get put here
+    #[serde(flatten, default="HashMap::default")]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 fn default_weight() -> u32 {
@@ -222,6 +231,10 @@ impl Web3ConnectionConfig {
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
         open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
+        if !self.extra.is_empty() {
+            warn!("unknown Web3ConnectionConfig fields!: {:?}", self.extra.keys());
+        }
+
         let hard_limit = match (self.hard_limit, redis_pool) {
             (None, None) => None,
             (Some(hard_limit), Some(redis_client_pool)) => Some((hard_limit, redis_client_pool)),
