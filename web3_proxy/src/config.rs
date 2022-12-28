@@ -45,7 +45,7 @@ pub struct TopConfig {
     // TODO: instead of an option, give it a default
     pub private_rpcs: Option<HashMap<String, Web3ConnectionConfig>>,
     /// unknown config options get put here
-    #[serde(flatten, default="HashMap::default")]
+    #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
 }
 
@@ -148,7 +148,7 @@ pub struct AppConfig {
     pub volatile_redis_max_connections: Option<usize>,
 
     /// unknown config options get put here
-    #[serde(flatten, default="HashMap::default")]
+    #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
 }
 
@@ -206,7 +206,7 @@ pub struct Web3ConnectionConfig {
     #[serde(default)]
     pub subscribe_txs: Option<bool>,
     /// unknown config options get put here
-    #[serde(flatten, default="HashMap::default")]
+    #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
 }
 
@@ -232,7 +232,10 @@ impl Web3ConnectionConfig {
         open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         if !self.extra.is_empty() {
-            warn!("unknown Web3ConnectionConfig fields!: {:?}", self.extra.keys());
+            warn!(
+                "unknown Web3ConnectionConfig fields!: {:?}",
+                self.extra.keys()
+            );
         }
 
         let hard_limit = match (self.hard_limit, redis_pool) {

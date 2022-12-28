@@ -342,10 +342,9 @@ pub async fn ip_is_authorized(
         x => unimplemented!("rate_limit_by_ip shouldn't ever see these: {:?}", x),
     };
 
-    let app = app.clone();
-
-    // TODO: in the background, add the ip to a recent_ips map
+    // in the background, add the ip to a recent_users map
     if app.config.public_recent_ips_salt.is_some() {
+        let app = app.clone();
         let f = async move {
             let now = Utc::now().timestamp();
 
@@ -357,21 +356,20 @@ pub async fn ip_is_authorized(
                 .as_ref()
                 .expect("public_recent_ips_salt must exist in here");
 
-            // TODO: how should we salt and hash the ips? do it faster?
             let salted_ip = format!("{}:{}", salt, ip);
 
             let hashed_ip = Bytes::from(keccak256(salted_ip.as_bytes()));
 
-            let recent_ips_key = format!("recent_ips:{}", app.config.chain_id);
+            let recent_ip_key = format!("recent_users:ip:{}", app.config.chain_id);
 
             redis_conn
-                .zadd(recent_ips_key, hashed_ip.to_string(), now)
+                .zadd(recent_ip_key, hashed_ip.to_string(), now)
                 .await?;
 
             Ok::<_, anyhow::Error>(())
         }
         .map_err(|err| {
-            warn!("background update of recent_ips failed: {}", err);
+            warn!("background update of recent_users:ip failed: {}", err);
 
             err
         });
@@ -384,7 +382,7 @@ pub async fn ip_is_authorized(
 
 /// like app.rate_limit_by_rpc_key but converts to a FrontendErrorResponse;
 pub async fn key_is_authorized(
-    app: &Web3ProxyApp,
+    app: &Arc<Web3ProxyApp>,
     rpc_key: RpcSecretKey,
     ip: IpAddr,
     origin: Option<Origin>,
@@ -403,6 +401,43 @@ pub async fn key_is_authorized(
         }
         RateLimitResult::UnknownKey => return Err(FrontendErrorResponse::UnknownKey),
     };
+
+    // TODO: DRY and maybe optimize the hashing
+    // in the background, add the ip to a recent_users map
+    if app.config.public_recent_ips_salt.is_some() {
+        let app = app.clone();
+        let user_id = authorization.checks.user_id;
+        let f = async move {
+            let now = Utc::now().timestamp();
+
+            let mut redis_conn = app.redis_conn().await?;
+
+            let salt = app
+                .config
+                .public_recent_ips_salt
+                .as_ref()
+                .expect("public_recent_ips_salt must exist in here");
+
+            let salted_user_id = format!("{}:{}", salt, user_id);
+
+            let hashed_user_id = Bytes::from(keccak256(salted_user_id.as_bytes()));
+
+            let recent_user_id_key = format!("recent_users:registered:{}", app.config.chain_id);
+
+            redis_conn
+                .zadd(recent_user_id_key, hashed_user_id.to_string(), now)
+                .await?;
+
+            Ok::<_, anyhow::Error>(())
+        }
+        .map_err(|err| {
+            warn!("background update of recent_users:ip failed: {}", err);
+
+            err
+        });
+
+        tokio::spawn(f);
+    }
 
     Ok((authorization, semaphore))
 }
@@ -434,18 +469,21 @@ impl Web3ProxyApp {
     }
 
     /// Limit the number of concurrent requests from the given rpc key.
-    pub async fn rpc_key_semaphore(
+    pub async fn registered_user_semaphore(
         &self,
         authorization_checks: &AuthorizationChecks,
     ) -> anyhow::Result<Option<OwnedSemaphorePermit>> {
         if let Some(max_concurrent_requests) = authorization_checks.max_concurrent_requests {
-            let rpc_key_id = authorization_checks.rpc_key_id.context("no rpc_key_id")?;
+            let user_id = authorization_checks
+                .user_id
+                .try_into()
+                .context("user ids should always be non-zero")?;
 
             let semaphore = self
-                .rpc_key_semaphores
-                .get_with(rpc_key_id, async move {
+                .registered_user_semaphores
+                .get_with(user_id, async move {
                     let s = Semaphore::new(max_concurrent_requests as usize);
-                    // // trace!("new semaphore for rpc_key_id {}", rpc_key_id);
+                    // trace!("new semaphore for user_id {}", user_id);
                     Arc::new(s)
                 })
                 .await;
@@ -739,9 +777,13 @@ impl Web3ProxyApp {
             return Ok(RateLimitResult::UnknownKey);
         }
 
+        // TODO: rpc_key should have an option to rate limit by ip instead of by key
+
         // only allow this rpc_key to run a limited amount of concurrent requests
         // TODO: rate limit should be BEFORE the semaphore!
-        let semaphore = self.rpc_key_semaphore(&authorization_checks).await?;
+        let semaphore = self
+            .registered_user_semaphore(&authorization_checks)
+            .await?;
 
         let authorization = Authorization::try_new(
             authorization_checks,
@@ -761,9 +803,13 @@ impl Web3ProxyApp {
         };
 
         // user key is valid. now check rate limits
-        if let Some(rate_limiter) = &self.frontend_key_rate_limiter {
+        if let Some(rate_limiter) = &self.frontend_registered_user_rate_limiter {
             match rate_limiter
-                .throttle(rpc_key.into(), Some(user_max_requests_per_period), 1)
+                .throttle(
+                    authorization.checks.user_id,
+                    Some(user_max_requests_per_period),
+                    1,
+                )
                 .await
             {
                 Ok(DeferredRateLimitResult::Allowed) => {
