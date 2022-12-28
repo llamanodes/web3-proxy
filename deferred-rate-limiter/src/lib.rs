@@ -44,6 +44,7 @@ where
 
         // TODO: time to live is not exactly right. we want this ttl counter to start only after redis is down. this works for now
         // TODO: what do these weigh?
+        // TODO: allow skipping max_capacity
         let local_cache = Cache::builder()
             .time_to_live(Duration::from_secs(ttl))
             .max_capacity(cache_size)
