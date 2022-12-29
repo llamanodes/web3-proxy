@@ -348,23 +348,23 @@ pub async fn ip_is_authorized(
         let f = async move {
             let now = Utc::now().timestamp();
 
-            let mut redis_conn = app.redis_conn().await?;
+            if let Some(mut redis_conn) = app.redis_conn().await? {
+                let salt = app
+                    .config
+                    .public_recent_ips_salt
+                    .as_ref()
+                    .expect("public_recent_ips_salt must exist in here");
 
-            let salt = app
-                .config
-                .public_recent_ips_salt
-                .as_ref()
-                .expect("public_recent_ips_salt must exist in here");
+                let salted_ip = format!("{}:{}", salt, ip);
 
-            let salted_ip = format!("{}:{}", salt, ip);
+                let hashed_ip = Bytes::from(keccak256(salted_ip.as_bytes()));
 
-            let hashed_ip = Bytes::from(keccak256(salted_ip.as_bytes()));
+                let recent_ip_key = format!("recent_users:ip:{}", app.config.chain_id);
 
-            let recent_ip_key = format!("recent_users:ip:{}", app.config.chain_id);
-
-            redis_conn
-                .zadd(recent_ip_key, hashed_ip.to_string(), now)
-                .await?;
+                redis_conn
+                    .zadd(recent_ip_key, hashed_ip.to_string(), now)
+                    .await?;
+            };
 
             Ok::<_, anyhow::Error>(())
         }
@@ -410,23 +410,23 @@ pub async fn key_is_authorized(
         let f = async move {
             let now = Utc::now().timestamp();
 
-            let mut redis_conn = app.redis_conn().await?;
+            if let Some(mut redis_conn) = app.redis_conn().await? {
+                let salt = app
+                    .config
+                    .public_recent_ips_salt
+                    .as_ref()
+                    .expect("public_recent_ips_salt must exist in here");
 
-            let salt = app
-                .config
-                .public_recent_ips_salt
-                .as_ref()
-                .expect("public_recent_ips_salt must exist in here");
+                let salted_user_id = format!("{}:{}", salt, user_id);
 
-            let salted_user_id = format!("{}:{}", salt, user_id);
+                let hashed_user_id = Bytes::from(keccak256(salted_user_id.as_bytes()));
 
-            let hashed_user_id = Bytes::from(keccak256(salted_user_id.as_bytes()));
+                let recent_user_id_key = format!("recent_users:registered:{}", app.config.chain_id);
 
-            let recent_user_id_key = format!("recent_users:registered:{}", app.config.chain_id);
-
-            redis_conn
-                .zadd(recent_user_id_key, hashed_user_id.to_string(), now)
-                .await?;
+                redis_conn
+                    .zadd(recent_user_id_key, hashed_user_id.to_string(), now)
+                    .await?;
+            }
 
             Ok::<_, anyhow::Error>(())
         }

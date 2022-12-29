@@ -268,6 +268,7 @@ pub async fn query_user_stats<'a>(
     let mut redis_conn = app
         .redis_conn()
         .await
+        .context("query_user_stats had a redis connection error")?
         .context("query_user_stats needs a redis")?;
 
     // get the user id first. if it is 0, we should use a cache on the app
