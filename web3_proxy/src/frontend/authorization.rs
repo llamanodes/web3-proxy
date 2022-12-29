@@ -421,7 +421,7 @@ pub async fn key_is_authorized(
 
                 let hashed_user_id = Bytes::from(keccak256(salted_user_id.as_bytes()));
 
-                let recent_user_id_key = format!("recent_users:registered:{}", app.config.chain_id);
+                let recent_user_id_key = format!("recent_users:id:{}", app.config.chain_id);
 
                 redis_conn
                     .zadd(recent_user_id_key, hashed_user_id.to_string(), now)
@@ -431,7 +431,7 @@ pub async fn key_is_authorized(
             Ok::<_, anyhow::Error>(())
         }
         .map_err(|err| {
-            warn!("background update of recent_users:ip failed: {}", err);
+            warn!("background update of recent_users:id failed: {}", err);
 
             err
         });
