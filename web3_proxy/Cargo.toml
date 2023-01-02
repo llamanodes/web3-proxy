@@ -20,7 +20,7 @@ redis-rate-limiter = { path = "../redis-rate-limiter" }
 thread-fast-rng = { path = "../thread-fast-rng" }
 
 anyhow = { version = "1.0.68", features = ["backtrace"] }
-arc-swap = "1.5.1"
+arc-swap = "1.6.0"
 argh = "0.1.9"
 axum = { version = "0.6.1", features = ["headers", "ws"] }
 axum-client-ip = "0.3.0"
