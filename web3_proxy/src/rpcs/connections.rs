@@ -573,8 +573,7 @@ impl Web3Connections {
                     continue;
                 }
             } else if connection.syncing() {
-                    continue;
-                }
+                continue;
             }
 
             // check rate limits and increment our connection counter
