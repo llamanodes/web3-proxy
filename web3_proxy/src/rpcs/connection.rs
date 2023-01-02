@@ -286,6 +286,13 @@ impl Web3Connection {
         self.block_data_limit.load(atomic::Ordering::Relaxed).into()
     }
 
+    pub fn syncing(&self) -> bool {
+        match self.head_block.read().clone() {
+            None => true,
+            Some(x) => x.syncing(),
+        }
+    }
+
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
         let head_block_num = match self.head_block.read().clone() {
             None => return false,

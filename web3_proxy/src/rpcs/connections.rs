@@ -572,6 +572,9 @@ impl Web3Connections {
                 if !connection.has_block_data(block_needed) {
                     continue;
                 }
+            } else if connection.syncing() {
+                    continue;
+                }
             }
 
             // check rate limits and increment our connection counter

@@ -1158,7 +1158,7 @@ impl Web3ProxyApp {
                         if let Ok(tx) = Transaction::decode(&rlp) {
                             let tx_hash = json!(tx.hash());
 
-                            debug!("tx_hash: {:#?}", tx_hash);
+                            trace!("tx_hash: {:#?}", tx_hash);
 
                             let tx_hash = to_raw_value(&tx_hash).unwrap();
 
