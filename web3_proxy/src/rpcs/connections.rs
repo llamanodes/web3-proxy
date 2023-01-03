@@ -388,6 +388,7 @@ impl Web3Connections {
     /// get the best available rpc server
     pub async fn best_synced_backend_connection(
         &self,
+        allowed_lag: u64,
         authorization: &Arc<Authorization>,
         request_metadata: Option<&Arc<RequestMetadata>>,
         skip: &[Arc<Web3Connection>],
@@ -422,10 +423,17 @@ impl Web3Connections {
                 // TODO: double check has_block_data?
                 let synced_connections = self.synced_connections.load();
 
-                let head_num = match synced_connections.head_block.as_ref() {
+                let head_block = match synced_connections.head_block.as_ref() {
                     None => return Ok(OpenRequestResult::NotReady),
-                    Some(x) => x.number(),
+                    Some(x) => x,
                 };
+
+                // TODO: different allowed_lag depending on the chain
+                if head_block.syncing(allowed_lag) {
+                    return Ok(OpenRequestResult::NotReady);
+                }
+
+                let head_num = head_block.number();
 
                 let c: Vec<_> = synced_connections
                     .conns
@@ -607,8 +615,10 @@ impl Web3Connections {
     }
 
     /// be sure there is a timeout on this or it might loop forever
+    /// TODO: do not take allowed_lag here. have it be on the connections struct instead
     pub async fn try_send_best_upstream_server(
         &self,
+        allowed_lag: u64,
         authorization: &Arc<Authorization>,
         request: JsonRpcRequest,
         request_metadata: Option<&Arc<RequestMetadata>>,
@@ -624,6 +634,7 @@ impl Web3Connections {
             }
             match self
                 .best_synced_backend_connection(
+                    allowed_lag,
                     authorization,
                     request_metadata,
                     &skip_rpcs,
@@ -1011,8 +1022,9 @@ mod tests {
         );
 
         // best_synced_backend_connection requires servers to be synced with the head block
+        // TODO: don't hard code allowed_lag
         let x = conns
-            .best_synced_backend_connection(&authorization, None, &[], None)
+            .best_synced_backend_connection(60, &authorization, None, &[], None)
             .await
             .unwrap();
 
@@ -1067,21 +1079,21 @@ mod tests {
 
         assert!(matches!(
             conns
-                .best_synced_backend_connection(&authorization, None, &[], None)
+                .best_synced_backend_connection(60, &authorization, None, &[], None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         assert!(matches!(
             conns
-                .best_synced_backend_connection(&authorization, None, &[], Some(&0.into()))
+                .best_synced_backend_connection(60, &authorization, None, &[], Some(&0.into()))
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         assert!(matches!(
             conns
-                .best_synced_backend_connection(&authorization, None, &[], Some(&1.into()))
+                .best_synced_backend_connection(60, &authorization, None, &[], Some(&1.into()))
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
@@ -1089,7 +1101,7 @@ mod tests {
         // future block should not get a handle
         assert!(matches!(
             conns
-                .best_synced_backend_connection(&authorization, None, &[], Some(&2.into()))
+                .best_synced_backend_connection(60, &authorization, None, &[], Some(&2.into()))
                 .await,
             Ok(OpenRequestResult::NotReady)
         ));
@@ -1219,7 +1231,13 @@ mod tests {
 
         // best_synced_backend_connection requires servers to be synced with the head block
         let best_head_server = conns
-            .best_synced_backend_connection(&authorization, None, &[], Some(&head_block.number()))
+            .best_synced_backend_connection(
+                60,
+                &authorization,
+                None,
+                &[],
+                Some(&head_block.number()),
+            )
             .await;
 
         assert!(matches!(
@@ -1228,7 +1246,7 @@ mod tests {
         ));
 
         let best_archive_server = conns
-            .best_synced_backend_connection(&authorization, None, &[], Some(&1.into()))
+            .best_synced_backend_connection(60, &authorization, None, &[], Some(&1.into()))
             .await;
 
         match best_archive_server {

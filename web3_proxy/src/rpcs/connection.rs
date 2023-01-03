@@ -202,7 +202,7 @@ impl Web3Connection {
             .await?
             .context("no block during check_block_data_limit!")?;
 
-        if SavedBlock::from(head_block).syncing() {
+        if SavedBlock::from(head_block).syncing(60) {
             // if the node is syncing, we can't check its block data limit
             return Ok(None);
         }
@@ -289,7 +289,7 @@ impl Web3Connection {
     pub fn syncing(&self) -> bool {
         match self.head_block.read().clone() {
             None => true,
-            Some(x) => x.syncing(),
+            Some(x) => x.syncing(60),
         }
     }
 
@@ -297,7 +297,7 @@ impl Web3Connection {
         let head_block_num = match self.head_block.read().clone() {
             None => return false,
             Some(x) => {
-                if x.syncing() {
+                if x.syncing(60) {
                     // skip syncing nodes. even though they might be able to serve a query,
                     // latency will be poor and it will get in the way of them syncing further
                     return false;

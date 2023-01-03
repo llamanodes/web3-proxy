@@ -55,23 +55,16 @@ impl SavedBlock {
     }
 
     pub fn lag(&self) -> u64 {
-        // TODO: read this from a global config. different chains should probably have different gaps.
-        let allowed_lag: u64 = 60;
-
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("there should always be time");
 
-        // TODO: get this from config
-        // TODO: is this safe enough? what if something about the chain is actually lagged? what if its a chain like BTC with 10 minute blocks?
-        let oldest_allowed = now - Duration::from_secs(allowed_lag);
-
         let block_timestamp = Duration::from_secs(self.block.timestamp.as_u64());
 
-        if block_timestamp < oldest_allowed {
+        if block_timestamp < now {
             // this server is still syncing from too far away to serve requests
             // u64 is safe because ew checked equality above
-            (oldest_allowed - block_timestamp).as_secs() as u64
+            (now - block_timestamp).as_secs() as u64
         } else {
             0
         }
@@ -87,9 +80,8 @@ impl SavedBlock {
     }
 
     /// When the block was received, this node was still syncing
-    pub fn syncing(&self) -> bool {
-        // TODO: margin should come from a global config
-        self.lag > 60
+    pub fn syncing(&self, allowed_lag: u64) -> bool {
+        self.lag > allowed_lag
     }
 }
 
@@ -103,7 +95,7 @@ impl Display for SavedBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} ({})", self.number(), self.hash())?;
 
-        if self.syncing() {
+        if self.syncing(0) {
             write!(f, " (behind by {} seconds)", self.lag)?;
         }
 
@@ -177,8 +169,9 @@ impl Web3Connections {
                 let request: JsonRpcRequest = serde_json::from_value(request)?;
 
                 // TODO: request_metadata? maybe we should put it in the authorization?
+                // TODO: don't hard code allowed lag
                 let response = self
-                    .try_send_best_upstream_server(authorization, request, None, None)
+                    .try_send_best_upstream_server(60, authorization, request, None, None)
                     .await?;
 
                 let block = response.result.context("failed fetching block")?;
@@ -254,7 +247,7 @@ impl Web3Connections {
         // TODO: if error, retry?
         // TODO: request_metadata or authorization?
         let response = self
-            .try_send_best_upstream_server(authorization, request, None, Some(num))
+            .try_send_best_upstream_server(60, authorization, request, None, Some(num))
             .await?;
 
         let raw_block = response.result.context("no block result")?;
@@ -324,7 +317,8 @@ impl Web3Connections {
                 // we don't know if its on the heaviest chain yet
                 self.save_block(&rpc_head_block.block, false).await?;
 
-                if rpc_head_block.syncing() {
+                // TODO: don't default to 60. different chains are differen
+                if rpc_head_block.syncing(60) {
                     if connection_heads.remove(&rpc.name).is_some() {
                         warn!("{} is behind by {} seconds", &rpc.name, rpc_head_block.lag);
                     } else {
