@@ -62,6 +62,7 @@ impl ProviderState {
 pub struct Web3Connection {
     pub name: String,
     pub display_name: Option<String>,
+    pub db_conn: Option<DatabaseConnection>,
     /// TODO: can we get this from the provider? do we even need it?
     pub(super) url: String,
     /// Some connections use an http_client. we keep a clone for reconnecting
@@ -137,6 +138,7 @@ impl Web3Connection {
 
         let new_connection = Self {
             name,
+            db_conn: db_conn.clone(),
             display_name,
             http_client,
             url: url_str,
@@ -272,6 +274,10 @@ impl Web3Connection {
         }
 
         if let Some(limit) = limit {
+            if limit == 0 {
+                warn!("{} is unable to serve requests", self);
+            }
+
             self.block_data_limit
                 .store(limit, atomic::Ordering::Release);
         }
@@ -283,7 +289,7 @@ impl Web3Connection {
 
     /// TODO: this might be too simple. different nodes can prune differently. its possible we will have a block range
     pub fn block_data_limit(&self) -> U64 {
-        self.block_data_limit.load(atomic::Ordering::Relaxed).into()
+        self.block_data_limit.load(atomic::Ordering::Acquire).into()
     }
 
     pub fn syncing(&self) -> bool {
@@ -534,6 +540,16 @@ impl Web3Connection {
                     let mut head_block = self.head_block.write();
 
                     let _ = head_block.insert(new_head_block.clone().into());
+                }
+
+                if self.block_data_limit() == U64::zero() && !self.syncing() {
+                    let authorization = Arc::new(Authorization::internal(self.db_conn.clone())?);
+                    if let Err(err) = self.check_block_data_limit(&authorization).await {
+                        warn!(
+                            "failed checking block limit after {} finished syncing. {:?}",
+                            self, err
+                        );
+                    }
                 }
 
                 Some(new_head_block)
@@ -1194,6 +1210,7 @@ mod tests {
 
         let x = Web3Connection {
             name: "name".to_string(),
+            db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),
             http_client: None,
@@ -1240,6 +1257,7 @@ mod tests {
         // TODO: this is getting long. have a `impl Default`
         let x = Web3Connection {
             name: "name".to_string(),
+            db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),
             http_client: None,
@@ -1290,6 +1308,7 @@ mod tests {
 
         let x = Web3Connection {
             name: "name".to_string(),
+            db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),
             http_client: None,

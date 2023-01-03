@@ -931,6 +931,7 @@ mod tests {
 
         let head_rpc = Web3Connection {
             name: "synced".to_string(),
+            db_conn: None,
             display_name: None,
             url: "ws://example.com/synced".to_string(),
             http_client: None,
@@ -949,6 +950,7 @@ mod tests {
 
         let lagged_rpc = Web3Connection {
             name: "lagged".to_string(),
+            db_conn: None,
             display_name: None,
             url: "ws://example.com/lagged".to_string(),
             http_client: None,
@@ -1151,6 +1153,7 @@ mod tests {
 
         let pruned_rpc = Web3Connection {
             name: "pruned".to_string(),
+            db_conn: None,
             display_name: None,
             url: "ws://example.com/pruned".to_string(),
             http_client: None,
@@ -1169,6 +1172,7 @@ mod tests {
 
         let archive_rpc = Web3Connection {
             name: "archive".to_string(),
+            db_conn: None,
             display_name: None,
             url: "ws://example.com/archive".to_string(),
             http_client: None,
