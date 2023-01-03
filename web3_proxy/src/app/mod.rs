@@ -21,6 +21,7 @@ use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimiter;
 use derive_more::From;
 use entities::sea_orm_active_enums::LogLevel;
+use entities::user;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, Bytes, Transaction, TxHash, H256, U64};
 use ethers::utils::rlp::{Decodable, Rlp};
@@ -30,7 +31,9 @@ use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
 use log::{debug, error, info, trace, warn, Level};
 use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
-use migration::sea_orm::{self, ConnectionTrait, Database, DatabaseConnection};
+use migration::sea_orm::{
+    self, ConnectionTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait,
+};
 use migration::sea_query::table::ColumnDef;
 use migration::{Alias, DbErr, Migrator, MigratorTrait, Table};
 use moka::future::Cache;
@@ -711,6 +714,21 @@ impl Web3ProxyApp {
         // globals.insert("service", "web3_proxy");
 
         #[derive(Default, Serialize)]
+        struct UserCount(i64);
+
+        let user_count: UserCount = if let Some(db) = self.db_conn() {
+            match user::Entity::find().count(&db).await {
+                Ok(user_count) => UserCount(user_count as i64),
+                Err(err) => {
+                    warn!("unable to count users: {:?}", err);
+                    UserCount(-1)
+                }
+            }
+        } else {
+            UserCount(-1)
+        };
+
+        #[derive(Default, Serialize)]
         struct RecentCounts {
             one_week: i64,
             one_day: i64,
@@ -846,6 +864,7 @@ impl Web3ProxyApp {
             recent_ip_counts: RecentCounts,
             recent_user_id_counts: RecentCounts,
             recent_tx_counts: RecentCounts,
+            user_count: UserCount,
         }
 
         let metrics = CombinedMetrics {
@@ -854,6 +873,7 @@ impl Web3ProxyApp {
             recent_ip_counts,
             recent_user_id_counts,
             recent_tx_counts,
+            user_count,
         };
 
         serde_prometheus::to_string(&metrics, Some("web3_proxy"), globals)

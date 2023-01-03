@@ -12,7 +12,7 @@ use web3_proxy::frontend::authorization::RpcSecretKey;
 /// change a user's tier.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 #[argh(subcommand, name = "change_user_tier_by_key")]
-pub struct ChangeUserTierByKeyCommand {
+pub struct ChangeUserTierByKeySubCommand {
     #[argh(positional)]
     /// the RPC key owned by the user you want to change.
     rpc_secret_key: RpcSecretKey,
@@ -22,7 +22,7 @@ pub struct ChangeUserTierByKeyCommand {
     user_tier_title: String,
 }
 
-impl ChangeUserTierByKeyCommand {
+impl ChangeUserTierByKeySubCommand {
     // TODO: don't expose the RpcSecretKeys at all. Better to take a user/key id. this is definitely most convenient
 
     pub async fn main(self, db_conn: &DatabaseConnection) -> anyhow::Result<()> {

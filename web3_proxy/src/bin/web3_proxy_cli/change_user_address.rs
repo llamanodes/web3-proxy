@@ -11,7 +11,7 @@ use migration::sea_orm::{
 /// change a user's address.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 #[argh(subcommand, name = "change_user_address")]
-pub struct ChangeUserAddressCommand {
+pub struct ChangeUserAddressSubCommand {
     /// the address of the user you want to change
     #[argh(positional)]
     old_address: String,
@@ -21,7 +21,7 @@ pub struct ChangeUserAddressCommand {
     new_address: String,
 }
 
-impl ChangeUserAddressCommand {
+impl ChangeUserAddressSubCommand {
     pub async fn main(self, db_conn: &DatabaseConnection) -> anyhow::Result<()> {
         let old_address: Address = self.old_address.parse()?;
         let new_address: Address = self.new_address.parse()?;

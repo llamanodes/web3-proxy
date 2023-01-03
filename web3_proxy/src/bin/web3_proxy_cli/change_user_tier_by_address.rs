@@ -11,7 +11,7 @@ use migration::sea_orm::{
 /// change a user's tier.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 #[argh(subcommand, name = "change_user_tier_by_address")]
-pub struct ChangeUserTierByAddressCommand {
+pub struct ChangeUserTierByAddressSubCommand {
     #[argh(positional)]
     /// the address of the user you want to change.
     user_address: Address,
@@ -21,7 +21,7 @@ pub struct ChangeUserTierByAddressCommand {
     user_tier_title: String,
 }
 
-impl ChangeUserTierByAddressCommand {
+impl ChangeUserTierByAddressSubCommand {
     pub async fn main(self, db_conn: &DatabaseConnection) -> anyhow::Result<()> {
         let address: Vec<u8> = self.user_address.to_fixed_bytes().into();
 

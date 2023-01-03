@@ -10,7 +10,7 @@ use migration::sea_orm::{
 /// change a user's tier.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 #[argh(subcommand, name = "change_user_tier")]
-pub struct ChangeUserTierCommand {
+pub struct ChangeUserTierSubCommand {
     /// the title of the user tier you are going to modify.
     #[argh(positional)]
     user_tier_title: String,
@@ -24,7 +24,7 @@ pub struct ChangeUserTierCommand {
     max_concurrent_requests: Option<u32>,
 }
 
-impl ChangeUserTierCommand {
+impl ChangeUserTierSubCommand {
     // TODO: don't expose the RpcSecretKeys at all. Better to take a user/key id. this is definitely most convenient
 
     pub async fn main(self, db_conn: &DatabaseConnection) -> anyhow::Result<()> {

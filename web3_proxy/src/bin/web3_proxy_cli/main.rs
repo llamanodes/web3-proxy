@@ -5,6 +5,7 @@ mod change_user_tier_by_address;
 mod change_user_tier_by_key;
 mod check_config;
 mod cost_calculator;
+mod count_users;
 mod create_user;
 mod drop_migration_lock;
 mod health_compass;
@@ -41,13 +42,14 @@ pub struct CliConfig {
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand)]
 enum SubCommand {
-    ChangeUserAddress(change_user_address::ChangeUserAddressCommand),
-    ChangeUserAddressByKey(change_user_address_by_key::ChangeUserAddressByKeyCommand),
-    ChangeUserTier(change_user_tier::ChangeUserTierCommand),
-    ChangeUserTierByAddress(change_user_tier_by_address::ChangeUserTierByAddressCommand),
-    ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeyCommand),
+    ChangeUserAddress(change_user_address::ChangeUserAddressSubCommand),
+    ChangeUserAddressByKey(change_user_address_by_key::ChangeUserAddressByKeySubCommand),
+    ChangeUserTier(change_user_tier::ChangeUserTierSubCommand),
+    ChangeUserTierByAddress(change_user_tier_by_address::ChangeUserTierByAddressSubCommand),
+    ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeySubCommand),
     CheckConfig(check_config::CheckConfigSubCommand),
-    CostCalculatorCommand(cost_calculator::CostCalculatorCommand),
+    CostCalculator(cost_calculator::CostCalculatorSubCommand),
+    CountUsers(count_users::CountUsersSubCommand),
     CreateUser(create_user::CreateUserSubCommand),
     DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
     HealthCompass(health_compass::HealthCompassSubCommand),
@@ -119,7 +121,12 @@ async fn main() -> anyhow::Result<()> {
 
             x.main(&db_conn).await
         }
-        SubCommand::CostCalculatorCommand(x) => {
+        SubCommand::CostCalculator(x) => {
+            let db_conn = get_db(cli_config.db_url, 1, 1).await?;
+
+            x.main(&db_conn).await
+        }
+        SubCommand::CountUsers(x) => {
             let db_conn = get_db(cli_config.db_url, 1, 1).await?;
 
             x.main(&db_conn).await

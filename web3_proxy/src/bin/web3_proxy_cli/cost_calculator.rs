@@ -45,7 +45,7 @@ impl FromStr for TimeFrame {
 /// calculate costs
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 #[argh(subcommand, name = "cost_calculator")]
-pub struct CostCalculatorCommand {
+pub struct CostCalculatorSubCommand {
     /// dollar cost of running web3-proxy
     #[argh(positional)]
     cost: Decimal,
@@ -65,7 +65,7 @@ pub struct CostCalculatorCommand {
     // TODO: goal price
 }
 
-impl CostCalculatorCommand {
+impl CostCalculatorSubCommand {
     pub async fn main(self, db_conn: &DatabaseConnection) -> anyhow::Result<()> {
         #[derive(Debug, FromQueryResult)]
         struct SelectResult {

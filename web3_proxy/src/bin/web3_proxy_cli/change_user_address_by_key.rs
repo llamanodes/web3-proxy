@@ -13,7 +13,7 @@ use web3_proxy::frontend::authorization::RpcSecretKey;
 /// change a user's tier.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 #[argh(subcommand, name = "change_user_address_by_key")]
-pub struct ChangeUserAddressByKeyCommand {
+pub struct ChangeUserAddressByKeySubCommand {
     #[argh(positional)]
     /// the RPC key owned by the user you want to change.
     rpc_secret_key: RpcSecretKey,
@@ -23,7 +23,7 @@ pub struct ChangeUserAddressByKeyCommand {
     new_address: String,
 }
 
-impl ChangeUserAddressByKeyCommand {
+impl ChangeUserAddressByKeySubCommand {
     pub async fn main(self, db_conn: &DatabaseConnection) -> anyhow::Result<()> {
         let rpc_secret_key: Uuid = self.rpc_secret_key.into();
 
