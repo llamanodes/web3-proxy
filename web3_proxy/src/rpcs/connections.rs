@@ -80,7 +80,7 @@ impl Web3Connections {
             // fantom
             250 => 1_000,
             // arbitrum
-            42161 => 0_500,
+            42161 => 500,
             // anything else
             _ => {
                 warn!("unexpected chain_id. polling every {} seconds", 10);
