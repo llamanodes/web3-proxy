@@ -90,10 +90,10 @@ pub async fn get_user_id_from_params(
 
             if save_to_redis {
                 // TODO: how long? we store in database for 4 weeks
-                let one_day = 60 * 60 * 24;
+                const ONE_DAY: usize = 60 * 60 * 24;
 
                 if let Err(err) = redis_conn
-                    .set_ex::<_, _, ()>(user_redis_key, user_id, one_day)
+                    .set_ex::<_, _, ()>(user_redis_key, user_id, ONE_DAY)
                     .await
                 {
                     warn!("Unable to save user bearer token to redis: {}", err)
