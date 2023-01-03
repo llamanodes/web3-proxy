@@ -71,13 +71,30 @@ impl Web3Connections {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
 
+        // TODO: query the rpc to get the actual expected block time, or get from config?
+        let expected_block_time_ms = match chain_id {
+            // ethereum
+            1 => 12_000,
+            // polygon
+            137 => 2_000,
+            // fantom
+            250 => 1_000,
+            // arbitrum
+            42161 => 0_500,
+            // anything else
+            _ => {
+                warn!("unexpected chain_id. polling every {} seconds", 10);
+                10_000
+            }
+        };
+
         let http_interval_sender = if http_client.is_some() {
             let (sender, receiver) = broadcast::channel(1);
 
             drop(receiver);
 
             // TODO: what interval? follow a websocket also? maybe by watching synced connections with a timeout. will need debounce
-            let mut interval = interval(Duration::from_secs(13));
+            let mut interval = interval(Duration::from_millis(expected_block_time_ms));
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
             let sender = Arc::new(sender);

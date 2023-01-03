@@ -35,7 +35,7 @@ impl Web3Provider {
             // TODO: dry this up (needs https://github.com/gakonst/ethers-rs/issues/592)
             // TODO: i don't think this interval matters for our uses, but we should probably set it to like `block time / 2`
             ethers::providers::Provider::new(provider)
-                .interval(Duration::from_secs(13))
+                .interval(Duration::from_secs(12))
                 .into()
         } else if url_str.starts_with("ws") {
             let provider = ethers::providers::Ws::connect(url_str).await?;
