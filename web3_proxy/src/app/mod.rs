@@ -712,6 +712,7 @@ impl Web3ProxyApp {
 
         #[derive(Default, Serialize)]
         struct RecentCounts {
+            one_week: i64,
             one_day: i64,
             one_hour: i64,
             one_minute: i64,
@@ -720,6 +721,7 @@ impl Web3ProxyApp {
         impl RecentCounts {
             fn for_err() -> Self {
                 Self {
+                    one_week: -1,
                     one_day: -1,
                     one_hour: -1,
                     one_minute: -1,
@@ -737,7 +739,9 @@ impl Web3ProxyApp {
                 const ONE_MINUTE: i64 = 60;
                 const ONE_HOUR: i64 = ONE_MINUTE * 60;
                 const ONE_DAY: i64 = ONE_HOUR * 24;
+                const ONE_WEEK: i64 = ONE_DAY * 7;
 
+                let one_week_ago = Utc::now().timestamp() - ONE_WEEK;
                 let one_day_ago = Utc::now().timestamp() - ONE_DAY;
                 let one_hour_ago = Utc::now().timestamp() - ONE_HOUR;
                 let one_minute_ago = Utc::now().timestamp() - ONE_MINUTE;
@@ -749,13 +753,17 @@ impl Web3ProxyApp {
 
                 match redis::pipe()
                     .atomic()
-                    // delete any entries older than 24 hours
-                    .zrembyscore(&recent_users_by_id, i64::MIN, one_day_ago)
+                    // delete any entries older than 1 week
+                    .zrembyscore(&recent_users_by_id, i64::MIN, one_week_ago)
                     .ignore()
-                    .zrembyscore(&recent_users_by_ip, i64::MIN, one_day_ago)
+                    .zrembyscore(&recent_users_by_ip, i64::MIN, one_week_ago)
                     .ignore()
-                    .zrembyscore(&recent_transactions, i64::MIN, one_day_ago)
+                    .zrembyscore(&recent_transactions, i64::MIN, one_week_ago)
                     .ignore()
+                    // get counts for last week
+                    .zcount(&recent_users_by_id, one_week_ago, i64::MAX)
+                    .zcount(&recent_users_by_ip, one_week_ago, i64::MAX)
+                    .zcount(&recent_transactions, one_week_ago, i64::MAX)
                     // get counts for last day
                     .zcount(&recent_users_by_id, one_day_ago, i64::MAX)
                     .zcount(&recent_users_by_ip, one_day_ago, i64::MAX)
@@ -772,6 +780,9 @@ impl Web3ProxyApp {
                     .await
                 {
                     Ok((
+                        user_id_in_week,
+                        ip_in_week,
+                        txs_in_week,
                         user_id_in_day,
                         ip_in_day,
                         txs_in_day,
@@ -783,16 +794,19 @@ impl Web3ProxyApp {
                         txs_in_minute,
                     )) => {
                         let recent_user_id_counts = RecentCounts {
+                            one_week: user_id_in_week,
                             one_day: user_id_in_day,
                             one_hour: user_id_in_hour,
                             one_minute: user_id_in_minute,
                         };
                         let recent_ip_counts = RecentCounts {
+                            one_week: ip_in_week,
                             one_day: ip_in_day,
                             one_hour: ip_in_hour,
                             one_minute: ip_in_minute,
                         };
                         let recent_tx_counts = RecentCounts {
+                            one_week: txs_in_week,
                             one_day: txs_in_day,
                             one_hour: txs_in_hour,
                             one_minute: txs_in_minute,
