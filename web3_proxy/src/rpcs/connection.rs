@@ -85,8 +85,8 @@ pub struct Web3Connection {
     pub(super) automatic_block_limit: bool,
     /// TODO: have an enum for this so that "no limit" prints pretty?
     pub(super) block_data_limit: AtomicU64,
-    /// Lower weight are higher priority when sending requests. 0 to 99.
-    pub(super) weight: f64,
+    /// Lower tiers are higher priority when sending requests
+    pub(super) tier: u64,
     /// TODO: should this be an AsyncRwLock?
     pub(super) head_block: RwLock<Option<SavedBlock>>,
     pub(super) open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
@@ -94,7 +94,7 @@ pub struct Web3Connection {
 
 impl Web3Connection {
     /// Connect to a web3 rpc
-    // TODO: have this take a builder (which will have channels attached)
+    // TODO: have this take a builder (which will have channels attached). or maybe just take the config and give the config public fields
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         name: String,
@@ -114,7 +114,7 @@ impl Web3Connection {
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
-        weight: u32,
+        tier: u64,
         open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_pool)| {
@@ -127,9 +127,6 @@ impl Web3Connection {
                 redis_pool,
             )
         });
-
-        // turn weight 0 into 100% and weight 100 into 0%
-        let weight = (100 - weight) as f64 / 100.0;
 
         // TODO: should we do this even if block_sender is None? then we would know limits on private relays
         let block_data_limit: AtomicU64 = block_data_limit.unwrap_or_default().into();
@@ -151,7 +148,7 @@ impl Web3Connection {
             automatic_block_limit,
             block_data_limit,
             head_block: RwLock::new(Default::default()),
-            weight,
+            tier,
             open_request_handle_metrics,
         };
 
@@ -1116,7 +1113,7 @@ impl Serialize for Web3Connection {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Connection", 8)?;
+        let mut state = serializer.serialize_struct("Web3Connection", 9)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
@@ -1132,7 +1129,8 @@ impl Serialize for Web3Connection {
             }
         }
 
-        state.serialize_field("weight", &self.weight)?;
+        state.serialize_field("tier", &self.tier)?;
+        state.serialize_field("weight", &1.0)?;
 
         state.serialize_field("soft_limit", &self.soft_limit)?;
 
@@ -1222,7 +1220,7 @@ mod tests {
             soft_limit: 1_000,
             automatic_block_limit: false,
             block_data_limit: block_data_limit.into(),
-            weight: 100.0,
+            tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(metrics),
         };
@@ -1269,7 +1267,7 @@ mod tests {
             soft_limit: 1_000,
             automatic_block_limit: false,
             block_data_limit: block_data_limit.into(),
-            weight: 100.0,
+            tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(metrics),
         };
@@ -1320,7 +1318,7 @@ mod tests {
             soft_limit: 1_000,
             automatic_block_limit: false,
             block_data_limit: block_data_limit.into(),
-            weight: 100.0,
+            tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(metrics),
         };

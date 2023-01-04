@@ -198,9 +198,9 @@ pub struct Web3ConnectionConfig {
     pub soft_limit: u32,
     /// the requests per second at which the server throws errors (rate limit or otherwise)
     pub hard_limit: Option<u64>,
-    /// All else equal, a server with a lower weight receives more requests. Ranges 0-100
-    #[serde(default = "default_weight")]
-    pub weight: u32,
+    /// All else equal, a server with a lower tier receives all requests
+    #[serde(default = "default_tier")]
+    pub tier: u64,
     /// Subscribe to the firehose of pending transactions
     /// Don't do this with free rpcs
     #[serde(default)]
@@ -210,7 +210,7 @@ pub struct Web3ConnectionConfig {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
-fn default_weight() -> u32 {
+fn default_tier() -> u64 {
     0
 }
 
@@ -270,7 +270,7 @@ impl Web3ConnectionConfig {
             block_sender,
             tx_id_sender,
             true,
-            self.weight,
+            self.tier,
             open_request_handle_metrics,
         )
         .await

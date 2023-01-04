@@ -293,6 +293,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] serde collect unknown fields in config instead of crash
 - [x] upgrade user tier by address
 - [x] all_backend_connections skips syncing servers
+- [x] change weight back to tier
 - [-] fix multiple origin and referer checks
 - [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in or spawned since it will slow things down and will make their calls less private
@@ -541,7 +542,6 @@ in another repo: event subscriber
   - if someone subscribes to all pending transactions, how should that count against rate limits
   - when those rate limits are hit, what should happen?
   - missing pending transactions might be okay, but not missing confirmed blocks 
-- [ ] double check weight sorting code
 - [ ] sea-orm brings in async-std, but we are using tokio. benchmark switching 
 - [ ] this query always times out, but erigon can serve it quickly: `curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["latest"],"id":1}' 127.0.0.1:8544' 127.0.0.1:8544`
   {"jsonrpc":"2.0","id":null,"error":{"code":-32099,"message":"deadline has elapsed"}}

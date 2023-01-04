@@ -411,10 +411,9 @@ impl Web3Connections {
         skip: &[Arc<Web3Connection>],
         min_block_needed: Option<&U64>,
     ) -> anyhow::Result<OpenRequestResult> {
-        let usable_rpcs_by_head_num: BTreeMap<U64, Vec<Arc<Web3Connection>>> =
+        let usable_rpcs_by_head_num_and_weight: BTreeMap<(U64, u64), Vec<Arc<Web3Connection>>> =
             if let Some(min_block_needed) = min_block_needed {
                 // need a potentially old block. check all the rpcs
-                // TODO: we are going to be checking "has_block_data" a lot now
                 let mut m = BTreeMap::new();
 
                 for x in self
@@ -429,7 +428,9 @@ impl Web3Connections {
                     match x_head_block {
                         None => continue,
                         Some(x_head) => {
-                            m.entry(x_head.number()).or_insert_with(Vec::new).push(x);
+                            let key = (x_head.number(), u64::MAX - x.tier);
+
+                            m.entry(key).or_insert_with(Vec::new).push(x);
                         }
                     }
                 }
@@ -437,7 +438,6 @@ impl Web3Connections {
                 m
             } else {
                 // need latest. filter the synced rpcs
-                // TODO: double check has_block_data?
                 let synced_connections = self.synced_connections.load();
 
                 let head_block = match synced_connections.head_block.as_ref() {
@@ -445,26 +445,32 @@ impl Web3Connections {
                     Some(x) => x,
                 };
 
-                // TODO: different allowed_lag depending on the chain
+                // TODO: self.allowed_lag instead of taking as an arg
                 if head_block.syncing(allowed_lag) {
                     return Ok(OpenRequestResult::NotReady);
                 }
 
                 let head_num = head_block.number();
 
-                let c: Vec<_> = synced_connections
+                let mut m = BTreeMap::new();
+
+                for x in synced_connections
                     .conns
                     .iter()
                     .filter(|x| !skip.contains(x))
-                    .cloned()
-                    .collect();
+                {
+                    let key = (head_num, u64::MAX - x.tier);
 
-                BTreeMap::from([(head_num, c)])
+                    m.entry(key).or_insert_with(Vec::new).push(x.clone());
+                }
+
+                m
             };
 
         let mut earliest_retry_at = None;
 
-        for usable_rpcs in usable_rpcs_by_head_num.into_values().rev() {
+        for usable_rpcs in usable_rpcs_by_head_num_and_weight.into_values().rev() {
+            // under heavy load, it is possible for even our best server to be negative
             let mut minimum = f64::MAX;
 
             // we sort on a combination of values. cache them here so that we don't do this math multiple times.
@@ -475,24 +481,22 @@ impl Web3Connections {
                     // TODO: get active requests out of redis (that's definitely too slow)
                     // TODO: do something with hard limit instead? (but that is hitting redis too much)
                     let active_requests = rpc.active_requests() as f64;
-                    let soft_limit = rpc.soft_limit as f64 * rpc.weight;
+                    let soft_limit = rpc.soft_limit as f64;
 
-                    // TODO: maybe store weight as the percentile
                     let available_requests = soft_limit - active_requests;
 
                     trace!("available requests on {}: {}", rpc, available_requests);
 
-                    // under heavy load, it is possible for even our best server to be negative
                     minimum = available_requests.min(minimum);
 
-                    // TODO: clone needed?
                     (rpc, available_requests)
                 })
                 .collect();
 
             trace!("minimum available requests: {}", minimum);
 
-            // weights can't have negative numbers. shift up if any are negative
+            // choose_multiple_weighted can't have negative numbers. shift up if any are negative
+            // TODO: is this a correct way to shift?
             if minimum < 0.0 {
                 available_request_map = available_request_map
                     .into_iter()
@@ -943,7 +947,7 @@ mod tests {
             soft_limit: 1_000,
             automatic_block_limit: true,
             block_data_limit: block_data_limit.into(),
-            weight: 100.0,
+            tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(Default::default()),
         };
@@ -962,7 +966,7 @@ mod tests {
             soft_limit: 1_000,
             automatic_block_limit: false,
             block_data_limit: block_data_limit.into(),
-            weight: 100.0,
+            tier: 0,
             head_block: RwLock::new(Some(lagged_block.clone())),
             open_request_handle_metrics: Arc::new(Default::default()),
         };
@@ -1165,7 +1169,7 @@ mod tests {
             soft_limit: 3_000,
             automatic_block_limit: false,
             block_data_limit: 64.into(),
-            weight: 1.0,
+            tier: 1,
             head_block: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(Default::default()),
         };
@@ -1184,8 +1188,7 @@ mod tests {
             soft_limit: 1_000,
             automatic_block_limit: false,
             block_data_limit: u64::MAX.into(),
-            // TODO: does weight = 0 work?
-            weight: 0.01,
+            tier: 2,
             head_block: RwLock::new(Some(head_block.clone())),
             open_request_handle_metrics: Arc::new(Default::default()),
         };
