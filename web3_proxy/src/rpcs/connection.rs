@@ -1135,7 +1135,10 @@ impl Serialize for Web3Connection {
         }
 
         state.serialize_field("tier", &self.tier)?;
-        state.serialize_field("weight", &1.0)?;
+
+        let faked_weight = 100u64.saturating_sub(self.tier) as f64 / 100.0;
+
+        state.serialize_field("weight", &faked_weight)?;
 
         state.serialize_field("soft_limit", &self.soft_limit)?;
 
