@@ -88,6 +88,9 @@ impl Web3Connections {
             }
         };
 
+        // TODO: this might be too aggressive. think about this more
+        let allowed_lag = ((expected_block_time_ms * 3) as f64 / 1000.0).round() as u64;
+
         let http_interval_sender = if http_client.is_some() {
             let (sender, receiver) = broadcast::channel(1);
 
@@ -151,6 +154,7 @@ impl Web3Connections {
                     server_config
                         .spawn(
                             server_name,
+                            allowed_lag,
                             db_conn,
                             redis_pool,
                             chain_id,
@@ -428,7 +432,7 @@ impl Web3Connections {
                     match x_head_block {
                         None => continue,
                         Some(x_head) => {
-                            let key = (x_head.number(), u64::MAX - x.tier);
+                            let key = (Some(x_head.number()), u64::MAX - x.tier);
 
                             m.entry(key).or_insert_with(Vec::new).push(x);
                         }
@@ -450,8 +454,6 @@ impl Web3Connections {
                     return Ok(OpenRequestResult::NotReady);
                 }
 
-                let head_num = head_block.number();
-
                 let mut m = BTreeMap::new();
 
                 for x in synced_connections
@@ -459,7 +461,7 @@ impl Web3Connections {
                     .iter()
                     .filter(|x| !skip.contains(x))
                 {
-                    let key = (head_num, u64::MAX - x.tier);
+                    let key = (None, u64::MAX - x.tier);
 
                     m.entry(key).or_insert_with(Vec::new).push(x.clone());
                 }
@@ -472,6 +474,7 @@ impl Web3Connections {
         for usable_rpcs in usable_rpcs_by_head_num_and_weight.into_values().rev() {
             // under heavy load, it is possible for even our best server to be negative
             let mut minimum = f64::MAX;
+            let mut maximum = f64::MIN;
 
             // we sort on a combination of values. cache them here so that we don't do this math multiple times.
             let mut available_request_map: HashMap<_, f64> = usable_rpcs
@@ -487,13 +490,20 @@ impl Web3Connections {
 
                     trace!("available requests on {}: {}", rpc, available_requests);
 
-                    minimum = available_requests.min(minimum);
+                    minimum = minimum.min(available_requests);
+                    maximum = maximum.max(available_requests);
 
                     (rpc, available_requests)
                 })
                 .collect();
 
             trace!("minimum available requests: {}", minimum);
+            trace!("maximum available requests: {}", minimum);
+
+            if maximum < 0.0 {
+                // TODO: if maximum < 0 and there are other tiers on the same block, we should include them now
+                warn!("soft limits overloaded: {} to {}", minimum, maximum)
+            }
 
             // choose_multiple_weighted can't have negative numbers. shift up if any are negative
             // TODO: is this a correct way to shift?
@@ -513,7 +523,7 @@ impl Web3Connections {
 
             let sorted_rpcs = {
                 if usable_rpcs.len() == 1 {
-                    // TODO: return now instead?
+                    // TODO: return now instead? we shouldn't need another alloc
                     vec![usable_rpcs.get(0).expect("there should be 1")]
                 } else {
                     let mut rng = thread_fast_rng::thread_fast_rng();
@@ -935,6 +945,8 @@ mod tests {
 
         let head_rpc = Web3Connection {
             name: "synced".to_string(),
+            // TODO: what should this be?
+            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com/synced".to_string(),
@@ -954,6 +966,7 @@ mod tests {
 
         let lagged_rpc = Web3Connection {
             name: "lagged".to_string(),
+            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com/lagged".to_string(),
@@ -1157,6 +1170,7 @@ mod tests {
 
         let pruned_rpc = Web3Connection {
             name: "pruned".to_string(),
+            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com/pruned".to_string(),
@@ -1176,6 +1190,7 @@ mod tests {
 
         let archive_rpc = Web3Connection {
             name: "archive".to_string(),
+            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com/archive".to_string(),

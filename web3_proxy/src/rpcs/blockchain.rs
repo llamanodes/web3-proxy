@@ -29,7 +29,7 @@ pub type BlockHashesCache = Cache<H256, ArcBlock, hashbrown::hash_map::DefaultHa
 pub struct SavedBlock {
     pub block: ArcBlock,
     /// number of seconds this block was behind the current time when received
-    pub lag: u64,
+    pub age: u64,
 }
 
 impl PartialEq for SavedBlock {
@@ -45,11 +45,11 @@ impl PartialEq for SavedBlock {
 
 impl SavedBlock {
     pub fn new(block: ArcBlock) -> Self {
-        let mut x = Self { block, lag: 0 };
+        let mut x = Self { block, age: 0 };
 
         // no need to recalulate lag every time
         // if the head block gets too old, a health check restarts this connection
-        x.lag = x.lag();
+        x.age = x.lag();
 
         x
     }
@@ -81,7 +81,7 @@ impl SavedBlock {
 
     /// When the block was received, this node was still syncing
     pub fn syncing(&self, allowed_lag: u64) -> bool {
-        self.lag > allowed_lag
+        self.age > allowed_lag
     }
 }
 
@@ -93,13 +93,7 @@ impl From<ArcBlock> for SavedBlock {
 
 impl Display for SavedBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} ({})", self.number(), self.hash())?;
-
-        if self.syncing(0) {
-            write!(f, " (behind by {} seconds)", self.lag)?;
-        }
-
-        Ok(())
+        write!(f, "{} ({}, {}s old)", self.number(), self.hash(), self.age)
     }
 }
 
@@ -320,7 +314,7 @@ impl Web3Connections {
                 // TODO: don't default to 60. different chains are differen
                 if rpc_head_block.syncing(60) {
                     if connection_heads.remove(&rpc.name).is_some() {
-                        warn!("{} is behind by {} seconds", &rpc.name, rpc_head_block.lag);
+                        warn!("{} is behind by {} seconds", &rpc.name, rpc_head_block.age);
                     } else {
                         // we didn't remove anything and this block is old. exit early
                         return Ok(());

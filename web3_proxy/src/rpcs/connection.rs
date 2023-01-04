@@ -63,6 +63,7 @@ pub struct Web3Connection {
     pub name: String,
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
+    pub(super) allowed_lag: u64,
     /// TODO: can we get this from the provider? do we even need it?
     pub(super) url: String,
     /// Some connections use an http_client. we keep a clone for reconnecting
@@ -98,6 +99,7 @@ impl Web3Connection {
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         name: String,
+        allowed_lag: u64,
         display_name: Option<String>,
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
@@ -135,6 +137,7 @@ impl Web3Connection {
 
         let new_connection = Self {
             name,
+            allowed_lag,
             db_conn: db_conn.clone(),
             display_name,
             http_client,
@@ -587,6 +590,8 @@ impl Web3Connection {
         reconnect: bool,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<()> {
+        let allowed_lag = self.allowed_lag;
+
         loop {
             let http_interval_receiver = http_interval_sender.as_ref().map(|x| x.subscribe());
 
@@ -641,10 +646,10 @@ impl Web3Connection {
                         if let Some(x) = &*conn.head_block.read() {
                             // if this block is too old, return an error so we reconnect
                             let current_lag = x.lag();
-                            if current_lag > 0 {
+                            if current_lag > allowed_lag {
                                 let level = if warned == 0 {
                                     log::Level::Warn
-                                } else if current_lag % 1000 == 0 {
+                                } else if warned % 100 == 0 {
                                     log::Level::Debug
                                 } else {
                                     log::Level::Trace
@@ -1208,6 +1213,7 @@ mod tests {
 
         let x = Web3Connection {
             name: "name".to_string(),
+            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),
@@ -1255,6 +1261,7 @@ mod tests {
         // TODO: this is getting long. have a `impl Default`
         let x = Web3Connection {
             name: "name".to_string(),
+            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),
@@ -1306,6 +1313,7 @@ mod tests {
 
         let x = Web3Connection {
             name: "name".to_string(),
+            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),

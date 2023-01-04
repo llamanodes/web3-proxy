@@ -221,6 +221,7 @@ impl Web3ConnectionConfig {
     pub async fn spawn(
         self,
         name: String,
+        allowed_lag: u64,
         db_conn: Option<DatabaseConnection>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
         chain_id: u64,
@@ -257,6 +258,7 @@ impl Web3ConnectionConfig {
 
         Web3Connection::spawn(
             name,
+            allowed_lag,
             self.display_name,
             chain_id,
             db_conn,

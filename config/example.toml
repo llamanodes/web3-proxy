@@ -54,50 +54,50 @@ response_cache_max_bytes = 10_000_000_000
     display_name = "Ankr"
     url = "https://rpc.ankr.com/eth"
     soft_limit = 1_000
-    weight = 0
+    tier = 0
 
     [balanced_rpcs.cloudflare]
     display_name = "Cloudflare"
     url = "https://cloudflare-eth.com"
     soft_limit = 1_000
-    weight = 10
+    tier = 1
 
     [balanced_rpcs.blastapi]
     display_name = "Blast"
     url = "https://eth-mainnet.public.blastapi.io"
     soft_limit = 1_000
-    weight = 10
+    tier = 1
 
     [balanced_rpcs.mycryptoapi]
     display_name = "MyCrypto"
     disabled = true
     url = "https://api.mycryptoapi.com/eth"
     soft_limit = 1_000
-    weight = 25
+    tier = 2
 
     [balanced_rpcs.pokt-v1]
     display_name = "Pokt #1"
     url = "https://eth-mainnet.gateway.pokt.network/v1/5f3453978e354ab992c4da79"
     soft_limit = 500
-    weight = 25
+    tier = 2
 
     [balanced_rpcs.pokt]
     display_name = "Pokt #2"
     url = "https://eth-rpc.gateway.pokt.network"
     soft_limit = 500
-    weight = 50
-
-    [balanced_rpcs.runonflux]
-    display_name = "Run on Flux (light)"
-    url = "https://ethereumnodelight.app.runonflux.io"
-    soft_limit = 1_000
-    weight = 75
+    tier = 3
 
     [balanced_rpcs.linkpool]
     display_name = "Linkpool"
     url = "https://main-rpc.linkpool.io"
     soft_limit = 500
-    weight = 75
+    tier = 4
+
+    [balanced_rpcs.runonflux]
+    display_name = "Run on Flux (light)"
+    url = "https://ethereumnodelight.app.runonflux.io"
+    soft_limit = 1_000
+    tier = 5
 
     # load balanced light nodes are not very reliable
     [balanced_rpcs.linkpool-light]
@@ -105,7 +105,7 @@ response_cache_max_bytes = 10_000_000_000
     disabled = true
     url = "https://main-light.eth.linkpool.io"
     soft_limit = 100
-    weight = 75
+    tier = 5
 
 [private_rpcs]
 
@@ -116,32 +116,32 @@ response_cache_max_bytes = 10_000_000_000
     display_name = "Eden network"
     url = "https://api.edennetwork.io/v1/"
     soft_limit = 1_805
-    weight = 0
+    tier = 0
 
     [private_rpcs.eden_beta]
     disabled = true
     display_name = "Eden network beta"
     url = "https://api.edennetwork.io/v1/beta"
     soft_limit = 5_861
-    weight = 0
+    tier = 0
 
     [private_rpcs.ethermine]
     disabled = true
     display_name = "Ethermine"
     url = "https://rpc.ethermine.org"
     soft_limit = 5_861
-    weight = 0
+    tier = 0
 
     [private_rpcs.flashbots]
     disabled = true
     display_name = "Flashbots Fast"
     url = "https://rpc.flashbots.net/fast"
     soft_limit = 7_074
-    weight = 0
+    tier = 0
 
     [private_rpcs.securerpc]
     disabled = true
     display_name = "SecureRPC"
     url = "https://gibson.securerpc.com/v1"
     soft_limit = 4_560
-    weight = 0
+    tier = 0

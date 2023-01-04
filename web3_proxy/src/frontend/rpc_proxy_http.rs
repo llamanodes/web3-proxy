@@ -10,6 +10,7 @@ use axum::{response::IntoResponse, Extension, Json};
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
 use itertools::Itertools;
+use log::debug;
 use std::sync::Arc;
 
 /// POST /rpc -- Public entrypoint for HTTP JSON-RPC requests. Web3 wallets use this.
@@ -90,7 +91,7 @@ pub async fn proxy_web3_rpc_with_key(
 
     let headers = response.headers_mut();
 
-    // TODO: special string if no rpcs were used (cache hit)?
+    // TODO: special string if no rpcs were used (cache hit)? or is an empty string fine? maybe the rpc name + "cached"
     let rpcs: String = rpcs.into_iter().map(|x| x.name.clone()).join(",");
 
     headers.insert(
