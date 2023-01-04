@@ -10,7 +10,6 @@ use axum::{response::IntoResponse, Extension, Json};
 use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
 use itertools::Itertools;
-use log::debug;
 use std::sync::Arc;
 
 /// POST /rpc -- Public entrypoint for HTTP JSON-RPC requests. Web3 wallets use this.

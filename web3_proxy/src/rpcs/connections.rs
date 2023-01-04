@@ -415,59 +415,61 @@ impl Web3Connections {
         skip: &[Arc<Web3Connection>],
         min_block_needed: Option<&U64>,
     ) -> anyhow::Result<OpenRequestResult> {
-        let usable_rpcs_by_head_num_and_weight: BTreeMap<(U64, u64), Vec<Arc<Web3Connection>>> =
-            if let Some(min_block_needed) = min_block_needed {
-                // need a potentially old block. check all the rpcs
-                let mut m = BTreeMap::new();
+        let usable_rpcs_by_head_num_and_weight: BTreeMap<
+            (Option<U64>, u64),
+            Vec<Arc<Web3Connection>>,
+        > = if let Some(min_block_needed) = min_block_needed {
+            // need a potentially old block. check all the rpcs
+            let mut m = BTreeMap::new();
 
-                for x in self
-                    .conns
-                    .values()
-                    .filter(|x| !skip.contains(x))
-                    .filter(|x| x.has_block_data(min_block_needed))
-                    .cloned()
-                {
-                    let x_head_block = x.head_block.read().clone();
+            for x in self
+                .conns
+                .values()
+                .filter(|x| !skip.contains(x))
+                .filter(|x| x.has_block_data(min_block_needed))
+                .cloned()
+            {
+                let x_head_block = x.head_block.read().clone();
 
-                    match x_head_block {
-                        None => continue,
-                        Some(x_head) => {
-                            let key = (Some(x_head.number()), u64::MAX - x.tier);
+                match x_head_block {
+                    None => continue,
+                    Some(x_head) => {
+                        let key = (Some(x_head.number()), u64::MAX - x.tier);
 
-                            m.entry(key).or_insert_with(Vec::new).push(x);
-                        }
+                        m.entry(key).or_insert_with(Vec::new).push(x);
                     }
                 }
+            }
 
-                m
-            } else {
-                // need latest. filter the synced rpcs
-                let synced_connections = self.synced_connections.load();
+            m
+        } else {
+            // need latest. filter the synced rpcs
+            let synced_connections = self.synced_connections.load();
 
-                let head_block = match synced_connections.head_block.as_ref() {
-                    None => return Ok(OpenRequestResult::NotReady),
-                    Some(x) => x,
-                };
-
-                // TODO: self.allowed_lag instead of taking as an arg
-                if head_block.syncing(allowed_lag) {
-                    return Ok(OpenRequestResult::NotReady);
-                }
-
-                let mut m = BTreeMap::new();
-
-                for x in synced_connections
-                    .conns
-                    .iter()
-                    .filter(|x| !skip.contains(x))
-                {
-                    let key = (None, u64::MAX - x.tier);
-
-                    m.entry(key).or_insert_with(Vec::new).push(x.clone());
-                }
-
-                m
+            let head_block = match synced_connections.head_block.as_ref() {
+                None => return Ok(OpenRequestResult::NotReady),
+                Some(x) => x,
             };
+
+            // TODO: self.allowed_lag instead of taking as an arg
+            if head_block.syncing(allowed_lag) {
+                return Ok(OpenRequestResult::NotReady);
+            }
+
+            let mut m = BTreeMap::new();
+
+            for x in synced_connections
+                .conns
+                .iter()
+                .filter(|x| !skip.contains(x))
+            {
+                let key = (None, u64::MAX - x.tier);
+
+                m.entry(key).or_insert_with(Vec::new).push(x.clone());
+            }
+
+            m
+        };
 
         let mut earliest_retry_at = None;
 
