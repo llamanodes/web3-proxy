@@ -13,6 +13,7 @@ use axum::{
     routing::{get, post, put},
     Extension, Router,
 };
+use axum_extra::routing::RouterExt;
 use http::header::AUTHORIZATION;
 use log::info;
 use moka::future::Cache;
@@ -45,20 +46,12 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         // routes should be ordered most to least common
         .route("/", post(rpc_proxy_http::proxy_web3_rpc))
         .route("/", get(rpc_proxy_ws::websocket_handler))
-        .route(
+        .route_with_tsr(
             "/rpc/:rpc_key",
             post(rpc_proxy_http::proxy_web3_rpc_with_key),
         )
-        .route(
-            "/rpc/:rpc_key/",
-            post(rpc_proxy_http::proxy_web3_rpc_with_key),
-        )
-        .route(
+        .route_with_tsr(
             "/rpc/:rpc_key",
-            get(rpc_proxy_ws::websocket_handler_with_key),
-        )
-        .route(
-            "/rpc/:rpc_key/",
             get(rpc_proxy_ws::websocket_handler_with_key),
         )
         .route("/health", get(status::health))
