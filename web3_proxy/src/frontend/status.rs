@@ -7,6 +7,7 @@ use super::{FrontendResponseCache, FrontendResponseCaches};
 use crate::app::Web3ProxyApp;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_macros::debug_handler;
+use moka::future::ConcurrentCacheExt;
 use serde_json::json;
 use std::sync::Arc;
 
