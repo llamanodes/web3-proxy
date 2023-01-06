@@ -870,6 +870,13 @@ impl Web3ProxyApp {
             }
         };
 
+        // app.pending_transactions.sync();
+        // app.rpc_secret_key_cache.sync();
+        // "pending_transactions_count": app.pending_transactions.entry_count(),
+        // "pending_transactions_size": app.pending_transactions.weighted_size(),
+        // "user_cache_count": app.rpc_secret_key_cache.entry_count(),
+        // "user_cache_size": app.rpc_secret_key_cache.weighted_size(),
+
         #[derive(Serialize)]
         struct CombinedMetrics<'a> {
             app: &'a Web3ProxyAppMetrics,

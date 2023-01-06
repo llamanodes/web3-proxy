@@ -32,16 +32,9 @@ pub async fn status(
 ) -> impl IntoResponse {
     let body = response_cache
         .get_with(FrontendResponseCaches::Status, async {
-            app.pending_transactions.sync();
-            app.rpc_secret_key_cache.sync();
-
-            // TODO: what else should we include? uptime, cache hit rates, cpu load
+            // TODO: what else should we include? uptime, cache hit rates, cpu load, memory used
             let body = json!({
                 "chain_id": app.config.chain_id,
-                "pending_transactions_count": app.pending_transactions.entry_count(),
-                "pending_transactions_size": app.pending_transactions.weighted_size(),
-                "user_cache_count": app.rpc_secret_key_cache.entry_count(),
-                "user_cache_size": app.rpc_secret_key_cache.weighted_size(),
                 "balanced_rpcs": app.balanced_rpcs,
                 "private_rpcs": app.private_rpcs,
             });
