@@ -50,7 +50,15 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
             post(rpc_proxy_http::proxy_web3_rpc_with_key),
         )
         .route(
+            "/rpc/:rpc_key/",
+            post(rpc_proxy_http::proxy_web3_rpc_with_key),
+        )
+        .route(
             "/rpc/:rpc_key",
+            get(rpc_proxy_ws::websocket_handler_with_key),
+        )
+        .route(
+            "/rpc/:rpc_key/",
             get(rpc_proxy_ws::websocket_handler_with_key),
         )
         .route("/health", get(status::health))
