@@ -88,7 +88,7 @@ cargo run up
 ### Create a user:
 
 ```
-web3_proxy_cli --db-url ... create_user --address 0x0000000000000000000000000000000000000000 --email infra@llamanodes.com --description "..."
+web3_proxy_cli --config ... create_user --address 0x0000000000000000000000000000000000000000 --email infra@llamanodes.com --description "..."
 ```
 
 ### Give a user unlimited requests per second:
@@ -96,7 +96,7 @@ web3_proxy_cli --db-url ... create_user --address 0x0000000000000000000000000000
 Copy the ULID key (or UUID key) out of the above command, and put it into the following command.
 
 ```
-web3_proxy_cli --db-url ... change_user_tier_by_key "$RPC_ULID_KEY_FROM_PREV_COMMAND" "Unlimited"
+web3_proxy_cli --config ... change_user_tier_by_key "$RPC_ULID_KEY_FROM_PREV_COMMAND" "Unlimited"
 ```
 
 ### Health compass
