@@ -351,7 +351,7 @@ impl Web3Connection {
             );
             let reconnect_in = Duration::from_millis(first_sleep_ms);
 
-            warn!("Reconnect to {} in {}ms", self, reconnect_in.as_millis());
+            info!("Reconnect to {} in {}ms", self, reconnect_in.as_millis());
 
             sleep(reconnect_in).await;
 
@@ -369,7 +369,7 @@ impl Web3Connection {
             );
 
             let retry_in = Duration::from_millis(sleep_ms);
-            warn!(
+            info!(
                 "Failed reconnect to {}! Retry in {}ms. err={:?}",
                 self,
                 retry_in.as_millis(),
