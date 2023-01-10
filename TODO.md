@@ -294,9 +294,9 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] upgrade user tier by address
 - [x] all_backend_connections skips syncing servers
 - [x] change weight back to tier
-- [-] fix multiple origin and referer checks
-- [-] let users choose a % to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
-  - this must be opt-in or spawned since it will slow things down and will make their calls less private
+- [x] fix multiple origin and referer checks
+- [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
+  - this must be opt-in and spawned in the background since it will slow things down and will make their calls less private
   - [ ] automatic pruning of old revert logs once too many are collected
   - [ ] we currently default to 0.0 and don't expose a way to edit it. we have a database row, but we don't use it
 - [-] add configurable size limits to all the Caches
@@ -587,3 +587,4 @@ in another repo: event subscriber
 - [ ] request timeout messages should include the request id
 - [ ] have an upgrade tier that queries multiple backends at once. returns on first Ok result, collects errors. if no Ok, find the most common error and then respond with that
 - [ ] give public_recent_ips_salt a better, more general, name
+- [ ] include tier in the head block logs?
