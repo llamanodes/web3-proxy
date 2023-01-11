@@ -292,10 +292,10 @@ impl Web3Connection {
         self.block_data_limit.load(atomic::Ordering::Acquire).into()
     }
 
-    pub fn syncing(&self) -> bool {
+    pub fn syncing(&self, allowed_lag: u64) -> bool {
         match self.head_block.read().clone() {
             None => true,
-            Some(x) => x.syncing(60),
+            Some(x) => x.syncing(allowed_lag),
         }
     }
 
@@ -303,6 +303,7 @@ impl Web3Connection {
         let head_block_num = match self.head_block.read().clone() {
             None => return false,
             Some(x) => {
+                // TODO: this 60 second limit is causing our polygons to fall behind. change this to number of blocks?
                 if x.syncing(60) {
                     // skip syncing nodes. even though they might be able to serve a query,
                     // latency will be poor and it will get in the way of them syncing further
@@ -542,7 +543,7 @@ impl Web3Connection {
                     let _ = head_block.insert(new_head_block.clone().into());
                 }
 
-                if self.block_data_limit() == U64::zero() && !self.syncing() {
+                if self.block_data_limit() == U64::zero() && !self.syncing(1) {
                     let authorization = Arc::new(Authorization::internal(self.db_conn.clone())?);
                     if let Err(err) = self.check_block_data_limit(&authorization).await {
                         warn!(

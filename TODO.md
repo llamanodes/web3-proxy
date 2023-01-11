@@ -295,6 +295,9 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] all_backend_connections skips syncing servers
 - [x] change weight back to tier
 - [x] fix multiple origin and referer checks
+- [x] ip detection needs work so that everything doesnt show up as 172.x.x.x
+  - i think this was done, but am not positive.
+- [x] if private txs are disabled, only send trasactions to some of our servers. we were DOSing ourselves with transactions and slowing down sync
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in and spawned in the background since it will slow things down and will make their calls less private
   - [ ] automatic pruning of old revert logs once too many are collected
@@ -302,11 +305,8 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
   - https://github.com/moka-rs/moka/issues/201
-- [-] ip detection needs work so that everything doesnt show up as 172.x.x.x
-  - i think this was done, but am not positive.
+- [ ] have private transactions be enabled by a url setting rather than a setting on the key
 - [ ] cli for adding rpc keys to an existing user
-- [ ] automatically tune database and redis connection pool size
-- [ ] if db is down, keep logins cached longer. at least only new logins will have trouble then
 - [ ] rate limiting/throttling on query_user_stats 
 - [ ] minimum allowed query_start on query_user_stats
 - [ ] setting request limits to None is broken. it does maxu64 and then internal deferred rate limiter counts try to *99/100
@@ -452,6 +452,8 @@ These are not yet ordered. There might be duplicates. We might not actually need
 
 These are not ordered. I think some rows also accidently got deleted here. Check git history.
 
+- [ ] automatically tune database and redis connection pool size
+- [ ] if db is down, keep logins cached longer. at least only new logins will have trouble then
 - [ ] handle user payments
   - [ ] separate daemon (or users themselves) call POST /users/process_transaction
     - checks a transaction to see if it modifies a user's balance. records results in a sql database

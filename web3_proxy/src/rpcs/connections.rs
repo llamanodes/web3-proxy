@@ -597,23 +597,34 @@ impl Web3Connections {
     }
 
     /// get all rpc servers that are not rate limited
-    /// returns servers even if they aren't in sync. This is useful for broadcasting signed transactions
+    /// returns servers even if they aren't fully in sync. This is useful for broadcasting signed transactions
     // TODO: better type on this that can return an anyhow::Result
-    pub async fn all_backend_connections(
+    pub async fn all_synced_connections(
         &self,
         authorization: &Arc<Authorization>,
         block_needed: Option<&U64>,
+        max_count: Option<usize>,
     ) -> Result<Vec<OpenRequestHandle>, Option<Instant>> {
         let mut earliest_retry_at = None;
         // TODO: with capacity?
         let mut selected_rpcs = vec![];
 
+        let mut max_count = if max_count.is_none() {
+            self.conns.len()
+        } else {
+            self.conns.len().min(max_count.unwrap())
+        };
+
         for connection in self.conns.values() {
+            if max_count == 0 {
+                break;
+            }
+
             if let Some(block_needed) = block_needed {
                 if !connection.has_block_data(block_needed) {
                     continue;
                 }
-            } else if connection.syncing() {
+            } else if connection.syncing(30) {
                 continue;
             }
 
@@ -626,7 +637,10 @@ impl Web3Connections {
                     // this rpc is not available. skip it
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                 }
-                Ok(OpenRequestResult::Handle(handle)) => selected_rpcs.push(handle),
+                Ok(OpenRequestResult::Handle(handle)) => {
+                    max_count -= 1;
+                    selected_rpcs.push(handle)
+                }
                 Ok(OpenRequestResult::NotReady) => {
                     warn!("no request handle for {}", connection)
                 }
@@ -800,10 +814,11 @@ impl Web3Connections {
         request_metadata: Option<Arc<RequestMetadata>>,
         block_needed: Option<&U64>,
         error_level: Level,
+        max_count: Option<usize>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
             match self
-                .all_backend_connections(authorization, block_needed)
+                .all_synced_connections(authorization, block_needed, max_count)
                 .await
             {
                 Ok(active_request_handles) => {
@@ -1052,7 +1067,7 @@ mod tests {
         // all_backend_connections gives everything regardless of sync status
         assert_eq!(
             conns
-                .all_backend_connections(&authorization, None)
+                .all_synced_connections(&authorization, None, None)
                 .await
                 .unwrap()
                 .len(),

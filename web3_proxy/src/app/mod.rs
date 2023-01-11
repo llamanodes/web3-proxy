@@ -156,6 +156,8 @@ pub struct AuthorizationChecks {
     /// Chance to save reverting eth_call, eth_estimateGas, and eth_sendRawTransaction to the database.
     /// TODO: f32 would be fine
     pub log_revert_chance: f64,
+    /// if true, transactions are broadcast to private mempools. They will still be public on the blockchain!
+    pub private_txs: bool,
 }
 
 /// Simple wrapper so that we can keep track of read only connections.
@@ -1170,8 +1172,18 @@ impl Web3ProxyApp {
             // TODO: eth_sendBundle (flashbots command)
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => {
-                // emit stats
-                let private_rpcs = self.private_rpcs.as_ref().unwrap_or(&self.balanced_rpcs);
+                let (private_rpcs, num) = if let Some(private_rpcs) = self.private_rpcs.as_ref() {
+                    if authorization.checks.private_txs {
+                        (private_rpcs, None)
+                    } else {
+                        // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
+                        // TODO: what if we do 2 per tier? we want to blast the third party rpcs
+                        // TODO: maybe having the third party rpcs would be good for this
+                        (&self.balanced_rpcs, Some(2))
+                    }
+                } else {
+                    (&self.balanced_rpcs, Some(2))
+                };
 
                 // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
                 let mut response = private_rpcs
@@ -1181,6 +1193,7 @@ impl Web3ProxyApp {
                         Some(request_metadata.clone()),
                         None,
                         Level::Trace,
+                        num,
                     )
                     .await?;
 
@@ -1224,6 +1237,7 @@ impl Web3ProxyApp {
 
                 let rpcs = request_metadata.backend_requests.lock().clone();
 
+                // emit stats
                 if let Some(salt) = self.config.public_recent_ips_salt.as_ref() {
                     if let Some(tx_hash) = response.result.clone() {
                         let now = Utc::now().timestamp();
