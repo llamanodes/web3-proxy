@@ -21,10 +21,10 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 
 anyhow = { version = "1.0.68", features = ["backtrace"] }
 arc-swap = "1.6.0"
-argh = "0.1.9"
-axum = { version = "0.6.1", features = ["headers", "ws"] }
-axum-client-ip = "0.3.0"
-axum-macros = "0.3.0"
+argh = "0.1.10"
+axum = { version = "0.6.2", features = ["headers", "ws"] }
+axum-client-ip = "0.3.1"
+axum-macros = "0.3.1"
 # TODO: import chrono from sea-orm so we always have the same version
 chrono = "0.4.23"
 counter = "0.5.7"
@@ -38,7 +38,7 @@ futures = { version = "0.3.25", features = ["thread-pool"] }
 hashbrown = { version = "0.13.1", features = ["serde"] }
 hdrhistogram = "7.5.2"
 http = "0.2.8"
-ipnet = "2.7.0"
+ipnet = "2.7.1"
 log = "0.4.17"
 metered = { version = "0.9.0", features = ["serialize"] }
 moka = { version = "0.9.6", default-features = false, features = ["future"] }
@@ -49,7 +49,7 @@ num-traits = "0.2.15"
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 proctitle = "0.1.1"
 # TODO: regex has several "perf" features that we might want to use
-regex = "1.7.0"
+regex = "1.7.1"
 reqwest = { version = "0.11.13", default-features = false, features = ["json", "tokio-rustls"] }
 handlebars = "4.3.6"
 rustc-hash = "1.1.0"
