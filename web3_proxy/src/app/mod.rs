@@ -1426,9 +1426,11 @@ impl Web3ProxyApp {
                             // TODO: what is the best way to handle an Arc here?
                             .map_err(|err| {
                                 // TODO: emit a stat for an error
-                                anyhow::anyhow!(err)
-                            })
-                            .context("error while forwarding and caching response")?
+                                anyhow::anyhow!(
+                                    "error while caching and forwarding response: {}",
+                                    err
+                                )
+                            })?
                     } else {
                         self.balanced_rpcs
                             .try_send_best_upstream_server(
@@ -1439,7 +1441,10 @@ impl Web3ProxyApp {
                                 None,
                             )
                             .await
-                            .context("error while forwarding response")?
+                            .map_err(|err| {
+                                // TODO: emit a stat for an error
+                                anyhow::anyhow!("error while forwarding response: {}", err)
+                            })?
                     }
                 };
 
