@@ -3,12 +3,12 @@ mod change_user_tier;
 mod change_user_tier_by_address;
 mod change_user_tier_by_key;
 mod check_config;
-mod cost_calculator;
 mod count_users;
 mod create_user;
 mod drop_migration_lock;
 mod health_compass;
 mod list_user_tier;
+mod rpc_accounting;
 mod transfer_key;
 mod user_export;
 mod user_import;
@@ -47,11 +47,11 @@ enum SubCommand {
     ChangeUserTierByAddress(change_user_tier_by_address::ChangeUserTierByAddressSubCommand),
     ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeySubCommand),
     CheckConfig(check_config::CheckConfigSubCommand),
-    CostCalculator(cost_calculator::CostCalculatorSubCommand),
     CountUsers(count_users::CountUsersSubCommand),
     CreateUser(create_user::CreateUserSubCommand),
     DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
     HealthCompass(health_compass::HealthCompassSubCommand),
+    RpcAccounting(rpc_accounting::RpcAccountingSubCommand),
     TransferKey(transfer_key::TransferKeySubCommand),
     UserExport(user_export::UserExportSubCommand),
     UserImport(user_import::UserImportSubCommand),
@@ -116,11 +116,6 @@ async fn main() -> anyhow::Result<()> {
 
             x.main(&db_conn).await
         }
-        SubCommand::CostCalculator(x) => {
-            let db_conn = get_db(cli_config.db_url, 1, 1).await?;
-
-            x.main(&db_conn).await
-        }
         SubCommand::CountUsers(x) => {
             let db_conn = get_db(cli_config.db_url, 1, 1).await?;
 
@@ -133,6 +128,11 @@ async fn main() -> anyhow::Result<()> {
             x.main(&db_conn).await
         }
         SubCommand::HealthCompass(x) => x.main().await,
+        SubCommand::RpcAccounting(x) => {
+            let db_conn = get_migrated_db(cli_config.db_url, 1, 1).await?;
+
+            x.main(&db_conn).await
+        }
         SubCommand::TransferKey(x) => {
             let db_conn = get_db(cli_config.db_url, 1, 1).await?;
 
