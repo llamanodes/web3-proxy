@@ -725,22 +725,34 @@ impl Web3Connections {
                                 }
 
                                 // some errors should be retried on other nodes
-                                if error.code == -32000 {
-                                    let error_msg = error.message.as_str();
+                                match error.code {
+                                    -32000 => {
+                                        let error_msg = error.message.as_str();
 
-                                    // TODO: regex?
-                                    let retry_prefixes = [
-                                        "header not found",
-                                        "header for hash not found",
-                                        "missing trie node",
-                                        "node not started",
-                                        "RPC timeout",
-                                    ];
-                                    for retry_prefix in retry_prefixes {
-                                        if error_msg.starts_with(retry_prefix) {
+                                        // TODO: regex?
+                                        let retry_prefixes = [
+                                            "header not found",
+                                            "header for hash not found",
+                                            "missing trie node",
+                                            "node not started",
+                                            "RPC timeout",
+                                        ];
+                                        for retry_prefix in retry_prefixes {
+                                            if error_msg.starts_with(retry_prefix) {
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                    -32601 => {
+                                        let error_msg = error.message.as_str();
+
+                                        if error_msg.starts_with("the method")
+                                            && error_msg.ends_with("is not available")
+                                        {
                                             continue;
                                         }
                                     }
+                                    _ => {}
                                 }
                             } else {
                                 // trace!(?response, "rpc success");
