@@ -512,11 +512,11 @@ impl Web3Connections {
             if minimum < 0.0 {
                 available_request_map = available_request_map
                     .into_iter()
-                    .map(|(rpc, weight)| {
+                    .map(|(rpc, available_requests)| {
                         // TODO: is simple addition the right way to shift everyone?
                         // TODO: probably want something non-linear
-                        // minimum is negative, so we subtract
-                        let x = weight - minimum;
+                        // minimum is negative, so we subtract to make available requests bigger
+                        let x = available_requests - minimum;
 
                         (rpc, x)
                     })
@@ -530,12 +530,11 @@ impl Web3Connections {
                 } else {
                     let mut rng = thread_fast_rng::thread_fast_rng();
 
-                    // TODO: sort or weight the non-archive nodes to be first
                     usable_rpcs
                         .choose_multiple_weighted(&mut rng, usable_rpcs.len(), |rpc| {
                             *available_request_map
                                 .get(rpc)
-                                .expect("rpc should always be in the weight map")
+                                .expect("rpc should always be in available_request_map")
                         })
                         .unwrap()
                         .collect::<Vec<_>>()

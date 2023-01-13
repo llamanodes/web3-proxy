@@ -1119,7 +1119,7 @@ impl Serialize for Web3Connection {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Connection", 9)?;
+        let mut state = serializer.serialize_struct("Web3Connection", 8)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
@@ -1136,10 +1136,6 @@ impl Serialize for Web3Connection {
         }
 
         state.serialize_field("tier", &self.tier)?;
-
-        let faked_weight = 100u64.saturating_sub(self.tier) as f64 / 100.0;
-
-        state.serialize_field("weight", &faked_weight)?;
 
         state.serialize_field("soft_limit", &self.soft_limit)?;
 

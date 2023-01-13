@@ -299,6 +299,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - i think this was done, but am not positive.
 - [x] if private txs are disabled, only send trasactions to some of our servers. we were DOSing ourselves with transactions and slowing down sync
 - [x] retry if we get "the method X is not available"
+- [x] remove weight. we don't use it anymore. tiers are what we use now
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in and spawned in the background since it will slow things down and will make their calls less private
   - [ ] automatic pruning of old revert logs once too many are collected
