@@ -123,6 +123,10 @@ impl RpcAccountingSubCommand {
             condition = condition.add(rpc_accounting::Column::PeriodDatetime.lte(end_timestamp))
         }
 
+        if let Some(chain_id) = self.chain_id {
+            condition = condition.add(rpc_accounting::Column::ChainId.eq(chain_id))
+        }
+
         q = q.filter(condition);
 
         // TODO: make this work without into_json. i think we need to make a struct
