@@ -44,7 +44,7 @@ pub async fn proxy_web3_rpc(
     let rpcs: String = rpcs.into_iter().map(|x| x.name.clone()).join(",");
 
     headers.insert(
-        "W3P-BACKEND-RPCs",
+        "W3P-BACKEND-RPCS",
         rpcs.parse().expect("W3P-BACKEND-RPCS should always parse"),
     );
 
