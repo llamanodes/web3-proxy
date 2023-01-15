@@ -12,17 +12,21 @@ use anyhow::Context;
 use futures::StreamExt;
 use log::{debug, error, info, warn};
 use num::Zero;
-use parking_lot::deadlock;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{self, AtomicUsize};
-use std::thread;
 use tokio::runtime;
 use tokio::sync::broadcast;
-use tokio::time::Duration;
 use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use web3_proxy::config::{CliConfig, TopConfig};
 use web3_proxy::{frontend, metrics_frontend};
+
+#[cfg(feature = "deadlock")]
+use parking_lot::deadlock;
+#[cfg(feature = "deadlock")]
+use std::thread;
+#[cfg(feature = "deadlock")]
+use tokio::time::Duration;
 
 fn run(
     shutdown_sender: broadcast::Sender<()>,
@@ -34,24 +38,26 @@ fn run(
 
     let mut shutdown_receiver = shutdown_sender.subscribe();
 
-    // spawn a thread for deadlock detection
-    // TODO: disable this feature during release mode and things should go faster
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_secs(10));
-        let deadlocks = deadlock::check_deadlock();
-        if deadlocks.is_empty() {
-            continue;
-        }
-
-        println!("{} deadlocks detected", deadlocks.len());
-        for (i, threads) in deadlocks.iter().enumerate() {
-            println!("Deadlock #{}", i);
-            for t in threads {
-                println!("Thread Id {:#?}", t.thread_id());
-                println!("{:#?}", t.backtrace());
+    #[cfg(feature = "deadlock")]
+    {
+        // spawn a thread for deadlock detection
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(10));
+            let deadlocks = deadlock::check_deadlock();
+            if deadlocks.is_empty() {
+                continue;
             }
-        }
-    });
+
+            println!("{} deadlocks detected", deadlocks.len());
+            for (i, threads) in deadlocks.iter().enumerate() {
+                println!("Deadlock #{}", i);
+                for t in threads {
+                    println!("Thread Id {:#?}", t.thread_id());
+                    println!("{:#?}", t.backtrace());
+                }
+            }
+        });
+    }
 
     // set up tokio's async runtime
     let mut rt_builder = runtime::Builder::new_multi_thread();
@@ -248,6 +254,7 @@ mod tests {
     };
     use hashbrown::HashMap;
     use std::env;
+    use std::thread;
 
     use web3_proxy::{
         config::{AppConfig, Web3ConnectionConfig},
