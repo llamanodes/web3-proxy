@@ -92,10 +92,8 @@ fn run(
         let frontend_handle =
             tokio::spawn(frontend::serve(app_frontend_port, spawned_app.app.clone()));
 
-        let prometheus_handle = tokio::spawn(metrics_frontend::serve(
-            spawned_app.app,
-            app_prometheus_port,
-        ));
+        // TODO: should we put this in a dedicated thread?
+        let prometheus_handle = tokio::spawn(metrics_frontend::serve(app_prometheus_port));
 
         // if everything is working, these should both run forever
         tokio::select! {
@@ -165,12 +163,11 @@ fn run(
 
         if background_errors.is_zero() {
             info!("finished");
+            Ok(())
         } else {
             // TODO: collect instead?
-            error!("finished with errors!")
+            Err(anyhow::anyhow!("finished with errors!"))
         }
-
-        Ok(())
     })
 }
 
