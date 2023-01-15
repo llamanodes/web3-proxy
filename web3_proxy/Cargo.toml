@@ -35,7 +35,7 @@ env_logger = "0.10.0"
 fdlimit = "0.2.1"
 flume = "0.10.14"
 futures = { version = "0.3.25", features = ["thread-pool"] }
-hashbrown = { version = "0.13.1", features = ["serde"] }
+hashbrown = { version = "0.13.2", features = ["serde"] }
 hdrhistogram = "7.5.2"
 http = "0.2.8"
 ipnet = "2.7.1"
