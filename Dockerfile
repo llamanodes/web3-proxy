@@ -8,7 +8,7 @@ COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/src/web3_proxy/target \
     cargo test &&\
-    cargo install --locked --root /opt/bin --path ./web3_proxy
+    cargo install --locked --no-default-features --root /opt/bin --path ./web3_proxy
 
 FROM debian:bullseye-slim
 
