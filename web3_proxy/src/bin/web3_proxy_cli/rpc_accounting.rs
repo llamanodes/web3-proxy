@@ -12,6 +12,8 @@ use migration::{
     },
     Condition,
 };
+use serde::Serialize;
+use serde_json::json;
 
 /// count requests
 #[derive(FromArgs, PartialEq, Debug, Eq)]
@@ -37,7 +39,7 @@ pub struct RpcAccountingSubCommand {
 
 impl RpcAccountingSubCommand {
     pub async fn main(self, db_conn: &DatabaseConnection) -> anyhow::Result<()> {
-        #[derive(Debug, FromQueryResult)]
+        #[derive(Serialize, FromQueryResult)]
         struct SelectResult {
             total_frontend_requests: Decimal,
             // pub total_backend_retries: Decimal,
@@ -137,8 +139,9 @@ impl RpcAccountingSubCommand {
             .context("no query result")?;
 
         info!(
-            "query_response for chain {:?}: {:#?}",
-            self.chain_id, query_response
+            "query_response for chain {:?}: {:#}",
+            self.chain_id,
+            json!(query_response)
         );
 
         // let query_seconds: Decimal = query_response
