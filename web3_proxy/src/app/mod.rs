@@ -6,6 +6,7 @@ use crate::block_number::{block_needed, BlockNeeded};
 use crate::config::{AppConfig, TopConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::errors::FrontendErrorResponse;
+use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{
     JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest, JsonRpcRequestEnum,
 };
@@ -907,10 +908,10 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: Arc<Authorization>,
         request: JsonRpcRequestEnum,
+        proxy_mode: ProxyMode,
     ) -> Result<(JsonRpcForwardedResponseEnum, Vec<Arc<Web3Connection>>), FrontendErrorResponse>
     {
-        // TODO: this should probably be trace level
-        // // trace!(?request, "proxy_web3_rpc");
+        // trace!(?request, "proxy_web3_rpc");
 
         // even though we have timeouts on the requests to our backend providers,
         // we need a timeout for the incoming request so that retries don't run forever
@@ -921,7 +922,7 @@ impl Web3ProxyApp {
             JsonRpcRequestEnum::Single(request) => {
                 let (response, rpcs) = timeout(
                     max_time,
-                    self.proxy_web3_rpc_request(&authorization, request),
+                    self.proxy_cached_request(&authorization, request, proxy_mode),
                 )
                 .await??;
 
@@ -930,7 +931,7 @@ impl Web3ProxyApp {
             JsonRpcRequestEnum::Batch(requests) => {
                 let (responses, rpcs) = timeout(
                     max_time,
-                    self.proxy_web3_rpc_requests(&authorization, requests),
+                    self.proxy_web3_rpc_requests(&authorization, requests, proxy_mode),
                 )
                 .await??;
 
@@ -947,6 +948,7 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         requests: Vec<JsonRpcRequest>,
+        proxy_mode: ProxyMode,
     ) -> anyhow::Result<(Vec<JsonRpcForwardedResponse>, Vec<Arc<Web3Connection>>)> {
         // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
@@ -956,7 +958,7 @@ impl Web3ProxyApp {
         let responses = join_all(
             requests
                 .into_iter()
-                .map(|request| self.proxy_web3_rpc_request(authorization, request))
+                .map(|request| self.proxy_cached_request(authorization, request, proxy_mode))
                 .collect::<Vec<_>>(),
         )
         .await;
@@ -1000,10 +1002,11 @@ impl Web3ProxyApp {
     }
 
     #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
-    async fn proxy_web3_rpc_request(
+    async fn proxy_cached_request(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
+        proxy_mode: ProxyMode,
     ) -> anyhow::Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Connection>>)> {
         // trace!("Received request: {:?}", request);
 
@@ -1172,22 +1175,32 @@ impl Web3ProxyApp {
             // TODO: eth_sendBundle (flashbots command)
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => {
+                // TODO: how should we handle private_mode here?
+                let default_num = match proxy_mode {
+                    // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
+                    ProxyMode::Best => Some(2),
+                    ProxyMode::Fastest(0) => None,
+                    // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
+                    // TODO: what if we do 2 per tier? we want to blast the third party rpcs
+                    // TODO: maybe having the third party rpcs in their own Web3Connections would be good for this
+                    ProxyMode::Fastest(x) => Some(x * 2),
+                    ProxyMode::Versus => None,
+                };
+
                 let (private_rpcs, num) = if let Some(private_rpcs) = self.private_rpcs.as_ref() {
                     if authorization.checks.private_txs {
+                        // if we are sending the transaction privately, no matter the proxy_mode, we send to ALL private rpcs
                         (private_rpcs, None)
                     } else {
-                        // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
-                        // TODO: what if we do 2 per tier? we want to blast the third party rpcs
-                        // TODO: maybe having the third party rpcs would be good for this
-                        (&self.balanced_rpcs, Some(2))
+                        (&self.balanced_rpcs, default_num)
                     }
                 } else {
-                    (&self.balanced_rpcs, Some(2))
+                    (&self.balanced_rpcs, default_num)
                 };
 
                 // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
                 let mut response = private_rpcs
-                    .try_send_all_upstream_servers(
+                    .try_send_all_synced_connections(
                         authorization,
                         &request,
                         Some(request_metadata.clone()),
@@ -1298,7 +1311,8 @@ impl Web3ProxyApp {
                 json!(true)
             }
             "net_peerCount" => {
-                // emit stats
+                // no stats on this. its cheap
+                // TODO: do something with proxy_mode here?
                 self.balanced_rpcs.num_synced_rpcs().into()
             }
             "web3_clientVersion" => {
@@ -1404,10 +1418,12 @@ impl Web3ProxyApp {
                             .try_get_with(cache_key, async move {
                                 // TODO: retry some failures automatically!
                                 // TODO: try private_rpcs if all the balanced_rpcs fail!
-                                // TODO: put the hash here instead?
+                                // TODO: put the hash here instead of the block number? its in the request already.
+
                                 let mut response = self
                                     .balanced_rpcs
-                                    .try_send_best_upstream_server(
+                                    .try_proxy_connection(
+                                        proxy_mode,
                                         self.allowed_lag,
                                         &authorization,
                                         request,
@@ -1433,18 +1449,15 @@ impl Web3ProxyApp {
                             })?
                     } else {
                         self.balanced_rpcs
-                            .try_send_best_upstream_server(
+                            .try_proxy_connection(
+                                proxy_mode,
                                 self.allowed_lag,
                                 &authorization,
                                 request,
                                 Some(&request_metadata),
                                 None,
                             )
-                            .await
-                            .map_err(|err| {
-                                // TODO: emit a stat for an error
-                                anyhow::anyhow!("error while forwarding response: {}", err)
-                            })?
+                            .await?
                     }
                 };
 

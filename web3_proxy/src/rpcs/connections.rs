@@ -2,12 +2,13 @@
 use super::blockchain::{ArcBlock, BlockHashesCache};
 use super::connection::Web3Connection;
 use super::request::{
-    OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult, RequestErrorHandler,
+    OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult, RequestRevertHandler,
 };
 use super::synced_connections::SyncedConnections;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3ConnectionConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
+use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
 use arc_swap::ArcSwap;
@@ -406,8 +407,8 @@ impl Web3Connections {
         unimplemented!("this shouldn't be possible")
     }
 
-    /// get the best available rpc server
-    pub async fn best_synced_backend_connection(
+    /// get the best available rpc server with the consensus head block. it might have blocks after the consensus head
+    pub async fn best_consensus_head_connection(
         &self,
         allowed_lag: u64,
         authorization: &Arc<Authorization>,
@@ -662,7 +663,7 @@ impl Web3Connections {
 
     /// be sure there is a timeout on this or it might loop forever
     /// TODO: do not take allowed_lag here. have it be on the connections struct instead
-    pub async fn try_send_best_upstream_server(
+    pub async fn try_send_best_consensus_head_connection(
         &self,
         allowed_lag: u64,
         authorization: &Arc<Authorization>,
@@ -679,7 +680,7 @@ impl Web3Connections {
                 break;
             }
             match self
-                .best_synced_backend_connection(
+                .best_consensus_head_connection(
                     allowed_lag,
                     authorization,
                     request_metadata,
@@ -705,7 +706,7 @@ impl Web3Connections {
                         .request(
                             &request.method,
                             &json!(request.params),
-                            RequestErrorHandler::SaveReverts,
+                            RequestRevertHandler::Save,
                         )
                         .await;
 
@@ -818,7 +819,7 @@ impl Web3Connections {
     }
 
     /// be sure there is a timeout on this or it might loop forever
-    pub async fn try_send_all_upstream_servers(
+    pub async fn try_send_all_synced_connections(
         &self,
         authorization: &Arc<Authorization>,
         request: &JsonRpcRequest,
@@ -885,6 +886,31 @@ impl Web3Connections {
                     continue;
                 }
             }
+        }
+    }
+
+    pub async fn try_proxy_connection(
+        &self,
+        proxy_mode: ProxyMode,
+        allowed_lag: u64,
+        authorization: &Arc<Authorization>,
+        request: JsonRpcRequest,
+        request_metadata: Option<&Arc<RequestMetadata>>,
+        min_block_needed: Option<&U64>,
+    ) -> anyhow::Result<JsonRpcForwardedResponse> {
+        match proxy_mode {
+            ProxyMode::Best => {
+                self.try_send_best_consensus_head_connection(
+                    allowed_lag,
+                    authorization,
+                    request,
+                    request_metadata,
+                    min_block_needed,
+                )
+                .await
+            }
+            ProxyMode::Fastest(x) => todo!("Fastest"),
+            ProxyMode::Versus => todo!("Versus"),
         }
     }
 }
@@ -1088,7 +1114,7 @@ mod tests {
         // best_synced_backend_connection requires servers to be synced with the head block
         // TODO: don't hard code allowed_lag
         let x = conns
-            .best_synced_backend_connection(60, &authorization, None, &[], None)
+            .best_consensus_head_connection(60, &authorization, None, &[], None)
             .await
             .unwrap();
 
@@ -1143,21 +1169,21 @@ mod tests {
 
         assert!(matches!(
             conns
-                .best_synced_backend_connection(60, &authorization, None, &[], None)
+                .best_consensus_head_connection(60, &authorization, None, &[], None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         assert!(matches!(
             conns
-                .best_synced_backend_connection(60, &authorization, None, &[], Some(&0.into()))
+                .best_consensus_head_connection(60, &authorization, None, &[], Some(&0.into()))
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         assert!(matches!(
             conns
-                .best_synced_backend_connection(60, &authorization, None, &[], Some(&1.into()))
+                .best_consensus_head_connection(60, &authorization, None, &[], Some(&1.into()))
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
@@ -1165,7 +1191,7 @@ mod tests {
         // future block should not get a handle
         assert!(matches!(
             conns
-                .best_synced_backend_connection(60, &authorization, None, &[], Some(&2.into()))
+                .best_consensus_head_connection(60, &authorization, None, &[], Some(&2.into()))
                 .await,
             Ok(OpenRequestResult::NotReady)
         ));
@@ -1298,7 +1324,7 @@ mod tests {
 
         // best_synced_backend_connection requires servers to be synced with the head block
         let best_head_server = conns
-            .best_synced_backend_connection(
+            .best_consensus_head_connection(
                 60,
                 &authorization,
                 None,
@@ -1313,7 +1339,7 @@ mod tests {
         ));
 
         let best_archive_server = conns
-            .best_synced_backend_connection(60, &authorization, None, &[], Some(&1.into()))
+            .best_consensus_head_connection(60, &authorization, None, &[], Some(&1.into()))
             .await;
 
         match best_archive_server {

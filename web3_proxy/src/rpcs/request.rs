@@ -42,7 +42,7 @@ pub struct OpenRequestHandle {
 }
 
 /// Depending on the context, RPC errors can require different handling.
-pub enum RequestErrorHandler {
+pub enum RequestRevertHandler {
     /// Log at the trace level. Use when errors are expected.
     TraceLevel,
     /// Log at the debug level. Use when errors are expected.
@@ -52,7 +52,7 @@ pub enum RequestErrorHandler {
     /// Log at the warn level. Use when errors do not cause problems.
     WarnLevel,
     /// Potentially save the revert. Users can tune how often this happens
-    SaveReverts,
+    Save,
 }
 
 // TODO: second param could be skipped since we don't need it here
@@ -65,13 +65,13 @@ struct EthCallFirstParams {
     data: Option<Bytes>,
 }
 
-impl From<Level> for RequestErrorHandler {
+impl From<Level> for RequestRevertHandler {
     fn from(level: Level) -> Self {
         match level {
-            Level::Trace => RequestErrorHandler::TraceLevel,
-            Level::Debug => RequestErrorHandler::DebugLevel,
-            Level::Error => RequestErrorHandler::ErrorLevel,
-            Level::Warn => RequestErrorHandler::WarnLevel,
+            Level::Trace => RequestRevertHandler::TraceLevel,
+            Level::Debug => RequestRevertHandler::DebugLevel,
+            Level::Error => RequestRevertHandler::ErrorLevel,
+            Level::Warn => RequestRevertHandler::WarnLevel,
             _ => unimplemented!("unexpected tracing Level"),
         }
     }
@@ -213,7 +213,7 @@ impl OpenRequestHandle {
         &self,
         method: &str,
         params: &P,
-        error_handler: RequestErrorHandler,
+        revert_handler: RequestRevertHandler,
     ) -> Result<R, ProviderError>
     where
         // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
@@ -252,36 +252,36 @@ impl OpenRequestHandle {
         if let Err(err) = &response {
             // only save reverts for some types of calls
             // TODO: do something special for eth_sendRawTransaction too
-            let error_handler = if let RequestErrorHandler::SaveReverts = error_handler {
+            let revert_handler = if let RequestRevertHandler::Save = revert_handler {
                 // TODO: should all these be Trace or Debug or a mix?
                 if !["eth_call", "eth_estimateGas"].contains(&method) {
                     // trace!(%method, "skipping save on revert");
-                    RequestErrorHandler::TraceLevel
+                    RequestRevertHandler::TraceLevel
                 } else if self.authorization.db_conn.is_some() {
                     let log_revert_chance = self.authorization.checks.log_revert_chance;
 
                     if log_revert_chance == 0.0 {
                         // trace!(%method, "no chance. skipping save on revert");
-                        RequestErrorHandler::TraceLevel
+                        RequestRevertHandler::TraceLevel
                     } else if log_revert_chance == 1.0 {
                         // trace!(%method, "gaurenteed chance. SAVING on revert");
-                        error_handler
+                        revert_handler
                     } else if thread_fast_rng::thread_fast_rng().gen_range(0.0f64..=1.0)
                         < log_revert_chance
                     {
                         // trace!(%method, "missed chance. skipping save on revert");
-                        RequestErrorHandler::TraceLevel
+                        RequestRevertHandler::TraceLevel
                     } else {
                         // trace!("Saving on revert");
                         // TODO: is always logging at debug level fine?
-                        error_handler
+                        revert_handler
                     }
                 } else {
                     // trace!(%method, "no database. skipping save on revert");
-                    RequestErrorHandler::TraceLevel
+                    RequestRevertHandler::TraceLevel
                 }
             } else {
-                error_handler
+                revert_handler
             };
 
             // check for "execution reverted" here
@@ -323,8 +323,8 @@ impl OpenRequestHandle {
             }
 
             // TODO: think more about the method and param logs. those can be sensitive information
-            match error_handler {
-                RequestErrorHandler::DebugLevel => {
+            match revert_handler {
+                RequestRevertHandler::DebugLevel => {
                     // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
                     if !is_revert {
                         debug!(
@@ -333,7 +333,7 @@ impl OpenRequestHandle {
                         );
                     }
                 }
-                RequestErrorHandler::TraceLevel => {
+                RequestRevertHandler::TraceLevel => {
                     trace!(
                         "bad response from {}! method={} params={:?} err={:?}",
                         self.conn,
@@ -342,21 +342,21 @@ impl OpenRequestHandle {
                         err
                     );
                 }
-                RequestErrorHandler::ErrorLevel => {
+                RequestRevertHandler::ErrorLevel => {
                     // TODO: include params if not running in release mode
                     error!(
                         "bad response from {}! method={} err={:?}",
                         self.conn, method, err
                     );
                 }
-                RequestErrorHandler::WarnLevel => {
+                RequestRevertHandler::WarnLevel => {
                     // TODO: include params if not running in release mode
                     warn!(
                         "bad response from {}! method={} err={:?}",
                         self.conn, method, err
                     );
                 }
-                RequestErrorHandler::SaveReverts => {
+                RequestRevertHandler::Save => {
                     trace!(
                         "bad response from {}! method={} params={:?} err={:?}",
                         self.conn,
