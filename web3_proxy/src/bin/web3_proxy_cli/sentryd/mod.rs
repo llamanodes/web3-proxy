@@ -22,6 +22,10 @@ pub struct SentrydSubCommand {
     web3_proxy: String,
 
     #[argh(option)]
+    /// warning threshold for age of the best known head block
+    max_age: i64,
+
+    #[argh(option)]
     /// warning threshold for seconds between the rpc and best other_rpc's head blocks
     max_lag: i64,
 
@@ -69,6 +73,7 @@ impl SentrydSubCommand {
 
         // compare the main web3-proxy head block to all web3-proxies and rpcs
         {
+            let max_age = self.max_age;
             let max_lag = self.max_lag;
             let rpc = self.web3_proxy.clone();
 
@@ -77,7 +82,7 @@ impl SentrydSubCommand {
             others.extend(self.other_rpc.clone());
 
             let loop_f = a_loop(seconds, log::Level::Error, move || {
-                compare::main(rpc.clone(), others.clone(), max_lag)
+                compare::main(rpc.clone(), others.clone(), max_age, max_lag)
             });
 
             handles.push(tokio::spawn(loop_f));

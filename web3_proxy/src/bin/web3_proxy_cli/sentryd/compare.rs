@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context};
 use chrono::{DateTime, Utc};
-use ethers::types::{Block, TxHash, H256, U64};
+use ethers::types::{Block, TxHash, H256};
 use futures::{stream::FuturesUnordered, StreamExt};
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,12 @@ impl From<Block<TxHash>> for AbbreviatedBlock {
     }
 }
 
-pub async fn main(rpc: String, others: Vec<String>, max_lag: i64) -> anyhow::Result<()> {
+pub async fn main(
+    rpc: String,
+    others: Vec<String>,
+    max_age: i64,
+    max_lag: i64,
+) -> anyhow::Result<()> {
     let client = reqwest::Client::new();
 
     let block_by_number_request = json!({
@@ -118,7 +123,7 @@ pub async fn main(rpc: String, others: Vec<String>, max_lag: i64) -> anyhow::Res
             .signed_duration_since(newest_other.max(&rpc_block).time)
             .num_seconds();
 
-        match block_age.abs().cmp(&max_lag) {
+        match block_age.abs().cmp(&max_age) {
             std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {}
             std::cmp::Ordering::Greater => match duration_since.cmp(&0) {
                 std::cmp::Ordering::Equal => unimplemented!(),
