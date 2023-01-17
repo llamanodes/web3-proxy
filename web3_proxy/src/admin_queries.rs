@@ -12,7 +12,7 @@ use entities::{admin, user, user_tier};
 use ethers::prelude::Address;
 use hashbrown::HashMap;
 use http::StatusCode;
-use migration::sea_orm::{self, IntoActiveModel};
+use migration::sea_orm::{self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use log::info;
 
 
@@ -51,14 +51,6 @@ pub async fn query_admin_modify_usertier<'a>(
 
     // Prepare output body
     let mut response_body = HashMap::new();
-    response_body.insert(
-        "user_address",
-        serde_json::Value::String(user_address.into()),
-    );
-    response_body.insert(
-        "user_tier_title",
-        serde_json::Value::String(user_tier_title.into()),
-    );
 
     // Establish connections
     let db_conn = app.db_conn().context("query_admin_modify_user needs a db")?;
@@ -78,8 +70,8 @@ pub async fn query_admin_modify_usertier<'a>(
 
     // Check if the caller is an admin (i.e. if he is in an admin table)
     let admin: admin::Model = admin::Entity::find()
-        .filter(admin::Entity::UserId.eq(caller_id))
-        .one(&db_replica)
+        .filter(admin::Column::UserId.eq(caller_id))
+        .one(&db_conn)
         .await?
         .context("This user is not registered as an admin")?;
 
@@ -88,19 +80,19 @@ pub async fn query_admin_modify_usertier<'a>(
     // Fetch the admin, and the user
     let user: user::Model = user::Entity::find()
         .filter(user::Column::Address.eq(user_address))
-        .one(&db_replica)
+        .one(&db_conn)
         .await?
         .context("No user with this id found as the change")?;
     // Return early if the target user_tier_id is the same as the original user_tier_id
     response_body.insert(
         "user_tier_title",
-        serde_json::Value::String(user.user_tier_id.into()),
+        serde_json::Value::Number(user.user_tier_id.into()),
     );
 
     // Now we can modify the user's tier
     let new_user_tier: user_tier::Model = user_tier::Entity::find()
         .filter(user_tier::Column::Title.eq(user_tier_title.clone()))
-        .one(&db_replica)
+        .one(&db_conn)
         .await?
         .context("No user tier found with that name")?;
 

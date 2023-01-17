@@ -2,6 +2,7 @@
 //!
 //! Important reading about axum extractors: https://docs.rs/axum/latest/axum/extract/index.html#the-order-of-extractors
 
+pub mod admin;
 pub mod authorization;
 pub mod errors;
 // TODO: these are only public so docs are generated. What's a better way to do this?
@@ -167,7 +168,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
             get(users::user_stats_aggregated_get),
         )
         .route("/user/stats/detailed", get(users::user_stats_detailed_get))
-        .route("/admin/modify_role", get(users::admin_change_user_roles))
+        .route("/admin/modify_role", get(admin::admin_change_user_roles))
         .route("/user/logout", post(users::user_logout_post))
         //
         // Axum layers
