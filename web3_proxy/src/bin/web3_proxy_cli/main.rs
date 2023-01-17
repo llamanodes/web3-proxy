@@ -1,4 +1,5 @@
 mod change_user_address;
+mod change_user_admin_status;
 mod change_user_tier;
 mod change_user_tier_by_address;
 mod change_user_tier_by_key;
@@ -44,6 +45,7 @@ pub struct CliConfig {
 enum SubCommand {
     ChangeUserAddress(change_user_address::ChangeUserAddressSubCommand),
     ChangeUserTier(change_user_tier::ChangeUserTierSubCommand),
+    ChangeUserAdminStatus(change_user_admin_status::ChangeUserAdminStatusSubCommand),
     ChangeUserTierByAddress(change_user_tier_by_address::ChangeUserTierByAddressSubCommand),
     ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeySubCommand),
     CheckConfig(check_config::CheckConfigSubCommand),
@@ -96,6 +98,11 @@ async fn main() -> anyhow::Result<()> {
             x.main(&db_conn).await
         }
         SubCommand::ChangeUserTier(x) => {
+            let db_conn = get_db(cli_config.db_url, 1, 1).await?;
+
+            x.main(&db_conn).await
+        }
+        SubCommand::ChangeUserAdminStatus(x) => {
             let db_conn = get_db(cli_config.db_url, 1, 1).await?;
 
             x.main(&db_conn).await
