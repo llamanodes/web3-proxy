@@ -856,23 +856,3 @@ pub async fn user_stats_detailed_get(
 
     Ok(response)
 }
-
-/// `GET /user/stats/detailed` -- Use a bearer token to get the user's key stats such as bandwidth used and methods requested.
-///
-/// If no bearer is provided, detailed stats for all users will be shown.
-/// View a single user with `?user_id=$x`.
-/// View a single chain with `?chain_id=$x`.
-///
-/// Set `$x` to zero to see all.
-///
-/// TODO: this will change as we add better support for secondary users.
-#[debug_handler]
-pub async fn admin_change_user_roles(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
-    bearer: Option<TypedHeader<Authorization<Bearer>>>,
-    Query(params): Query<HashMap<String, String>>,
-) -> FrontendResult {
-    let response = query_admin_modify_usertier(&app, bearer, &params).await?;
-
-    response
-}
