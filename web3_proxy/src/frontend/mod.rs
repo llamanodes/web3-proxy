@@ -40,6 +40,8 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .time_to_live(Duration::from_secs(1))
         .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
+    // TODO: read config for if fastest/versus should be available publicly. default off
+
     // build our axum Router
     let app = Router::new()
         // TODO: i think these routes could be done a lot better
