@@ -93,7 +93,10 @@ fn run(
             tokio::spawn(frontend::serve(app_frontend_port, spawned_app.app.clone()));
 
         // TODO: should we put this in a dedicated thread?
-        let prometheus_handle = tokio::spawn(metrics_frontend::serve(app_prometheus_port));
+        let prometheus_handle = tokio::spawn(metrics_frontend::serve(
+            spawned_app.app.clone(),
+            app_prometheus_port,
+        ));
 
         // if everything is working, these should both run forever
         tokio::select! {
