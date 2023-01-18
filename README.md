@@ -37,7 +37,7 @@ Options:
 Start the server with the defaults (listen on `http://localhost:8544` and use `./config/development.toml` which uses the database and cache running under docker and proxies to a bunch of public nodes:
 
 ```
-cargo run --release
+cargo run --release -- daemon
 ```
 
 ## Common commands
@@ -45,7 +45,7 @@ cargo run --release
 Create a user:
 
 ```
-cargo run --bin web3_proxy_cli -- --db-url "$YOUR_DB_URL" create_user --address "$USER_ADDRESS_0x"
+cargo run -- --db-url "$YOUR_DB_URL" create_user --address "$USER_ADDRESS_0x"
 ```
 
 Check that the proxy is working:

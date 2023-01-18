@@ -300,6 +300,12 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] if private txs are disabled, only send trasactions to some of our servers. we were DOSing ourselves with transactions and slowing down sync
 - [x] retry if we get "the method X is not available"
 - [x] remove weight. we don't use it anymore. tiers are what we use now
+- [x] make deadlock feature optional
+- [x] standalone healthcheck daemon (sentryd)
+- [x] status page should show version
+- [x] combine the proxy and cli into one bin
+- [-] proxy mode for benchmarking all backends
+- [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in and spawned in the background since it will slow things down and will make their calls less private
   - [ ] automatic pruning of old revert logs once too many are collected
@@ -578,7 +584,6 @@ in another repo: event subscriber
 - [ ] sentry profiling
 - [ ] support alchemy_minedTransactions
 - [ ] debug print of user::Model's address is a big vec of numbers. make that hex somehow
-- [ ] should we combine the proxy and cli into one bin?
 - [ ] make it so you can put a string like "LN arbitrum" into the create_user script, and have it automatically turn it into 0x4c4e20617262697472756d000000000000000000.
   - [ ] if --address not given, use the --description
   - [ ] if it is too long, (the last 4 bytes must be zero), give an error so descriptions like this stand out
