@@ -14,10 +14,10 @@ mod user_export;
 mod user_import;
 
 use argh::FromArgs;
-use log::warn;
+use log::{info, warn};
 use std::fs;
 use web3_proxy::{
-    app::{get_db, get_migrated_db},
+    app::{get_db, get_migrated_db, APP_USER_AGENT},
     config::TopConfig,
 };
 
@@ -125,6 +125,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     log::set_max_level(max_level);
+
+    info!("{}", APP_USER_AGENT);
 
     match cli_config.sub_command {
         SubCommand::ChangeUserAddress(x) => {

@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::atomic::{self, AtomicUsize};
 use tokio::runtime;
 use tokio::sync::broadcast;
-use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
+use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp, APP_USER_AGENT};
 use web3_proxy::config::{CliConfig, TopConfig};
 use web3_proxy::{frontend, metrics_frontend};
 
@@ -234,6 +234,8 @@ fn main() -> anyhow::Result<()> {
     };
 
     log::set_max_level(max_level);
+
+    info!("{}", APP_USER_AGENT);
 
     // we used to do this earlier, but now we attach sentry
     debug!("CLI config @ {:#?}", cli_config.config);

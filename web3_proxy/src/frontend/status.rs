@@ -4,7 +4,7 @@
 //! They will eventually move to another port.
 
 use super::{FrontendResponseCache, FrontendResponseCaches};
-use crate::app::Web3ProxyApp;
+use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_macros::debug_handler;
 use serde_json::json;
@@ -33,6 +33,7 @@ pub async fn status(
         .get_with(FrontendResponseCaches::Status, async {
             // TODO: what else should we include? uptime, cache hit rates, cpu load, memory used
             let body = json!({
+                "version": APP_USER_AGENT,
                 "chain_id": app.config.chain_id,
                 "balanced_rpcs": app.balanced_rpcs,
                 "private_rpcs": app.private_rpcs,

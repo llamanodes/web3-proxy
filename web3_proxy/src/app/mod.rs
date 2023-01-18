@@ -56,11 +56,12 @@ use tokio::time::{sleep, timeout};
 use ulid::Ulid;
 
 // TODO: make this customizable?
+// TODO: include GIT_REF in here. i had trouble getting https://docs.rs/vergen/latest/vergen/ to work with a workspace. also .git is in .dockerignore
 pub static APP_USER_AGENT: &str = concat!(
-    "satoshiandkin/",
+    "llamanodes_",
     env!("CARGO_PKG_NAME"),
-    "/",
-    env!("CARGO_PKG_VERSION"),
+    "/v",
+    env!("CARGO_PKG_VERSION")
 );
 
 /// TODO: allow customizing the request period?
