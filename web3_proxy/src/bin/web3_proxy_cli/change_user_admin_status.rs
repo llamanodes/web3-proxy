@@ -1,12 +1,13 @@
 use anyhow::Context;
 use argh::FromArgs;
-use entities::{admin, user};
+use entities::{admin, login, user};
 use ethers::types::Address;
 use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, IntoActiveModel,
     QueryFilter,
 };
+use web3_proxy::frontend::errors::FrontendErrorResponse;
 
 /// change a user's admin status. eiter they are an admin, or they aren't
 #[derive(FromArgs, PartialEq, Eq, Debug)]
@@ -58,6 +59,14 @@ impl ChangeUserAdminStatusSubCommand {
             },
             _ => {}
         }
+
+        // Remove any user logins from the database (incl. bearer tokens)
+        let delete_result = login::Entity::delete_many()
+            .filter(login::Column::UserId.eq(user.id))
+            .exec(db_conn)
+            .await;
+
+        debug!("cleared modified logins: {:?}", delete_result);
 
         Ok(())
     }
