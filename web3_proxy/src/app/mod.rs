@@ -1134,6 +1134,7 @@ impl Web3ProxyApp {
             }
             /*
             // erigon was giving bad estimates. but now it doesn't need it
+            // TODO: got reports of some gas estimate issue on polygon with their erc20s. maybe we do want it
             "eth_estimateGas" => {
                 // TODO: eth_estimateGas using anvil?
                 // TODO: modify the block requested?
