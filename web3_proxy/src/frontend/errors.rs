@@ -35,7 +35,6 @@ pub enum FrontendErrorResponse {
     NotFound,
     RateLimited(Authorization, Option<Instant>),
     Redis(RedisError),
-    Response(Response),
     /// simple way to return an error message to the user and an anyhow to our logs
     StatusCode(StatusCode, String, Option<anyhow::Error>),
     /// TODO: what should be attached to the timout?
@@ -44,11 +43,9 @@ pub enum FrontendErrorResponse {
     UnknownKey,
 }
 
-impl IntoResponse for FrontendErrorResponse {
-    fn into_response(self) -> Response {
-        // TODO: include the request id in these so that users can give us something that will point to logs
-        // TODO: status code is in the jsonrpc response and is also the first item in the tuple. DRY
-        let (status_code, response) = match self {
+impl FrontendErrorResponse {
+    pub fn into_response_parts(self) -> (StatusCode, JsonRpcForwardedResponse) {
+        match self {
             Self::AccessDenied => {
                 // TODO: attach something to this trace. probably don't include much in the message though. don't want to leak creds by accident
                 trace!("access denied");
@@ -174,12 +171,12 @@ impl IntoResponse for FrontendErrorResponse {
                 };
 
                 // create a string with either the IP or the rpc_key_id
-                let msg = if authorization.checks.rpc_key_id.is_none() {
+                let msg = if authorization.checks.rpc_secret_key_id.is_none() {
                     format!("too many requests from {}.{}", authorization.ip, retry_msg)
                 } else {
                     format!(
                         "too many requests from rpc key #{}.{}",
-                        authorization.checks.rpc_key_id.unwrap(),
+                        authorization.checks.rpc_secret_key_id.unwrap(),
                         retry_msg
                     )
                 };
@@ -203,10 +200,6 @@ impl IntoResponse for FrontendErrorResponse {
                         None,
                     ),
                 )
-            }
-            Self::Response(r) => {
-                debug_assert_ne!(r.status(), StatusCode::OK);
-                return r;
             }
             Self::SemaphoreAcquireError(err) => {
                 warn!("semaphore acquire err={:?}", err);
@@ -274,7 +267,15 @@ impl IntoResponse for FrontendErrorResponse {
                     None,
                 ),
             ),
-        };
+        }
+    }
+}
+
+impl IntoResponse for FrontendErrorResponse {
+    fn into_response(self) -> Response {
+        // TODO: include the request id in these so that users can give us something that will point to logs
+        // TODO: status code is in the jsonrpc response and is also the first item in the tuple. DRY
+        let (status_code, response) = self.into_response_parts();
 
         (status_code, Json(response)).into_response()
     }

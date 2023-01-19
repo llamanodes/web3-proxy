@@ -84,7 +84,7 @@ impl Authorization {
         method: Method,
         params: EthCallFirstParams,
     ) -> anyhow::Result<()> {
-        let rpc_key_id = match self.checks.rpc_key_id {
+        let rpc_key_id = match self.checks.rpc_secret_key_id {
             Some(rpc_key_id) => rpc_key_id.into(),
             None => {
                 // // trace!(?self, "cannot save revert without rpc_key_id");
@@ -240,14 +240,14 @@ impl OpenRequestHandle {
             Web3Provider::Ws(provider) => provider.request(method, params).await,
         };
 
-        // TODO: i think ethers already has trace logging (and does it much more fancy)
-        trace!(
-            "response from {} for {} {:?}: {:?}",
-            self.conn,
-            method,
-            params,
-            response,
-        );
+        // // TODO: i think ethers already has trace logging (and does it much more fancy)
+        // trace!(
+        //     "response from {} for {} {:?}: {:?}",
+        //     self.conn,
+        //     method,
+        //     params,
+        //     response,
+        // );
 
         if let Err(err) = &response {
             // only save reverts for some types of calls

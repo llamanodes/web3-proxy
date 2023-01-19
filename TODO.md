@@ -304,6 +304,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] standalone healthcheck daemon (sentryd)
 - [x] status page should show version
 - [x] combine the proxy and cli into one bin
+- [x] improve rate limiting on websockets
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
@@ -514,7 +515,8 @@ in another repo: event subscriber
 - [ ] if the call is something simple like "symbol" or "decimals", cache that too. though i think this could bite us.
 - [ ] add a subscription that returns the head block number and hash but nothing else
 - [ ] if chain split detected, what should we do? don't send transactions?
-- [ ] archive check works well for local servers, but public nodes (especially on other chains) seem to give unreliable results. likely because of load balancers. maybe have a "max block data limit"
+- [ ] archive check works well for local servers, but public nodes (especially on other chains) seem to give unreliable results. likely because of load balancers.
+  - [x] configurable block data limit until better checks
 - [ ] https://docs.rs/derive_builder/latest/derive_builder/
 - [ ] Detect orphaned transactions
 - [ ] https://crates.io/crates/reqwest-middleware easy retry with exponential back off

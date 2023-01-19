@@ -4,7 +4,7 @@ mod ws;
 use crate::app_stats::{ProxyResponseStat, StatEmitter, Web3ProxyStat};
 use crate::block_number::{block_needed, BlockNeeded};
 use crate::config::{AppConfig, TopConfig};
-use crate::frontend::authorization::{Authorization, RequestMetadata};
+use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
 use crate::frontend::errors::FrontendErrorResponse;
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{
@@ -136,12 +136,14 @@ pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
 #[derive(Clone, Debug, Default, From)]
 pub struct AuthorizationChecks {
-    /// database id of the primary user.
+    /// database id of the primary user. 0 if anon
     /// TODO: do we need this? its on the authorization so probably not
     pub user_id: u64,
+    /// the key used (if any)
+    pub rpc_secret_key: Option<RpcSecretKey>,
     /// database id of the rpc key
     /// if this is None, then this request is being rate limited by ip
-    pub rpc_key_id: Option<NonZeroU64>,
+    pub rpc_secret_key_id: Option<NonZeroU64>,
     /// if None, allow unlimited queries. inherited from the user_tier
     pub max_requests_per_period: Option<u64>,
     // if None, allow unlimited concurrent requests. inherited from the user_tier

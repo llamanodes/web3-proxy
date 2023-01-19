@@ -660,13 +660,11 @@ impl Web3ProxyApp {
 
                 let db_replica = self.db_replica().context("Getting database connection")?;
 
-                let rpc_secret_key: Uuid = rpc_secret_key.into();
-
                 // TODO: join the user table to this to return the User? we don't always need it
                 // TODO: join on secondary users
                 // TODO: join on user tier
                 match rpc_key::Entity::find()
-                    .filter(rpc_key::Column::SecretKey.eq(rpc_secret_key))
+                    .filter(rpc_key::Column::SecretKey.eq(<Uuid>::from(rpc_secret_key)))
                     .filter(rpc_key::Column::Active.eq(true))
                     .one(db_replica.conn())
                     .await?
@@ -741,7 +739,8 @@ impl Web3ProxyApp {
 
                         Ok(AuthorizationChecks {
                             user_id: rpc_key_model.user_id,
-                            rpc_key_id,
+                            rpc_secret_key: Some(rpc_secret_key),
+                            rpc_secret_key_id: rpc_key_id,
                             allowed_ips,
                             allowed_origins,
                             allowed_referers,
@@ -774,7 +773,7 @@ impl Web3ProxyApp {
         let authorization_checks = self.authorization_checks(rpc_key).await?;
 
         // if no rpc_key_id matching the given rpc was found, then we can't rate limit by key
-        if authorization_checks.rpc_key_id.is_none() {
+        if authorization_checks.rpc_secret_key_id.is_none() {
             return Ok(RateLimitResult::UnknownKey);
         }
 
@@ -843,5 +842,31 @@ impl Web3ProxyApp {
             // TODO: if no redis, rate limit with just a local cache?
             Ok(RateLimitResult::Allowed(authorization, semaphore))
         }
+    }
+}
+
+impl Authorization {
+    pub async fn check_again(
+        &self,
+        app: &Arc<Web3ProxyApp>,
+    ) -> Result<(Arc<Self>, Option<OwnedSemaphorePermit>), FrontendErrorResponse> {
+        // TODO: we could probably do this without clones. but this is easy
+        let (a, s) = if let Some(rpc_secret_key) = self.checks.rpc_secret_key {
+            key_is_authorized(
+                app,
+                rpc_secret_key,
+                self.ip,
+                self.origin.clone(),
+                self.referer.clone(),
+                self.user_agent.clone(),
+            )
+            .await?
+        } else {
+            ip_is_authorized(app, self.ip, self.origin.clone()).await?
+        };
+
+        let a = Arc::new(a);
+
+        Ok((a, s))
     }
 }

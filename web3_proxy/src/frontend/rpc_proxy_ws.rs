@@ -32,6 +32,7 @@ use serde_json::json;
 use serde_json::value::to_raw_value;
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
+use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock};
 
 #[derive(Copy, Clone)]
 pub enum ProxyMode {
@@ -52,7 +53,7 @@ pub async fn websocket_handler(
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    _websocket_handler(ProxyMode::Fastest(1), app, ip, origin, ws_upgrade).await
+    _websocket_handler(ProxyMode::Best, app, ip, origin, ws_upgrade).await
 }
 
 /// Public entrypoint for WebSocket JSON-RPC requests that uses all synced servers.
@@ -226,7 +227,7 @@ async fn _websocket_handler_with_key(
             match (
                 &app.config.redirect_public_url,
                 &app.config.redirect_rpc_key_url,
-                authorization.checks.rpc_key_id,
+                authorization.checks.rpc_secret_key_id,
             ) {
                 (None, None, _) => Err(FrontendErrorResponse::StatusCode(
                     StatusCode::BAD_REQUEST,
@@ -239,7 +240,7 @@ async fn _websocket_handler_with_key(
                 (_, Some(redirect_rpc_key_url), rpc_key_id) => {
                     let reg = Handlebars::new();
 
-                    if authorization.checks.rpc_key_id.is_none() {
+                    if authorization.checks.rpc_secret_key_id.is_none() {
                         // i don't think this is possible
                         Err(FrontendErrorResponse::StatusCode(
                             StatusCode::UNAUTHORIZED,
@@ -298,9 +299,20 @@ async fn handle_socket_payload(
     payload: &str,
     response_sender: &flume::Sender<Message>,
     subscription_count: &AtomicUsize,
-    subscriptions: &mut HashMap<String, AbortHandle>,
+    subscriptions: Arc<RwLock<HashMap<String, AbortHandle>>>,
     proxy_mode: ProxyMode,
-) -> Message {
+) -> (Message, Option<OwnedSemaphorePermit>) {
+    let (authorization, semaphore) = match authorization.check_again(&app).await {
+        Ok((a, s)) => (a, s),
+        Err(err) => {
+            let (_, err) = err.into_response_parts();
+
+            let err = serde_json::to_string(&err).expect("to_string should always work here");
+
+            return (Message::Text(err), None);
+        }
+    };
+
     // TODO: do any clients send batches over websockets?
     let (id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
         Ok(json_request) => {
@@ -322,7 +334,9 @@ async fn handle_socket_payload(
                     {
                         Ok((handle, response)) => {
                             // TODO: better key
-                            subscriptions.insert(
+                            let mut x = subscriptions.write().await;
+
+                            x.insert(
                                 response
                                     .result
                                     .as_ref()
@@ -346,14 +360,18 @@ async fn handle_socket_payload(
 
                     let subscription_id = json_request.params.unwrap().to_string();
 
+                    let mut x = subscriptions.write().await;
+
                     // TODO: is this the right response?
-                    let partial_response = match subscriptions.remove(&subscription_id) {
+                    let partial_response = match x.remove(&subscription_id) {
                         None => false,
                         Some(handle) => {
                             handle.abort();
                             true
                         }
                     };
+
+                    drop(x);
 
                     let response =
                         JsonRpcForwardedResponse::from_value(json!(partial_response), id.clone());
@@ -409,9 +427,7 @@ async fn handle_socket_payload(
         }
     };
 
-    // TODO: what error should this be?
-
-    Message::Text(response_str)
+    (Message::Text(response_str), semaphore)
 }
 
 async fn read_web3_socket(
@@ -421,61 +437,97 @@ async fn read_web3_socket(
     response_sender: flume::Sender<Message>,
     proxy_mode: ProxyMode,
 ) {
-    let mut subscriptions = HashMap::new();
-    let subscription_count = AtomicUsize::new(1);
+    // TODO: need a concurrent hashmap
+    let subscriptions = Arc::new(RwLock::new(HashMap::new()));
+    let subscription_count = Arc::new(AtomicUsize::new(1));
 
-    while let Some(Ok(msg)) = ws_rx.next().await {
-        // TODO: spawn this?
-        // new message from our client. forward to a backend and then send it through response_tx
-        let response_msg = match msg {
-            Message::Text(payload) => {
-                handle_socket_payload(
-                    app.clone(),
-                    &authorization,
-                    &payload,
-                    &response_sender,
-                    &subscription_count,
-                    &mut subscriptions,
-                    proxy_mode,
-                )
-                .await
+    let (close_sender, mut close_receiver) = broadcast::channel(1);
+
+    loop {
+        tokio::select! {
+            msg = ws_rx.next() => {
+                if let Some(Ok(msg)) = msg {
+                    // spawn so that we can serve responses from this loop even faster
+                    // TODO: only do these clones if the msg is text/binary?
+                    let close_sender = close_sender.clone();
+                    let app = app.clone();
+                    let authorization = authorization.clone();
+                    let response_sender = response_sender.clone();
+                    let subscriptions = subscriptions.clone();
+                    let subscription_count = subscription_count.clone();
+
+                    let f = async move {
+                        let mut _semaphore = None;
+
+                        // new message from our client. forward to a backend and then send it through response_tx
+                        let response_msg = match msg {
+                            Message::Text(payload) => {
+                                let (msg, s) = handle_socket_payload(
+                                    app.clone(),
+                                    &authorization,
+                                    &payload,
+                                    &response_sender,
+                                    &subscription_count,
+                                    subscriptions,
+                                    proxy_mode,
+                                )
+                                .await;
+
+                                _semaphore = s;
+
+                                msg
+                            }
+                            Message::Ping(x) => {
+                                trace!("ping: {:?}", x);
+                                Message::Pong(x)
+                            }
+                            Message::Pong(x) => {
+                                trace!("pong: {:?}", x);
+                                return;
+                            }
+                            Message::Close(_) => {
+                                info!("closing websocket connection");
+                                // TODO: do something to close subscriptions?
+                                let _ = close_sender.send(true);
+                                return;
+                            }
+                            Message::Binary(mut payload) => {
+                                let payload = from_utf8_mut(&mut payload).unwrap();
+
+                                let (msg, s) = handle_socket_payload(
+                                    app.clone(),
+                                    &authorization,
+                                    payload,
+                                    &response_sender,
+                                    &subscription_count,
+                                    subscriptions,
+                                    proxy_mode,
+                                )
+                                .await;
+
+                                _semaphore = s;
+
+                                msg
+                            }
+                        };
+
+                        if response_sender.send_async(response_msg).await.is_err() {
+                            let _ = close_sender.send(true);
+                            return;
+                        };
+
+                        _semaphore = None;
+                    };
+
+                    tokio::spawn(f);
+                } else {
+                    break;
+                }
             }
-            Message::Ping(x) => {
-                trace!("ping: {:?}", x);
-                Message::Pong(x)
-            }
-            Message::Pong(x) => {
-                trace!("pong: {:?}", x);
-                continue;
-            }
-            Message::Close(_) => {
-                info!("closing websocket connection");
+            _ = close_receiver.recv() => {
                 break;
             }
-            Message::Binary(mut payload) => {
-                // TODO: poke rate limit for the user/ip
-                let payload = from_utf8_mut(&mut payload).unwrap();
-
-                handle_socket_payload(
-                    app.clone(),
-                    &authorization,
-                    payload,
-                    &response_sender,
-                    &subscription_count,
-                    &mut subscriptions,
-                    proxy_mode,
-                )
-                .await
-            }
-        };
-
-        match response_sender.send_async(response_msg).await {
-            Ok(_) => {}
-            Err(err) => {
-                error!("{}", err);
-                break;
-            }
-        };
+        }
     }
 }
 
