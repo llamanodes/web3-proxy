@@ -727,6 +727,10 @@ impl Web3ProxyApp {
         Ok((app, cancellable_handles, important_background_handles).into())
     }
 
+    pub fn head_block_receiver(&self) -> watch::Receiver<ArcBlock> {
+        self.head_block_receiver.clone()
+    }
+
     pub async fn prometheus_metrics(&self) -> String {
         let globals = HashMap::new();
         // TODO: what globals? should this be the hostname or what?

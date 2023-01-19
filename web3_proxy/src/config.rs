@@ -198,6 +198,8 @@ pub struct Web3ConnectionConfig {
     pub soft_limit: u32,
     /// the requests per second at which the server throws errors (rate limit or otherwise)
     pub hard_limit: Option<u64>,
+    /// only use this rpc if everything else is lagging too far. this allows us to ignore fast but very low limit rpcs
+    pub backup: Option<bool>,
     /// All else equal, a server with a lower tier receives all requests
     #[serde(default = "default_tier")]
     pub tier: u64,
@@ -256,6 +258,8 @@ impl Web3ConnectionConfig {
             None
         };
 
+        let backup = self.backup.unwrap_or(false);
+
         Web3Connection::spawn(
             name,
             allowed_lag,
@@ -267,6 +271,7 @@ impl Web3ConnectionConfig {
             http_interval_sender,
             hard_limit,
             self.soft_limit,
+            backup,
             self.block_data_limit,
             block_map,
             block_sender,

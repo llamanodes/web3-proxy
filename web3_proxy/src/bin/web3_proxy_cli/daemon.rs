@@ -51,22 +51,25 @@ async fn run(
 
     let app_frontend_port = frontend_port;
     let app_prometheus_port = prometheus_port;
+    let mut shutdown_receiver = shutdown_sender.subscribe();
 
     // start the main app
     let mut spawned_app =
         Web3ProxyApp::spawn(top_config, num_workers, shutdown_sender.subscribe()).await?;
 
-    let frontend_handle = tokio::spawn(frontend::serve(app_frontend_port, spawned_app.app.clone()));
-
-    // TODO: should we put this in a dedicated thread?
+    // start the prometheus metrics port
     let prometheus_handle = tokio::spawn(metrics_frontend::serve(
         spawned_app.app.clone(),
         app_prometheus_port,
     ));
 
-    let mut shutdown_receiver = shutdown_sender.subscribe();
+    // wait until the app has seen its first consensus head block
+    let _ = spawned_app.app.head_block_receiver().changed().await;
 
-    // if everything is working, these should both run forever
+    // start the frontend port
+    let frontend_handle = tokio::spawn(frontend::serve(app_frontend_port, spawned_app.app.clone()));
+
+    // if everything is working, these should all run forever
     tokio::select! {
         x = flatten_handles(spawned_app.app_handles) => {
             match x {
@@ -204,6 +207,7 @@ mod tests {
                         disabled: false,
                         display_name: None,
                         url: anvil.endpoint(),
+                        backup: Some(false),
                         block_data_limit: None,
                         soft_limit: 100,
                         hard_limit: None,
@@ -218,6 +222,7 @@ mod tests {
                         disabled: false,
                         display_name: None,
                         url: anvil.ws_endpoint(),
+                        backup: Some(false),
                         block_data_limit: None,
                         soft_limit: 100,
                         hard_limit: None,

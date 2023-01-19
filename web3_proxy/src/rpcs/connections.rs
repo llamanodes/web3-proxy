@@ -4,7 +4,7 @@ use super::connection::Web3Connection;
 use super::request::{
     OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult, RequestRevertHandler,
 };
-use super::synced_connections::SyncedConnections;
+use super::synced_connections::ConsensusConnections;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3ConnectionConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
@@ -40,7 +40,7 @@ use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBeh
 pub struct Web3Connections {
     pub(crate) conns: HashMap<String, Arc<Web3Connection>>,
     /// any requests will be forwarded to one (or more) of these connections
-    pub(super) synced_connections: ArcSwap<SyncedConnections>,
+    pub(super) synced_connections: ArcSwap<ConsensusConnections>,
     pub(super) pending_transactions:
         Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
@@ -196,7 +196,7 @@ impl Web3Connections {
             }
         }
 
-        let synced_connections = SyncedConnections::default();
+        let synced_connections = ConsensusConnections::default();
 
         // TODO: max_capacity and time_to_idle from config
         // all block hashes are the same size, so no need for weigher
@@ -329,6 +329,7 @@ impl Web3Connections {
     }
 
     /// Send the same request to all the handles. Returning the most common success or most common error.
+    /// TODO: option to return the fastest response and handles for all the others instead?
     pub async fn try_send_parallel_requests(
         &self,
         active_request_handles: Vec<OpenRequestHandle>,
@@ -501,7 +502,7 @@ impl Web3Connections {
                 .collect();
 
             trace!("minimum available requests: {}", minimum);
-            trace!("maximum available requests: {}", minimum);
+            trace!("maximum available requests: {}", maximum);
 
             if maximum < 0.0 {
                 // TODO: if maximum < 0 and there are other tiers on the same block, we should include them now
@@ -725,10 +726,20 @@ impl Web3Connections {
                                 }
 
                                 // some errors should be retried on other nodes
+                                let error_msg = error.message.as_str();
+
+                                // different providers do different codes. check all of them
+                                // TODO: there's probably more strings to add here
+                                let rate_limit_substrings = ["limit", "exceeded"];
+                                for rate_limit_substr in rate_limit_substrings {
+                                    if error_msg.contains(rate_limit_substr) {
+                                        warn!("rate limited by {:?}", skip_rpcs.last());
+                                        continue;
+                                    }
+                                }
+
                                 match error.code {
                                     -32000 => {
-                                        let error_msg = error.message.as_str();
-
                                         // TODO: regex?
                                         let retry_prefixes = [
                                             "header not found",
@@ -866,7 +877,7 @@ impl Web3Connections {
                     // TODO: return a 502? if it does?
                     // return Err(anyhow::anyhow!("no available rpcs!"));
                     // TODO: sleep how long?
-                    // TODO: subscribe to something in SyncedConnections instead
+                    // TODO: subscribe to something in ConsensusConnections instead
                     sleep(Duration::from_millis(200)).await;
 
                     continue;
@@ -951,7 +962,11 @@ mod tests {
     // TODO: why is this allow needed? does tokio::test get in the way somehow?
     #![allow(unused_imports)]
     use super::*;
-    use crate::rpcs::{blockchain::SavedBlock, connection::ProviderState, provider::Web3Provider};
+    use crate::rpcs::{
+        blockchain::{ConsensusFinder, SavedBlock},
+        connection::ProviderState,
+        provider::Web3Provider,
+    };
     use ethers::types::{Block, U256};
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
@@ -992,8 +1007,8 @@ mod tests {
         let head_block = Arc::new(head_block);
 
         // TODO: write a impl From for Block -> BlockId?
-        let lagged_block: SavedBlock = lagged_block.into();
-        let head_block: SavedBlock = head_block.into();
+        let mut lagged_block: SavedBlock = lagged_block.into();
+        let mut head_block: SavedBlock = head_block.into();
 
         let block_data_limit = u64::MAX;
 
@@ -1012,6 +1027,7 @@ mod tests {
             hard_limit: None,
             soft_limit: 1_000,
             automatic_block_limit: true,
+            backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
@@ -1032,6 +1048,7 @@ mod tests {
             hard_limit: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
+            backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(lagged_block.clone())),
@@ -1072,7 +1089,7 @@ mod tests {
 
         let (head_block_sender, _head_block_receiver) =
             watch::channel::<ArcBlock>(Default::default());
-        let mut connection_heads = HashMap::new();
+        let mut connection_heads = ConsensusFinder::default();
 
         // process None so that
         conns
@@ -1123,7 +1140,7 @@ mod tests {
         assert!(matches!(x, OpenRequestResult::NotReady));
 
         // add lagged blocks to the conns. both servers should be allowed
-        conns.save_block(&lagged_block.block, true).await.unwrap();
+        lagged_block.block = conns.save_block(lagged_block.block, true).await.unwrap();
 
         conns
             .process_block_from_rpc(
@@ -1151,7 +1168,7 @@ mod tests {
         assert_eq!(conns.num_synced_rpcs(), 2);
 
         // add head block to the conns. lagged_rpc should not be available
-        conns.save_block(&head_block.block, true).await.unwrap();
+        head_block.block = conns.save_block(head_block.block, true).await.unwrap();
 
         conns
             .process_block_from_rpc(
@@ -1236,6 +1253,7 @@ mod tests {
             hard_limit: None,
             soft_limit: 3_000,
             automatic_block_limit: false,
+            backup: false,
             block_data_limit: 64.into(),
             tier: 1,
             head_block: RwLock::new(Some(head_block.clone())),
@@ -1256,6 +1274,7 @@ mod tests {
             hard_limit: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
+            backup: false,
             block_data_limit: u64::MAX.into(),
             tier: 2,
             head_block: RwLock::new(Some(head_block.clone())),
@@ -1295,7 +1314,7 @@ mod tests {
 
         let (head_block_sender, _head_block_receiver) =
             watch::channel::<ArcBlock>(Default::default());
-        let mut connection_heads = HashMap::new();
+        let mut connection_heads = ConsensusFinder::default();
 
         conns
             .process_block_from_rpc(

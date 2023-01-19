@@ -84,6 +84,8 @@ pub struct Web3Connection {
     pub(super) soft_limit: u32,
     /// use web3 queries to find the block data limit for archive/pruned nodes
     pub(super) automatic_block_limit: bool,
+    /// only use this rpc if everything else is lagging too far. this allows us to ignore fast but very low limit rpcs
+    pub(super) backup: bool,
     /// TODO: have an enum for this so that "no limit" prints pretty?
     pub(super) block_data_limit: AtomicU64,
     /// Lower tiers are higher priority when sending requests
@@ -111,6 +113,7 @@ impl Web3Connection {
         hard_limit: Option<(u64, RedisPool)>,
         // TODO: think more about this type
         soft_limit: u32,
+        backup: bool,
         block_data_limit: Option<u64>,
         block_map: BlockHashesCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
@@ -149,6 +152,7 @@ impl Web3Connection {
             hard_limit,
             soft_limit,
             automatic_block_limit,
+            backup,
             block_data_limit,
             head_block: RwLock::new(Default::default()),
             tier,
@@ -304,6 +308,7 @@ impl Web3Connection {
             None => return false,
             Some(x) => {
                 // TODO: this 60 second limit is causing our polygons to fall behind. change this to number of blocks?
+                // TODO: sometimes blocks might actually just take longer than 60 seconds
                 if x.syncing(60) {
                     // skip syncing nodes. even though they might be able to serve a query,
                     // latency will be poor and it will get in the way of them syncing further
@@ -648,7 +653,7 @@ impl Web3Connection {
                             // if this block is too old, return an error so we reconnect
                             let current_lag = x.lag();
                             if current_lag > allowed_lag {
-                                let level = if warned == 0 {
+                                let level = if warned == 0 && !conn.backup {
                                     log::Level::Warn
                                 } else if warned % 100 == 0 {
                                     log::Level::Debug
@@ -1225,6 +1230,7 @@ mod tests {
             hard_limit: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
+            backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
@@ -1273,6 +1279,7 @@ mod tests {
             hard_limit: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
+            backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
@@ -1325,6 +1332,7 @@ mod tests {
             hard_limit: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
+            backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),

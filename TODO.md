@@ -305,6 +305,8 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] status page should show version
 - [x] combine the proxy and cli into one bin
 - [x] improve rate limiting on websockets
+- [x] retry another server if we get a jsonrpc response error about rate limits
+- [x] major refactor to only use backup servers when absolutely necessary
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
