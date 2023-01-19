@@ -14,8 +14,8 @@ FROM debian:bullseye-slim
 
 COPY --from=builder /opt/bin/* /usr/local/bin/
 
-# TODO: be careful changing this to just web3_proxy_cli. if you don't do it correctly, there will be a production outage!
-ENTRYPOINT ["web3_proxy_cli", "proxyd"]
+ENTRYPOINT ["web3_proxy_cli"]
+CMD [ "--config", "/web3-proxy.toml", "daemon" ]
 
 # TODO: lower log level when done with prototyping
 ENV RUST_LOG "web3_proxy=debug"
