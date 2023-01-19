@@ -190,7 +190,6 @@ pub struct Web3ProxyApp {
     head_block_receiver: watch::Receiver<ArcBlock>,
     pending_tx_sender: broadcast::Sender<TxStatus>,
     pub config: AppConfig,
-    pub allowed_lag: u64,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
     pub db_replica: Option<DatabaseReplica>,
     /// prometheus metrics
@@ -687,20 +686,8 @@ impl Web3ProxyApp {
             .time_to_idle(Duration::from_secs(120))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
-        // TODO: get this out of the toml instead
-        let allowed_lag = match top_config.app.chain_id {
-            1 => 60,
-            137 => 10,
-            250 => 10,
-            _ => {
-                warn!("defaulting allowed lag to 60");
-                60
-            }
-        };
-
         let app = Self {
             config: top_config.app,
-            allowed_lag,
             balanced_rpcs,
             private_rpcs,
             response_cache,
@@ -1432,7 +1419,6 @@ impl Web3ProxyApp {
                                     .balanced_rpcs
                                     .try_proxy_connection(
                                         proxy_mode,
-                                        self.allowed_lag,
                                         &authorization,
                                         request,
                                         Some(&request_metadata),
@@ -1459,7 +1445,6 @@ impl Web3ProxyApp {
                         self.balanced_rpcs
                             .try_proxy_connection(
                                 proxy_mode,
-                                self.allowed_lag,
                                 &authorization,
                                 request,
                                 Some(&request_metadata),

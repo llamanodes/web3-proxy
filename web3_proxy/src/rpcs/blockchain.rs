@@ -78,11 +78,6 @@ impl SavedBlock {
     pub fn number(&self) -> U64 {
         self.block.number.expect("saved blocks must have a number")
     }
-
-    /// When the block was received, this node was still syncing
-    pub fn syncing(&self, allowed_lag: u64) -> bool {
-        self.age > allowed_lag
-    }
 }
 
 impl From<ArcBlock> for SavedBlock {
@@ -172,7 +167,7 @@ impl Web3Connections {
                 // TODO: request_metadata? maybe we should put it in the authorization?
                 // TODO: don't hard code allowed lag
                 let response = self
-                    .try_send_best_consensus_head_connection(60, authorization, request, None, None)
+                    .try_send_best_consensus_head_connection(authorization, request, None, None)
                     .await?;
 
                 let block = response.result.context("failed fetching block")?;
@@ -248,7 +243,7 @@ impl Web3Connections {
         // TODO: if error, retry?
         // TODO: request_metadata or authorization?
         let response = self
-            .try_send_best_consensus_head_connection(60, authorization, request, None, Some(num))
+            .try_send_best_consensus_head_connection(authorization, request, None, Some(num))
             .await?;
 
         let raw_block = response.result.context("no block result")?;

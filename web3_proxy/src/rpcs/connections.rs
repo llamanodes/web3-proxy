@@ -89,9 +89,6 @@ impl Web3Connections {
             }
         };
 
-        // TODO: this might be too aggressive. think about this more
-        let allowed_lag = ((expected_block_time_ms * 3) as f64 / 1000.0).round() as u64;
-
         let http_interval_sender = if http_client.is_some() {
             let (sender, receiver) = broadcast::channel(1);
 
@@ -155,7 +152,6 @@ impl Web3Connections {
                     server_config
                         .spawn(
                             server_name,
-                            allowed_lag,
                             db_conn,
                             redis_pool,
                             chain_id,
@@ -408,10 +404,40 @@ impl Web3Connections {
         unimplemented!("this shouldn't be possible")
     }
 
-    /// get the best available rpc server with the consensus head block. it might have blocks after the consensus head
     pub async fn best_consensus_head_connection(
         &self,
-        allowed_lag: u64,
+        authorization: &Arc<Authorization>,
+        request_metadata: Option<&Arc<RequestMetadata>>,
+        skip: &[Arc<Web3Connection>],
+        min_block_needed: Option<&U64>,
+    ) -> anyhow::Result<OpenRequestResult> {
+        if let Ok(without_backups) = self
+            ._best_consensus_head_connection(
+                false,
+                authorization,
+                request_metadata,
+                skip,
+                min_block_needed,
+            )
+            .await
+        {
+            return Ok(without_backups);
+        }
+
+        self._best_consensus_head_connection(
+            true,
+            authorization,
+            request_metadata,
+            skip,
+            min_block_needed,
+        )
+        .await
+    }
+
+    /// get the best available rpc server with the consensus head block. it might have blocks after the consensus head
+    async fn _best_consensus_head_connection(
+        &self,
+        allow_backups: bool,
         authorization: &Arc<Authorization>,
         request_metadata: Option<&Arc<RequestMetadata>>,
         skip: &[Arc<Web3Connection>],
@@ -421,12 +447,13 @@ impl Web3Connections {
             (Option<U64>, u64),
             Vec<Arc<Web3Connection>>,
         > = if let Some(min_block_needed) = min_block_needed {
-            // need a potentially old block. check all the rpcs
+            // need a potentially old block. check all the rpcs. prefer the most synced
             let mut m = BTreeMap::new();
 
             for x in self
                 .conns
                 .values()
+                .filter(|x| if allow_backups { true } else { !x.backup })
                 .filter(|x| !skip.contains(x))
                 .filter(|x| x.has_block_data(min_block_needed))
                 .cloned()
@@ -448,15 +475,7 @@ impl Web3Connections {
             // need latest. filter the synced rpcs
             let synced_connections = self.synced_connections.load();
 
-            let head_block = match synced_connections.head_block.as_ref() {
-                None => return Ok(OpenRequestResult::NotReady),
-                Some(x) => x,
-            };
-
-            // TODO: self.allowed_lag instead of taking as an arg
-            if head_block.syncing(allowed_lag) {
-                return Ok(OpenRequestResult::NotReady);
-            }
+            // TODO: if head_block is super old. emit an error!
 
             let mut m = BTreeMap::new();
 
@@ -575,7 +594,7 @@ impl Web3Connections {
             None => {
                 // none of the servers gave us a time to retry at
 
-                // TODO: bring this back?
+                // TODO: bring this back? need to think about how to do this with `allow_backups`
                 // we could return an error here, but maybe waiting a second will fix the problem
                 // TODO: configurable max wait? the whole max request time, or just some portion?
                 // let handle = sorted_rpcs
@@ -606,6 +625,24 @@ impl Web3Connections {
         block_needed: Option<&U64>,
         max_count: Option<usize>,
     ) -> Result<Vec<OpenRequestHandle>, Option<Instant>> {
+        if let Ok(without_backups) = self
+            ._all_synced_connections(false, authorization, block_needed, max_count)
+            .await
+        {
+            return Ok(without_backups);
+        }
+
+        self._all_synced_connections(true, authorization, block_needed, max_count)
+            .await
+    }
+
+    async fn _all_synced_connections(
+        &self,
+        allow_backups: bool,
+        authorization: &Arc<Authorization>,
+        block_needed: Option<&U64>,
+        max_count: Option<usize>,
+    ) -> Result<Vec<OpenRequestHandle>, Option<Instant>> {
         let mut earliest_retry_at = None;
         // TODO: with capacity?
         let mut selected_rpcs = vec![];
@@ -621,12 +658,14 @@ impl Web3Connections {
                 break;
             }
 
+            if !allow_backups && connection.backup {
+                continue;
+            }
+
             if let Some(block_needed) = block_needed {
                 if !connection.has_block_data(block_needed) {
                     continue;
                 }
-            } else if connection.syncing(30) {
-                continue;
             }
 
             // check rate limits and increment our connection counter
@@ -663,10 +702,8 @@ impl Web3Connections {
     }
 
     /// be sure there is a timeout on this or it might loop forever
-    /// TODO: do not take allowed_lag here. have it be on the connections struct instead
     pub async fn try_send_best_consensus_head_connection(
         &self,
-        allowed_lag: u64,
         authorization: &Arc<Authorization>,
         request: JsonRpcRequest,
         request_metadata: Option<&Arc<RequestMetadata>>,
@@ -682,7 +719,6 @@ impl Web3Connections {
             }
             match self
                 .best_consensus_head_connection(
-                    allowed_lag,
                     authorization,
                     request_metadata,
                     &skip_rpcs,
@@ -903,7 +939,6 @@ impl Web3Connections {
     pub async fn try_proxy_connection(
         &self,
         proxy_mode: ProxyMode,
-        allowed_lag: u64,
         authorization: &Arc<Authorization>,
         request: JsonRpcRequest,
         request_metadata: Option<&Arc<RequestMetadata>>,
@@ -912,7 +947,6 @@ impl Web3Connections {
         match proxy_mode {
             ProxyMode::Best => {
                 self.try_send_best_consensus_head_connection(
-                    allowed_lag,
                     authorization,
                     request,
                     request_metadata,
@@ -1014,8 +1048,6 @@ mod tests {
 
         let head_rpc = Web3Connection {
             name: "synced".to_string(),
-            // TODO: what should this be?
-            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com/synced".to_string(),
@@ -1036,7 +1068,6 @@ mod tests {
 
         let lagged_rpc = Web3Connection {
             name: "lagged".to_string(),
-            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com/lagged".to_string(),
@@ -1129,9 +1160,8 @@ mod tests {
         );
 
         // best_synced_backend_connection requires servers to be synced with the head block
-        // TODO: don't hard code allowed_lag
         let x = conns
-            .best_consensus_head_connection(60, &authorization, None, &[], None)
+            .best_consensus_head_connection(&authorization, None, &[], None)
             .await
             .unwrap();
 
@@ -1186,21 +1216,21 @@ mod tests {
 
         assert!(matches!(
             conns
-                .best_consensus_head_connection(60, &authorization, None, &[], None)
+                .best_consensus_head_connection(&authorization, None, &[], None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         assert!(matches!(
             conns
-                .best_consensus_head_connection(60, &authorization, None, &[], Some(&0.into()))
+                .best_consensus_head_connection(&authorization, None, &[], Some(&0.into()))
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         assert!(matches!(
             conns
-                .best_consensus_head_connection(60, &authorization, None, &[], Some(&1.into()))
+                .best_consensus_head_connection(&authorization, None, &[], Some(&1.into()))
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
@@ -1208,7 +1238,7 @@ mod tests {
         // future block should not get a handle
         assert!(matches!(
             conns
-                .best_consensus_head_connection(60, &authorization, None, &[], Some(&2.into()))
+                .best_consensus_head_connection(&authorization, None, &[], Some(&2.into()))
                 .await,
             Ok(OpenRequestResult::NotReady)
         ));
@@ -1241,7 +1271,6 @@ mod tests {
 
         let pruned_rpc = Web3Connection {
             name: "pruned".to_string(),
-            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com/pruned".to_string(),
@@ -1262,7 +1291,6 @@ mod tests {
 
         let archive_rpc = Web3Connection {
             name: "archive".to_string(),
-            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com/archive".to_string(),
@@ -1343,13 +1371,7 @@ mod tests {
 
         // best_synced_backend_connection requires servers to be synced with the head block
         let best_head_server = conns
-            .best_consensus_head_connection(
-                60,
-                &authorization,
-                None,
-                &[],
-                Some(&head_block.number()),
-            )
+            .best_consensus_head_connection(&authorization, None, &[], Some(&head_block.number()))
             .await;
 
         assert!(matches!(
@@ -1358,7 +1380,7 @@ mod tests {
         ));
 
         let best_archive_server = conns
-            .best_consensus_head_connection(60, &authorization, None, &[], Some(&1.into()))
+            .best_consensus_head_connection(&authorization, None, &[], Some(&1.into()))
             .await;
 
         match best_archive_server {

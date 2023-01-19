@@ -63,7 +63,6 @@ pub struct Web3Connection {
     pub name: String,
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
-    pub(super) allowed_lag: u64,
     /// TODO: can we get this from the provider? do we even need it?
     pub(super) url: String,
     /// Some connections use an http_client. we keep a clone for reconnecting
@@ -101,7 +100,6 @@ impl Web3Connection {
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         name: String,
-        allowed_lag: u64,
         display_name: Option<String>,
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
@@ -140,7 +138,6 @@ impl Web3Connection {
 
         let new_connection = Self {
             name,
-            allowed_lag,
             db_conn: db_conn.clone(),
             display_name,
             http_client,
@@ -195,25 +192,7 @@ impl Web3Connection {
             return Ok(None);
         }
 
-        // check if we are synced
-        let head_block: ArcBlock = self
-            .wait_for_request_handle(authorization, Duration::from_secs(30), true)
-            .await?
-            .request::<_, Option<_>>(
-                "eth_getBlockByNumber",
-                &json!(("latest", false)),
-                // error here are expected, so keep the level low
-                Level::Warn.into(),
-            )
-            .await?
-            .context("no block during check_block_data_limit!")?;
-
-        if SavedBlock::from(head_block).syncing(60) {
-            // if the node is syncing, we can't check its block data limit
-            return Ok(None);
-        }
-
-        // TODO: add SavedBlock to self? probably best not to. we might not get marked Ready
+        // TODO: check eth_syncing. if it is not false, return Ok(None)
 
         let mut limit = None;
 
@@ -296,27 +275,10 @@ impl Web3Connection {
         self.block_data_limit.load(atomic::Ordering::Acquire).into()
     }
 
-    pub fn syncing(&self, allowed_lag: u64) -> bool {
-        match self.head_block.read().clone() {
-            None => true,
-            Some(x) => x.syncing(allowed_lag),
-        }
-    }
-
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
         let head_block_num = match self.head_block.read().clone() {
             None => return false,
-            Some(x) => {
-                // TODO: this 60 second limit is causing our polygons to fall behind. change this to number of blocks?
-                // TODO: sometimes blocks might actually just take longer than 60 seconds
-                if x.syncing(60) {
-                    // skip syncing nodes. even though they might be able to serve a query,
-                    // latency will be poor and it will get in the way of them syncing further
-                    return false;
-                }
-
-                x.number()
-            }
+            Some(x) => x.number(),
         };
 
         // this rpc doesn't have that block yet. still syncing
@@ -548,7 +510,7 @@ impl Web3Connection {
                     let _ = head_block.insert(new_head_block.clone().into());
                 }
 
-                if self.block_data_limit() == U64::zero() && !self.syncing(1) {
+                if self.block_data_limit() == U64::zero() {
                     let authorization = Arc::new(Authorization::internal(self.db_conn.clone())?);
                     if let Err(err) = self.check_block_data_limit(&authorization).await {
                         warn!(
@@ -596,8 +558,6 @@ impl Web3Connection {
         reconnect: bool,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<()> {
-        let allowed_lag = self.allowed_lag;
-
         loop {
             let http_interval_receiver = http_interval_sender.as_ref().map(|x| x.subscribe());
 
@@ -629,8 +589,6 @@ impl Web3Connection {
                     let health_sleep_seconds = 10;
                     sleep(Duration::from_secs(health_sleep_seconds)).await;
 
-                    let mut warned = 0;
-
                     loop {
                         // TODO: what if we just happened to have this check line up with another restart?
                         // TODO: think more about this
@@ -648,38 +606,6 @@ impl Web3Connection {
                             return Err(anyhow::anyhow!("{} is not ready", conn));
                         }
                         // trace!("health check on {}. unlocked", conn);
-
-                        if let Some(x) = &*conn.head_block.read() {
-                            // if this block is too old, return an error so we reconnect
-                            let current_lag = x.lag();
-                            if current_lag > allowed_lag {
-                                let level = if warned == 0 {
-                                    if conn.backup {
-                                        log::Level::Info
-                                    } else {
-                                        log::Level::Warn
-                                    }
-                                } else if warned % 100 == 0 {
-                                    log::Level::Debug
-                                } else {
-                                    log::Level::Trace
-                                };
-
-                                log::log!(
-                                    level,
-                                    "{} is lagged {} secs: {} {}",
-                                    conn,
-                                    current_lag,
-                                    x.number(),
-                                    x.hash(),
-                                );
-
-                                warned += 1;
-                            } else {
-                                // reset warnings now that we are connected
-                                warned = 0;
-                            }
-                        }
 
                         sleep(Duration::from_secs(health_sleep_seconds)).await;
                     }
@@ -1222,7 +1148,6 @@ mod tests {
 
         let x = Web3Connection {
             name: "name".to_string(),
-            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),
@@ -1271,7 +1196,6 @@ mod tests {
         // TODO: this is getting long. have a `impl Default`
         let x = Web3Connection {
             name: "name".to_string(),
-            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),
@@ -1299,6 +1223,8 @@ mod tests {
         assert!(!x.has_block_data(&(head_block.number() + 1000)));
     }
 
+    /*
+    // TODO: think about how to bring the concept of a "lagged" node back
     #[test]
     fn test_lagged_node_not_has_block_data() {
         let now: U256 = SystemTime::now()
@@ -1324,7 +1250,6 @@ mod tests {
 
         let x = Web3Connection {
             name: "name".to_string(),
-            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),
@@ -1349,4 +1274,5 @@ mod tests {
         assert!(!x.has_block_data(&(head_block.number() + 1)));
         assert!(!x.has_block_data(&(head_block.number() + 1000)));
     }
+    */
 }
