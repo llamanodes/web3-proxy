@@ -653,8 +653,12 @@ impl Web3Connection {
                             // if this block is too old, return an error so we reconnect
                             let current_lag = x.lag();
                             if current_lag > allowed_lag {
-                                let level = if warned == 0 && !conn.backup {
-                                    log::Level::Warn
+                                let level = if warned == 0 {
+                                    if conn.backup {
+                                        log::Level::Info
+                                    } else {
+                                        log::Level::Warn
+                                    }
                                 } else if warned % 100 == 0 {
                                     log::Level::Debug
                                 } else {
