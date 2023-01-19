@@ -60,7 +60,7 @@ serde_json = { version = "1.0.91", default-features = false, features = ["alloc"
 serde_prometheus = "0.1.6"
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 time = "0.3.17"
-tokio = { version = "1.24.1", features = ["full"] }
+tokio = { version = "1.24.2", features = ["full"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.11", features = ["sync"] }
 toml = "0.5.10"
