@@ -865,7 +865,9 @@ impl ConsensusFinder {
             .await
         {
             Err(err) => {
-                warn!("Unable to find any consensus head: {}", err);
+                if self.all.rpc_name_to_hash.len() < web3_connections.min_head_rpcs {
+                    debug!("No consensus head yet: {}", err);
+                }
                 return ConsensusConnections::default();
             }
             Ok(x) => x,
@@ -887,6 +889,7 @@ impl ConsensusFinder {
                 error!("CONSENSUS HEAD IS VERY OLD! Backup RPCs did not improve this situation");
                 x
             } else {
+                // TODO: i don't think we need this error. and i doublt we'll ever even get here
                 error!("NO CONSENSUS HEAD!");
                 ConsensusConnections::default()
             }
