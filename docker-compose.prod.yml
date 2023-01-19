@@ -68,7 +68,7 @@ services:
     extends:
       file: docker-compose.common.yml
       service: web3-proxy
-    command: --config /config.toml --workers 48
+    command: --config /config.toml --workers 48 proxyd
     volumes:
       - ./config/production-eth.toml:/config.toml
       - ./data/scratch:/scratch
