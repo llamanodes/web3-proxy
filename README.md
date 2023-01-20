@@ -104,7 +104,7 @@ web3_proxy_cli --config ... change_user_tier_by_key "$RPC_ULID_KEY_FROM_PREV_COM
 Health check 3 servers and error if the first one doesn't match the others.
 
 ```
-web3_proxy_cli https://eth.llamarpc.com/ https://rpc.ankr.com/eth https://cloudflare-eth.com
+web3_proxy_cli health_compass https://eth.llamarpc.com/ https://rpc.ankr.com/eth https://cloudflare-eth.com
 ```
 
 ## Adding new database tables

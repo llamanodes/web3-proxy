@@ -273,18 +273,14 @@ pub async fn drop_migration_lock(db_conn: &DatabaseConnection) -> Result<(), DbE
     Ok(())
 }
 
-/// Connect to the database and run migrations
-pub async fn get_migrated_db(
-    db_url: String,
-    min_connections: u32,
-    max_connections: u32,
-) -> anyhow::Result<DatabaseConnection> {
-    // TODO: this seems to fail silently
-    let db_conn = get_db(db_url, min_connections, max_connections).await?;
-
+/// Be super careful with override_existing_lock! It is very important that only one process is running the migrations at a time!
+pub async fn migrate_db(
+    db_conn: &DatabaseConnection,
+    override_existing_lock: bool,
+) -> Result<(), DbErr> {
     let db_backend = db_conn.get_database_backend();
 
-    // TODO: put the timestamp into this?
+    // TODO: put the timestamp and hostname into this as columns?
     let create_lock_statment = db_backend.build(
         Table::create()
             .table(Alias::new("migration_lock"))
@@ -294,18 +290,24 @@ pub async fn get_migrated_db(
     loop {
         if Migrator::get_pending_migrations(&db_conn).await?.is_empty() {
             info!("no migrations to apply");
-            return Ok(db_conn);
+            return Ok(());
         }
 
         // there are migrations to apply
         // acquire a lock
         if let Err(err) = db_conn.execute(create_lock_statment.clone()).await {
-            debug!("Unable to acquire lock. err={:?}", err);
+            if override_existing_lock {
+                warn!("OVERRIDING EXISTING LOCK in 10 seconds! ctrl+c now if other migrations are actually running!");
 
-            // TODO: exponential backoff with jitter
-            sleep(Duration::from_secs(1)).await;
+                sleep(Duration::from_secs(10)).await
+            } else {
+                debug!("Unable to acquire lock. if you are positive no migration is running, run \"web3_proxy_cli drop_migration_lock\". err={:?}", err);
 
-            continue;
+                // TODO: exponential backoff with jitter?
+                sleep(Duration::from_secs(1)).await;
+
+                continue;
+            }
         }
 
         debug!("migration lock acquired");
@@ -318,7 +320,19 @@ pub async fn get_migrated_db(
     drop_migration_lock(&db_conn).await?;
 
     // return if migrations erred
-    migration_result?;
+    migration_result
+}
+
+/// Connect to the database and run migrations
+pub async fn get_migrated_db(
+    db_url: String,
+    min_connections: u32,
+    max_connections: u32,
+) -> Result<DatabaseConnection, DbErr> {
+    // TODO: this seems to fail silently
+    let db_conn = get_db(db_url, min_connections, max_connections).await?;
+
+    migrate_db(&db_conn, false).await?;
 
     Ok(db_conn)
 }
