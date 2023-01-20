@@ -16,6 +16,7 @@ mod user_import;
 
 use anyhow::Context;
 use argh::FromArgs;
+use ethers::types::U256;
 use log::{info, warn};
 use std::{
     fs,
@@ -127,7 +128,10 @@ fn main() -> anyhow::Result<()> {
             .context(format!("checking for config at {}", top_config_path))?;
 
         let top_config: String = fs::read_to_string(top_config_path)?;
-        let top_config: TopConfig = toml::from_str(&top_config)?;
+        let mut top_config: TopConfig = toml::from_str(&top_config)?;
+
+        // TODO: this doesn't seem to do anything
+        proctitle::set_title(format!("web3_proxy-{}", top_config.app.chain_id));
 
         if cli_config.db_url.is_none() {
             cli_config.db_url = top_config.app.db_url.clone();
@@ -137,8 +141,15 @@ fn main() -> anyhow::Result<()> {
             cli_config.sentry_url = Some(sentry_url);
         }
 
-        // TODO: this doesn't seem to do anything
-        proctitle::set_title(format!("web3_proxy-{}", top_config.app.chain_id));
+        if top_config.app.chain_id == 137 {
+            if top_config.app.gas_increase_min.is_none() {
+                top_config.app.gas_increase_min = Some(U256::from(25_000));
+            }
+
+            if top_config.app.gas_increase_percent.is_none() {
+                top_config.app.gas_increase_percent = Some(U256::from(25));
+            }
+        }
 
         Some(top_config)
     } else {

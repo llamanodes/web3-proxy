@@ -25,6 +25,7 @@ use entities::sea_orm_active_enums::LogLevel;
 use entities::user;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Block, Bytes, Transaction, TxHash, H256, U64};
+use ethers::types::U256;
 use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -1119,19 +1120,14 @@ impl Web3ProxyApp {
             // TODO: eth_sendPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_sendprivatetransaction)
             "eth_coinbase" => {
                 // no need for serving coinbase
-                // we could return a per-user payment address here, but then we might leak that to dapps
                 // no stats on this. its cheap
                 json!(Address::zero())
             }
-            /*
-            // erigon was giving bad estimates. but now it doesn't need it
-            // TODO: got reports of some gas estimate issue on polygon with their erc20s. maybe we do want it
             "eth_estimateGas" => {
-                // TODO: eth_estimateGas using anvil?
-                // TODO: modify the block requested?
                 let mut response = self
                     .balanced_rpcs
-                    .try_send_best_upstream_server(
+                    .try_proxy_connection(
+                        proxy_mode,
                         authorization,
                         request,
                         Some(&request_metadata),
@@ -1139,11 +1135,9 @@ impl Web3ProxyApp {
                     )
                     .await?;
 
-                let parsed_gas_estimate = if let Some(gas_estimate) = response.result.take() {
-                    let parsed_gas_estimate: U256 = serde_json::from_str(gas_estimate.get())
-                        .context("gas estimate result is not an U256")?;
-
-                    parsed_gas_estimate
+                let mut gas_estimate: U256 = if let Some(gas_estimate) = response.result.take() {
+                    serde_json::from_str(gas_estimate.get())
+                        .context("gas estimate result is not an U256")?
                 } else {
                     // i think this is always an error response
                     let rpcs = request_metadata.backend_requests.lock().clone();
@@ -1151,13 +1145,21 @@ impl Web3ProxyApp {
                     return Ok((response, rpcs));
                 };
 
-                // increase by 1.01%
-                let parsed_gas_estimate =
-                    parsed_gas_estimate * U256::from(101_010) / U256::from(100_000);
+                let gas_increase =
+                    if let Some(gas_increase_percent) = self.config.gas_increase_percent {
+                        let gas_increase = gas_estimate * gas_increase_percent / U256::from(100);
 
-                json!(parsed_gas_estimate)
+                        let min_gas_increase = self.config.gas_increase_min.unwrap_or_default();
+
+                        gas_increase.max(min_gas_increase)
+                    } else {
+                        self.config.gas_increase_min.unwrap_or_default()
+                    };
+
+                gas_estimate += gas_increase;
+
+                json!(gas_estimate)
             }
-            */
             // TODO: eth_gasPrice that does awesome magic to predict the future
             "eth_hashrate" => {
                 // no stats on this. its cheap

@@ -4,6 +4,7 @@ use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::{app::AnyhowJoinHandle, rpcs::blockchain::ArcBlock};
 use argh::FromArgs;
 use ethers::prelude::TxHash;
+use ethers::types::U256;
 use hashbrown::HashMap;
 use log::warn;
 use migration::sea_orm::DatabaseConnection;
@@ -89,6 +90,12 @@ pub struct AppConfig {
     /// 0 = block all requests
     /// None = allow all requests
     pub default_user_max_requests_per_period: Option<u64>,
+
+    /// minimum amount to increase eth_estimateGas results
+    pub gas_increase_min: Option<U256>,
+
+    /// percentage to increase eth_estimateGas results. 100 == 100%
+    pub gas_increase_percent: Option<U256>,
 
     /// Restrict user registration.
     /// None = no code needed
