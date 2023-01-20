@@ -137,6 +137,7 @@ async fn get_chain_id(rpc: &str, client: &reqwest::Client) -> anyhow::Result<u64
         "method": "eth_chainId",
     });
 
+    // TODO: loop until chain id is found?
     let check_result = client
         .post(rpc)
         .json(&get_chain_id_request)
