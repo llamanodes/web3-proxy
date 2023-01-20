@@ -723,6 +723,7 @@ impl Web3Connections {
 
         // TODO: maximum retries? right now its the total number of servers
         loop {
+            // TODO: is self.conns still right now that we split main and backup servers?
             if skip_rpcs.len() == self.conns.len() {
                 // no servers to try
                 break;
@@ -738,14 +739,17 @@ impl Web3Connections {
             {
                 OpenRequestResult::Handle(active_request_handle) => {
                     // save the rpc in case we get an error and want to retry on another server
+                    // TODO: look at backend_requests instead
                     skip_rpcs.push(active_request_handle.clone_connection());
 
                     if let Some(request_metadata) = request_metadata {
-                        // TODO: request_metadata.backend_requests instead of skip_rpcs
+                        let rpc = active_request_handle.clone_connection();
+
                         request_metadata
-                            .backend_requests
-                            .lock()
-                            .push(active_request_handle.clone_connection());
+                            .response_from_backup_rpc
+                            .store(rpc.backup, Ordering::Release);
+
+                        request_metadata.backend_requests.lock().push(rpc);
                     }
 
                     // TODO: get the log percent from the user data
@@ -896,10 +900,24 @@ impl Web3Connections {
                     // TODO: this is not working right. simplify
 
                     if let Some(request_metadata) = request_metadata {
+                        let mut backup_used = false;
+
+                        request_metadata.backend_requests.lock().extend(
+                            active_request_handles.iter().map(|x| {
+                                let rpc = x.clone_connection();
+
+                                if rpc.backup {
+                                    // TODO: its possible we serve from a synced connection though. think about this more
+                                    backup_used = true;
+                                }
+
+                                x.clone_connection()
+                            }),
+                        );
+
                         request_metadata
-                            .backend_requests
-                            .lock()
-                            .extend(active_request_handles.iter().map(|x| x.clone_connection()));
+                            .response_from_backup_rpc
+                            .store(true, Ordering::Release);
                     }
 
                     return self

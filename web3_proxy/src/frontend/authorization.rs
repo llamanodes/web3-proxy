@@ -85,6 +85,7 @@ pub struct RequestMetadata {
     pub error_response: AtomicBool,
     pub response_bytes: AtomicU64,
     pub response_millis: AtomicU64,
+    pub response_from_backup_rpc: AtomicBool,
 }
 
 impl RequestMetadata {
@@ -103,6 +104,7 @@ impl RequestMetadata {
             error_response: false.into(),
             response_bytes: 0.into(),
             response_millis: 0.into(),
+            response_from_backup_rpc: false.into(),
         };
 
         Ok(new)
