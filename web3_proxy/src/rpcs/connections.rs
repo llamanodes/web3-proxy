@@ -769,7 +769,7 @@ impl Web3Connections {
                                 let rate_limit_substrings = ["limit", "exceeded"];
                                 for rate_limit_substr in rate_limit_substrings {
                                     if error_msg.contains(rate_limit_substr) {
-                                        warn!("rate limited by {:?}", skip_rpcs.last());
+                                        warn!("rate limited by {}", skip_rpcs.last().unwrap());
                                         continue;
                                     }
                                 }
