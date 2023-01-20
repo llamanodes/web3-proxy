@@ -23,6 +23,22 @@ services:
     volumes:
       - ./data/dev_mysql:/var/lib/mysql
 
+  # influxdb for stats
+  dev-influxdb:
+    image: influxdb:2.6.1-alpine
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: dev_web3_proxy
+      DOCKER_INFLUXDB_INIT_PASSWORD: dev_web3_proxy
+      DOCKER_INFLUXDB_INIT_ORG: dev_org
+      DOCKER_INFLUXDB_INIT_BUCKET: dev_web3_proxy
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: dev_web3_proxy_auth_token
+    ports:
+      - 127.0.0.1:8086:8086
+    volumes:
+      - ./data/dev_influxdb/data:/var/lib/influxdb2
+      - ./data/dev_influxdb/config:/etc/influxdb2
+
   # volatile redis for storing rate limits
   dev-vredis:
     extends:
