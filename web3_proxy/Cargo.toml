@@ -50,7 +50,7 @@ parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 proctitle = "0.1.1"
 # TODO: regex has several "perf" features that we might want to use
 regex = "1.7.1"
-reqwest = { version = "0.11.13", default-features = false, features = ["json", "tokio-rustls"] }
+reqwest = { version = "0.11.14", default-features = false, features = ["json", "tokio-rustls"] }
 handlebars = "4.3.6"
 rustc-hash = "1.1.0"
 siwe = "0.5.0"
@@ -63,7 +63,7 @@ time = "0.3.17"
 tokio = { version = "1.24.2", features = ["full"] }
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
 tokio-stream = { version = "0.1.11", features = ["sync"] }
-toml = "0.5.10"
+toml = "0.5.11"
 tower = "0.4.13"
 tower-http = { version = "0.3.5", features = ["cors", "sensitive-headers"] }
 ulid = { version = "1.0.0", features = ["serde"] }
