@@ -22,7 +22,7 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 anyhow = { version = "1.0.68", features = ["backtrace"] }
 arc-swap = "1.6.0"
 argh = "0.1.10"
-axum = { version = "0.6.2", features = ["headers", "ws"] }
+axum = { version = "0.6.3", features = ["headers", "ws"] }
 axum-client-ip = "0.3.1"
 axum-macros = "0.3.1"
 # TODO: import chrono from sea-orm so we always have the same version
