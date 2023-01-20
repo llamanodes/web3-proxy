@@ -331,20 +331,20 @@ impl Web3Connections {
             .synced_connections
             .swap(Arc::new(new_synced_connections));
 
-        let includes_backups_str = if includes_backups { "B" } else { "" };
+        let includes_backups_str = if includes_backups { "B " } else { "" };
 
         if let Some(consensus_saved_block) = consensus_head_block {
             match &old_synced_connections.head_block {
                 None => {
                     debug!(
-                        "first {}/{}/{}/{} block={}, rpc={} {}",
+                        "first {}{}/{}/{}/{} block={}, rpc={}",
+                        includes_backups_str,
                         num_consensus_rpcs,
                         num_checked_rpcs,
                         num_active_rpcs,
                         total_rpcs,
                         consensus_saved_block,
                         rpc,
-                        includes_backups_str,
                     );
 
                     if includes_backups {
@@ -371,7 +371,8 @@ impl Web3Connections {
                             if consensus_saved_block.hash() == old_head_block.hash() {
                                 // no change in hash. no need to use head_block_sender
                                 debug!(
-                                    "con {}/{}/{}/{} con={} rpc={}@{} {}",
+                                    "con {}{}/{}/{}/{} con={} rpc={}@{}",
+                                    includes_backups_str,
                                     num_consensus_rpcs,
                                     num_checked_rpcs,
                                     num_active_rpcs,
@@ -379,7 +380,6 @@ impl Web3Connections {
                                     consensus_saved_block,
                                     rpc,
                                     rpc_head_str,
-                                    includes_backups_str,
                                 )
                             } else {
                                 // hash changed
@@ -390,7 +390,8 @@ impl Web3Connections {
                                 }
 
                                 debug!(
-                                    "unc {}/{}/{}/{} con_head={} old={} rpc={}@{} {}",
+                                    "unc {}{}/{}/{}/{} con_head={} old={} rpc={}@{}",
+                                    includes_backups_str,
                                     num_consensus_rpcs,
                                     num_checked_rpcs,
                                     num_active_rpcs,
@@ -399,7 +400,6 @@ impl Web3Connections {
                                     old_head_block,
                                     rpc,
                                     rpc_head_str,
-                                    includes_backups_str,
                                 );
 
                                 let consensus_head_block = self
@@ -416,7 +416,8 @@ impl Web3Connections {
                             // this is unlikely but possible
                             // TODO: better log
                             warn!(
-                                "chain rolled back {}/{}/{}/{} con={} old={} rpc={}@{} {}",
+                                "chain rolled back {}{}/{}/{}/{} con={} old={} rpc={}@{}",
+                                includes_backups_str,
                                 num_consensus_rpcs,
                                 num_checked_rpcs,
                                 num_active_rpcs,
@@ -425,7 +426,6 @@ impl Web3Connections {
                                 old_head_block,
                                 rpc,
                                 rpc_head_str,
-                                includes_backups_str,
                             );
 
                             if includes_backups {
@@ -447,7 +447,8 @@ impl Web3Connections {
                         }
                         Ordering::Greater => {
                             debug!(
-                                "new {}/{}/{}/{} con={} rpc={}@{} {}",
+                                "new {}{}/{}/{}/{} con={} rpc={}@{}",
+                                includes_backups_str,
                                 num_consensus_rpcs,
                                 num_checked_rpcs,
                                 num_active_rpcs,
@@ -455,7 +456,6 @@ impl Web3Connections {
                                 consensus_saved_block,
                                 rpc,
                                 rpc_head_str,
-                                includes_backups_str,
                             );
 
                             if includes_backups {
@@ -479,25 +479,25 @@ impl Web3Connections {
 
             if num_checked_rpcs >= self.min_head_rpcs {
                 error!(
-                    "non {}/{}/{}/{} rpc={}@{} {}",
+                    "non {}{}/{}/{}/{} rpc={}@{}",
+                    includes_backups_str,
                     num_consensus_rpcs,
                     num_checked_rpcs,
                     num_active_rpcs,
                     total_rpcs,
                     rpc,
                     rpc_head_str,
-                    includes_backups_str,
                 );
             } else {
                 debug!(
-                    "non {}/{}/{}/{} rpc={}@{} {}",
+                    "non {}{}/{}/{}/{} rpc={}@{}",
+                    includes_backups_str,
                     num_consensus_rpcs,
                     num_checked_rpcs,
                     num_active_rpcs,
                     total_rpcs,
                     rpc,
                     rpc_head_str,
-                    includes_backups_str,
                 );
             }
         }

@@ -27,9 +27,9 @@ use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::collections::BTreeMap;
-use std::fmt;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::{cmp, fmt};
 use thread_fast_rng::rand::seq::SliceRandom;
 use tokio::sync::{broadcast, watch};
 use tokio::task;
@@ -446,47 +446,57 @@ impl Web3Connections {
         let usable_rpcs_by_head_num_and_weight: BTreeMap<
             (Option<U64>, u64),
             Vec<Arc<Web3Connection>>,
-        > = if let Some(min_block_needed) = min_block_needed {
-            // need a potentially old block. check all the rpcs. prefer the most synced
-            let mut m = BTreeMap::new();
-
-            for x in self
-                .conns
-                .values()
-                .filter(|x| if allow_backups { true } else { !x.backup })
-                .filter(|x| !skip.contains(x))
-                .filter(|x| x.has_block_data(min_block_needed))
-                .cloned()
-            {
-                let x_head_block = x.head_block.read().clone();
-
-                match x_head_block {
-                    None => continue,
-                    Some(x_head) => {
-                        let key = (Some(x_head.number()), u64::MAX - x.tier);
-
-                        m.entry(key).or_insert_with(Vec::new).push(x);
-                    }
-                }
-            }
-
-            m
-        } else {
-            // need latest. filter the synced rpcs
+        > = {
             let synced_connections = self.synced_connections.load();
 
-            // TODO: if head_block is super old. emit an error!
+            let head_block_num = if let Some(head_block) = synced_connections.head_block.as_ref() {
+                head_block.number()
+            } else {
+                return Ok(OpenRequestResult::NotReady);
+            };
+
+            let min_block_needed = min_block_needed.unwrap_or(&head_block_num);
 
             let mut m = BTreeMap::new();
 
-            for x in synced_connections
-                .conns
-                .iter()
-                .filter(|x| !skip.contains(x))
-            {
-                let key = (None, u64::MAX - x.tier);
+            match min_block_needed.cmp(&head_block_num) {
+                cmp::Ordering::Less => {
+                    // need an old block. check all the rpcs. prefer the most synced
+                    for x in self
+                        .conns
+                        .values()
+                        .filter(|x| if allow_backups { true } else { !x.backup })
+                        .filter(|x| !skip.contains(x))
+                        .filter(|x| x.has_block_data(min_block_needed))
+                        .cloned()
+                    {
+                        let x_head_block = x.head_block.read().clone();
 
-                m.entry(key).or_insert_with(Vec::new).push(x.clone());
+                        match x_head_block {
+                            None => continue,
+                            Some(x_head) => {
+                                let key = (Some(x_head.number()), u64::MAX - x.tier);
+
+                                m.entry(key).or_insert_with(Vec::new).push(x);
+                            }
+                        }
+                    }
+                }
+                cmp::Ordering::Equal => {
+                    // need the consensus head block. filter the synced rpcs
+                    for x in synced_connections
+                        .conns
+                        .iter()
+                        .filter(|x| !skip.contains(x))
+                    {
+                        let key = (None, u64::MAX - x.tier);
+
+                        m.entry(key).or_insert_with(Vec::new).push(x.clone());
+                    }
+                }
+                cmp::Ordering::Greater => {
+                    return Ok(OpenRequestResult::NotReady);
+                }
             }
 
             m
