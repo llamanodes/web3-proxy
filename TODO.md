@@ -310,6 +310,8 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] remove allowed lag
 - [x] configurable gas buffer. default to the larger of 25k or 25% on polygon to work around erigon bug
 - [x] public is 3900, but free is 360. free should be at least 3900 but probably more
+- [x] add --max-wait to wait_for_sync
+- [x] add automatic compare urls to wait_for_sync
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly

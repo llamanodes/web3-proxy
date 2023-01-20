@@ -1,27 +1,39 @@
-// TODO: websockets instead of http
+// TODO: support websockets
 
 use anyhow::Context;
 use argh::FromArgs;
 use chrono::Utc;
+use ethers::types::U64;
 use ethers::types::{Block, TxHash};
 use log::info;
 use log::warn;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::time::sleep;
 use tokio::time::Duration;
 
 #[derive(Debug, FromArgs)]
 /// Command line interface for admins to interact with web3_proxy
 pub struct CliConfig {
-    /// the RPC to check
+    /// the HTTP RPC to check
     #[argh(option, default = "\"http://localhost:8545\".to_string()")]
     pub check_url: String,
 
-    /// the RPC to compare to
-    #[argh(option, default = "\"https://eth.llamarpc.com\".to_string()")]
-    pub compare_url: String,
+    /// the HTTP RPC to compare against. defaults to LlamaNodes public RPC
+    #[argh(option)]
+    pub compare_url: Option<String>,
+
+    /// how many seconds to wait for sync.
+    /// Defaults to waiting forever.
+    /// if the wait is exceeded, will exit with code 2
+    #[argh(option)]
+    pub max_wait: Option<u64>,
+
+    /// require a specific chain id (for extra safety)
+    #[argh(option)]
+    pub chain_id: Option<u64>,
 }
 
 #[tokio::main]
@@ -38,26 +50,73 @@ async fn main() -> anyhow::Result<()> {
 
     let cli_config: CliConfig = argh::from_env();
 
-    let json_request = json!({
-        "id": "1",
-        "jsonrpc": "2.0",
-        "method": "eth_getBlockByNumber",
-        "params": [
-            "latest",
-            false,
-        ],
-    });
-
     let client = reqwest::Client::new();
 
-    // TODO: make sure the chain ids match
-    // TODO: automatic compare_url based on the chain id
+    let check_url = cli_config.check_url;
+
+    // make sure the chain ids match
+    let check_id = get_chain_id(&check_url, &client)
+        .await
+        .context("unknown chain id for check_url")?;
+
+    if let Some(chain_id) = cli_config.chain_id {
+        if chain_id != check_id {
+            return Err(anyhow::anyhow!(
+                "chain_id of check_url is wrong! Need {}. Found {}",
+                chain_id,
+                check_id,
+            ));
+        }
+    }
+
+    let compare_url: String = match cli_config.compare_url {
+        Some(x) => x,
+        None => match check_id {
+            1 => "https://eth.llamarpc.com",
+            137 => "https://polygon.llamarpc.com",
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "--compare-url required for chain {}",
+                    check_id
+                ))
+            }
+        }
+        .to_string(),
+    };
+
+    info!(
+        "comparing {} to {} (chain {})",
+        check_url, compare_url, check_id
+    );
+
+    let compare_id = get_chain_id(&compare_url, &client)
+        .await
+        .context("unknown chain id for compare_url")?;
+
+    if check_id != compare_id {
+        return Err(anyhow::anyhow!(
+            "chain_id does not match! Need {}. Found {}",
+            check_id,
+            compare_id,
+        ));
+    }
+
+    // start ids at 2 because id 1 was checking the chain id
+    let counter = AtomicU32::new(2);
+    let start = tokio::time::Instant::now();
 
     loop {
-        match main_loop(&cli_config, &client, &json_request).await {
+        match main_loop(&check_url, &compare_url, &client, &counter).await {
             Ok(()) => break,
             Err(err) => {
                 warn!("{:?}", err);
+
+                if let Some(max_wait) = cli_config.max_wait {
+                    if max_wait == 0 || start.elapsed().as_secs() > max_wait {
+                        std::process::exit(2);
+                    }
+                }
+
                 sleep(Duration::from_secs(10)).await;
             }
         }
@@ -67,37 +126,75 @@ async fn main() -> anyhow::Result<()> {
 }
 
 #[derive(Deserialize)]
+struct JsonRpcChainIdResult {
+    result: U64,
+}
+
+async fn get_chain_id(rpc: &str, client: &reqwest::Client) -> anyhow::Result<u64> {
+    let get_chain_id_request = json!({
+        "id": "1",
+        "jsonrpc": "2.0",
+        "method": "eth_chainId",
+    });
+
+    let check_result = client
+        .post(rpc)
+        .json(&get_chain_id_request)
+        .send()
+        .await
+        .context("failed querying chain id")?
+        .json::<JsonRpcChainIdResult>()
+        .await
+        .context("failed parsing chain id")?
+        .result
+        .as_u64();
+
+    Ok(check_result)
+}
+
+#[derive(Deserialize)]
 struct JsonRpcBlockResult {
     result: Block<TxHash>,
 }
 
 async fn main_loop(
-    cli_config: &CliConfig,
+    check_url: &str,
+    compare_url: &str,
     client: &Client,
-    json_request: &serde_json::Value,
+    counter: &AtomicU32,
 ) -> anyhow::Result<()> {
-    let check_result = client
-        .post(&cli_config.check_url)
-        .json(json_request)
+    // TODO: have a real id here that increments every call?
+    let get_block_number_request = json!({
+        "id": counter.fetch_add(1, Ordering::SeqCst),
+        "jsonrpc": "2.0",
+        "method": "eth_getBlockByNumber",
+        "params": [
+            "latest",
+            false,
+        ],
+    });
+
+    let check_block = client
+        .post(check_url)
+        .json(&get_block_number_request)
         .send()
         .await
         .context("querying check block")?
         .json::<JsonRpcBlockResult>()
         .await
-        .context("parsing check block")?;
+        .context("parsing check block")?
+        .result;
 
-    let compare_result = client
-        .post(&cli_config.compare_url)
-        .json(json_request)
+    let compare_block = client
+        .post(compare_url)
+        .json(&get_block_number_request)
         .send()
         .await
         .context("querying compare block")?
         .json::<JsonRpcBlockResult>()
         .await
-        .context("parsing compare block")?;
-
-    let check_block = check_result.result;
-    let compare_block = compare_result.result;
+        .context("parsing compare block")?
+        .result;
 
     let check_number = check_block.number.context("no check block number")?;
     let compare_number = compare_block.number.context("no compare block number")?;
