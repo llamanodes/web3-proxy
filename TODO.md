@@ -309,6 +309,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] major refactor to only use backup servers when absolutely necessary
 - [x] remove allowed lag
 - [x] configurable gas buffer. default to the larger of 25k or 25% on polygon to work around erigon bug
+- [x] public is 3900, but free is 360. free should be at least 3900 but probably more
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
