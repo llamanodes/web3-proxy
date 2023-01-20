@@ -128,9 +128,8 @@ pub async fn websocket_handler_with_key(
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
-    // TODO: config instead of defaulting to fastest(1)?
     _websocket_handler_with_key(
-        ProxyMode::Fastest(1),
+        ProxyMode::Best,
         app,
         ip,
         rpc_key,
