@@ -64,6 +64,7 @@ async fn run(
     ));
 
     // wait until the app has seen its first consensus head block
+    // TODO: if backups were included, wait a little longer
     let _ = spawned_app.app.head_block_receiver().changed().await;
 
     // start the frontend port
