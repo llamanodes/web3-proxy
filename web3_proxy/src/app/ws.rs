@@ -50,7 +50,7 @@ impl Web3ProxyApp {
         match request_json.params.as_ref() {
             Some(x) if x == &json!(["newHeads"]) => {
                 let authorization = authorization.clone();
-                let head_block_receiver = self.head_block_receiver.clone();
+                let head_block_receiver = self.watch_consensus_head_receiver.clone();
                 let stat_sender = self.stat_sender.clone();
 
                 trace!("newHeads subscription {:?}", subscription_id);

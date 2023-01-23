@@ -1,4 +1,4 @@
-use super::blockchain::SavedBlock;
+use super::blockchain::{ArcBlock, SavedBlock};
 use super::connection::Web3Connection;
 use super::connections::Web3Connections;
 use ethers::prelude::{H256, U64};
@@ -43,31 +43,29 @@ impl fmt::Debug for ConsensusConnections {
 }
 
 impl Web3Connections {
-    pub fn head_block(&self) -> Option<SavedBlock> {
-        self.synced_connections.load().head_block.clone()
+    pub fn head_block(&self) -> Option<ArcBlock> {
+        self.watch_consensus_head_receiver
+            .as_ref()
+            .map(|x| x.borrow().clone())
     }
 
     pub fn head_block_hash(&self) -> Option<H256> {
-        self.synced_connections
-            .load()
-            .head_block
-            .as_ref()
-            .map(|head_block| head_block.hash())
+        self.head_block().and_then(|x| x.hash)
     }
 
     pub fn head_block_num(&self) -> Option<U64> {
-        self.synced_connections
-            .load()
-            .head_block
-            .as_ref()
-            .map(|head_block| head_block.number())
+        self.head_block().and_then(|x| x.number)
     }
 
     pub fn synced(&self) -> bool {
-        !self.synced_connections.load().conns.is_empty()
+        !self
+            .watch_consensus_connections_sender
+            .borrow()
+            .conns
+            .is_empty()
     }
 
     pub fn num_synced_rpcs(&self) -> usize {
-        self.synced_connections.load().conns.len()
+        self.watch_consensus_connections_sender.borrow().conns.len()
     }
 }

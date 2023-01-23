@@ -188,7 +188,7 @@ pub struct Web3ProxyApp {
     response_cache: ResponseCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
-    head_block_receiver: watch::Receiver<ArcBlock>,
+    watch_consensus_head_receiver: watch::Receiver<ArcBlock>,
     pending_tx_sender: broadcast::Sender<TxStatus>,
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
@@ -533,7 +533,8 @@ impl Web3ProxyApp {
         };
 
         // TODO: i don't like doing Block::default here! Change this to "None"?
-        let (head_block_sender, head_block_receiver) = watch::channel(Arc::new(Block::default()));
+        let (watch_consensus_head_sender, watch_consensus_head_receiver) =
+            watch::channel(Arc::new(Block::default()));
         // TODO: will one receiver lagging be okay? how big should this be?
         let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
 
@@ -570,7 +571,7 @@ impl Web3ProxyApp {
             http_client.clone(),
             vredis_pool.clone(),
             block_map.clone(),
-            Some(head_block_sender),
+            Some(watch_consensus_head_sender),
             top_config.app.min_sum_soft_limit,
             top_config.app.min_synced_rpcs,
             Some(pending_tx_sender.clone()),
@@ -598,6 +599,8 @@ impl Web3ProxyApp {
                 vredis_pool.clone(),
                 block_map,
                 // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
+                // they also often have low rate limits
+                // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
                 None,
                 0,
                 0,
@@ -706,7 +709,7 @@ impl Web3ProxyApp {
             balanced_rpcs,
             private_rpcs,
             response_cache,
-            head_block_receiver,
+            watch_consensus_head_receiver,
             pending_tx_sender,
             pending_transactions,
             frontend_ip_rate_limiter,
@@ -730,7 +733,7 @@ impl Web3ProxyApp {
     }
 
     pub fn head_block_receiver(&self) -> watch::Receiver<ArcBlock> {
-        self.head_block_receiver.clone()
+        self.watch_consensus_head_receiver.clone()
     }
 
     pub async fn prometheus_metrics(&self) -> String {
@@ -1362,10 +1365,10 @@ impl Web3ProxyApp {
             method => {
                 // emit stats
 
-                // TODO: if no servers synced, wait for them to be synced?
-                let head_block = self
+                // TODO: if no servers synced, wait for them to be synced? probably better to error and let haproxy retry another server
+                let head_block_num = self
                     .balanced_rpcs
-                    .head_block()
+                    .head_block_num()
                     .context("no servers synced")?;
 
                 // we do this check before checking caches because it might modify the request params
@@ -1375,7 +1378,7 @@ impl Web3ProxyApp {
                     authorization,
                     method,
                     request.params.as_mut(),
-                    head_block.number(),
+                    head_block_num,
                     &self.balanced_rpcs,
                 )
                 .await?

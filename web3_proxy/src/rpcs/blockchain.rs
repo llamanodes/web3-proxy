@@ -165,9 +165,15 @@ impl Web3Connections {
                 let request: JsonRpcRequest = serde_json::from_value(request)?;
 
                 // TODO: request_metadata? maybe we should put it in the authorization?
-                // TODO: don't hard code allowed lag
+                // TODO: think more about this wait_for_sync
                 let response = self
-                    .try_send_best_consensus_head_connection(authorization, request, None, None)
+                    .try_send_best_consensus_head_connection(
+                        authorization,
+                        request,
+                        None,
+                        None,
+                        true,
+                    )
                     .await?;
 
                 let block = response.result.context("failed fetching block")?;
@@ -199,6 +205,7 @@ impl Web3Connections {
     }
 
     /// Get the heaviest chain's block from cache or backend rpc
+    /// Caution! If a future block is requested, this might wait forever. Be sure to have a timeout outside of this!
     pub async fn cannonical_block(
         &self,
         authorization: &Arc<Authorization>,
@@ -208,22 +215,32 @@ impl Web3Connections {
         // maybe save them during save_block in a blocks_by_number Cache<U64, Vec<ArcBlock>>
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
 
+        let mut consensus_head_receiver = self
+            .watch_consensus_head_receiver
+            .as_ref()
+            .context("need new head subscriptions to fetch cannonical_block")?
+            .clone();
+
         // be sure the requested block num exists
-        let head_block_num = self.head_block_num().context("no servers in sync")?;
+        let mut head_block_num = consensus_head_receiver.borrow_and_update().number;
+
+        loop {
+            if let Some(head_block_num) = head_block_num {
+                if num <= &head_block_num {
+                    break;
+                }
+            }
+
+            consensus_head_receiver.changed().await?;
+
+            head_block_num = consensus_head_receiver.borrow_and_update().number;
+        }
+
+        let head_block_num =
+            head_block_num.expect("we should only get here if we have a head block");
 
         // TODO: geth does 64, erigon does 90k. sometimes we run a mix
         let archive_needed = num < &(head_block_num - U64::from(64));
-
-        if num > &head_block_num {
-            // TODO: i'm seeing this a lot when using ethspam. i dont know why though. i thought we delayed publishing
-            // TODO: instead of error, maybe just sleep and try again?
-            // TODO: this should be a 401, not a 500
-            return Err(anyhow::anyhow!(
-                "Head block is #{}, but #{} was requested",
-                head_block_num,
-                num
-            ));
-        }
 
         // try to get the hash from our cache
         // deref to not keep the lock open
@@ -243,7 +260,7 @@ impl Web3Connections {
         // TODO: if error, retry?
         // TODO: request_metadata or authorization?
         let response = self
-            .try_send_best_consensus_head_connection(authorization, request, None, Some(num))
+            .try_send_best_consensus_head_connection(authorization, request, None, Some(num), true)
             .await?;
 
         let raw_block = response.result.context("no block result")?;
@@ -320,6 +337,8 @@ impl Web3Connections {
             .best_consensus_connections(authorization, self)
             .await;
 
+        // TODO: what should we do if the block number of new_synced_connections is < old_synced_connections? wait?
+
         let includes_backups = new_synced_connections.includes_backups;
         let consensus_head_block = new_synced_connections.head_block.clone();
         let num_consensus_rpcs = new_synced_connections.num_conns();
@@ -327,14 +346,14 @@ impl Web3Connections {
         let num_active_rpcs = consensus_finder.all.rpc_name_to_hash.len();
         let total_rpcs = self.conns.len();
 
-        let old_synced_connections = self
-            .synced_connections
-            .swap(Arc::new(new_synced_connections));
+        let old_consensus_head_connections = self
+            .watch_consensus_connections_sender
+            .send_replace(Arc::new(new_synced_connections));
 
         let includes_backups_str = if includes_backups { "B " } else { "" };
 
         if let Some(consensus_saved_block) = consensus_head_block {
-            match &old_synced_connections.head_block {
+            match &old_consensus_head_connections.head_block {
                 None => {
                     debug!(
                         "first {}{}/{}/{}/{} block={}, rpc={}",
@@ -843,7 +862,13 @@ impl ConsensusFinder {
             Some(x) => x.number.expect("blocks here should always have a number"),
         };
 
-        let min_block_num = highest_block_num.saturating_sub(U64::from(5));
+        // TODO: also needs to be not less than our current head
+        let mut min_block_num = highest_block_num.saturating_sub(U64::from(5));
+
+        // we also want to be sure we don't ever go backwards!
+        if let Some(current_consensus_head_num) = web3_connections.head_block_num() {
+            min_block_num = min_block_num.max(current_consensus_head_num);
+        }
 
         // TODO: pass `min_block_num` to consensus_head_connections?
         let consensus_head_for_main = self

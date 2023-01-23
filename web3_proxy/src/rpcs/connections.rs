@@ -11,7 +11,6 @@ use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
-use arc_swap::ArcSwap;
 use counter::Counter;
 use derive_more::From;
 use ethers::prelude::{ProviderError, TxHash, H256, U64};
@@ -38,9 +37,12 @@ use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBeh
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
 pub struct Web3Connections {
-    pub(crate) conns: HashMap<String, Arc<Web3Connection>>,
     /// any requests will be forwarded to one (or more) of these connections
-    pub(super) synced_connections: ArcSwap<ConsensusConnections>,
+    pub(crate) conns: HashMap<String, Arc<Web3Connection>>,
+    /// all providers with the same consensus head block. won't update if there is no `self.watch_consensus_head_sender`
+    pub(super) watch_consensus_connections_sender: watch::Sender<Arc<ConsensusConnections>>,
+    /// this head receiver makes it easy to wait until there is a new block
+    pub(super) watch_consensus_head_receiver: Option<watch::Receiver<ArcBlock>>,
     pub(super) pending_transactions:
         Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
@@ -62,7 +64,7 @@ impl Web3Connections {
         http_client: Option<reqwest::Client>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
         block_map: BlockHashesCache,
-        head_block_sender: Option<watch::Sender<ArcBlock>>,
+        watch_consensus_head_sender: Option<watch::Sender<ArcBlock>>,
         min_sum_soft_limit: u32,
         min_head_rpcs: usize,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
@@ -138,7 +140,7 @@ impl Web3Connections {
                 let redis_pool = redis_pool.clone();
                 let http_interval_sender = http_interval_sender.clone();
 
-                let block_sender = if head_block_sender.is_some() {
+                let block_sender = if watch_consensus_head_sender.is_some() {
                     Some(block_sender.clone())
                 } else {
                     None
@@ -192,8 +194,6 @@ impl Web3Connections {
             }
         }
 
-        let synced_connections = ConsensusConnections::default();
-
         // TODO: max_capacity and time_to_idle from config
         // all block hashes are the same size, so no need for weigher
         let block_hashes = Cache::builder()
@@ -206,9 +206,15 @@ impl Web3Connections {
             .max_capacity(10_000)
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
+        let (watch_consensus_connections_sender, _) = watch::channel(Default::default());
+
+        let watch_consensus_head_receiver =
+            watch_consensus_head_sender.as_ref().map(|x| x.subscribe());
+
         let connections = Arc::new(Self {
             conns: connections,
-            synced_connections: ArcSwap::new(Arc::new(synced_connections)),
+            watch_consensus_connections_sender,
+            watch_consensus_head_receiver,
             pending_transactions,
             block_hashes,
             block_numbers,
@@ -228,7 +234,7 @@ impl Web3Connections {
                         authorization,
                         pending_tx_id_receiver,
                         block_receiver,
-                        head_block_sender,
+                        watch_consensus_head_sender,
                         pending_tx_sender,
                     )
                     .await
@@ -447,11 +453,12 @@ impl Web3Connections {
             (Option<U64>, u64),
             Vec<Arc<Web3Connection>>,
         > = {
-            let synced_connections = self.synced_connections.load();
+            let synced_connections = self.watch_consensus_connections_sender.borrow().clone();
 
             let head_block_num = if let Some(head_block) = synced_connections.head_block.as_ref() {
                 head_block.number()
             } else {
+                // TODO: optionally wait for a head block >= min_block_needed
                 return Ok(OpenRequestResult::NotReady);
             };
 
@@ -495,6 +502,7 @@ impl Web3Connections {
                     }
                 }
                 cmp::Ordering::Greater => {
+                    // TODO? if the blocks is close and wait_for_sync and allow_backups, wait for change on a watch_consensus_connections_receiver().subscribe()
                     return Ok(OpenRequestResult::NotReady);
                 }
             }
@@ -712,18 +720,27 @@ impl Web3Connections {
     }
 
     /// be sure there is a timeout on this or it might loop forever
+    /// TODO: think more about wait_for_sync
     pub async fn try_send_best_consensus_head_connection(
         &self,
         authorization: &Arc<Authorization>,
         request: JsonRpcRequest,
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
+        wait_for_sync: bool,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         let mut skip_rpcs = vec![];
+
+        let mut watch_consensus_connections = if wait_for_sync {
+            Some(self.watch_consensus_connections_sender.subscribe())
+        } else {
+            None
+        };
 
         // TODO: maximum retries? right now its the total number of servers
         loop {
             // TODO: is self.conns still right now that we split main and backup servers?
+            // TODO: if a new block arrives, we probably want to reset the skip list
             if skip_rpcs.len() == self.conns.len() {
                 // no servers to try
                 break;
@@ -833,9 +850,6 @@ impl Web3Connections {
                                 rpc, err
                             );
 
-                            // TODO: sleep how long? until synced_connections changes or rate limits are available
-                            // sleep(Duration::from_millis(100)).await;
-
                             continue;
                         }
                     }
@@ -851,16 +865,38 @@ impl Web3Connections {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
-                    sleep_until(retry_at).await;
-
-                    continue;
+                    if let Some(watch_consensus_connections) = watch_consensus_connections.as_mut()
+                    {
+                        // TODO: if there are other servers in synced_connections, we should continue now
+                        // wait until retry_at OR synced_connections changes
+                        tokio::select! {
+                            _ = sleep_until(retry_at) => {
+                                skip_rpcs.pop();
+                            }
+                            _ = watch_consensus_connections.changed() => {
+                                // TODO: would be nice to save this retry_at so we don't keep hitting limits
+                                let _ = watch_consensus_connections.borrow_and_update();
+                            }
+                        }
+                        continue;
+                    } else {
+                        break;
+                    }
                 }
                 OpenRequestResult::NotReady => {
                     if let Some(request_metadata) = request_metadata {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
-                    break;
+                    if wait_for_sync {
+                        // TODO: race here. there might have been a change while we were waiting on the previous server
+                        self.watch_consensus_connections_sender
+                            .subscribe()
+                            .changed()
+                            .await?;
+                    } else {
+                        break;
+                    }
                 }
             }
         }
@@ -979,6 +1015,7 @@ impl Web3Connections {
                     request,
                     request_metadata,
                     min_block_needed,
+                    true,
                 )
                 .await
             }
@@ -1007,8 +1044,11 @@ impl Serialize for Web3Connections {
         let conns: Vec<&Web3Connection> = self.conns.values().map(|x| x.as_ref()).collect();
         state.serialize_field("conns", &conns)?;
 
-        let synced_connections = &**self.synced_connections.load();
-        state.serialize_field("synced_connections", synced_connections)?;
+        {
+            let consensus_connections = self.watch_consensus_connections_sender.borrow().clone();
+            // TODO: rename synced_connections to consensus_connections?
+            state.serialize_field("synced_connections", &consensus_connections)?;
+        }
 
         self.block_hashes.sync();
         self.block_numbers.sync();
@@ -1128,9 +1168,13 @@ mod tests {
             (lagged_rpc.name.clone(), lagged_rpc.clone()),
         ]);
 
+        let (watch_consensus_connections_sender, _) = watch::channel(Default::default());
+
+        // TODO: make a Web3Connections::new
         let conns = Web3Connections {
             conns,
-            synced_connections: Default::default(),
+            watch_consensus_head_receiver: None,
+            watch_consensus_connections_sender,
             pending_transactions: Cache::builder()
                 .max_capacity(10_000)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
@@ -1350,9 +1394,13 @@ mod tests {
             (archive_rpc.name.clone(), archive_rpc.clone()),
         ]);
 
+        let (watch_consensus_connections_sender, _) = watch::channel(Default::default());
+
+        // TODO: make a Web3Connections::new
         let conns = Web3Connections {
             conns,
-            synced_connections: Default::default(),
+            watch_consensus_head_receiver: None,
+            watch_consensus_connections_sender,
             pending_transactions: Cache::builder()
                 .max_capacity(10)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
