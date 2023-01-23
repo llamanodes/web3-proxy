@@ -123,35 +123,39 @@ fn main() -> anyhow::Result<()> {
     }
 
     let top_config = if let Some(top_config_path) = cli_config.config.clone() {
-        let top_config_path = Path::new(&top_config_path)
-            .canonicalize()
-            .context(format!("checking for config at {}", top_config_path))?;
+        if top_config_path.is_empty() {
+            None
+        } else {
+            let top_config_path = Path::new(&top_config_path)
+                .canonicalize()
+                .context(format!("checking for config at {}", top_config_path))?;
 
-        let top_config: String = fs::read_to_string(top_config_path)?;
-        let mut top_config: TopConfig = toml::from_str(&top_config)?;
+            let top_config: String = fs::read_to_string(top_config_path)?;
+            let mut top_config: TopConfig = toml::from_str(&top_config)?;
 
-        // TODO: this doesn't seem to do anything
-        proctitle::set_title(format!("web3_proxy-{}", top_config.app.chain_id));
+            // TODO: this doesn't seem to do anything
+            proctitle::set_title(format!("web3_proxy-{}", top_config.app.chain_id));
 
-        if cli_config.db_url.is_none() {
-            cli_config.db_url = top_config.app.db_url.clone();
-        }
-
-        if let Some(sentry_url) = top_config.app.sentry_url.clone() {
-            cli_config.sentry_url = Some(sentry_url);
-        }
-
-        if top_config.app.chain_id == 137 {
-            if top_config.app.gas_increase_min.is_none() {
-                top_config.app.gas_increase_min = Some(U256::from(25_000));
+            if cli_config.db_url.is_none() {
+                cli_config.db_url = top_config.app.db_url.clone();
             }
 
-            if top_config.app.gas_increase_percent.is_none() {
-                top_config.app.gas_increase_percent = Some(U256::from(25));
+            if let Some(sentry_url) = top_config.app.sentry_url.clone() {
+                cli_config.sentry_url = Some(sentry_url);
             }
-        }
 
-        Some(top_config)
+            if top_config.app.chain_id == 137 {
+                if top_config.app.gas_increase_min.is_none() {
+                    top_config.app.gas_increase_min = Some(U256::from(25_000));
+                }
+
+                if top_config.app.gas_increase_percent.is_none() {
+                    top_config.app.gas_increase_percent = Some(U256::from(25));
+                }
+            }
+
+            Some(top_config)
+        }
     } else {
         None
     };
@@ -201,6 +205,8 @@ fn main() -> anyhow::Result<()> {
             // TODO: i think these max at 15 characters
             format!("web3-{}-{}", chain_id, worker_id)
         });
+    } else {
+        rt_builder.enable_all();
     }
 
     // start tokio's async runtime
