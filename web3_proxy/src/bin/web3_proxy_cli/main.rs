@@ -144,12 +144,13 @@ fn main() -> anyhow::Result<()> {
         }
 
         if top_config.app.chain_id == 137 {
+            // TODO: these numbers are arbitrary. i think the maticnetwork/erigon fork has a bug
             if top_config.app.gas_increase_min.is_none() {
-                top_config.app.gas_increase_min = Some(U256::from(25_000));
+                top_config.app.gas_increase_min = Some(U256::from(40_000));
             }
 
             if top_config.app.gas_increase_percent.is_none() {
-                top_config.app.gas_increase_percent = Some(U256::from(25));
+                top_config.app.gas_increase_percent = Some(U256::from(40));
             }
         }
 
