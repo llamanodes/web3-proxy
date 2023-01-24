@@ -15,3 +15,4 @@ debug = true
 lto = true
 
 # TODO: we can't do panic = abort because the websockets disconnect by panicking sometimes
+# TODO: i want to have a panic handler than sends things to pagerduty when we panic, but that will be too verbose too
