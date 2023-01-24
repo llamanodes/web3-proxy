@@ -14,6 +14,10 @@ pub struct PagerdutySubCommand {
     /// short description of the alert
     summary: String,
 
+    /// the chain id to require. Only used if not using --config.
+    #[argh(option)]
+    chain_id: Option<u64>,
+
     #[argh(option)]
     /// the class/type of the event
     class: Option<String>,
@@ -56,7 +60,7 @@ impl PagerdutySubCommand {
             })
             .unwrap_or_else(|| {
                 pagerduty_alert(
-                    None,
+                    self.chain_id,
                     self.class,
                     "web3-proxy".to_string(),
                     None,

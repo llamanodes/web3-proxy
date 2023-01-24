@@ -257,8 +257,6 @@ fn main() -> anyhow::Result<()> {
                 error!("Failed sending panic to pagerduty: {}", err);
             }
         }));
-    } else {
-        info!("No pagerduty key. Using default panic handler");
     }
 
     // set up tokio's async runtime
