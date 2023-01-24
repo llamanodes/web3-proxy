@@ -366,7 +366,7 @@ fn main() -> anyhow::Result<()> {
                     warn!("sentry_url is not set! Logs will only show in this console");
                 }
 
-                x.main(pagerduty_async).await
+                x.main(pagerduty_async, top_config).await
             }
             SubCommand::RpcAccounting(x) => {
                 let db_url = cli_config

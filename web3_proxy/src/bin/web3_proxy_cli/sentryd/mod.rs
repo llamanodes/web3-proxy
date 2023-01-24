@@ -1,6 +1,7 @@
 mod compare;
 mod simple;
 
+use anyhow::Context;
 use argh::FromArgs;
 use futures::{
     stream::{FuturesUnordered, StreamExt},
@@ -11,7 +12,7 @@ use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Eve
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, MissedTickBehavior};
-use web3_proxy::pagerduty::pagerduty_alert;
+use web3_proxy::{config::TopConfig, pagerduty::pagerduty_alert};
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 /// Loop healthchecks and send pager duty alerts if any fail
@@ -20,6 +21,10 @@ pub struct SentrydSubCommand {
     #[argh(positional)]
     /// the main (HTTP only) web3-proxy being checked.
     web3_proxy: String,
+
+    /// the chain id to require. Only used if not using --config.
+    #[argh(option)]
+    chain_id: Option<u64>,
 
     #[argh(option)]
     /// warning threshold for age of the best known head block
@@ -50,8 +55,17 @@ struct Error {
 }
 
 impl SentrydSubCommand {
-    pub async fn main(self, pagerduty_async: Option<PagerdutyAsyncEventsV2>) -> anyhow::Result<()> {
+    pub async fn main(
+        self,
+        pagerduty_async: Option<PagerdutyAsyncEventsV2>,
+        top_config: Option<TopConfig>,
+    ) -> anyhow::Result<()> {
         // sentry logging should already be configured
+
+        let chain_id = self
+            .chain_id
+            .or_else(|| top_config.map(|x| x.app.chain_id))
+            .context("--config or --chain-id required")?;
 
         let web3_proxy = self.web3_proxy.trim_end_matches("/").to_string();
 
@@ -85,7 +99,7 @@ impl SentrydSubCommand {
 
                     if matches!(err.level, log::Level::Error) {
                         let alert = pagerduty_alert(
-                            None,
+                            Some(chain_id),
                             Some(err.class),
                             "web3-proxy-sentry".to_string(),
                             None,
