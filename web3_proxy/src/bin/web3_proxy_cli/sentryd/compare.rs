@@ -169,19 +169,25 @@ async fn check_rpc(
 
     // TODO: don't unwrap! don't use the try operator
     let response: JsonRpcResponse<Block<TxHash>> = client
-        .post(rpc)
+        .post(rpc.clone())
         .json(&block_by_hash_request)
         .send()
-        .await?
+        .await
+        .context(format!("awaiting response from {}", rpc))?
         .json()
-        .await?;
+        .await
+        .context(format!("reading json on {}", rpc))?;
 
     if let Some(result) = response.result {
         let abbreviated = AbbreviatedBlock::from(result);
 
         Ok(abbreviated)
     } else if let Some(result) = response.error {
-        Err(anyhow!("Failed parsing response as JSON: {:?}", result))
+        Err(anyhow!(
+            "Failed parsing response from {} as JSON: {:?}",
+            rpc,
+            result
+        ))
     } else {
         unimplemented!("{:?}", response)
     }

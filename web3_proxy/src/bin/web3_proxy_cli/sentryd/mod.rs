@@ -53,6 +53,20 @@ impl SentrydSubCommand {
     pub async fn main(self, pagerduty_async: Option<PagerdutyAsyncEventsV2>) -> anyhow::Result<()> {
         // sentry logging should already be configured
 
+        let web3_proxy = self.web3_proxy.trim_end_matches("/").to_string();
+
+        let other_proxy: Vec<_> = self
+            .other_proxy
+            .into_iter()
+            .map(|x| x.trim_end_matches("/").to_string())
+            .collect();
+
+        let other_rpc: Vec<_> = self
+            .other_rpc
+            .into_iter()
+            .map(|x| x.trim_end_matches("/").to_string())
+            .collect();
+
         let seconds = self.seconds.unwrap_or(60);
 
         let mut handles = FuturesUnordered::new();
@@ -109,7 +123,7 @@ impl SentrydSubCommand {
 
         // check the main rpc's /health endpoint
         {
-            let url = format!("{}/health", self.web3_proxy);
+            let url = format!("{}/health", web3_proxy);
             let error_sender = error_sender.clone();
 
             let loop_f = a_loop(
@@ -123,7 +137,7 @@ impl SentrydSubCommand {
             handles.push(tokio::spawn(loop_f));
         }
         // check any other web3-proxy /health endpoints
-        for other_web3_proxy in self.other_proxy.iter() {
+        for other_web3_proxy in other_proxy.iter() {
             let url = format!("{}/health", other_web3_proxy);
             let error_sender = error_sender.clone();
 
@@ -145,9 +159,9 @@ impl SentrydSubCommand {
             let rpc = self.web3_proxy.clone();
             let error_sender = error_sender.clone();
 
-            let mut others = self.other_proxy.clone();
+            let mut others = other_proxy.clone();
 
-            others.extend(self.other_rpc.clone());
+            others.extend(other_rpc);
 
             let loop_f = a_loop(
                 "head block comparison",
