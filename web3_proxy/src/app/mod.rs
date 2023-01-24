@@ -1194,12 +1194,12 @@ impl Web3ProxyApp {
                 // TODO: how should we handle private_mode here?
                 let default_num = match proxy_mode {
                     // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
-                    ProxyMode::Best => Some(2),
+                    ProxyMode::Best => Some(4),
                     ProxyMode::Fastest(0) => None,
                     // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
                     // TODO: what if we do 2 per tier? we want to blast the third party rpcs
                     // TODO: maybe having the third party rpcs in their own Web3Connections would be good for this
-                    ProxyMode::Fastest(x) => Some(x * 2),
+                    ProxyMode::Fastest(x) => Some(x * 4),
                     ProxyMode::Versus => None,
                 };
 
