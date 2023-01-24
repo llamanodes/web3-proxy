@@ -194,18 +194,18 @@ fn main() -> anyhow::Result<()> {
     // set up tokio's async runtime
     let mut rt_builder = runtime::Builder::new_multi_thread();
 
+    rt_builder.enable_all();
+
     if let Some(top_config) = top_config.as_ref() {
         let chain_id = top_config.app.chain_id;
 
-        rt_builder.enable_all().thread_name_fn(move || {
+        rt_builder.thread_name_fn(move || {
             static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
             // TODO: what ordering? i think we want seqcst so that these all happen in order, but that might be stricter than we really need
             let worker_id = ATOMIC_ID.fetch_add(1, atomic::Ordering::SeqCst);
             // TODO: i think these max at 15 characters
             format!("web3-{}-{}", chain_id, worker_id)
         });
-    } else {
-        rt_builder.enable_all();
     }
 
     // start tokio's async runtime

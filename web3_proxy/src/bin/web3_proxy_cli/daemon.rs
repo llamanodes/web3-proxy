@@ -9,7 +9,7 @@ use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use web3_proxy::config::TopConfig;
 use web3_proxy::{frontend, metrics_frontend};
 
-/// count requests
+/// start the main proxy daemon
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 #[argh(subcommand, name = "proxyd")]
 pub struct ProxydSubCommand {
