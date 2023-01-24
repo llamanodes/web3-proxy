@@ -7,6 +7,7 @@ use futures::{
     Future,
 };
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tokio::time::{interval, MissedTickBehavior};
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
@@ -46,13 +47,33 @@ impl SentrydSubCommand {
 
         let mut handles = FuturesUnordered::new();
 
+        // channels and a task for sending errors to logs/pagerduty
+        let (error_sender, mut error_receiver) = mpsc::channel::<(log::Level, anyhow::Error)>(10);
+
+        {
+            let error_handler_f = async move {
+                while let Some((error_level, err)) = error_receiver.recv().await {
+                    log::log!(error_level, "check failed: {:?}", err);
+
+                    if matches!(error_level, log::Level::Error) {
+                        todo!("send to pager duty if pager duty exists");
+                    }
+                }
+
+                Ok(())
+            };
+
+            handles.push(tokio::spawn(error_handler_f));
+        }
+
         // spawn a bunch of health check loops that do their checks on an interval
 
         // check the main rpc's /health endpoint
         {
             let url = format!("{}/health", self.web3_proxy);
+            let error_sender = error_sender.clone();
 
-            let loop_f = a_loop(seconds, log::Level::Error, move || {
+            let loop_f = a_loop(seconds, log::Level::Error, error_sender, move || {
                 simple::main(url.clone())
             });
 
@@ -61,8 +82,11 @@ impl SentrydSubCommand {
         // check any other web3-proxy /health endpoints
         for other_web3_proxy in self.other_proxy.iter() {
             let url = format!("{}/health", other_web3_proxy);
+            let error_sender = error_sender.clone();
 
-            let loop_f = a_loop(seconds, log::Level::Warn, move || simple::main(url.clone()));
+            let loop_f = a_loop(seconds, log::Level::Warn, error_sender, move || {
+                simple::main(url.clone())
+            });
 
             handles.push(tokio::spawn(loop_f));
         }
@@ -72,12 +96,13 @@ impl SentrydSubCommand {
             let max_age = self.max_age;
             let max_lag = self.max_lag;
             let rpc = self.web3_proxy.clone();
+            let error_sender = error_sender.clone();
 
             let mut others = self.other_proxy.clone();
 
             others.extend(self.other_rpc.clone());
 
-            let loop_f = a_loop(seconds, log::Level::Error, move || {
+            let loop_f = a_loop(seconds, log::Level::Error, error_sender, move || {
                 compare::main(rpc.clone(), others.clone(), max_age, max_lag)
             });
 
@@ -94,7 +119,12 @@ impl SentrydSubCommand {
     }
 }
 
-async fn a_loop<T>(seconds: u64, error_level: log::Level, f: impl Fn() -> T) -> anyhow::Result<()>
+async fn a_loop<T>(
+    seconds: u64,
+    error_level: log::Level,
+    error_sender: mpsc::Sender<(log::Level, anyhow::Error)>,
+    f: impl Fn() -> T,
+) -> anyhow::Result<()>
 where
     T: Future<Output = anyhow::Result<()>> + Send + 'static,
 {
@@ -107,7 +137,7 @@ where
         interval.tick().await;
 
         if let Err(err) = f().await {
-            log::log!(error_level, "check failed: {:?}", err);
+            error_sender.send((error_level, err)).await?;
         };
     }
 }

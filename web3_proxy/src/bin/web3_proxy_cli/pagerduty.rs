@@ -1,11 +1,10 @@
 use argh::FromArgs;
-use gethostname::gethostname;
 use log::{error, info};
-use pagerduty_rs::{
-    eventsv2async::EventsV2 as PagerdutyAsyncEventsV2,
-    types::{AlertTrigger, AlertTriggerPayload, Event},
+use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
+use web3_proxy::{
+    config::TopConfig,
+    pagerduty::{pagerduty_event_for_config, trigger_pagerduty_alert},
 };
-use web3_proxy::config::TopConfig;
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 /// Quickly create a pagerduty alert
@@ -18,6 +17,10 @@ pub struct PagerdutySubCommand {
     #[argh(option)]
     /// the class/type of the event
     class: Option<String>,
+
+    #[argh(option)]
+    /// the component of the event
+    component: Option<String>,
 
     #[argh(option)]
     /// deduplicate alerts based on this key.
@@ -33,40 +36,36 @@ pub struct PagerdutySubCommand {
 
 impl PagerdutySubCommand {
     pub async fn main(
-        &self,
+        self,
         pagerduty_async: Option<PagerdutyAsyncEventsV2>,
         top_config: Option<TopConfig>,
     ) -> anyhow::Result<()> {
-        let client = top_config
-            .as_ref()
-            .map(|top_config| format!("web3-proxy chain #{}", top_config.app.chain_id))
-            .unwrap_or_else(|| format!("web3-proxy w/o chain"));
-
-        let client_url = top_config
-            .as_ref()
-            .and_then(|x| x.app.redirect_public_url.clone());
-
-        let hostname = gethostname().into_string().unwrap_or("unknown".to_string());
-
-        let payload = AlertTriggerPayload {
-            severity: pagerduty_rs::types::Severity::Error,
-            summary: self.summary.clone(),
-            source: hostname,
-            timestamp: None,
-            component: None,
-            group: Some(self.group.clone()),
-            class: self.class.clone(),
-            custom_details: None::<()>,
-        };
-
-        let event = AlertTrigger {
-            payload,
-            dedup_key: None,
-            images: None,
-            links: None,
-            client: Some(client),
-            client_url: client_url,
-        };
+        let event = top_config
+            .map(|top_config| {
+                pagerduty_event_for_config(
+                    top_config,
+                    self.class.clone(),
+                    self.component.clone(),
+                    Some(self.group.clone()),
+                    self.summary.clone(),
+                    None,
+                    None::<()>,
+                )
+            })
+            .unwrap_or_else(|| {
+                trigger_pagerduty_alert(
+                    "web3-proxy".to_string(),
+                    None,
+                    self.class,
+                    None,
+                    self.component,
+                    Some(self.group),
+                    None,
+                    self.summary,
+                    None,
+                    None::<()>,
+                )
+            });
 
         if let Some(pagerduty_async) = pagerduty_async {
             info!(
