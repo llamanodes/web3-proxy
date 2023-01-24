@@ -337,7 +337,15 @@ impl Web3Connection {
             );
 
             let retry_in = Duration::from_millis(sleep_ms);
-            info!(
+
+            let error_level = if self.backup {
+                log::Level::Debug
+            } else {
+                log::Level::Info
+            };
+
+            log::log!(
+                error_level,
                 "Failed reconnect to {}! Retry in {}ms. err={:?}",
                 self,
                 retry_in.as_millis(),

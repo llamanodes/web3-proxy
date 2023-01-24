@@ -1099,6 +1099,7 @@ impl Web3ProxyApp {
             | "shh_version") => {
                 // TODO: client error stat
                 // TODO: proper error code
+                // TODO: right now this sends a warn level log. thats too verbose
                 return Err(anyhow::anyhow!("method unsupported: {}", method));
             }
             // TODO: implement these commands
@@ -1109,6 +1110,7 @@ impl Web3ProxyApp {
             | "eth_newPendingTransactionFilter"
             | "eth_uninstallFilter") => {
                 // TODO: unsupported command stat
+                // TODO: right now this sends a warn level log. thats too verbose
                 return Err(anyhow::anyhow!("not yet implemented: {}", method));
             }
             // some commands can use local data or caches
