@@ -319,6 +319,8 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - this will let us easily wait for a new head or a new synced connection
 - [x] broadcast transactions to more servers
 - [x] send sentryd errors to pagerduty
+- [x] improve handling of unknown methods
+- [x] don't send pagerduty alerts for websocket panics
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly

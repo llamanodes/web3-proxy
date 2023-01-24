@@ -231,30 +231,34 @@ fn main() -> anyhow::Result<()> {
             let hostname = gethostname().into_string().unwrap_or("unknown".to_string());
             let panic_msg = format!("{} {:?}", x, x);
 
-            error!("sending panic to pagerduty: {}", panic_msg);
+            if panic_msg.starts_with("panicked at 'WS Server panic") {
+                info!("Underlying library {}", panic_msg);
+            } else {
+                error!("sending panic to pagerduty: {}", panic_msg);
 
-            let payload = AlertTriggerPayload {
-                severity: pagerduty_rs::types::Severity::Error,
-                summary: panic_msg.clone(),
-                source: hostname,
-                timestamp: None,
-                component: None,
-                group: Some("web3-proxy".to_string()),
-                class: Some("panic".to_string()),
-                custom_details: None::<()>,
-            };
+                let payload = AlertTriggerPayload {
+                    severity: pagerduty_rs::types::Severity::Error,
+                    summary: panic_msg.clone(),
+                    source: hostname,
+                    timestamp: None,
+                    component: None,
+                    group: Some("web3-proxy".to_string()),
+                    class: Some("panic".to_string()),
+                    custom_details: None::<()>,
+                };
 
-            let event = Event::AlertTrigger(AlertTrigger {
-                payload,
-                dedup_key: None,
-                images: None,
-                links: None,
-                client: Some(client.clone()),
-                client_url: client_url.clone(),
-            });
+                let event = Event::AlertTrigger(AlertTrigger {
+                    payload,
+                    dedup_key: None,
+                    images: None,
+                    links: None,
+                    client: Some(client.clone()),
+                    client_url: client_url.clone(),
+                });
 
-            if let Err(err) = pagerduty_sync.event(event) {
-                error!("Failed sending panic to pagerduty: {}", err);
+                if let Err(err) = pagerduty_sync.event(event) {
+                    error!("Failed sending panic to pagerduty: {}", err);
+                }
             }
         }));
     }
