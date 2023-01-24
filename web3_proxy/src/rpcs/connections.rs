@@ -749,6 +749,7 @@ impl Web3Connections {
         wait_for_sync: bool,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         let mut skip_rpcs = vec![];
+        let mut method_not_available_response = None;
 
         let mut watch_consensus_connections = if wait_for_sync {
             Some(self.watch_consensus_connections_sender.subscribe())
@@ -761,7 +762,6 @@ impl Web3Connections {
             // TODO: is self.conns still right now that we split main and backup servers?
             // TODO: if a new block arrives, we probably want to reset the skip list
             if skip_rpcs.len() == self.conns.len() {
-                // no servers to try
                 break;
             }
             match self
@@ -802,7 +802,7 @@ impl Web3Connections {
                         request.id.clone(),
                     ) {
                         Ok(response) => {
-                            if let Some(error) = &response.error {
+                            if let Some(error) = &response.error.as_ref() {
                                 // trace!(?response, "rpc error");
 
                                 if let Some(request_metadata) = request_metadata {
@@ -843,9 +843,22 @@ impl Web3Connections {
                                     -32601 => {
                                         let error_msg = error.message.as_str();
 
+                                        // sometimes a provider does not support all rpc methods
+                                        // we check other connections rather than returning the error
+                                        // but sometimes the method is something that is actually unsupported,
+                                        // so we save the response here to return it later
+
+                                        // some providers look like this
                                         if error_msg.starts_with("the method")
                                             && error_msg.ends_with("is not available")
                                         {
+                                            method_not_available_response = Some(response);
+                                            continue;
+                                        }
+
+                                        // others look like this
+                                        if error_msg == "Method not found" {
+                                            method_not_available_response = Some(response);
                                             continue;
                                         }
                                     }
@@ -888,6 +901,7 @@ impl Web3Connections {
                     {
                         // TODO: if there are other servers in synced_connections, we should continue now
                         // wait until retry_at OR synced_connections changes
+                        trace!("waiting for change in synced servers or retry_at");
                         tokio::select! {
                             _ = sleep_until(retry_at) => {
                                 skip_rpcs.pop();
@@ -899,7 +913,8 @@ impl Web3Connections {
                         }
                         continue;
                     } else {
-                        break;
+                        sleep_until(retry_at).await;
+                        continue;
                     }
                 }
                 OpenRequestResult::NotReady => {
@@ -908,16 +923,23 @@ impl Web3Connections {
                     }
 
                     if wait_for_sync {
+                        trace!("waiting for change in synced servers");
                         // TODO: race here. there might have been a change while we were waiting on the previous server
                         self.watch_consensus_connections_sender
                             .subscribe()
                             .changed()
                             .await?;
                     } else {
-                        break;
+                        // TODO: continue or break?
+                        continue;
                     }
                 }
             }
+        }
+
+        if let Some(r) = method_not_available_response {
+            // TODO: emit a stat for unsupported methods?
+            return Ok(r);
         }
 
         // TODO: do we need this here, or do we do it somewhere else?
@@ -929,9 +951,17 @@ impl Web3Connections {
 
         let num_conns = self.conns.len();
 
-        error!("No servers synced ({} known)", num_conns);
+        if skip_rpcs.is_empty() {
+            error!("No servers synced ({} known)", num_conns);
 
-        Err(anyhow::anyhow!("No servers synced ({} known)", num_conns))
+            Err(anyhow::anyhow!("No servers synced ({} known)", num_conns))
+        } else {
+            Err(anyhow::anyhow!(
+                "{}/{} servers erred",
+                skip_rpcs.len(),
+                num_conns
+            ))
+        }
     }
 
     /// be sure there is a timeout on this or it might loop forever
