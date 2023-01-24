@@ -8,6 +8,7 @@ mod create_user;
 mod daemon;
 mod drop_migration_lock;
 mod list_user_tier;
+mod pagerduty;
 mod rpc_accounting;
 mod sentryd;
 mod transfer_key;
@@ -17,9 +18,13 @@ mod user_import;
 use anyhow::Context;
 use argh::FromArgs;
 use ethers::types::U256;
-use log::{info, warn};
+use gethostname::gethostname;
+use log::{error, info, warn};
+use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
+use pagerduty_rs::types::{AlertTrigger, AlertTriggerPayload};
+use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
 use std::{
-    fs,
+    fs, panic,
     path::Path,
     sync::atomic::{self, AtomicUsize},
 };
@@ -71,6 +76,7 @@ enum SubCommand {
     CountUsers(count_users::CountUsersSubCommand),
     CreateUser(create_user::CreateUserSubCommand),
     DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
+    Pagerduty(pagerduty::PagerdutySubCommand),
     Proxyd(daemon::ProxydSubCommand),
     RpcAccounting(rpc_accounting::RpcAccountingSubCommand),
     Sentryd(sentryd::SentrydSubCommand),
@@ -191,6 +197,70 @@ fn main() -> anyhow::Result<()> {
 
     info!("{}", APP_USER_AGENT);
 
+    // optionally connect to pagerduty
+    // TODO: fix this nested result
+    let (pagerduty_async, pagerduty_sync) = if let Ok(pagerduty_key) =
+        std::env::var("PAGERDUTY_INTEGRATION_KEY")
+    {
+        let pagerduty_async =
+            PagerdutyAsyncEventsV2::new(pagerduty_key.clone(), Some(APP_USER_AGENT.to_string()))?;
+        let pagerduty_sync =
+            PagerdutySyncEventsV2::new(pagerduty_key, Some(APP_USER_AGENT.to_string()))?;
+
+        (Some(pagerduty_async), Some(pagerduty_sync))
+    } else {
+        info!("No PAGERDUTY_INTEGRATION_KEY");
+
+        (None, None)
+    };
+
+    // panic handler that sends to pagerduty
+    // TODO: there is a `pagerduty_panic` module that looks like it would work with minor tweaks, but ethers-rs panics when a websocket exit and that would fire too many alerts
+
+    if let Some(pagerduty_sync) = pagerduty_sync {
+        let client = top_config
+            .as_ref()
+            .map(|top_config| format!("web3-proxy chain #{}", top_config.app.chain_id))
+            .unwrap_or_else(|| format!("web3-proxy w/o chain"));
+
+        let client_url = top_config
+            .as_ref()
+            .and_then(|x| x.app.redirect_public_url.clone());
+
+        panic::set_hook(Box::new(move |x| {
+            let hostname = gethostname().into_string().unwrap_or("unknown".to_string());
+            let panic_msg = format!("{} {:?}", x, x);
+
+            error!("sending panic to pagerduty: {}", panic_msg);
+
+            let payload = AlertTriggerPayload {
+                severity: pagerduty_rs::types::Severity::Error,
+                summary: panic_msg.clone(),
+                source: hostname,
+                timestamp: None,
+                component: None,
+                group: Some("web3-proxy".to_string()),
+                class: Some("panic".to_string()),
+                custom_details: None::<()>,
+            };
+
+            let event = Event::AlertTrigger(AlertTrigger {
+                payload,
+                dedup_key: None,
+                images: None,
+                links: None,
+                client: Some(client.clone()),
+                client_url: client_url.clone(),
+            });
+
+            if let Err(err) = pagerduty_sync.event(event) {
+                error!("Failed sending panic to pagerduty: {}", err);
+            }
+        }));
+    } else {
+        info!("No pagerduty key. Using default panic handler");
+    }
+
     // set up tokio's async runtime
     let mut rt_builder = runtime::Builder::new_multi_thread();
 
@@ -285,6 +355,13 @@ fn main() -> anyhow::Result<()> {
                 let db_conn = get_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
+            }
+            SubCommand::Pagerduty(x) => {
+                if cli_config.sentry_url.is_none() {
+                    warn!("sentry_url is not set! Logs will only show in this console");
+                }
+
+                x.main(pagerduty_async, top_config).await
             }
             SubCommand::Sentryd(x) => {
                 if cli_config.sentry_url.is_none() {

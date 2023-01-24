@@ -14,10 +14,6 @@ use tokio::time::{interval, MissedTickBehavior};
 #[argh(subcommand, name = "sentryd")]
 pub struct SentrydSubCommand {
     #[argh(positional)]
-    /// a descriptive name for this node (probably the hostname)
-    location: String,
-
-    #[argh(positional)]
     /// the main (HTTP only) web3-proxy being checked.
     web3_proxy: String,
 
