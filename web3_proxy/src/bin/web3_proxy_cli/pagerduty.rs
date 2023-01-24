@@ -3,7 +3,7 @@ use log::{error, info};
 use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
 use web3_proxy::{
     config::TopConfig,
-    pagerduty::{pagerduty_event_for_config, trigger_pagerduty_alert},
+    pagerduty::{pagerduty_alert, pagerduty_event_for_config},
 };
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
@@ -40,30 +40,33 @@ impl PagerdutySubCommand {
         pagerduty_async: Option<PagerdutyAsyncEventsV2>,
         top_config: Option<TopConfig>,
     ) -> anyhow::Result<()> {
+        // TODO: allow customizing severity
         let event = top_config
             .map(|top_config| {
                 pagerduty_event_for_config(
-                    top_config,
                     self.class.clone(),
                     self.component.clone(),
+                    None::<()>,
                     Some(self.group.clone()),
+                    pagerduty_rs::types::Severity::Error,
                     self.summary.clone(),
                     None,
-                    None::<()>,
+                    top_config,
                 )
             })
             .unwrap_or_else(|| {
-                trigger_pagerduty_alert(
-                    "web3-proxy".to_string(),
+                pagerduty_alert(
                     None,
                     self.class,
+                    "web3-proxy".to_string(),
                     None,
                     self.component,
+                    None::<()>,
                     Some(self.group),
+                    pagerduty_rs::types::Severity::Error,
                     None,
                     self.summary,
                     None,
-                    None::<()>,
                 )
             });
 
