@@ -897,9 +897,10 @@ impl Web3Connections {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
+                    // TODO: if there are other servers in synced_connections, we should continue now
+
                     if let Some(watch_consensus_connections) = watch_consensus_connections.as_mut()
                     {
-                        // TODO: if there are other servers in synced_connections, we should continue now
                         // wait until retry_at OR synced_connections changes
                         trace!("waiting for change in synced servers or retry_at");
                         tokio::select! {
@@ -911,10 +912,8 @@ impl Web3Connections {
                                 let _ = watch_consensus_connections.borrow_and_update();
                             }
                         }
-                        continue;
                     } else {
                         sleep_until(retry_at).await;
-                        continue;
                     }
                 }
                 OpenRequestResult::NotReady => {
@@ -929,9 +928,6 @@ impl Web3Connections {
                             .subscribe()
                             .changed()
                             .await?;
-                    } else {
-                        // TODO: continue or break?
-                        continue;
                     }
                 }
             }
