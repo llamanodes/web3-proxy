@@ -47,7 +47,7 @@ pub fn pagerduty_alert<T: Serialize>(
     timestamp: Option<OffsetDateTime>,
 ) -> AlertTrigger<T> {
     let client = chain_id
-        .map(|x| format!("{} chain #{}", x, client))
+        .map(|x| format!("{} chain #{}", client, x))
         .unwrap_or_else(|| format!("{} w/o chain", client));
 
     let source =

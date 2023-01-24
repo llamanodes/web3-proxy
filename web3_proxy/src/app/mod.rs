@@ -1098,9 +1098,15 @@ impl Web3ProxyApp {
             | "shh_uninstallFilter"
             | "shh_version") => {
                 // TODO: client error stat
-                // TODO: proper error code
-                // TODO: right now this sends a warn level log. thats too verbose
-                return Err(anyhow::anyhow!("method unsupported: {}", method));
+                // TODO: what error code?
+                return Ok((
+                    JsonRpcForwardedResponse::from_string(
+                        format!("method unsupported: {}", method),
+                        None,
+                        Some(request_id),
+                    ),
+                    vec![],
+                ));
             }
             // TODO: implement these commands
             method @ ("eth_getFilterChanges"
@@ -1110,8 +1116,15 @@ impl Web3ProxyApp {
             | "eth_newPendingTransactionFilter"
             | "eth_uninstallFilter") => {
                 // TODO: unsupported command stat
-                // TODO: right now this sends a warn level log. thats too verbose
-                return Err(anyhow::anyhow!("not yet implemented: {}", method));
+                // TODO: what error code?
+                return Ok((
+                    JsonRpcForwardedResponse::from_string(
+                        format!("not yet implemented: {}", method),
+                        None,
+                        Some(request_id),
+                    ),
+                    vec![],
+                ));
             }
             // some commands can use local data or caches
             "eth_accounts" => {
@@ -1312,13 +1325,23 @@ impl Web3ProxyApp {
                 json!(false)
             }
             "eth_subscribe" => {
-                return Err(anyhow::anyhow!(
-                    "notifications not supported. eth_subscribe is only available over a websocket"
+                return Ok((
+                    JsonRpcForwardedResponse::from_string(
+                        format!("notifications not supported. eth_subscribe is only available over a websocket"),
+                        Some(-32601),
+                        Some(request_id),
+                    ),
+                    vec![],
                 ));
             }
             "eth_unsubscribe" => {
-                return Err(anyhow::anyhow!(
-                    "notifications not supported. eth_unsubscribe is only available over a websocket"
+                return Ok((
+                    JsonRpcForwardedResponse::from_string(
+                        format!("notifications not supported. eth_unsubscribe is only available over a websocket"),
+                        Some(-32601),
+                        Some(request_id),
+                    ),
+                    vec![],
                 ));
             }
             "net_listening" => {
@@ -1342,10 +1365,18 @@ impl Web3ProxyApp {
                     Some(serde_json::Value::Array(params)) => {
                         // TODO: make a struct and use serde conversion to clean this up
                         if params.len() != 1 || !params[0].is_string() {
-                            // TODO: this needs the correct error code in the response
-                            return Err(anyhow::anyhow!("invalid request"));
+                            // TODO: what error code?
+                            return Ok((
+                                JsonRpcForwardedResponse::from_str(
+                                    "Invalid request",
+                                    Some(-32600),
+                                    Some(request_id),
+                                ),
+                                vec![],
+                            ));
                         }
 
+                        // TODO: don't return with ? here. send a jsonrpc invalid request
                         let param = Bytes::from_str(
                             params[0]
                                 .as_str()
@@ -1359,9 +1390,26 @@ impl Web3ProxyApp {
                     _ => {
                         // TODO: this needs the correct error code in the response
                         // TODO: emit stat?
-                        return Err(anyhow::anyhow!("invalid request"));
+                        return Ok((
+                            JsonRpcForwardedResponse::from_str(
+                                "invalid request",
+                                None,
+                                Some(request_id),
+                            ),
+                            vec![],
+                        ));
                     }
                 }
+            }
+            "test" => {
+                return Ok((
+                    JsonRpcForwardedResponse::from_str(
+                        "The method test does not exist/is not available.",
+                        Some(-32601),
+                        Some(request_id),
+                    ),
+                    vec![],
+                ));
             }
             // anything else gets sent to backend rpcs and cached
             method => {
