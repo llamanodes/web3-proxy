@@ -1,11 +1,5 @@
 FROM rust:1-bullseye as builder
 
-# our app uses rust-tls, but the sentry crate only uses openssl
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y libssl-dev; \
-    rm -rf /var/lib/apt/lists/*
-
 ENV PATH /root/.foundry/bin:$PATH
 RUN curl -L https://foundry.paradigm.xyz | bash && foundryup
 
@@ -17,12 +11,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install --locked --no-default-features --root /opt/bin --path ./web3_proxy
 
 FROM debian:bullseye-slim
-
-# our app uses rust-tls, but the sentry crate only uses openssl
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y libssl-dev; \
-    rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/bin/* /usr/local/bin/
 
