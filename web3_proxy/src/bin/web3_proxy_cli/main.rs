@@ -289,6 +289,10 @@ fn main() -> anyhow::Result<()> {
 
     rt_builder.enable_all();
 
+    if cli_config.workers > 0 {
+        rt_builder.worker_threads(cli_config.workers);
+    }
+
     if let Some(top_config) = top_config.as_ref() {
         let chain_id = top_config.app.chain_id;
 
