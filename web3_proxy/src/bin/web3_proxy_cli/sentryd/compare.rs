@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use web3_proxy::jsonrpc::JsonRpcErrorData;
 
+use super::{SentrydErrorBuilder, SentrydResult};
+
 #[derive(Debug, Deserialize, Serialize)]
 struct JsonRpcResponse<V> {
     // pub jsonrpc: String,
@@ -35,11 +37,12 @@ impl From<Block<TxHash>> for AbbreviatedBlock {
 }
 
 pub async fn main(
+    error_builder: SentrydErrorBuilder,
     rpc: String,
     others: Vec<String>,
     max_age: i64,
     max_lag: i64,
-) -> anyhow::Result<()> {
+) -> SentrydResult {
     let client = reqwest::Client::new();
 
     let block_by_number_request = json!({
@@ -54,30 +57,48 @@ pub async fn main(
         .json(&block_by_number_request)
         .send()
         .await
-        .context(format!("error fetching block from {}", rpc))?
+        .context(format!("error querying block from {}", rpc))
+        .map_err(|x| error_builder.build(x))?;
+
+    // TODO: capture response headers now in case of error. store them in the extra data on the pager duty alert
+    let headers = format!("{:#?}", a.headers());
+
+    let a = a
         .json::<JsonRpcResponse<Block<TxHash>>>()
         .await
-        .context(format!("error parsing block from {}", rpc))?
-        .result
-        .context(format!("no block from {}", rpc))?;
+        .context(format!("error parsing block from {}", rpc))
+        .map_err(|x| error_builder.build(x))?;
+
+    let a = if let Some(block) = a.result {
+        block
+    } else if let Some(err) = a.error {
+        return error_builder.result(
+            anyhow::anyhow!("headers: {:#?}. err: {:#?}", headers, err)
+                .context(format!("jsonrpc error from {}", rpc)),
+        );
+    } else {
+        return error_builder
+            .result(anyhow!("{:#?}", a).context(format!("empty response from {}", rpc)));
+    };
 
     // check the parent because b and c might not be as fast as a
     let parent_hash = a.parent_hash;
 
-    let rpc_block = check_rpc(parent_hash, client.clone(), rpc.clone())
+    let rpc_block = check_rpc(parent_hash, client.clone(), rpc.to_string())
         .await
-        .context("Error while querying primary rpc")?;
+        .context(format!("Error while querying primary rpc: {}", rpc))
+        .map_err(|err| error_builder.build(err))?;
 
     let fs = FuturesUnordered::new();
     for other in others.iter() {
-        let f = check_rpc(parent_hash, client.clone(), other.clone());
+        let f = check_rpc(parent_hash, client.clone(), other.to_string());
 
         fs.push(tokio::spawn(f));
     }
     let other_check: Vec<_> = fs.collect().await;
 
     if other_check.is_empty() {
-        return Err(anyhow::anyhow!("No other RPCs to check!"));
+        return error_builder.result(anyhow::anyhow!("No other RPCs to check!"));
     }
 
     // TODO: collect into a counter instead?
@@ -99,22 +120,27 @@ pub async fn main(
         match duration_since.abs().cmp(&max_lag) {
             std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {}
             std::cmp::Ordering::Greater => match duration_since.cmp(&0) {
-                std::cmp::Ordering::Equal => unimplemented!(),
+                std::cmp::Ordering::Equal => {
+                    unimplemented!("we already checked that they are not equal")
+                }
                 std::cmp::Ordering::Less => {
-                    return Err(anyhow::anyhow!(
+                    return error_builder.result(anyhow::anyhow!(
                         "Our RPC is too far ahead ({} s)! Something might be wrong.\n{:#}\nvs\n{:#}",
                         duration_since.abs(),
                         json!(rpc_block),
                         json!(newest_other),
-                    ));
+                    ).context(format!("{} is too far ahead", rpc)));
                 }
                 std::cmp::Ordering::Greater => {
-                    return Err(anyhow::anyhow!(
-                        "Our RPC is too far behind ({} s)!\n{:#}\nvs\n{:#}",
-                        duration_since,
-                        json!(rpc_block),
-                        json!(newest_other),
-                    ));
+                    return error_builder.result(
+                        anyhow::anyhow!(
+                            "Behind {} s!\n{:#}\nvs\n{:#}",
+                            duration_since,
+                            json!(rpc_block),
+                            json!(newest_other),
+                        )
+                        .context(format!("{} is too far behind", rpc)),
+                    );
                 }
             },
         }
@@ -130,25 +156,31 @@ pub async fn main(
             std::cmp::Ordering::Greater => match duration_since.cmp(&0) {
                 std::cmp::Ordering::Equal => unimplemented!(),
                 std::cmp::Ordering::Less => {
-                    return Err(anyhow::anyhow!(
-                        "Our clock is too far behind ({} s)! Something might be wrong.\n{:#}\nvs\n{:#}",
-                        block_age.abs(),
-                        json!(now),
-                        json!(newest_other),
-                    ));
+                    return error_builder.result(
+                        anyhow::anyhow!(
+                            "Clock is behind {}s! Something might be wrong.\n{:#}\nvs\n{:#}",
+                            block_age.abs(),
+                            json!(now),
+                            json!(newest_other),
+                        )
+                        .context(format!("Clock is too far behind on {}!", rpc)),
+                    );
                 }
                 std::cmp::Ordering::Greater => {
-                    return Err(anyhow::anyhow!(
-                        "block is too old ({} s)!\n{:#}\nvs\n{:#}",
-                        block_age,
-                        json!(now),
-                        json!(newest_other),
-                    ));
+                    return error_builder.result(
+                        anyhow::anyhow!(
+                            "block is too old ({}s)!\n{:#}\nvs\n{:#}",
+                            block_age,
+                            json!(now),
+                            json!(newest_other),
+                        )
+                        .context(format!("block is too old on {}!", rpc)),
+                    );
                 }
             },
         }
     } else {
-        return Err(anyhow::anyhow!("No other RPC times to check!"));
+        return error_builder.result(anyhow::anyhow!("No other RPC times to check!"));
     }
 
     debug!("rpc comparison ok: {:#}", json!(rpc_block));

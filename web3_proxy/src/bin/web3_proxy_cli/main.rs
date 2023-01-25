@@ -18,19 +18,16 @@ mod user_import;
 use anyhow::Context;
 use argh::FromArgs;
 use ethers::types::U256;
-use gethostname::gethostname;
-use log::{error, info, warn};
+use log::{info, warn};
+use pagerduty_rs::eventsv2async::EventsV2 as PagerdutyAsyncEventsV2;
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
-use pagerduty_rs::types::{AlertTrigger, AlertTriggerPayload};
-use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::{
     fs, panic,
     path::Path,
     sync::atomic::{self, AtomicUsize},
 };
 use tokio::runtime;
+use web3_proxy::pagerduty::panic_handler;
 use web3_proxy::{
     app::{get_db, get_migrated_db, APP_USER_AGENT},
     config::TopConfig,
@@ -237,57 +234,13 @@ fn main() -> anyhow::Result<()> {
         (None, None)
     };
 
-    // panic handler that sends to pagerduty
-    // TODO: there is a `pagerduty_panic` module that looks like it would work with minor tweaks, but ethers-rs panics when a websocket exit and that would fire too many alerts
-
+    // panic handler that sends to pagerduty.
+    // TODO: use the sentry handler if no pager duty. use default if no sentry
     if let Some(pagerduty_sync) = pagerduty_sync {
-        let client = top_config
-            .as_ref()
-            .map(|top_config| format!("web3-proxy chain #{}", top_config.app.chain_id))
-            .unwrap_or_else(|| format!("web3-proxy w/o chain"));
-
-        let client_url = top_config
-            .as_ref()
-            .and_then(|x| x.app.redirect_public_url.clone());
+        let top_config = top_config.clone();
 
         panic::set_hook(Box::new(move |x| {
-            let hostname = gethostname().into_string().unwrap_or("unknown".to_string());
-            let panic_msg = format!("{} {:?}", x, x);
-
-            if panic_msg.starts_with("panicked at 'WS Server panic") {
-                info!("Underlying library {}", panic_msg);
-            } else {
-                error!("sending panic to pagerduty: {}", panic_msg);
-
-                let mut s = DefaultHasher::new();
-                panic_msg.hash(&mut s);
-                panic_msg.hash(&mut s);
-                let dedup_key = s.finish().to_string();
-
-                let payload = AlertTriggerPayload {
-                    severity: pagerduty_rs::types::Severity::Error,
-                    summary: panic_msg,
-                    source: hostname,
-                    timestamp: None,
-                    component: None,
-                    group: Some("web3-proxy".to_string()),
-                    class: Some("panic".to_string()),
-                    custom_details: None::<()>,
-                };
-
-                let event = Event::AlertTrigger(AlertTrigger {
-                    payload,
-                    dedup_key: Some(dedup_key),
-                    images: None,
-                    links: None,
-                    client: Some(client.clone()),
-                    client_url: client_url.clone(),
-                });
-
-                if let Err(err) = pagerduty_sync.event(event) {
-                    error!("Failed sending panic to pagerduty: {}", err);
-                }
-            }
+            panic_handler(top_config.clone(), &pagerduty_sync, x);
         }));
     }
 

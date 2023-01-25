@@ -9,6 +9,7 @@ use futures::{
 };
 use log::{error, info};
 use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
+use serde_json::json;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, MissedTickBehavior};
@@ -48,11 +49,40 @@ pub struct SentrydSubCommand {
 }
 
 #[derive(Debug)]
-struct Error {
+pub struct SentrydError {
+    /// The class/type of the event, for example ping failure or cpu load
+    class: String,
+    /// Errors will send a pagerduty alert. others just give log messages
+    level: log::Level,
+    /// A short summary that should be mostly static
+    summary: String,
+    /// Lots of detail about the error
+    extra: Option<serde_json::Value>,
+}
+
+/// helper for creating SentrydErrors
+#[derive(Clone)]
+pub struct SentrydErrorBuilder {
     class: String,
     level: log::Level,
-    anyhow: anyhow::Error,
 }
+
+impl SentrydErrorBuilder {
+    fn build(&self, err: anyhow::Error) -> SentrydError {
+        SentrydError {
+            class: self.class.to_owned(),
+            level: self.level.to_owned(),
+            summary: format!("{}", err),
+            extra: Some(json!(format!("{:#?}", err))),
+        }
+    }
+
+    fn result(&self, err: anyhow::Error) -> SentrydResult {
+        Err(self.build(err))
+    }
+}
+
+type SentrydResult = Result<(), SentrydError>;
 
 impl SentrydSubCommand {
     pub async fn main(
@@ -86,7 +116,7 @@ impl SentrydSubCommand {
         let mut handles = FuturesUnordered::new();
 
         // channels and a task for sending errors to logs/pagerduty
-        let (error_sender, mut error_receiver) = mpsc::channel::<Error>(10);
+        let (error_sender, mut error_receiver) = mpsc::channel::<SentrydError>(10);
 
         {
             let error_handler_f = async move {
@@ -101,14 +131,13 @@ impl SentrydSubCommand {
                         let alert = pagerduty_alert(
                             Some(chain_id),
                             Some(err.class),
-                            "web3-proxy-sentry".to_string(),
-                            None,
-                            None,
-                            None::<()>,
                             Some("web3-proxy-sentry".to_string()),
+                            None,
+                            None,
+                            err.extra,
                             pagerduty_rs::types::Severity::Error,
                             None,
-                            format!("{:#?}", err.anyhow),
+                            err.summary,
                             None,
                         );
 
@@ -140,12 +169,15 @@ impl SentrydSubCommand {
             let url = format!("{}/health", web3_proxy);
             let error_sender = error_sender.clone();
 
+            // TODO: what timeout?
+            let timeout = Duration::from_secs(1);
+
             let loop_f = a_loop(
                 "main /health",
                 seconds,
                 log::Level::Error,
                 error_sender,
-                move || simple::main(url.clone()),
+                move |error_builder| simple::main(error_builder, url.clone(), timeout),
             );
 
             handles.push(tokio::spawn(loop_f));
@@ -162,12 +194,15 @@ impl SentrydSubCommand {
 
             let error_sender = error_sender.clone();
 
+            // TODO: what timeout?
+            let timeout = Duration::from_secs(1);
+
             let loop_f = a_loop(
                 "other /health",
                 seconds,
                 log::Level::Warn,
                 error_sender,
-                move || simple::main(url.clone()),
+                move |error_builder| simple::main(error_builder, url.clone(), timeout),
             );
 
             handles.push(tokio::spawn(loop_f));
@@ -189,7 +224,9 @@ impl SentrydSubCommand {
                 seconds,
                 log::Level::Error,
                 error_sender,
-                move || compare::main(rpc.clone(), others.clone(), max_age, max_lag),
+                move |error_builder| {
+                    compare::main(error_builder, rpc.clone(), others.clone(), max_age, max_lag)
+                },
             );
 
             handles.push(tokio::spawn(loop_f));
@@ -209,12 +246,17 @@ async fn a_loop<T>(
     class: &str,
     seconds: u64,
     error_level: log::Level,
-    error_sender: mpsc::Sender<Error>,
-    f: impl Fn() -> T,
+    error_sender: mpsc::Sender<SentrydError>,
+    f: impl Fn(SentrydErrorBuilder) -> T,
 ) -> anyhow::Result<()>
 where
-    T: Future<Output = anyhow::Result<()>> + Send + 'static,
+    T: Future<Output = SentrydResult> + Send + 'static,
 {
+    let error_builder = SentrydErrorBuilder {
+        class: class.to_owned(),
+        level: error_level,
+    };
+
     let mut interval = interval(Duration::from_secs(seconds));
 
     // TODO: should we warn if there are delays?
@@ -223,13 +265,7 @@ where
     loop {
         interval.tick().await;
 
-        if let Err(err) = f().await {
-            let err = Error {
-                class: class.to_string(),
-                level: error_level,
-                anyhow: err,
-            };
-
+        if let Err(err) = f(error_builder.clone()).await {
             error_sender.send(err).await?;
         };
     }
