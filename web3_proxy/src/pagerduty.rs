@@ -59,6 +59,7 @@ pub fn pagerduty_alert<T: Serialize>(
         source.unwrap_or_else(|| gethostname().into_string().unwrap_or("unknown".to_string()));
 
     let mut s = DefaultHasher::new();
+    // TODO: include severity here?
     summary.hash(&mut s);
     client.hash(&mut s);
     client_url.hash(&mut s);

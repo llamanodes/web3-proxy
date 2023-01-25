@@ -53,11 +53,13 @@ pub async fn main(
         .post(&rpc)
         .json(&block_by_number_request)
         .send()
-        .await?
+        .await
+        .context(format!("error fetching block from {}", rpc))?
         .json::<JsonRpcResponse<Block<TxHash>>>()
-        .await?
+        .await
+        .context(format!("error parsing block from {}", rpc))?
         .result
-        .context(format!("error fetching block from {}", rpc))?;
+        .context(format!("no block from {}", rpc))?;
 
     // check the parent because b and c might not be as fast as a
     let parent_hash = a.parent_hash;

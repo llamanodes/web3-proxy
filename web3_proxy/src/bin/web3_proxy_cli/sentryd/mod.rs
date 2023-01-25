@@ -95,7 +95,7 @@ impl SentrydSubCommand {
                 }
 
                 while let Some(err) = error_receiver.recv().await {
-                    log::log!(err.level, "check failed: {:?}", err);
+                    log::log!(err.level, "check failed: {:#?}", err);
 
                     if matches!(err.level, log::Level::Error) {
                         let alert = pagerduty_alert(
@@ -108,20 +108,20 @@ impl SentrydSubCommand {
                             Some("web3-proxy-sentry".to_string()),
                             pagerduty_rs::types::Severity::Error,
                             None,
-                            format!("{}", err.anyhow),
+                            format!("{:#?}", err.anyhow),
                             None,
                         );
 
                         if let Some(pagerduty_async) = pagerduty_async.as_ref() {
                             info!(
-                                "sending to pagerduty: {}",
+                                "sending to pagerduty: {:#}",
                                 serde_json::to_string_pretty(&alert)?
                             );
 
                             if let Err(err) =
                                 pagerduty_async.event(Event::AlertTrigger(alert)).await
                             {
-                                error!("Failed sending to pagerduty: {}", err);
+                                error!("Failed sending to pagerduty: {:#?}", err);
                             }
                         }
                     }
