@@ -123,6 +123,7 @@ fn main() -> anyhow::Result<()> {
                     "web3_proxy=trace",
                     "web3_proxy_cli=trace",
                     "web3_proxy::rpcs::blockchain=info",
+                    "web3_proxy::rpcs::request=debug",
                 ]
             }
             _ => {

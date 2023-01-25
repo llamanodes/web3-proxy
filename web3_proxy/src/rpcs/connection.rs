@@ -213,7 +213,7 @@ impl Web3Connection {
         // TODO: start at 0 or 1?
         for block_data_limit in [0, 32, 64, 128, 256, 512, 1024, 90_000, u64::MAX] {
             let handle = self
-                .wait_for_request_handle(authorization, Duration::from_secs(30), true)
+                .wait_for_request_handle(authorization, None, true)
                 .await?;
 
             let head_block_num_future = handle.request::<Option<()>, U256>(
@@ -239,7 +239,7 @@ impl Web3Connection {
             // TODO: wait for the handle BEFORE we check the current block number. it might be delayed too!
             // TODO: what should the request be?
             let handle = self
-                .wait_for_request_handle(authorization, Duration::from_secs(30), true)
+                .wait_for_request_handle(authorization, None, true)
                 .await?;
 
             let archive_result: Result<Bytes, _> = handle
@@ -436,7 +436,7 @@ impl Web3Connection {
         // TODO: what should the timeout be? should there be a request timeout?
         // trace!("waiting on chain id for {}", self);
         let found_chain_id: Result<U64, _> = self
-            .wait_for_request_handle(&authorization, Duration::from_secs(30), true)
+            .wait_for_request_handle(&authorization, None, true)
             .await?
             .request(
                 "eth_chainId",
@@ -720,7 +720,7 @@ impl Web3Connection {
                     loop {
                         // TODO: what should the max_wait be?
                         match self
-                            .wait_for_request_handle(&authorization, Duration::from_secs(30), false)
+                            .wait_for_request_handle(&authorization, None, false)
                             .await
                         {
                             Ok(active_request_handle) => {
@@ -806,7 +806,7 @@ impl Web3Connection {
                 Web3Provider::Ws(provider) => {
                     // todo: move subscribe_blocks onto the request handle?
                     let active_request_handle = self
-                        .wait_for_request_handle(&authorization, Duration::from_secs(30), false)
+                        .wait_for_request_handle(&authorization, None, false)
                         .await;
                     let mut stream = provider.subscribe_blocks().await?;
                     drop(active_request_handle);
@@ -816,7 +816,7 @@ impl Web3Connection {
                     // all it does is print "new block" for the same block as current block
                     // TODO: how does this get wrapped in an arc? does ethers handle that?
                     let block: Result<Option<ArcBlock>, _> = self
-                        .wait_for_request_handle(&authorization, Duration::from_secs(30), false)
+                        .wait_for_request_handle(&authorization, None, false)
                         .await?
                         .request(
                             "eth_getBlockByNumber",
@@ -917,8 +917,8 @@ impl Web3Connection {
                 Web3Provider::Ws(provider) => {
                     // TODO: maybe the subscribe_pending_txs function should be on the active_request_handle
                     let active_request_handle = self
-                        .wait_for_request_handle(&authorization, Duration::from_secs(30), false)
-                        .await;
+                        .wait_for_request_handle(&authorization, None, false)
+                        .await?;
 
                     let mut stream = provider.subscribe_pending_txs().await?;
 
@@ -955,10 +955,10 @@ impl Web3Connection {
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
-        max_wait: Duration,
+        max_wait: Option<Duration>,
         allow_not_ready: bool,
     ) -> anyhow::Result<OpenRequestHandle> {
-        let max_wait = Instant::now() + max_wait;
+        let max_wait = max_wait.map(|x| Instant::now() + x);
 
         loop {
             match self
@@ -968,24 +968,34 @@ impl Web3Connection {
                 Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
-                    trace!("{} waiting for request handle until {:?}", self, retry_at);
+                    let wait = retry_at.duration_since(Instant::now());
 
-                    if retry_at > max_wait {
-                        // break now since we will wait past our maximum wait time
-                        // TODO: don't use anyhow. use specific error type
-                        return Err(anyhow::anyhow!("timeout waiting for request handle"));
+                    trace!(
+                        "waiting {} millis for request handle on {}",
+                        wait.as_millis(),
+                        self
+                    );
+
+                    if let Some(max_wait) = max_wait {
+                        if retry_at > max_wait {
+                            // break now since we will wait past our maximum wait time
+                            // TODO: don't use anyhow. use specific error type
+                            return Err(anyhow::anyhow!("timeout waiting for request handle"));
+                        }
                     }
 
                     sleep_until(retry_at).await;
                 }
-                Ok(OpenRequestResult::NotReady) => {
+                Ok(OpenRequestResult::NotReady(_)) => {
                     // TODO: when can this happen? log? emit a stat?
                     trace!("{} has no handle ready", self);
 
-                    let now = Instant::now();
+                    if let Some(max_wait) = max_wait {
+                        let now = Instant::now();
 
-                    if now > max_wait {
-                        return Err(anyhow::anyhow!("unable to retry for request handle"));
+                        if now > max_wait {
+                            return Err(anyhow::anyhow!("unable to retry for request handle"));
+                        }
                     }
 
                     // TODO: sleep how long? maybe just error?
@@ -1013,7 +1023,8 @@ impl Web3Connection {
                 .await
                 .is_none()
         {
-            return Ok(OpenRequestResult::NotReady);
+            trace!("{} is not ready", self);
+            return Ok(OpenRequestResult::NotReady(self.backup));
         }
 
         if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
@@ -1029,25 +1040,33 @@ impl Web3Connection {
         // check rate limits
         if let Some(ratelimiter) = self.hard_limit.as_ref() {
             // TODO: how should we know if we should set expire or not?
-            match ratelimiter.throttle().await? {
+            match ratelimiter
+                .throttle()
+                .await
+                .context(format!("attempting to throttle {}", self))?
+            {
                 RedisRateLimitResult::Allowed(_) => {
                     // trace!("rate limit succeeded")
                 }
                 RedisRateLimitResult::RetryAt(retry_at, _) => {
-                    // rate limit failed
-                    // save the smallest retry_after. if nothing succeeds, return an Err with retry_after in it
-                    // TODO: use tracing better
-                    // TODO: i'm seeing "Exhausted rate limit on moralis: 0ns". How is it getting 0?
-                    warn!("Exhausted rate limit on {}. Retry at {:?}", self, retry_at);
+                    // rate limit gave us a wait time
+                    if !self.backup {
+                        let when = retry_at.duration_since(Instant::now());
+                        warn!(
+                            "Exhausted rate limit on {}. Retry in {}ms",
+                            self,
+                            when.as_millis()
+                        );
+                    }
 
                     if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
-                        hard_limit_until.send(retry_at.clone())?;
+                        hard_limit_until.send_replace(retry_at.clone());
                     }
 
                     return Ok(OpenRequestResult::RetryAt(retry_at));
                 }
                 RedisRateLimitResult::RetryNever => {
-                    return Ok(OpenRequestResult::NotReady);
+                    return Ok(OpenRequestResult::NotReady(self.backup));
                 }
             }
         };

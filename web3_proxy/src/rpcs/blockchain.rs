@@ -149,7 +149,7 @@ impl Web3Connections {
         // TODO: if error, retry?
         let block: ArcBlock = match rpc {
             Some(rpc) => rpc
-                .wait_for_request_handle(authorization, Duration::from_secs(30), false)
+                .wait_for_request_handle(authorization, Some(Duration::from_secs(30)), false)
                 .await?
                 .request::<_, Option<_>>(
                     "eth_getBlockByHash",
@@ -253,11 +253,16 @@ impl Web3Connections {
 
         // TODO: if error, retry?
         // TODO: request_metadata or authorization?
+        // we don't actually set min_block_needed here because all nodes have all blocks
         let response = self
-            .try_send_best_consensus_head_connection(authorization, request, None, Some(num))
+            .try_send_best_consensus_head_connection(authorization, request, None, None)
             .await?;
 
-        let raw_block = response.result.context("no block result")?;
+        if let Some(err) = response.error {
+            debug!("could not find canonical block {}: {:?}", num, err);
+        }
+
+        let raw_block = response.result.context("no cannonical block result")?;
 
         let block: ArcBlock = serde_json::from_str(raw_block.get())?;
 

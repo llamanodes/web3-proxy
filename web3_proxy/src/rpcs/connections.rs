@@ -428,7 +428,10 @@ impl Web3Connections {
             )
             .await
         {
-            return Ok(without_backups);
+            // TODO: this might use backups too eagerly. but even when we allow backups, we still prioritize our own
+            if matches!(without_backups, OpenRequestResult::Handle(_)) {
+                return Ok(without_backups);
+            }
         }
 
         self._best_consensus_head_connection(
@@ -460,7 +463,7 @@ impl Web3Connections {
                 head_block.number()
             } else {
                 // TODO: optionally wait for a head block >= min_block_needed
-                return Ok(OpenRequestResult::NotReady);
+                return Ok(OpenRequestResult::NotReady(allow_backups));
             };
 
             let min_block_needed = min_block_needed.unwrap_or(&head_block_num);
@@ -504,7 +507,7 @@ impl Web3Connections {
                 }
                 cmp::Ordering::Greater => {
                     // TODO? if the blocks is close and wait_for_sync and allow_backups, wait for change on a watch_consensus_connections_receiver().subscribe()
-                    return Ok(OpenRequestResult::NotReady);
+                    return Ok(OpenRequestResult::NotReady(allow_backups));
                 }
             }
 
@@ -595,7 +598,7 @@ impl Web3Connections {
                     Ok(OpenRequestResult::RetryAt(retry_at)) => {
                         earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                     }
-                    Ok(OpenRequestResult::NotReady) => {
+                    Ok(OpenRequestResult::NotReady(_)) => {
                         // TODO: log a warning? emit a stat?
                     }
                     Err(err) => {
@@ -625,7 +628,7 @@ impl Web3Connections {
 
                 // TODO: should we log here?
 
-                Ok(OpenRequestResult::NotReady)
+                Ok(OpenRequestResult::NotReady(allow_backups))
             }
             Some(earliest_retry_at) => {
                 warn!("no servers on {:?}! {:?}", self, earliest_retry_at);
@@ -719,7 +722,7 @@ impl Web3Connections {
                     max_count -= 1;
                     selected_rpcs.push(handle)
                 }
-                Ok(OpenRequestResult::NotReady) => {
+                Ok(OpenRequestResult::NotReady(_)) => {
                     warn!("no request handle for {}", connection)
                 }
                 Err(err) => {
@@ -911,17 +914,51 @@ impl Web3Connections {
                         }
                     }
                 }
-                OpenRequestResult::NotReady => {
+                OpenRequestResult::NotReady(backups_included) => {
                     if let Some(request_metadata) = request_metadata {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
-                    trace!("No servers ready. Waiting up to 1 second for change in synced servers");
+                    // todo!(
+                    //     "check if we are requesting an old block and no archive servers are synced"
+                    // );
+
+                    if let Some(min_block_needed) = min_block_needed {
+                        let mut theres_a_chance = false;
+
+                        for potential_conn in self.conns.values() {
+                            if skip_rpcs.contains(potential_conn) {
+                                continue;
+                            }
+
+                            // TODO: should we instead check if has_block_data but with the current head block?
+                            if potential_conn.has_block_data(min_block_needed) {
+                                trace!("chance for {} on {}", min_block_needed, potential_conn);
+                                theres_a_chance = true;
+                                break;
+                            }
+
+                            skip_rpcs.push(potential_conn.clone());
+                        }
+
+                        if !theres_a_chance {
+                            debug!("no chance of finding data in block #{}", min_block_needed);
+                            break;
+                        }
+                    }
+
+                    if backups_included {
+                        // if NotReady and we tried backups, there's no chance
+                        warn!("No servers ready even after checking backups");
+                        break;
+                    }
+
+                    debug!("No servers ready. Waiting up to 1 second for change in synced servers");
 
                     // TODO: exponential backoff?
                     tokio::select! {
                         _ = sleep(Duration::from_secs(1)) => {
-                            skip_rpcs.pop();
+                            // do NOT pop the last rpc off skip here
                         }
                         _ = watch_consensus_connections.changed() => {
                             watch_consensus_connections.borrow_and_update();
@@ -944,17 +981,30 @@ impl Web3Connections {
         }
 
         let num_conns = self.conns.len();
+        let num_skipped = skip_rpcs.len();
 
-        if skip_rpcs.is_empty() {
+        if num_skipped == 0 {
             error!("No servers synced ({} known)", num_conns);
 
-            Err(anyhow::anyhow!("No servers synced ({} known)", num_conns))
+            return Ok(JsonRpcForwardedResponse::from_str(
+                "No servers synced",
+                Some(-32000),
+                Some(request.id),
+            ));
         } else {
-            Err(anyhow::anyhow!(
-                "{}/{} servers erred",
-                skip_rpcs.len(),
-                num_conns
-            ))
+            // TODO: warn? debug? trace?
+            warn!(
+                "Requested data was not available on {}/{} servers",
+                num_skipped, num_conns
+            );
+
+            // TODO: what error code?
+            // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
+            return Ok(JsonRpcForwardedResponse::from_str(
+                "Requested data is not available",
+                Some(-32043),
+                Some(request.id),
+            ));
         }
     }
 
@@ -1287,7 +1337,7 @@ mod tests {
 
         dbg!(&x);
 
-        assert!(matches!(x, OpenRequestResult::NotReady));
+        assert!(matches!(x, OpenRequestResult::NotReady(true)));
 
         // add lagged blocks to the conns. both servers should be allowed
         lagged_block.block = conns.save_block(lagged_block.block, true).await.unwrap();
@@ -1360,7 +1410,7 @@ mod tests {
             conns
                 .best_consensus_head_connection(&authorization, None, &[], Some(&2.into()))
                 .await,
-            Ok(OpenRequestResult::NotReady)
+            Ok(OpenRequestResult::NotReady(true))
         ));
     }
 

@@ -1326,8 +1326,8 @@ impl Web3ProxyApp {
             }
             "eth_subscribe" => {
                 return Ok((
-                    JsonRpcForwardedResponse::from_string(
-                        format!("notifications not supported. eth_subscribe is only available over a websocket"),
+                    JsonRpcForwardedResponse::from_str(
+                        "notifications not supported. eth_subscribe is only available over a websocket",
                         Some(-32601),
                         Some(request_id),
                     ),
@@ -1336,8 +1336,8 @@ impl Web3ProxyApp {
             }
             "eth_unsubscribe" => {
                 return Ok((
-                    JsonRpcForwardedResponse::from_string(
-                        format!("notifications not supported. eth_unsubscribe is only available over a websocket"),
+                    JsonRpcForwardedResponse::from_str(
+                        "notifications not supported. eth_unsubscribe is only available over a websocket",
                         Some(-32601),
                         Some(request_id),
                     ),

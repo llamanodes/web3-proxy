@@ -347,7 +347,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] `stat delay` script 
   - query database for newest stat
 - [ ] period_datetime should always be :00. right now it depends on start time 
-- [ ] two servers running will confuse rpc_accounting!
+- [ ] we have our hard rate limiter set up with a period of 60. but most providers have period of 1- [ ] two servers running will confuse rpc_accounting!
   - it won't happen with users often because they should be sticky to one proxy, but unauthenticated users will definitely hit this
   - one option: we need the insert to be an upsert, but how do we merge historgrams?
 - [ ] don't use systemtime. use chrono

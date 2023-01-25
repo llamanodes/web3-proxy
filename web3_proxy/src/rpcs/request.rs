@@ -27,7 +27,8 @@ pub enum OpenRequestResult {
     /// Unable to start a request. Retry at the given time.
     RetryAt(Instant),
     /// Unable to start a request because the server is not synced
-    NotReady,
+    /// contains "true" if backup servers were attempted
+    NotReady(bool),
 }
 
 /// Make RPC requests through this handle and drop it when you are done.
