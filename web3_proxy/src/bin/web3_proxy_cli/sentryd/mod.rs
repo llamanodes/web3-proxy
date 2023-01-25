@@ -152,7 +152,14 @@ impl SentrydSubCommand {
         }
         // check any other web3-proxy /health endpoints
         for other_web3_proxy in other_proxy.iter() {
-            let url = format!("{}/health", other_web3_proxy);
+            let url = if other_web3_proxy.contains("/rpc/") {
+                let x = other_web3_proxy.split("/rpc/").next().unwrap();
+
+                format!("{}/health", x)
+            } else {
+                format!("{}/health", other_web3_proxy)
+            };
+
             let error_sender = error_sender.clone();
 
             let loop_f = a_loop(

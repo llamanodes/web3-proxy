@@ -184,11 +184,15 @@ async fn check_rpc(
         Ok(abbreviated)
     } else if let Some(result) = response.error {
         Err(anyhow!(
-            "Failed parsing response from {} as JSON: {:?}",
+            "jsonrpc error during check_rpc from {}: {:#}",
             rpc,
-            result
+            json!(result),
         ))
     } else {
-        unimplemented!("{:?}", response)
+        Err(anyhow!(
+            "empty result during check_rpc from {}: {:#}",
+            rpc,
+            json!(response)
+        ))
     }
 }
