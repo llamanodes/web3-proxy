@@ -23,6 +23,8 @@ use log::{error, info, warn};
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
 use pagerduty_rs::types::{AlertTrigger, AlertTriggerPayload};
 use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::{
     fs, panic,
     path::Path,
@@ -257,9 +259,14 @@ fn main() -> anyhow::Result<()> {
             } else {
                 error!("sending panic to pagerduty: {}", panic_msg);
 
+                let mut s = DefaultHasher::new();
+                panic_msg.hash(&mut s);
+                panic_msg.hash(&mut s);
+                let dedup_key = s.finish().to_string();
+
                 let payload = AlertTriggerPayload {
                     severity: pagerduty_rs::types::Severity::Error,
-                    summary: panic_msg.clone(),
+                    summary: panic_msg,
                     source: hostname,
                     timestamp: None,
                     component: None,
@@ -270,7 +277,7 @@ fn main() -> anyhow::Result<()> {
 
                 let event = Event::AlertTrigger(AlertTrigger {
                     payload,
-                    dedup_key: None,
+                    dedup_key: Some(dedup_key),
                     images: None,
                     links: None,
                     client: Some(client.clone()),

@@ -1,3 +1,8 @@
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
+
 use crate::config::TopConfig;
 use gethostname::gethostname;
 use pagerduty_rs::types::{AlertTrigger, AlertTriggerPayload};
@@ -53,6 +58,15 @@ pub fn pagerduty_alert<T: Serialize>(
     let source =
         source.unwrap_or_else(|| gethostname().into_string().unwrap_or("unknown".to_string()));
 
+    let mut s = DefaultHasher::new();
+    summary.hash(&mut s);
+    client.hash(&mut s);
+    client_url.hash(&mut s);
+    component.hash(&mut s);
+    group.hash(&mut s);
+    class.hash(&mut s);
+    let dedup_key = s.finish().to_string();
+
     let payload = AlertTriggerPayload {
         severity,
         summary,
@@ -66,7 +80,7 @@ pub fn pagerduty_alert<T: Serialize>(
 
     AlertTrigger {
         payload,
-        dedup_key: None,
+        dedup_key: Some(dedup_key),
         images: None,
         links: None,
         client: Some(client),
