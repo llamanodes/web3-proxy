@@ -27,9 +27,9 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 
 anyhow = { version = "1.0.68", features = ["backtrace"] }
 argh = "0.1.10"
-axum = { version = "0.6.3", features = ["headers", "ws"] }
+axum = { version = "0.6.4", features = ["headers", "ws"] }
 axum-client-ip = "0.3.1"
-axum-macros = "0.3.1"
+axum-macros = "0.3.2"
 chrono = "0.4.23"
 counter = "0.5.7"
 derive_more = "0.99.17"
