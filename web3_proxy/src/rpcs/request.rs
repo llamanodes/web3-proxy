@@ -339,9 +339,7 @@ impl OpenRequestHandle {
 
                     trace!("retry {} at: {:?}", self.conn, retry_at);
 
-                    hard_limit_until
-                        .send(retry_at)
-                        .expect("sending hard limit retry times should always work");
+                    hard_limit_until.send_replace(retry_at);
                 }
             }
 
