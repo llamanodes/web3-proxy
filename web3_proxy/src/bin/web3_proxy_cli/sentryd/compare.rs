@@ -201,22 +201,37 @@ async fn check_rpc(
         "params": [block_hash, false],
     });
 
-    // TODO: don't unwrap! don't use the try operator
-    let response: JsonRpcResponse<Block<TxHash>> = client
+    let response = client
         .post(rpc.clone())
         .json(&block_by_hash_request)
         .send()
         .await
-        .context(format!("awaiting response from {}", rpc))?
-        .json()
-        .await
-        .context(format!("reading json on {}", rpc))?;
+        .context(format!("awaiting response from {}", rpc))?;
 
-    if let Some(result) = response.result {
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "bad response from {}: {}",
+            rpc,
+            response.status(),
+        ));
+    }
+
+    let body = response
+        .text()
+        .await
+        .context(format!("failed parsing body from {}", rpc))?;
+
+    let response_json: JsonRpcResponse<Block<TxHash>> = serde_json::from_str(&body)
+        .context(format!("body: {}", body))
+        .context(format!("failed parsing json from {}", rpc))?;
+
+    if let Some(result) = response_json.result {
         let abbreviated = AbbreviatedBlock::from(result);
 
+        debug!("{} has {:?}@{}", rpc, abbreviated.hash, abbreviated.num);
+
         Ok(abbreviated)
-    } else if let Some(result) = response.error {
+    } else if let Some(result) = response_json.error {
         Err(anyhow!(
             "jsonrpc error during check_rpc from {}: {:#}",
             rpc,
@@ -226,7 +241,7 @@ async fn check_rpc(
         Err(anyhow!(
             "empty result during check_rpc from {}: {:#}",
             rpc,
-            json!(response)
+            json!(response_json)
         ))
     }
 }

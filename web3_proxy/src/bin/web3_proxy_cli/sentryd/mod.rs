@@ -97,7 +97,7 @@ impl SentrydSubCommand {
             .or_else(|| top_config.map(|x| x.app.chain_id))
             .context("--config or --chain-id required")?;
 
-        let web3_proxy = self.web3_proxy.trim_end_matches("/").to_string();
+        let primary_proxy = self.web3_proxy.trim_end_matches("/").to_string();
 
         let other_proxy: Vec<_> = self
             .other_proxy
@@ -166,7 +166,7 @@ impl SentrydSubCommand {
 
         // check the main rpc's /health endpoint
         {
-            let url = format!("{}/health", web3_proxy);
+            let url = format!("{}/health", primary_proxy);
             let error_sender = error_sender.clone();
 
             // TODO: what timeout?
@@ -212,7 +212,7 @@ impl SentrydSubCommand {
         {
             let max_age = self.max_age;
             let max_lag = self.max_lag;
-            let rpc = self.web3_proxy.clone();
+            let primary_proxy = primary_proxy.clone();
             let error_sender = error_sender.clone();
 
             let mut others = other_proxy.clone();
@@ -225,7 +225,13 @@ impl SentrydSubCommand {
                 log::Level::Error,
                 error_sender,
                 move |error_builder| {
-                    compare::main(error_builder, rpc.clone(), others.clone(), max_age, max_lag)
+                    compare::main(
+                        error_builder,
+                        primary_proxy.clone(),
+                        others.clone(),
+                        max_age,
+                        max_lag,
+                    )
                 },
             );
 
