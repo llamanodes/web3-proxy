@@ -114,8 +114,28 @@ fn main() -> anyhow::Result<()> {
     // TODO: is there a better way to do this?
     let rust_log = match std::env::var("RUST_LOG") {
         Ok(x) => x,
-        Err(_) => "info,ethers=debug,redis_rate_limit=debug,web3_proxy=debug,web3_proxy_cli=debug"
-            .to_string(),
+        Err(_) => match std::env::var("WEB3_PROXY_TRACE").map(|x| x == "true") {
+            Ok(true) => {
+                vec![
+                    "info",
+                    "ethers=debug",
+                    "redis_rate_limit=debug",
+                    "web3_proxy=trace",
+                    "web3_proxy_cli=trace",
+                    "web3_proxy::rpcs::blockchain=info",
+                ]
+            }
+            _ => {
+                vec![
+                    "info",
+                    "ethers=debug",
+                    "redis_rate_limit=debug",
+                    "web3_proxy=debug",
+                    "web3_proxy_cli=debug",
+                ]
+            }
+        }
+        .join(","),
     };
 
     // this probably won't matter for us in docker, but better safe than sorry
