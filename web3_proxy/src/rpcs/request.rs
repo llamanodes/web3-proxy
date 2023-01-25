@@ -284,8 +284,14 @@ impl OpenRequestHandle {
                 revert_handler
             };
 
+            enum ResponseTypes {
+                Revert,
+                RateLimit,
+                Ok,
+            }
+
             // check for "execution reverted" here
-            let is_revert = if let ProviderError::JsonRpcClientError(err) = err {
+            let response_type = if let ProviderError::JsonRpcClientError(err) = err {
                 // Http and Ws errors are very similar, but different types
                 let msg = match &*self.provider {
                     Web3Provider::Mock => unimplemented!(),
@@ -310,23 +316,39 @@ impl OpenRequestHandle {
                 };
 
                 if let Some(msg) = msg {
-                    msg.starts_with("execution reverted")
+                    if msg.starts_with("execution reverted") {
+                        trace!("revert from {}", self.conn);
+                        ResponseTypes::Revert
+                    } else if msg.contains("limit") || msg.contains("request") {
+                        trace!("rate limit from {}", self.conn);
+                        ResponseTypes::RateLimit
+                    } else {
+                        ResponseTypes::Ok
+                    }
                 } else {
-                    false
+                    ResponseTypes::Ok
                 }
             } else {
-                false
+                ResponseTypes::Ok
             };
 
-            if is_revert {
-                trace!("revert from {}", self.conn);
+            if matches!(response_type, ResponseTypes::RateLimit) {
+                if let Some(hard_limit_until) = self.conn.hard_limit_until.as_ref() {
+                    let retry_at = Instant::now() + Duration::from_secs(1);
+
+                    trace!("retry {} at: {:?}", self.conn, retry_at);
+
+                    hard_limit_until
+                        .send(retry_at)
+                        .expect("sending hard limit retry times should always work");
+                }
             }
 
             // TODO: think more about the method and param logs. those can be sensitive information
             match revert_handler {
                 RequestRevertHandler::DebugLevel => {
                     // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
-                    if !is_revert {
+                    if matches!(response_type, ResponseTypes::Revert) {
                         debug!(
                             "bad response from {}! method={} params={:?} err={:?}",
                             self.conn, method, params, err

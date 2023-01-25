@@ -24,22 +24,22 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::{cmp::Ordering, sync::Arc};
 use thread_fast_rng::rand::Rng;
 use thread_fast_rng::thread_fast_rng;
-use tokio::sync::{broadcast, oneshot, RwLock as AsyncRwLock};
+use tokio::sync::{broadcast, oneshot, watch, RwLock as AsyncRwLock};
 use tokio::time::{interval, sleep, sleep_until, timeout, Duration, Instant, MissedTickBehavior};
 
 // TODO: maybe provider state should have the block data limit in it. but it is inside an async lock and we can't Serialize then
 #[derive(Clone, Debug)]
 pub enum ProviderState {
     None,
-    NotReady(Arc<Web3Provider>),
-    Ready(Arc<Web3Provider>),
+    Connecting(Arc<Web3Provider>),
+    Connected(Arc<Web3Provider>),
 }
 
 impl ProviderState {
     pub async fn provider(&self, allow_not_ready: bool) -> Option<&Arc<Web3Provider>> {
         match self {
             ProviderState::None => None,
-            ProviderState::NotReady(x) => {
+            ProviderState::Connecting(x) => {
                 if allow_not_ready {
                     Some(x)
                 } else {
@@ -47,7 +47,7 @@ impl ProviderState {
                     None
                 }
             }
-            ProviderState::Ready(x) => {
+            ProviderState::Connected(x) => {
                 if x.ready() {
                     Some(x)
                 } else {
@@ -76,6 +76,8 @@ pub struct Web3Connection {
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
     pub(super) provider_state: AsyncRwLock<ProviderState>,
+    /// keep track of hard limits
+    pub(super) hard_limit_until: Option<watch::Sender<Instant>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     /// We do not use the deferred rate limiter because going over limits would cause errors
     pub(super) hard_limit: Option<RedisRateLimiter>,
@@ -136,6 +138,16 @@ impl Web3Connection {
         let automatic_block_limit =
             (block_data_limit.load(atomic::Ordering::Acquire) == 0) && block_sender.is_some();
 
+        // track hard limit until on backup servers (which might surprise us with rate limit changes)
+        // and track on servers that have a configured hard limit
+        let hard_limit_until = if backup || hard_limit.is_some() {
+            let (sender, _) = watch::channel(Instant::now());
+
+            Some(sender)
+        } else {
+            None
+        };
+
         let new_connection = Self {
             name,
             db_conn: db_conn.clone(),
@@ -147,6 +159,7 @@ impl Web3Connection {
             internal_requests: 0.into(),
             provider_state: AsyncRwLock::new(ProviderState::None),
             hard_limit,
+            hard_limit_until,
             soft_limit,
             automatic_block_limit,
             backup,
@@ -376,7 +389,7 @@ impl Web3Connection {
             ProviderState::None => {
                 info!("connecting to {}", self);
             }
-            ProviderState::NotReady(provider) | ProviderState::Ready(provider) => {
+            ProviderState::Connecting(provider) | ProviderState::Connected(provider) => {
                 // disconnect the current provider
                 if let Web3Provider::Mock = provider.as_ref() {
                     return Ok(());
@@ -410,7 +423,7 @@ impl Web3Connection {
         let new_provider = Web3Provider::from_str(&self.url, self.http_client.clone()).await?;
 
         // trace!("saving provider state as NotReady on {}", self);
-        *provider_state = ProviderState::NotReady(Arc::new(new_provider));
+        *provider_state = ProviderState::Connecting(Arc::new(new_provider));
 
         // drop the lock so that we can get a request handle
         // trace!("provider_state {} unlocked", self);
@@ -464,7 +477,7 @@ impl Web3Connection {
                 .context("provider missing")?
                 .clone();
 
-            *provider_state = ProviderState::Ready(ready_provider);
+            *provider_state = ProviderState::Connected(ready_provider);
             // trace!("unlocked for ready...");
         }
 
@@ -693,7 +706,7 @@ impl Web3Connection {
         // trace!("unlocked on new heads");
 
         // TODO: need a timeout
-        if let ProviderState::Ready(provider) = provider_state {
+        if let ProviderState::Connected(provider) = provider_state {
             match provider.as_ref() {
                 Web3Provider::Mock => unimplemented!(),
                 Web3Provider::Http(_provider) => {
@@ -865,7 +878,7 @@ impl Web3Connection {
         authorization: Arc<Authorization>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
     ) -> anyhow::Result<()> {
-        if let ProviderState::Ready(provider) = self
+        if let ProviderState::Connected(provider) = self
             .provider_state
             .try_read()
             .context("subscribe_pending_transactions")?
@@ -938,6 +951,7 @@ impl Web3Connection {
 
     /// be careful with this; it might wait forever!
     /// `allow_not_ready` is only for use by health checks while starting the provider
+    /// TODO: don't use anyhow. use specific error type
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -954,21 +968,29 @@ impl Web3Connection {
                 Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
-                    // // trace!(?retry_at);
+                    trace!("{} waiting for request handle until {:?}", self, retry_at);
 
                     if retry_at > max_wait {
                         // break now since we will wait past our maximum wait time
                         // TODO: don't use anyhow. use specific error type
                         return Err(anyhow::anyhow!("timeout waiting for request handle"));
                     }
+
                     sleep_until(retry_at).await;
                 }
                 Ok(OpenRequestResult::NotReady) => {
                     // TODO: when can this happen? log? emit a stat?
-                    // TODO: subscribe to the head block on this
+                    trace!("{} has no handle ready", self);
+
+                    let now = Instant::now();
+
+                    if now > max_wait {
+                        return Err(anyhow::anyhow!("unable to retry for request handle"));
+                    }
+
                     // TODO: sleep how long? maybe just error?
-                    // TODO: don't use anyhow. use specific error type
-                    return Err(anyhow::anyhow!("unable to retry for request handle"));
+                    // TODO: instead of an arbitrary sleep, subscribe to the head block on this
+                    sleep(Duration::from_millis(10)).await;
                 }
                 Err(err) => return Err(err),
             }
@@ -994,12 +1016,22 @@ impl Web3Connection {
             return Ok(OpenRequestResult::NotReady);
         }
 
+        if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
+            let hard_limit_ready = hard_limit_until.borrow().clone();
+
+            let now = Instant::now();
+
+            if now < hard_limit_ready {
+                return Ok(OpenRequestResult::RetryAt(hard_limit_ready));
+            }
+        }
+
         // check rate limits
         if let Some(ratelimiter) = self.hard_limit.as_ref() {
             // TODO: how should we know if we should set expire or not?
             match ratelimiter.throttle().await? {
                 RedisRateLimitResult::Allowed(_) => {
-                    // // trace!("rate limit succeeded")
+                    // trace!("rate limit succeeded")
                 }
                 RedisRateLimitResult::RetryAt(retry_at, _) => {
                     // rate limit failed
@@ -1007,6 +1039,10 @@ impl Web3Connection {
                     // TODO: use tracing better
                     // TODO: i'm seeing "Exhausted rate limit on moralis: 0ns". How is it getting 0?
                     warn!("Exhausted rate limit on {}. Retry at {:?}", self, retry_at);
+
+                    if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
+                        hard_limit_until.send(retry_at.clone())?;
+                    }
 
                     return Ok(OpenRequestResult::RetryAt(retry_at));
                 }
@@ -1165,6 +1201,7 @@ mod tests {
             internal_requests: 0.into(),
             provider_state: AsyncRwLock::new(ProviderState::None),
             hard_limit: None,
+            hard_limit_until: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,
@@ -1213,6 +1250,7 @@ mod tests {
             internal_requests: 0.into(),
             provider_state: AsyncRwLock::new(ProviderState::None),
             hard_limit: None,
+            hard_limit_until: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,

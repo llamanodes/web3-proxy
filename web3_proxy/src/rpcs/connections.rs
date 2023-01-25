@@ -128,6 +128,7 @@ impl Web3Connections {
 
         // turn configs into connections (in parallel)
         // TODO: move this into a helper function. then we can use it when configs change (will need a remove function too)
+        // TODO: futures unordered?
         let spawn_handles: Vec<_> = server_configs
             .into_iter()
             .filter_map(|(server_name, server_config)| {
@@ -175,7 +176,7 @@ impl Web3Connections {
         let mut connections = HashMap::new();
         let mut handles = vec![];
 
-        // TODO: do we need to join this?
+        // TODO: futures unordered?
         for x in join_all(spawn_handles).await {
             // TODO: how should we handle errors here? one rpc being down shouldn't cause the program to exit
             match x {
@@ -529,7 +530,7 @@ impl Web3Connections {
 
                     let available_requests = soft_limit - active_requests;
 
-                    trace!("available requests on {}: {}", rpc, available_requests);
+                    // trace!("available requests on {}: {}", rpc, available_requests);
 
                     minimum = minimum.min(available_requests);
                     maximum = maximum.max(available_requests);
@@ -538,8 +539,8 @@ impl Web3Connections {
                 })
                 .collect();
 
-            trace!("minimum available requests: {}", minimum);
-            trace!("maximum available requests: {}", maximum);
+            // trace!("minimum available requests: {}", minimum);
+            // trace!("maximum available requests: {}", maximum);
 
             if maximum < 0.0 {
                 // TODO: if maximum < 0 and there are other tiers on the same block, we should include them now
@@ -588,7 +589,7 @@ impl Web3Connections {
                     .await
                 {
                     Ok(OpenRequestResult::Handle(handle)) => {
-                        trace!("opened handle: {}", best_rpc);
+                        // trace!("opened handle: {}", best_rpc);
                         return Ok(OpenRequestResult::Handle(handle));
                     }
                     Ok(OpenRequestResult::RetryAt(retry_at)) => {
@@ -746,24 +747,25 @@ impl Web3Connections {
         request: JsonRpcRequest,
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
-        wait_for_sync: bool,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         let mut skip_rpcs = vec![];
         let mut method_not_available_response = None;
 
-        let mut watch_consensus_connections = if wait_for_sync {
-            Some(self.watch_consensus_connections_sender.subscribe())
-        } else {
-            None
-        };
+        let mut watch_consensus_connections = self.watch_consensus_connections_sender.subscribe();
 
         // TODO: maximum retries? right now its the total number of servers
         loop {
-            // TODO: is self.conns still right now that we split main and backup servers?
-            // TODO: if a new block arrives, we probably want to reset the skip list
-            if skip_rpcs.len() == self.conns.len() {
-                break;
+            let num_skipped = skip_rpcs.len();
+
+            if num_skipped > 0 {
+                // trace!("skip_rpcs: {:?}", skip_rpcs);
+
+                // TODO: is self.conns still right now that we split main and backup servers?
+                if num_skipped == self.conns.len() {
+                    break;
+                }
             }
+
             match self
                 .best_consensus_head_connection(
                     authorization,
@@ -890,30 +892,23 @@ impl Web3Connections {
                     // TODO: move this to a helper function
                     // sleep (TODO: with a lock?) until our rate limits should be available
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
-                    warn!("All rate limits exceeded. Sleeping until {:?}", retry_at);
+                    warn!(
+                        "All rate limits exceeded. waiting for change in synced servers or {:?}",
+                        retry_at
+                    );
 
                     // TODO: have a separate column for rate limited?
                     if let Some(request_metadata) = request_metadata {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
-                    // TODO: if there are other servers in synced_connections, we should continue now
-
-                    if let Some(watch_consensus_connections) = watch_consensus_connections.as_mut()
-                    {
-                        // wait until retry_at OR synced_connections changes
-                        trace!("waiting for change in synced servers or retry_at");
-                        tokio::select! {
-                            _ = sleep_until(retry_at) => {
-                                skip_rpcs.pop();
-                            }
-                            _ = watch_consensus_connections.changed() => {
-                                // TODO: would be nice to save this retry_at so we don't keep hitting limits
-                                let _ = watch_consensus_connections.borrow_and_update();
-                            }
+                    tokio::select! {
+                        _ = sleep_until(retry_at) => {
+                            skip_rpcs.pop();
                         }
-                    } else {
-                        sleep_until(retry_at).await;
+                        _ = watch_consensus_connections.changed() => {
+                            watch_consensus_connections.borrow_and_update();
+                        }
                     }
                 }
                 OpenRequestResult::NotReady => {
@@ -921,13 +916,16 @@ impl Web3Connections {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
-                    if wait_for_sync {
-                        trace!("waiting for change in synced servers");
-                        // TODO: race here. there might have been a change while we were waiting on the previous server
-                        self.watch_consensus_connections_sender
-                            .subscribe()
-                            .changed()
-                            .await?;
+                    trace!("No servers ready. Waiting up to 1 second for change in synced servers");
+
+                    // TODO: exponential backoff?
+                    tokio::select! {
+                        _ = sleep(Duration::from_secs(1)) => {
+                            skip_rpcs.pop();
+                        }
+                        _ = watch_consensus_connections.changed() => {
+                            watch_consensus_connections.borrow_and_update();
+                        }
                     }
                 }
             }
@@ -1060,7 +1058,6 @@ impl Web3Connections {
                     request,
                     request_metadata,
                     min_block_needed,
-                    true,
                 )
                 .await
             }
@@ -1168,8 +1165,11 @@ mod tests {
             active_requests: 0.into(),
             frontend_requests: 0.into(),
             internal_requests: 0.into(),
-            provider_state: AsyncRwLock::new(ProviderState::Ready(Arc::new(Web3Provider::Mock))),
+            provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
+                Web3Provider::Mock,
+            ))),
             hard_limit: None,
+            hard_limit_until: None,
             soft_limit: 1_000,
             automatic_block_limit: true,
             backup: false,
@@ -1188,8 +1188,11 @@ mod tests {
             active_requests: 0.into(),
             frontend_requests: 0.into(),
             internal_requests: 0.into(),
-            provider_state: AsyncRwLock::new(ProviderState::Ready(Arc::new(Web3Provider::Mock))),
+            provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
+                Web3Provider::Mock,
+            ))),
             hard_limit: None,
+            hard_limit_until: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,
@@ -1395,8 +1398,11 @@ mod tests {
             active_requests: 0.into(),
             frontend_requests: 0.into(),
             internal_requests: 0.into(),
-            provider_state: AsyncRwLock::new(ProviderState::Ready(Arc::new(Web3Provider::Mock))),
+            provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
+                Web3Provider::Mock,
+            ))),
             hard_limit: None,
+            hard_limit_until: None,
             soft_limit: 3_000,
             automatic_block_limit: false,
             backup: false,
@@ -1415,8 +1421,11 @@ mod tests {
             active_requests: 0.into(),
             frontend_requests: 0.into(),
             internal_requests: 0.into(),
-            provider_state: AsyncRwLock::new(ProviderState::Ready(Arc::new(Web3Provider::Mock))),
+            provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
+                Web3Provider::Mock,
+            ))),
             hard_limit: None,
+            hard_limit_until: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,

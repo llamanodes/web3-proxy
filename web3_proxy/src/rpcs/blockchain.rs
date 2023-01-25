@@ -167,13 +167,7 @@ impl Web3Connections {
                 // TODO: request_metadata? maybe we should put it in the authorization?
                 // TODO: think more about this wait_for_sync
                 let response = self
-                    .try_send_best_consensus_head_connection(
-                        authorization,
-                        request,
-                        None,
-                        None,
-                        true,
-                    )
+                    .try_send_best_consensus_head_connection(authorization, request, None, None)
                     .await?;
 
                 let block = response.result.context("failed fetching block")?;
@@ -260,7 +254,7 @@ impl Web3Connections {
         // TODO: if error, retry?
         // TODO: request_metadata or authorization?
         let response = self
-            .try_send_best_consensus_head_connection(authorization, request, None, Some(num), true)
+            .try_send_best_consensus_head_connection(authorization, request, None, Some(num))
             .await?;
 
         let raw_block = response.result.context("no block result")?;

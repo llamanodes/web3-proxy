@@ -321,6 +321,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] send sentryd errors to pagerduty
 - [x] improve handling of unknown methods
 - [x] don't send pagerduty alerts for websocket panics
+- [x] improve waiting for sync when rate limited
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
