@@ -60,6 +60,8 @@ pub async fn main(
         .context(format!("error querying block from {}", rpc))
         .map_err(|x| error_builder.build(x))?;
 
+    // TODO: if !a.status().is_success()
+
     // TODO: capture response headers now in case of error. store them in the extra data on the pager duty alert
     let headers = format!("{:#?}", a.headers());
 
@@ -74,7 +76,7 @@ pub async fn main(
     } else if let Some(err) = a.error {
         return error_builder.result(
             anyhow::anyhow!("headers: {:#?}. err: {:#?}", headers, err)
-                .context(format!("jsonrpc error from {}", rpc)),
+                .context(format!("jsonrpc error from {}: code {}", rpc, err.code)),
         );
     } else {
         return error_builder
