@@ -166,7 +166,13 @@ impl SentrydSubCommand {
 
         // check the main rpc's /health endpoint
         {
-            let url = format!("{}/health", primary_proxy);
+            let url = if primary_proxy.contains("/rpc/") {
+                let x = primary_proxy.split("/rpc/").next().unwrap();
+
+                format!("{}/health", x)
+            } else {
+                format!("{}/health", primary_proxy)
+            };
             let error_sender = error_sender.clone();
 
             // TODO: what timeout?
