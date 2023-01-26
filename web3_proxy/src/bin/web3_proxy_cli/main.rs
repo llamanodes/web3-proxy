@@ -4,6 +4,7 @@ mod change_user_tier_by_address;
 mod change_user_tier_by_key;
 mod check_config;
 mod count_users;
+mod create_key;
 mod create_user;
 mod daemon;
 mod drop_migration_lock;
@@ -73,6 +74,7 @@ enum SubCommand {
     ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeySubCommand),
     CheckConfig(check_config::CheckConfigSubCommand),
     CountUsers(count_users::CountUsersSubCommand),
+    CreateKey(create_key::CreateKeySubCommand),
     CreateUser(create_user::CreateUserSubCommand),
     DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
     Pagerduty(pagerduty::PagerdutySubCommand),
@@ -310,6 +312,15 @@ fn main() -> anyhow::Result<()> {
                 x.main(&db_conn).await
             }
             SubCommand::CheckConfig(x) => x.main().await,
+            SubCommand::CreateKey(x) => {
+                let db_url = cli_config
+                    .db_url
+                    .expect("'--config' (with a db) or '--db-url' is required to run create a key");
+
+                let db_conn = get_migrated_db(db_url, 1, 1).await?;
+
+                x.main(&db_conn).await
+            }
             SubCommand::CreateUser(x) => {
                 let db_url = cli_config
                     .db_url
