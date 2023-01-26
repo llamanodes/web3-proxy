@@ -13,6 +13,7 @@ mod m20221108_200345_save_anon_stats;
 mod m20221211_124002_request_method_privacy;
 mod m20221213_134158_move_login_into_database;
 mod m20230119_204135_better_free_tier;
+mod m20230125_204810_stats_v2;
 
 pub struct Migrator;
 
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20221211_124002_request_method_privacy::Migration),
             Box::new(m20221213_134158_move_login_into_database::Migration),
             Box::new(m20230119_204135_better_free_tier::Migration),
+            Box::new(m20230125_204810_stats_v2::Migration),
         ]
     }
 }

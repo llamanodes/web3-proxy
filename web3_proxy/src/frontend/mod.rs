@@ -1,4 +1,4 @@
-//! `frontend` contains HTTP and websocket endpoints for use by users and admins.
+//! `frontend` contains HTTP and websocket endpoints for use by a website or web3 wallet.
 //!
 //! Important reading about axum extractors: https://docs.rs/axum/latest/axum/extract/index.html#the-order-of-extractors
 
@@ -21,28 +21,34 @@ use moka::future::Cache;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{iter::once, time::Duration};
+use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
+/// simple keys for caching responses
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub enum FrontendResponseCaches {
     Status,
 }
 
-// TODO: what should this cache's value be?
-pub type FrontendResponseCache =
+pub type FrontendJsonResponseCache =
     Cache<FrontendResponseCaches, Arc<serde_json::Value>, hashbrown::hash_map::DefaultHashBuilder>;
 pub type FrontendHealthCache = Cache<(), bool, hashbrown::hash_map::DefaultHashBuilder>;
 
 /// Start the frontend server.
-pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
+pub async fn serve(
+    port: u16,
+    proxy_app: Arc<Web3ProxyApp>,
+    mut shutdown_receiver: broadcast::Receiver<()>,
+    shutdown_complete_sender: broadcast::Sender<()>,
+) -> anyhow::Result<()> {
     // setup caches for whatever the frontend needs
-    // TODO: a moka cache is probably way overkill for this.
-    // no need for max items. only expire because of time to live
-    let response_cache: FrontendResponseCache = Cache::builder()
+    // no need for max items since it is limited by the enum key
+    let json_response_cache: FrontendJsonResponseCache = Cache::builder()
         .time_to_live(Duration::from_secs(2))
         .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
+    // /health gets a cache with a shorter lifetime
     let health_cache: FrontendHealthCache = Cache::builder()
         .time_to_live(Duration::from_millis(100))
         .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
@@ -179,7 +185,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         // application state
         .layer(Extension(proxy_app.clone()))
         // frontend caches
-        .layer(Extension(response_cache))
+        .layer(Extension(json_response_cache))
         .layer(Extension(health_cache))
         // 404 for any unknown routes
         .fallback(errors::handler_404);
@@ -200,9 +206,16 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
     let service = app.into_make_service_with_connect_info::<SocketAddr>();
 
     // `axum::Server` is a re-export of `hyper::Server`
-    axum::Server::bind(&addr)
+    let server = axum::Server::bind(&addr)
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .serve(service)
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_receiver.recv().await;
+        })
         .await
-        .map_err(Into::into)
+        .map_err(Into::into);
+
+    let _ = shutdown_complete_sender.send(());
+
+    server
 }

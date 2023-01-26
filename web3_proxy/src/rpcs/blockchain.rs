@@ -1,6 +1,6 @@
+///! Keep track of the blockchain as seen by a Web3Rpcs.
 use super::consensus::ConsensusFinder;
 use super::many::Web3Rpcs;
-///! Keep track of the blockchain as seen by a Web3Rpcs.
 use super::one::Web3Rpc;
 use super::transactions::TxStatus;
 use crate::frontend::authorization::Authorization;
@@ -11,9 +11,9 @@ use ethers::prelude::{Block, TxHash, H256, U64};
 use hashbrown::HashSet;
 use log::{debug, error, trace, warn, Level};
 use moka::future::Cache;
+use serde::ser::SerializeStruct;
 use serde::Serialize;
 use serde_json::json;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Duration;
@@ -24,12 +24,35 @@ pub type ArcBlock = Arc<Block<TxHash>>;
 pub type BlockHashesCache = Cache<H256, Web3ProxyBlock, hashbrown::hash_map::DefaultHashBuilder>;
 
 /// A block and its age.
-#[derive(Clone, Debug, Default, From, Serialize)]
+#[derive(Clone, Debug, Default, From)]
 pub struct Web3ProxyBlock {
     pub block: ArcBlock,
     /// number of seconds this block was behind the current time when received
     /// this is only set if the block is from a subscription
     pub received_age: Option<u64>,
+}
+
+impl Serialize for Web3ProxyBlock {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // TODO: i'm not sure about this name
+        let mut state = serializer.serialize_struct("saved_block", 2)?;
+
+        state.serialize_field("age", &self.age())?;
+
+        let block = json!({
+            "block_hash": self.block.hash,
+            "parent_hash": self.block.parent_hash,
+            "number": self.block.number,
+            "timestamp": self.block.timestamp,
+        });
+
+        state.serialize_field("block", &block)?;
+
+        state.end()
+    }
 }
 
 impl PartialEq for Web3ProxyBlock {
@@ -64,16 +87,13 @@ impl Web3ProxyBlock {
     }
 
     pub fn age(&self) -> u64 {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("there should always be time");
+        let now = chrono::Utc::now().timestamp();
 
-        let block_timestamp = Duration::from_secs(self.block.timestamp.as_u64());
+        let block_timestamp = self.block.timestamp.as_u32() as i64;
 
         if block_timestamp < now {
-            // this server is still syncing from too far away to serve requests
-            // u64 is safe because ew checked equality above
-            (now - block_timestamp).as_secs() as u64
+            // u64 is safe because we checked equality above
+            (now - block_timestamp) as u64
         } else {
             0
         }
@@ -402,7 +422,7 @@ impl Web3Rpcs {
             return Ok(());
         }
 
-        let new_synced_connections = consensus_finder
+        let new_consensus = consensus_finder
             .best_consensus_connections(authorization, self)
             .await
             .context("no consensus head block!")
@@ -413,13 +433,13 @@ impl Web3Rpcs {
                 err
             })?;
 
-        // TODO: what should we do if the block number of new_synced_connections is < old_synced_connections? wait?
+        // TODO: what should we do if the block number of new_consensus is < old_synced_connections? wait?
 
-        let consensus_tier = new_synced_connections.tier;
+        let consensus_tier = new_consensus.tier;
         let total_tiers = consensus_finder.len();
-        let backups_needed = new_synced_connections.backups_needed;
-        let consensus_head_block = new_synced_connections.head_block.clone();
-        let num_consensus_rpcs = new_synced_connections.num_conns();
+        let backups_needed = new_consensus.backups_needed;
+        let consensus_head_block = new_consensus.head_block.clone();
+        let num_consensus_rpcs = new_consensus.num_conns();
         let num_active_rpcs = consensus_finder
             .all_rpcs_group()
             .map(|x| x.len())
@@ -428,7 +448,7 @@ impl Web3Rpcs {
 
         let old_consensus_head_connections = self
             .watch_consensus_rpcs_sender
-            .send_replace(Arc::new(new_synced_connections));
+            .send_replace(Arc::new(new_consensus));
 
         let backups_voted_str = if backups_needed { "B " } else { "" };
 
