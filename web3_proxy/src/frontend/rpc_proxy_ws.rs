@@ -4,8 +4,7 @@
 
 use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, RequestMetadata};
 use super::errors::{FrontendErrorResponse, FrontendResult};
-use crate::app::REQUEST_PERIOD;
-use crate::app_stats::ProxyResponseStat;
+use crate::stats::RpcQueryStats;
 use crate::{
     app::Web3ProxyApp,
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
@@ -379,8 +378,7 @@ async fn handle_socket_payload(
                     // TODO: move this logic into the app?
                     let request_bytes = json_request.num_bytes();
 
-                    let request_metadata =
-                        Arc::new(RequestMetadata::new(REQUEST_PERIOD, request_bytes).unwrap());
+                    let request_metadata = Arc::new(RequestMetadata::new(request_bytes).unwrap());
 
                     let subscription_id = json_request.params.unwrap().to_string();
 
@@ -401,7 +399,7 @@ async fn handle_socket_payload(
                         JsonRpcForwardedResponse::from_value(json!(partial_response), id.clone());
 
                     if let Some(stat_sender) = app.stat_sender.as_ref() {
-                        let response_stat = ProxyResponseStat::new(
+                        let response_stat = RpcQueryStats::new(
                             json_request.method.clone(),
                             authorization.clone(),
                             request_metadata,

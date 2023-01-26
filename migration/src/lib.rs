@@ -17,6 +17,7 @@ mod m20230119_204135_better_free_tier;
 mod m20230130_124740_read_only_login_logic;
 mod m20230130_165144_prepare_admin_imitation_pre_login;
 mod m20230215_152254_admin_trail;
+mod m20230125_204810_stats_v2;
 
 pub struct Migrator;
 
@@ -41,6 +42,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20230130_124740_read_only_login_logic::Migration),
             Box::new(m20230130_165144_prepare_admin_imitation_pre_login::Migration),
             Box::new(m20230215_152254_admin_trail::Migration),
+            Box::new(m20230125_204810_stats_v2::Migration),
         ]
     }
 }

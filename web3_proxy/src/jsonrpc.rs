@@ -30,7 +30,8 @@ impl fmt::Debug for JsonRpcRequest {
         f.debug_struct("JsonRpcRequest")
             .field("id", &self.id)
             .field("method", &self.method)
-            .finish_non_exhaustive()
+            .field("params", &self.params)
+            .finish()
     }
 }
 

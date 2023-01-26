@@ -1,6 +1,6 @@
 use crate::app::Web3ProxyApp;
 use crate::frontend::errors::FrontendErrorResponse;
-use crate::user_queries::get_user_id_from_params;
+use crate::http_params::get_user_id_from_params;
 use anyhow::Context;
 use axum::response::{IntoResponse, Response};
 use axum::{

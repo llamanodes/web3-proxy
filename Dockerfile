@@ -33,11 +33,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo install \
+    --features tokio-uring \
     --locked \
     --no-default-features \
+    --path ./web3_proxy \
     --profile faster_release \
-    --root /opt/bin \
-    --path ./web3_proxy
+    --root /opt/bin
 
 #
 # We do not need the Rust toolchain to run the binary!

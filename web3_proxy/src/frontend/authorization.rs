@@ -10,6 +10,7 @@ use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
+use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{login, rpc_key, user, user_tier};
 use ethers::types::Bytes;
 use ethers::utils::keccak256;
@@ -72,10 +73,7 @@ pub struct Authorization {
 
 #[derive(Debug)]
 pub struct RequestMetadata {
-    pub start_datetime: chrono::DateTime<Utc>,
     pub start_instant: tokio::time::Instant,
-    // TODO: better name for this
-    pub period_seconds: u64,
     pub request_bytes: u64,
     // TODO: do we need atomics? seems like we should be able to pass a &mut around
     // TODO: "archive" isn't really a boolean.
@@ -90,14 +88,12 @@ pub struct RequestMetadata {
 }
 
 impl RequestMetadata {
-    pub fn new(period_seconds: u64, request_bytes: usize) -> anyhow::Result<Self> {
+    pub fn new(request_bytes: usize) -> anyhow::Result<Self> {
         // TODO: how can we do this without turning it into a string first. this is going to slow us down!
         let request_bytes = request_bytes as u64;
 
         let new = Self {
             start_instant: Instant::now(),
-            start_datetime: Utc::now(),
-            period_seconds,
             request_bytes,
             archive_request: false.into(),
             backend_requests: Default::default(),
@@ -183,6 +179,7 @@ impl Authorization {
         let authorization_checks = AuthorizationChecks {
             // any error logs on a local (internal) query are likely problems. log them all
             log_revert_chance: 1.0,
+            tracking_level: TrackingLevel::Detailed,
             // default for everything else should be fine. we don't have a user_id or ip to give
             ..Default::default()
         };
@@ -220,10 +217,10 @@ impl Authorization {
             })
             .unwrap_or_default();
 
-        // TODO: default or None?
         let authorization_checks = AuthorizationChecks {
             max_requests_per_period,
             proxy_mode,
+            tracking_level: TrackingLevel::Detailed,
             ..Default::default()
         };
 
@@ -616,7 +613,7 @@ impl Web3ProxyApp {
         proxy_mode: ProxyMode,
     ) -> anyhow::Result<RateLimitResult> {
         // ip rate limits don't check referer or user agent
-        // the do check
+        // the do check origin because we can override rate limits for some origins
         let authorization = Authorization::external(
             allowed_origin_requests_per_period,
             self.db_conn.clone(),
@@ -766,7 +763,7 @@ impl Web3ProxyApp {
                             allowed_origins,
                             allowed_referers,
                             allowed_user_agents,
-                            log_level: rpc_key_model.log_level,
+                            tracking_level: rpc_key_model.log_level,
                             log_revert_chance: rpc_key_model.log_revert_chance,
                             max_concurrent_requests: user_tier_model.max_concurrent_requests,
                             max_requests_per_period: user_tier_model.max_requests_per_period,

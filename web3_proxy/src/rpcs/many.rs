@@ -2,8 +2,9 @@
 use super::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use super::consensus::ConsensusWeb3Rpcs;
 use super::one::Web3Rpc;
-use super::request::{OpenRequestHandle, OpenRequestResult, RequestRevertHandler};
+use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
 use crate::app::{flatten_handle, AnyhowJoinHandle, Web3ProxyApp};
+///! Load balanced communication with a group of web3 providers
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
@@ -87,7 +88,12 @@ impl Web3Rpcs {
         pending_transaction_cache: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
-    ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
+    ) -> anyhow::Result<(
+        Arc<Self>,
+        AnyhowJoinHandle<()>,
+        watch::Receiver<Option<Arc<ConsensusWeb3Rpcs>>>,
+        // watch::Receiver<Arc<ConsensusWeb3Rpcs>>,
+    )> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
 
@@ -161,7 +167,7 @@ impl Web3Rpcs {
             .max_capacity(10_000)
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
-        let (watch_consensus_rpcs_sender, _) = watch::channel(Default::default());
+        let (watch_consensus_rpcs_sender, consensus_connections_watcher) = watch::channel(Default::default());
 
         // by_name starts empty. self.apply_server_configs will add to it
         let by_name = Default::default();
@@ -195,7 +201,7 @@ impl Web3Rpcs {
             })
         };
 
-        Ok((connections, handle))
+        Ok((connections, handle, consensus_connections_watcher))
     }
 
     /// update the rpcs in this group
@@ -274,6 +280,10 @@ impl Web3Rpcs {
             })
             .collect();
 
+        // map of connection names to their connection
+        // let mut connections = HashMap::new();
+        // let mut handles = vec![];
+
         while let Some(x) = spawn_handles.next().await {
             match x {
                 Ok(Ok((rpc, _handle))) => {
@@ -308,8 +318,43 @@ impl Web3Rpcs {
             }
         }
 
+// <<<<<<< HEAD
         Ok(())
     }
+// =======
+//         // TODO: max_capacity and time_to_idle from config
+//         // all block hashes are the same size, so no need for weigher
+//         let block_hashes = Cache::builder()
+//             .time_to_idle(Duration::from_secs(600))
+//             .max_capacity(10_000)
+//             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+//         // all block numbers are the same size, so no need for weigher
+//         let block_numbers = Cache::builder()
+//             .time_to_idle(Duration::from_secs(600))
+//             .max_capacity(10_000)
+//             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+//
+//         let (watch_consensus_connections_sender, consensus_connections_watcher) =
+//             watch::channel(Default::default());
+//
+//         let watch_consensus_head_receiver =
+//             watch_consensus_head_sender.as_ref().map(|x| x.subscribe());
+//
+//         let connections = Arc::new(Self {
+//             by_name: connections,
+//             watch_consensus_rpcs_sender: watch_consensus_connections_sender,
+//             watch_consensus_head_receiver,
+//             pending_transactions,
+//             block_hashes,
+//             block_numbers,
+//             min_sum_soft_limit,
+//             min_head_rpcs,
+//             max_block_age,
+//             max_block_lag,
+//         });
+//
+//         let authorization = Arc::new(Authorization::internal(db_conn.clone())?);
+// >>>>>>> 77df3fa (stats v2)
 
     pub fn get(&self, conn_name: &str) -> Option<Arc<Web3Rpc>> {
         self.by_name.read().get(conn_name).cloned()
@@ -319,8 +364,12 @@ impl Web3Rpcs {
         self.by_name.read().len()
     }
 
+// <<<<<<< HEAD
     pub fn is_empty(&self) -> bool {
         self.by_name.read().is_empty()
+// =======
+//         Ok((connections, handle, consensus_connections_watcher))
+// >>>>>>> 77df3fa (stats v2)
     }
 
     pub fn min_head_rpcs(&self) -> usize {
@@ -655,9 +704,7 @@ impl Web3Rpcs {
                 trace!("{} vs {}", rpc_a, rpc_b);
                 // TODO: cached key to save a read lock
                 // TODO: ties to the server with the smallest block_data_limit
-                let best_rpc = min_by_key(rpc_a, rpc_b, |x| {
-                    OrderedFloat(x.head_latency.read().value())
-                });
+                let best_rpc = min_by_key(rpc_a, rpc_b, |x| x.peak_ewma());
                 trace!("winner: {}", best_rpc);
 
                 // just because it has lower latency doesn't mean we are sure to get a connection
@@ -671,7 +718,7 @@ impl Web3Rpcs {
                     }
                     Ok(OpenRequestResult::NotReady) => {
                         // TODO: log a warning? emit a stat?
-                        trace!("best_rpc not ready");
+                        trace!("best_rpc not ready: {}", best_rpc);
                     }
                     Err(err) => {
                         warn!("No request handle for {}. err={:?}", best_rpc, err)
@@ -837,7 +884,11 @@ impl Web3Rpcs {
 
         // TODO: maximum retries? right now its the total number of servers
         loop {
+// <<<<<<< HEAD
             if skip_rpcs.len() >= self.by_name.read().len() {
+// =======
+//             if skip_rpcs.len() == self.by_name.len() {
+// >>>>>>> 77df3fa (stats v2)
                 break;
             }
 
@@ -854,11 +905,10 @@ impl Web3Rpcs {
                 OpenRequestResult::Handle(active_request_handle) => {
                     // save the rpc in case we get an error and want to retry on another server
                     // TODO: look at backend_requests instead
-                    skip_rpcs.push(active_request_handle.clone_connection());
+                    let rpc = active_request_handle.clone_connection();
+                    skip_rpcs.push(rpc.clone());
 
                     if let Some(request_metadata) = request_metadata {
-                        let rpc = active_request_handle.clone_connection();
-
                         request_metadata
                             .response_from_backup_rpc
                             .store(rpc.backup, Ordering::Release);
@@ -871,7 +921,7 @@ impl Web3Rpcs {
                         .request(
                             &request.method,
                             &json!(request.params),
-                            RequestRevertHandler::Save,
+                            RequestErrorHandler::SaveRevert,
                             None,
                         )
                         .await;
@@ -1109,9 +1159,18 @@ impl Web3Rpcs {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
+// <<<<<<< HEAD
                     watch_consensus_rpcs.changed().await?;
 
                     watch_consensus_rpcs.borrow_and_update();
+// =======
+                    // TODO: i don't think this will ever happen
+                    // TODO: return a 502? if it does?
+                    // return Err(anyhow::anyhow!("no available rpcs!"));
+                    // TODO: sleep how long?
+                    // TODO: subscribe to something in ConsensusWeb3Rpcs instead
+                    sleep(Duration::from_millis(200)).await;
+// >>>>>>> 77df3fa (stats v2)
 
                     continue;
                 }
@@ -1239,13 +1298,14 @@ fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (U64, u64, bool, OrderedFloat<f
 mod tests {
     // TODO: why is this allow needed? does tokio::test get in the way somehow?
     #![allow(unused_imports)]
+
+    use std::time::{SystemTime, UNIX_EPOCH};
     use super::*;
     use crate::rpcs::consensus::ConsensusFinder;
     use crate::rpcs::{blockchain::Web3ProxyBlock, provider::Web3Provider};
     use ethers::types::{Block, U256};
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock as AsyncRwLock;
 
     #[tokio::test]
@@ -1331,11 +1391,7 @@ mod tests {
             .is_test(true)
             .try_init();
 
-        let now: U256 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            .into();
+        let now = chrono::Utc::now().timestamp().into();
 
         let lagged_block = Block {
             hash: Some(H256::random()),
@@ -1547,11 +1603,7 @@ mod tests {
             .is_test(true)
             .try_init();
 
-        let now: U256 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            .into();
+        let now = chrono::Utc::now().timestamp().into();
 
         let head_block = Block {
             hash: Some(H256::random()),

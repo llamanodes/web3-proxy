@@ -1,8 +1,7 @@
-use crate::frontend::authorization::Authorization;
-
 use super::blockchain::Web3ProxyBlock;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
+use crate::frontend::authorization::Authorization;
 use anyhow::Context;
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
@@ -21,18 +20,22 @@ pub struct ConsensusWeb3Rpcs {
     // TODO: tier should be an option, or we should have consensus be stored as an Option<ConsensusWeb3Rpcs>
     pub(super) tier: u64,
     pub(super) head_block: Web3ProxyBlock,
+    // pub tier: u64,
+    // pub head_block: Option<Web3ProxyBlock>,
     // TODO: this should be able to serialize, but it isn't
     #[serde(skip_serializing)]
-    pub(super) rpcs: Vec<Arc<Web3Rpc>>,
-    pub(super) backups_voted: Option<Web3ProxyBlock>,
-    pub(super) backups_needed: bool,
+    pub rpcs: Vec<Arc<Web3Rpc>>,
+    pub backups_voted: Option<Web3ProxyBlock>,
+    pub backups_needed: bool,
 }
 
 impl ConsensusWeb3Rpcs {
+    #[inline(always)]
     pub fn num_conns(&self) -> usize {
         self.rpcs.len()
     }
 
+    #[inline(always)]
     pub fn sum_soft_limit(&self) -> u32 {
         self.rpcs.iter().fold(0, |sum, rpc| sum + rpc.soft_limit)
     }
@@ -44,9 +47,9 @@ impl fmt::Debug for ConsensusWeb3Rpcs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
         // TODO: print the actual conns?
-        f.debug_struct("ConsensusConnections")
+        f.debug_struct("ConsensusWeb3Rpcs")
             .field("head_block", &self.head_block)
-            .field("num_conns", &self.rpcs.len())
+            .field("num_rpcs", &self.rpcs.len())
             .finish_non_exhaustive()
     }
 }
@@ -203,7 +206,7 @@ impl ConnectionsGroup {
         let mut primary_rpcs_voted: Option<Web3ProxyBlock> = None;
         let mut backup_rpcs_voted: Option<Web3ProxyBlock> = None;
 
-        // track rpcs on this heaviest chain so we can build a new ConsensusConnections
+        // track rpcs on this heaviest chain so we can build a new ConsensusWeb3Rpcs
         let mut primary_consensus_rpcs = HashSet::<&str>::new();
         let mut backup_consensus_rpcs = HashSet::<&str>::new();
 
@@ -356,7 +359,7 @@ impl ConnectionsGroup {
     }
 }
 
-/// A ConsensusConnections builder that tracks all connection heads across multiple groups of servers
+/// A ConsensusWeb3Rpcs builder that tracks all connection heads across multiple groups of servers
 pub struct ConsensusFinder {
     /// backups for all tiers are only used if necessary
     /// tiers[0] = only tier 0.

@@ -1,6 +1,6 @@
 use crate::config::TopConfig;
 use gethostname::gethostname;
-use log::{debug, error};
+use log::{debug, error, warn};
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
 use pagerduty_rs::types::{AlertTrigger, AlertTriggerPayload, Event};
 use serde::Serialize;
@@ -157,8 +157,12 @@ pub fn pagerduty_alert<T: Serialize>(
 
     let group = chain_id.map(|x| format!("chain #{}", x));
 
-    let source =
-        source.unwrap_or_else(|| gethostname().into_string().unwrap_or("unknown".to_string()));
+    let source = source.unwrap_or_else(|| {
+        gethostname().into_string().unwrap_or_else(|err| {
+            warn!("unable to handle hostname: {:#?}", err);
+            "unknown".to_string()
+        })
+    });
 
     let mut s = DefaultHasher::new();
     // TODO: include severity here?

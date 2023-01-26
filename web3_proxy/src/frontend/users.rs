@@ -2,10 +2,11 @@
 use super::authorization::{login_is_authorized, RpcSecretKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
-use crate::user_queries::get_page_from_params;
-use crate::user_queries::{
-    get_chain_id_from_params, get_query_start_from_params, query_user_stats, StatResponse,
+use crate::http_params::{
+    get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
 };
+use crate::stats::db_queries::query_user_stats;
+use crate::stats::StatType;
 use crate::user_token::UserBearerToken;
 use crate::{PostLogin, PostLoginQuery};
 use anyhow::Context;
@@ -19,7 +20,7 @@ use axum::{
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
-use entities::sea_orm_active_enums::LogLevel;
+use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{login, pending_login, revert_log, rpc_key, user};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
@@ -489,9 +490,7 @@ pub async fn user_balance_get(
 ///
 /// We will subscribe to events to watch for any user deposits, but sometimes events can be missed.
 ///
-/// TODO: rate limit by user
-/// TODO: one key per request? maybe /user/balance/:rpc_key?
-/// TODO: this will change as we add better support for secondary users.
+/// TODO: change this. just have a /tx/:txhash that is open to anyone. rate limit like we rate limit /login
 #[debug_handler]
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -503,8 +502,6 @@ pub async fn user_balance_post(
 }
 
 /// `GET /user/keys` -- Use a bearer token to get the user's api keys and their settings.
-///
-/// TODO: one key per request? maybe /user/keys/:rpc_key?
 #[debug_handler]
 pub async fn rpc_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -514,7 +511,7 @@ pub async fn rpc_keys_get(
 
     let db_replica = app
         .db_replica()
-        .context("getting db to fetch user's keys")?;
+        .context("db_replica is required to fetch a user's keys")?;
 
     let uks = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(user.id))
@@ -522,7 +519,6 @@ pub async fn rpc_keys_get(
         .await
         .context("failed loading user's key")?;
 
-    // TODO: stricter type on this?
     let response_json = json!({
         "user_id": user.id,
         "user_rpc_keys": uks
@@ -560,7 +556,7 @@ pub struct UserKeyManagement {
     allowed_referers: Option<String>,
     allowed_user_agents: Option<String>,
     description: Option<String>,
-    log_level: Option<LogLevel>,
+    log_level: Option<TrackingLevel>,
     // TODO: enable log_revert_trace: Option<f64>,
     private_txs: Option<bool>,
 }
@@ -813,7 +809,7 @@ pub async fn user_stats_aggregated_get(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    let response = query_user_stats(&app, bearer, &params, StatResponse::Aggregated).await?;
+    let response = query_user_stats(&app, bearer, &params, StatType::Aggregated).await?;
 
     Ok(response)
 }
@@ -833,7 +829,7 @@ pub async fn user_stats_detailed_get(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    let response = query_user_stats(&app, bearer, &params, StatResponse::Detailed).await?;
+    let response = query_user_stats(&app, bearer, &params, StatType::Detailed).await?;
 
     Ok(response)
 }

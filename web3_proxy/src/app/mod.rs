@@ -1,7 +1,6 @@
 // TODO: this file is way too big now. move things into other modules
 mod ws;
 
-use crate::app_stats::{ProxyResponseStat, StatEmitter, Web3ProxyStat};
 use crate::block_number::{block_needed, BlockNeeded};
 use crate::config::{AppConfig, TopConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
@@ -10,17 +9,19 @@ use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{
     JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest, JsonRpcRequestEnum,
 };
-use crate::rpcs::blockchain::Web3ProxyBlock;
+use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
+use crate::rpcs::consensus::ConsensusWeb3Rpcs;
 use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::transactions::TxStatus;
+use crate::stats::{AppStat, RpcQueryStats, StatBuffer};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::{Origin, Referer, UserAgent};
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimiter;
 use derive_more::From;
-use entities::sea_orm_active_enums::LogLevel;
+use entities::sea_orm_active_enums::TrackingLevel;
 use entities::user;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U64};
@@ -65,8 +66,8 @@ pub static APP_USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION")
 );
 
-/// TODO: allow customizing the request period?
-pub static REQUEST_PERIOD: u64 = 60;
+// aggregate across 1 week
+const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
 
 #[derive(Debug, From)]
 struct ResponseCacheKey {
@@ -153,10 +154,12 @@ type ResponseCache =
 
 pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 
+/// TODO: move this
 #[derive(Clone, Debug, Default, From)]
 pub struct AuthorizationChecks {
     /// database id of the primary user. 0 if anon
     /// TODO: do we need this? its on the authorization so probably not
+    /// TODO: Option<NonZeroU64>?
     pub user_id: u64,
     /// the key used (if any)
     pub rpc_secret_key: Option<RpcSecretKey>,
@@ -175,17 +178,21 @@ pub struct AuthorizationChecks {
     pub allowed_user_agents: Option<Vec<UserAgent>>,
     /// if None, allow any IP Address
     pub allowed_ips: Option<Vec<IpNet>>,
-    pub log_level: LogLevel,
+    /// how detailed any rpc account entries should be
+    pub tracking_level: TrackingLevel,
     /// Chance to save reverting eth_call, eth_estimateGas, and eth_sendRawTransaction to the database.
+    /// depending on the caller, errors might be expected. this keeps us from bloating our database
     /// TODO: f32 would be fine
     pub log_revert_chance: f64,
-    /// if true, transactions are broadcast to private mempools. They will still be public on the blockchain!
+    /// if true, transactions are broadcast only to private mempools.
+    /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
     pub private_txs: bool,
     pub proxy_mode: ProxyMode,
 }
 
 /// Simple wrapper so that we can keep track of read only connections.
 /// This does no blocking of writing in the compiler!
+/// TODO: move this
 #[derive(Clone)]
 pub struct DatabaseReplica(pub DatabaseConnection);
 
@@ -197,38 +204,60 @@ impl DatabaseReplica {
 }
 
 /// The application
-// TODO: this debug impl is way too verbose. make something smaller
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
 pub struct Web3ProxyApp {
     /// Send requests to the best server available
     pub balanced_rpcs: Arc<Web3Rpcs>,
     pub http_client: Option<reqwest::Client>,
-    /// Send private requests (like eth_sendRawTransaction) to all these servers
-    pub private_rpcs: Option<Arc<Web3Rpcs>>,
-    response_cache: ResponseCache,
-    // don't drop this or the sender will stop working
-    // TODO: broadcast channel instead?
-    watch_consensus_head_receiver: watch::Receiver<Option<Web3ProxyBlock>>,
-    pending_tx_sender: broadcast::Sender<TxStatus>,
+    /// application config
+    /// TODO: this will need a large refactor to handle reloads while running. maybe use a watch::Receiver?
     pub config: AppConfig,
+    /// Send private requests (like eth_sendRawTransaction) to all these servers
+    /// TODO: include another type so that we can use private miner relays that do not use JSONRPC requests
+    pub private_rpcs: Option<Arc<Web3Rpcs>>,
+    /// track JSONRPC responses
+    response_cache: ResponseCache,
+    /// rpc clients that subscribe to newHeads use this channel
+    /// don't drop this or the sender will stop working
+    /// TODO: broadcast channel instead?
+    pub watch_consensus_head_receiver: watch::Receiver<Option<Web3ProxyBlock>>,
+    /// rpc clients that subscribe to pendingTransactions use this channel
+    /// This is the Sender so that new channels can subscribe to it
+    pending_tx_sender: broadcast::Sender<TxStatus>,
+    /// Optional database for users and accounting
     pub db_conn: Option<sea_orm::DatabaseConnection>,
+    /// Optional read-only database for users and accounting
     pub db_replica: Option<DatabaseReplica>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
+    /// TODO: think about this more. might be worth storing if we sent the transaction or not and using this for automatic retries
     pub pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
+    /// rate limit anonymous users
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
+    /// rate limit authenticated users
     pub frontend_registered_user_rate_limiter: Option<DeferredRateLimiter<u64>>,
+    /// Optional time series database for making pretty graphs that load quickly
+    pub influxdb_client: Option<influxdb2::Client>,
+    /// rate limit the login endpoint
+    /// we do this because each pending login is a row in the database
     pub login_rate_limiter: Option<RedisRateLimiter>,
+    /// volatile cache used for rate limits
+    /// TODO: i think i might just delete this entirely. instead use local-only concurrency limits.
     pub vredis_pool: Option<RedisPool>,
-    // TODO: this key should be our RpcSecretKey class, not Ulid
+    /// cache authenticated users so that we don't have to query the database on the hot path
+    // TODO: should the key be our RpcSecretKey class instead of Ulid?
     pub rpc_secret_key_cache:
         Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>,
+    /// concurrent/parallel RPC request limits for authenticated users
     pub registered_user_semaphores:
         Cache<NonZeroU64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
+    /// concurrent/parallel request limits for anonymous users
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
+    /// concurrent/parallel application request limits for authenticated users
     pub bearer_token_semaphores:
         Cache<UserBearerToken, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
-    pub stat_sender: Option<flume::Sender<Web3ProxyStat>>,
     pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
+    /// channel for sending stats in a background task
+    pub stat_sender: Option<flume::Sender<AppStat>>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -355,6 +384,7 @@ pub async fn get_migrated_db(
     Ok(db_conn)
 }
 
+/// starting an app creates many tasks
 #[derive(From)]
 pub struct Web3ProxyAppSpawn {
     /// the app. probably clone this to use in other groups of handles
@@ -365,6 +395,8 @@ pub struct Web3ProxyAppSpawn {
     pub background_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
     /// config changes are sent here
     pub new_top_config_sender: watch::Sender<TopConfig>,
+    /// watch this to know when to start the app
+    pub consensus_connections_watcher: watch::Receiver<Option<Arc<ConsensusWeb3Rpcs>>>,
 }
 
 impl Web3ProxyApp {
@@ -372,8 +404,11 @@ impl Web3ProxyApp {
     pub async fn spawn(
         top_config: TopConfig,
         num_workers: usize,
-        shutdown_receiver: broadcast::Receiver<()>,
+        shutdown_sender: broadcast::Sender<()>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
+        let rpc_account_shutdown_recevier = shutdown_sender.subscribe();
+        let mut background_shutdown_receiver = shutdown_sender.subscribe();
+
         // safety checks on the config
         // while i would prefer this to be in a "apply_top_config" function, that is a larger refactor
         // TODO: maybe don't spawn with a config at all. have all config updates come through an apply_top_config call
@@ -512,20 +547,46 @@ impl Web3ProxyApp {
             }
         };
 
-        // setup a channel for receiving stats (generally with a high cardinality, such as per-user)
-        // we do this in a channel so we don't slow down our response to the users
-        let stat_sender = if let Some(db_conn) = db_conn.clone() {
-            let emitter_spawn =
-                StatEmitter::spawn(top_config.app.chain_id, db_conn, 60, shutdown_receiver)?;
+        let influxdb_client = match top_config.app.influxdb_host.as_ref() {
+            Some(influxdb_host) => {
+                let influxdb_org = top_config
+                    .app
+                    .influxdb_org
+                    .clone()
+                    .expect("influxdb_org needed when influxdb_host is set");
+                let influxdb_token = top_config
+                    .app
+                    .influxdb_token
+                    .clone()
+                    .expect("influxdb_token needed when influxdb_host is set");
 
+                let influxdb_client =
+                    influxdb2::Client::new(influxdb_host, influxdb_org, influxdb_token);
+
+                // TODO: test the client now. having a stat for "started" can be useful on graphs to mark deploys
+
+                Some(influxdb_client)
+            }
+            None => None,
+        };
+
+        // create a channel for receiving stats
+        // we do this in a channel so we don't slow down our response to the users
+        // stats can be saved in mysql, influxdb, both, or none
+        let stat_sender = if let Some(emitter_spawn) = StatBuffer::try_spawn(
+            top_config.app.chain_id,
+            db_conn.clone(),
+            influxdb_client.clone(),
+            60,
+            1,
+            BILLING_PERIOD_SECONDS,
+            rpc_account_shutdown_recevier,
+        )? {
+            // since the database entries are used for accounting, we want to be sure everything is saved before exiting
             important_background_handles.push(emitter_spawn.background_handle);
 
             Some(emitter_spawn.stat_sender)
         } else {
-            warn!("cannot store stats without a database connection");
-
-            // TODO: subscribe to the shutdown_receiver here since the stat emitter isn't running?
-
             None
         };
 
@@ -644,7 +705,9 @@ impl Web3ProxyApp {
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // prepare a Web3Rpcs to hold all our balanced connections
-        let (balanced_rpcs, balanced_rpcs_handle) = Web3Rpcs::spawn(
+        // let (balanced_rpcs, balanced_rpcs_handle) = Web3Rpcs::spawn(
+        // connect to the load balanced rpcs
+        let (balanced_rpcs, balanced_handle, consensus_connections_watcher) = Web3Rpcs::spawn(
             top_config.app.chain_id,
             db_conn.clone(),
             http_client.clone(),
@@ -659,7 +722,7 @@ impl Web3ProxyApp {
         .await
         .context("spawning balanced rpcs")?;
 
-        app_handles.push(balanced_rpcs_handle);
+        app_handles.push(balanced_handle);
 
         // prepare a Web3Rpcs to hold all our private connections
         // only some chains have this, so this is optional
@@ -668,7 +731,9 @@ impl Web3ProxyApp {
             None
         } else {
             // TODO: do something with the spawn handle
-            let (private_rpcs, private_rpcs_handle) = Web3Rpcs::spawn(
+            // TODO: Merge
+            // let (private_rpcs, private_rpcs_handle) = Web3Rpcs::spawn(
+            let (private_rpcs, private_handle, _) = Web3Rpcs::spawn(
                 top_config.app.chain_id,
                 db_conn.clone(),
                 http_client.clone(),
@@ -689,7 +754,7 @@ impl Web3ProxyApp {
             .await
             .context("spawning private_rpcs")?;
 
-            app_handles.push(private_rpcs_handle);
+            app_handles.push(private_handle);
 
             Some(private_rpcs)
         };
@@ -709,6 +774,7 @@ impl Web3ProxyApp {
             login_rate_limiter,
             db_conn,
             db_replica,
+            influxdb_client,
             vredis_pool,
             rpc_secret_key_cache,
             bearer_token_semaphores,
@@ -745,14 +811,26 @@ impl Web3ProxyApp {
 
             app_handles.push(config_handle);
         }
+// =======
+//         if important_background_handles.is_empty() {
+//             info!("no important background handles");
+//
+//             let f = tokio::spawn(async move {
+//                 let _ = background_shutdown_receiver.recv().await;
+//
+//                 Ok(())
+//             });
+//
+//             important_background_handles.push(f);
+// >>>>>>> 77df3fa (stats v2)
 
         Ok((
             app,
             app_handles,
             important_background_handles,
             new_top_config_sender,
-        )
-            .into())
+            consensus_connections_watcher
+        ).into())
     }
 
     pub async fn apply_top_config(&self, new_top_config: TopConfig) -> anyhow::Result<()> {
@@ -786,6 +864,7 @@ impl Web3ProxyApp {
         // TODO: what globals? should this be the hostname or what?
         // globals.insert("service", "web3_proxy");
 
+        // TODO: this needs a refactor to get HELP and TYPE into the serialized text
         #[derive(Default, Serialize)]
         struct UserCount(i64);
 
@@ -1069,7 +1148,6 @@ impl Web3ProxyApp {
         }
     }
 
-    // #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
     async fn proxy_cached_request(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -1078,7 +1156,7 @@ impl Web3ProxyApp {
     ) -> Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // trace!("Received request: {:?}", request);
 
-        let request_metadata = Arc::new(RequestMetadata::new(REQUEST_PERIOD, request.num_bytes())?);
+        let request_metadata = Arc::new(RequestMetadata::new(request.num_bytes())?);
 
         let mut kafka_stuff = None;
 
@@ -1216,7 +1294,7 @@ impl Web3ProxyApp {
             | "shh_post"
             | "shh_uninstallFilter"
             | "shh_version") => {
-                // TODO: client error stat
+                // i don't think we will ever support these methods
                 // TODO: what error code?
                 return Ok((
                     JsonRpcForwardedResponse::from_string(
@@ -1235,9 +1313,10 @@ impl Web3ProxyApp {
             | "eth_newPendingTransactionFilter"
             | "eth_pollSubscriptions"
             | "eth_uninstallFilter") => {
-                // TODO: unsupported command stat
+                // TODO: unsupported command stat. use the count to prioritize new features
                 // TODO: what error code?
                 return Ok((
+                    // TODO: what code?
                     JsonRpcForwardedResponse::from_string(
                         format!("not yet implemented: {}", method),
                         None,
@@ -1712,7 +1791,7 @@ impl Web3ProxyApp {
                 let rpcs = request_metadata.backend_requests.lock().clone();
 
                 if let Some(stat_sender) = self.stat_sender.as_ref() {
-                    let response_stat = ProxyResponseStat::new(
+                    let response_stat = RpcQueryStats::new(
                         method.to_string(),
                         authorization.clone(),
                         request_metadata,
@@ -1735,7 +1814,7 @@ impl Web3ProxyApp {
         let rpcs = request_metadata.backend_requests.lock().clone();
 
         if let Some(stat_sender) = self.stat_sender.as_ref() {
-            let response_stat = ProxyResponseStat::new(
+            let response_stat = RpcQueryStats::new(
                 request_method,
                 authorization.clone(),
                 request_metadata,
