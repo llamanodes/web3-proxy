@@ -170,7 +170,7 @@ impl SentrydSubCommand {
             let error_sender = error_sender.clone();
 
             // TODO: what timeout?
-            let timeout = Duration::from_secs(1);
+            let timeout = Duration::from_secs(5);
 
             let loop_f = a_loop(
                 "main /health",
@@ -195,7 +195,7 @@ impl SentrydSubCommand {
             let error_sender = error_sender.clone();
 
             // TODO: what timeout?
-            let timeout = Duration::from_secs(1);
+            let timeout = Duration::from_secs(5);
 
             let loop_f = a_loop(
                 "other /health",
