@@ -60,16 +60,25 @@ pub async fn main(
         .context(format!("error querying block from {}", rpc))
         .map_err(|x| error_builder.build(x))?;
 
-    // TODO: if !a.status().is_success()
+    if !a.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "bad response from {}: {}",
+            rpc,
+            response.status(),
+        ));
+    }
 
     // TODO: capture response headers now in case of error. store them in the extra data on the pager duty alert
     let headers = format!("{:#?}", a.headers());
 
     let a = a
-        .json::<JsonRpcResponse<Block<TxHash>>>()
+        .text()
         .await
-        .context(format!("error parsing block from {}", rpc))
-        .map_err(|x| error_builder.build(x))?;
+        .context(format!("failed parsing body from {}", rpc))?;
+
+    let a: JsonRpcResponse<Block<TxHash>> = serde_json::from_str(&body)
+        .context(format!("body: {}", body))
+        .context(format!("failed parsing json from {}", rpc))?;
 
     let a = if let Some(block) = a.result {
         block
@@ -204,7 +213,7 @@ async fn check_rpc(
     });
 
     let response = client
-        .post(rpc.clone())
+        .post(&rpc)
         .json(&block_by_hash_request)
         .send()
         .await
