@@ -61,24 +61,22 @@ pub async fn main(
         .map_err(|x| error_builder.build(x))?;
 
     if !a.status().is_success() {
-        return Err(anyhow::anyhow!(
-            "bad response from {}: {}",
-            rpc,
-            response.status(),
-        ));
+        return error_builder.result(anyhow!("bad response from {}: {}", rpc, a.status()));
     }
 
     // TODO: capture response headers now in case of error. store them in the extra data on the pager duty alert
     let headers = format!("{:#?}", a.headers());
 
-    let a = a
+    let body = a
         .text()
         .await
-        .context(format!("failed parsing body from {}", rpc))?;
+        .context(format!("failed parsing body from {}", rpc))
+        .map_err(|x| error_builder.build(x))?;
 
     let a: JsonRpcResponse<Block<TxHash>> = serde_json::from_str(&body)
         .context(format!("body: {}", body))
-        .context(format!("failed parsing json from {}", rpc))?;
+        .context(format!("failed parsing json from {}", rpc))
+        .map_err(|x| error_builder.build(x))?;
 
     let a = if let Some(block) = a.result {
         block
