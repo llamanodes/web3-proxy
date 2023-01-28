@@ -1,6 +1,12 @@
 def amd_image
 def arm_image
 def intel_image
+def restoreMTime() {
+    sh '''
+        git restore-mtime
+        touch -t $(git show -s --date=format:'%Y%m%d%H%M.%S' --format=%cd HEAD) .git
+    '''
+}
 
 
 pipeline {
@@ -18,6 +24,7 @@ pipeline {
                     steps {
                         script {
                             DOCKER_GIT_TAG_AMD="$DOCKER_GIT_TAG" + "_amd64"
+                            restoreMTime()
                             amd_image = docker.build("$DOCKER_GIT_TAG_AMD")
                         }
                     }
@@ -27,6 +34,7 @@ pipeline {
                     steps {
                         script {
                             DOCKER_GIT_TAG_ARM="$DOCKER_GIT_TAG" + "_arm64"
+                            restoreMTime()
                             arm_image = docker.build("$DOCKER_GIT_TAG_ARM")
                         }
                     }
@@ -36,6 +44,7 @@ pipeline {
                     steps {
                         script {
                             DOCKER_GIT_TAG_INTEL="$DOCKER_GIT_TAG" + "_intel_sky_lake"
+                            restoreMTime()
                             intel_image = docker.build("$DOCKER_GIT_TAG_INTEL")
                         }
                     }
