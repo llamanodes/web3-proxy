@@ -2,6 +2,7 @@
 
 use super::authorization::{ip_is_authorized, key_is_authorized};
 use super::errors::FrontendResult;
+use super::rpc_proxy_ws::ProxyMode;
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::Path;
 use axum::headers::{Origin, Referer, UserAgent};
@@ -18,9 +19,41 @@ use std::sync::Arc;
 #[debug_handler]
 pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ClientIp(ip): ClientIp,
+    ip: ClientIp,
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
+) -> FrontendResult {
+    _proxy_web3_rpc(app, ip, origin, payload, ProxyMode::Best).await
+}
+
+#[debug_handler]
+pub async fn fastest_proxy_web3_rpc(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: ClientIp,
+    origin: Option<TypedHeader<Origin>>,
+    Json(payload): Json<JsonRpcRequestEnum>,
+) -> FrontendResult {
+    // TODO: read the fastest number from params
+    // TODO: check that the app allows this without authentication
+    _proxy_web3_rpc(app, ip, origin, payload, ProxyMode::Fastest(0)).await
+}
+
+#[debug_handler]
+pub async fn versus_proxy_web3_rpc(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: ClientIp,
+    origin: Option<TypedHeader<Origin>>,
+    Json(payload): Json<JsonRpcRequestEnum>,
+) -> FrontendResult {
+    _proxy_web3_rpc(app, ip, origin, payload, ProxyMode::Versus).await
+}
+
+async fn _proxy_web3_rpc(
+    app: Arc<Web3ProxyApp>,
+    ClientIp(ip): ClientIp,
+    origin: Option<TypedHeader<Origin>>,
+    payload: JsonRpcRequestEnum,
+    proxy_mode: ProxyMode,
 ) -> FrontendResult {
     // TODO: benchmark spawning this
     // TODO: do we care about keeping the TypedHeader wrapper?
@@ -31,7 +64,7 @@ pub async fn proxy_web3_rpc(
     let authorization = Arc::new(authorization);
 
     let (response, rpcs, _semaphore) = app
-        .proxy_web3_rpc(authorization, payload)
+        .proxy_web3_rpc(authorization, payload, proxy_mode)
         .await
         .map(|(x, y)| (x, y, semaphore))?;
 
@@ -58,12 +91,82 @@ pub async fn proxy_web3_rpc(
 #[debug_handler]
 pub async fn proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ClientIp(ip): ClientIp,
+    ip: ClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     Path(rpc_key): Path<String>,
     Json(payload): Json<JsonRpcRequestEnum>,
+) -> FrontendResult {
+    _proxy_web3_rpc_with_key(
+        app,
+        ip,
+        origin,
+        referer,
+        user_agent,
+        rpc_key,
+        payload,
+        ProxyMode::Best,
+    )
+    .await
+}
+
+#[debug_handler]
+pub async fn fastest_proxy_web3_rpc_with_key(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: ClientIp,
+    origin: Option<TypedHeader<Origin>>,
+    referer: Option<TypedHeader<Referer>>,
+    user_agent: Option<TypedHeader<UserAgent>>,
+    Path(rpc_key): Path<String>,
+    Json(payload): Json<JsonRpcRequestEnum>,
+) -> FrontendResult {
+    _proxy_web3_rpc_with_key(
+        app,
+        ip,
+        origin,
+        referer,
+        user_agent,
+        rpc_key,
+        payload,
+        ProxyMode::Fastest(0),
+    )
+    .await
+}
+
+#[debug_handler]
+pub async fn versus_proxy_web3_rpc_with_key(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: ClientIp,
+    origin: Option<TypedHeader<Origin>>,
+    referer: Option<TypedHeader<Referer>>,
+    user_agent: Option<TypedHeader<UserAgent>>,
+    Path(rpc_key): Path<String>,
+    Json(payload): Json<JsonRpcRequestEnum>,
+) -> FrontendResult {
+    _proxy_web3_rpc_with_key(
+        app,
+        ip,
+        origin,
+        referer,
+        user_agent,
+        rpc_key,
+        payload,
+        ProxyMode::Versus,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn _proxy_web3_rpc_with_key(
+    app: Arc<Web3ProxyApp>,
+    ClientIp(ip): ClientIp,
+    origin: Option<TypedHeader<Origin>>,
+    referer: Option<TypedHeader<Referer>>,
+    user_agent: Option<TypedHeader<UserAgent>>,
+    rpc_key: String,
+    payload: JsonRpcRequestEnum,
+    proxy_mode: ProxyMode,
 ) -> FrontendResult {
     // TODO: DRY w/ proxy_web3_rpc
     // the request can take a while, so we spawn so that we can start serving another request
@@ -82,7 +185,7 @@ pub async fn proxy_web3_rpc_with_key(
     let authorization = Arc::new(authorization);
 
     let (response, rpcs, _semaphore) = app
-        .proxy_web3_rpc(authorization, payload)
+        .proxy_web3_rpc(authorization, payload, proxy_mode)
         .await
         .map(|(x, y)| (x, y, semaphore))?;
 

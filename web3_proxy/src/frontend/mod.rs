@@ -41,28 +41,102 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .time_to_live(Duration::from_secs(1))
         .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
+    // TODO: read config for if fastest/versus should be available publicly. default off
+
     // build our axum Router
     let app = Router::new()
-        // routes should be ordered most to least common
+        // TODO: i think these routes could be done a lot better
+        //
+        // HTTP RPC (POST)
+        //
+        // public
         .route("/", post(rpc_proxy_http::proxy_web3_rpc))
+        // authenticated with and without trailing slash
+        .route(
+            "/rpc/:rpc_key/",
+            post(rpc_proxy_http::proxy_web3_rpc_with_key),
+        )
+        .route(
+            "/rpc/:rpc_key",
+            post(rpc_proxy_http::proxy_web3_rpc_with_key),
+        )
+        // public fastest with and without trailing slash
+        .route("/fastest/", post(rpc_proxy_http::fastest_proxy_web3_rpc))
+        .route("/fastest", post(rpc_proxy_http::fastest_proxy_web3_rpc))
+        // authenticated fastest with and without trailing slash
+        .route(
+            "/fastest/:rpc_key/",
+            post(rpc_proxy_http::fastest_proxy_web3_rpc_with_key),
+        )
+        .route(
+            "/fastest/:rpc_key",
+            post(rpc_proxy_http::fastest_proxy_web3_rpc_with_key),
+        )
+        // public versus
+        .route("/versus/", post(rpc_proxy_http::versus_proxy_web3_rpc))
+        .route("/versus", post(rpc_proxy_http::versus_proxy_web3_rpc))
+        // authenticated versus with and without trailing slash
+        .route(
+            "/versus/:rpc_key/",
+            post(rpc_proxy_http::versus_proxy_web3_rpc_with_key),
+        )
+        .route(
+            "/versus/:rpc_key",
+            post(rpc_proxy_http::versus_proxy_web3_rpc_with_key),
+        )
+        //
+        // Websocket RPC (GET)
+        // If not an RPC, this will redirect to configurable urls
+        //
+        // public
         .route("/", get(rpc_proxy_ws::websocket_handler))
-        .route(
-            "/rpc/:rpc_key",
-            post(rpc_proxy_http::proxy_web3_rpc_with_key),
-        )
+        // authenticated with and without trailing slash
         .route(
             "/rpc/:rpc_key/",
-            post(rpc_proxy_http::proxy_web3_rpc_with_key),
+            get(rpc_proxy_ws::websocket_handler_with_key),
         )
         .route(
             "/rpc/:rpc_key",
             get(rpc_proxy_ws::websocket_handler_with_key),
         )
+        // public fastest with and without trailing slash
+        .route("/fastest/", get(rpc_proxy_ws::fastest_websocket_handler))
+        .route("/fastest", get(rpc_proxy_ws::fastest_websocket_handler))
+        // authenticated fastest with and without trailing slash
         .route(
-            "/rpc/:rpc_key/",
-            get(rpc_proxy_ws::websocket_handler_with_key),
+            "/fastest/:rpc_key/",
+            get(rpc_proxy_ws::fastest_websocket_handler_with_key),
         )
+        .route(
+            "/fastest/:rpc_key",
+            get(rpc_proxy_ws::fastest_websocket_handler_with_key),
+        )
+        // public versus
+        .route(
+            "/versus/",
+            get(rpc_proxy_ws::versus_websocket_handler_with_key),
+        )
+        .route(
+            "/versus",
+            get(rpc_proxy_ws::versus_websocket_handler_with_key),
+        )
+        // authenticated versus with and without trailing slash
+        .route(
+            "/versus/:rpc_key/",
+            get(rpc_proxy_ws::versus_websocket_handler_with_key),
+        )
+        .route(
+            "/versus/:rpc_key",
+            get(rpc_proxy_ws::versus_websocket_handler_with_key),
+        )
+        //
+        // System things
+        //
         .route("/health", get(status::health))
+        .route("/status", get(status::status))
+        //
+        // User stuff
+        //
         .route("/user/login/:user_address", get(users::user_login_get))
         .route(
             "/user/login/:user_address/:message_eip",
@@ -88,9 +162,11 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/user/stats/detailed", get(users::user_stats_detailed_get))
         .route("/admin/modify_role", get(admin::admin_change_user_roles))
         .route("/user/logout", post(users::user_logout_post))
-        .route("/status", get(status::status))
+        //
+        // Axum layers
         // layers are ordered bottom up
         // the last layer is first for requests and last for responses
+        //
         // Mark the `Authorization` request header as sensitive so it doesn't show in logs
         .layer(SetSensitiveRequestHeadersLayer::new(once(AUTHORIZATION)))
         // handle cors

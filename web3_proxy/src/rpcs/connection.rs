@@ -24,22 +24,22 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::{cmp::Ordering, sync::Arc};
 use thread_fast_rng::rand::Rng;
 use thread_fast_rng::thread_fast_rng;
-use tokio::sync::{broadcast, oneshot, RwLock as AsyncRwLock};
+use tokio::sync::{broadcast, oneshot, watch, RwLock as AsyncRwLock};
 use tokio::time::{interval, sleep, sleep_until, timeout, Duration, Instant, MissedTickBehavior};
 
 // TODO: maybe provider state should have the block data limit in it. but it is inside an async lock and we can't Serialize then
 #[derive(Clone, Debug)]
 pub enum ProviderState {
     None,
-    NotReady(Arc<Web3Provider>),
-    Ready(Arc<Web3Provider>),
+    Connecting(Arc<Web3Provider>),
+    Connected(Arc<Web3Provider>),
 }
 
 impl ProviderState {
     pub async fn provider(&self, allow_not_ready: bool) -> Option<&Arc<Web3Provider>> {
         match self {
             ProviderState::None => None,
-            ProviderState::NotReady(x) => {
+            ProviderState::Connecting(x) => {
                 if allow_not_ready {
                     Some(x)
                 } else {
@@ -47,7 +47,7 @@ impl ProviderState {
                     None
                 }
             }
-            ProviderState::Ready(x) => {
+            ProviderState::Connected(x) => {
                 if x.ready() {
                     Some(x)
                 } else {
@@ -63,7 +63,6 @@ pub struct Web3Connection {
     pub name: String,
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
-    pub(super) allowed_lag: u64,
     /// TODO: can we get this from the provider? do we even need it?
     pub(super) url: String,
     /// Some connections use an http_client. we keep a clone for reconnecting
@@ -77,6 +76,8 @@ pub struct Web3Connection {
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
     pub(super) provider_state: AsyncRwLock<ProviderState>,
+    /// keep track of hard limits
+    pub(super) hard_limit_until: Option<watch::Sender<Instant>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     /// We do not use the deferred rate limiter because going over limits would cause errors
     pub(super) hard_limit: Option<RedisRateLimiter>,
@@ -84,6 +85,8 @@ pub struct Web3Connection {
     pub(super) soft_limit: u32,
     /// use web3 queries to find the block data limit for archive/pruned nodes
     pub(super) automatic_block_limit: bool,
+    /// only use this rpc if everything else is lagging too far. this allows us to ignore fast but very low limit rpcs
+    pub(super) backup: bool,
     /// TODO: have an enum for this so that "no limit" prints pretty?
     pub(super) block_data_limit: AtomicU64,
     /// Lower tiers are higher priority when sending requests
@@ -99,7 +102,6 @@ impl Web3Connection {
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         name: String,
-        allowed_lag: u64,
         display_name: Option<String>,
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
@@ -111,6 +113,7 @@ impl Web3Connection {
         hard_limit: Option<(u64, RedisPool)>,
         // TODO: think more about this type
         soft_limit: u32,
+        backup: bool,
         block_data_limit: Option<u64>,
         block_map: BlockHashesCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
@@ -135,9 +138,18 @@ impl Web3Connection {
         let automatic_block_limit =
             (block_data_limit.load(atomic::Ordering::Acquire) == 0) && block_sender.is_some();
 
+        // track hard limit until on backup servers (which might surprise us with rate limit changes)
+        // and track on servers that have a configured hard limit
+        let hard_limit_until = if backup || hard_limit.is_some() {
+            let (sender, _) = watch::channel(Instant::now());
+
+            Some(sender)
+        } else {
+            None
+        };
+
         let new_connection = Self {
             name,
-            allowed_lag,
             db_conn: db_conn.clone(),
             display_name,
             http_client,
@@ -147,8 +159,10 @@ impl Web3Connection {
             internal_requests: 0.into(),
             provider_state: AsyncRwLock::new(ProviderState::None),
             hard_limit,
+            hard_limit_until,
             soft_limit,
             automatic_block_limit,
+            backup,
             block_data_limit,
             head_block: RwLock::new(Default::default()),
             tier,
@@ -191,25 +205,7 @@ impl Web3Connection {
             return Ok(None);
         }
 
-        // check if we are synced
-        let head_block: ArcBlock = self
-            .wait_for_request_handle(authorization, Duration::from_secs(30), true)
-            .await?
-            .request::<_, Option<_>>(
-                "eth_getBlockByNumber",
-                &json!(("latest", false)),
-                // error here are expected, so keep the level low
-                Level::Warn.into(),
-            )
-            .await?
-            .context("no block during check_block_data_limit!")?;
-
-        if SavedBlock::from(head_block).syncing(60) {
-            // if the node is syncing, we can't check its block data limit
-            return Ok(None);
-        }
-
-        // TODO: add SavedBlock to self? probably best not to. we might not get marked Ready
+        // TODO: check eth_syncing. if it is not false, return Ok(None)
 
         let mut limit = None;
 
@@ -217,7 +213,7 @@ impl Web3Connection {
         // TODO: start at 0 or 1?
         for block_data_limit in [0, 32, 64, 128, 256, 512, 1024, 90_000, u64::MAX] {
             let handle = self
-                .wait_for_request_handle(authorization, Duration::from_secs(30), true)
+                .wait_for_request_handle(authorization, None, true)
                 .await?;
 
             let head_block_num_future = handle.request::<Option<()>, U256>(
@@ -243,7 +239,7 @@ impl Web3Connection {
             // TODO: wait for the handle BEFORE we check the current block number. it might be delayed too!
             // TODO: what should the request be?
             let handle = self
-                .wait_for_request_handle(authorization, Duration::from_secs(30), true)
+                .wait_for_request_handle(authorization, None, true)
                 .await?;
 
             let archive_result: Result<Bytes, _> = handle
@@ -292,26 +288,10 @@ impl Web3Connection {
         self.block_data_limit.load(atomic::Ordering::Acquire).into()
     }
 
-    pub fn syncing(&self, allowed_lag: u64) -> bool {
-        match self.head_block.read().clone() {
-            None => true,
-            Some(x) => x.syncing(allowed_lag),
-        }
-    }
-
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
         let head_block_num = match self.head_block.read().clone() {
             None => return false,
-            Some(x) => {
-                // TODO: this 60 second limit is causing our polygons to fall behind. change this to number of blocks?
-                if x.syncing(60) {
-                    // skip syncing nodes. even though they might be able to serve a query,
-                    // latency will be poor and it will get in the way of them syncing further
-                    return false;
-                }
-
-                x.number()
-            }
+            Some(x) => x.number(),
         };
 
         // this rpc doesn't have that block yet. still syncing
@@ -370,7 +350,15 @@ impl Web3Connection {
             );
 
             let retry_in = Duration::from_millis(sleep_ms);
-            info!(
+
+            let error_level = if self.backup {
+                log::Level::Debug
+            } else {
+                log::Level::Info
+            };
+
+            log::log!(
+                error_level,
                 "Failed reconnect to {}! Retry in {}ms. err={:?}",
                 self,
                 retry_in.as_millis(),
@@ -401,7 +389,7 @@ impl Web3Connection {
             ProviderState::None => {
                 info!("connecting to {}", self);
             }
-            ProviderState::NotReady(provider) | ProviderState::Ready(provider) => {
+            ProviderState::Connecting(provider) | ProviderState::Connected(provider) => {
                 // disconnect the current provider
                 if let Web3Provider::Mock = provider.as_ref() {
                     return Ok(());
@@ -435,7 +423,7 @@ impl Web3Connection {
         let new_provider = Web3Provider::from_str(&self.url, self.http_client.clone()).await?;
 
         // trace!("saving provider state as NotReady on {}", self);
-        *provider_state = ProviderState::NotReady(Arc::new(new_provider));
+        *provider_state = ProviderState::Connecting(Arc::new(new_provider));
 
         // drop the lock so that we can get a request handle
         // trace!("provider_state {} unlocked", self);
@@ -448,7 +436,7 @@ impl Web3Connection {
         // TODO: what should the timeout be? should there be a request timeout?
         // trace!("waiting on chain id for {}", self);
         let found_chain_id: Result<U64, _> = self
-            .wait_for_request_handle(&authorization, Duration::from_secs(30), true)
+            .wait_for_request_handle(&authorization, None, true)
             .await?
             .request(
                 "eth_chainId",
@@ -489,7 +477,7 @@ impl Web3Connection {
                 .context("provider missing")?
                 .clone();
 
-            *provider_state = ProviderState::Ready(ready_provider);
+            *provider_state = ProviderState::Connected(ready_provider);
             // trace!("unlocked for ready...");
         }
 
@@ -543,7 +531,7 @@ impl Web3Connection {
                     let _ = head_block.insert(new_head_block.clone().into());
                 }
 
-                if self.block_data_limit() == U64::zero() && !self.syncing(1) {
+                if self.block_data_limit() == U64::zero() {
                     let authorization = Arc::new(Authorization::internal(self.db_conn.clone())?);
                     if let Err(err) = self.check_block_data_limit(&authorization).await {
                         warn!(
@@ -591,8 +579,6 @@ impl Web3Connection {
         reconnect: bool,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<()> {
-        let allowed_lag = self.allowed_lag;
-
         loop {
             let http_interval_receiver = http_interval_sender.as_ref().map(|x| x.subscribe());
 
@@ -624,8 +610,6 @@ impl Web3Connection {
                     let health_sleep_seconds = 10;
                     sleep(Duration::from_secs(health_sleep_seconds)).await;
 
-                    let mut warned = 0;
-
                     loop {
                         // TODO: what if we just happened to have this check line up with another restart?
                         // TODO: think more about this
@@ -643,34 +627,6 @@ impl Web3Connection {
                             return Err(anyhow::anyhow!("{} is not ready", conn));
                         }
                         // trace!("health check on {}. unlocked", conn);
-
-                        if let Some(x) = &*conn.head_block.read() {
-                            // if this block is too old, return an error so we reconnect
-                            let current_lag = x.lag();
-                            if current_lag > allowed_lag {
-                                let level = if warned == 0 {
-                                    log::Level::Warn
-                                } else if warned % 100 == 0 {
-                                    log::Level::Debug
-                                } else {
-                                    log::Level::Trace
-                                };
-
-                                log::log!(
-                                    level,
-                                    "{} is lagged {} secs: {} {}",
-                                    conn,
-                                    current_lag,
-                                    x.number(),
-                                    x.hash(),
-                                );
-
-                                warned += 1;
-                            } else {
-                                // reset warnings now that we are connected
-                                warned = 0;
-                            }
-                        }
 
                         sleep(Duration::from_secs(health_sleep_seconds)).await;
                     }
@@ -750,7 +706,7 @@ impl Web3Connection {
         // trace!("unlocked on new heads");
 
         // TODO: need a timeout
-        if let ProviderState::Ready(provider) = provider_state {
+        if let ProviderState::Connected(provider) = provider_state {
             match provider.as_ref() {
                 Web3Provider::Mock => unimplemented!(),
                 Web3Provider::Http(_provider) => {
@@ -764,7 +720,7 @@ impl Web3Connection {
                     loop {
                         // TODO: what should the max_wait be?
                         match self
-                            .wait_for_request_handle(&authorization, Duration::from_secs(30), false)
+                            .wait_for_request_handle(&authorization, None, false)
                             .await
                         {
                             Ok(active_request_handle) => {
@@ -850,7 +806,7 @@ impl Web3Connection {
                 Web3Provider::Ws(provider) => {
                     // todo: move subscribe_blocks onto the request handle?
                     let active_request_handle = self
-                        .wait_for_request_handle(&authorization, Duration::from_secs(30), false)
+                        .wait_for_request_handle(&authorization, None, false)
                         .await;
                     let mut stream = provider.subscribe_blocks().await?;
                     drop(active_request_handle);
@@ -860,7 +816,7 @@ impl Web3Connection {
                     // all it does is print "new block" for the same block as current block
                     // TODO: how does this get wrapped in an arc? does ethers handle that?
                     let block: Result<Option<ArcBlock>, _> = self
-                        .wait_for_request_handle(&authorization, Duration::from_secs(30), false)
+                        .wait_for_request_handle(&authorization, None, false)
                         .await?
                         .request(
                             "eth_getBlockByNumber",
@@ -922,7 +878,7 @@ impl Web3Connection {
         authorization: Arc<Authorization>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
     ) -> anyhow::Result<()> {
-        if let ProviderState::Ready(provider) = self
+        if let ProviderState::Connected(provider) = self
             .provider_state
             .try_read()
             .context("subscribe_pending_transactions")?
@@ -961,8 +917,8 @@ impl Web3Connection {
                 Web3Provider::Ws(provider) => {
                     // TODO: maybe the subscribe_pending_txs function should be on the active_request_handle
                     let active_request_handle = self
-                        .wait_for_request_handle(&authorization, Duration::from_secs(30), false)
-                        .await;
+                        .wait_for_request_handle(&authorization, None, false)
+                        .await?;
 
                     let mut stream = provider.subscribe_pending_txs().await?;
 
@@ -995,13 +951,14 @@ impl Web3Connection {
 
     /// be careful with this; it might wait forever!
     /// `allow_not_ready` is only for use by health checks while starting the provider
+    /// TODO: don't use anyhow. use specific error type
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
-        max_wait: Duration,
+        max_wait: Option<Duration>,
         allow_not_ready: bool,
     ) -> anyhow::Result<OpenRequestHandle> {
-        let max_wait = Instant::now() + max_wait;
+        let max_wait = max_wait.map(|x| Instant::now() + x);
 
         loop {
             match self
@@ -1011,21 +968,39 @@ impl Web3Connection {
                 Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
-                    // // trace!(?retry_at);
+                    let wait = retry_at.duration_since(Instant::now());
 
-                    if retry_at > max_wait {
-                        // break now since we will wait past our maximum wait time
-                        // TODO: don't use anyhow. use specific error type
-                        return Err(anyhow::anyhow!("timeout waiting for request handle"));
+                    trace!(
+                        "waiting {} millis for request handle on {}",
+                        wait.as_millis(),
+                        self
+                    );
+
+                    if let Some(max_wait) = max_wait {
+                        if retry_at > max_wait {
+                            // break now since we will wait past our maximum wait time
+                            // TODO: don't use anyhow. use specific error type
+                            return Err(anyhow::anyhow!("timeout waiting for request handle"));
+                        }
                     }
+
                     sleep_until(retry_at).await;
                 }
-                Ok(OpenRequestResult::NotReady) => {
+                Ok(OpenRequestResult::NotReady(_)) => {
                     // TODO: when can this happen? log? emit a stat?
-                    // TODO: subscribe to the head block on this
+                    trace!("{} has no handle ready", self);
+
+                    if let Some(max_wait) = max_wait {
+                        let now = Instant::now();
+
+                        if now > max_wait {
+                            return Err(anyhow::anyhow!("unable to retry for request handle"));
+                        }
+                    }
+
                     // TODO: sleep how long? maybe just error?
-                    // TODO: don't use anyhow. use specific error type
-                    return Err(anyhow::anyhow!("unable to retry for request handle"));
+                    // TODO: instead of an arbitrary sleep, subscribe to the head block on this
+                    sleep(Duration::from_millis(10)).await;
                 }
                 Err(err) => return Err(err),
             }
@@ -1048,27 +1023,50 @@ impl Web3Connection {
                 .await
                 .is_none()
         {
-            return Ok(OpenRequestResult::NotReady);
+            trace!("{} is not ready", self);
+            return Ok(OpenRequestResult::NotReady(self.backup));
+        }
+
+        if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
+            let hard_limit_ready = hard_limit_until.borrow().clone();
+
+            let now = Instant::now();
+
+            if now < hard_limit_ready {
+                return Ok(OpenRequestResult::RetryAt(hard_limit_ready));
+            }
         }
 
         // check rate limits
         if let Some(ratelimiter) = self.hard_limit.as_ref() {
             // TODO: how should we know if we should set expire or not?
-            match ratelimiter.throttle().await? {
+            match ratelimiter
+                .throttle()
+                .await
+                .context(format!("attempting to throttle {}", self))?
+            {
                 RedisRateLimitResult::Allowed(_) => {
-                    // // trace!("rate limit succeeded")
+                    // trace!("rate limit succeeded")
                 }
                 RedisRateLimitResult::RetryAt(retry_at, _) => {
-                    // rate limit failed
-                    // save the smallest retry_after. if nothing succeeds, return an Err with retry_after in it
-                    // TODO: use tracing better
-                    // TODO: i'm seeing "Exhausted rate limit on moralis: 0ns". How is it getting 0?
-                    warn!("Exhausted rate limit on {}. Retry at {:?}", self, retry_at);
+                    // rate limit gave us a wait time
+                    if !self.backup {
+                        let when = retry_at.duration_since(Instant::now());
+                        warn!(
+                            "Exhausted rate limit on {}. Retry in {}ms",
+                            self,
+                            when.as_millis()
+                        );
+                    }
+
+                    if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
+                        hard_limit_until.send_replace(retry_at.clone());
+                    }
 
                     return Ok(OpenRequestResult::RetryAt(retry_at));
                 }
                 RedisRateLimitResult::RetryNever => {
-                    return Ok(OpenRequestResult::NotReady);
+                    return Ok(OpenRequestResult::NotReady(self.backup));
                 }
             }
         };
@@ -1213,7 +1211,6 @@ mod tests {
 
         let x = Web3Connection {
             name: "name".to_string(),
-            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),
@@ -1223,8 +1220,10 @@ mod tests {
             internal_requests: 0.into(),
             provider_state: AsyncRwLock::new(ProviderState::None),
             hard_limit: None,
+            hard_limit_until: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
+            backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
@@ -1261,7 +1260,6 @@ mod tests {
         // TODO: this is getting long. have a `impl Default`
         let x = Web3Connection {
             name: "name".to_string(),
-            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),
@@ -1271,8 +1269,10 @@ mod tests {
             internal_requests: 0.into(),
             provider_state: AsyncRwLock::new(ProviderState::None),
             hard_limit: None,
+            hard_limit_until: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
+            backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
@@ -1288,6 +1288,8 @@ mod tests {
         assert!(!x.has_block_data(&(head_block.number() + 1000)));
     }
 
+    /*
+    // TODO: think about how to bring the concept of a "lagged" node back
     #[test]
     fn test_lagged_node_not_has_block_data() {
         let now: U256 = SystemTime::now()
@@ -1313,7 +1315,6 @@ mod tests {
 
         let x = Web3Connection {
             name: "name".to_string(),
-            allowed_lag: 10,
             db_conn: None,
             display_name: None,
             url: "ws://example.com".to_string(),
@@ -1325,6 +1326,7 @@ mod tests {
             hard_limit: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
+            backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
@@ -1337,4 +1339,5 @@ mod tests {
         assert!(!x.has_block_data(&(head_block.number() + 1)));
         assert!(!x.has_block_data(&(head_block.number() + 1000)));
     }
+    */
 }

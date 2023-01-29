@@ -1,6 +1,6 @@
 [package]
 name = "entities"
-version = "0.12.0"
+version = "0.13.0"
 edition = "2021"
 
 [lib]
@@ -10,7 +10,7 @@ path = "src/mod.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sea-orm = "0.10.6"
+sea-orm = "0.10.7"
 serde = "1.0.152"
 uuid = "1.2.2"
 ethers = "1.0.2"

@@ -27,7 +27,8 @@ pub enum OpenRequestResult {
     /// Unable to start a request. Retry at the given time.
     RetryAt(Instant),
     /// Unable to start a request because the server is not synced
-    NotReady,
+    /// contains "true" if backup servers were attempted
+    NotReady(bool),
 }
 
 /// Make RPC requests through this handle and drop it when you are done.
@@ -42,7 +43,7 @@ pub struct OpenRequestHandle {
 }
 
 /// Depending on the context, RPC errors can require different handling.
-pub enum RequestErrorHandler {
+pub enum RequestRevertHandler {
     /// Log at the trace level. Use when errors are expected.
     TraceLevel,
     /// Log at the debug level. Use when errors are expected.
@@ -52,7 +53,7 @@ pub enum RequestErrorHandler {
     /// Log at the warn level. Use when errors do not cause problems.
     WarnLevel,
     /// Potentially save the revert. Users can tune how often this happens
-    SaveReverts,
+    Save,
 }
 
 // TODO: second param could be skipped since we don't need it here
@@ -65,13 +66,13 @@ struct EthCallFirstParams {
     data: Option<Bytes>,
 }
 
-impl From<Level> for RequestErrorHandler {
+impl From<Level> for RequestRevertHandler {
     fn from(level: Level) -> Self {
         match level {
-            Level::Trace => RequestErrorHandler::TraceLevel,
-            Level::Debug => RequestErrorHandler::DebugLevel,
-            Level::Error => RequestErrorHandler::ErrorLevel,
-            Level::Warn => RequestErrorHandler::WarnLevel,
+            Level::Trace => RequestRevertHandler::TraceLevel,
+            Level::Debug => RequestRevertHandler::DebugLevel,
+            Level::Error => RequestRevertHandler::ErrorLevel,
+            Level::Warn => RequestRevertHandler::WarnLevel,
             _ => unimplemented!("unexpected tracing Level"),
         }
     }
@@ -84,7 +85,7 @@ impl Authorization {
         method: Method,
         params: EthCallFirstParams,
     ) -> anyhow::Result<()> {
-        let rpc_key_id = match self.checks.rpc_key_id {
+        let rpc_key_id = match self.checks.rpc_secret_key_id {
             Some(rpc_key_id) => rpc_key_id.into(),
             None => {
                 // // trace!(?self, "cannot save revert without rpc_key_id");
@@ -213,7 +214,7 @@ impl OpenRequestHandle {
         &self,
         method: &str,
         params: &P,
-        error_handler: RequestErrorHandler,
+        revert_handler: RequestRevertHandler,
     ) -> Result<R, ProviderError>
     where
         // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
@@ -240,52 +241,58 @@ impl OpenRequestHandle {
             Web3Provider::Ws(provider) => provider.request(method, params).await,
         };
 
-        // TODO: i think ethers already has trace logging (and does it much more fancy)
-        trace!(
-            "response from {} for {} {:?}: {:?}",
-            self.conn,
-            method,
-            params,
-            response,
-        );
+        // // TODO: i think ethers already has trace logging (and does it much more fancy)
+        // trace!(
+        //     "response from {} for {} {:?}: {:?}",
+        //     self.conn,
+        //     method,
+        //     params,
+        //     response,
+        // );
 
         if let Err(err) = &response {
             // only save reverts for some types of calls
             // TODO: do something special for eth_sendRawTransaction too
-            let error_handler = if let RequestErrorHandler::SaveReverts = error_handler {
+            let revert_handler = if let RequestRevertHandler::Save = revert_handler {
                 // TODO: should all these be Trace or Debug or a mix?
                 if !["eth_call", "eth_estimateGas"].contains(&method) {
                     // trace!(%method, "skipping save on revert");
-                    RequestErrorHandler::TraceLevel
+                    RequestRevertHandler::TraceLevel
                 } else if self.authorization.db_conn.is_some() {
                     let log_revert_chance = self.authorization.checks.log_revert_chance;
 
                     if log_revert_chance == 0.0 {
                         // trace!(%method, "no chance. skipping save on revert");
-                        RequestErrorHandler::TraceLevel
+                        RequestRevertHandler::TraceLevel
                     } else if log_revert_chance == 1.0 {
                         // trace!(%method, "gaurenteed chance. SAVING on revert");
-                        error_handler
+                        revert_handler
                     } else if thread_fast_rng::thread_fast_rng().gen_range(0.0f64..=1.0)
                         < log_revert_chance
                     {
                         // trace!(%method, "missed chance. skipping save on revert");
-                        RequestErrorHandler::TraceLevel
+                        RequestRevertHandler::TraceLevel
                     } else {
                         // trace!("Saving on revert");
                         // TODO: is always logging at debug level fine?
-                        error_handler
+                        revert_handler
                     }
                 } else {
                     // trace!(%method, "no database. skipping save on revert");
-                    RequestErrorHandler::TraceLevel
+                    RequestRevertHandler::TraceLevel
                 }
             } else {
-                error_handler
+                revert_handler
             };
 
+            enum ResponseTypes {
+                Revert,
+                RateLimit,
+                Ok,
+            }
+
             // check for "execution reverted" here
-            let is_revert = if let ProviderError::JsonRpcClientError(err) = err {
+            let response_type = if let ProviderError::JsonRpcClientError(err) = err {
                 // Http and Ws errors are very similar, but different types
                 let msg = match &*self.provider {
                     Web3Provider::Mock => unimplemented!(),
@@ -310,30 +317,44 @@ impl OpenRequestHandle {
                 };
 
                 if let Some(msg) = msg {
-                    msg.starts_with("execution reverted")
+                    if msg.starts_with("execution reverted") {
+                        trace!("revert from {}", self.conn);
+                        ResponseTypes::Revert
+                    } else if msg.contains("limit") || msg.contains("request") {
+                        trace!("rate limit from {}", self.conn);
+                        ResponseTypes::RateLimit
+                    } else {
+                        ResponseTypes::Ok
+                    }
                 } else {
-                    false
+                    ResponseTypes::Ok
                 }
             } else {
-                false
+                ResponseTypes::Ok
             };
 
-            if is_revert {
-                trace!("revert from {}", self.conn);
+            if matches!(response_type, ResponseTypes::RateLimit) {
+                if let Some(hard_limit_until) = self.conn.hard_limit_until.as_ref() {
+                    let retry_at = Instant::now() + Duration::from_secs(1);
+
+                    trace!("retry {} at: {:?}", self.conn, retry_at);
+
+                    hard_limit_until.send_replace(retry_at);
+                }
             }
 
             // TODO: think more about the method and param logs. those can be sensitive information
-            match error_handler {
-                RequestErrorHandler::DebugLevel => {
+            match revert_handler {
+                RequestRevertHandler::DebugLevel => {
                     // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
-                    if !is_revert {
+                    if matches!(response_type, ResponseTypes::Revert) {
                         debug!(
                             "bad response from {}! method={} params={:?} err={:?}",
                             self.conn, method, params, err
                         );
                     }
                 }
-                RequestErrorHandler::TraceLevel => {
+                RequestRevertHandler::TraceLevel => {
                     trace!(
                         "bad response from {}! method={} params={:?} err={:?}",
                         self.conn,
@@ -342,21 +363,21 @@ impl OpenRequestHandle {
                         err
                     );
                 }
-                RequestErrorHandler::ErrorLevel => {
+                RequestRevertHandler::ErrorLevel => {
                     // TODO: include params if not running in release mode
                     error!(
                         "bad response from {}! method={} err={:?}",
                         self.conn, method, err
                     );
                 }
-                RequestErrorHandler::WarnLevel => {
+                RequestRevertHandler::WarnLevel => {
                     // TODO: include params if not running in release mode
                     warn!(
                         "bad response from {}! method={} err={:?}",
                         self.conn, method, err
                     );
                 }
-                RequestErrorHandler::SaveReverts => {
+                RequestRevertHandler::Save => {
                     trace!(
                         "bad response from {}! method={} params={:?} err={:?}",
                         self.conn,

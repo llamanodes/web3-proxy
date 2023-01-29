@@ -300,6 +300,32 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] if private txs are disabled, only send trasactions to some of our servers. we were DOSing ourselves with transactions and slowing down sync
 - [x] retry if we get "the method X is not available"
 - [x] remove weight. we don't use it anymore. tiers are what we use now
+- [x] make deadlock feature optional
+- [x] standalone healthcheck daemon (sentryd)
+- [x] status page should show version
+- [x] combine the proxy and cli into one bin
+- [x] improve rate limiting on websockets
+- [x] retry another server if we get a jsonrpc response error about rate limits
+- [x] major refactor to only use backup servers when absolutely necessary
+- [x] remove allowed lag
+- [x] configurable gas buffer. default to the larger of 25k or 25% on polygon to work around erigon bug
+- [x] public is 3900, but free is 360. free should be at least 3900 but probably more
+- [x] add --max-wait to wait_for_sync
+- [x] add automatic compare urls to wait_for_sync
+- [x] send panics to pagerduty
+- [x] enable lto on release builds
+- [x] less logs for backup servers
+- [x] use channels instead of arcswap
+  - this will let us easily wait for a new head or a new synced connection
+- [x] broadcast transactions to more servers
+- [x] send sentryd errors to pagerduty
+- [x] improve handling of unknown methods
+- [x] don't send pagerduty alerts for websocket panics
+- [x] improve waiting for sync when rate limited
+- [x] improve pager duty errors for smarter deduping
+- [x] add create_key cli command
+- [-] proxy mode for benchmarking all backends
+- [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
   - this must be opt-in and spawned in the background since it will slow things down and will make their calls less private
   - [ ] automatic pruning of old revert logs once too many are collected
@@ -323,7 +349,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] `stat delay` script 
   - query database for newest stat
 - [ ] period_datetime should always be :00. right now it depends on start time 
-- [ ] two servers running will confuse rpc_accounting!
+- [ ] we have our hard rate limiter set up with a period of 60. but most providers have period of 1- [ ] two servers running will confuse rpc_accounting!
   - it won't happen with users often because they should be sticky to one proxy, but unauthenticated users will definitely hit this
   - one option: we need the insert to be an upsert, but how do we merge historgrams?
 - [ ] don't use systemtime. use chrono
@@ -508,7 +534,8 @@ in another repo: event subscriber
 - [ ] if the call is something simple like "symbol" or "decimals", cache that too. though i think this could bite us.
 - [ ] add a subscription that returns the head block number and hash but nothing else
 - [ ] if chain split detected, what should we do? don't send transactions?
-- [ ] archive check works well for local servers, but public nodes (especially on other chains) seem to give unreliable results. likely because of load balancers. maybe have a "max block data limit"
+- [ ] archive check works well for local servers, but public nodes (especially on other chains) seem to give unreliable results. likely because of load balancers.
+  - [x] configurable block data limit until better checks
 - [ ] https://docs.rs/derive_builder/latest/derive_builder/
 - [ ] Detect orphaned transactions
 - [ ] https://crates.io/crates/reqwest-middleware easy retry with exponential back off
@@ -578,7 +605,6 @@ in another repo: event subscriber
 - [ ] sentry profiling
 - [ ] support alchemy_minedTransactions
 - [ ] debug print of user::Model's address is a big vec of numbers. make that hex somehow
-- [ ] should we combine the proxy and cli into one bin?
 - [ ] make it so you can put a string like "LN arbitrum" into the create_user script, and have it automatically turn it into 0x4c4e20617262697472756d000000000000000000.
   - [ ] if --address not given, use the --description
   - [ ] if it is too long, (the last 4 bytes must be zero), give an error so descriptions like this stand out

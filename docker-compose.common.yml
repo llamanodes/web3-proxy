@@ -4,7 +4,7 @@ services:
     build: .
     init: true
     restart: unless-stopped
-    command: --config /config.toml --workers 16
+    command: --config /config.toml --workers 16 proxyd
     # rust's tokio crate expects a SIGINT https://tokio.rs/tokio/topics/shutdown
     stop_signal: SIGINT
     environment:

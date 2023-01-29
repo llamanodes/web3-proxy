@@ -36,7 +36,7 @@ impl ProxyResponseStat {
     fn key(&self) -> ProxyResponseAggregateKey {
         // include either the rpc_key_id or the origin
         let (mut rpc_key_id, origin) = match (
-            self.authorization.checks.rpc_key_id,
+            self.authorization.checks.rpc_secret_key_id,
             &self.authorization.origin,
         ) {
             (Some(rpc_key_id), _) => {

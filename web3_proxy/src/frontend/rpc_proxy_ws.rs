@@ -32,11 +32,60 @@ use serde_json::json;
 use serde_json::value::to_raw_value;
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
+use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock};
+
+#[derive(Copy, Clone)]
+pub enum ProxyMode {
+    /// send to the "best" synced server
+    Best,
+    /// send to all synced servers and return the fastest non-error response (reverts do not count as errors here)
+    Fastest(usize),
+    /// send to all servers for benchmarking. return the fastest non-error response
+    Versus,
+}
 
 /// Public entrypoint for WebSocket JSON-RPC requests.
+/// Queries a single server at a time
 #[debug_handler]
 pub async fn websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: ClientIp,
+    origin: Option<TypedHeader<Origin>>,
+    ws_upgrade: Option<WebSocketUpgrade>,
+) -> FrontendResult {
+    _websocket_handler(ProxyMode::Best, app, ip, origin, ws_upgrade).await
+}
+
+/// Public entrypoint for WebSocket JSON-RPC requests that uses all synced servers.
+/// Queries all synced backends with every request! This might get expensive!
+#[debug_handler]
+pub async fn fastest_websocket_handler(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: ClientIp,
+    origin: Option<TypedHeader<Origin>>,
+    ws_upgrade: Option<WebSocketUpgrade>,
+) -> FrontendResult {
+    // TODO: get the fastest number from the url params (default to 0/all)
+    // TODO: config to disable this
+    _websocket_handler(ProxyMode::Fastest(0), app, ip, origin, ws_upgrade).await
+}
+
+/// Public entrypoint for WebSocket JSON-RPC requests that uses all synced servers.
+/// Queries **all** backends with every request! This might get expensive!
+#[debug_handler]
+pub async fn versus_websocket_handler(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: ClientIp,
+    origin: Option<TypedHeader<Origin>>,
+    ws_upgrade: Option<WebSocketUpgrade>,
+) -> FrontendResult {
+    // TODO: config to disable this
+    _websocket_handler(ProxyMode::Versus, app, ip, origin, ws_upgrade).await
+}
+
+async fn _websocket_handler(
+    proxy_mode: ProxyMode,
+    app: Arc<Web3ProxyApp>,
     ClientIp(ip): ClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
@@ -49,7 +98,7 @@ pub async fn websocket_handler(
 
     match ws_upgrade {
         Some(ws) => Ok(ws
-            .on_upgrade(|socket| proxy_web3_socket(app, authorization, socket))
+            .on_upgrade(move |socket| proxy_web3_socket(app, authorization, socket, proxy_mode))
             .into_response()),
         None => {
             if let Some(redirect) = &app.config.redirect_public_url {
@@ -72,8 +121,79 @@ pub async fn websocket_handler(
 #[debug_handler]
 pub async fn websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ClientIp(ip): ClientIp,
+    ip: ClientIp,
     Path(rpc_key): Path<String>,
+    origin: Option<TypedHeader<Origin>>,
+    referer: Option<TypedHeader<Referer>>,
+    user_agent: Option<TypedHeader<UserAgent>>,
+    ws_upgrade: Option<WebSocketUpgrade>,
+) -> FrontendResult {
+    _websocket_handler_with_key(
+        ProxyMode::Best,
+        app,
+        ip,
+        rpc_key,
+        origin,
+        referer,
+        user_agent,
+        ws_upgrade,
+    )
+    .await
+}
+
+#[debug_handler]
+pub async fn fastest_websocket_handler_with_key(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: ClientIp,
+    Path(rpc_key): Path<String>,
+    origin: Option<TypedHeader<Origin>>,
+    referer: Option<TypedHeader<Referer>>,
+    user_agent: Option<TypedHeader<UserAgent>>,
+    ws_upgrade: Option<WebSocketUpgrade>,
+) -> FrontendResult {
+    // TODO: get the fastest number from the url params (default to 0/all)
+    _websocket_handler_with_key(
+        ProxyMode::Fastest(0),
+        app,
+        ip,
+        rpc_key,
+        origin,
+        referer,
+        user_agent,
+        ws_upgrade,
+    )
+    .await
+}
+
+#[debug_handler]
+pub async fn versus_websocket_handler_with_key(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: ClientIp,
+    Path(rpc_key): Path<String>,
+    origin: Option<TypedHeader<Origin>>,
+    referer: Option<TypedHeader<Referer>>,
+    user_agent: Option<TypedHeader<UserAgent>>,
+    ws_upgrade: Option<WebSocketUpgrade>,
+) -> FrontendResult {
+    _websocket_handler_with_key(
+        ProxyMode::Versus,
+        app,
+        ip,
+        rpc_key,
+        origin,
+        referer,
+        user_agent,
+        ws_upgrade,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn _websocket_handler_with_key(
+    proxy_mode: ProxyMode,
+    app: Arc<Web3ProxyApp>,
+    ClientIp(ip): ClientIp,
+    rpc_key: String,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
@@ -96,9 +216,8 @@ pub async fn websocket_handler_with_key(
     let authorization = Arc::new(authorization);
 
     match ws_upgrade {
-        Some(ws_upgrade) => {
-            Ok(ws_upgrade.on_upgrade(move |socket| proxy_web3_socket(app, authorization, socket)))
-        }
+        Some(ws_upgrade) => Ok(ws_upgrade
+            .on_upgrade(move |socket| proxy_web3_socket(app, authorization, socket, proxy_mode))),
         None => {
             // if no websocket upgrade, this is probably a user loading the url with their browser
 
@@ -107,7 +226,7 @@ pub async fn websocket_handler_with_key(
             match (
                 &app.config.redirect_public_url,
                 &app.config.redirect_rpc_key_url,
-                authorization.checks.rpc_key_id,
+                authorization.checks.rpc_secret_key_id,
             ) {
                 (None, None, _) => Err(FrontendErrorResponse::StatusCode(
                     StatusCode::BAD_REQUEST,
@@ -120,7 +239,7 @@ pub async fn websocket_handler_with_key(
                 (_, Some(redirect_rpc_key_url), rpc_key_id) => {
                     let reg = Handlebars::new();
 
-                    if authorization.checks.rpc_key_id.is_none() {
+                    if authorization.checks.rpc_secret_key_id.is_none() {
                         // i don't think this is possible
                         Err(FrontendErrorResponse::StatusCode(
                             StatusCode::UNAUTHORIZED,
@@ -154,6 +273,7 @@ async fn proxy_web3_socket(
     app: Arc<Web3ProxyApp>,
     authorization: Arc<Authorization>,
     socket: WebSocket,
+    proxy_mode: ProxyMode,
 ) {
     // split the websocket so we can read and write concurrently
     let (ws_tx, ws_rx) = socket.split();
@@ -162,7 +282,13 @@ async fn proxy_web3_socket(
     let (response_sender, response_receiver) = flume::unbounded::<Message>();
 
     tokio::spawn(write_web3_socket(response_receiver, ws_tx));
-    tokio::spawn(read_web3_socket(app, authorization, ws_rx, response_sender));
+    tokio::spawn(read_web3_socket(
+        app,
+        authorization,
+        ws_rx,
+        response_sender,
+        proxy_mode,
+    ));
 }
 
 /// websockets support a few more methods than http clients
@@ -172,8 +298,20 @@ async fn handle_socket_payload(
     payload: &str,
     response_sender: &flume::Sender<Message>,
     subscription_count: &AtomicUsize,
-    subscriptions: &mut HashMap<String, AbortHandle>,
-) -> Message {
+    subscriptions: Arc<RwLock<HashMap<String, AbortHandle>>>,
+    proxy_mode: ProxyMode,
+) -> (Message, Option<OwnedSemaphorePermit>) {
+    let (authorization, semaphore) = match authorization.check_again(&app).await {
+        Ok((a, s)) => (a, s),
+        Err(err) => {
+            let (_, err) = err.into_response_parts();
+
+            let err = serde_json::to_string(&err).expect("to_string should always work here");
+
+            return (Message::Text(err), None);
+        }
+    };
+
     // TODO: do any clients send batches over websockets?
     let (id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
         Ok(json_request) => {
@@ -183,6 +321,7 @@ async fn handle_socket_payload(
                 [..]
             {
                 "eth_subscribe" => {
+                    // TODO: how can we subscribe with proxy_mode?
                     match app
                         .eth_subscribe(
                             authorization.clone(),
@@ -194,7 +333,9 @@ async fn handle_socket_payload(
                     {
                         Ok((handle, response)) => {
                             // TODO: better key
-                            subscriptions.insert(
+                            let mut x = subscriptions.write().await;
+
+                            x.insert(
                                 response
                                     .result
                                     .as_ref()
@@ -218,14 +359,18 @@ async fn handle_socket_payload(
 
                     let subscription_id = json_request.params.unwrap().to_string();
 
+                    let mut x = subscriptions.write().await;
+
                     // TODO: is this the right response?
-                    let partial_response = match subscriptions.remove(&subscription_id) {
+                    let partial_response = match x.remove(&subscription_id) {
                         None => false,
                         Some(handle) => {
                             handle.abort();
                             true
                         }
                     };
+
+                    drop(x);
 
                     let response =
                         JsonRpcForwardedResponse::from_value(json!(partial_response), id.clone());
@@ -247,7 +392,7 @@ async fn handle_socket_payload(
                     Ok(response.into())
                 }
                 _ => app
-                    .proxy_web3_rpc(authorization.clone(), json_request.into())
+                    .proxy_web3_rpc(authorization.clone(), json_request.into(), proxy_mode)
                     .await
                     .map_or_else(
                         |err| match err {
@@ -281,9 +426,7 @@ async fn handle_socket_payload(
         }
     };
 
-    // TODO: what error should this be?
-
-    Message::Text(response_str)
+    (Message::Text(response_str), semaphore)
 }
 
 async fn read_web3_socket(
@@ -291,60 +434,99 @@ async fn read_web3_socket(
     authorization: Arc<Authorization>,
     mut ws_rx: SplitStream<WebSocket>,
     response_sender: flume::Sender<Message>,
+    proxy_mode: ProxyMode,
 ) {
-    let mut subscriptions = HashMap::new();
-    let subscription_count = AtomicUsize::new(1);
+    // TODO: need a concurrent hashmap
+    let subscriptions = Arc::new(RwLock::new(HashMap::new()));
+    let subscription_count = Arc::new(AtomicUsize::new(1));
 
-    while let Some(Ok(msg)) = ws_rx.next().await {
-        // TODO: spawn this?
-        // new message from our client. forward to a backend and then send it through response_tx
-        let response_msg = match msg {
-            Message::Text(payload) => {
-                handle_socket_payload(
-                    app.clone(),
-                    &authorization,
-                    &payload,
-                    &response_sender,
-                    &subscription_count,
-                    &mut subscriptions,
-                )
-                .await
+    let (close_sender, mut close_receiver) = broadcast::channel(1);
+
+    loop {
+        tokio::select! {
+            msg = ws_rx.next() => {
+                if let Some(Ok(msg)) = msg {
+                    // spawn so that we can serve responses from this loop even faster
+                    // TODO: only do these clones if the msg is text/binary?
+                    let close_sender = close_sender.clone();
+                    let app = app.clone();
+                    let authorization = authorization.clone();
+                    let response_sender = response_sender.clone();
+                    let subscriptions = subscriptions.clone();
+                    let subscription_count = subscription_count.clone();
+
+                    let f = async move {
+                        let mut _semaphore = None;
+
+                        // new message from our client. forward to a backend and then send it through response_tx
+                        let response_msg = match msg {
+                            Message::Text(payload) => {
+                                let (msg, s) = handle_socket_payload(
+                                    app.clone(),
+                                    &authorization,
+                                    &payload,
+                                    &response_sender,
+                                    &subscription_count,
+                                    subscriptions,
+                                    proxy_mode,
+                                )
+                                .await;
+
+                                _semaphore = s;
+
+                                msg
+                            }
+                            Message::Ping(x) => {
+                                trace!("ping: {:?}", x);
+                                Message::Pong(x)
+                            }
+                            Message::Pong(x) => {
+                                trace!("pong: {:?}", x);
+                                return;
+                            }
+                            Message::Close(_) => {
+                                info!("closing websocket connection");
+                                // TODO: do something to close subscriptions?
+                                let _ = close_sender.send(true);
+                                return;
+                            }
+                            Message::Binary(mut payload) => {
+                                let payload = from_utf8_mut(&mut payload).unwrap();
+
+                                let (msg, s) = handle_socket_payload(
+                                    app.clone(),
+                                    &authorization,
+                                    payload,
+                                    &response_sender,
+                                    &subscription_count,
+                                    subscriptions,
+                                    proxy_mode,
+                                )
+                                .await;
+
+                                _semaphore = s;
+
+                                msg
+                            }
+                        };
+
+                        if response_sender.send_async(response_msg).await.is_err() {
+                            let _ = close_sender.send(true);
+                            return;
+                        };
+
+                        _semaphore = None;
+                    };
+
+                    tokio::spawn(f);
+                } else {
+                    break;
+                }
             }
-            Message::Ping(x) => {
-                trace!("ping: {:?}", x);
-                Message::Pong(x)
-            }
-            Message::Pong(x) => {
-                trace!("pong: {:?}", x);
-                continue;
-            }
-            Message::Close(_) => {
-                info!("closing websocket connection");
+            _ = close_receiver.recv() => {
                 break;
             }
-            Message::Binary(mut payload) => {
-                // TODO: poke rate limit for the user/ip
-                let payload = from_utf8_mut(&mut payload).unwrap();
-
-                handle_socket_payload(
-                    app.clone(),
-                    &authorization,
-                    payload,
-                    &response_sender,
-                    &subscription_count,
-                    &mut subscriptions,
-                )
-                .await
-            }
-        };
-
-        match response_sender.send_async(response_msg).await {
-            Ok(_) => {}
-            Err(err) => {
-                error!("{}", err);
-                break;
-            }
-        };
+        }
     }
 }
 

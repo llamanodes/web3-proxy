@@ -4,6 +4,7 @@ use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::{app::AnyhowJoinHandle, rpcs::blockchain::ArcBlock};
 use argh::FromArgs;
 use ethers::prelude::TxHash;
+use ethers::types::U256;
 use hashbrown::HashMap;
 use log::warn;
 use migration::sea_orm::DatabaseConnection;
@@ -38,7 +39,7 @@ pub struct CliConfig {
     pub cookie_key_filename: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct TopConfig {
     pub app: AppConfig,
     pub balanced_rpcs: HashMap<String, Web3ConnectionConfig>,
@@ -51,7 +52,7 @@ pub struct TopConfig {
 
 /// shared configuration between Web3Connections
 // TODO: no String, only &str
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct AppConfig {
     /// Request limit for allowed origins for anonymous users.
     /// These requests get rate limited by IP.
@@ -89,6 +90,12 @@ pub struct AppConfig {
     /// 0 = block all requests
     /// None = allow all requests
     pub default_user_max_requests_per_period: Option<u64>,
+
+    /// minimum amount to increase eth_estimateGas results
+    pub gas_increase_min: Option<U256>,
+
+    /// percentage to increase eth_estimateGas results. 100 == 100%
+    pub gas_increase_percent: Option<U256>,
 
     /// Restrict user registration.
     /// None = no code needed
@@ -183,7 +190,7 @@ fn default_response_cache_max_bytes() -> usize {
 }
 
 /// Configuration for a backend web3 RPC server
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Web3ConnectionConfig {
     /// simple way to disable a connection without deleting the row
     #[serde(default)]
@@ -198,6 +205,8 @@ pub struct Web3ConnectionConfig {
     pub soft_limit: u32,
     /// the requests per second at which the server throws errors (rate limit or otherwise)
     pub hard_limit: Option<u64>,
+    /// only use this rpc if everything else is lagging too far. this allows us to ignore fast but very low limit rpcs
+    pub backup: Option<bool>,
     /// All else equal, a server with a lower tier receives all requests
     #[serde(default = "default_tier")]
     pub tier: u64,
@@ -221,7 +230,6 @@ impl Web3ConnectionConfig {
     pub async fn spawn(
         self,
         name: String,
-        allowed_lag: u64,
         db_conn: Option<DatabaseConnection>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
         chain_id: u64,
@@ -256,9 +264,10 @@ impl Web3ConnectionConfig {
             None
         };
 
+        let backup = self.backup.unwrap_or(false);
+
         Web3Connection::spawn(
             name,
-            allowed_lag,
             self.display_name,
             chain_id,
             db_conn,
@@ -267,6 +276,7 @@ impl Web3ConnectionConfig {
             http_interval_sender,
             hard_limit,
             self.soft_limit,
+            backup,
             self.block_data_limit,
             block_map,
             block_sender,
