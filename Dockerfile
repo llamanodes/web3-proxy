@@ -7,21 +7,22 @@ FROM rust:1-bullseye AS chef
 
 WORKDIR /app
 
-# cargo binstall provides a low-complexity mechanism for installing rust binaries as an alternative to building from source (via cargo install) or manually downloading packages.
-# This is intended to work with existing CI artifacts and infrastructure, and with minimal overhead for package maintainers.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
-    cargo install cargo-binstall 
+# # cargo binstall provides a low-complexity mechanism for installing rust binaries as an alternative to building from source (via cargo install) or manually downloading packages.
+# # This is intended to work with existing CI artifacts and infrastructure, and with minimal overhead for package maintainers.
+# # TODO: more mount type cache?
+# # TODO: this works on some architectures, but is failing on others.
+# RUN --mount=type=cache,target=/usr/local/cargo/registry \
+#     cargo install cargo-binstall
 
 # cache the dependencies of your Rust project and speed up your Docker builds. 
+# TODO: more mount type cache?
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
-    cargo binstall --no-confirm --no-symlinks --secure cargo-chef 
+    cargo install cargo-chef
 
 # a next-generation test runner for Rust projects.
+# TODO: more mount type cache?
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
-    cargo binstall --no-confirm --no-symlinks --secure cargo-nextest 
+    cargo install cargo-nextest
 
 #
 # prepare examines your project and builds a recipe that captures the set of information required to build your dependencies.
