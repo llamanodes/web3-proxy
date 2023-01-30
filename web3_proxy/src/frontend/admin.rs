@@ -319,82 +319,32 @@ pub async fn admin_login_post(
     }
 
     // TODO: Maybe add a context?
-    let imitating_user = user_pending_login.imitating_user.address?;
+    let imitating_user_id = user_pending_login.imitating_user
+        .context("getting address of the imitating user")?;
 
     // TODO: limit columns or load whole user?
     // TODO: Right now this loads the whole admin. I assume we might want to load the user though (?) figure this out as we go along...
     let admin = user::Entity::find()
         .filter(user::Column::Address.eq(our_msg.address.as_ref()))
         .one(db_replica.conn())
-        .await
-        .unwrap();
+        .await?
+        .context("getting admin address")?;
 
-    let u = user::Entity::find()
-        .filter(user::Column::Address.eq(imitating_user_address.as_ref()))
+    let imitating_user = user::Entity::find()
+        .filter(user::Column::Id.eq(imitating_user_id))
         .one(db_replica.conn())
+        .await?
+        .context("admin address was not found!")?;
+
+    // I supposed we also get the rpc_key, whatever this is used for (?).
+    // I think the RPC key should still belong to the admin though in this case ...
+
+    // the user is already registered
+    let admin_rpc_key = rpc_key::Entity::find()
+        .filter(rpc_key::Column::UserId.eq(admin.id))
+        .all(db_replica.conn())
         .await
-        .unwrap();
-
-    let db_conn = app.db_conn().context("login requires a db")?;
-
-    let (u, uks, status_code) = match u {
-        None => {
-            // user does not exist yet
-
-            // check the invite code
-            // TODO: more advanced invite codes that set different request/minute and concurrency limits
-            if let Some(invite_code) = &app.config.invite_code {
-                if query.invite_code.as_ref() != Some(invite_code) {
-                    return Err(anyhow::anyhow!("checking invite_code").into());
-                }
-            }
-
-            let txn = db_conn.begin().await?;
-
-            // the only thing we need from them is an address
-            // everything else is optional
-            // TODO: different invite codes should allow different levels
-            // TODO: maybe decrement a count on the invite code?
-            let u = user::ActiveModel {
-                address: sea_orm::Set(our_msg.address.into()),
-                ..Default::default()
-            };
-
-            let u = u.insert(&txn).await?;
-
-            // create the user's first api key
-            let rpc_secret_key = RpcSecretKey::new();
-
-            let uk = rpc_key::ActiveModel {
-                user_id: sea_orm::Set(u.id),
-                secret_key: sea_orm::Set(rpc_secret_key.into()),
-                description: sea_orm::Set(None),
-                ..Default::default()
-            };
-
-            let uk = uk
-                .insert(&txn)
-                .await
-                .context("Failed saving new user key")?;
-
-            let uks = vec![uk];
-
-            // save the user and key to the database
-            txn.commit().await?;
-
-            (u, uks, StatusCode::CREATED)
-        }
-        Some(u) => {
-            // the user is already registered
-            let uks = rpc_key::Entity::find()
-                .filter(rpc_key::Column::UserId.eq(u.id))
-                .all(db_replica.conn())
-                .await
-                .context("failed loading user's key")?;
-
-            (u, uks, StatusCode::OK)
-        }
-    };
+        .context("failed loading user's key")?;
 
     // create a bearer token for the user.
     let user_bearer_token = UserBearerToken::default();
@@ -402,15 +352,16 @@ pub async fn admin_login_post(
     // json response with everything in it
     // we could return just the bearer token, but I think they will always request api keys and the user profile
     let response_json = json!({
-        "rpc_keys": uks
+        "rpc_keys": admin_rpc_key
             .into_iter()
             .map(|uk| (uk.id, uk))
             .collect::<HashMap<_, _>>(),
         "bearer_token": user_bearer_token,
-        "user": u,
+        "imitating_user": imitating_user,
+        "admin_user": admin,
     });
 
-    let response = (status_code, Json(response_json)).into_response();
+    let response = (StatusCode::OK, Json(response_json)).into_response();
 
     // add bearer to the database
 
@@ -426,10 +377,12 @@ pub async fn admin_login_post(
     let user_login = login::ActiveModel {
         id: sea_orm::NotSet,
         bearer_token: sea_orm::Set(user_bearer_token.uuid()),
-        user_id: sea_orm::Set(u.id),  // Yes, this should be the user ... because the rest of the applications takes this item, from the initial user
+        user_id: sea_orm::Set(imitating_user.id),  // Yes, this should be the user ... because the rest of the applications takes this item, from the initial user
         expires_at: sea_orm::Set(expires_at),
         read_only: sea_orm::Set(true)
     };
+
+    let db_conn = app.db_conn().context("Getting database connection")?;
 
     user_login
         .save(&db_conn)
