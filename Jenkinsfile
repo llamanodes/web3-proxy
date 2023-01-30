@@ -11,6 +11,9 @@ def restoreMTime() {
 
 pipeline {
     agent any
+    options {
+        ansiColor('xterm')
+    }
     environment {
         DOCKER_GIT_TAG="$AWS_ECR_URL/web3-proxy:${GIT_COMMIT.substring(0,8)}"
         DOCKER_BUILDKIT=1
