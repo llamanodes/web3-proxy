@@ -14,6 +14,8 @@ mod m20221211_124002_request_method_privacy;
 mod m20221213_134158_move_login_into_database;
 mod m20230117_191358_admin_table;
 mod m20230119_204135_better_free_tier;
+mod m20230130_124740_read_only_login_logic;
+mod m20230130_165144_prepare_admin_imitation_pre_login;
 
 pub struct Migrator;
 
@@ -35,6 +37,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20221213_134158_move_login_into_database::Migration),
             Box::new(m20230117_191358_admin_table::Migration),
             Box::new(m20230119_204135_better_free_tier::Migration),
+            Box::new(m20230130_124740_read_only_login_logic::Migration),
+            Box::new(m20230130_165144_prepare_admin_imitation_pre_login::Migration),
         ]
     }
 }

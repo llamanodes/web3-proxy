@@ -14,6 +14,7 @@ pub struct Model {
     pub bearer_token: Uuid,
     pub user_id: u64,
     pub expires_at: DateTimeUtc,
+    pub read_only: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

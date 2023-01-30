@@ -43,6 +43,7 @@ use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
 use crate::admin_queries::query_admin_modify_usertier;
 use crate::frontend::errors::FrontendErrorResponse;
+use crate::{PostLogin, PostLoginQuery};
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
 ///
@@ -131,6 +132,7 @@ pub async fn user_login_get(
         nonce: sea_orm::Set(uuid),
         message: sea_orm::Set(message.to_string()),
         expires_at: sea_orm::Set(expires_at),
+        imitating_user: sea_orm::Set(None)
     };
 
     user_pending_login
@@ -155,24 +157,6 @@ pub async fn user_login_get(
     };
 
     Ok(message.into_response())
-}
-
-/// Query params for our `post_login` handler.
-#[derive(Debug, Deserialize)]
-pub struct PostLoginQuery {
-    /// While we are in alpha/beta, we require users to supply an invite code.
-    /// The invite code (if any) is set in the application's config.
-    /// This may eventually provide some sort of referral bonus.
-    pub invite_code: Option<String>,
-}
-
-/// JSON body to our `post_login` handler.
-/// Currently only siwe logins that send an address, msg, and sig are allowed.
-/// Email/password and other login methods are planned.
-#[derive(Debug, Deserialize)]
-pub struct PostLogin {
-    sig: String,
-    msg: String,
 }
 
 /// `POST /user/login` - Register or login by posting a signed "siwe" message.
@@ -368,6 +352,7 @@ pub async fn user_login_post(
         bearer_token: sea_orm::Set(user_bearer_token.uuid()),
         user_id: sea_orm::Set(u.id),
         expires_at: sea_orm::Set(expires_at),
+        read_only: sea_orm::Set(false)
     };
 
     user_login
