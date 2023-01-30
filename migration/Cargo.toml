@@ -9,7 +9,7 @@ name = "migration"
 path = "src/lib.rs"
 
 [dependencies]
-tokio = { version = "1.24.2", features = ["full", "tracing"] }
+tokio = { version = "1.25.0", features = ["full", "tracing"] }
 
 [dependencies.sea-orm-migration]
 version = "0.10.7"
