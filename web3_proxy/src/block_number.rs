@@ -4,7 +4,7 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
-use log::{trace, warn};
+use log::warn;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -56,7 +56,7 @@ pub async fn clean_block_number(
             None => {
                 if params.len() == block_param_id {
                     // add the latest block number to the end of the params
-                    params.push(serde_json::to_value(latest_block)?);
+                    params.push(json!(latest_block));
                 } else {
                     // don't modify the request. only cache with current block
                     // TODO: more useful log that include the
@@ -67,8 +67,6 @@ pub async fn clean_block_number(
                 Ok(latest_block)
             }
             Some(x) => {
-                let start = x.clone();
-
                 // convert the json value to a BlockNumber
                 let (block_num, change) = if let Some(obj) = x.as_object_mut() {
                     // it might be a Map like `{"blockHash": String("0xa5626dc20d3a0a209b1de85521717a3e859698de8ce98bca1b16822b7501f74b")}`
@@ -76,7 +74,10 @@ pub async fn clean_block_number(
                         let block_hash: H256 =
                             serde_json::from_value(block_hash).context("decoding blockHash")?;
 
-                        let block = rpcs.block(authorization, &block_hash, None).await?;
+                        let block = rpcs
+                            .block(authorization, &block_hash, None)
+                            .await
+                            .context("fetching block number from hash")?;
 
                         // TODO: set change to true? i think not we should probably use hashes for everything.
                         (
@@ -91,19 +92,15 @@ pub async fn clean_block_number(
                 } else {
                     // it might be a string like "latest" or a block number
                     // TODO: "BlockNumber" needs a better name
-                    let block_number = serde_json::from_value::<BlockNumber>(x.take())?;
+                    let block_number = serde_json::from_value::<BlockNumber>(x.take())
+                        .context("checking params for BlockNumber")?;
 
                     block_num_to_U64(block_number, latest_block)
                 };
 
                 // if we changed "latest" to a number, update the params to match
                 if change {
-                    *x = serde_json::to_value(block_num)?;
-                }
-
-                // TODO: only do this if trace logging is enabled
-                if x.as_u64() != start.as_u64() {
-                    trace!("changed {} to {}", start, x);
+                    *x = json!(block_num);
                 }
 
                 Ok(block_num)
@@ -147,7 +144,7 @@ pub async fn block_needed(
         });
     };
 
-    // get the index for the BlockNumber or return None to say no block is needed.
+    // get the index for the BlockNumber
     // The BlockNumber is usually the last element.
     // TODO: double check these. i think some of the getBlock stuff will never need archive
     let block_param_id = match method {
@@ -185,7 +182,8 @@ pub async fn block_needed(
                 1
             } else {
                 let from_block_num = if let Some(x) = obj.get_mut("fromBlock") {
-                    let block_num: BlockNumber = serde_json::from_value(x.take())?;
+                    // TODO: use .take instead of clone
+                    let block_num: BlockNumber = serde_json::from_value(x.clone())?;
 
                     let (block_num, change) = block_num_to_U64(block_num, head_block_num);
 
@@ -201,7 +199,8 @@ pub async fn block_needed(
                 };
 
                 let to_block_num = if let Some(x) = obj.get_mut("toBlock") {
-                    let block_num: BlockNumber = serde_json::from_value(x.take())?;
+                    // TODO: use .take instead of clone
+                    let block_num: BlockNumber = serde_json::from_value(x.clone())?;
 
                     let (block_num, change) = block_num_to_U64(block_num, head_block_num);
 

@@ -760,13 +760,8 @@ impl Web3Connections {
         loop {
             let num_skipped = skip_rpcs.len();
 
-            if num_skipped > 0 {
-                // trace!("skip_rpcs: {:?}", skip_rpcs);
-
-                // TODO: is self.conns still right now that we split main and backup servers?
-                if num_skipped == self.conns.len() {
-                    break;
-                }
+            if num_skipped == self.conns.len() {
+                break;
             }
 
             match self
