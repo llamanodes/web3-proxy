@@ -11,29 +11,31 @@ use std::sync::Arc;
 use crate::{frontend::authorization::Authorization, rpcs::connections::Web3Connections};
 
 #[allow(non_snake_case)]
-pub fn block_num_to_U64(block_num: BlockNumber, latest_block: U64) -> (U64, bool) {
+pub fn block_num_to_U64(block_num: BlockNumber, latest_block: U64) -> U64 {
     match block_num {
-        BlockNumber::Earliest => (U64::zero(), false),
+        BlockNumber::Earliest => {
+            // modified is false because we want the backend to see "pending"
+            U64::zero()
+        }
         BlockNumber::Finalized => {
             warn!("finalized block requested! not yet implemented!");
-            (latest_block - 10, false)
+            latest_block - 10
         }
         BlockNumber::Latest => {
             // change "latest" to a number
-            (latest_block, true)
+            latest_block
         }
         BlockNumber::Number(x) => {
             // we already have a number
-            (x, false)
+            x
         }
         BlockNumber::Pending => {
-            // modified is false because we want the backend to see "pending"
             // TODO: think more about how to handle Pending
-            (latest_block, false)
+            latest_block
         }
         BlockNumber::Safe => {
             warn!("finalized block requested! not yet implemented!");
-            (latest_block - 3, false)
+            latest_block - 3
         }
     }
 }
@@ -70,7 +72,7 @@ pub async fn clean_block_number(
                 let start = x.clone();
 
                 // convert the json value to a BlockNumber
-                let (block_num, change) = if let Some(obj) = x.as_object_mut() {
+                let block_num = if let Some(obj) = x.as_object_mut() {
                     // it might be a Map like `{"blockHash": String("0xa5626dc20d3a0a209b1de85521717a3e859698de8ce98bca1b16822b7501f74b")}`
                     if let Some(block_hash) = obj.remove("blockHash") {
                         let block_hash: H256 =
@@ -78,13 +80,9 @@ pub async fn clean_block_number(
 
                         let block = rpcs.block(authorization, &block_hash, None).await?;
 
-                        // TODO: set change to true? i think not we should probably use hashes for everything.
-                        (
-                            block
-                                .number
-                                .expect("blocks here should always have numbers"),
-                            false,
-                        )
+                        block
+                            .number
+                            .expect("blocks here should always have numbers")
                     } else {
                         return Err(anyhow::anyhow!("blockHash missing"));
                     }
@@ -97,9 +95,7 @@ pub async fn clean_block_number(
                 };
 
                 // if we changed "latest" to a number, update the params to match
-                if change {
-                    *x = serde_json::to_value(block_num)?;
-                }
+                *x = serde_json::to_value(block_num)?;
 
                 // TODO: only do this if trace logging is enabled
                 if x.as_u64() != start.as_u64() {
@@ -116,15 +112,7 @@ pub async fn clean_block_number(
 pub enum BlockNeeded {
     CacheSuccessForever,
     CacheNever,
-    Cache {
-        block_num: U64,
-        cache_errors: bool,
-    },
-    CacheRange {
-        from_block_num: U64,
-        to_block_num: U64,
-        cache_errors: bool,
-    },
+    Cache { block_num: U64, cache_errors: bool },
 }
 
 pub async fn block_needed(
@@ -134,13 +122,12 @@ pub async fn block_needed(
     head_block_num: U64,
     rpcs: &Web3Connections,
 ) -> anyhow::Result<BlockNeeded> {
+    // if no params, no block is needed
     let params = if let Some(params) = params {
-        // grab the params so we can inspect and potentially modify them
         params
     } else {
-        // if no params, no block is needed
         // TODO: check all the methods with no params, some might not be cacheable
-        // caching with the head block /should/ always be okay
+        // caching for one block should always be okay
         return Ok(BlockNeeded::Cache {
             block_num: head_block_num,
             cache_errors: true,
@@ -181,42 +168,39 @@ pub async fn block_needed(
                 .as_object_mut()
                 .ok_or_else(|| anyhow::anyhow!("invalid format"))?;
 
+            if let Some(x) = obj.get_mut("fromBlock") {
+                let block_num: BlockNumber = serde_json::from_value(x.take())?;
+
+                let block_num = block_num_to_U64(block_num, head_block_num);
+
+                *x = json!(block_num);
+
+                // TODO: maybe don't return. instead check toBlock too?
+                // TODO: if there is a very wide fromBlock and toBlock, we need to check that our rpcs have both!
+                return Ok(BlockNeeded::Cache {
+                    block_num,
+                    cache_errors: false,
+                });
+            }
+
+            if let Some(x) = obj.get_mut("toBlock") {
+                let block_num: BlockNumber = serde_json::from_value(x.take())?;
+
+                let block_num = block_num_to_U64(block_num, head_block_num);
+
+                *x = json!(block_num);
+
+                return Ok(BlockNeeded::Cache {
+                    block_num,
+                    cache_errors: false,
+                });
+            }
+
             if obj.contains_key("blockHash") {
                 1
             } else {
-                let from_block_num = if let Some(x) = obj.get_mut("fromBlock") {
-                    let block_num: BlockNumber = serde_json::from_value(x.take())?;
-
-                    let (block_num, change) = block_num_to_U64(block_num, head_block_num);
-
-                    if change {
-                        *x = json!(block_num);
-                    }
-
-                    block_num
-                } else {
-                    let (block_num, _) = block_num_to_U64(BlockNumber::Earliest, head_block_num);
-
-                    block_num
-                };
-
-                let to_block_num = if let Some(x) = obj.get_mut("toBlock") {
-                    let block_num: BlockNumber = serde_json::from_value(x.take())?;
-
-                    let (block_num, change) = block_num_to_U64(block_num, head_block_num);
-
-                    if change {
-                        *x = json!(block_num);
-                    }
-
-                    block_num
-                } else {
-                    head_block_num
-                };
-
-                return Ok(BlockNeeded::CacheRange {
-                    from_block_num: from_block_num,
-                    to_block_num: to_block_num,
+                return Ok(BlockNeeded::Cache {
+                    block_num: head_block_num,
                     cache_errors: true,
                 });
             }

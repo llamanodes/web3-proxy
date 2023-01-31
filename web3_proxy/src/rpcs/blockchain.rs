@@ -234,7 +234,6 @@ impl Web3Connections {
             head_block_num.expect("we should only get here if we have a head block");
 
         // TODO: geth does 64, erigon does 90k. sometimes we run a mix
-        // TODO: do this dynamically based on balanced_rpcs block_data_limit
         let archive_needed = num < &(head_block_num - U64::from(64));
 
         // try to get the hash from our cache

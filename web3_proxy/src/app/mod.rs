@@ -71,9 +71,7 @@ pub static REQUEST_PERIOD: u64 = 60;
 #[derive(From)]
 struct ResponseCacheKey {
     // if none, this is cached until evicted
-    from_block: Option<SavedBlock>,
-    // to_block is only set when ranges of blocks are requested (like with eth_getLogs)
-    to_block: Option<SavedBlock>,
+    block: Option<SavedBlock>,
     method: String,
     // TODO: better type for this
     params: Option<serde_json::Value>,
@@ -98,22 +96,7 @@ impl PartialEq for ResponseCacheKey {
             return false;
         }
 
-        match (self.from_block.as_ref(), other.from_block.as_ref()) {
-            (None, None) => {}
-            (None, Some(_)) => {
-                return false;
-            }
-            (Some(_), None) => {
-                return false;
-            }
-            (Some(s), Some(o)) => {
-                if s != o {
-                    return false;
-                }
-            }
-        }
-
-        match (self.to_block.as_ref(), other.to_block.as_ref()) {
+        match (self.block.as_ref(), other.block.as_ref()) {
             (None, None) => {}
             (None, Some(_)) => {
                 return false;
@@ -140,8 +123,7 @@ impl Eq for ResponseCacheKey {}
 
 impl Hash for ResponseCacheKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.from_block.as_ref().map(|x| x.hash()).hash(state);
-        self.to_block.as_ref().map(|x| x.hash()).hash(state);
+        self.block.as_ref().map(|x| x.hash()).hash(state);
         self.method.hash(state);
         self.params.as_ref().map(|x| x.to_string()).hash(state);
         self.cache_errors.hash(state)
@@ -1452,8 +1434,7 @@ impl Web3ProxyApp {
                 .await?
                 {
                     BlockNeeded::CacheSuccessForever => Some(ResponseCacheKey {
-                        from_block: None,
-                        to_block: None,
+                        block: None,
                         method: method.to_string(),
                         params: request.params.clone(),
                         cache_errors: false,
@@ -1480,48 +1461,7 @@ impl Web3ProxyApp {
                             .await?;
 
                         Some(ResponseCacheKey {
-                            from_block: Some(SavedBlock::new(request_block)),
-                            to_block: None,
-                            method: method.to_string(),
-                            // TODO: hash here?
-                            params: request.params.clone(),
-                            cache_errors,
-                        })
-                    }
-                    BlockNeeded::CacheRange {
-                        from_block_num,
-                        to_block_num,
-                        cache_errors,
-                    } => {
-                        let (from_block_hash, archive_needed) = self
-                            .balanced_rpcs
-                            .block_hash(authorization, &from_block_num)
-                            .await?;
-
-                        if archive_needed {
-                            request_metadata
-                                .archive_request
-                                .store(true, atomic::Ordering::Relaxed);
-                        }
-
-                        let from_block = self
-                            .balanced_rpcs
-                            .block(authorization, &from_block_hash, None)
-                            .await?;
-
-                        let (to_block_hash, _) = self
-                            .balanced_rpcs
-                            .block_hash(authorization, &to_block_num)
-                            .await?;
-
-                        let to_block = self
-                            .balanced_rpcs
-                            .block(authorization, &to_block_hash, None)
-                            .await?;
-
-                        Some(ResponseCacheKey {
-                            from_block: Some(SavedBlock::new(from_block)),
-                            to_block: Some(SavedBlock::new(to_block)),
+                            block: Some(SavedBlock::new(request_block)),
                             method: method.to_string(),
                             // TODO: hash here?
                             params: request.params.clone(),
@@ -1536,7 +1476,7 @@ impl Web3ProxyApp {
                     let authorization = authorization.clone();
 
                     if let Some(cache_key) = cache_key {
-                        let from_block_num = cache_key.from_block.as_ref().map(|x| x.number());
+                        let request_block_number = cache_key.block.as_ref().map(|x| x.number());
 
                         self.response_cache
                             .try_get_with(cache_key, async move {
@@ -1551,7 +1491,7 @@ impl Web3ProxyApp {
                                         &authorization,
                                         request,
                                         Some(&request_metadata),
-                                        from_block_num.as_ref(),
+                                        request_block_number.as_ref(),
                                     )
                                     .await?;
 
