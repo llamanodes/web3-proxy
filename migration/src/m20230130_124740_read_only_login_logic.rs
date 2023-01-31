@@ -6,11 +6,11 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
+        // Add a read-only column to the table
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("login"))
+                    .table(Login::Table)
                     .add_column(
                         ColumnDef::new(Login::ReadOnly)
                             .boolean()
@@ -20,13 +20,12 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
         // Drop the column from the table ...
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("login"))
-                    .drop_column(Alias::new("read_only"))
+                    .table(Login::Table)
+                    .drop_column(Login::ReadOnly)
                     .to_owned()
             ).await
     }
