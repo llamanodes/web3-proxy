@@ -70,8 +70,8 @@ pub struct Web3ProxyCli {
 #[argh(subcommand)]
 enum SubCommand {
     ChangeUserAddress(change_user_address::ChangeUserAddressSubCommand),
-    ChangeUserTier(change_user_tier::ChangeUserTierSubCommand),
     ChangeUserAdminStatus(change_user_admin_status::ChangeUserAdminStatusSubCommand),
+    ChangeUserTier(change_user_tier::ChangeUserTierSubCommand),
     ChangeUserTierByAddress(change_user_tier_by_address::ChangeUserTierByAddressSubCommand),
     ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeySubCommand),
     CheckConfig(check_config::CheckConfigSubCommand),

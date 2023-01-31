@@ -15,6 +15,7 @@ use http::StatusCode;
 use migration::sea_orm::{self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use log::info;
 use redis_rate_limiter::redis::AsyncCommands;
+use crate::frontend::errors::FrontendErrorResponse::AccessDenied;
 
 // TODO: Add some logic to check if the operating user is an admin
 // If he is, return true
@@ -79,7 +80,7 @@ pub async fn query_admin_modify_usertier<'a>(
         .filter(admin::Column::UserId.eq(caller_id))
         .one(&db_conn)
         .await?
-        .context("This user is not registered as an admin")?;
+        .ok_or(AccessDenied.into())?;
 
     // If we are here, that means an admin was found, and we can safely proceed
 
@@ -88,7 +89,11 @@ pub async fn query_admin_modify_usertier<'a>(
         .filter(user::Column::Address.eq(user_address))
         .one(&db_conn)
         .await?
-        .context("No user with this id found as the change")?;
+        .ok_or(FrontendErrorResponse::StatusCode(
+            StatusCode::BAD_REQUEST,
+            "No user with this id found".to_string(),
+            None,
+        ))?;
     // Return early if the target user_tier_id is the same as the original user_tier_id
     response_body.insert(
         "user_tier_title",
@@ -96,11 +101,15 @@ pub async fn query_admin_modify_usertier<'a>(
     );
 
     // Now we can modify the user's tier
-    let new_user_tier: user_tier::Model = user_tier::Entity::find()
+    let new_user_tier: user_tier::Model = !user_tier::Entity::find()
         .filter(user_tier::Column::Title.eq(user_tier_title.clone()))
         .one(&db_conn)
         .await?
-        .context("No user tier found with that name")?;
+        .ok_or(|| FrontendErrorResponse::StatusCode(
+            StatusCode::BAD_REQUEST,
+            "User Tier name was not found".to_string(),
+            None,
+        ))?;
 
     if user.user_tier_id == new_user_tier.id {
         info!("user already has that tier");

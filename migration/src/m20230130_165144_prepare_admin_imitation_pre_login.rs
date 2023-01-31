@@ -6,11 +6,10 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("pending_login"))
+                    .table(PendingLogin::Table)
                     .add_column(
                         ColumnDef::new(PendingLogin::ImitatingUser)
                             .big_unsigned()
@@ -27,13 +26,12 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("pending_login"))
+                    .table(PendingLogin::Table)
                     .drop_foreign_key(Alias::new("fk-pending_login-imitating_user"))
-                    .drop_column(Alias::new("imitating_user"))
+                    .drop_column(PendingLogin::ImitatingUser)
                     .to_owned()
             ).await
     }

@@ -173,8 +173,11 @@ pub async fn admin_login_get(
         .filter(user::Column::Address.eq(user_address))
         .one(db_replica.conn())
         .await?
-        .context("fetching admin from db by user_id")?;
-
+        .ok_or(FrontendErrorResponse::StatusCode(
+            StatusCode::BAD_REQUEST,
+            "Could not find user in db".to_string(),
+            None,
+        ))?;
 
     // Can there be two login-sessions at the same time?
     // I supposed if the user logs in, the admin would be logged out and vice versa
