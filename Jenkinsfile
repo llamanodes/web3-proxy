@@ -32,8 +32,10 @@ pipeline {
                                 def err = "amd64 build failed: ${e}"
                                 error(err)
                             }
-                            amd_image.push()
-                            amd_image.push('latest_amd3')
+                            if (env.BRANCH_NAME == 'main') {
+                                amd_image.push()
+                                amd_image.push('latest_amd3')
+                            }
                         }
                     }
                 }
@@ -51,8 +53,10 @@ pipeline {
                                 def err = "arm64 build failed: ${e}"
                                 error(err)
                             }
-                            arm_image.push()
-                            arm_image.push('latest_graviton2')
+                            if (env.BRANCH_NAME == 'main') {
+                                arm_image.push()
+                                arm_image.push('latest_graviton2')
+                            }                            
                         }
                     }
                 }
@@ -70,8 +74,10 @@ pipeline {
                                 def err = "intel_sky_lake build failed: ${e}"
                                 error(err)
                             }
-                            intel_image.push()
-                            intel_image.push('latest')
+                            if (env.BRANCH_NAME == 'main') {
+                                intel_image.push()
+                                intel_image.push('latest')
+                            }    
                         }
                     }
                 }
