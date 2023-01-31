@@ -92,7 +92,8 @@ pub async fn clean_block_number(
                 } else {
                     // it might be a string like "latest" or a block number
                     // TODO: "BlockNumber" needs a better name
-                    let block_number = serde_json::from_value::<BlockNumber>(x.take())
+                    // TODO: use take instead of clone
+                    let block_number = serde_json::from_value::<BlockNumber>(x.clone())
                         .context("checking params for BlockNumber")?;
 
                     block_num_to_U64(block_number, latest_block)
