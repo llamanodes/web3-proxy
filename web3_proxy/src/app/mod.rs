@@ -1132,6 +1132,7 @@ impl Web3ProxyApp {
             | "eth_newBlockFilter"
             | "eth_newFilter"
             | "eth_newPendingTransactionFilter"
+            | "eth_pollSubscriptions"
             | "eth_uninstallFilter") => {
                 // TODO: unsupported command stat
                 // TODO: what error code?
