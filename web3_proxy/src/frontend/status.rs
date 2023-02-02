@@ -3,7 +3,7 @@
 //! For ease of development, users can currently access these endponts.
 //! They will eventually move to another port.
 
-use super::{FrontendResponseCache, FrontendResponseCaches};
+use super::{FrontendHealthCache, FrontendResponseCache, FrontendResponseCaches};
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_macros::debug_handler;
@@ -12,9 +12,15 @@ use std::sync::Arc;
 
 /// Health check page for load balancers to use.
 #[debug_handler]
-pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
-    // TODO: add a check that we aren't shutting down
-    if app.balanced_rpcs.synced() {
+pub async fn health(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(health_cache): Extension<FrontendHealthCache>,
+) -> impl IntoResponse {
+    let synced = health_cache
+        .get_with((), async { app.balanced_rpcs.synced() })
+        .await;
+
+    if synced {
         (StatusCode::OK, "OK")
     } else {
         (StatusCode::SERVICE_UNAVAILABLE, ":(")
