@@ -324,6 +324,9 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] improve waiting for sync when rate limited
 - [x] improve pager duty errors for smarter deduping
 - [x] add create_key cli command
+- [x] short lived cache on /health
+- [x] cache /status for longer
+- [x] sort connections during eth_sendRawTransaction
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly

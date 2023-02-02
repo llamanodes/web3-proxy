@@ -35,6 +35,12 @@ pub enum ProviderState {
     Connected(Arc<Web3Provider>),
 }
 
+impl Default for ProviderState {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 impl ProviderState {
     pub async fn provider(&self, allow_not_ready: bool) -> Option<&Arc<Web3Provider>> {
         match self {
@@ -59,6 +65,7 @@ impl ProviderState {
 }
 
 /// An active connection to a Web3 RPC server like geth or erigon.
+#[derive(Default)]
 pub struct Web3Connection {
     pub name: String,
     pub display_name: Option<String>,
