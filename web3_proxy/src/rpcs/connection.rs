@@ -1117,12 +1117,14 @@ impl Serialize for Web3Connection {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Connection", 8)?;
+        let mut state = serializer.serialize_struct("Web3Connection", 9)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
         // a longer name for display to users
         state.serialize_field("display_name", &self.display_name)?;
+
+        state.serialize_field("backup", &self.backup)?;
 
         match self.block_data_limit.load(atomic::Ordering::Relaxed) {
             u64::MAX => {
