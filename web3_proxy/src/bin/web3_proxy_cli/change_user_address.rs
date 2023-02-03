@@ -2,7 +2,7 @@ use anyhow::Context;
 use argh::FromArgs;
 use entities::user;
 use ethers::types::Address;
-use log::{debug, info};
+use tracing::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,

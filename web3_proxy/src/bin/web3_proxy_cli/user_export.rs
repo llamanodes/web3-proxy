@@ -1,6 +1,6 @@
 use argh::FromArgs;
 use entities::{rpc_key, user};
-use log::info;
+use tracing::info;
 use migration::sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
 use std::fs::{self, create_dir_all};
 use std::path::Path;

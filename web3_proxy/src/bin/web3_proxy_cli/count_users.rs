@@ -1,6 +1,6 @@
 use argh::FromArgs;
 use entities::user;
-use log::info;
+use tracing::info;
 use migration::sea_orm::{self, EntityTrait, PaginatorTrait};
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]

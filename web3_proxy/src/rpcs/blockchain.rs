@@ -163,7 +163,7 @@ impl Web3Connections {
                 .request::<_, Option<_>>(
                     "eth_getBlockByHash",
                     &json!(get_block_params),
-                    Level::Error.into(),
+                    Level::ERROR.into(),
                 )
                 .await?
                 .context("no block!")?,

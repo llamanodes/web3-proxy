@@ -2,7 +2,7 @@ use anyhow::Context;
 use argh::FromArgs;
 use entities::{rpc_key, user};
 use ethers::prelude::Address;
-use log::info;
+use tracing::info;
 use migration::sea_orm::{self, ActiveModelTrait, TransactionTrait};
 use ulid::Ulid;
 use uuid::Uuid;

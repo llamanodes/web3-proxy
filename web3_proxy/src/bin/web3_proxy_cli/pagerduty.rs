@@ -1,5 +1,5 @@
 use argh::FromArgs;
-use log::{error, info};
+use tracing::{error, info};
 use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
 use web3_proxy::{
     config::TopConfig,

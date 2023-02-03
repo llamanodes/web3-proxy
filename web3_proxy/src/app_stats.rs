@@ -81,6 +81,7 @@ impl ProxyResponseStat {
     }
 }
 
+#[derive(Debug)]
 pub struct ProxyResponseHistograms {
     request_bytes: Histogram<u64>,
     response_bytes: Histogram<u64>,
@@ -115,7 +116,7 @@ struct ProxyResponseAggregateKey {
     origin: Option<Origin>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct ProxyResponseAggregate {
     frontend_requests: u64,
     backend_requests: u64,

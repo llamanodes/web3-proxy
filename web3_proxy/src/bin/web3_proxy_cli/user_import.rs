@@ -3,7 +3,7 @@ use argh::FromArgs;
 use entities::{rpc_key, user};
 use glob::glob;
 use hashbrown::HashMap;
-use log::{info, warn};
+use tracing::{info, warn};
 use migration::sea_orm::ActiveValue::NotSet;
 use migration::sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter,

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use super::{SentrydErrorBuilder, SentrydResult};
 use anyhow::Context;
-use log::{debug, trace};
+use tracing::{debug, trace};
 use tokio::time::Instant;
 
 /// GET the url and return an error if it wasn't a success

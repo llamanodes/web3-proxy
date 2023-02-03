@@ -36,7 +36,7 @@ impl Web3Connections {
                     .request(
                         "eth_getTransactionByHash",
                         &(pending_tx_id,),
-                        Level::Error.into(),
+                        Level::ERROR.into(),
                     )
                     .await?
             }

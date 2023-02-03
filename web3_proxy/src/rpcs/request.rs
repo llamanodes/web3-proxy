@@ -71,10 +71,10 @@ impl From<Level> for RequestRevertHandler {
     #[instrument(level = "trace")]
     fn from(level: Level) -> Self {
         match level {
-            Level::Trace => RequestRevertHandler::TraceLevel,
-            Level::Debug => RequestRevertHandler::DebugLevel,
-            Level::Error => RequestRevertHandler::ErrorLevel,
-            Level::Warn => RequestRevertHandler::WarnLevel,
+            Level::TRACE => RequestRevertHandler::TraceLevel,
+            Level::DEBUG => RequestRevertHandler::DebugLevel,
+            Level::ERROR => RequestRevertHandler::ErrorLevel,
+            Level::WARN => RequestRevertHandler::WarnLevel,
             _ => unimplemented!("unexpected tracing Level"),
         }
     }

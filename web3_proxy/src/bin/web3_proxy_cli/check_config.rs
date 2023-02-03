@@ -1,5 +1,5 @@
 use argh::FromArgs;
-use log::{error, info, warn};
+use tracing::{error, info, warn};
 use std::fs;
 use web3_proxy::config::TopConfig;
 

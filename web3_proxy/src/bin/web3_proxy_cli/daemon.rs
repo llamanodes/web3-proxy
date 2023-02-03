@@ -2,7 +2,7 @@
 
 use argh::FromArgs;
 use futures::StreamExt;
-use log::{error, info, warn};
+use tracing::{error, info, warn};
 use num::Zero;
 use tokio::sync::broadcast;
 use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};

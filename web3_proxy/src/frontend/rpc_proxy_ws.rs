@@ -47,7 +47,7 @@ pub enum ProxyMode {
 /// Public entrypoint for WebSocket JSON-RPC requests.
 /// Queries a single server at a time
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -60,7 +60,7 @@ pub async fn websocket_handler(
 /// Public entrypoint for WebSocket JSON-RPC requests that uses all synced servers.
 /// Queries all synced backends with every request! This might get expensive!
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn fastest_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -75,7 +75,7 @@ pub async fn fastest_websocket_handler(
 /// Public entrypoint for WebSocket JSON-RPC requests that uses all synced servers.
 /// Queries **all** backends with every request! This might get expensive!
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn versus_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -123,7 +123,7 @@ async fn _websocket_handler(
 /// Rate limit and billing based on the api key in the url.
 /// Can optionally authorized based on origin, referer, or user agent.
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -147,7 +147,7 @@ pub async fn websocket_handler_with_key(
 }
 
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn fastest_websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -172,7 +172,7 @@ pub async fn fastest_websocket_handler_with_key(
 }
 
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn versus_websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,

@@ -102,7 +102,7 @@ impl Web3Connection {
     /// Connect to a web3 rpc
     // TODO: have this take a builder (which will have channels attached). or maybe just take the config and give the config public fields
     #[allow(clippy::too_many_arguments)]
-    #[instrument(level = "trace")]
+    #[instrument(level = "trace", skip(hard_limit))]
     pub async fn spawn(
         name: String,
         display_name: Option<String>,
@@ -224,7 +224,7 @@ impl Web3Connection {
                 "eth_blockNumber",
                 &None,
                 // error here are expected, so keep the level low
-                Level::Debug.into(),
+                Level::DEBUG.into(),
             );
 
             let head_block_num = timeout(Duration::from_secs(5), head_block_num_future)
@@ -254,7 +254,7 @@ impl Web3Connection {
                         maybe_archive_block,
                     )),
                     // error here are expected, so keep the level low
-                    Level::Trace.into(),
+                    Level::TRACE.into(),
                 )
                 .await;
 
@@ -441,7 +441,7 @@ impl Web3Connection {
             .request(
                 "eth_chainId",
                 &json!(Option::None::<()>),
-                Level::Trace.into(),
+                Level::TRACE.into(),
             )
             .await;
         // trace!("found_chain_id: {:?}", found_chain_id);
@@ -732,7 +732,7 @@ impl Web3Connection {
                                     .request(
                                         "eth_getBlockByNumber",
                                         &json!(("latest", false)),
-                                        Level::Warn.into(),
+                                        Level::WARN.into(),
                                     )
                                     .await;
 
@@ -825,7 +825,7 @@ impl Web3Connection {
                         .request(
                             "eth_getBlockByNumber",
                             &json!(("latest", false)),
-                            Level::Warn.into(),
+                            Level::WARN.into(),
                         )
                         .await;
 
@@ -1085,7 +1085,7 @@ impl Web3Connection {
 }
 
 impl fmt::Debug for Web3Provider {
-    #[instrument(level = "trace")]
+    #[instrument(skip_all)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default Debug takes forever to write. this is too quiet though. we at least need the url
         f.debug_struct("Web3Provider").finish_non_exhaustive()
@@ -1093,7 +1093,7 @@ impl fmt::Debug for Web3Provider {
 }
 
 impl Hash for Web3Connection {
-    #[instrument(level = "trace")]
+    #[instrument(skip_all)]
     fn hash<H: Hasher>(&self, state: &mut H) {
         // TODO: is this enough?
         self.name.hash(state);
@@ -1124,7 +1124,7 @@ impl PartialEq for Web3Connection {
 }
 
 impl Serialize for Web3Connection {
-    #[instrument(level = "trace")]
+    #[instrument(skip_all)]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1171,7 +1171,7 @@ impl Serialize for Web3Connection {
 }
 
 impl fmt::Debug for Web3Connection {
-    #[instrument(level = "trace")]
+    #[instrument(skip_all)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut f = f.debug_struct("Web3Connection");
 
@@ -1189,7 +1189,7 @@ impl fmt::Debug for Web3Connection {
 }
 
 impl fmt::Display for Web3Connection {
-    #[instrument(level = "trace")]
+    #[instrument(skip_all)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: filter basic auth and api keys
         write!(f, "{}", &self.name)

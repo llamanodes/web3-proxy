@@ -19,7 +19,7 @@ mod user_import;
 use anyhow::Context;
 use argh::FromArgs;
 use ethers::types::U256;
-use log::{info, warn};
+use tracing::{info, warn};
 use pagerduty_rs::eventsv2async::EventsV2 as PagerdutyAsyncEventsV2;
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
 use std::{
@@ -40,6 +40,7 @@ use parking_lot::deadlock;
 use std::thread;
 #[cfg(feature = "deadlock")]
 use tokio::time::Duration;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, FromArgs)]
 /// Command line interface for admins to interact with web3_proxy
@@ -187,35 +188,40 @@ fn main() -> anyhow::Result<()> {
         None
     };
 
-    let logger = env_logger::builder().parse_filters(&rust_log).build();
+    // Setup the tracing subscriber ... (I think this is everything that's needed (?))
+    tracing_subscriber::fmt()
+        .compact()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
-    let max_level = logger.filter();
-
-    // connect to sentry for error reporting
-    // if no sentry, only log to stdout
-    let _sentry_guard = if let Some(sentry_url) = cli_config.sentry_url.clone() {
-        let logger = sentry::integrations::log::SentryLogger::with_dest(logger);
-
-        log::set_boxed_logger(Box::new(logger)).unwrap();
-
-        let guard = sentry::init((
-            sentry_url,
-            sentry::ClientOptions {
-                release: sentry::release_name!(),
-                // TODO: Set this a to lower value (from config) in production
-                traces_sample_rate: 1.0,
-                ..Default::default()
-            },
-        ));
-
-        Some(guard)
-    } else {
-        log::set_boxed_logger(Box::new(logger)).unwrap();
-
-        None
-    };
-
-    log::set_max_level(max_level);
+    // let logger = env_logger::builder().parse_filters(&rust_log).build();
+    // let max_level = logger.filter();
+    //
+    // // connect to sentry for error reporting
+    // // if no sentry, only log to stdout
+    // let _sentry_guard = if let Some(sentry_url) = cli_config.sentry_url.clone() {
+    //     let logger = sentry::integrations::log::SentryLogger::with_dest(logger);
+    //
+    //     log::set_boxed_logger(Box::new(logger)).unwrap();
+    //
+    //     let guard = sentry::init((
+    //         sentry_url,
+    //         sentry::ClientOptions {
+    //             release: sentry::release_name!(),
+    //             // TODO: Set this a to lower value (from config) in production
+    //             traces_sample_rate: 1.0,
+    //             ..Default::default()
+    //         },
+    //     ));
+    //
+    //     Some(guard)
+    // } else {
+    //     log::set_boxed_logger(Box::new(logger)).unwrap();
+    //
+    //     None
+    // };
+    //
+    // log::set_max_level(max_level);
 
     info!("{}", APP_USER_AGENT);
 

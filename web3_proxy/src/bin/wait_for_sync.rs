@@ -5,14 +5,16 @@ use argh::FromArgs;
 use chrono::Utc;
 use ethers::types::U64;
 use ethers::types::{Block, TxHash};
-use log::info;
-use log::warn;
+use tracing::{info, warn};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::time::sleep;
 use tokio::time::Duration;
+use tracing_subscriber::{EnvFilter, Layer};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[derive(Debug, FromArgs)]
 /// Command line interface for admins to interact with web3_proxy
@@ -43,7 +45,20 @@ async fn main() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "wait_for_sync=debug");
     }
 
-    env_logger::init();
+    // TODO: how do we put the EnvFilter on this?
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .compact()
+                .with_filter(EnvFilter::from_default_env()),
+        )
+        .with(sentry_tracing::layer())
+        .init();
+
+    tracing_subscriber::fmt()
+        .compact()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
     // this probably won't matter for us in docker, but better safe than sorry
     fdlimit::raise_fd_limit();

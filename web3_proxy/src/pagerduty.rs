@@ -65,7 +65,7 @@ use tracing::{instrument};
 
 */
 
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(pagerduty_sync))]
 pub fn panic_handler(
     top_config: Option<TopConfig>,
     pagerduty_sync: &PagerdutySyncEventsV2,
@@ -115,7 +115,7 @@ pub fn panic_handler(
     }
 }
 
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(custom_details, severity))]
 pub fn pagerduty_alert_for_config<T: Serialize>(
     class: Option<String>,
     component: Option<String>,
@@ -143,7 +143,7 @@ pub fn pagerduty_alert_for_config<T: Serialize>(
     )
 }
 
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(custom_details, severity))]
 pub fn pagerduty_alert<T: Serialize>(
     chain_id: Option<u64>,
     class: Option<String>,

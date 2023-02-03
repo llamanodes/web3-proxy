@@ -44,7 +44,7 @@ pub enum JsonRpcRequestEnum {
 }
 
 impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
-    #[instrument(level = "trace")]
+    #[instrument(skip_all)]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,

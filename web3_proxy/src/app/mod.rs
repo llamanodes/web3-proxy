@@ -124,7 +124,7 @@ impl PartialEq for ResponseCacheKey {
 impl Eq for ResponseCacheKey {}
 
 impl Hash for ResponseCacheKey {
-    #[instrument(level = "trace")]
+    #[instrument(skip_all)]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.block.as_ref().map(|x| x.hash()).hash(state);
         self.method.hash(state);
@@ -1252,7 +1252,7 @@ impl Web3ProxyApp {
                         &request,
                         Some(request_metadata.clone()),
                         None,
-                        Level::Trace,
+                        Level::TRACE,
                         num,
                     )
                     .await?;

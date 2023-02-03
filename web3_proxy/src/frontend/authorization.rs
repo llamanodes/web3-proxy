@@ -127,7 +127,7 @@ impl Default for RpcSecretKey {
 }
 
 impl Display for RpcSecretKey {
-    #[instrument(level = "trace")]
+    #[instrument(skip_all)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // TODO: do this without dereferencing
         let ulid: Ulid = (*self).into();

@@ -26,7 +26,7 @@ use serde_json::json;
 /// First checks redis. Then checks the database.
 /// 0 means all users.
 /// This authenticates that the bearer is allowed to view this user_id's stats
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(redis_conn))]
 pub async fn get_user_id_from_params(
     redis_conn: &mut RedisConnection,
     db_conn: &DatabaseConnection,

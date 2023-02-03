@@ -3,7 +3,7 @@ use anyhow::Context;
 use argh::FromArgs;
 use entities::{rpc_accounting, rpc_key, user};
 use ethers::types::Address;
-use log::info;
+use tracing::info;
 use migration::{
     sea_orm::{
         self,

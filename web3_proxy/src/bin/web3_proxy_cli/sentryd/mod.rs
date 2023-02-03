@@ -7,7 +7,7 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     Future,
 };
-use log::{error, info};
+use tracing::{error, info, log};
 use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
 use serde_json::json;
 use std::time::Duration;
@@ -53,7 +53,7 @@ pub struct SentrydError {
     /// The class/type of the event, for example ping failure or cpu load
     class: String,
     /// Errors will send a pagerduty alert. others just give log messages
-    level: log::Level,
+    level: tracing::Level,
     /// A short summary that should be mostly static
     summary: String,
     /// Lots of detail about the error
@@ -64,7 +64,7 @@ pub struct SentrydError {
 #[derive(Clone)]
 pub struct SentrydErrorBuilder {
     class: String,
-    level: log::Level,
+    level: tracing::Level,
 }
 
 impl SentrydErrorBuilder {
@@ -125,9 +125,9 @@ impl SentrydSubCommand {
                 }
 
                 while let Some(err) = error_receiver.recv().await {
-                    log::log!(err.level, "check failed: {:#?}", err);
+                    error!("check failed: {:#?}", err);
 
-                    if matches!(err.level, log::Level::Error) {
+                    if matches!(err.level, tracing::Level::ERROR) {
                         let alert = pagerduty_alert(
                             Some(chain_id),
                             Some(err.class),
@@ -181,7 +181,7 @@ impl SentrydSubCommand {
             let loop_f = a_loop(
                 "main /health",
                 seconds,
-                log::Level::Error,
+                tracing::Level::ERROR,
                 error_sender,
                 move |error_builder| simple::main(error_builder, url.clone(), timeout),
             );
@@ -206,7 +206,7 @@ impl SentrydSubCommand {
             let loop_f = a_loop(
                 "other /health",
                 seconds,
-                log::Level::Warn,
+                tracing::Level::WARN,
                 error_sender,
                 move |error_builder| simple::main(error_builder, url.clone(), timeout),
             );
@@ -228,7 +228,7 @@ impl SentrydSubCommand {
             let loop_f = a_loop(
                 "head block comparison",
                 seconds,
-                log::Level::Error,
+                tracing::Level::ERROR,
                 error_sender,
                 move |error_builder| {
                     compare::main(
@@ -257,7 +257,7 @@ impl SentrydSubCommand {
 async fn a_loop<T>(
     class: &str,
     seconds: u64,
-    error_level: log::Level,
+    error_level: tracing::Level,
     error_sender: mpsc::Sender<SentrydError>,
     f: impl Fn(SentrydErrorBuilder) -> T,
 ) -> anyhow::Result<()>

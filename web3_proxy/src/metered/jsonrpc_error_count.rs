@@ -59,7 +59,7 @@ impl<C: Counter + Debug> Clear for JsonRpcErrorCount<C> {
 impl<C: Counter> Deref for JsonRpcErrorCount<C> {
     type Target = C;
 
-    #[instrument(level = "trace")]
+    #[instrument(skip_all)]
     fn deref(&self) -> &Self::Target {
         &self.0
     }

@@ -46,7 +46,7 @@ impl<C: Counter + Debug, T: Debug> OnResult<Result<T, ProviderError>> for Provid
 }
 
 impl<C: Counter> Clear for ProviderErrorCount<C> {
-    #[instrument(level = "trace")]
+    #[instrument(skip_all)]
     fn clear(&self) {
         self.0.clear()
     }
@@ -55,7 +55,7 @@ impl<C: Counter> Clear for ProviderErrorCount<C> {
 impl<C: Counter> Deref for ProviderErrorCount<C> {
     type Target = C;
 
-    #[instrument(level = "trace")]
+    #[instrument(skip_all)]
     fn deref(&self) -> &Self::Target {
         &self.0
     }

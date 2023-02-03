@@ -18,7 +18,7 @@ use tracing::{instrument};
 /// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -29,7 +29,7 @@ pub async fn proxy_web3_rpc(
 }
 
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn fastest_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -42,7 +42,7 @@ pub async fn fastest_proxy_web3_rpc(
 }
 
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn versus_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -94,7 +94,7 @@ async fn _proxy_web3_rpc(
 /// Can optionally authorized based on origin, referer, or user agent.
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -118,7 +118,7 @@ pub async fn proxy_web3_rpc_with_key(
 }
 
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn fastest_proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -142,7 +142,7 @@ pub async fn fastest_proxy_web3_rpc_with_key(
 }
 
 #[debug_handler]
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip(ip))]
 pub async fn versus_proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,

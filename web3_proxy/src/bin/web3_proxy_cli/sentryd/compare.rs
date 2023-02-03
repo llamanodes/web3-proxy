@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context};
 use chrono::{DateTime, Utc};
 use ethers::types::{Block, TxHash, H256};
 use futures::{stream::FuturesUnordered, StreamExt};
-use log::{debug, warn};
+use tracing::{debug, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use web3_proxy::jsonrpc::JsonRpcErrorData;

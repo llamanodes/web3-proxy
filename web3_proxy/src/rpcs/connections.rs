@@ -58,7 +58,7 @@ pub struct Web3Connections {
 impl Web3Connections {
     /// Spawn durable connections to multiple Web3 providers.
     #[allow(clippy::too_many_arguments)]
-    #[instrument(level = "trace")]
+    #[instrument(level = "trace", skip(redis_pool))]
     pub async fn spawn(
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
