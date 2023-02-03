@@ -21,60 +21,60 @@ pipeline {
     stages {
         stage('build and push') {
             parallel {
-                stage('Build and push amd64 image') {
+                stage('Build and push amd64_epyc2 image') {
                     agent {
-                        label 'amd64_jenkins_agent'
+                        label 'amd64_epyc2'
                     }
                     steps {
                         script {
-                            DOCKER_GIT_TAG_AMD="$DOCKER_GIT_TAG" + "_amd64"
+                            DOCKER_GIT_TAG_AMD="$DOCKER_GIT_TAG" + "_amd64_epyc2"
                             restoreMTime()
                             try {
                                 amd_image = docker.build("$DOCKER_GIT_TAG_AMD")
                             } catch (e) {
-                                def err = "amd64 build failed: ${e}"
+                                def err = "amd64_epyc2 build failed: ${e}"
                                 error(err)
                             }
                             amd_image.push()
-                            amd_image.push('latest_amd3')
+                            amd_image.push('latest_amd64_epyc2')
                         }
                     }
                 }
-                stage('Build and push arm64 image') {
+                stage('Build and push arm64_graviton2 image') {
                     agent {
-                        label 'arm64_jenkins_agent'
+                        label 'arm64_graviton2'
                     }
                     steps {
                         script {
-                            DOCKER_GIT_TAG_ARM="$DOCKER_GIT_TAG" + "_arm64"
+                            DOCKER_GIT_TAG_ARM="$DOCKER_GIT_TAG" + "_arm64_graviton2"
                             restoreMTime()
                             try {
                                 arm_image = docker.build("$DOCKER_GIT_TAG_ARM")
                             } catch (e) {
-                                def err = "arm64 build failed: ${e}"
+                                def err = "arm64_graviton2 build failed: ${e}"
                                 error(err)
                             }
                             arm_image.push()
-                            arm_image.push('latest_graviton2')
+                            arm_image.push('latest_arm64_graviton2')
                         }
                     }
                 }
-                stage('Build and push intel image') {
+                stage('Build and push intel_xeon3 image') {
                     agent {
-                        label 'intel_jenkins_agent'
+                        label 'intel_xeon3'
                     }
                     steps {
                         script {
-                            DOCKER_GIT_TAG_INTEL="$DOCKER_GIT_TAG" + "_intel_sky_lake"
+                            DOCKER_GIT_TAG_INTEL="$DOCKER_GIT_TAG" + "_intel_xeon3"
                             restoreMTime()
                             try {
                                 intel_image = docker.build("$DOCKER_GIT_TAG_INTEL")
                             } catch (e) {
-                                def err = "intel_sky_lake build failed: ${e}"
+                                def err = "intel_xeon3 build failed: ${e}"
                                 error(err)
                             }
                             intel_image.push()
-                            intel_image.push('latest')
+                            intel_image.push('latest_intel_xeon3')
                         }
                     }
                 }
