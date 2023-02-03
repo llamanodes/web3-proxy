@@ -212,7 +212,7 @@ pub struct Web3ProxyApp {
     pub db_conn: Option<sea_orm::DatabaseConnection>,
     pub db_replica: Option<DatabaseReplica>,
     /// prometheus metrics
-    app_metrics: Arc<Web3ProxyAppMetrics>,
+    // app_metrics: Arc<Web3ProxyAppMetrics>,
     open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     pub pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
@@ -365,7 +365,7 @@ pub struct Web3ProxyAppSpawn {
     pub background_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
 }
 
-#[metered(registry = Web3ProxyAppMetrics, registry_expr = self.app_metrics, visibility = pub)]
+// #[metered(registry = Web3ProxyAppMetrics, registry_expr = self.app_metrics, visibility = pub)]
 impl Web3ProxyApp {
     /// The main entrypoint.
     pub async fn spawn(
@@ -396,7 +396,7 @@ impl Web3ProxyApp {
         }
 
         // setup metrics
-        let app_metrics = Default::default();
+        // let app_metrics = Default::default();
         let open_request_handle_metrics: Arc<OpenRequestHandleMetrics> = Default::default();
 
         let mut db_conn = None::<DatabaseConnection>;
@@ -736,7 +736,7 @@ impl Web3ProxyApp {
             db_conn,
             db_replica,
             vredis_pool,
-            app_metrics,
+            // app_metrics,
             open_request_handle_metrics,
             rpc_secret_key_cache,
             bearer_token_semaphores,
@@ -912,7 +912,7 @@ impl Web3ProxyApp {
 
         #[derive(Serialize)]
         struct CombinedMetrics<'a> {
-            app: &'a Web3ProxyAppMetrics,
+            // app: &'a Web3ProxyAppMetrics,
             backend_rpc: &'a OpenRequestHandleMetrics,
             recent_ip_counts: RecentCounts,
             recent_user_id_counts: RecentCounts,
@@ -921,7 +921,7 @@ impl Web3ProxyApp {
         }
 
         let metrics = CombinedMetrics {
-            app: &self.app_metrics,
+            // app: &self.app_metrics,
             backend_rpc: &self.open_request_handle_metrics,
             recent_ip_counts,
             recent_user_id_counts,
@@ -979,7 +979,8 @@ impl Web3ProxyApp {
         authorization: &Arc<Authorization>,
         requests: Vec<JsonRpcRequest>,
         proxy_mode: ProxyMode,
-    ) -> anyhow::Result<(Vec<JsonRpcForwardedResponse>, Vec<Arc<Web3Connection>>)> {
+    ) -> Result<(Vec<JsonRpcForwardedResponse>, Vec<Arc<Web3Connection>>), FrontendErrorResponse>
+    {
         // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
 
@@ -1031,13 +1032,13 @@ impl Web3ProxyApp {
         }
     }
 
-    #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
+    // #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
     async fn proxy_cached_request(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
         proxy_mode: ProxyMode,
-    ) -> anyhow::Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Connection>>)> {
+    ) -> Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Connection>>), FrontendErrorResponse> {
         // trace!("Received request: {:?}", request);
 
         let request_metadata = Arc::new(RequestMetadata::new(REQUEST_PERIOD, request.num_bytes())?);
@@ -1051,13 +1052,7 @@ impl Web3ProxyApp {
         // TODO: don't clone?
         let partial_response: serde_json::Value = match request_method.as_ref() {
             // lots of commands are blocked
-            method @ ("admin_addPeer"
-            | "admin_datadir"
-            | "admin_startRPC"
-            | "admin_startWS"
-            | "admin_stopRPC"
-            | "admin_stopWS"
-            | "db_getHex"
+            method @ ("db_getHex"
             | "db_getString"
             | "db_putHex"
             | "db_putString"
@@ -1157,9 +1152,10 @@ impl Web3ProxyApp {
                     }
                     None => {
                         // TODO: what does geth do if this happens?
-                        return Err(anyhow::anyhow!(
-                            "no servers synced. unknown eth_blockNumber"
-                        ));
+                        // TODO: i think we want a 502 so that haproxy retries on another server
+                        return Err(
+                            anyhow::anyhow!("no servers synced. unknown eth_blockNumber").into(),
+                        );
                     }
                 }
             }
@@ -1395,12 +1391,16 @@ impl Web3ProxyApp {
                             ));
                         }
 
-                        // TODO: don't return with ? here. send a jsonrpc invalid request
                         let param = Bytes::from_str(
                             params[0]
                                 .as_str()
                                 .context("parsing params 0 into str then bytes")?,
-                        )?;
+                        )
+                        .map_err(|x| {
+                            FrontendErrorResponse::BadRequest(
+                                "param 0 could not be read as H256".to_string(),
+                            )
+                        })?;
 
                         let hash = H256::from(keccak256(param));
 
@@ -1432,6 +1432,11 @@ impl Web3ProxyApp {
             }
             // anything else gets sent to backend rpcs and cached
             method => {
+                if method.starts_with("admin_") {
+                    // TODO: emit a stat? will probably just be noise
+                    return Err(FrontendErrorResponse::AccessDenied);
+                }
+
                 // emit stats
 
                 // TODO: if no servers synced, wait for them to be synced? probably better to error and let haproxy retry another server
