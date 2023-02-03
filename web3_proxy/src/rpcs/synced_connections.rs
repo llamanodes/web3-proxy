@@ -5,6 +5,7 @@ use ethers::prelude::{H256, U64};
 use serde::Serialize;
 use std::fmt;
 use std::sync::Arc;
+use tracing::{instrument};
 
 /// A collection of Web3Connections that are on the same block.
 /// Serialize is so we can print it on our debug endpoint
@@ -20,10 +21,12 @@ pub struct ConsensusConnections {
 }
 
 impl ConsensusConnections {
+    #[instrument(level = "trace")]
     pub fn num_conns(&self) -> usize {
         self.conns.len()
     }
 
+    #[instrument(level = "trace")]
     pub fn sum_soft_limit(&self) -> u32 {
         self.conns.iter().fold(0, |sum, rpc| sum + rpc.soft_limit)
     }
@@ -32,6 +35,7 @@ impl ConsensusConnections {
 }
 
 impl fmt::Debug for ConsensusConnections {
+    #[instrument(skip_all)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
         // TODO: print the actual conns?
@@ -43,20 +47,24 @@ impl fmt::Debug for ConsensusConnections {
 }
 
 impl Web3Connections {
+    #[instrument(level = "trace")]
     pub fn head_block(&self) -> Option<ArcBlock> {
         self.watch_consensus_head_receiver
             .as_ref()
             .map(|x| x.borrow().clone())
     }
 
+    #[instrument(level = "trace")]
     pub fn head_block_hash(&self) -> Option<H256> {
         self.head_block().and_then(|x| x.hash)
     }
 
+    #[instrument(level = "trace")]
     pub fn head_block_num(&self) -> Option<U64> {
         self.head_block().and_then(|x| x.number)
     }
 
+    #[instrument(level = "trace")]
     pub fn synced(&self) -> bool {
         !self
             .watch_consensus_connections_sender
@@ -65,6 +73,7 @@ impl Web3Connections {
             .is_empty()
     }
 
+    #[instrument(level = "trace")]
     pub fn num_synced_rpcs(&self) -> usize {
         self.watch_consensus_connections_sender.borrow().conns.len()
     }

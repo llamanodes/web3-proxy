@@ -12,7 +12,7 @@ use chrono::{NaiveDateTime, Utc};
 use entities::{login, rpc_accounting, rpc_key};
 use hashbrown::HashMap;
 use http::StatusCode;
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 use migration::sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Select,
@@ -26,6 +26,7 @@ use serde_json::json;
 /// First checks redis. Then checks the database.
 /// 0 means all users.
 /// This authenticates that the bearer is allowed to view this user_id's stats
+#[instrument(level = "trace")]
 pub async fn get_user_id_from_params(
     redis_conn: &mut RedisConnection,
     db_conn: &DatabaseConnection,
@@ -124,6 +125,7 @@ pub async fn get_user_id_from_params(
 /// this will keep people from reading someone else's keys.
 /// 0 means none.
 
+#[instrument(level = "trace")]
 pub fn get_rpc_key_id_from_params(
     user_id: u64,
     params: &HashMap<String, String>,
@@ -142,6 +144,7 @@ pub fn get_rpc_key_id_from_params(
     }
 }
 
+#[instrument(level = "trace")]
 pub fn get_chain_id_from_params(
     app: &Web3ProxyApp,
     params: &HashMap<String, String>,
@@ -156,6 +159,7 @@ pub fn get_chain_id_from_params(
     )
 }
 
+#[instrument(level = "trace")]
 pub fn get_query_start_from_params(
     params: &HashMap<String, String>,
 ) -> anyhow::Result<chrono::NaiveDateTime> {
@@ -179,6 +183,7 @@ pub fn get_query_start_from_params(
     )
 }
 
+#[instrument(level = "trace")]
 pub fn get_page_from_params(params: &HashMap<String, String>) -> anyhow::Result<u64> {
     params.get("page").map_or_else::<anyhow::Result<u64>, _, _>(
         || {
@@ -195,6 +200,7 @@ pub fn get_page_from_params(params: &HashMap<String, String>) -> anyhow::Result<
     )
 }
 
+#[instrument(level = "trace")]
 pub fn get_query_window_seconds_from_params(
     params: &HashMap<String, String>,
 ) -> Result<u64, FrontendErrorResponse> {
@@ -217,6 +223,7 @@ pub fn get_query_window_seconds_from_params(
     )
 }
 
+#[instrument(level = "trace")]
 pub fn filter_query_window_seconds(
     query_window_seconds: u64,
     response: &mut HashMap<&str, serde_json::Value>,
@@ -250,11 +257,13 @@ pub fn filter_query_window_seconds(
     Ok(q)
 }
 
+#[derive(Debug)]
 pub enum StatResponse {
     Aggregated,
     Detailed,
 }
 
+#[instrument(level = "trace")]
 pub async fn query_user_stats<'a>(
     app: &'a Web3ProxyApp,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,

@@ -10,6 +10,7 @@ use std::{
     panic::PanicInfo,
 };
 use time::OffsetDateTime;
+use tracing::{instrument};
 
 /*
 
@@ -64,6 +65,7 @@ use time::OffsetDateTime;
 
 */
 
+#[instrument(level = "trace")]
 pub fn panic_handler(
     top_config: Option<TopConfig>,
     pagerduty_sync: &PagerdutySyncEventsV2,
@@ -113,6 +115,7 @@ pub fn panic_handler(
     }
 }
 
+#[instrument(level = "trace")]
 pub fn pagerduty_alert_for_config<T: Serialize>(
     class: Option<String>,
     component: Option<String>,
@@ -140,6 +143,7 @@ pub fn pagerduty_alert_for_config<T: Serialize>(
     )
 }
 
+#[instrument(level = "trace")]
 pub fn pagerduty_alert<T: Serialize>(
     chain_id: Option<u64>,
     class: Option<String>,

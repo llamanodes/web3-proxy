@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::value::{to_raw_value, RawValue};
 use std::fmt;
+use std::fmt::Debug;
+use tracing::{instrument};
 
 // this is used by serde
 #[allow(dead_code)]
@@ -42,6 +44,7 @@ pub enum JsonRpcRequestEnum {
 }
 
 impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
+    #[instrument(level = "trace")]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -176,6 +179,7 @@ pub struct JsonRpcForwardedResponse {
 }
 
 impl JsonRpcRequest {
+    #[instrument(level = "trace")]
     pub fn num_bytes(&self) -> usize {
         // TODO: not sure how to do this without wasting a ton of allocations
         serde_json::to_string(self)
@@ -185,6 +189,7 @@ impl JsonRpcRequest {
 }
 
 impl JsonRpcForwardedResponse {
+    #[instrument(level = "trace")]
     pub fn from_anyhow_error(
         err: anyhow::Error,
         code: Option<i64>,
@@ -216,6 +221,7 @@ impl JsonRpcForwardedResponse {
         }
     }
 
+    #[instrument(level = "trace")]
     pub fn from_response(partial_response: Box<RawValue>, id: Box<RawValue>) -> Self {
         JsonRpcForwardedResponse {
             jsonrpc: "2.0".to_string(),
@@ -226,6 +232,7 @@ impl JsonRpcForwardedResponse {
         }
     }
 
+    #[instrument(level = "trace")]
     pub fn from_value(partial_response: serde_json::Value, id: Box<RawValue>) -> Self {
         let partial_response =
             to_raw_value(&partial_response).expect("Value to RawValue should always work");
@@ -238,6 +245,7 @@ impl JsonRpcForwardedResponse {
         }
     }
 
+    #[instrument(level = "trace")]
     pub fn from_ethers_error(e: ProviderError, id: Box<RawValue>) -> anyhow::Result<Self> {
         // TODO: move turning ClientError into json to a helper function?
         let code;
@@ -297,6 +305,7 @@ impl JsonRpcForwardedResponse {
         })
     }
 
+    #[instrument(level = "trace")]
     pub fn try_from_response_result(
         result: Result<Box<RawValue>, ProviderError>,
         id: Box<RawValue>,
@@ -307,6 +316,7 @@ impl JsonRpcForwardedResponse {
         }
     }
 
+    #[instrument(level = "trace")]
     pub fn num_bytes(&self) -> usize {
         // TODO: not sure how to do this without wasting a ton of allocations
         serde_json::to_string(self)

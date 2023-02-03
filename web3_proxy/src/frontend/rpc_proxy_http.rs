@@ -12,11 +12,13 @@ use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
 use itertools::Itertools;
 use std::sync::Arc;
+use tracing::{instrument};
 
 /// POST /rpc -- Public entrypoint for HTTP JSON-RPC requests. Web3 wallets use this.
 /// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -27,6 +29,7 @@ pub async fn proxy_web3_rpc(
 }
 
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn fastest_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -39,6 +42,7 @@ pub async fn fastest_proxy_web3_rpc(
 }
 
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn versus_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -48,6 +52,7 @@ pub async fn versus_proxy_web3_rpc(
     _proxy_web3_rpc(app, ip, origin, payload, ProxyMode::Versus).await
 }
 
+#[instrument(level = "trace")]
 async fn _proxy_web3_rpc(
     app: Arc<Web3ProxyApp>,
     ClientIp(ip): ClientIp,
@@ -89,6 +94,7 @@ async fn _proxy_web3_rpc(
 /// Can optionally authorized based on origin, referer, or user agent.
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -112,6 +118,7 @@ pub async fn proxy_web3_rpc_with_key(
 }
 
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn fastest_proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -135,6 +142,7 @@ pub async fn fastest_proxy_web3_rpc_with_key(
 }
 
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn versus_proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: ClientIp,
@@ -158,6 +166,7 @@ pub async fn versus_proxy_web3_rpc_with_key(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[instrument(level = "trace")]
 async fn _proxy_web3_rpc_with_key(
     app: Arc<Web3ProxyApp>,
     ClientIp(ip): ClientIp,

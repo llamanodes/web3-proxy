@@ -1,5 +1,6 @@
 //! A module providing the `JsonRpcErrorCount` metric.
 
+use std::fmt::Debug;
 use ethers::providers::ProviderError;
 use metered::metric::{Advice, Enter, OnResult};
 use metered::{
@@ -7,6 +8,7 @@ use metered::{
     clear::Clear,
     metric::{Counter, Metric},
 };
+use tracing::{instrument};
 use serde::Serialize;
 use std::ops::Deref;
 
@@ -21,16 +23,17 @@ use std::ops::Deref;
 #[derive(Clone, Default, Debug, Serialize)]
 pub struct JsonRpcErrorCount<C: Counter = AtomicInt<u64>>(pub C);
 
-impl<C: Counter, T> Metric<Result<T, ProviderError>> for JsonRpcErrorCount<C> {}
+impl<C: Counter + Debug, T: Debug> Metric<Result<T, ProviderError>> for JsonRpcErrorCount<C> {}
 
-impl<C: Counter> Enter for JsonRpcErrorCount<C> {
+impl<C: Counter + Debug> Enter for JsonRpcErrorCount<C> {
     type E = ();
     fn enter(&self) {}
 }
 
-impl<C: Counter, T> OnResult<Result<T, ProviderError>> for JsonRpcErrorCount<C> {
+impl<C: Counter + Debug, T: Debug> OnResult<Result<T, ProviderError>> for JsonRpcErrorCount<C> {
     /// Unlike the default ErrorCount, this one does not increment for internal jsonrpc errors
     /// TODO: count errors like this on another helper
+    #[instrument(level = "trace")]
     fn on_result(&self, _: (), r: &Result<T, ProviderError>) -> Advice {
         match r {
             Ok(_) => {}
@@ -45,7 +48,9 @@ impl<C: Counter, T> OnResult<Result<T, ProviderError>> for JsonRpcErrorCount<C> 
     }
 }
 
-impl<C: Counter> Clear for JsonRpcErrorCount<C> {
+impl<C: Counter + Debug> Clear for JsonRpcErrorCount<C> {
+
+    #[instrument(level = "trace")]
     fn clear(&self) {
         self.0.clear()
     }
@@ -54,6 +59,7 @@ impl<C: Counter> Clear for JsonRpcErrorCount<C> {
 impl<C: Counter> Deref for JsonRpcErrorCount<C> {
     type Target = C;
 
+    #[instrument(level = "trace")]
     fn deref(&self) -> &Self::Target {
         &self.0
     }

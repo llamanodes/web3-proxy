@@ -11,7 +11,7 @@ use axum::{
 use derive_more::From;
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
-use tracing::{trace, warn};
+use tracing::{instrument, trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
@@ -44,6 +44,7 @@ pub enum FrontendErrorResponse {
 }
 
 impl FrontendErrorResponse {
+    #[instrument(level = "trace")]
     pub fn into_response_parts(self) -> (StatusCode, JsonRpcForwardedResponse) {
         match self {
             Self::AccessDenied => {
@@ -272,6 +273,7 @@ impl FrontendErrorResponse {
 }
 
 impl IntoResponse for FrontendErrorResponse {
+    #[instrument(level = "trace")]
     fn into_response(self) -> Response {
         // TODO: include the request id in these so that users can give us something that will point to logs
         // TODO: status code is in the jsonrpc response and is also the first item in the tuple. DRY
@@ -281,6 +283,7 @@ impl IntoResponse for FrontendErrorResponse {
     }
 }
 
+#[instrument(level = "trace")]
 pub async fn handler_404() -> Response {
     FrontendErrorResponse::NotFound.into_response()
 }

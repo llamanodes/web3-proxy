@@ -18,7 +18,7 @@ use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::{HashMap, HashSet};
-use tracing::{debug, error, info, trace, warn, Level};
+use tracing::{debug, error, info, instrument, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use moka::future::{Cache, ConcurrentCacheExt};
 use serde::ser::{SerializeStruct, Serializer};
@@ -29,6 +29,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::{cmp, fmt};
+use std::fmt::Debug;
 use thread_fast_rng::rand::seq::SliceRandom;
 use tokio::sync::{broadcast, watch};
 use tokio::task;
@@ -57,6 +58,7 @@ pub struct Web3Connections {
 impl Web3Connections {
     /// Spawn durable connections to multiple Web3 providers.
     #[allow(clippy::too_many_arguments)]
+    #[instrument(level = "trace")]
     pub async fn spawn(
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
@@ -245,6 +247,7 @@ impl Web3Connections {
         Ok((connections, handle))
     }
 
+    #[instrument(level = "trace")]
     pub fn get(&self, conn_name: &str) -> Option<&Arc<Web3Connection>> {
         self.conns.get(conn_name)
     }
@@ -252,6 +255,7 @@ impl Web3Connections {
     /// subscribe to blocks and transactions from all the backend rpcs.
     /// blocks are processed by all the `Web3Connection`s and then sent to the `block_receiver`
     /// transaction ids from all the `Web3Connection`s are deduplicated and forwarded to `pending_tx_sender`
+    #[instrument(level = "trace")]
     async fn subscribe(
         self: Arc<Self>,
         authorization: Arc<Authorization>,
@@ -333,6 +337,7 @@ impl Web3Connections {
 
     /// Send the same request to all the handles. Returning the most common success or most common error.
     /// TODO: option to return the fastest response and handles for all the others instead?
+    #[instrument(level = "trace")]
     pub async fn try_send_parallel_requests(
         &self,
         active_request_handles: Vec<OpenRequestHandle>,
@@ -411,6 +416,7 @@ impl Web3Connections {
         unimplemented!("this shouldn't be possible")
     }
 
+    #[instrument(level = "trace")]
     pub async fn best_consensus_head_connection(
         &self,
         authorization: &Arc<Authorization>,
@@ -445,6 +451,7 @@ impl Web3Connections {
     }
 
     /// get the best available rpc server with the consensus head block. it might have blocks after the consensus head
+    #[instrument(level = "trace")]
     async fn _best_consensus_head_connection(
         &self,
         allow_backups: bool,
@@ -642,6 +649,7 @@ impl Web3Connections {
     /// this prefers synced servers, but it will return servers even if they aren't fully in sync.
     /// This is useful for broadcasting signed transactions.
     // TODO: better type on this that can return an anyhow::Result
+    #[instrument(level = "trace")]
     pub async fn all_connections(
         &self,
         authorization: &Arc<Authorization>,
@@ -744,6 +752,7 @@ impl Web3Connections {
 
     /// be sure there is a timeout on this or it might loop forever
     /// TODO: think more about wait_for_sync
+    #[instrument(level = "trace")]
     pub async fn try_send_best_consensus_head_connection(
         &self,
         authorization: &Arc<Authorization>,
@@ -1009,6 +1018,7 @@ impl Web3Connections {
     }
 
     /// be sure there is a timeout on this or it might loop forever
+    #[instrument(level = "trace")]
     pub async fn try_send_all_synced_connections(
         &self,
         authorization: &Arc<Authorization>,
@@ -1093,6 +1103,7 @@ impl Web3Connections {
         }
     }
 
+    #[instrument(level = "trace")]
     pub async fn try_proxy_connection(
         &self,
         proxy_mode: ProxyMode,
@@ -1118,6 +1129,7 @@ impl Web3Connections {
 }
 
 impl fmt::Debug for Web3Connections {
+    #[instrument(skip_all)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
         f.debug_struct("Web3Connections")
@@ -1127,6 +1139,7 @@ impl fmt::Debug for Web3Connections {
 }
 
 impl Serialize for Web3Connections {
+    #[instrument(skip_all)]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1162,7 +1175,7 @@ mod tests {
         provider::Web3Provider,
     };
     use ethers::types::{Block, U256};
-    use tracing::{trace, LevelFilter};
+    use tracing::{trace};
     use parking_lot::RwLock;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock as AsyncRwLock;

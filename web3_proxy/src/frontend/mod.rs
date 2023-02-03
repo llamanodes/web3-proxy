@@ -14,7 +14,7 @@ use axum::{
     Extension, Router,
 };
 use http::header::AUTHORIZATION;
-use tracing::info;
+use tracing::{info, instrument};
 use moka::future::Cache;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ use std::{iter::once, time::Duration};
 use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum FrontendResponseCaches {
     Status,
 }
@@ -32,6 +32,7 @@ pub type FrontendResponseCache =
     Cache<FrontendResponseCaches, Arc<serde_json::Value>, hashbrown::hash_map::DefaultHashBuilder>;
 
 /// Start the frontend server.
+#[instrument(level = "trace")]
 pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
     // setup caches for whatever the frontend needs
     // TODO: a moka cache is probably way overkill for this.

@@ -5,12 +5,12 @@ use super::connection::Web3Connection;
 use super::connections::Web3Connections;
 use super::request::OpenRequestResult;
 use ethers::prelude::{ProviderError, Transaction, TxHash};
-use tracing::{debug, trace, Level};
+use tracing::{debug, instrument, trace, Level};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
 // TODO: think more about TxState
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum TxStatus {
     Pending(Transaction),
     Confirmed(Transaction),
@@ -18,6 +18,8 @@ pub enum TxStatus {
 }
 
 impl Web3Connections {
+
+    #[instrument(level = "trace")]
     async fn query_transaction_status(
         &self,
         authorization: &Arc<Authorization>,
@@ -63,6 +65,7 @@ impl Web3Connections {
     }
 
     /// dedupe transaction and send them to any listening clients
+    #[instrument(level = "trace")]
     pub(super) async fn process_incoming_tx_id(
         self: Arc<Self>,
         authorization: Arc<Authorization>,

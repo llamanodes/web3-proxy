@@ -9,9 +9,11 @@ use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_macros::debug_handler;
 use serde_json::json;
 use std::sync::Arc;
+use tracing::{instrument};
 
 /// Health check page for load balancers to use.
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
     // TODO: add a check that we aren't shutting down
     if app.balanced_rpcs.synced() {
@@ -25,6 +27,7 @@ pub async fn health(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoRe
 ///
 /// TODO: replace this with proper stats and monitoring
 #[debug_handler]
+#[instrument(level = "trace")]
 pub async fn status(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Extension(response_cache): Extension<FrontendResponseCache>,

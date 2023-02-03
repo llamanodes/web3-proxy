@@ -10,7 +10,7 @@ use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use ethers::types::U256;
 use futures::future::try_join_all;
 use futures::StreamExt;
-use tracing::{debug, error, info, trace, warn, Level};
+use tracing::{debug, error, info, instrument, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use parking_lot::RwLock;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
@@ -22,6 +22,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32, AtomicU64};
 use std::{cmp::Ordering, sync::Arc};
+use std::fmt::Debug;
 use thread_fast_rng::rand::Rng;
 use thread_fast_rng::thread_fast_rng;
 use tokio::sync::{broadcast, oneshot, watch, RwLock as AsyncRwLock};
@@ -36,6 +37,7 @@ pub enum ProviderState {
 }
 
 impl ProviderState {
+    #[instrument(level = "trace")]
     pub async fn provider(&self, allow_not_ready: bool) -> Option<&Arc<Web3Provider>> {
         match self {
             ProviderState::None => None,
@@ -100,6 +102,7 @@ impl Web3Connection {
     /// Connect to a web3 rpc
     // TODO: have this take a builder (which will have channels attached). or maybe just take the config and give the config public fields
     #[allow(clippy::too_many_arguments)]
+    #[instrument(level = "trace")]
     pub async fn spawn(
         name: String,
         display_name: Option<String>,
@@ -196,6 +199,7 @@ impl Web3Connection {
     }
 
     // TODO: would be great if rpcs exposed this. see https://github.com/ledgerwatch/erigon/issues/6391
+    #[instrument(level = "trace")]
     async fn check_block_data_limit(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -284,10 +288,12 @@ impl Web3Connection {
     }
 
     /// TODO: this might be too simple. different nodes can prune differently. its possible we will have a block range
+    #[instrument(level = "trace")]
     pub fn block_data_limit(&self) -> U64 {
         self.block_data_limit.load(atomic::Ordering::Acquire).into()
     }
 
+    #[instrument(level = "trace")]
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
         let head_block_num = match self.head_block.read().clone() {
             None => return false,
@@ -310,6 +316,7 @@ impl Web3Connection {
     /// reconnect to the provider. errors are retried forever with exponential backoff with jitter.
     /// We use the "Decorrelated" jitter from <https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/>
     /// TODO: maybe it would be better to use "Full Jitter". The "Full Jitter" approach uses less work, but slightly more time.
+    #[instrument(level = "trace")]
     pub async fn retrying_connect(
         self: &Arc<Self>,
         block_sender: Option<&flume::Sender<BlockAndRpc>>,
@@ -352,18 +359,10 @@ impl Web3Connection {
             let retry_in = Duration::from_millis(sleep_ms);
 
             let error_level = if self.backup {
-                tracing::Level::Debug
+                debug!("Failed reconnect to {}! Retry in {}ms. err={:?}", self, retry_in.as_millis(), err);
             } else {
-                tracing::Level::Info
+                info!("Failed reconnect to {}! Retry in {}ms. err={:?}", self, retry_in.as_millis(), err);
             };
-
-            tracing::log!(
-                error_level,
-                "Failed reconnect to {}! Retry in {}ms. err={:?}",
-                self,
-                retry_in.as_millis(),
-                err,
-            );
 
             sleep(retry_in).await;
         }
@@ -372,6 +371,7 @@ impl Web3Connection {
     }
 
     /// connect to the web3 provider
+    #[instrument(level = "trace")]
     async fn connect(
         self: &Arc<Self>,
         block_sender: Option<&flume::Sender<BlockAndRpc>>,
@@ -487,10 +487,12 @@ impl Web3Connection {
     }
 
     #[inline]
+    #[instrument(level = "trace")]
     pub fn active_requests(&self) -> u32 {
         self.active_requests.load(atomic::Ordering::Acquire)
     }
 
+    #[instrument(level = "trace")]
     async fn send_head_block_result(
         self: &Arc<Self>,
         new_head_block: Result<Option<ArcBlock>, ProviderError>,
@@ -569,6 +571,7 @@ impl Web3Connection {
     /// This should only exit when the program is exiting.
     /// TODO: should more of these args be on self?
     #[allow(clippy::too_many_arguments)]
+    #[instrument(level = "trace")]
     async fn subscribe(
         self: Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -688,6 +691,7 @@ impl Web3Connection {
     }
 
     /// Subscribe to new blocks. If `reconnect` is true, this runs forever.
+    #[instrument(level = "trace")]
     async fn subscribe_new_heads(
         self: Arc<Self>,
         authorization: Arc<Authorization>,
@@ -873,6 +877,7 @@ impl Web3Connection {
         }
     }
 
+    #[instrument(level = "trace")]
     async fn subscribe_pending_transactions(
         self: Arc<Self>,
         authorization: Arc<Authorization>,
@@ -952,6 +957,7 @@ impl Web3Connection {
     /// be careful with this; it might wait forever!
     /// `allow_not_ready` is only for use by health checks while starting the provider
     /// TODO: don't use anyhow. use specific error type
+    #[instrument(level = "trace")]
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -1007,6 +1013,7 @@ impl Web3Connection {
         }
     }
 
+    #[instrument(level = "trace")]
     pub async fn try_request_handle(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -1078,6 +1085,7 @@ impl Web3Connection {
 }
 
 impl fmt::Debug for Web3Provider {
+    #[instrument(level = "trace")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default Debug takes forever to write. this is too quiet though. we at least need the url
         f.debug_struct("Web3Provider").finish_non_exhaustive()
@@ -1085,6 +1093,7 @@ impl fmt::Debug for Web3Provider {
 }
 
 impl Hash for Web3Connection {
+    #[instrument(level = "trace")]
     fn hash<H: Hasher>(&self, state: &mut H) {
         // TODO: is this enough?
         self.name.hash(state);
@@ -1094,24 +1103,28 @@ impl Hash for Web3Connection {
 impl Eq for Web3Connection {}
 
 impl Ord for Web3Connection {
+    #[instrument(level = "trace")]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.name.cmp(&other.name)
     }
 }
 
 impl PartialOrd for Web3Connection {
+    #[instrument(level = "trace")]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl PartialEq for Web3Connection {
+    #[instrument(level = "trace")]
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
     }
 }
 
 impl Serialize for Web3Connection {
+    #[instrument(level = "trace")]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1158,6 +1171,7 @@ impl Serialize for Web3Connection {
 }
 
 impl fmt::Debug for Web3Connection {
+    #[instrument(level = "trace")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut f = f.debug_struct("Web3Connection");
 
@@ -1175,6 +1189,7 @@ impl fmt::Debug for Web3Connection {
 }
 
 impl fmt::Display for Web3Connection {
+    #[instrument(level = "trace")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: filter basic auth and api keys
         write!(f, "{}", &self.name)

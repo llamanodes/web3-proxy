@@ -2,14 +2,14 @@ use axum::headers::HeaderName;
 use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response};
 use axum::{routing::get, Extension, Router};
-use tracing::info;
+use tracing::{info, instrument};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use crate::app::Web3ProxyApp;
 
 /// Run a prometheus metrics server on the given port.
-
+#[instrument(level = "trace")]
 pub async fn serve(app: Arc<Web3ProxyApp>, port: u16) -> anyhow::Result<()> {
     // build our application with a route
     // order most to least common
@@ -42,6 +42,7 @@ pub async fn serve(app: Arc<Web3ProxyApp>, port: u16) -> anyhow::Result<()> {
         .map_err(Into::into)
 }
 
+#[instrument(level = "trace")]
 async fn root(Extension(app): Extension<Arc<Web3ProxyApp>>) -> Response {
     let serialized = app.prometheus_metrics().await;
 

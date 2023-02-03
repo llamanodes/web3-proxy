@@ -12,7 +12,7 @@ use ethers::prelude::U64;
 use futures::future::AbortHandle;
 use futures::future::Abortable;
 use futures::stream::StreamExt;
-use tracing::{trace, warn};
+use tracing::{instrument, trace, warn};
 use serde_json::json;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
@@ -20,6 +20,7 @@ use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 
 impl Web3ProxyApp {
     // TODO: #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
+    #[instrument(level = "trace")]
     pub async fn eth_subscribe<'a>(
         self: &'a Arc<Self>,
         authorization: Arc<Authorization>,

@@ -6,7 +6,7 @@ use argh::FromArgs;
 use ethers::prelude::TxHash;
 use ethers::types::U256;
 use hashbrown::HashMap;
-use tracing::warn;
+use tracing::{instrument, warn};
 use migration::sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -227,6 +227,7 @@ impl Web3ConnectionConfig {
     /// Create a Web3Connection from config
     /// TODO: move this into Web3Connection? (just need to make things pub(crate))
     #[allow(clippy::too_many_arguments)]
+    #[instrument(level = "trace")]
     pub async fn spawn(
         self,
         name: String,

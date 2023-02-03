@@ -1,6 +1,7 @@
 use anyhow::Context;
 use derive_more::From;
 use std::time::Duration;
+use tracing::{instrument};
 
 /// Use HTTP and WS providers.
 // TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit <https://github.com/gakonst/ethers-rs/issues/592>
@@ -21,6 +22,7 @@ impl Web3Provider {
         }
     }
 
+    #[instrument(level = "trace")]
     pub async fn from_str(
         url_str: &str,
         http_client: Option<reqwest::Client>,

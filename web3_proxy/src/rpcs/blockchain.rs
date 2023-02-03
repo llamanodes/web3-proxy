@@ -10,7 +10,7 @@ use anyhow::Context;
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use hashbrown::{HashMap, HashSet};
-use tracing::{debug, error, warn, Level};
+use tracing::{debug, error, instrument, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use serde_json::json;
@@ -33,6 +33,7 @@ pub struct SavedBlock {
 }
 
 impl PartialEq for SavedBlock {
+    #[instrument(level = "trace")]
     fn eq(&self, other: &Self) -> bool {
         match (self.block.hash, other.block.hash) {
             (None, None) => true,
@@ -44,6 +45,7 @@ impl PartialEq for SavedBlock {
 }
 
 impl SavedBlock {
+    #[instrument(level = "trace")]
     pub fn new(block: ArcBlock) -> Self {
         let mut x = Self { block, age: 0 };
 
@@ -54,6 +56,7 @@ impl SavedBlock {
         x
     }
 
+    #[instrument(level = "trace")]
     pub fn lag(&self) -> u64 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -70,23 +73,27 @@ impl SavedBlock {
         }
     }
 
+    #[instrument(level = "trace")]
     pub fn hash(&self) -> H256 {
         self.block.hash.expect("saved blocks must have a hash")
     }
 
     // TODO: return as U64 or u64?
+    #[instrument(level = "trace")]
     pub fn number(&self) -> U64 {
         self.block.number.expect("saved blocks must have a number")
     }
 }
 
 impl From<ArcBlock> for SavedBlock {
+    #[instrument(level = "trace")]
     fn from(x: ArcBlock) -> Self {
         SavedBlock::new(x)
     }
 }
 
 impl Display for SavedBlock {
+    #[instrument(skip_all)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} ({}, {}s old)", self.number(), self.hash(), self.age)
     }
@@ -94,6 +101,7 @@ impl Display for SavedBlock {
 
 impl Web3Connections {
     /// add a block to our mappings and track the heaviest chain
+    #[instrument(level = "trace")]
     pub async fn save_block(
         &self,
         block: ArcBlock,
@@ -131,6 +139,7 @@ impl Web3Connections {
     /// Get a block from caches with fallback.
     /// Will query a specific node or the best available.
     /// TODO: return anyhow::Result<Option<ArcBlock>>?
+    #[instrument(level = "trace")]
     pub async fn block(
         &self,
         authorization: &Arc<Authorization>,
@@ -186,6 +195,7 @@ impl Web3Connections {
     }
 
     /// Convenience method to get the cannonical block at a given block height.
+    #[instrument(level = "trace")]
     pub async fn block_hash(
         &self,
         authorization: &Arc<Authorization>,
@@ -200,6 +210,7 @@ impl Web3Connections {
 
     /// Get the heaviest chain's block from cache or backend rpc
     /// Caution! If a future block is requested, this might wait forever. Be sure to have a timeout outside of this!
+    #[instrument(level = "trace")]
     pub async fn cannonical_block(
         &self,
         authorization: &Arc<Authorization>,
@@ -272,6 +283,7 @@ impl Web3Connections {
         Ok((block, archive_needed))
     }
 
+    #[instrument(level = "trace")]
     pub(super) async fn process_incoming_blocks(
         &self,
         authorization: &Arc<Authorization>,
@@ -314,6 +326,7 @@ impl Web3Connections {
     /// `connection_heads` is a mapping of rpc_names to head block hashes.
     /// self.blockchain_map is a mapping of hashes to the complete ArcBlock.
     /// TODO: return something?
+    #[instrument(level = "trace")]
     pub(crate) async fn process_block_from_rpc(
         &self,
         authorization: &Arc<Authorization>,
@@ -524,6 +537,7 @@ impl Web3Connections {
     }
 }
 
+#[derive(Debug)]
 struct ConnectionsGroup {
     /// TODO: this group might not actually include backups, but they were at leastchecked
     includes_backups: bool,
@@ -531,6 +545,7 @@ struct ConnectionsGroup {
 }
 
 impl ConnectionsGroup {
+    #[instrument(level = "trace")]
     fn new(with_backups: bool) -> Self {
         Self {
             includes_backups: with_backups,
@@ -538,23 +553,28 @@ impl ConnectionsGroup {
         }
     }
 
+    #[instrument(level = "trace")]
     fn without_backups() -> Self {
         Self::new(false)
     }
 
+    #[instrument(level = "trace")]
     fn with_backups() -> Self {
         Self::new(true)
     }
 
+    #[instrument(level = "trace")]
     fn remove(&mut self, rpc: &Web3Connection) -> Option<H256> {
         self.rpc_name_to_hash.remove(rpc.name.as_str())
     }
 
+    #[instrument(level = "trace")]
     fn insert(&mut self, rpc: &Web3Connection, block_hash: H256) -> Option<H256> {
         self.rpc_name_to_hash.insert(rpc.name.clone(), block_hash)
     }
 
     // TODO: i don't love having this here. move to web3_connections?
+    #[instrument(level = "trace")]
     async fn get_block_from_rpc(
         &self,
         rpc_name: &str,
@@ -577,6 +597,7 @@ impl ConnectionsGroup {
     }
 
     // TODO: do this during insert/remove?
+    #[instrument(level = "trace")]
     pub(self) async fn highest_block(
         &self,
         authorization: &Arc<Authorization>,
@@ -624,6 +645,7 @@ impl ConnectionsGroup {
         highest_block
     }
 
+    #[instrument(level = "trace")]
     pub(self) async fn consensus_head_connections(
         &self,
         authorization: &Arc<Authorization>,
@@ -764,6 +786,7 @@ impl ConnectionsGroup {
 }
 
 /// A ConsensusConnections builder that tracks all connection heads across multiple groups of servers
+#[derive(Debug)]
 pub struct ConsensusFinder {
     /// only main servers
     main: ConnectionsGroup,
@@ -772,6 +795,7 @@ pub struct ConsensusFinder {
 }
 
 impl Default for ConsensusFinder {
+    #[instrument(level = "trace")]
     fn default() -> Self {
         Self {
             main: ConnectionsGroup::without_backups(),
@@ -781,6 +805,7 @@ impl Default for ConsensusFinder {
 }
 
 impl ConsensusFinder {
+    #[instrument(level = "trace")]
     fn remove(&mut self, rpc: &Web3Connection) -> Option<H256> {
         // TODO: should we have multiple backup tiers? (remote datacenters vs third party)
         if !rpc.backup {
@@ -789,6 +814,7 @@ impl ConsensusFinder {
         self.all.remove(rpc)
     }
 
+    #[instrument(level = "trace")]
     fn insert(&mut self, rpc: &Web3Connection, new_hash: H256) -> Option<H256> {
         // TODO: should we have multiple backup tiers? (remote datacenters vs third party)
         if !rpc.backup {
@@ -798,6 +824,7 @@ impl ConsensusFinder {
     }
 
     /// Update our tracking of the rpc and return true if something changed
+    #[instrument(level = "trace")]
     async fn update_rpc(
         &mut self,
         rpc_head_block: Option<SavedBlock>,
@@ -845,6 +872,7 @@ impl ConsensusFinder {
     }
 
     // TODO: this could definitely be cleaner. i don't like the error handling/unwrapping
+    #[instrument(level = "trace")]
     async fn best_consensus_connections(
         &mut self,
         authorization: &Arc<Authorization>,

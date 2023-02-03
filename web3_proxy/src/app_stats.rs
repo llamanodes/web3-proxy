@@ -6,7 +6,7 @@ use entities::rpc_accounting;
 use entities::sea_orm_active_enums::LogLevel;
 use hashbrown::HashMap;
 use hdrhistogram::{Histogram, RecordError};
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 use migration::sea_orm::{self, ActiveModelTrait, DatabaseConnection, DbErr};
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
@@ -33,6 +33,7 @@ pub struct ProxyResponseStat {
 
 impl ProxyResponseStat {
     /// TODO: think more about this. probably rename it
+    #[instrument(level = "trace")]
     fn key(&self) -> ProxyResponseAggregateKey {
         // include either the rpc_key_id or the origin
         let (mut rpc_key_id, origin) = match (
@@ -87,6 +88,8 @@ pub struct ProxyResponseHistograms {
 }
 
 impl Default for ProxyResponseHistograms {
+
+    #[instrument(level = "trace")]
     fn default() -> Self {
         // TODO: how many significant figures?
         let request_bytes = Histogram::new(5).expect("creating request_bytes histogram");
@@ -102,7 +105,7 @@ impl Default for ProxyResponseHistograms {
 }
 
 // TODO: think more about if we should include IP address in this
-#[derive(Clone, From, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
 struct ProxyResponseAggregateKey {
     archive_request: bool,
     error_response: bool,
@@ -142,6 +145,7 @@ pub struct StatEmitterSpawn {
     pub background_handle: JoinHandle<anyhow::Result<()>>,
 }
 
+#[derive(Debug)]
 pub struct StatEmitter {
     chain_id: u64,
     db_conn: DatabaseConnection,
@@ -150,6 +154,8 @@ pub struct StatEmitter {
 
 // TODO: impl `+=<ProxyResponseStat>` for ProxyResponseAggregate?
 impl ProxyResponseAggregate {
+
+    #[instrument(level = "trace")]
     fn add(&mut self, stat: ProxyResponseStat) -> Result<(), RecordError> {
         // a stat always come from just 1 frontend request
         self.frontend_requests += 1;
@@ -181,6 +187,7 @@ impl ProxyResponseAggregate {
 
     // TODO? help to turn this plus the key into a database model?
     // TODO: take a db transaction instead so that we can batch
+    #[instrument(level = "trace")]
     async fn save(
         self,
         chain_id: u64,
@@ -268,6 +275,8 @@ impl ProxyResponseAggregate {
 }
 
 impl ProxyResponseStat {
+
+    #[instrument(level = "trace")]
     pub fn new(
         method: String,
         authorization: Arc<Authorization>,
@@ -301,6 +310,8 @@ impl ProxyResponseStat {
 }
 
 impl StatEmitter {
+
+    #[instrument(level = "trace")]
     pub fn spawn(
         chain_id: u64,
         db_conn: DatabaseConnection,
@@ -322,6 +333,7 @@ impl StatEmitter {
         Ok((stat_sender, handle).into())
     }
 
+    #[instrument(level = "trace")]
     async fn stat_loop(
         &mut self,
         stat_receiver: flume::Receiver<Web3ProxyStat>,

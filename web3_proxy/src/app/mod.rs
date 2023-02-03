@@ -31,7 +31,7 @@ use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
 use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
-use tracing::{debug, error, info, trace, warn, Level};
+use tracing::{debug, error, info, instrument, trace, warn, Level};
 use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
 use migration::sea_orm::{
     self, ConnectionTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait,
@@ -68,7 +68,7 @@ pub static APP_USER_AGENT: &str = concat!(
 /// TODO: allow customizing the request period?
 pub static REQUEST_PERIOD: u64 = 60;
 
-#[derive(From)]
+#[derive(Debug, From)]
 struct ResponseCacheKey {
     // if none, this is cached until evicted
     block: Option<SavedBlock>,
@@ -79,6 +79,7 @@ struct ResponseCacheKey {
 }
 
 impl ResponseCacheKey {
+    #[instrument(level = "trace")]
     fn weight(&self) -> usize {
         let mut w = self.method.len();
 
@@ -91,6 +92,7 @@ impl ResponseCacheKey {
 }
 
 impl PartialEq for ResponseCacheKey {
+    #[instrument(level = "trace")]
     fn eq(&self, other: &Self) -> bool {
         if self.cache_errors != other.cache_errors {
             return false;
@@ -122,6 +124,7 @@ impl PartialEq for ResponseCacheKey {
 impl Eq for ResponseCacheKey {}
 
 impl Hash for ResponseCacheKey {
+    #[instrument(level = "trace")]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.block.as_ref().map(|x| x.hash()).hash(state);
         self.method.hash(state);
@@ -167,11 +170,12 @@ pub struct AuthorizationChecks {
 
 /// Simple wrapper so that we can keep track of read only connections.
 /// This does no blocking of writing in the compiler!
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DatabaseReplica(pub DatabaseConnection);
 
 // TODO: I feel like we could do something smart with DeRef or AsRef or Borrow, but that wasn't working for me
 impl DatabaseReplica {
+    #[instrument(skip_all)]
     pub fn conn(&self) -> &DatabaseConnection {
         &self.0
     }
@@ -215,6 +219,7 @@ pub struct Web3ProxyApp {
 
 /// flatten a JoinError into an anyhow error
 /// Useful when joining multiple futures.
+#[instrument(skip_all)]
 pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T> {
     match handle.await {
         Ok(Ok(result)) => Ok(result),
@@ -224,7 +229,7 @@ pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T>
 }
 
 /// return the first error or okay if everything worked
-
+#[instrument(skip_all)]
 pub async fn flatten_handles<T>(
     mut handles: FuturesUnordered<AnyhowJoinHandle<T>>,
 ) -> anyhow::Result<()> {
@@ -239,6 +244,7 @@ pub async fn flatten_handles<T>(
     Ok(())
 }
 
+#[instrument(level = "trace")]
 pub async fn get_db(
     db_url: String,
     min_connections: u32,
@@ -261,6 +267,7 @@ pub async fn get_db(
     Database::connect(db_opt).await
 }
 
+#[instrument(level = "trace")]
 pub async fn drop_migration_lock(db_conn: &DatabaseConnection) -> Result<(), DbErr> {
     let db_backend = db_conn.get_database_backend();
 
@@ -274,6 +281,7 @@ pub async fn drop_migration_lock(db_conn: &DatabaseConnection) -> Result<(), DbE
 }
 
 /// Be super careful with override_existing_lock! It is very important that only one process is running the migrations at a time!
+#[instrument(level = "trace")]
 pub async fn migrate_db(
     db_conn: &DatabaseConnection,
     override_existing_lock: bool,
@@ -324,6 +332,7 @@ pub async fn migrate_db(
 }
 
 /// Connect to the database and run migrations
+#[instrument(level = "trace")]
 pub async fn get_migrated_db(
     db_url: String,
     min_connections: u32,
@@ -350,6 +359,7 @@ pub struct Web3ProxyAppSpawn {
 #[metered(registry = Web3ProxyAppMetrics, registry_expr = self.app_metrics, visibility = pub)]
 impl Web3ProxyApp {
     /// The main entrypoint.
+    #[instrument(level = "trace")]
     pub async fn spawn(
         top_config: TopConfig,
         num_workers: usize,
@@ -732,10 +742,12 @@ impl Web3ProxyApp {
         Ok((app, cancellable_handles, important_background_handles).into())
     }
 
+    #[instrument(level = "trace")]
     pub fn head_block_receiver(&self) -> watch::Receiver<ArcBlock> {
         self.watch_consensus_head_receiver.clone()
     }
 
+    #[instrument(level = "trace")]
     pub async fn prometheus_metrics(&self) -> String {
         let globals = HashMap::new();
         // TODO: what globals? should this be the hostname or what?
@@ -916,6 +928,7 @@ impl Web3ProxyApp {
     }
 
     /// send the request or batch of requests to the approriate RPCs
+    #[instrument(level = "trace")]
     pub async fn proxy_web3_rpc(
         self: &Arc<Self>,
         authorization: Arc<Authorization>,
@@ -956,6 +969,7 @@ impl Web3ProxyApp {
 
     /// cut up the request and send to potentually different servers
     /// TODO: make sure this isn't a problem
+    #[instrument(level = "trace")]
     async fn proxy_web3_rpc_requests(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -993,14 +1007,17 @@ impl Web3ProxyApp {
     }
 
     /// TODO: i don't think we want or need this. just use app.db_conn, or maybe app.db_conn.clone() or app.db_conn.as_ref()
+    #[instrument(level = "trace")]
     pub fn db_conn(&self) -> Option<DatabaseConnection> {
         self.db_conn.clone()
     }
 
+    #[instrument(level = "trace")]
     pub fn db_replica(&self) -> Option<DatabaseReplica> {
         self.db_replica.clone()
     }
 
+    #[instrument(level = "trace")]
     pub async fn redis_conn(&self) -> anyhow::Result<Option<redis_rate_limiter::RedisConnection>> {
         match self.vredis_pool.as_ref() {
             // TODO: don't do an error. return None
@@ -1014,6 +1031,7 @@ impl Web3ProxyApp {
     }
 
     #[measure([ErrorCount, HitCount, ResponseTime, Throughput])]
+    #[instrument(level = "trace")]
     async fn proxy_cached_request(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -1572,6 +1590,7 @@ impl Web3ProxyApp {
 }
 
 impl fmt::Debug for Web3ProxyApp {
+    #[instrument(skip_all)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
         f.debug_struct("Web3ProxyApp").finish_non_exhaustive()

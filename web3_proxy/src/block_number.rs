@@ -4,13 +4,14 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
-use tracing::{trace, warn};
+use tracing::{instrument, trace, warn};
 use serde_json::json;
 use std::sync::Arc;
 
 use crate::{frontend::authorization::Authorization, rpcs::connections::Web3Connections};
 
 #[allow(non_snake_case)]
+#[instrument(level = "trace")]
 pub fn block_num_to_U64(block_num: BlockNumber, latest_block: U64) -> U64 {
     match block_num {
         BlockNumber::Earliest => {
@@ -41,7 +42,7 @@ pub fn block_num_to_U64(block_num: BlockNumber, latest_block: U64) -> U64 {
 }
 
 /// modify params to always have a block number and not "latest"
-
+#[instrument(level = "trace")]
 pub async fn clean_block_number(
     authorization: &Arc<Authorization>,
     params: &mut serde_json::Value,
@@ -115,6 +116,7 @@ pub enum BlockNeeded {
     Cache { block_num: U64, cache_errors: bool },
 }
 
+#[instrument(level = "trace")]
 pub async fn block_needed(
     authorization: &Arc<Authorization>,
     method: &str,

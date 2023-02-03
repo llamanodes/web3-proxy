@@ -16,7 +16,7 @@ use futures::TryFutureExt;
 use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
-use tracing::{error, warn};
+use tracing::{error, instrument, warn};
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use parking_lot::Mutex;
 use redis_rate_limiter::redis::AsyncCommands;
@@ -89,6 +89,7 @@ pub struct RequestMetadata {
 }
 
 impl RequestMetadata {
+    #[instrument(level = "trace")]
     pub fn new(period_seconds: u64, request_bytes: usize) -> anyhow::Result<Self> {
         // TODO: how can we do this without turning it into a string first. this is going to slow us down!
         let request_bytes = request_bytes as u64;
@@ -112,18 +113,21 @@ impl RequestMetadata {
 }
 
 impl RpcSecretKey {
+    #[instrument(level = "trace")]
     pub fn new() -> Self {
         Ulid::new().into()
     }
 }
 
 impl Default for RpcSecretKey {
+    #[instrument(level = "trace")]
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl Display for RpcSecretKey {
+    #[instrument(level = "trace")]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // TODO: do this without dereferencing
         let ulid: Ulid = (*self).into();
@@ -135,6 +139,7 @@ impl Display for RpcSecretKey {
 impl FromStr for RpcSecretKey {
     type Err = anyhow::Error;
 
+    #[instrument(level = "trace")]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Ok(ulid) = s.parse::<Ulid>() {
             Ok(ulid.into())
@@ -148,18 +153,21 @@ impl FromStr for RpcSecretKey {
 }
 
 impl From<Ulid> for RpcSecretKey {
+    #[instrument(level = "trace")]
     fn from(x: Ulid) -> Self {
         RpcSecretKey::Ulid(x)
     }
 }
 
 impl From<Uuid> for RpcSecretKey {
+    #[instrument(level = "trace")]
     fn from(x: Uuid) -> Self {
         RpcSecretKey::Uuid(x)
     }
 }
 
 impl From<RpcSecretKey> for Ulid {
+    #[instrument(level = "trace")]
     fn from(x: RpcSecretKey) -> Self {
         match x {
             RpcSecretKey::Ulid(x) => x,
@@ -178,6 +186,7 @@ impl From<RpcSecretKey> for Uuid {
 }
 
 impl Authorization {
+    #[instrument(level = "trace")]
     pub fn internal(db_conn: Option<DatabaseConnection>) -> anyhow::Result<Self> {
         let authorization_checks = AuthorizationChecks {
             // any error logs on a local (internal) query are likely problems. log them all
@@ -200,6 +209,7 @@ impl Authorization {
         )
     }
 
+    #[instrument(level = "trace")]
     pub fn external(
         allowed_origin_requests_per_period: &HashMap<String, u64>,
         db_conn: Option<DatabaseConnection>,
@@ -235,6 +245,7 @@ impl Authorization {
         )
     }
 
+    #[instrument(level = "trace")]
     pub fn try_new(
         authorization_checks: AuthorizationChecks,
         db_conn: Option<DatabaseConnection>,
@@ -307,6 +318,7 @@ impl Authorization {
 
 /// rate limit logins only by ip.
 /// we want all origins and referers and user agents to count together
+#[instrument(level = "trace")]
 pub async fn login_is_authorized(
     app: &Web3ProxyApp,
     ip: IpAddr,
@@ -324,6 +336,7 @@ pub async fn login_is_authorized(
 }
 
 /// semaphore won't ever be None, but its easier if key auth and ip auth work the same way
+#[instrument(level = "trace")]
 pub async fn ip_is_authorized(
     app: &Arc<Web3ProxyApp>,
     ip: IpAddr,
@@ -383,6 +396,7 @@ pub async fn ip_is_authorized(
 }
 
 /// like app.rate_limit_by_rpc_key but converts to a FrontendErrorResponse;
+#[instrument(level = "trace")]
 pub async fn key_is_authorized(
     app: &Arc<Web3ProxyApp>,
     rpc_key: RpcSecretKey,
@@ -446,6 +460,7 @@ pub async fn key_is_authorized(
 
 impl Web3ProxyApp {
     /// Limit the number of concurrent requests from the given ip address.
+    #[instrument(level = "trace")]
     pub async fn ip_semaphore(&self, ip: IpAddr) -> anyhow::Result<Option<OwnedSemaphorePermit>> {
         if let Some(max_concurrent_requests) = self.config.public_max_concurrent_requests {
             let semaphore = self
@@ -471,6 +486,7 @@ impl Web3ProxyApp {
     }
 
     /// Limit the number of concurrent requests from the given rpc key.
+    #[instrument(level = "trace")]
     pub async fn registered_user_semaphore(
         &self,
         authorization_checks: &AuthorizationChecks,
@@ -506,6 +522,7 @@ impl Web3ProxyApp {
 
     /// Verify that the given bearer token and address are allowed to take the specified action.
     /// This includes concurrent request limiting.
+    #[instrument(level = "trace")]
     pub async fn bearer_is_authorized(
         &self,
         bearer: Bearer,
@@ -542,6 +559,7 @@ impl Web3ProxyApp {
         Ok((user, semaphore_permit))
     }
 
+    #[instrument(level = "trace")]
     pub async fn rate_limit_login(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_rpc_key?
 
@@ -592,6 +610,7 @@ impl Web3ProxyApp {
     }
 
     /// origin is included because it can override the default rate limits
+    #[instrument(level = "trace")]
     pub async fn rate_limit_by_ip(
         &self,
         allowed_origin_requests_per_period: &HashMap<String, u64>,
@@ -651,6 +670,7 @@ impl Web3ProxyApp {
     }
 
     // check the local cache for user data, or query the database
+    #[instrument(level = "trace")]
     pub(crate) async fn authorization_checks(
         &self,
         rpc_secret_key: RpcSecretKey,
@@ -764,6 +784,7 @@ impl Web3ProxyApp {
     }
 
     /// Authorized the ip/origin/referer/useragent and rate limit and concurrency
+    #[instrument(level = "trace")]
     pub async fn rate_limit_by_rpc_key(
         &self,
         ip: IpAddr,
@@ -848,6 +869,7 @@ impl Web3ProxyApp {
 }
 
 impl Authorization {
+    #[instrument(level = "trace")]
     pub async fn check_again(
         &self,
         app: &Arc<Web3ProxyApp>,

@@ -8,7 +8,6 @@ use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::{HttpClientError, ProviderError, WsClientError};
 use ethers::types::{Address, Bytes};
-use tracing::{debug, error, trace, warn, Level};
 use metered::metered;
 use metered::HitCount;
 use metered::ResponseTime;
@@ -20,6 +19,7 @@ use std::sync::atomic::{self, AtomicBool, Ordering};
 use std::sync::Arc;
 use thread_fast_rng::rand::Rng;
 use tokio::time::{sleep, Duration, Instant};
+use tracing::{debug, error, trace, instrument, warn, Level};
 
 #[derive(Debug)]
 pub enum OpenRequestResult {
@@ -43,6 +43,7 @@ pub struct OpenRequestHandle {
 }
 
 /// Depending on the context, RPC errors can require different handling.
+#[derive(Debug)]
 pub enum RequestRevertHandler {
     /// Log at the trace level. Use when errors are expected.
     TraceLevel,
@@ -60,13 +61,14 @@ pub enum RequestRevertHandler {
 #[derive(serde::Deserialize, serde::Serialize)]
 struct EthCallParams((EthCallFirstParams, Option<serde_json::Value>));
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct EthCallFirstParams {
     to: Address,
     data: Option<Bytes>,
 }
 
 impl From<Level> for RequestRevertHandler {
+    #[instrument(level = "trace")]
     fn from(level: Level) -> Self {
         match level {
             Level::Trace => RequestRevertHandler::TraceLevel,
@@ -80,6 +82,7 @@ impl From<Level> for RequestRevertHandler {
 
 impl Authorization {
     /// Save a RPC call that return "execution reverted" to the database.
+    #[instrument(level = "trace")]
     async fn save_revert(
         self: Arc<Self>,
         method: Method,
@@ -131,6 +134,7 @@ impl Authorization {
 
 #[metered(registry = OpenRequestHandleMetrics, visibility = pub)]
 impl OpenRequestHandle {
+    #[instrument(level = "trace")]
     pub async fn new(authorization: Arc<Authorization>, conn: Arc<Web3Connection>) -> Self {
         // TODO: take request_id as an argument?
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
@@ -196,11 +200,13 @@ impl OpenRequestHandle {
         }
     }
 
+    #[instrument(level = "trace")]
     pub fn connection_name(&self) -> String {
         self.conn.name.clone()
     }
 
     #[inline]
+    #[instrument(level = "trace")]
     pub fn clone_connection(&self) -> Arc<Web3Connection> {
         self.conn.clone()
     }
@@ -209,6 +215,7 @@ impl OpenRequestHandle {
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// TODO: we no longer take self because metered doesn't like that
     /// TODO: ErrorCount includes too many types of errors, such as transaction reverts
+    #[instrument(level = "trace")]
     #[measure([JsonRpcErrorCount, HitCount, ProviderErrorCount, ResponseTime, Throughput])]
     pub async fn request<P, R>(
         &self,
@@ -407,6 +414,7 @@ impl OpenRequestHandle {
 }
 
 impl Drop for OpenRequestHandle {
+    #[instrument(level = "trace")]
     fn drop(&mut self) {
         self.conn
             .active_requests
