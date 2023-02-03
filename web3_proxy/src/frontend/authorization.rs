@@ -16,7 +16,7 @@ use futures::TryFutureExt;
 use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
-use log::{error, warn};
+use tracing::{error, warn};
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use parking_lot::Mutex;
 use redis_rate_limiter::redis::AsyncCommands;

@@ -10,7 +10,7 @@ use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use ethers::types::U256;
 use futures::future::try_join_all;
 use futures::StreamExt;
-use log::{debug, error, info, trace, warn, Level};
+use tracing::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use parking_lot::RwLock;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
@@ -352,12 +352,12 @@ impl Web3Connection {
             let retry_in = Duration::from_millis(sleep_ms);
 
             let error_level = if self.backup {
-                log::Level::Debug
+                tracing::Level::Debug
             } else {
-                log::Level::Info
+                tracing::Level::Info
             };
 
-            log::log!(
+            tracing::log!(
                 error_level,
                 "Failed reconnect to {}! Retry in {}ms. err={:?}",
                 self,

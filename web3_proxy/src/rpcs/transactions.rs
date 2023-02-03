@@ -5,7 +5,7 @@ use super::connection::Web3Connection;
 use super::connections::Web3Connections;
 use super::request::OpenRequestResult;
 use ethers::prelude::{ProviderError, Transaction, TxHash};
-use log::{debug, trace, Level};
+use tracing::{debug, trace, Level};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 

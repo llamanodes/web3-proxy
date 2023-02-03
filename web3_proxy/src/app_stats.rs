@@ -6,7 +6,7 @@ use entities::rpc_accounting;
 use entities::sea_orm_active_enums::LogLevel;
 use hashbrown::HashMap;
 use hdrhistogram::{Histogram, RecordError};
-use log::{error, info};
+use tracing::{error, info};
 use migration::sea_orm::{self, ActiveModelTrait, DatabaseConnection, DbErr};
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;

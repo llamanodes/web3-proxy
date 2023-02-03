@@ -12,7 +12,7 @@ use chrono::{NaiveDateTime, Utc};
 use entities::{login, rpc_accounting, rpc_key};
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{debug, warn};
+use tracing::{debug, warn};
 use migration::sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Select,

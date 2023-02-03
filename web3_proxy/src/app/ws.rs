@@ -12,7 +12,7 @@ use ethers::prelude::U64;
 use futures::future::AbortHandle;
 use futures::future::Abortable;
 use futures::stream::StreamExt;
-use log::{trace, warn};
+use tracing::{trace, warn};
 use serde_json::json;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;

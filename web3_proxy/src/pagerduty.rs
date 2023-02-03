@@ -1,6 +1,6 @@
 use crate::config::TopConfig;
 use gethostname::gethostname;
-use log::{debug, error};
+use tracing::{debug, error};
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
 use pagerduty_rs::types::{AlertTrigger, AlertTriggerPayload, Event};
 use serde::Serialize;

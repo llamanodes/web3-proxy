@@ -10,7 +10,7 @@ use anyhow::Context;
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use hashbrown::{HashMap, HashSet};
-use log::{debug, error, warn, Level};
+use tracing::{debug, error, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use serde_json::json;

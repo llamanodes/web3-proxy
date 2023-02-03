@@ -1,5 +1,5 @@
 //#![warn(missing_docs)]
-use log::error;
+use tracing::error;
 use moka::future::Cache;
 use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
 use std::cmp::Eq;

@@ -11,7 +11,7 @@ use axum::{
 use derive_more::From;
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
-use log::{trace, warn};
+use tracing::{trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;

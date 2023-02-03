@@ -14,7 +14,7 @@ use axum::{
     Extension, Router,
 };
 use http::header::AUTHORIZATION;
-use log::info;
+use tracing::info;
 use moka::future::Cache;
 use std::net::SocketAddr;
 use std::sync::Arc;

@@ -26,7 +26,7 @@ use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
 use itertools::Itertools;
-use log::{debug, warn};
+use tracing::{debug, warn};
 use migration::sea_orm::prelude::Uuid;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,

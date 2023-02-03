@@ -18,7 +18,7 @@ use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::{HashMap, HashSet};
-use log::{debug, error, info, trace, warn, Level};
+use tracing::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use moka::future::{Cache, ConcurrentCacheExt};
 use serde::ser::{SerializeStruct, Serializer};
@@ -1162,7 +1162,7 @@ mod tests {
         provider::Web3Provider,
     };
     use ethers::types::{Block, U256};
-    use log::{trace, LevelFilter};
+    use tracing::{trace, LevelFilter};
     use parking_lot::RwLock;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock as AsyncRwLock;

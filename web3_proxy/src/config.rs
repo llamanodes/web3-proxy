@@ -6,7 +6,7 @@ use argh::FromArgs;
 use ethers::prelude::TxHash;
 use ethers::types::U256;
 use hashbrown::HashMap;
-use log::warn;
+use tracing::warn;
 use migration::sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use std::sync::Arc;

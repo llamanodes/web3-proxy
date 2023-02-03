@@ -27,7 +27,7 @@ use futures::{
 use handlebars::Handlebars;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{error, info, trace, warn};
+use tracing::{error, info, trace, warn};
 use serde_json::json;
 use serde_json::value::to_raw_value;
 use std::sync::Arc;
