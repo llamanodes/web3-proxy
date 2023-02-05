@@ -10,6 +10,9 @@ pub struct Model {
     pub tx_hash: Option<String>,
     pub chain: String,
     pub user_id: u64,
+    // TODO: Add a field to check if the credit was already subtracted from this (boolean)
+    // TODO: Also add a timestamp for rate-limit purposes
+
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

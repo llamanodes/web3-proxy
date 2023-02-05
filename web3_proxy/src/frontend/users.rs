@@ -20,7 +20,7 @@ use axum_client_ip::ClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::sea_orm_active_enums::LogLevel;
-use entities::{login, pending_login, referral, revert_log, rpc_key, user, user_tier};
+use entities::{login, pending_login, referral, revert_log, rpc_key, rpc_request, user, user_tier};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
@@ -44,6 +44,7 @@ use entities::user::Relation::UserTier;
 use migration::extension::postgres::Type;
 use thread_fast_rng::rand;
 use crate::frontend::errors::FrontendErrorResponse;
+use crate::referral_code::ReferralCode;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
 ///
@@ -269,12 +270,12 @@ pub async fn user_login_post(
                 err_1,
                 err_191
             )
-            .into());
+                .into());
         }
     }
 
     // TODO: limit columns or load whole user?
-    let u = user::Entity::find()
+    let caller = user::Entity::find()
         .filter(user::Column::Address.eq(our_msg.address.as_ref()))
         .one(db_replica.conn())
         .await
@@ -282,62 +283,103 @@ pub async fn user_login_post(
 
     let db_conn = app.db_conn().context("login requires a db")?;
 
-    let (u, uks, status_code) = match u {
+    let (caller, user_rpc_keys, status_code) = match caller {
         None => {
             // user does not exist yet
 
             // check the invite code
             // TODO: more advanced invite codes that set different request/minute and concurrency limits
+            // Do nothing if app config is none (then there is basically no authentication invitation, and the user can process with a free tier ...
+
+            let txn;
+
+            let user_referrer: Option<Referral>;
             if let Some(invite_code) = &app.config.invite_code {
                 if query.invite_code.as_ref() != Some(invite_code) {
                     return Err(anyhow::anyhow!("checking invite_code").into());
                 }
             }
 
-            let txn = db_conn.begin().await?;
+            if invite_code.is_some() {
+                // If it is not inside, also check in the database
+                user_referrer = refferal::Entity::find()
+                    .filter(refferal::Column::ReferralCode.eq(referral_link))
+                    .one(db_replica.conn())
+                    .await?
+                    .ok_or(
+                        FrontendErrorResponse::StatusCode(
+                            StatusCode::BAD_REQUEST,
+                            fmt!("The referral_link you provided does not exist {}", referral_code),
+                            None,
+                        )
+                    )?;
+
+                // Create a new item in the database,
+                // marking this guy as the referrer (and ignoring a duplicate insert, if there is any...)
+                // First person to make the referral gets all credits
+                // Generate a random referral code ...
+                let used_referral = referral::ActiveModel {
+                    // address: sea_orm::Set(our_msg.address.into()),
+                    used_referral_code: Some(user_referrer.referral_code),
+                    user_id: caller.id,
+                    ..Default::default()
+                };
+
+                txn = db_conn.begin().await?;
+                used_referral.insert(&txn).await?;
+
+            } else if app.config.invite_code.is_none() {
+                // Pass
+                txn = db_conn.begin().await?;
+            }
 
             // the only thing we need from them is an address
             // everything else is optional
             // TODO: different invite codes should allow different levels
             // TODO: maybe decrement a count on the invite code?
-            let u = user::ActiveModel {
+            let caller = user::ActiveModel {
                 address: sea_orm::Set(our_msg.address.into()),
                 ..Default::default()
             };
 
-            let u = u.insert(&txn).await?;
+            let caller = caller.insert(&txn).await?;
 
             // create the user's first api key
             let rpc_secret_key = RpcSecretKey::new();
 
-            let uk = rpc_key::ActiveModel {
-                user_id: sea_orm::Set(u.id),
+            let user_rpc_key = rpc_key::ActiveModel {
+                user_id: sea_orm::Set(caller.id),
                 secret_key: sea_orm::Set(rpc_secret_key.into()),
                 description: sea_orm::Set(None),
                 ..Default::default()
             };
 
-            let uk = uk
+            let user_rpc_key = user_rpc_key
                 .insert(&txn)
                 .await
                 .context("Failed saving new user key")?;
 
-            let uks = vec![uk];
+            let user_rpc_keys = vec![user_rpc_key];
+
+            // Also add a part for the invite code, i.e. who invited this guy
 
             // save the user and key to the database
             txn.commit().await?;
 
-            (u, uks, StatusCode::CREATED)
+            (caller, user_rpc_keys, StatusCode::CREATED)
         }
-        Some(u) => {
+        Some(caller) => {
+
+            // Let's say that a user that exists can actually
+
             // the user is already registered
-            let uks = rpc_key::Entity::find()
-                .filter(rpc_key::Column::UserId.eq(u.id))
+            let user_rpc_keys = rpc_key::Entity::find()
+                .filter(rpc_key::Column::UserId.eq(caller.id))
                 .all(db_replica.conn())
                 .await
                 .context("failed loading user's key")?;
 
-            (u, uks, StatusCode::OK)
+            (caller, user_rpc_keys, StatusCode::OK)
         }
     };
 
@@ -347,12 +389,12 @@ pub async fn user_login_post(
     // json response with everything in it
     // we could return just the bearer token, but I think they will always request api keys and the user profile
     let response_json = json!({
-        "rpc_keys": uks
+        "rpc_keys": user_rpc_keys
             .into_iter()
-            .map(|uk| (uk.id, uk))
+            .map(|user_rpc_key| (user_rpc_key.id, user_rpc_key))
             .collect::<HashMap<_, _>>(),
         "bearer_token": user_bearer_token,
-        "user": u,
+        "user": caller,
     });
 
     let response = (status_code, Json(response_json)).into_response();
@@ -367,7 +409,7 @@ pub async fn user_login_post(
     let user_login = login::ActiveModel {
         id: sea_orm::NotSet,
         bearer_token: sea_orm::Set(user_bearer_token.uuid()),
-        user_id: sea_orm::Set(u.id),
+        user_id: sea_orm::Set(caller.id),
         expires_at: sea_orm::Set(expires_at),
     };
 
@@ -756,7 +798,68 @@ pub async fn rpc_keys_management(
     Ok(Json(uk).into_response())
 }
 
-/// the JSON input to the `referral_link` handler
+
+// TODO: Make sure that the input is also inside ...
+// /// Redeems an existing referral link.
+// ///
+// #[debug_handle]
+// pub async fn user_redeem_referral_link_get(
+//     Extension(app): Extension<Arc<Web3ProxyApp>>,
+//     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+//     Query(mut params): Query<HashMap<String, String>>,
+// ) -> FrontendResult {
+//
+//     // First get the bearer token and check if the user is logged in
+//     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+//
+//     // Then get the input, specifically the referral link. If this does not exist, it's a bad request
+//     let referral_link: String = params
+//         .remove("referral_link")
+//         // TODO: map_err so this becomes a 500. routing must be bad
+//         .ok_or(
+//             FrontendErrorResponse::StatusCode(
+//                 StatusCode::BAD_REQUEST,
+//                 "You called the referral link endpoint, but have not provided a referral_link".to_string(),
+//                 None,
+//             )
+//         )?
+//         .parse()
+//         .context("unable to parse address")?;
+//
+//     // Check if this referral link exists
+//     let db_replica = app
+//         .db_replica()
+//         .context("getting replica db for user's revert logs")?;
+//
+//     // Turn this into an active model that we can modify ...
+//     let user_referrer: Referral = refferal::Entity::find()
+//         .filter(refferal::Column::ReferralCode.eq(referral_link))
+//         .one(db_replica.conn())
+//         .await?
+//         .ok_or(
+//             FrontendErrorResponse::StatusCode(
+//                 StatusCode::BAD_REQUEST,
+//                 fmt!("The referral_link you provided does not exist {}", referral_code),
+//                 None,
+//             )
+//         )?;
+//
+//     // Get or create this user ...
+//     // Check if this user if premium, if not, return ...
+//
+//     // Add this user to the table of users (create, or write the used referral link).
+//     // user_referrer.used_referral_code =
+//     // TODO: Make sure that the invite link does not already redeem the login ...
+//
+//
+//     // Do nothing else for now, as the credit condition is only activated if enough credits are added
+//
+//     let db_conn = app.db_conn()?;
+// }
+
+/// Create or get the existing referral link.
+/// This is the link that the user can share to third parties, and get credits.
+/// Applies to premium users only
 #[debug_handle]
 pub async fn user_referral_link_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -803,17 +906,12 @@ pub async fn user_referral_link_get(
             let db_conn = app
                 .db_conn()?;
 
-            let rand_string = rand::thread_rng()
-                .gen_ascii_chars()
-                .take(32)
-                .collect::<String>();
-            let referral_code = fmt!("llamanodes-{}", rand_string);
+            let referral_code = ReferralCode::default().0;
 
             let txn = db_conn.begin().await?;
 
             // Create a new referral code
             let referral_entry = referral::ActiveModel {
-                referral_code: referral_code,
                 used_referral_code: None,
                 user_id: user.id,
                 ..Default::default()
@@ -832,7 +930,6 @@ pub async fn user_referral_link_get(
 
     let response = (status_code, Json(response_json)).into_response();
     Ok(response)
-
 }
 
 
