@@ -389,6 +389,7 @@ impl Web3Connections {
                             // multiple blocks with the same fork!
                             if consensus_saved_block.hash() == old_head_block.hash() {
                                 // no change in hash. no need to use head_block_sender
+                                // TODO: trace level if rpc is backup
                                 debug!(
                                     "con {}{}/{}/{}/{} con={} rpc={}@{}",
                                     includes_backups_str,
