@@ -8,3 +8,6 @@ pub use super::rpc_key::Entity as RpcKey;
 pub use super::secondary_user::Entity as SecondaryUser;
 pub use super::user::Entity as User;
 pub use super::user_tier::Entity as UserTier;
+pub use super::referral::Entity as Referral;
+pub use super::credits::Entity as Credits;
+pub use super::rpc_request::Entity as RpcRequest;

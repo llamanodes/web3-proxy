@@ -13,6 +13,9 @@ mod m20221108_200345_save_anon_stats;
 mod m20221211_124002_request_method_privacy;
 mod m20221213_134158_move_login_into_database;
 mod m20230119_204135_better_free_tier;
+mod m20230205_130035_create_credits;
+mod m20230205_133204_create_requests;
+mod m20230205_133755_create_referrals;
 
 pub struct Migrator;
 
@@ -33,6 +36,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20221211_124002_request_method_privacy::Migration),
             Box::new(m20221213_134158_move_login_into_database::Migration),
             Box::new(m20230119_204135_better_free_tier::Migration),
+            Box::new(m20230205_130035_create_credits::Migration),
+            Box::new(m20230205_133204_create_requests::Migration),
+            Box::new(m20230205_133755_create_referrals::Migration),
         ]
     }
 }
