@@ -243,8 +243,8 @@ These are roughly in order of completition
 - [x] cache the status page for a second
 - [x] request accounting for websockets
 - [x] database merge scripts
-- [x] test that sets up a Web3Connection and asks "has_block" for old and new blocks
-- [x] test that sets up Web3Connections with 2 nodes. one behind by several blocks. and see what the "next" server shows as
+- [x] test that sets up a Web3Rpc and asks "has_block" for old and new blocks
+- [x] test that sets up Web3Rpcs with 2 nodes. one behind by several blocks. and see what the "next" server shows as
 - [x] ethspam on bsc and polygon gives 1/4 errors. fix whatever is causing this
   - bugfix! we were using the whole connection list instead of just the synced connection list when picking servers. oops!
 - [x] actually block unauthenticated requests instead of emitting warning of "allowing without auth during development!"
@@ -289,7 +289,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - we were caching too aggressively
 - [x] BUG! if sending transactions gets "INTERNAL_ERROR: existing tx with same hash", create a success message
   - we just want to be sure that the server has our tx and in this case, it does.
-  - ERROR http_request:request:try_send_all_upstream_servers: web3_proxy::rpcs::request: bad response! err=JsonRpcClientError(JsonRpcError(JsonRpcError { code: -32000, message: "INTERNAL_ERROR: existing tx with same hash", data: None })) method=eth_sendRawTransaction rpc=local_erigon_alpha_archive id=01GF4HV03Y4ZNKQV8DW5NDQ5CG method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 }) self=Web3Connections { conns: {"local_erigon_alpha_archive_ws": Web3Connection { name: "local_erigon_alpha_archive_ws", blocks: "all", .. }, "local_geth_ws": Web3Connection { name: "local_geth_ws", blocks: 64, .. }, "local_erigon_alpha_archive": Web3Connection { name: "local_erigon_alpha_archive", blocks: "all", .. }}, .. } authorized_request=Some(User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })) request=JsonRpcRequest { id: RawValue(39), method: "eth_sendRawTransaction", .. } request_metadata=Some(RequestMetadata { datetime: 2022-10-11T22:14:57.406829095Z, period_seconds: 60, request_bytes: 633, backend_requests: 0, no_servers: 0, error_response: false, response_bytes: 0, response_millis: 0 }) block_needed=None
+  - ERROR http_request:request:try_send_all_upstream_servers: web3_proxy::rpcs::request: bad response! err=JsonRpcClientError(JsonRpcError(JsonRpcError { code: -32000, message: "INTERNAL_ERROR: existing tx with same hash", data: None })) method=eth_sendRawTransaction rpc=local_erigon_alpha_archive id=01GF4HV03Y4ZNKQV8DW5NDQ5CG method=POST authorized_request=User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 }) self=Web3Rpcs { conns: {"local_erigon_alpha_archive_ws": Web3Rpc { name: "local_erigon_alpha_archive_ws", blocks: "all", .. }, "local_geth_ws": Web3Rpc { name: "local_geth_ws", blocks: 64, .. }, "local_erigon_alpha_archive": Web3Rpc { name: "local_erigon_alpha_archive", blocks: "all", .. }}, .. } authorized_request=Some(User(Some(SqlxMySqlPoolConnection), AuthorizedKey { ip: 10.11.12.15, origin: None, user_key_id: 4, log_revert_chance: 0.0000 })) request=JsonRpcRequest { id: RawValue(39), method: "eth_sendRawTransaction", .. } request_metadata=Some(RequestMetadata { datetime: 2022-10-11T22:14:57.406829095Z, period_seconds: 60, request_bytes: 633, backend_requests: 0, no_servers: 0, error_response: false, response_bytes: 0, response_millis: 0 }) block_needed=None
 - [x] serde collect unknown fields in config instead of crash
 - [x] upgrade user tier by address
 - [x] all_backend_connections skips syncing servers
@@ -556,10 +556,10 @@ in another repo: event subscriber
 - [ ] weird flapping fork could have more useful logs. like, howd we get to 1/1/4 and fork. geth changed its mind 3 times?
   - should we change our code to follow the same consensus rules as geth? our first seen still seems like a reasonable choice
   -  other chains might change all sorts of things about their fork choice rules
-    2022-07-22T23:52:18.593956Z  WARN block_receiver: web3_proxy::connections: chain is forked! 1 possible heads. 1/1/4 rpcs have 0xa906…5bc1 rpc=Web3Connection { url: "ws://127.0.0.1:8546", data: 64, .. } new_block_num=15195517
-    2022-07-22T23:52:18.983441Z  WARN block_receiver: web3_proxy::connections: chain is forked! 1 possible heads. 1/1/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "ws://127.0.0.1:8546", data: 64, .. } new_block_num=15195517
-    2022-07-22T23:52:19.350720Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 1/2/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "ws://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517
-    2022-07-22T23:52:26.041140Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 2/4/4 rpcs have 0x70e8…48e0 rpc=Web3Connection { url: "http://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517
+    2022-07-22T23:52:18.593956Z  WARN block_receiver: web3_proxy::connections: chain is forked! 1 possible heads. 1/1/4 rpcs have 0xa906…5bc1 rpc=Web3Rpc { url: "ws://127.0.0.1:8546", data: 64, .. } new_block_num=15195517
+    2022-07-22T23:52:18.983441Z  WARN block_receiver: web3_proxy::connections: chain is forked! 1 possible heads. 1/1/4 rpcs have 0x70e8…48e0 rpc=Web3Rpc { url: "ws://127.0.0.1:8546", data: 64, .. } new_block_num=15195517
+    2022-07-22T23:52:19.350720Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 1/2/4 rpcs have 0x70e8…48e0 rpc=Web3Rpc { url: "ws://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517
+    2022-07-22T23:52:26.041140Z  WARN block_receiver: web3_proxy::connections: chain is forked! 2 possible heads. 2/4/4 rpcs have 0x70e8…48e0 rpc=Web3Rpc { url: "http://127.0.0.1:8549", data: "archive", .. } new_block_num=15195517
   - [ ] threshold should check actual available request limits (if any) instead of just the soft limit
 - [ ] foreign key on_update and on_delete
 - [ ] database creation timestamps

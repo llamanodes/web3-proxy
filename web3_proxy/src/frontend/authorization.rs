@@ -2,7 +2,7 @@
 
 use super::errors::FrontendErrorResponse;
 use crate::app::{AuthorizationChecks, Web3ProxyApp, APP_USER_AGENT};
-use crate::rpcs::connection::Web3Connection;
+use crate::rpcs::one::Web3Rpc;
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::authorization::Bearer;
@@ -80,7 +80,7 @@ pub struct RequestMetadata {
     // TODO: "archive" isn't really a boolean.
     pub archive_request: AtomicBool,
     /// if this is empty, there was a cache_hit
-    pub backend_requests: Mutex<Vec<Arc<Web3Connection>>>,
+    pub backend_requests: Mutex<Vec<Arc<Web3Rpc>>>,
     pub no_servers: AtomicU64,
     pub error_response: AtomicBool,
     pub response_bytes: AtomicU64,

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 // show what nodes are used most often
 use argh::FromArgs;
-use log::info;
+use log::trace;
 use prettytable::{row, Table};
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -87,10 +87,8 @@ impl PopularityContestSubCommand {
             by_tier.entry(tier).or_default().push(rpc_data);
         }
 
-        // TODO: sort by_tier
-
-        info!("tier_requests: {:#?}", tier_requests);
-        info!("by_tier: {:#?}", by_tier);
+        trace!("tier_requests: {:#?}", tier_requests);
+        trace!("by_tier: {:#?}", by_tier);
 
         let mut table = Table::new();
 

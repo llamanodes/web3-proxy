@@ -1,5 +1,5 @@
 use crate::rpcs::blockchain::BlockHashesCache;
-use crate::rpcs::connection::Web3Connection;
+use crate::rpcs::one::Web3Rpc;
 use crate::{app::AnyhowJoinHandle, rpcs::blockchain::ArcBlock};
 use argh::FromArgs;
 use ethers::prelude::TxHash;
@@ -11,8 +11,8 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-pub type BlockAndRpc = (Option<ArcBlock>, Arc<Web3Connection>);
-pub type TxHashAndRpc = (TxHash, Arc<Web3Connection>);
+pub type BlockAndRpc = (Option<ArcBlock>, Arc<Web3Rpc>);
+pub type TxHashAndRpc = (TxHash, Arc<Web3Rpc>);
 
 #[derive(Debug, FromArgs)]
 /// Web3_proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
@@ -41,15 +41,15 @@ pub struct CliConfig {
 #[derive(Clone, Debug, Deserialize)]
 pub struct TopConfig {
     pub app: AppConfig,
-    pub balanced_rpcs: HashMap<String, Web3ConnectionConfig>,
+    pub balanced_rpcs: HashMap<String, Web3RpcConfig>,
     // TODO: instead of an option, give it a default
-    pub private_rpcs: Option<HashMap<String, Web3ConnectionConfig>>,
+    pub private_rpcs: Option<HashMap<String, Web3RpcConfig>>,
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
 }
 
-/// shared configuration between Web3Connections
+/// shared configuration between Web3Rpcs
 // TODO: no String, only &str
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct AppConfig {
@@ -198,7 +198,7 @@ fn default_response_cache_max_bytes() -> usize {
 
 /// Configuration for a backend web3 RPC server
 #[derive(Clone, Debug, Deserialize)]
-pub struct Web3ConnectionConfig {
+pub struct Web3RpcConfig {
     /// simple way to disable a connection without deleting the row
     #[serde(default)]
     pub disabled: bool,
@@ -230,9 +230,9 @@ fn default_tier() -> u64 {
     0
 }
 
-impl Web3ConnectionConfig {
-    /// Create a Web3Connection from config
-    /// TODO: move this into Web3Connection? (just need to make things pub(crate))
+impl Web3RpcConfig {
+    /// Create a Web3Rpc from config
+    /// TODO: move this into Web3Rpc? (just need to make things pub(crate))
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         self,
@@ -245,12 +245,9 @@ impl Web3ConnectionConfig {
         block_map: BlockHashesCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
-    ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
+    ) -> anyhow::Result<(Arc<Web3Rpc>, AnyhowJoinHandle<()>)> {
         if !self.extra.is_empty() {
-            warn!(
-                "unknown Web3ConnectionConfig fields!: {:?}",
-                self.extra.keys()
-            );
+            warn!("unknown Web3RpcConfig fields!: {:?}", self.extra.keys());
         }
 
         let hard_limit = match (self.hard_limit, redis_pool) {
@@ -272,7 +269,7 @@ impl Web3ConnectionConfig {
 
         let backup = self.backup.unwrap_or(false);
 
-        Web3Connection::spawn(
+        Web3Rpc::spawn(
             name,
             self.display_name,
             chain_id,

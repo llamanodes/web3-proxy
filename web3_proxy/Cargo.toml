@@ -25,10 +25,10 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 # TODO: import chrono from sea-orm so we always have the same version
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 
-anyhow = { version = "1.0.68", features = ["backtrace"] }
+anyhow = { version = "1.0.69", features = ["backtrace"] }
 argh = "0.1.10"
 axum = { version = "0.6.4", features = ["headers", "ws"] }
-axum-client-ip = "0.3.1"
+axum-client-ip = "0.4.0"
 axum-macros = "0.3.2"
 chrono = "0.4.23"
 counter = "0.5.7"
@@ -61,8 +61,8 @@ reqwest = { version = "0.11.14", default-features = false, features = ["json", "
 rustc-hash = "1.1.0"
 sentry = { version = "0.29.2", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
 serde = { version = "1.0.152", features = [] }
-serde_json = { version = "1.0.91", default-features = false, features = ["alloc", "raw_value"] }
-serde_prometheus = "0.1.6"
+serde_json = { version = "1.0.92", default-features = false, features = ["alloc", "raw_value"] }
+serde_prometheus = "0.2.0"
 siwe = "0.5.0"
 time = "0.3.17"
 tokio = { version = "1.25.0", features = ["full"] }
@@ -72,4 +72,4 @@ tower = "0.4.13"
 tower-http = { version = "0.3.5", features = ["cors", "sensitive-headers"] }
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.3.1"
-uuid = "1.2.2"
+uuid = "1.3.0"

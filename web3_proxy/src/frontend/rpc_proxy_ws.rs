@@ -17,7 +17,7 @@ use axum::{
     response::{IntoResponse, Redirect},
     Extension, TypedHeader,
 };
-use axum_client_ip::ClientIp;
+use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use futures::SinkExt;
 use futures::{
@@ -49,7 +49,7 @@ pub enum ProxyMode {
 #[debug_handler]
 pub async fn websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
@@ -61,7 +61,7 @@ pub async fn websocket_handler(
 #[debug_handler]
 pub async fn fastest_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
@@ -75,7 +75,7 @@ pub async fn fastest_websocket_handler(
 #[debug_handler]
 pub async fn versus_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
@@ -86,7 +86,7 @@ pub async fn versus_websocket_handler(
 async fn _websocket_handler(
     proxy_mode: ProxyMode,
     app: Arc<Web3ProxyApp>,
-    ClientIp(ip): ClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> FrontendResult {
@@ -121,7 +121,7 @@ async fn _websocket_handler(
 #[debug_handler]
 pub async fn websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -144,7 +144,7 @@ pub async fn websocket_handler_with_key(
 #[debug_handler]
 pub async fn fastest_websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -168,7 +168,7 @@ pub async fn fastest_websocket_handler_with_key(
 #[debug_handler]
 pub async fn versus_websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -192,7 +192,7 @@ pub async fn versus_websocket_handler_with_key(
 async fn _websocket_handler_with_key(
     proxy_mode: ProxyMode,
     app: Arc<Web3ProxyApp>,
-    ClientIp(ip): ClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     rpc_key: String,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,

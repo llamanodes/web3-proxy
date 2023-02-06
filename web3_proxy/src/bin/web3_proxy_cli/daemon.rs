@@ -155,7 +155,7 @@ mod tests {
     use std::env;
 
     use web3_proxy::{
-        config::{AppConfig, Web3ConnectionConfig},
+        config::{AppConfig, Web3RpcConfig},
         rpcs::blockchain::ArcBlock,
     };
 
@@ -204,7 +204,7 @@ mod tests {
             balanced_rpcs: HashMap::from([
                 (
                     "anvil".to_string(),
-                    Web3ConnectionConfig {
+                    Web3RpcConfig {
                         disabled: false,
                         display_name: None,
                         url: anvil.endpoint(),
@@ -219,7 +219,7 @@ mod tests {
                 ),
                 (
                     "anvil_ws".to_string(),
-                    Web3ConnectionConfig {
+                    Web3RpcConfig {
                         disabled: false,
                         display_name: None,
                         url: anvil.ws_endpoint(),

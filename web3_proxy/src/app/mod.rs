@@ -11,8 +11,8 @@ use crate::jsonrpc::{
     JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest, JsonRpcRequestEnum,
 };
 use crate::rpcs::blockchain::{ArcBlock, SavedBlock};
-use crate::rpcs::connection::Web3Connection;
-use crate::rpcs::connections::Web3Connections;
+use crate::rpcs::many::Web3Rpcs;
+use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::transactions::TxStatus;
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
@@ -198,9 +198,9 @@ impl DatabaseReplica {
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
 pub struct Web3ProxyApp {
     /// Send requests to the best server available
-    pub balanced_rpcs: Arc<Web3Connections>,
+    pub balanced_rpcs: Arc<Web3Rpcs>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
-    pub private_rpcs: Option<Arc<Web3Connections>>,
+    pub private_rpcs: Option<Arc<Web3Rpcs>>,
     response_cache: ResponseCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
@@ -572,7 +572,7 @@ impl Web3ProxyApp {
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // connect to the load balanced rpcs
-        let (balanced_rpcs, balanced_handle) = Web3Connections::spawn(
+        let (balanced_rpcs, balanced_handle) = Web3Rpcs::spawn(
             top_config.app.chain_id,
             db_conn.clone(),
             balanced_rpcs,
@@ -598,7 +598,7 @@ impl Web3ProxyApp {
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             None
         } else {
-            let (private_rpcs, private_handle) = Web3Connections::spawn(
+            let (private_rpcs, private_handle) = Web3Rpcs::spawn(
                 top_config.app.chain_id,
                 db_conn.clone(),
                 private_rpcs,
@@ -911,6 +911,7 @@ impl Web3ProxyApp {
             user_count,
         };
 
+        // TODO: i don't like this library. it doesn't include HELP or TYPE lines and so our prometheus server fails to parse it
         serde_prometheus::to_string(&metrics, Some("web3_proxy"), globals)
             .expect("prometheus metrics should always serialize")
     }
@@ -921,8 +922,7 @@ impl Web3ProxyApp {
         authorization: Arc<Authorization>,
         request: JsonRpcRequestEnum,
         proxy_mode: ProxyMode,
-    ) -> Result<(JsonRpcForwardedResponseEnum, Vec<Arc<Web3Connection>>), FrontendErrorResponse>
-    {
+    ) -> Result<(JsonRpcForwardedResponseEnum, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // trace!(?request, "proxy_web3_rpc");
 
         // even though we have timeouts on the requests to our backend providers,
@@ -961,8 +961,7 @@ impl Web3ProxyApp {
         authorization: &Arc<Authorization>,
         requests: Vec<JsonRpcRequest>,
         proxy_mode: ProxyMode,
-    ) -> Result<(Vec<JsonRpcForwardedResponse>, Vec<Arc<Web3Connection>>), FrontendErrorResponse>
-    {
+    ) -> Result<(Vec<JsonRpcForwardedResponse>, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
 
@@ -979,7 +978,7 @@ impl Web3ProxyApp {
         // TODO: i'm sure this could be done better with iterators
         // TODO: stream the response?
         let mut collected: Vec<JsonRpcForwardedResponse> = Vec::with_capacity(num_requests);
-        let mut collected_rpcs: HashSet<Arc<Web3Connection>> = HashSet::new();
+        let mut collected_rpcs: HashSet<Arc<Web3Rpc>> = HashSet::new();
         for response in responses {
             // TODO: any way to attach the tried rpcs to the error? it is likely helpful
             let (response, rpcs) = response?;
@@ -1020,7 +1019,7 @@ impl Web3ProxyApp {
         authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
         proxy_mode: ProxyMode,
-    ) -> Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Connection>>), FrontendErrorResponse> {
+    ) -> Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // trace!("Received request: {:?}", request);
 
         let request_metadata = Arc::new(RequestMetadata::new(REQUEST_PERIOD, request.num_bytes())?);
@@ -1208,7 +1207,7 @@ impl Web3ProxyApp {
                     ProxyMode::Fastest(0) => None,
                     // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
                     // TODO: what if we do 2 per tier? we want to blast the third party rpcs
-                    // TODO: maybe having the third party rpcs in their own Web3Connections would be good for this
+                    // TODO: maybe having the third party rpcs in their own Web3Rpcs would be good for this
                     ProxyMode::Fastest(x) => Some(x * 4),
                     ProxyMode::Versus => None,
                 };

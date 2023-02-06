@@ -8,7 +8,7 @@ use log::warn;
 use serde_json::json;
 use std::sync::Arc;
 
-use crate::{frontend::authorization::Authorization, rpcs::connections::Web3Connections};
+use crate::{frontend::authorization::Authorization, rpcs::many::Web3Rpcs};
 
 #[allow(non_snake_case)]
 pub fn block_num_to_U64(block_num: BlockNumber, latest_block: U64) -> (U64, bool) {
@@ -45,7 +45,7 @@ pub async fn clean_block_number(
     params: &mut serde_json::Value,
     block_param_id: usize,
     latest_block: U64,
-    rpcs: &Web3Connections,
+    rpcs: &Web3Rpcs,
 ) -> anyhow::Result<U64> {
     match params.as_array_mut() {
         None => {
@@ -130,7 +130,7 @@ pub async fn block_needed(
     method: &str,
     params: Option<&mut serde_json::Value>,
     head_block_num: U64,
-    rpcs: &Web3Connections,
+    rpcs: &Web3Rpcs,
 ) -> anyhow::Result<BlockNeeded> {
     let params = if let Some(params) = params {
         // grab the params so we can inspect and potentially modify them

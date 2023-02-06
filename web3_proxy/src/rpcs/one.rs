@@ -10,6 +10,7 @@ use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use ethers::types::U256;
 use futures::future::try_join_all;
 use futures::StreamExt;
+use hdrhistogram::Histogram;
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use parking_lot::RwLock;
@@ -64,9 +65,31 @@ impl ProviderState {
     }
 }
 
+pub struct Web3RpcLatencies {
+    /// Traack how far behind the fastest node we are
+    new_head: Histogram<u64>,
+    /// exponentially weighted moving average of how far behind the fastest node we are
+    new_head_ewma: u32,
+    /// Track how long an rpc call takes on average
+    request: Histogram<u64>,
+    /// exponentially weighted moving average of how far behind the fastest node we are
+    request_ewma: u32,
+}
+
+impl Default for Web3RpcLatencies {
+    fn default() -> Self {
+        Self {
+            new_head: Histogram::new(3).unwrap(),
+            new_head_ewma: 0,
+            request: Histogram::new(3).unwrap(),
+            request_ewma: 0,
+        }
+    }
+}
+
 /// An active connection to a Web3 RPC server like geth or erigon.
 #[derive(Default)]
-pub struct Web3Connection {
+pub struct Web3Rpc {
     pub name: String,
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
@@ -100,9 +123,11 @@ pub struct Web3Connection {
     pub(super) tier: u64,
     /// TODO: change this to a watch channel so that http providers can subscribe and take action on change
     pub(super) head_block: RwLock<Option<SavedBlock>>,
+    /// Track how fast this RPC is
+    pub(super) latency: Web3RpcLatencies,
 }
 
-impl Web3Connection {
+impl Web3Rpc {
     /// Connect to a web3 rpc
     // TODO: have this take a builder (which will have channels attached). or maybe just take the config and give the config public fields
     #[allow(clippy::too_many_arguments)]
@@ -126,7 +151,7 @@ impl Web3Connection {
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
         tier: u64,
-    ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
+    ) -> anyhow::Result<(Arc<Web3Rpc>, AnyhowJoinHandle<()>)> {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_pool)| {
             // TODO: is cache size 1 okay? i think we need
             RedisRateLimiter::new(
@@ -159,18 +184,14 @@ impl Web3Connection {
             display_name,
             http_client,
             url: url_str,
-            active_requests: 0.into(),
-            frontend_requests: 0.into(),
-            internal_requests: 0.into(),
-            provider_state: AsyncRwLock::new(ProviderState::None),
             hard_limit,
             hard_limit_until,
             soft_limit,
             automatic_block_limit,
             backup,
             block_data_limit,
-            head_block: RwLock::new(Default::default()),
             tier,
+            ..Default::default()
         };
 
         let new_connection = Arc::new(new_connection);
@@ -1068,40 +1089,40 @@ impl fmt::Debug for Web3Provider {
     }
 }
 
-impl Hash for Web3Connection {
+impl Hash for Web3Rpc {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // TODO: is this enough?
         self.name.hash(state);
     }
 }
 
-impl Eq for Web3Connection {}
+impl Eq for Web3Rpc {}
 
-impl Ord for Web3Connection {
+impl Ord for Web3Rpc {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.name.cmp(&other.name)
     }
 }
 
-impl PartialOrd for Web3Connection {
+impl PartialOrd for Web3Rpc {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl PartialEq for Web3Connection {
+impl PartialEq for Web3Rpc {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
     }
 }
 
-impl Serialize for Web3Connection {
+impl Serialize for Web3Rpc {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Connection", 9)?;
+        let mut state = serializer.serialize_struct("Web3Rpc", 9)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
@@ -1143,9 +1164,9 @@ impl Serialize for Web3Connection {
     }
 }
 
-impl fmt::Debug for Web3Connection {
+impl fmt::Debug for Web3Rpc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = f.debug_struct("Web3Connection");
+        let mut f = f.debug_struct("Web3Rpc");
 
         f.field("name", &self.name);
 
@@ -1160,7 +1181,7 @@ impl fmt::Debug for Web3Connection {
     }
 }
 
-impl fmt::Display for Web3Connection {
+impl fmt::Display for Web3Rpc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: filter basic auth and api keys
         write!(f, "{}", &self.name)
@@ -1193,24 +1214,16 @@ mod tests {
         let head_block = SavedBlock::new(random_block);
         let block_data_limit = u64::MAX;
 
-        let x = Web3Connection {
+        let x = Web3Rpc {
             name: "name".to_string(),
-            db_conn: None,
-            display_name: None,
             url: "ws://example.com".to_string(),
-            http_client: None,
-            active_requests: 0.into(),
-            frontend_requests: 0.into(),
-            internal_requests: 0.into(),
-            provider_state: AsyncRwLock::new(ProviderState::None),
-            hard_limit: None,
-            hard_limit_until: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
+            ..Default::default()
         };
 
         assert!(x.has_block_data(&0.into()));
@@ -1239,24 +1252,15 @@ mod tests {
         let block_data_limit = 64;
 
         // TODO: this is getting long. have a `impl Default`
-        let x = Web3Connection {
+        let x = Web3Rpc {
             name: "name".to_string(),
-            db_conn: None,
-            display_name: None,
-            url: "ws://example.com".to_string(),
-            http_client: None,
-            active_requests: 0.into(),
-            frontend_requests: 0.into(),
-            internal_requests: 0.into(),
-            provider_state: AsyncRwLock::new(ProviderState::None),
-            hard_limit: None,
-            hard_limit_until: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
+            ..Default::default()
         };
 
         assert!(!x.has_block_data(&0.into()));
@@ -1293,7 +1297,7 @@ mod tests {
 
         let metrics = OpenRequestHandleMetrics::default();
 
-        let x = Web3Connection {
+        let x = Web3Rpc {
             name: "name".to_string(),
             db_conn: None,
             display_name: None,

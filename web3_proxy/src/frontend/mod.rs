@@ -1,4 +1,6 @@
 //! `frontend` contains HTTP and websocket endpoints for use by users and admins.
+//!
+//! Important reading about axum extractors: https://docs.rs/axum/latest/axum/extract/index.html#the-order-of-extractors
 
 pub mod authorization;
 pub mod errors;
@@ -196,7 +198,6 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
       - axum::extract::ConnectInfo (if not behind proxy)
     */
     let service = app.into_make_service_with_connect_info::<SocketAddr>();
-    // let service = app.into_make_service();
 
     // `axum::Server` is a re-export of `hyper::Server`
     axum::Server::bind(&addr)

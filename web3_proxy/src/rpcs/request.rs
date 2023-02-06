@@ -1,4 +1,4 @@
-use super::connection::Web3Connection;
+use super::one::Web3Rpc;
 use super::provider::Web3Provider;
 use crate::frontend::authorization::{Authorization, AuthorizationType};
 use anyhow::Context;
@@ -30,7 +30,7 @@ pub enum OpenRequestResult {
 #[derive(Debug)]
 pub struct OpenRequestHandle {
     authorization: Arc<Authorization>,
-    conn: Arc<Web3Connection>,
+    conn: Arc<Web3Rpc>,
     provider: Arc<Web3Provider>,
 }
 
@@ -122,7 +122,7 @@ impl Authorization {
 }
 
 impl OpenRequestHandle {
-    pub async fn new(authorization: Arc<Authorization>, conn: Arc<Web3Connection>) -> Self {
+    pub async fn new(authorization: Arc<Authorization>, conn: Arc<Web3Rpc>) -> Self {
         // TODO: take request_id as an argument?
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
@@ -185,7 +185,7 @@ impl OpenRequestHandle {
     }
 
     #[inline]
-    pub fn clone_connection(&self) -> Arc<Web3Connection> {
+    pub fn clone_connection(&self) -> Arc<Web3Rpc> {
         self.conn.clone()
     }
 

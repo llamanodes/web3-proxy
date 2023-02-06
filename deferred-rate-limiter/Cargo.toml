@@ -7,7 +7,7 @@ edition = "2021"
 [dependencies]
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 
-anyhow = "1.0.68"
+anyhow = "1.0.69"
 hashbrown = "0.13.2"
 log = "0.4.17"
 moka = { version = "0.9.6", default-features = false, features = ["future"] }

@@ -1,10 +1,10 @@
-///! Keep track of the blockchain as seen by a Web3Connections.
-use super::connection::Web3Connection;
-use super::connections::Web3Connections;
+use super::many::Web3Rpcs;
+///! Keep track of the blockchain as seen by a Web3Rpcs.
+use super::one::Web3Rpc;
 use super::transactions::TxStatus;
 use crate::frontend::authorization::Authorization;
 use crate::{
-    config::BlockAndRpc, jsonrpc::JsonRpcRequest, rpcs::synced_connections::ConsensusConnections,
+    config::BlockAndRpc, jsonrpc::JsonRpcRequest, rpcs::synced_connections::ConsensusWeb3Rpcs,
 };
 use anyhow::Context;
 use derive_more::From;
@@ -92,7 +92,7 @@ impl Display for SavedBlock {
     }
 }
 
-impl Web3Connections {
+impl Web3Rpcs {
     /// add a block to our mappings and track the heaviest chain
     pub async fn save_block(
         &self,
@@ -135,7 +135,7 @@ impl Web3Connections {
         &self,
         authorization: &Arc<Authorization>,
         hash: &H256,
-        rpc: Option<&Arc<Web3Connection>>,
+        rpc: Option<&Arc<Web3Rpc>>,
     ) -> anyhow::Result<ArcBlock> {
         // first, try to get the hash from our cache
         // the cache is set last, so if its here, its everywhere
@@ -322,7 +322,7 @@ impl Web3Connections {
         authorization: &Arc<Authorization>,
         consensus_finder: &mut ConsensusFinder,
         rpc_head_block: Option<SavedBlock>,
-        rpc: Arc<Web3Connection>,
+        rpc: Arc<Web3Rpc>,
         head_block_sender: &watch::Sender<ArcBlock>,
         pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
@@ -550,11 +550,11 @@ impl ConnectionsGroup {
         Self::new(true)
     }
 
-    fn remove(&mut self, rpc: &Web3Connection) -> Option<H256> {
+    fn remove(&mut self, rpc: &Web3Rpc) -> Option<H256> {
         self.rpc_name_to_hash.remove(rpc.name.as_str())
     }
 
-    fn insert(&mut self, rpc: &Web3Connection, block_hash: H256) -> Option<H256> {
+    fn insert(&mut self, rpc: &Web3Rpc, block_hash: H256) -> Option<H256> {
         self.rpc_name_to_hash.insert(rpc.name.clone(), block_hash)
     }
 
@@ -564,7 +564,7 @@ impl ConnectionsGroup {
         rpc_name: &str,
         hash: &H256,
         authorization: &Arc<Authorization>,
-        web3_connections: &Web3Connections,
+        web3_rpcs: &Web3Rpcs,
     ) -> anyhow::Result<ArcBlock> {
         // // TODO: why does this happen?!?! seems to only happen with uncled blocks
         // // TODO: maybe we should do try_get_with?
@@ -575,16 +575,17 @@ impl ConnectionsGroup {
         // );
 
         // this option should almost always be populated. if the connection reconnects at a bad time it might not be available though
-        let rpc = web3_connections.conns.get(rpc_name);
+        // TODO: if this is None, I think we should error.
+        let rpc = web3_rpcs.conns.get(rpc_name);
 
-        web3_connections.block(authorization, hash, rpc).await
+        web3_rpcs.block(authorization, hash, rpc).await
     }
 
     // TODO: do this during insert/remove?
     pub(self) async fn highest_block(
         &self,
         authorization: &Arc<Authorization>,
-        web3_connections: &Web3Connections,
+        web3_rpcs: &Web3Rpcs,
     ) -> Option<ArcBlock> {
         let mut checked_heads = HashSet::with_capacity(self.rpc_name_to_hash.len());
         let mut highest_block = None::<ArcBlock>;
@@ -596,7 +597,7 @@ impl ConnectionsGroup {
             }
 
             let rpc_block = match self
-                .get_block_from_rpc(rpc_name, rpc_head_hash, authorization, web3_connections)
+                .get_block_from_rpc(rpc_name, rpc_head_hash, authorization, web3_rpcs)
                 .await
             {
                 Ok(x) => x,
@@ -631,9 +632,9 @@ impl ConnectionsGroup {
     pub(self) async fn consensus_head_connections(
         &self,
         authorization: &Arc<Authorization>,
-        web3_connections: &Web3Connections,
-    ) -> anyhow::Result<ConsensusConnections> {
-        let mut maybe_head_block = match self.highest_block(authorization, web3_connections).await {
+        web3_rpcs: &Web3Rpcs,
+    ) -> anyhow::Result<ConsensusWeb3Rpcs> {
+        let mut maybe_head_block = match self.highest_block(authorization, web3_rpcs).await {
             None => return Err(anyhow::anyhow!("No blocks known")),
             Some(x) => x,
         };
@@ -667,7 +668,7 @@ impl ConnectionsGroup {
                     continue;
                 }
 
-                if let Some(rpc) = web3_connections.conns.get(rpc_name.as_str()) {
+                if let Some(rpc) = web3_rpcs.conns.get(rpc_name.as_str()) {
                     highest_rpcs.insert(rpc_name);
                     highest_rpcs_sum_soft_limit += rpc.soft_limit;
                 } else {
@@ -676,18 +677,15 @@ impl ConnectionsGroup {
                 }
             }
 
-            if highest_rpcs_sum_soft_limit >= web3_connections.min_sum_soft_limit
-                && highest_rpcs.len() >= web3_connections.min_head_rpcs
+            if highest_rpcs_sum_soft_limit >= web3_rpcs.min_sum_soft_limit
+                && highest_rpcs.len() >= web3_rpcs.min_head_rpcs
             {
                 // we have enough servers with enough requests
                 break;
             }
 
             // not enough rpcs yet. check the parent block
-            if let Some(parent_block) = web3_connections
-                .block_hashes
-                .get(&maybe_head_block.parent_hash)
-            {
+            if let Some(parent_block) = web3_rpcs.block_hashes.get(&maybe_head_block.parent_hash) {
                 // trace!(
                 //     child=%maybe_head_hash, parent=%parent_block.hash.unwrap(), "avoiding thundering herd",
                 // );
@@ -695,25 +693,25 @@ impl ConnectionsGroup {
                 maybe_head_block = parent_block;
                 continue;
             } else {
-                if num_known < web3_connections.min_head_rpcs {
+                if num_known < web3_rpcs.min_head_rpcs {
                     return Err(anyhow::anyhow!(
                         "not enough rpcs connected: {}/{}/{}",
                         highest_rpcs.len(),
                         num_known,
-                        web3_connections.min_head_rpcs,
+                        web3_rpcs.min_head_rpcs,
                     ));
                 } else {
                     let soft_limit_percent = (highest_rpcs_sum_soft_limit as f32
-                        / web3_connections.min_sum_soft_limit as f32)
+                        / web3_rpcs.min_sum_soft_limit as f32)
                         * 100.0;
 
                     return Err(anyhow::anyhow!(
                         "ran out of parents to check. rpcs {}/{}/{}. soft limit: {:.2}% ({}/{})",
                         highest_rpcs.len(),
                         num_known,
-                        web3_connections.min_head_rpcs,
+                        web3_rpcs.min_head_rpcs,
                         highest_rpcs_sum_soft_limit,
-                        web3_connections.min_sum_soft_limit,
+                        web3_rpcs.min_sum_soft_limit,
                         soft_limit_percent,
                     ));
                 }
@@ -723,29 +721,28 @@ impl ConnectionsGroup {
         // TODO: if consensus_head_rpcs.is_empty, try another method of finding the head block. will need to change the return Err above into breaks.
 
         // we've done all the searching for the heaviest block that we can
-        if highest_rpcs.len() < web3_connections.min_head_rpcs
-            || highest_rpcs_sum_soft_limit < web3_connections.min_sum_soft_limit
+        if highest_rpcs.len() < web3_rpcs.min_head_rpcs
+            || highest_rpcs_sum_soft_limit < web3_rpcs.min_sum_soft_limit
         {
             // if we get here, not enough servers are synced. return an error
-            let soft_limit_percent = (highest_rpcs_sum_soft_limit as f32
-                / web3_connections.min_sum_soft_limit as f32)
-                * 100.0;
+            let soft_limit_percent =
+                (highest_rpcs_sum_soft_limit as f32 / web3_rpcs.min_sum_soft_limit as f32) * 100.0;
 
             return Err(anyhow::anyhow!(
                 "Not enough resources. rpcs {}/{}/{}. soft limit: {:.2}% ({}/{})",
                 highest_rpcs.len(),
                 num_known,
-                web3_connections.min_head_rpcs,
+                web3_rpcs.min_head_rpcs,
                 highest_rpcs_sum_soft_limit,
-                web3_connections.min_sum_soft_limit,
+                web3_rpcs.min_sum_soft_limit,
                 soft_limit_percent,
             ));
         }
 
         // success! this block has enough soft limit and nodes on it (or on later blocks)
-        let conns: Vec<Arc<Web3Connection>> = highest_rpcs
+        let conns: Vec<Arc<Web3Rpc>> = highest_rpcs
             .into_iter()
-            .filter_map(|conn_name| web3_connections.conns.get(conn_name).cloned())
+            .filter_map(|conn_name| web3_rpcs.conns.get(conn_name).cloned())
             .collect();
 
         // TODO: DEBUG only check
@@ -758,7 +755,7 @@ impl ConnectionsGroup {
 
         let consensus_head_block: SavedBlock = maybe_head_block.into();
 
-        Ok(ConsensusConnections {
+        Ok(ConsensusWeb3Rpcs {
             head_block: Some(consensus_head_block),
             conns,
             num_checked_conns: self.rpc_name_to_hash.len(),
@@ -785,7 +782,7 @@ impl Default for ConsensusFinder {
 }
 
 impl ConsensusFinder {
-    fn remove(&mut self, rpc: &Web3Connection) -> Option<H256> {
+    fn remove(&mut self, rpc: &Web3Rpc) -> Option<H256> {
         // TODO: should we have multiple backup tiers? (remote datacenters vs third party)
         if !rpc.backup {
             self.main.remove(rpc);
@@ -793,7 +790,7 @@ impl ConsensusFinder {
         self.all.remove(rpc)
     }
 
-    fn insert(&mut self, rpc: &Web3Connection, new_hash: H256) -> Option<H256> {
+    fn insert(&mut self, rpc: &Web3Rpc, new_hash: H256) -> Option<H256> {
         // TODO: should we have multiple backup tiers? (remote datacenters vs third party)
         if !rpc.backup {
             self.main.insert(rpc, new_hash);
@@ -805,9 +802,9 @@ impl ConsensusFinder {
     async fn update_rpc(
         &mut self,
         rpc_head_block: Option<SavedBlock>,
-        rpc: Arc<Web3Connection>,
+        rpc: Arc<Web3Rpc>,
         // we need this so we can save the block to caches. i don't like it though. maybe we should use a lazy_static Cache wrapper that has a "save_block" method?. i generally dislike globals but i also dislike all the types having to pass eachother around
-        web3_connections: &Web3Connections,
+        web3_connections: &Web3Rpcs,
     ) -> anyhow::Result<bool> {
         // add the rpc's block to connection_heads, or remove the rpc from connection_heads
         let changed = match rpc_head_block {
@@ -852,15 +849,15 @@ impl ConsensusFinder {
     async fn best_consensus_connections(
         &mut self,
         authorization: &Arc<Authorization>,
-        web3_connections: &Web3Connections,
-    ) -> ConsensusConnections {
+        web3_connections: &Web3Rpcs,
+    ) -> ConsensusWeb3Rpcs {
         let highest_block_num = match self
             .all
             .highest_block(authorization, web3_connections)
             .await
         {
             None => {
-                return ConsensusConnections::default();
+                return ConsensusWeb3Rpcs::default();
             }
             Some(x) => x.number.expect("blocks here should always have a number"),
         };
@@ -901,7 +898,7 @@ impl ConsensusFinder {
                 if self.all.rpc_name_to_hash.len() < web3_connections.min_head_rpcs {
                     debug!("No consensus head yet: {}", err);
                 }
-                return ConsensusConnections::default();
+                return ConsensusWeb3Rpcs::default();
             }
             Ok(x) => x,
         };
@@ -924,7 +921,7 @@ impl ConsensusFinder {
             } else {
                 // TODO: i don't think we need this error. and i doublt we'll ever even get here
                 error!("NO CONSENSUS HEAD!");
-                ConsensusConnections::default()
+                ConsensusWeb3Rpcs::default()
             }
         }
     }
