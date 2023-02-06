@@ -32,7 +32,6 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
 use log::{debug, error, info, trace, warn, Level};
-use metered::{metered, ErrorCount, HitCount, ResponseTime, Throughput};
 use migration::sea_orm::{
     self, ConnectionTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait,
 };
@@ -365,7 +364,6 @@ pub struct Web3ProxyAppSpawn {
     pub background_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
 }
 
-// #[metered(registry = Web3ProxyAppMetrics, registry_expr = self.app_metrics, visibility = pub)]
 impl Web3ProxyApp {
     /// The main entrypoint.
     pub async fn spawn(
@@ -1469,12 +1467,12 @@ impl Web3ProxyApp {
                         block_num,
                         cache_errors,
                     } => {
-                        let (request_block_hash, archive_needed) = self
+                        let (request_block_hash, block_depth) = self
                             .balanced_rpcs
                             .block_hash(authorization, &block_num)
                             .await?;
 
-                        if archive_needed {
+                        if block_depth < self.config.archive_depth {
                             request_metadata
                                 .archive_request
                                 .store(true, atomic::Ordering::Relaxed);
@@ -1499,12 +1497,12 @@ impl Web3ProxyApp {
                         to_block_num,
                         cache_errors,
                     } => {
-                        let (from_block_hash, archive_needed) = self
+                        let (from_block_hash, block_depth) = self
                             .balanced_rpcs
                             .block_hash(authorization, &from_block_num)
                             .await?;
 
-                        if archive_needed {
+                        if block_depth < self.config.archive_depth {
                             request_metadata
                                 .archive_request
                                 .store(true, atomic::Ordering::Relaxed);

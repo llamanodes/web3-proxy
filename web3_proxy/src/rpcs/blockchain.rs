@@ -190,12 +190,12 @@ impl Web3Connections {
         &self,
         authorization: &Arc<Authorization>,
         num: &U64,
-    ) -> anyhow::Result<(H256, bool)> {
-        let (block, is_archive_block) = self.cannonical_block(authorization, num).await?;
+    ) -> anyhow::Result<(H256, u64)> {
+        let (block, block_depth) = self.cannonical_block(authorization, num).await?;
 
         let hash = block.hash.expect("Saved blocks should always have hashes");
 
-        Ok((hash, is_archive_block))
+        Ok((hash, block_depth))
     }
 
     /// Get the heaviest chain's block from cache or backend rpc
@@ -204,7 +204,7 @@ impl Web3Connections {
         &self,
         authorization: &Arc<Authorization>,
         num: &U64,
-    ) -> anyhow::Result<(ArcBlock, bool)> {
+    ) -> anyhow::Result<(ArcBlock, u64)> {
         // we only have blocks by hash now
         // maybe save them during save_block in a blocks_by_number Cache<U64, Vec<ArcBlock>>
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
@@ -233,9 +233,11 @@ impl Web3Connections {
         let head_block_num =
             head_block_num.expect("we should only get here if we have a head block");
 
-        // TODO: geth does 64, erigon does 90k. sometimes we run a mix
-        // TODO: do this dynamically based on balanced_rpcs block_data_limit
-        let archive_needed = num < &(head_block_num - U64::from(64));
+        let block_depth = if num >= &head_block_num {
+            0
+        } else {
+            (head_block_num - num).as_u64()
+        };
 
         // try to get the hash from our cache
         // deref to not keep the lock open
@@ -244,7 +246,7 @@ impl Web3Connections {
             // TODO: pass authorization through here?
             let block = self.block(authorization, &block_hash, None).await?;
 
-            return Ok((block, archive_needed));
+            return Ok((block, block_depth));
         }
 
         // block number not in cache. we need to ask an rpc for it
@@ -270,7 +272,7 @@ impl Web3Connections {
         // the block was fetched using eth_getBlockByNumber, so it should have all fields and be on the heaviest chain
         let block = self.save_block(block, true).await?;
 
-        Ok((block, archive_needed))
+        Ok((block, block_depth))
     }
 
     pub(super) async fn process_incoming_blocks(

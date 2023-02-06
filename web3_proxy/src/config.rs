@@ -59,6 +59,10 @@ pub struct AppConfig {
     #[serde(default = "default_allowed_origin_requests_per_period")]
     pub allowed_origin_requests_per_period: HashMap<String, u64>,
 
+    /// erigon defaults to pruning beyond 90,000 blocks
+    #[serde(default = "default_archive_depth")]
+    pub archive_depth: u64,
+
     /// EVM chain id. 1 for ETH
     /// TODO: better type for chain_id? max of `u64::MAX / 2 - 36` <https://github.com/ethereum/EIPs/issues/2294>
     pub chain_id: u64,
@@ -157,6 +161,10 @@ pub struct AppConfig {
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
+}
+
+fn default_archive_depth() -> u64 {
+    90_000
 }
 
 fn default_allowed_origin_requests_per_period() -> HashMap<String, u64> {
