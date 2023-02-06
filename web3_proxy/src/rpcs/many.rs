@@ -94,7 +94,7 @@ impl Web3Rpcs {
             drop(receiver);
 
             // TODO: what interval? follow a websocket also? maybe by watching synced connections with a timeout. will need debounce
-            let mut interval = interval(Duration::from_millis(expected_block_time_ms));
+            let mut interval = interval(Duration::from_millis(expected_block_time_ms / 2));
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
             let sender = Arc::new(sender);
@@ -104,10 +104,9 @@ impl Web3Rpcs {
 
                 async move {
                     loop {
-                        // TODO: every time a head_block arrives (with a small delay for known slow servers), or on the interval.
                         interval.tick().await;
 
-                        // // trace!("http interval ready");
+                        // trace!("http interval ready");
 
                         // errors are okay. they mean that all receivers have been dropped
                         let _ = sender.send(());
