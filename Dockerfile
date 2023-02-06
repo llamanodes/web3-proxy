@@ -71,6 +71,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 #
 FROM debian:bullseye-slim AS runtime
 
+# Create llama user to avoid running container with root
+RUN mkdir /llama \
+    && adduser --home /llama --shell /sbin/nologin --gecos '' --no-create-home --disabled-password --uid 1001 llama \
+    && chown -R llama /llama
+
+USER llama
+
 ENTRYPOINT ["web3_proxy_cli"]
 CMD [ "--config", "/web3-proxy.toml", "proxyd" ]
 
