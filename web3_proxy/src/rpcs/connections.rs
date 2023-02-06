@@ -2,7 +2,7 @@
 use super::blockchain::{ArcBlock, BlockHashesCache};
 use super::connection::Web3Connection;
 use super::request::{
-    OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult, RequestRevertHandler,
+    OpenRequestHandle, OpenRequestResult, RequestRevertHandler,
 };
 use super::synced_connections::ConsensusConnections;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
@@ -69,7 +69,6 @@ impl Web3Connections {
         min_head_rpcs: usize,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
-        open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
@@ -149,7 +148,6 @@ impl Web3Connections {
 
                 let pending_tx_id_sender = Some(pending_tx_id_sender.clone());
                 let block_map = block_map.clone();
-                let open_request_handle_metrics = open_request_handle_metrics.clone();
 
                 let handle = tokio::spawn(async move {
                     server_config
@@ -163,7 +161,6 @@ impl Web3Connections {
                             block_map,
                             block_sender,
                             pending_tx_id_sender,
-                            open_request_handle_metrics,
                         )
                         .await
                 });
@@ -1315,7 +1312,6 @@ mod tests {
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
-            open_request_handle_metrics: Arc::new(Default::default()),
         };
 
         let lagged_rpc = Web3Connection {
@@ -1338,7 +1334,6 @@ mod tests {
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(lagged_block.clone())),
-            open_request_handle_metrics: Arc::new(Default::default()),
         };
 
         assert!(head_rpc.has_block_data(&lagged_block.number()));
@@ -1548,7 +1543,6 @@ mod tests {
             block_data_limit: 64.into(),
             tier: 1,
             head_block: RwLock::new(Some(head_block.clone())),
-            open_request_handle_metrics: Arc::new(Default::default()),
         };
 
         let archive_rpc = Web3Connection {
@@ -1571,7 +1565,6 @@ mod tests {
             block_data_limit: u64::MAX.into(),
             tier: 2,
             head_block: RwLock::new(Some(head_block.clone())),
-            open_request_handle_metrics: Arc::new(Default::default()),
         };
 
         assert!(pruned_rpc.has_block_data(&head_block.number()));

@@ -13,7 +13,6 @@ use crate::jsonrpc::{
 use crate::rpcs::blockchain::{ArcBlock, SavedBlock};
 use crate::rpcs::connection::Web3Connection;
 use crate::rpcs::connections::Web3Connections;
-use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::rpcs::transactions::TxStatus;
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
@@ -210,9 +209,6 @@ pub struct Web3ProxyApp {
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
     pub db_replica: Option<DatabaseReplica>,
-    /// prometheus metrics
-    // app_metrics: Arc<Web3ProxyAppMetrics>,
-    open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     pub pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
@@ -392,10 +388,6 @@ impl Web3ProxyApp {
                 top_config.app.extra.keys()
             );
         }
-
-        // setup metrics
-        // let app_metrics = Default::default();
-        let open_request_handle_metrics: Arc<OpenRequestHandleMetrics> = Default::default();
 
         let mut db_conn = None::<DatabaseConnection>;
         let mut db_replica = None::<DatabaseReplica>;
@@ -592,7 +584,6 @@ impl Web3ProxyApp {
             top_config.app.min_synced_rpcs,
             Some(pending_tx_sender.clone()),
             pending_transactions.clone(),
-            open_request_handle_metrics.clone(),
         )
         .await
         .context("spawning balanced rpcs")?;
@@ -623,7 +614,6 @@ impl Web3ProxyApp {
                 // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits
                 None,
                 pending_transactions.clone(),
-                open_request_handle_metrics.clone(),
             )
             .await
             .context("spawning private_rpcs")?;
@@ -734,8 +724,6 @@ impl Web3ProxyApp {
             db_conn,
             db_replica,
             vredis_pool,
-            // app_metrics,
-            open_request_handle_metrics,
             rpc_secret_key_cache,
             bearer_token_semaphores,
             ip_semaphores,
@@ -909,9 +897,7 @@ impl Web3ProxyApp {
         // "user_cache_size": app.rpc_secret_key_cache.weighted_size(),
 
         #[derive(Serialize)]
-        struct CombinedMetrics<'a> {
-            // app: &'a Web3ProxyAppMetrics,
-            backend_rpc: &'a OpenRequestHandleMetrics,
+        struct CombinedMetrics {
             recent_ip_counts: RecentCounts,
             recent_user_id_counts: RecentCounts,
             recent_tx_counts: RecentCounts,
@@ -919,8 +905,6 @@ impl Web3ProxyApp {
         }
 
         let metrics = CombinedMetrics {
-            // app: &self.app_metrics,
-            backend_rpc: &self.open_request_handle_metrics,
             recent_ip_counts,
             recent_user_id_counts,
             recent_tx_counts,
@@ -1395,6 +1379,7 @@ impl Web3ProxyApp {
                                 .context("parsing params 0 into str then bytes")?,
                         )
                         .map_err(|x| {
+                            trace!("bad request: {:?}", x);
                             FrontendErrorResponse::BadRequest(
                                 "param 0 could not be read as H256".to_string(),
                             )

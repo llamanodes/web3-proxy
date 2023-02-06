@@ -1,6 +1,5 @@
 use crate::rpcs::blockchain::BlockHashesCache;
 use crate::rpcs::connection::Web3Connection;
-use crate::rpcs::request::OpenRequestHandleMetrics;
 use crate::{app::AnyhowJoinHandle, rpcs::blockchain::ArcBlock};
 use argh::FromArgs;
 use ethers::prelude::TxHash;
@@ -246,7 +245,6 @@ impl Web3ConnectionConfig {
         block_map: BlockHashesCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
-        open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         if !self.extra.is_empty() {
             warn!(
@@ -291,7 +289,6 @@ impl Web3ConnectionConfig {
             tx_id_sender,
             true,
             self.tier,
-            open_request_handle_metrics,
         )
         .await
     }

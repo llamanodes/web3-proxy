@@ -48,7 +48,6 @@ http = "0.2.8"
 ipnet = "2.7.1"
 itertools = "0.10.5"
 log = "0.4.17"
-metered = { version = "0.9.0", features = ["serialize"] }
 moka = { version = "0.9.6", default-features = false, features = ["future"] }
 notify = "5.1.0"
 num = "0.4.0"

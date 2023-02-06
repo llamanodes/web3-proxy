@@ -328,6 +328,8 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] cache /status for longer
 - [x] sort connections during eth_sendRawTransaction
 - [x] block all admin_ rpc commands
+- [x] remove the "metered" crate now that we save aggregate queries?
+- [x] add archive depth to app config
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
@@ -379,7 +381,6 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] cli commands to search users by key
 - [ ] cli flag to set prometheus port
 - [ ] flamegraphs show 25% of the time to be in moka-housekeeper. tune that
-- [ ] remove the "metered" crate now that we save aggregate queries?
 - [ ] remove/change the "active_requests" counter? maybe only once we have dynamic soft limits?
 - [ ] refactor so configs can change while running
   - this will probably be a rather large change, but is necessary when we have autoscaling

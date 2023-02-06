@@ -18,9 +18,9 @@ pub struct PopularityContestSubCommand {
 #[derive(Debug)]
 struct BackendRpcData<'a> {
     name: &'a str,
-    tier: u64,
-    backup: bool,
-    block_data_limit: u64,
+    // tier: u64,
+    // backup: bool,
+    // block_data_limit: u64,
     requests: u64,
 }
 
@@ -62,21 +62,21 @@ impl PopularityContestSubCommand {
 
             let tier = conn.get("tier").unwrap().as_u64().unwrap();
 
-            let backup = conn.get("backup").unwrap().as_bool().unwrap();
+            // let backup = conn.get("backup").unwrap().as_bool().unwrap();
 
-            let block_data_limit = conn
-                .get("block_data_limit")
-                .unwrap()
-                .as_u64()
-                .unwrap_or(u64::MAX);
+            // let block_data_limit = conn
+            //     .get("block_data_limit")
+            //     .unwrap()
+            //     .as_u64()
+            //     .unwrap_or(u64::MAX);
 
             let requests = conn.get("total_requests").unwrap().as_u64().unwrap();
 
             let rpc_data = BackendRpcData {
                 name,
-                tier,
-                backup,
-                block_data_limit,
+                // tier,
+                // backup,
+                // block_data_limit,
                 requests,
             };
 

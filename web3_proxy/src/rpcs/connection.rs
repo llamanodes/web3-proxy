@@ -1,7 +1,7 @@
 ///! Rate-limited communication with a web3 provider.
 use super::blockchain::{ArcBlock, BlockHashesCache, SavedBlock};
 use super::provider::Web3Provider;
-use super::request::{OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult};
+use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::BlockAndRpc;
 use crate::frontend::authorization::Authorization;
@@ -25,7 +25,7 @@ use std::{cmp::Ordering, sync::Arc};
 use thread_fast_rng::rand::Rng;
 use thread_fast_rng::thread_fast_rng;
 use tokio::sync::{broadcast, oneshot, watch, RwLock as AsyncRwLock};
-use tokio::time::{interval, sleep, sleep_until, timeout, Duration, Instant, MissedTickBehavior};
+use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
 
 // TODO: maybe provider state should have the block data limit in it. but it is inside an async lock and we can't Serialize then
 #[derive(Clone, Debug)]
@@ -98,9 +98,8 @@ pub struct Web3Connection {
     pub(super) block_data_limit: AtomicU64,
     /// Lower tiers are higher priority when sending requests
     pub(super) tier: u64,
-    /// TODO: should this be an AsyncRwLock?
+    /// TODO: change this to a watch channel so that http providers can subscribe and take action on change
     pub(super) head_block: RwLock<Option<SavedBlock>>,
-    pub(super) open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
 }
 
 impl Web3Connection {
@@ -127,7 +126,6 @@ impl Web3Connection {
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
         tier: u64,
-        open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Web3Connection>, AnyhowJoinHandle<()>)> {
         let hard_limit = hard_limit.map(|(hard_rate_limit, redis_pool)| {
             // TODO: is cache size 1 okay? i think we need
@@ -173,7 +171,6 @@ impl Web3Connection {
             block_data_limit,
             head_block: RwLock::new(Default::default()),
             tier,
-            open_request_handle_metrics,
         };
 
         let new_connection = Arc::new(new_connection);
@@ -892,34 +889,14 @@ impl Web3Connection {
             .clone()
         {
             trace!("watching pending transactions on {}", self);
+            // TODO: does this keep the lock open for too long?
             match provider.as_ref() {
                 Web3Provider::Mock => unimplemented!(),
                 Web3Provider::Http(provider) => {
                     // there is a "watch_pending_transactions" function, but a lot of public nodes do not support the necessary rpc endpoints
-                    // TODO: what should this interval be? probably automatically set to some fraction of block time
-                    // TODO: maybe it would be better to have one interval for all of the http providers, but this works for now
-                    // TODO: if there are some websocket providers, maybe have a longer interval and a channel that tells the https to update when a websocket gets a new head? if they are slow this wouldn't work well though
-                    let mut interval = interval(Duration::from_secs(60));
-                    interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-                    loop {
-                        // TODO: actually do something here
-                        /*
-                        match self.try_request_handle().await {
-                            Ok(active_request_handle) => {
-                                // TODO: check the filter
-                                todo!("actually send a request");
-                            }
-                            Err(e) => {
-                                warn!("Failed getting latest block from {}: {:?}", self, e);
-                            }
-                        }
-                        */
-
-                        // wait for the interval
-                        // TODO: if error or rate limit, increase interval?
-                        interval.tick().await;
-                    }
+                    // TODO: maybe subscribe to self.head_block?
+                    // TODO: this keeps a read lock guard open on provider_state forever. is that okay for an http client?
+                    futures::future::pending::<()>().await;
                 }
                 Web3Provider::Ws(provider) => {
                     // TODO: maybe the subscribe_pending_txs function should be on the active_request_handle
@@ -1216,8 +1193,6 @@ mod tests {
         let head_block = SavedBlock::new(random_block);
         let block_data_limit = u64::MAX;
 
-        let metrics = OpenRequestHandleMetrics::default();
-
         let x = Web3Connection {
             name: "name".to_string(),
             db_conn: None,
@@ -1236,7 +1211,6 @@ mod tests {
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
-            open_request_handle_metrics: Arc::new(metrics),
         };
 
         assert!(x.has_block_data(&0.into()));
@@ -1264,8 +1238,6 @@ mod tests {
 
         let block_data_limit = 64;
 
-        let metrics = OpenRequestHandleMetrics::default();
-
         // TODO: this is getting long. have a `impl Default`
         let x = Web3Connection {
             name: "name".to_string(),
@@ -1285,7 +1257,6 @@ mod tests {
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
-            open_request_handle_metrics: Arc::new(metrics),
         };
 
         assert!(!x.has_block_data(&0.into()));
@@ -1339,7 +1310,6 @@ mod tests {
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
-            open_request_handle_metrics: Arc::new(metrics),
         };
 
         assert!(!x.has_block_data(&0.into()));
