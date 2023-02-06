@@ -87,6 +87,8 @@ impl PopularityContestSubCommand {
             by_tier.entry(tier).or_default().push(rpc_data);
         }
 
+        // TODO: sort by_tier
+
         info!("tier_requests: {:#?}", tier_requests);
         info!("by_tier: {:#?}", by_tier);
 
