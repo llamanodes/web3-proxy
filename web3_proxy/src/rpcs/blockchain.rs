@@ -288,28 +288,33 @@ impl Web3Rpcs {
         // TODO: this will grow unbounded. prune old heads on this at the same time we prune the graph?
         let mut connection_heads = ConsensusFinder::default();
 
-        while let Ok((new_block, rpc)) = block_receiver.recv_async().await {
-            let new_block = new_block.map(Into::into);
+        loop {
+            match block_receiver.recv_async().await {
+                Ok((new_block, rpc)) => {
+                    let new_block = new_block.map(Into::into);
 
-            let rpc_name = rpc.name.clone();
+                    let rpc_name = rpc.name.clone();
 
-            if let Err(err) = self
-                .process_block_from_rpc(
-                    authorization,
-                    &mut connection_heads,
-                    new_block,
-                    rpc,
-                    &head_block_sender,
-                    &pending_tx_sender,
-                )
-                .await
-            {
-                warn!("unable to process block from rpc {}: {:?}", rpc_name, err);
+                    if let Err(err) = self
+                        .process_block_from_rpc(
+                            authorization,
+                            &mut connection_heads,
+                            new_block,
+                            rpc,
+                            &head_block_sender,
+                            &pending_tx_sender,
+                        )
+                        .await
+                    {
+                        warn!("unable to process block from rpc {}: {:?}", rpc_name, err);
+                    }
+                }
+                Err(err) => {
+                    warn!("block_receiver exited! {:#?}", err);
+                    return Err(err.into());
+                }
             }
         }
-
-        // TODO: if there was an error, should we return it instead of an Ok?
-        warn!("block_receiver exited!");
 
         Ok(())
     }
@@ -674,6 +679,7 @@ impl ConnectionsGroup {
                 } else {
                     // i don't think this is an error. i think its just if a reconnect is currently happening
                     warn!("connection missing: {}", rpc_name);
+                    debug!("web3_rpcs.conns: {:#?}", web3_rpcs.conns);
                 }
             }
 

@@ -12,7 +12,7 @@ use crate::rpcs::transactions::TxStatus;
 use counter::Counter;
 use derive_more::From;
 use ethers::prelude::{ProviderError, TxHash, H256, U64};
-use futures::future::try_join_all;
+use futures::future::{join_all, try_join_all};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::{HashMap, HashSet};
@@ -89,9 +89,7 @@ impl Web3Rpcs {
         };
 
         let http_interval_sender = if http_client.is_some() {
-            let (sender, receiver) = broadcast::channel(1);
-
-            drop(receiver);
+            let (sender, _) = broadcast::channel(1);
 
             // TODO: what interval? follow a websocket also? maybe by watching synced connections with a timeout. will need debounce
             let mut interval = interval(Duration::from_millis(expected_block_time_ms / 2));
@@ -109,14 +107,10 @@ impl Web3Rpcs {
                         // trace!("http interval ready");
 
                         if let Err(_) = sender.send(()) {
-                            // errors are okay. they mean that all receivers have been dropped. that is normal if there are only websocket backend rpcs
-                            // TODO: if error, await a `std::future::pending::<()>`? whats the right thing here?
-                            info!("all http receivers have been dropped");
-                            break;
+                            // errors are okay. they mean that all receivers have been dropped, or the rpcs just haven't started yet
+                            trace!("no http receivers");
                         };
                     }
-
-                    info!("http interval sender exited");
                 }
             };
 
@@ -130,11 +124,11 @@ impl Web3Rpcs {
 
         // turn configs into connections (in parallel)
         // TODO: move this into a helper function. then we can use it when configs change (will need a remove function too)
-        // TODO: futures unordered?
-        let mut spawn_handles: FuturesUnordered<_> = server_configs
+        let mut spawn_handles: Vec<_> = server_configs
             .into_iter()
             .filter_map(|(server_name, server_config)| {
                 if server_config.disabled {
+                    info!("{} is disabled", server_name);
                     return None;
                 }
 
@@ -151,6 +145,8 @@ impl Web3Rpcs {
 
                 let pending_tx_id_sender = Some(pending_tx_id_sender.clone());
                 let block_map = block_map.clone();
+
+                debug!("spawning {}", server_name);
 
                 let handle = tokio::spawn(async move {
                     server_config
@@ -176,8 +172,8 @@ impl Web3Rpcs {
         let mut connections = HashMap::new();
         let mut handles = vec![];
 
-        for x in spawn_handles.next().await {
-            // TODO: how should we handle errors here? one rpc being down shouldn't cause the program to exit
+        // TODO: futures unordered?
+        for x in join_all(spawn_handles).await {
             match x {
                 Ok(Ok((connection, handle))) => {
                     // web3 connection worked
@@ -230,7 +226,6 @@ impl Web3Rpcs {
             let connections = connections.clone();
 
             tokio::spawn(async move {
-                // TODO: try_join_all with the other handles here
                 connections
                     .subscribe(
                         authorization,
@@ -328,7 +323,6 @@ impl Web3Rpcs {
         }
 
         info!("subscriptions over: {:?}", self);
-
         Ok(())
     }
 
