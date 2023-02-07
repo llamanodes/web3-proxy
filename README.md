@@ -37,7 +37,7 @@ Options:
 Start the server with the defaults (listen on `http://localhost:8544` and use `./config/development.toml` which uses the database and cache running under docker and proxies to a bunch of public nodes:
 
 ```
-cargo run --release -- daemon
+cargo run --release -- proxyd
 ```
 
 ## Common commands
