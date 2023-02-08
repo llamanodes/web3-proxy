@@ -531,7 +531,7 @@ impl Web3Rpc {
                         // we previously sent a None. return early
                         return Ok(());
                     }
-                    warn!("{} is not synced!", self);
+                    warn!("clearing head block on {}!", self);
 
                     *head_block = None;
                 }
