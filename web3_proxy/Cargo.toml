@@ -48,7 +48,7 @@ http = "0.2.8"
 ipnet = "2.7.1"
 itertools = "0.10.5"
 log = "0.4.17"
-moka = { version = "0.9.6", default-features = false, features = ["future"] }
+moka = { version = "0.9.7", default-features = false, features = ["future"] }
 notify = "5.1.0"
 num = "0.4.0"
 num-traits = "0.2.15"
@@ -67,7 +67,7 @@ siwe = "0.5.0"
 time = "0.3.17"
 tokio = { version = "1.25.0", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync"] }
-toml = "0.7.1"
+toml = "0.7.2"
 tower = "0.4.13"
 tower-http = { version = "0.3.5", features = ["cors", "sensitive-headers"] }
 ulid = { version = "1.0.0", features = ["serde"] }

@@ -301,7 +301,7 @@ pub async fn migrate_db(
     );
 
     loop {
-        if Migrator::get_pending_migrations(&db_conn).await?.is_empty() {
+        if Migrator::get_pending_migrations(db_conn).await?.is_empty() {
             info!("no migrations to apply");
             return Ok(());
         }
@@ -327,10 +327,10 @@ pub async fn migrate_db(
         break;
     }
 
-    let migration_result = Migrator::up(&db_conn, None).await;
+    let migration_result = Migrator::up(db_conn, None).await;
 
     // drop the distributed lock
-    drop_migration_lock(&db_conn).await?;
+    drop_migration_lock(db_conn).await?;
 
     // return if migrations erred
     migration_result
