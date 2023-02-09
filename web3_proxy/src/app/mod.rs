@@ -1217,6 +1217,7 @@ impl Web3ProxyApp {
                         // if we are sending the transaction privately, no matter the proxy_mode, we send to ALL private rpcs
                         (private_rpcs, None)
                     } else {
+                        // TODO: send to balanced_rpcs AND private_rpcs
                         (&self.balanced_rpcs, default_num)
                     }
                 } else {
@@ -1232,6 +1233,7 @@ impl Web3ProxyApp {
                         None,
                         Level::Trace,
                         num,
+                        true,
                     )
                     .await?;
 
@@ -1528,10 +1530,7 @@ impl Web3ProxyApp {
 
                         self.response_cache
                             .try_get_with(cache_key, async move {
-                                // TODO: retry some failures automatically!
-                                // TODO: try private_rpcs if all the balanced_rpcs fail!
                                 // TODO: put the hash here instead of the block number? its in the request already.
-
                                 let mut response = self
                                     .balanced_rpcs
                                     .try_proxy_connection(
@@ -1547,6 +1546,8 @@ impl Web3ProxyApp {
                                 response.id = Default::default();
 
                                 // TODO: only cache the inner response
+                                // TODO: how are we going to stream this?
+                                // TODO: check response size. if its very large, return it in a custom Error type that bypasses caching
                                 Ok::<_, anyhow::Error>(response)
                             })
                             .await

@@ -639,12 +639,15 @@ impl Web3Rpcs {
         authorization: &Arc<Authorization>,
         block_needed: Option<&U64>,
         max_count: Option<usize>,
+        always_include_backups: bool,
     ) -> Result<Vec<OpenRequestHandle>, Option<Instant>> {
-        if let Ok(without_backups) = self
-            ._all_connections(false, authorization, block_needed, max_count)
-            .await
-        {
-            return Ok(without_backups);
+        if !always_include_backups {
+            if let Ok(without_backups) = self
+                ._all_connections(false, authorization, block_needed, max_count)
+                .await
+            {
+                return Ok(without_backups);
+            }
         }
 
         self._all_connections(true, authorization, block_needed, max_count)
@@ -1008,10 +1011,16 @@ impl Web3Rpcs {
         block_needed: Option<&U64>,
         error_level: Level,
         max_count: Option<usize>,
+        always_include_backups: bool,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
             match self
-                .all_connections(authorization, block_needed, max_count)
+                .all_connections(
+                    authorization,
+                    block_needed,
+                    max_count,
+                    always_include_backups,
+                )
                 .await
             {
                 Ok(active_request_handles) => {
@@ -1382,10 +1391,10 @@ mod tests {
         // no head block because the rpcs haven't communicated through their channels
         assert!(conns.head_block_hash().is_none());
 
-        // all_backend_connections gives everything regardless of sync status
+        // all_backend_connections gives all non-backup servers regardless of sync status
         assert_eq!(
             conns
-                .all_connections(&authorization, None, None)
+                .all_connections(&authorization, None, None, false)
                 .await
                 .unwrap()
                 .len(),
