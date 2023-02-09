@@ -12,7 +12,7 @@ use crate::rpcs::transactions::TxStatus;
 use counter::Counter;
 use derive_more::From;
 use ethers::prelude::{ProviderError, TxHash, H256, U64};
-use futures::future::{join_all, try_join_all};
+use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::{HashMap, HashSet};
@@ -124,7 +124,7 @@ impl Web3Rpcs {
 
         // turn configs into connections (in parallel)
         // TODO: move this into a helper function. then we can use it when configs change (will need a remove function too)
-        let mut spawn_handles: Vec<_> = server_configs
+        let mut spawn_handles: FuturesUnordered<_> = server_configs
             .into_iter()
             .filter_map(|(server_name, server_config)| {
                 if server_config.disabled {
@@ -173,7 +173,7 @@ impl Web3Rpcs {
         let mut handles = vec![];
 
         // TODO: futures unordered?
-        for x in join_all(spawn_handles).await {
+        while let Some(x) = spawn_handles.next().await {
             match x {
                 Ok(Ok((connection, handle))) => {
                     // web3 connection worked
