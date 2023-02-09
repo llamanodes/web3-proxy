@@ -315,8 +315,6 @@ impl Web3Rpcs {
                 }
             }
         }
-
-        Ok(())
     }
 
     /// `connection_heads` is a mapping of rpc_names to head block hashes.
