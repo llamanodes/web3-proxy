@@ -26,7 +26,7 @@ use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
 use itertools::Itertools;
-use log::{debug, warn};
+use log::{debug, Level, trace, warn};
 use migration::sea_orm::prelude::Uuid;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
@@ -38,6 +38,9 @@ use siwe::{Message, VerificationOpts};
 use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
+use ethers::abi::ParamType;
+use ethers::prelude::H256;
+use ethers::types::Transaction;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
 use entities::user::Relation::UserTier;
@@ -45,6 +48,7 @@ use migration::extension::postgres::Type;
 use thread_fast_rng::rand;
 use crate::frontend::errors::FrontendErrorResponse;
 use crate::referral_code::ReferralCode;
+use crate::rpcs::request::OpenRequestResult;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
 ///
@@ -327,7 +331,6 @@ pub async fn user_login_post(
 
                 txn = db_conn.begin().await?;
                 used_referral.insert(&txn).await?;
-
             } else if app.config.invite_code.is_none() {
                 // Pass
                 txn = db_conn.begin().await?;
@@ -856,6 +859,101 @@ pub async fn rpc_keys_management(
 //
 //     let db_conn = app.db_conn()?;
 // }
+
+#[debug_handle]
+pub async fn user_increase_credits(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+    Query(mut params): Query<HashMap<String, String>>,
+) -> FrontendResult {
+
+    // Check that the user is logged-in and authorized. We don't need a semaphore here btw
+    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+
+    // Get the transaction hash, and the amount that the user wants to top up by.
+    // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
+    let tx_hash: H256 = params.remove("tx_hash")
+        .ok_or(
+            FrontendErrorResponse::StatusCode(
+                StatusCode::BAD_REQUEST,
+                "You have not provided a tx-hash that shows how much you paid in".to_string(),
+                None,
+            )
+        )?
+        .parse()
+        .context("unable to parse tx_hash")?;
+
+    // We don't check the trace, the transaction must be a naive, simple send transaction (for now at least...)
+    // TODO: Get the respective transaction ...
+    let tx: Transaction = match rpc.try_request_handle(authorization, false).await {
+        Ok(OpenRequestResult::Handle(handle)) => {
+            handle.request(
+                "eth_getTransactionByHash",
+                &json!(Option::None::<()>),
+                Level::Trace.into(),
+            ).await
+        }
+        Ok(_) => {
+            // TODO: actually retry?
+            FrontendErrorResponse::StatusCode(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "We retrieved no handle! Should try again!".to_string(),
+                None,
+            )
+        }
+        Err(err) => {
+            log::trace!(
+                    "cancelled funneling transaction {} from {}: {:?}",
+                    pending_tx_id,
+                    rpc,
+                    err,
+                );
+            FrontendErrorResponse::StatusCode(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "We retrieved no handle! Should try again!".to_string(),
+                None,
+            )
+        }
+    }?;
+
+    // Make sure that from coincides with the user that is calling this ...
+    // Actually, this doesn't matter ...
+    let contract = match tx.to {
+        None => {
+            FrontendErrorResponse::StatusCode(
+                StatusCode::BAD_REQUEST,
+                "The Transaction is not a Transfer".to_string(),
+                None,
+            )
+        }
+        Some(contract) => contract
+    }?;
+
+    // Throw error if this is a currency that we do not support
+    if !CURRENCIES.contains_key(&k) {
+        return Err(
+            FrontendErrorResponse::StatusCode(
+                StatusCode::BAD_REQUEST,
+                "We do not support this currency / contract".to_string(),
+                None,
+            )
+        );
+    }
+
+    // Decode the transaction of the contract ...
+    ethers::abi::decode(
+        &[ParamType::Address],
+        tx.
+    )
+
+
+    // TODO: Decode the data of the transaction. The to-address must be an ERC20, one of the stablecoins ...
+
+    // abi::decode()
+
+
+    Ok(())
+}
 
 /// Create or get the existing referral link.
 /// This is the link that the user can share to third parties, and get credits.
