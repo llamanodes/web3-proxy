@@ -669,14 +669,12 @@ impl Web3ProxyApp {
             ));
         }
 
-        // keep 1GB of blocks in the cache
-        // responses can be very different in sizes, so this definitely needs a weigher
-        // TODO: max_capacity from config
+        // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
         // TODO: don't allow any response to be bigger than X% of the cache
         let response_cache = Cache::builder()
-            .max_capacity(1024 * 1024 * 1024)
+            .max_capacity(top_config.app.response_cache_max_bytes)
             .weigher(|k: &ResponseCacheKey, v| {
-                // TODO: is this good?
+                // TODO: is this good enough?
                 if let Ok(v) = serde_json::to_string(v) {
                     let weight = k.weight() + v.len();
 

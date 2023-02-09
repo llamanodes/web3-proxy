@@ -138,7 +138,7 @@ pub struct AppConfig {
 
     /// RPC responses are cached locally
     #[serde(default = "default_response_cache_max_bytes")]
-    pub response_cache_max_bytes: usize,
+    pub response_cache_max_bytes: u64,
 
     /// the stats page url for an anonymous user.
     pub redirect_public_url: Option<String>,
@@ -190,10 +190,10 @@ fn default_login_rate_limit_per_period() -> u64 {
     10
 }
 
-fn default_response_cache_max_bytes() -> usize {
+fn default_response_cache_max_bytes() -> u64 {
     // TODO: default to some percentage of the system?
     // 100 megabytes
-    10_usize.pow(8)
+    10u64.pow(8)
 }
 
 /// Configuration for a backend web3 RPC server
