@@ -196,7 +196,7 @@ mod tests {
                 min_sum_soft_limit: 1,
                 min_synced_rpcs: 1,
                 public_requests_per_period: Some(1_000_000),
-                response_cache_max_bytes: 10_usize.pow(7),
+                response_cache_max_bytes: 10_u64.pow(7),
                 redirect_public_url: Some("example.com/".to_string()),
                 redirect_rpc_key_url: Some("example.com/{{rpc_key_id}}".to_string()),
                 ..Default::default()
