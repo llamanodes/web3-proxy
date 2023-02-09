@@ -59,9 +59,9 @@ proctitle = "0.1.1"
 regex = "1.7.1"
 reqwest = { version = "0.11.14", default-features = false, features = ["json", "tokio-rustls"] }
 rustc-hash = "1.1.0"
-sentry = { version = "0.29.2", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
+sentry = { version = "0.29.3", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
 serde = { version = "1.0.152", features = [] }
-serde_json = { version = "1.0.92", default-features = false, features = ["alloc", "raw_value"] }
+serde_json = { version = "1.0.93", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.2.0"
 siwe = "0.5.0"
 time = "0.3.17"
