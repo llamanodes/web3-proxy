@@ -85,6 +85,19 @@ pipeline {
                         }
                     }
                 }
+                stage('build and push amd64_epyc3 image') {
+                    agent {
+                        label 'amd64_epyc3'
+                    }
+                    environment {
+                        ARCH="amd64_epyc3"
+                    }
+                    steps {
+                        script {
+                            buildAndPush()
+                        }
+                    }
+                }
                 stage('Build and push arm64_graviton2 image') {
                     agent {
                         label 'arm64_graviton2'
