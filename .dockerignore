@@ -6,5 +6,6 @@ perf.data.old
 /data/
 /docker-compose*
 /Dockerfile
+/Jenkinsfile
 /redis-cell-server/
 /target

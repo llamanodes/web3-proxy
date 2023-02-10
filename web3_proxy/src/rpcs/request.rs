@@ -1,7 +1,6 @@
-use super::connection::Web3Connection;
+use super::one::Web3Rpc;
 use super::provider::Web3Provider;
 use crate::frontend::authorization::{Authorization, AuthorizationType};
-use crate::metered::{JsonRpcErrorCount, ProviderErrorCount};
 use anyhow::Context;
 use chrono::Utc;
 use entities::revert_log;
@@ -9,14 +8,10 @@ use entities::sea_orm_active_enums::Method;
 use ethers::providers::{HttpClientError, ProviderError, WsClientError};
 use ethers::types::{Address, Bytes};
 use log::{debug, error, trace, warn, Level};
-use metered::metered;
-use metered::HitCount;
-use metered::ResponseTime;
-use metered::Throughput;
 use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
 use serde_json::json;
 use std::fmt;
-use std::sync::atomic::{self, AtomicBool, Ordering};
+use std::sync::atomic;
 use std::sync::Arc;
 use thread_fast_rng::rand::Rng;
 use tokio::time::{sleep, Duration, Instant};
@@ -35,11 +30,8 @@ pub enum OpenRequestResult {
 #[derive(Debug)]
 pub struct OpenRequestHandle {
     authorization: Arc<Authorization>,
-    conn: Arc<Web3Connection>,
-    // TODO: this is the same metrics on the conn. use a reference?
-    metrics: Arc<OpenRequestHandleMetrics>,
+    conn: Arc<Web3Rpc>,
     provider: Arc<Web3Provider>,
-    used: AtomicBool,
 }
 
 /// Depending on the context, RPC errors can require different handling.
@@ -129,14 +121,11 @@ impl Authorization {
     }
 }
 
-#[metered(registry = OpenRequestHandleMetrics, visibility = pub)]
 impl OpenRequestHandle {
-    pub async fn new(authorization: Arc<Authorization>, conn: Arc<Web3Connection>) -> Self {
+    pub async fn new(authorization: Arc<Authorization>, conn: Arc<Web3Rpc>) -> Self {
         // TODO: take request_id as an argument?
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
-        // TODO: should we be using metered, or not? i think not because we want stats for each handle
-        // TODO: these should maybe be sent to an influxdb instance?
         conn.active_requests.fetch_add(1, atomic::Ordering::Relaxed);
 
         let mut provider = None;
@@ -184,15 +173,10 @@ impl OpenRequestHandle {
             }
         }
 
-        let metrics = conn.open_request_handle_metrics.clone();
-        let used = false.into();
-
         Self {
             authorization,
             conn,
-            metrics,
             provider,
-            used,
         }
     }
 
@@ -201,17 +185,14 @@ impl OpenRequestHandle {
     }
 
     #[inline]
-    pub fn clone_connection(&self) -> Arc<Web3Connection> {
+    pub fn clone_connection(&self) -> Arc<Web3Rpc> {
         self.conn.clone()
     }
 
     /// Send a web3 request
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
-    /// TODO: we no longer take self because metered doesn't like that
-    /// TODO: ErrorCount includes too many types of errors, such as transaction reverts
-    #[measure([JsonRpcErrorCount, HitCount, ProviderErrorCount, ResponseTime, Throughput])]
     pub async fn request<P, R>(
-        &self,
+        self,
         method: &str,
         params: &P,
         revert_handler: RequestRevertHandler,
@@ -221,20 +202,11 @@ impl OpenRequestHandle {
         P: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
         R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug,
     {
-        // ensure this function only runs once
-        if self.used.swap(true, Ordering::Release) {
-            unimplemented!("a request handle should only be used once");
-        }
-
         // TODO: use tracing spans
-        // TODO: requests from customers have request ids, but we should add
-        // TODO: including params in this is way too verbose
-        // the authorization field is already on a parent span
+        // TODO: including params in this log is way too verbose
         // trace!(rpc=%self.conn, %method, "request");
 
-        // trace!("got provider for {:?}", self);
-
-        // TODO: really sucks that we have to clone here
+        // TODO: replace ethers-rs providers with our own that supports streaming the responses
         let response = match &*self.provider {
             Web3Provider::Mock => unimplemented!(),
             Web3Provider::Http(provider) => provider.request(method, params).await,

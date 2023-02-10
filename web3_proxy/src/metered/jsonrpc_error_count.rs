@@ -1,12 +1,6 @@
 //! A module providing the `JsonRpcErrorCount` metric.
 
 use ethers::providers::ProviderError;
-use metered::metric::{Advice, Enter, OnResult};
-use metered::{
-    atomic::AtomicInt,
-    clear::Clear,
-    metric::{Counter, Metric},
-};
 use serde::Serialize;
 use std::ops::Deref;
 

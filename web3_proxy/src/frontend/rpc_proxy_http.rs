@@ -8,7 +8,7 @@ use axum::extract::Path;
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::TypedHeader;
 use axum::{response::IntoResponse, Extension, Json};
-use axum_client_ip::ClientIp;
+use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use itertools::Itertools;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ use std::sync::Arc;
 #[debug_handler]
 pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> FrontendResult {
@@ -29,7 +29,7 @@ pub async fn proxy_web3_rpc(
 #[debug_handler]
 pub async fn fastest_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> FrontendResult {
@@ -41,7 +41,7 @@ pub async fn fastest_proxy_web3_rpc(
 #[debug_handler]
 pub async fn versus_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> FrontendResult {
@@ -50,7 +50,7 @@ pub async fn versus_proxy_web3_rpc(
 
 async fn _proxy_web3_rpc(
     app: Arc<Web3ProxyApp>,
-    ClientIp(ip): ClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     payload: JsonRpcRequestEnum,
     proxy_mode: ProxyMode,
@@ -91,7 +91,7 @@ async fn _proxy_web3_rpc(
 #[debug_handler]
 pub async fn proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
@@ -114,7 +114,7 @@ pub async fn proxy_web3_rpc_with_key(
 #[debug_handler]
 pub async fn fastest_proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
@@ -137,7 +137,7 @@ pub async fn fastest_proxy_web3_rpc_with_key(
 #[debug_handler]
 pub async fn versus_proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: ClientIp,
+    ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
@@ -160,7 +160,7 @@ pub async fn versus_proxy_web3_rpc_with_key(
 #[allow(clippy::too_many_arguments)]
 async fn _proxy_web3_rpc_with_key(
     app: Arc<Web3ProxyApp>,
-    ClientIp(ip): ClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,

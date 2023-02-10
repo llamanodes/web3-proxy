@@ -25,10 +25,10 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 # TODO: import chrono from sea-orm so we always have the same version
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 
-anyhow = { version = "1.0.68", features = ["backtrace"] }
+anyhow = { version = "1.0.69", features = ["backtrace"] }
 argh = "0.1.10"
 axum = { version = "0.6.4", features = ["headers", "ws"] }
-axum-client-ip = "0.3.1"
+axum-client-ip = "0.4.0"
 axum-macros = "0.3.2"
 chrono = "0.4.23"
 counter = "0.5.7"
@@ -38,7 +38,7 @@ env_logger = "0.10.0"
 ethers = { version = "1.0.2", default-features = false, features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 flume = "0.10.14"
-futures = { version = "0.3.25", features = ["thread-pool"] }
+futures = { version = "0.3.26", features = ["thread-pool"] }
 gethostname = "0.4.1"
 glob = "0.3.1"
 handlebars = "4.3.6"
@@ -48,28 +48,28 @@ http = "0.2.8"
 ipnet = "2.7.1"
 itertools = "0.10.5"
 log = "0.4.17"
-metered = { version = "0.9.0", features = ["serialize"] }
-moka = { version = "0.9.6", default-features = false, features = ["future"] }
-notify = "5.0.0"
+moka = { version = "0.9.7", default-features = false, features = ["future"] }
+notify = "5.1.0"
 num = "0.4.0"
 num-traits = "0.2.15"
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "rustls", "sync"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
+prettytable = "*"
 proctitle = "0.1.1"
 regex = "1.7.1"
 reqwest = { version = "0.11.14", default-features = false, features = ["json", "tokio-rustls"] }
 rustc-hash = "1.1.0"
-sentry = { version = "0.29.2", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
+sentry = { version = "0.29.3", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
 serde = { version = "1.0.152", features = [] }
-serde_json = { version = "1.0.91", default-features = false, features = ["alloc", "raw_value"] }
-serde_prometheus = "0.1.6"
+serde_json = { version = "1.0.93", default-features = false, features = ["alloc", "raw_value"] }
+serde_prometheus = "0.2.0"
 siwe = "0.5.0"
 time = "0.3.17"
-tokio = { version = "1.24.2", features = ["full"] }
+tokio = { version = "1.25.0", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync"] }
-toml = "0.6.0"
+toml = "0.7.2"
 tower = "0.4.13"
 tower-http = { version = "0.3.5", features = ["cors", "sensitive-headers"] }
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.3.1"
-uuid = "1.2.2"
+uuid = "1.3.0"

@@ -11,7 +11,7 @@ use axum::{
 use derive_more::From;
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
-use log::{trace, warn};
+use log::{debug, trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
@@ -25,6 +25,7 @@ pub type FrontendResult = Result<Response, FrontendErrorResponse>;
 pub enum FrontendErrorResponse {
     AccessDenied,
     Anyhow(anyhow::Error),
+    BadRequest(String),
     SemaphoreAcquireError(AcquireError),
     Database(DbErr),
     HeadersError(headers::Error),
@@ -71,18 +72,17 @@ impl FrontendErrorResponse {
                     ),
                 )
             }
-            // Self::(err) => {
-            //     warn!("boxed err={:?}", err);
-            //     (
-            //         StatusCode::INTERNAL_SERVER_ERROR,
-            //         JsonRpcForwardedResponse::from_str(
-            //             // TODO: make this better. maybe include the error type?
-            //             "boxed error!",
-            //             Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-            //             None,
-            //         ),
-            //     )
-            // }
+            Self::BadRequest(err) => {
+                debug!("BAD_REQUEST: {}", err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        &format!("bad request: {}", err),
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             Self::Database(err) => {
                 warn!("database err={:?}", err);
                 (

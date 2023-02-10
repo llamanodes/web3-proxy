@@ -11,6 +11,7 @@ mod daemon;
 mod drop_migration_lock;
 mod list_user_tier;
 mod pagerduty;
+mod popularity_contest;
 mod rpc_accounting;
 mod sentryd;
 mod transfer_key;
@@ -80,6 +81,7 @@ enum SubCommand {
     CreateUser(create_user::CreateUserSubCommand),
     DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
     Pagerduty(pagerduty::PagerdutySubCommand),
+    PopularityContest(popularity_contest::PopularityContestSubCommand),
     Proxyd(daemon::ProxydSubCommand),
     RpcAccounting(rpc_accounting::RpcAccountingSubCommand),
     Sentryd(sentryd::SentrydSubCommand),
@@ -372,6 +374,7 @@ fn main() -> anyhow::Result<()> {
 
                 x.main(pagerduty_async, top_config).await
             }
+            SubCommand::PopularityContest(x) => x.main().await,
             SubCommand::Sentryd(x) => {
                 if cli_config.sentry_url.is_none() {
                     warn!("sentry_url is not set! Logs will only show in this console");
