@@ -11,5 +11,9 @@ members = [
 [profile.release]
 # `debug = true` so that sentry can give us line numbers
 debug = true
+
+[profile.faster_release]
+inherits = "release"
+
 # spend longer compiling for a slightly faster binary
 codegen-units = 1

@@ -1,8 +1,8 @@
 use crate::frontend::authorization::Authorization;
 
+use super::many::Web3Rpcs;
 ///! Load balanced communication with a group of web3 providers
-use super::connection::Web3Connection;
-use super::connections::Web3Connections;
+use super::one::Web3Rpc;
 use super::request::OpenRequestResult;
 use ethers::prelude::{ProviderError, Transaction, TxHash};
 use log::{debug, trace, Level};
@@ -17,11 +17,11 @@ pub enum TxStatus {
     Orphaned(Transaction),
 }
 
-impl Web3Connections {
+impl Web3Rpcs {
     async fn query_transaction_status(
         &self,
         authorization: &Arc<Authorization>,
-        rpc: Arc<Web3Connection>,
+        rpc: Arc<Web3Rpc>,
         pending_tx_id: TxHash,
     ) -> Result<Option<TxStatus>, ProviderError> {
         // TODO: there is a race here on geth. sometimes the rpc isn't yet ready to serve the transaction (even though they told us about it!)
@@ -66,7 +66,7 @@ impl Web3Connections {
     pub(super) async fn process_incoming_tx_id(
         self: Arc<Self>,
         authorization: Arc<Authorization>,
-        rpc: Arc<Web3Connection>,
+        rpc: Arc<Web3Rpc>,
         pending_tx_id: TxHash,
         pending_tx_sender: broadcast::Sender<TxStatus>,
     ) -> anyhow::Result<()> {

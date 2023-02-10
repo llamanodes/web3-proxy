@@ -16,7 +16,7 @@ use axum::{
     response::IntoResponse,
     Extension, Json, TypedHeader,
 };
-use axum_client_ip::ClientIp;
+use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::sea_orm_active_enums::LogLevel;
@@ -65,7 +65,7 @@ use crate::frontend::errors::FrontendErrorResponse;
 #[debug_handler]
 pub async fn user_login_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ClientIp(ip): ClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     // TODO: what does axum's error handling look like if the path fails to parse?
     Path(mut params): Path<HashMap<String, String>>,
 ) -> FrontendResult {
@@ -182,7 +182,7 @@ pub struct PostLogin {
 #[debug_handler]
 pub async fn user_login_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ClientIp(ip): ClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     Query(query): Query<PostLoginQuery>,
     Json(payload): Json<PostLogin>,
 ) -> FrontendResult {
