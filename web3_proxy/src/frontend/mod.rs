@@ -171,7 +171,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/admin/modify_role", get(admin::admin_change_user_roles))
         .route("/admin/imitate-login/:user_address", get(admin::admin_login_get))
         .route(
-            "/user/imitate-login/:user_address/:message_eip",
+            "/admin/imitate-login/:user_address/:message_eip",
             get(admin::admin_login_get),
         )
         .route("/admin/imitate-login", post(admin::admin_login_post))
