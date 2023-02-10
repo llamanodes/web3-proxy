@@ -1,7 +1,9 @@
 use anyhow::Context;
 use argh::FromArgs;
 use entities::{admin, login, user};
-use ethers::types::Address;
+use ethers::types::{Address, Bytes};
+use ethers::utils::keccak256;
+use http::StatusCode;
 use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, IntoActiveModel,
@@ -34,17 +36,19 @@ impl ChangeUserAdminStatusSubCommand {
             .filter(user::Column::Address.eq(address.clone()))
             .one(db_conn)
             .await?
-            .context("No user found with that address")?;
-
-        // Check if there is a record in the database
-        let mut admin = admin::Entity::find()
-            .filter(admin::Column::UserId.eq(address))
-            .all(db_conn)
-            .await?;
+            .context(format!("No user with this id found {:?}", address))?;
 
         debug!("user: {:#?}", user);
 
-        match admin.pop() {
+        // Check if there is a record in the database
+        match admin::Entity::find()
+            .filter(admin::Column::UserId.eq(address))
+            .one(db_conn)
+            .await? {
+            Some(old_admin) if !should_be_admin => {
+                // User is already an admin, but shouldn't be
+                old_admin.delete(db_conn).await?;
+            }
             None if should_be_admin => {
                 // User is not an admin yet, but should be
                 let new_admin = admin::ActiveModel {
@@ -52,19 +56,42 @@ impl ChangeUserAdminStatusSubCommand {
                     ..Default::default()
                 };
                 new_admin.insert(db_conn).await?;
-            },
-            Some(old_admin) if !should_be_admin => {
-                // User is already an admin, but shouldn't be
-                old_admin.delete(db_conn).await?;
-            },
-            _ => {}
+            }
+            _ => {
+                // Do nothing in this case
+                debug!("no change needed for: {:#?}", user);
+                // Early return
+                return Ok(());
+            }
         }
+
+        // Get the bearer tokens of this user and delete them ...
+        let bearer_tokens = login::Entity::find()
+            .filter(login::Column::UserId.eq(user.id))
+            .all(db_conn)
+            .await?;
+
+        // // TODO: Remove from Redis
+        // // Remove multiple items simultaneously, but this should be quick let's not prematurely optimize
+        // let recent_user_id_key = format!("recent_users:id:{}", app.config.chain_id);
+        // let salt = app
+        //     .config
+        //     .public_recent_ips_salt
+        //     .as_ref()
+        //     .expect("public_recent_ips_salt must exist in here");
+        //
+        // // TODO: Also clear redis ...
+        // let salted_user_id = format!("{}:{}", salt, bearer_token.user_id);
+        // let hashed_user_id = Bytes::from(keccak256(salted_user_id.as_bytes()));
+        // redis_conn
+        //     .zrem(&recent_user_id_key, hashed_user_id.to_string())
+        //     .await?;
 
         // Remove any user logins from the database (incl. bearer tokens)
         let delete_result = login::Entity::delete_many()
             .filter(login::Column::UserId.eq(user.id))
             .exec(db_conn)
-            .await;
+            .await?;
 
         debug!("cleared modified logins: {:?}", delete_result);
 

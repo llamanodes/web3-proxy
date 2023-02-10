@@ -8,8 +8,10 @@ use axum::{
     TypedHeader,
 };
 use axum::response::{IntoResponse, Response};
-use entities::{admin, user, user_tier};
+use entities::{admin, login, user, user_tier};
 use ethers::prelude::Address;
+use ethers::types::Bytes;
+use ethers::utils::keccak256;
 use hashbrown::HashMap;
 use http::StatusCode;
 use migration::sea_orm::{self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
@@ -32,29 +34,13 @@ pub async fn query_admin_modify_usertier<'a>(
     // Quickly return if any of the input tokens are bad
     let user_address: Vec<u8> = params
         .get("user_address")
-        .ok_or_else(||
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Unable to find user_address key in request".to_string(),
-                None,
-            )
-        )?
+        .ok_or_else(|| FrontendErrorResponse::BadRequest("Unable to find user_address key in request".to_string()))?
         .parse::<Address>()
-        .map_err(|err| {
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Unable to parse user_address as an Address".to_string(),
-                Some(err.into()),
-            )
-        })?
+        .map_err(|_| FrontendErrorResponse::BadRequest("Unable to parse user_address as an Address".to_string()))?
         .to_fixed_bytes().into();
     let user_tier_title = params
         .get("user_tier_title")
-        .ok_or_else(|| FrontendErrorResponse::StatusCode(
-            StatusCode::BAD_REQUEST,
-            "Unable to get the user_tier_title key from the request".to_string(),
-            None,
-        ))?;
+        .ok_or_else(||FrontendErrorResponse::BadRequest("Unable to get the user_tier_title key from the request".to_string()))?;
 
     // Prepare output body
     let mut response_body = HashMap::new();
@@ -78,22 +64,18 @@ pub async fn query_admin_modify_usertier<'a>(
     // Check if the caller is an admin (i.e. if he is in an admin table)
     let admin: admin::Model = admin::Entity::find()
         .filter(admin::Column::UserId.eq(caller_id))
-        .one(&db_conn)
+        .one(db_replica.conn())
         .await?
-        .ok_or(AccessDenied.into())?;
+        .ok_or(AccessDenied)?;
 
     // If we are here, that means an admin was found, and we can safely proceed
 
     // Fetch the admin, and the user
     let user: user::Model = user::Entity::find()
         .filter(user::Column::Address.eq(user_address))
-        .one(&db_conn)
+        .one(db_replica.conn())
         .await?
-        .ok_or(FrontendErrorResponse::StatusCode(
-            StatusCode::BAD_REQUEST,
-            "No user with this id found".to_string(),
-            None,
-        ))?;
+        .ok_or(FrontendErrorResponse::BadRequest("No user with this id found".to_string()))?;
     // Return early if the target user_tier_id is the same as the original user_tier_id
     response_body.insert(
         "user_tier_title",
@@ -101,20 +83,16 @@ pub async fn query_admin_modify_usertier<'a>(
     );
 
     // Now we can modify the user's tier
-    let new_user_tier: user_tier::Model = !user_tier::Entity::find()
+    let new_user_tier: user_tier::Model = user_tier::Entity::find()
         .filter(user_tier::Column::Title.eq(user_tier_title.clone()))
-        .one(&db_conn)
+        .one(db_replica.conn())
         .await?
-        .ok_or(|| FrontendErrorResponse::StatusCode(
-            StatusCode::BAD_REQUEST,
-            "User Tier name was not found".to_string(),
-            None,
-        ))?;
+        .ok_or(FrontendErrorResponse::BadRequest("User Tier name was not found".to_string()))?;
 
     if user.user_tier_id == new_user_tier.id {
         info!("user already has that tier");
     } else {
-        let mut user = user.into_active_model();
+        let mut user = user.clone().into_active_model();
 
         user.user_tier_id = sea_orm::Set(new_user_tier.id);
 
@@ -123,11 +101,35 @@ pub async fn query_admin_modify_usertier<'a>(
         info!("user's tier changed");
     }
 
-    // Finally, remove the user from redis
-    // TODO: Also remove the user from the redis
-    // redis_conn.zrem();
-    // redis_conn.get::<_, u64>(&user.) // TODO: Where do i find the bearer token ...
+    // Query the login table, and get all bearer tokens by this user
+    let bearer_tokens = login::Entity::find()
+        .filter(login::Column::UserId.eq(user.id))
+        .all(db_replica.conn())
+        .await?;
 
+    // TODO: Remove from Redis
+    // Remove multiple items simultaneously, but this should be quick let's not prematurely optimize
+    let recent_user_id_key = format!("recent_users:id:{}", app.config.chain_id);
+    let salt = app
+        .config
+        .public_recent_ips_salt
+        .as_ref()
+        .expect("public_recent_ips_salt must exist in here");
+
+    // TODO: How do I remove the redis items (?)
+    for bearer_token in bearer_tokens {
+        let salted_user_id = format!("{}:{}", salt, bearer_token.user_id);
+        let hashed_user_id = Bytes::from(keccak256(salted_user_id.as_bytes()));
+        redis_conn
+            .zrem(&recent_user_id_key, hashed_user_id.to_string())
+            .await?;
+    }
+
+    // Now delete these tokens ...
+    login::Entity::delete_many()
+        .filter(login::Column::UserId.eq(user.id))
+        .exec(&db_conn)
+        .await?;
 
     Ok(Json(&response_body).into_response())
 
