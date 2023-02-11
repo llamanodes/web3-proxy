@@ -15,9 +15,8 @@ use ethers::utils::keccak256;
 use hashbrown::HashMap;
 use http::StatusCode;
 use migration::sea_orm::{self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
-use log::info;
+use log::{info, debug};
 use redis_rate_limiter::redis::AsyncCommands;
-use crate::frontend::errors::FrontendErrorResponse::AccessDenied;
 
 // TODO: Add some logic to check if the operating user is an admin
 // If he is, return true
@@ -61,12 +60,14 @@ pub async fn query_admin_modify_usertier<'a>(
     // get the user id first. if it is 0, we should use a cache on the app
     let caller_id = get_user_id_from_params(&mut redis_conn, &db_conn, &db_replica, bearer, &params).await?;
 
+    debug!("Caller id is: {:?}", caller_id);
+
     // Check if the caller is an admin (i.e. if he is in an admin table)
     let admin: admin::Model = admin::Entity::find()
         .filter(admin::Column::UserId.eq(caller_id))
         .one(db_replica.conn())
         .await?
-        .ok_or(AccessDenied)?;
+        .ok_or(FrontendErrorResponse::AccessDenied)?;
 
     // If we are here, that means an admin was found, and we can safely proceed
 
