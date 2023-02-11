@@ -67,13 +67,13 @@ impl ProviderState {
 
 pub struct Web3RpcLatencies {
     /// Traack how far behind the fastest node we are
-    new_head: Histogram<u64>,
+    pub new_head: Histogram<u64>,
     /// exponentially weighted moving average of how far behind the fastest node we are
-    new_head_ewma: u32,
+    pub new_head_ewma: u32,
     /// Track how long an rpc call takes on average
-    request: Histogram<u64>,
+    pub request: Histogram<u64>,
     /// exponentially weighted moving average of how far behind the fastest node we are
-    request_ewma: u32,
+    pub request_ewma: u32,
 }
 
 impl Default for Web3RpcLatencies {
