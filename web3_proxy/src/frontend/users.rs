@@ -43,7 +43,8 @@ use ethers::prelude::H256;
 use ethers::types::Transaction;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
-use entities::user::Relation::UserTier;
+use entities;
+use entities::prelude::{Referral, UserTier};
 use migration::extension::postgres::Type;
 use thread_fast_rng::rand;
 use crate::frontend::errors::FrontendErrorResponse;
@@ -297,7 +298,7 @@ pub async fn user_login_post(
 
             let txn;
 
-            let user_referrer: Option<Referral>;
+            let user_referrer;  // : Option<Referral>
             if let Some(invite_code) = &app.config.invite_code {
                 if query.invite_code.as_ref() != Some(invite_code) {
                     return Err(anyhow::anyhow!("checking invite_code").into());
@@ -306,15 +307,13 @@ pub async fn user_login_post(
 
             if invite_code.is_some() {
                 // If it is not inside, also check in the database
-                user_referrer = refferal::Entity::find()
-                    .filter(refferal::Column::ReferralCode.eq(referral_link))
+                user_referrer = referral::Entity::find()
+                    .filter(referral::Column::ReferralCode.eq(referral_link))
                     .one(db_replica.conn())
                     .await?
                     .ok_or(
-                        FrontendErrorResponse::StatusCode(
-                            StatusCode::BAD_REQUEST,
-                            fmt!("The referral_link you provided does not exist {}", referral_code),
-                            None,
+                        FrontendErrorResponse::BadRequest(
+                            format!("The referral_link you provided does not exist {}", referral_code)
                         )
                     )?;
 
@@ -931,20 +930,14 @@ pub async fn user_increase_credits(
 
     // Throw error if this is a currency that we do not support
     if !CURRENCIES.contains_key(&k) {
-        return Err(
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "We do not support this currency / contract".to_string(),
-                None,
-            )
-        );
+        return Err(FrontendErrorResponse::BadRequest("We do not support this currency / contract".to_string()));
     }
 
     // Decode the transaction of the contract ...
-    ethers::abi::decode(
-        &[ParamType::Address],
-        tx.
-    )
+    // ethers::abi::decode(
+    //     &[ParamType::Address],
+    //     tx.
+    // )
 
 
     // TODO: Decode the data of the transaction. The to-address must be an ERC20, one of the stablecoins ...
@@ -977,13 +970,7 @@ pub async fn user_referral_link_get(
         .filter(user_tier::Column::UserId.eq(user.id))
         .one(db_replica.conn())
         .await?
-        .ok_or(
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Could not find user in db although bearer token is there!".to_string(),
-                None,
-            )
-        )?;
+        .ok_or(FrontendErrorResponse::BadRequest(StatusCode::BAD_REQUEST, "Could not find user in db although bearer token is there!".to_string()))?;
 
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
     if user_tier.title != "Premium" {
@@ -991,8 +978,8 @@ pub async fn user_referral_link_get(
     }
 
     // Then get the referral token
-    let user_referral: Option<Referral> = refferal::Entity::find()
-        .filter(refferal::Column::UserId.eq(user.id))
+    let user_referral: Option<Referral> = referral::Entity::find()
+        .filter(referral::Column::UserId.eq(user.id))
         .one(db_replica.conn())
         .await?;
 

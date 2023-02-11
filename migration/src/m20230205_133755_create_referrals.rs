@@ -6,64 +6,106 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+
+        // Create one table for the referrer
         manager
             .create_table(
                 Table::create()
-                    .table(Referral::Table)
+                    .table(Referrer::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(Referral::Id)
+                        ColumnDef::new(Referrer::Id)
                             .integer()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(Referral::ReferralCode)
+                        ColumnDef::new(Referrer::ReferralCode)
                             .string()
                             .unique_key()
                             .not_null()
                     )
                     .col(
-                        ColumnDef::new(Referral::UsedReferralCode)
-                            .string()
-                    )
-                    // Basically, this links to who invited the user ...
-                    .foreign_key(
-                        sea_query::ForeignKey::create()
-                            .from(Referral::Table, Referral::UsedReferralCode)
-                            .to(Referral::Table, Referral::ReferralCode),
-                    )
-                    .col(
-                        ColumnDef::new(Referral::UserId)
+                        ColumnDef::new(Referrer::UserId)
                             .big_unsigned()
                             .unique_key()
                             .not_null()
                     )
                     .foreign_key(
                         sea_query::ForeignKey::create()
-                            .from(Referral::Table, Referral::UserId)
+                            .from(Referrer::Table, Referrer::UserId)
+                            .to(User::Table, User::Id),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        // Create one table for the referrer
+        manager
+            .create_table(
+                Table::create()
+                    .table(Referee::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(Referee::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(Referee::UsedReferralCode)
+                            .string()
+                            .unique_key()
+                            .not_null()
+                    )
+                    .foreign_key(
+                        sea_query::ForeignKey::create()
+                            .from(Referee::Table, Referee::UserId)
+                            .to(Referrer::Table, Referrer::ReferralCode),
+                    )
+                    .col(
+                        ColumnDef::new(Referee::UserId)
+                            .big_unsigned()
+                            .unique_key()
+                            .not_null()
+                    )
+                    .foreign_key(
+                        sea_query::ForeignKey::create()
+                            .from(Referee::Table, Referee::UserId)
                             .to(User::Table, User::Id),
                     )
                     .to_owned(),
             )
             .await
+
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Referral::Table).to_owned())
+            .drop_table(Table::drop().table(Referrer::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(Referee::Table).to_owned())
             .await
     }
 }
 
 /// Learn more at https://docs.rs/sea-query#iden
 #[derive(Iden)]
-enum Referral {
+enum Referrer {
     Table,
     Id,
     UserId,
-    ReferralCode,
+    ReferralCode
+}
+
+#[derive(Iden)]
+enum Referee {
+    Table,
+    Id,
+    UserId,
     UsedReferralCode
 }
 

@@ -9,30 +9,30 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(Credits::Table)
+                    .table(Balance::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(Credits::Id)
+                        ColumnDef::new(Balance::Id)
                             .integer()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(Credits::Credits)
+                        ColumnDef::new(Balance::Balance)
                             .big_unsigned()
                             .not_null()
                             .default(0)
                     )
                     .col(
-                        ColumnDef::new(Credits::UserId)
+                        ColumnDef::new(Balance::UserId)
                             .big_unsigned()
                             .unique_key()
                             .not_null()
                     )
                     .foreign_key(
                         sea_query::ForeignKey::create()
-                            .from(Credits::Table, Credits::UserId)
+                            .from(Balance::Table, Balance::UserId)
                             .to(User::Table, User::Id),
                     )
                     .to_owned(),
@@ -42,18 +42,18 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Credits::Table).to_owned())
+            .drop_table(Table::drop().table(Balance::Table).to_owned())
             .await
     }
 }
 
 /// Learn more at https://docs.rs/sea-query#iden
 #[derive(Iden)]
-enum Credits {
+enum Balance {
     Table,
     Id,
     UserId,
-    Credits,
+    Balance,
 }
 
 #[derive(Iden)]
