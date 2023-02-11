@@ -1158,6 +1158,7 @@ impl Web3ProxyApp {
                         request,
                         Some(&request_metadata),
                         None,
+                        None,
                     )
                     .await?;
 
@@ -1231,6 +1232,7 @@ impl Web3ProxyApp {
                         &request,
                         Some(request_metadata.clone()),
                         head_block_num.as_ref(),
+                        None,
                         Level::Trace,
                         num,
                         true,
@@ -1527,6 +1529,7 @@ impl Web3ProxyApp {
 
                     if let Some(cache_key) = cache_key {
                         let from_block_num = cache_key.from_block.as_ref().map(|x| x.number());
+                        let to_block_num = cache_key.to_block.as_ref().map(|x| x.number());
 
                         self.response_cache
                             .try_get_with(cache_key, async move {
@@ -1539,6 +1542,7 @@ impl Web3ProxyApp {
                                         request,
                                         Some(&request_metadata),
                                         from_block_num.as_ref(),
+                                        to_block_num.as_ref(),
                                     )
                                     .await?;
 
@@ -1547,7 +1551,7 @@ impl Web3ProxyApp {
 
                                 // TODO: only cache the inner response
                                 // TODO: how are we going to stream this?
-                                // TODO: check response size. if its very large, return it in a custom Error type that bypasses caching
+                                // TODO: check response size. if its very large, return it in a custom Error type that bypasses caching? or will moka do that for us?
                                 Ok::<_, anyhow::Error>(response)
                             })
                             .await
@@ -1566,6 +1570,7 @@ impl Web3ProxyApp {
                                 &authorization,
                                 request,
                                 Some(&request_metadata),
+                                None,
                                 None,
                             )
                             .await?
