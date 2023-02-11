@@ -1222,13 +1222,15 @@ impl Web3ProxyApp {
                     (&self.balanced_rpcs, default_num)
                 };
 
+                let head_block_num = self.balanced_rpcs.head_block_num();
+
                 // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
                 let mut response = private_rpcs
                     .try_send_all_synced_connections(
                         authorization,
                         &request,
                         Some(request_metadata.clone()),
-                        None,
+                        head_block_num.as_ref(),
                         Level::Trace,
                         num,
                         true,

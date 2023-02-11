@@ -680,12 +680,11 @@ impl Web3Rpcs {
             .clone();
 
         // synced connections are all on the same block. sort them by tier with higher soft limits first
-        synced_conns.sort_by_cached_key(|x| (x.tier, u32::MAX - x.soft_limit));
+        synced_conns.sort_by_cached_key(sort_rpcs_by_sync_status);
 
         // if there aren't enough synced connections, include more connections
         let mut all_conns: Vec<_> = self.conns.values().cloned().collect();
-
-        sort_connections_by_sync_status(&mut all_conns);
+        all_conns.sort_by_cached_key(sort_rpcs_by_sync_status);
 
         for connection in itertools::chain(synced_conns, all_conns) {
             if max_count == 0 {
@@ -1153,19 +1152,21 @@ impl Serialize for Web3Rpcs {
 }
 
 /// sort by block number (descending) and tier (ascending)
-fn sort_connections_by_sync_status(rpcs: &mut Vec<Arc<Web3Rpc>>) {
-    rpcs.sort_by_cached_key(|x| {
-        let reversed_head_block = u64::MAX
-            - x.head_block
-                .read()
-                .as_ref()
-                .map(|x| x.number().as_u64())
-                .unwrap_or(0);
+/// TODO: should this be moved into a `impl Web3Rpc`?
+/// TODO: take AsRef or something like that? We don't need an Arc here
+fn sort_rpcs_by_sync_status(x: &Arc<Web3Rpc>) -> (u64, u64, u32) {
+    let reversed_head_block = u64::MAX
+        - x.head_block
+            .read()
+            .as_ref()
+            .map(|x| x.number().as_u64())
+            .unwrap_or(0);
 
-        let tier = x.tier;
+    let tier = x.tier;
 
-        (reversed_head_block, tier)
-    });
+    let request_ewma = x.latency.request_ewma;
+
+    (reversed_head_block, tier, request_ewma)
 }
 
 mod tests {
@@ -1208,7 +1209,7 @@ mod tests {
             .map(|x| SavedBlock::new(Arc::new(x)))
             .collect();
 
-        let mut rpcs = [
+        let mut rpcs: Vec<_> = [
             Web3Rpc {
                 name: "a".to_string(),
                 tier: 0,
@@ -1250,7 +1251,7 @@ mod tests {
         .map(Arc::new)
         .collect();
 
-        sort_connections_by_sync_status(&mut rpcs);
+        rpcs.sort_by_cached_key(sort_rpcs_by_sync_status);
 
         let names_in_sort_order: Vec<_> = rpcs.iter().map(|x| x.name.as_str()).collect();
 

@@ -339,6 +339,10 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
   - https://github.com/moka-rs/moka/issues/201
+- [ ] have multiple providers on each backend rpc. one websocket for newHeads. and then http providers for handling requests
+  - erigon only streams the JSON over HTTP. that code isn't enabled for websockets. so this should save memory on the erigon servers
+  - i think this also means we don't need to worry about changing the id that the user gives us.
+  - have the healthcheck get the block over http. if it errors, or doesn't match what the websocket says, something is wrong (likely a deadlock in the websocket code)
 - [ ] have private transactions be enabled by a url setting rather than a setting on the key
 - [ ] cli for adding rpc keys to an existing user
 - [ ] rate limiting/throttling on query_user_stats 
@@ -349,6 +353,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
   - if total difficulty is set and non-zero, use it for consensus instead of just the number
 - [ ] query_user_stats cache hit rate
+- [ ] need debounce on reconnect. websockets are closing on us and then we reconnect twice. locks on ProviderState need more thought
 - [ ] having the whole block in status is very verbose. trim it down
 - [ ] `cost estimate` script
   - sum bytes and number of requests. prompt hosting costs. divide
