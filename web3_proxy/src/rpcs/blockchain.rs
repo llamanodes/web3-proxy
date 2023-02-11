@@ -167,7 +167,13 @@ impl Web3Rpcs {
                 // TODO: request_metadata? maybe we should put it in the authorization?
                 // TODO: think more about this wait_for_sync
                 let response = self
-                    .try_send_best_consensus_head_connection(authorization, request, None, None)
+                    .try_send_best_consensus_head_connection(
+                        authorization,
+                        request,
+                        None,
+                        None,
+                        None,
+                    )
                     .await?;
 
                 let block = response.result.context("failed fetching block")?;
@@ -258,7 +264,7 @@ impl Web3Rpcs {
         // TODO: request_metadata or authorization?
         // we don't actually set min_block_needed here because all nodes have all blocks
         let response = self
-            .try_send_best_consensus_head_connection(authorization, request, None, None)
+            .try_send_best_consensus_head_connection(authorization, request, None, None, None)
             .await?;
 
         if let Some(err) = response.error {

@@ -215,8 +215,8 @@ pub async fn block_needed(
                 };
 
                 return Ok(BlockNeeded::CacheRange {
-                    from_block_num: from_block_num,
-                    to_block_num: to_block_num,
+                    from_block_num,
+                    to_block_num,
                     cache_errors: true,
                 });
             }
