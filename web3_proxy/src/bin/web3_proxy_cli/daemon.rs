@@ -155,7 +155,7 @@ mod tests {
     use std::env;
 
     use web3_proxy::{
-        config::{AppConfig, Web3ConnectionConfig},
+        config::{AppConfig, Web3RpcConfig},
         rpcs::blockchain::ArcBlock,
     };
 
@@ -196,7 +196,7 @@ mod tests {
                 min_sum_soft_limit: 1,
                 min_synced_rpcs: 1,
                 public_requests_per_period: Some(1_000_000),
-                response_cache_max_bytes: 10_usize.pow(7),
+                response_cache_max_bytes: 10_u64.pow(7),
                 redirect_public_url: Some("example.com/".to_string()),
                 redirect_rpc_key_url: Some("example.com/{{rpc_key_id}}".to_string()),
                 ..Default::default()
@@ -204,7 +204,7 @@ mod tests {
             balanced_rpcs: HashMap::from([
                 (
                     "anvil".to_string(),
-                    Web3ConnectionConfig {
+                    Web3RpcConfig {
                         disabled: false,
                         display_name: None,
                         url: anvil.endpoint(),
@@ -219,7 +219,7 @@ mod tests {
                 ),
                 (
                     "anvil_ws".to_string(),
-                    Web3ConnectionConfig {
+                    Web3RpcConfig {
                         disabled: false,
                         display_name: None,
                         url: anvil.ws_endpoint(),

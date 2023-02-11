@@ -1,4 +1,6 @@
 //! `frontend` contains HTTP and websocket endpoints for use by users and admins.
+//!
+//! Important reading about axum extractors: https://docs.rs/axum/latest/axum/extract/index.html#the-order-of-extractors
 
 pub mod authorization;
 pub mod errors;
@@ -30,6 +32,7 @@ pub enum FrontendResponseCaches {
 // TODO: what should this cache's value be?
 pub type FrontendResponseCache =
     Cache<FrontendResponseCaches, Arc<serde_json::Value>, hashbrown::hash_map::DefaultHashBuilder>;
+pub type FrontendHealthCache = Cache<(), bool, hashbrown::hash_map::DefaultHashBuilder>;
 
 /// Start the frontend server.
 pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()> {
@@ -37,7 +40,11 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
     // TODO: a moka cache is probably way overkill for this.
     // no need for max items. only expire because of time to live
     let response_cache: FrontendResponseCache = Cache::builder()
-        .time_to_live(Duration::from_secs(1))
+        .time_to_live(Duration::from_secs(2))
+        .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+
+    let health_cache: FrontendHealthCache = Cache::builder()
+        .time_to_live(Duration::from_millis(100))
         .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
     // TODO: read config for if fastest/versus should be available publicly. default off
@@ -175,6 +182,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .layer(Extension(proxy_app.clone()))
         // frontend caches
         .layer(Extension(response_cache))
+        .layer(Extension(health_cache))
         // 404 for any unknown routes
         .fallback(errors::handler_404);
 
@@ -192,7 +200,6 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
       - axum::extract::ConnectInfo (if not behind proxy)
     */
     let service = app.into_make_service_with_connect_info::<SocketAddr>();
-    // let service = app.into_make_service();
 
     // `axum::Server` is a re-export of `hyper::Server`
     axum::Server::bind(&addr)

@@ -1,12 +1,10 @@
-///! Load balanced communication with a group of web3 providers
+///! Load balanced communication with a group of web3 rpc providers
 use super::blockchain::{ArcBlock, BlockHashesCache};
-use super::connection::Web3Connection;
-use super::request::{
-    OpenRequestHandle, OpenRequestHandleMetrics, OpenRequestResult, RequestRevertHandler,
-};
-use super::synced_connections::ConsensusConnections;
+use super::one::Web3Rpc;
+use super::request::{OpenRequestHandle, OpenRequestResult, RequestRevertHandler};
+use super::synced_connections::ConsensusWeb3Rpcs;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
-use crate::config::{BlockAndRpc, TxHashAndRpc, Web3ConnectionConfig};
+use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
@@ -14,7 +12,7 @@ use crate::rpcs::transactions::TxStatus;
 use counter::Counter;
 use derive_more::From;
 use ethers::prelude::{ProviderError, TxHash, H256, U64};
-use futures::future::{join_all, try_join_all};
+use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::{HashMap, HashSet};
@@ -36,11 +34,11 @@ use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBeh
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
-pub struct Web3Connections {
+pub struct Web3Rpcs {
     /// any requests will be forwarded to one (or more) of these connections
-    pub(crate) conns: HashMap<String, Arc<Web3Connection>>,
+    pub(crate) conns: HashMap<String, Arc<Web3Rpc>>,
     /// all providers with the same consensus head block. won't update if there is no `self.watch_consensus_head_sender`
-    pub(super) watch_consensus_connections_sender: watch::Sender<Arc<ConsensusConnections>>,
+    pub(super) watch_consensus_connections_sender: watch::Sender<Arc<ConsensusWeb3Rpcs>>,
     /// this head receiver makes it easy to wait until there is a new block
     pub(super) watch_consensus_head_receiver: Option<watch::Receiver<ArcBlock>>,
     pub(super) pending_transactions:
@@ -54,13 +52,13 @@ pub struct Web3Connections {
     pub(super) min_sum_soft_limit: u32,
 }
 
-impl Web3Connections {
+impl Web3Rpcs {
     /// Spawn durable connections to multiple Web3 providers.
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
-        server_configs: HashMap<String, Web3ConnectionConfig>,
+        server_configs: HashMap<String, Web3RpcConfig>,
         http_client: Option<reqwest::Client>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
         block_map: BlockHashesCache,
@@ -69,7 +67,6 @@ impl Web3Connections {
         min_head_rpcs: usize,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
-        open_request_handle_metrics: Arc<OpenRequestHandleMetrics>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
@@ -92,12 +89,10 @@ impl Web3Connections {
         };
 
         let http_interval_sender = if http_client.is_some() {
-            let (sender, receiver) = broadcast::channel(1);
-
-            drop(receiver);
+            let (sender, _) = broadcast::channel(1);
 
             // TODO: what interval? follow a websocket also? maybe by watching synced connections with a timeout. will need debounce
-            let mut interval = interval(Duration::from_millis(expected_block_time_ms));
+            let mut interval = interval(Duration::from_millis(expected_block_time_ms / 2));
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
             let sender = Arc::new(sender);
@@ -107,13 +102,14 @@ impl Web3Connections {
 
                 async move {
                     loop {
-                        // TODO: every time a head_block arrives (with a small delay for known slow servers), or on the interval.
                         interval.tick().await;
 
-                        // // trace!("http interval ready");
+                        // trace!("http interval ready");
 
-                        // errors are okay. they mean that all receivers have been dropped
-                        let _ = sender.send(());
+                        if let Err(_) = sender.send(()) {
+                            // errors are okay. they mean that all receivers have been dropped, or the rpcs just haven't started yet
+                            trace!("no http receivers");
+                        };
                     }
                 }
             };
@@ -128,11 +124,11 @@ impl Web3Connections {
 
         // turn configs into connections (in parallel)
         // TODO: move this into a helper function. then we can use it when configs change (will need a remove function too)
-        // TODO: futures unordered?
-        let spawn_handles: Vec<_> = server_configs
+        let mut spawn_handles: FuturesUnordered<_> = server_configs
             .into_iter()
             .filter_map(|(server_name, server_config)| {
                 if server_config.disabled {
+                    info!("{} is disabled", server_name);
                     return None;
                 }
 
@@ -149,7 +145,8 @@ impl Web3Connections {
 
                 let pending_tx_id_sender = Some(pending_tx_id_sender.clone());
                 let block_map = block_map.clone();
-                let open_request_handle_metrics = open_request_handle_metrics.clone();
+
+                debug!("spawning {}", server_name);
 
                 let handle = tokio::spawn(async move {
                     server_config
@@ -163,7 +160,6 @@ impl Web3Connections {
                             block_map,
                             block_sender,
                             pending_tx_id_sender,
-                            open_request_handle_metrics,
                         )
                         .await
                 });
@@ -177,19 +173,20 @@ impl Web3Connections {
         let mut handles = vec![];
 
         // TODO: futures unordered?
-        for x in join_all(spawn_handles).await {
-            // TODO: how should we handle errors here? one rpc being down shouldn't cause the program to exit
+        while let Some(x) = spawn_handles.next().await {
             match x {
                 Ok(Ok((connection, handle))) => {
+                    // web3 connection worked
                     connections.insert(connection.name.clone(), connection);
                     handles.push(handle);
                 }
                 Ok(Err(err)) => {
-                    // if we got an error here, it is not retryable
+                    // if we got an error here, the app can continue on
                     // TODO: include context about which connection failed
                     error!("Unable to create connection. err={:?}", err);
                 }
                 Err(err) => {
+                    // something actually bad happened. exit with an error
                     return Err(err.into());
                 }
             }
@@ -229,7 +226,6 @@ impl Web3Connections {
             let connections = connections.clone();
 
             tokio::spawn(async move {
-                // TODO: try_join_all with the other handles here
                 connections
                     .subscribe(
                         authorization,
@@ -245,13 +241,13 @@ impl Web3Connections {
         Ok((connections, handle))
     }
 
-    pub fn get(&self, conn_name: &str) -> Option<&Arc<Web3Connection>> {
+    pub fn get(&self, conn_name: &str) -> Option<&Arc<Web3Rpc>> {
         self.conns.get(conn_name)
     }
 
     /// subscribe to blocks and transactions from all the backend rpcs.
-    /// blocks are processed by all the `Web3Connection`s and then sent to the `block_receiver`
-    /// transaction ids from all the `Web3Connection`s are deduplicated and forwarded to `pending_tx_sender`
+    /// blocks are processed by all the `Web3Rpc`s and then sent to the `block_receiver`
+    /// transaction ids from all the `Web3Rpc`s are deduplicated and forwarded to `pending_tx_sender`
     async fn subscribe(
         self: Arc<Self>,
         authorization: Arc<Authorization>,
@@ -327,7 +323,6 @@ impl Web3Connections {
         }
 
         info!("subscriptions over: {:?}", self);
-
         Ok(())
     }
 
@@ -415,7 +410,7 @@ impl Web3Connections {
         &self,
         authorization: &Arc<Authorization>,
         request_metadata: Option<&Arc<RequestMetadata>>,
-        skip: &[Arc<Web3Connection>],
+        skip: &[Arc<Web3Rpc>],
         min_block_needed: Option<&U64>,
     ) -> anyhow::Result<OpenRequestResult> {
         if let Ok(without_backups) = self
@@ -450,13 +445,10 @@ impl Web3Connections {
         allow_backups: bool,
         authorization: &Arc<Authorization>,
         request_metadata: Option<&Arc<RequestMetadata>>,
-        skip: &[Arc<Web3Connection>],
+        skip: &[Arc<Web3Rpc>],
         min_block_needed: Option<&U64>,
     ) -> anyhow::Result<OpenRequestResult> {
-        let usable_rpcs_by_head_num_and_weight: BTreeMap<
-            (Option<U64>, u64),
-            Vec<Arc<Web3Connection>>,
-        > = {
+        let usable_rpcs_by_head_num_and_weight: BTreeMap<(Option<U64>, u64), Vec<Arc<Web3Rpc>>> = {
             let synced_connections = self.watch_consensus_connections_sender.borrow().clone();
 
             let head_block_num = if let Some(head_block) = synced_connections.head_block.as_ref() {
@@ -647,12 +639,15 @@ impl Web3Connections {
         authorization: &Arc<Authorization>,
         block_needed: Option<&U64>,
         max_count: Option<usize>,
+        always_include_backups: bool,
     ) -> Result<Vec<OpenRequestHandle>, Option<Instant>> {
-        if let Ok(without_backups) = self
-            ._all_connections(false, authorization, block_needed, max_count)
-            .await
-        {
-            return Ok(without_backups);
+        if !always_include_backups {
+            if let Ok(without_backups) = self
+                ._all_connections(false, authorization, block_needed, max_count)
+                .await
+            {
+                return Ok(without_backups);
+            }
         }
 
         self._all_connections(true, authorization, block_needed, max_count)
@@ -678,17 +673,21 @@ impl Web3Connections {
 
         let mut tried = HashSet::new();
 
-        let conns_to_try = itertools::chain(
-            // TODO: sort by tier
-            self.watch_consensus_connections_sender
-                .borrow()
-                .conns
-                .clone(),
-            // TODO: sort by tier
-            self.conns.values().cloned(),
-        );
+        let mut synced_conns = self
+            .watch_consensus_connections_sender
+            .borrow()
+            .conns
+            .clone();
 
-        for connection in conns_to_try {
+        // synced connections are all on the same block. sort them by tier with higher soft limits first
+        synced_conns.sort_by_cached_key(|x| (x.tier, u32::MAX - x.soft_limit));
+
+        // if there aren't enough synced connections, include more connections
+        let mut all_conns: Vec<_> = self.conns.values().cloned().collect();
+
+        sort_connections_by_sync_status(&mut all_conns);
+
+        for connection in itertools::chain(synced_conns, all_conns) {
             if max_count == 0 {
                 break;
             }
@@ -760,13 +759,8 @@ impl Web3Connections {
         loop {
             let num_skipped = skip_rpcs.len();
 
-            if num_skipped > 0 {
-                // trace!("skip_rpcs: {:?}", skip_rpcs);
-
-                // TODO: is self.conns still right now that we split main and backup servers?
-                if num_skipped == self.conns.len() {
-                    break;
-                }
+            if num_skipped == self.conns.len() {
+                break;
             }
 
             match self
@@ -1017,10 +1011,16 @@ impl Web3Connections {
         block_needed: Option<&U64>,
         error_level: Level,
         max_count: Option<usize>,
+        always_include_backups: bool,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
         loop {
             match self
-                .all_connections(authorization, block_needed, max_count)
+                .all_connections(
+                    authorization,
+                    block_needed,
+                    max_count,
+                    always_include_backups,
+                )
                 .await
             {
                 Ok(active_request_handles) => {
@@ -1117,23 +1117,23 @@ impl Web3Connections {
     }
 }
 
-impl fmt::Debug for Web3Connections {
+impl fmt::Debug for Web3Rpcs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
-        f.debug_struct("Web3Connections")
+        f.debug_struct("Web3Rpcs")
             .field("conns", &self.conns)
             .finish_non_exhaustive()
     }
 }
 
-impl Serialize for Web3Connections {
+impl Serialize for Web3Rpcs {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Web3Connections", 6)?;
+        let mut state = serializer.serialize_struct("Web3Rpcs", 6)?;
 
-        let conns: Vec<&Web3Connection> = self.conns.values().map(|x| x.as_ref()).collect();
+        let conns: Vec<&Web3Rpc> = self.conns.values().map(|x| x.as_ref()).collect();
         state.serialize_field("conns", &conns)?;
 
         {
@@ -1152,13 +1152,29 @@ impl Serialize for Web3Connections {
     }
 }
 
+/// sort by block number (descending) and tier (ascending)
+fn sort_connections_by_sync_status(rpcs: &mut Vec<Arc<Web3Rpc>>) {
+    rpcs.sort_by_cached_key(|x| {
+        let reversed_head_block = u64::MAX
+            - x.head_block
+                .read()
+                .as_ref()
+                .map(|x| x.number().as_u64())
+                .unwrap_or(0);
+
+        let tier = x.tier;
+
+        (reversed_head_block, tier)
+    });
+}
+
 mod tests {
     // TODO: why is this allow needed? does tokio::test get in the way somehow?
     #![allow(unused_imports)]
     use super::*;
     use crate::rpcs::{
         blockchain::{ConsensusFinder, SavedBlock},
-        connection::ProviderState,
+        one::ProviderState,
         provider::Web3Provider,
     };
     use ethers::types::{Block, U256};
@@ -1166,6 +1182,80 @@ mod tests {
     use parking_lot::RwLock;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock as AsyncRwLock;
+
+    #[tokio::test]
+    async fn test_sort_connections_by_sync_status() {
+        let block_0 = Block {
+            number: Some(0.into()),
+            hash: Some(H256::random()),
+            ..Default::default()
+        };
+        let block_1 = Block {
+            number: Some(1.into()),
+            hash: Some(H256::random()),
+            parent_hash: block_0.hash.unwrap(),
+            ..Default::default()
+        };
+        let block_2 = Block {
+            number: Some(2.into()),
+            hash: Some(H256::random()),
+            parent_hash: block_1.hash.unwrap(),
+            ..Default::default()
+        };
+
+        let blocks: Vec<_> = [block_0, block_1, block_2]
+            .into_iter()
+            .map(|x| SavedBlock::new(Arc::new(x)))
+            .collect();
+
+        let mut rpcs = [
+            Web3Rpc {
+                name: "a".to_string(),
+                tier: 0,
+                head_block: RwLock::new(None),
+                ..Default::default()
+            },
+            Web3Rpc {
+                name: "b".to_string(),
+                tier: 0,
+                head_block: RwLock::new(blocks.get(1).cloned()),
+                ..Default::default()
+            },
+            Web3Rpc {
+                name: "c".to_string(),
+                tier: 0,
+                head_block: RwLock::new(blocks.get(2).cloned()),
+                ..Default::default()
+            },
+            Web3Rpc {
+                name: "d".to_string(),
+                tier: 1,
+                head_block: RwLock::new(None),
+                ..Default::default()
+            },
+            Web3Rpc {
+                name: "e".to_string(),
+                tier: 1,
+                head_block: RwLock::new(blocks.get(1).cloned()),
+                ..Default::default()
+            },
+            Web3Rpc {
+                name: "f".to_string(),
+                tier: 1,
+                head_block: RwLock::new(blocks.get(2).cloned()),
+                ..Default::default()
+            },
+        ]
+        .into_iter()
+        .map(Arc::new)
+        .collect();
+
+        sort_connections_by_sync_status(&mut rpcs);
+
+        let names_in_sort_order: Vec<_> = rpcs.iter().map(|x| x.name.as_str()).collect();
+
+        assert_eq!(names_in_sort_order, ["c", "f", "b", "e", "a", "d"]);
+    }
 
     #[tokio::test]
     async fn test_server_selection_by_height() {
@@ -1206,50 +1296,32 @@ mod tests {
 
         let block_data_limit = u64::MAX;
 
-        let head_rpc = Web3Connection {
+        let head_rpc = Web3Rpc {
             name: "synced".to_string(),
-            db_conn: None,
-            display_name: None,
-            url: "ws://example.com/synced".to_string(),
-            http_client: None,
-            active_requests: 0.into(),
-            frontend_requests: 0.into(),
-            internal_requests: 0.into(),
             provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
                 Web3Provider::Mock,
             ))),
-            hard_limit: None,
-            hard_limit_until: None,
             soft_limit: 1_000,
-            automatic_block_limit: true,
+            automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
-            open_request_handle_metrics: Arc::new(Default::default()),
+            ..Default::default()
         };
 
-        let lagged_rpc = Web3Connection {
+        let lagged_rpc = Web3Rpc {
             name: "lagged".to_string(),
-            db_conn: None,
-            display_name: None,
-            url: "ws://example.com/lagged".to_string(),
-            http_client: None,
-            active_requests: 0.into(),
-            frontend_requests: 0.into(),
-            internal_requests: 0.into(),
             provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
                 Web3Provider::Mock,
             ))),
-            hard_limit: None,
-            hard_limit_until: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(lagged_block.clone())),
-            open_request_handle_metrics: Arc::new(Default::default()),
+            ..Default::default()
         };
 
         assert!(head_rpc.has_block_data(&lagged_block.number()));
@@ -1268,8 +1340,8 @@ mod tests {
 
         let (watch_consensus_connections_sender, _) = watch::channel(Default::default());
 
-        // TODO: make a Web3Connections::new
-        let conns = Web3Connections {
+        // TODO: make a Web3Rpcs::new
+        let conns = Web3Rpcs {
             conns,
             watch_consensus_head_receiver: None,
             watch_consensus_connections_sender,
@@ -1319,10 +1391,10 @@ mod tests {
         // no head block because the rpcs haven't communicated through their channels
         assert!(conns.head_block_hash().is_none());
 
-        // all_backend_connections gives everything regardless of sync status
+        // all_backend_connections gives all non-backup servers regardless of sync status
         assert_eq!(
             conns
-                .all_connections(&authorization, None, None)
+                .all_connections(&authorization, None, None, false)
                 .await
                 .unwrap()
                 .len(),
@@ -1439,50 +1511,32 @@ mod tests {
 
         let head_block: SavedBlock = Arc::new(head_block).into();
 
-        let pruned_rpc = Web3Connection {
+        let pruned_rpc = Web3Rpc {
             name: "pruned".to_string(),
-            db_conn: None,
-            display_name: None,
-            url: "ws://example.com/pruned".to_string(),
-            http_client: None,
-            active_requests: 0.into(),
-            frontend_requests: 0.into(),
-            internal_requests: 0.into(),
             provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
                 Web3Provider::Mock,
             ))),
-            hard_limit: None,
-            hard_limit_until: None,
             soft_limit: 3_000,
             automatic_block_limit: false,
             backup: false,
             block_data_limit: 64.into(),
             tier: 1,
             head_block: RwLock::new(Some(head_block.clone())),
-            open_request_handle_metrics: Arc::new(Default::default()),
+            ..Default::default()
         };
 
-        let archive_rpc = Web3Connection {
+        let archive_rpc = Web3Rpc {
             name: "archive".to_string(),
-            db_conn: None,
-            display_name: None,
-            url: "ws://example.com/archive".to_string(),
-            http_client: None,
-            active_requests: 0.into(),
-            frontend_requests: 0.into(),
-            internal_requests: 0.into(),
             provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
                 Web3Provider::Mock,
             ))),
-            hard_limit: None,
-            hard_limit_until: None,
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,
             block_data_limit: u64::MAX.into(),
             tier: 2,
             head_block: RwLock::new(Some(head_block.clone())),
-            open_request_handle_metrics: Arc::new(Default::default()),
+            ..Default::default()
         };
 
         assert!(pruned_rpc.has_block_data(&head_block.number()));
@@ -1500,8 +1554,8 @@ mod tests {
 
         let (watch_consensus_connections_sender, _) = watch::channel(Default::default());
 
-        // TODO: make a Web3Connections::new
-        let conns = Web3Connections {
+        // TODO: make a Web3Rpcs::new
+        let conns = Web3Rpcs {
             conns,
             watch_consensus_head_receiver: None,
             watch_consensus_connections_sender,

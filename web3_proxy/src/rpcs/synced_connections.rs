@@ -1,25 +1,25 @@
 use super::blockchain::{ArcBlock, SavedBlock};
-use super::connection::Web3Connection;
-use super::connections::Web3Connections;
+use super::many::Web3Rpcs;
+use super::one::Web3Rpc;
 use ethers::prelude::{H256, U64};
 use serde::Serialize;
 use std::fmt;
 use std::sync::Arc;
 
-/// A collection of Web3Connections that are on the same block.
+/// A collection of Web3Rpcs that are on the same block.
 /// Serialize is so we can print it on our debug endpoint
 #[derive(Clone, Default, Serialize)]
-pub struct ConsensusConnections {
+pub struct ConsensusWeb3Rpcs {
     // TODO: store ArcBlock instead?
     pub(super) head_block: Option<SavedBlock>,
     // TODO: this should be able to serialize, but it isn't
     #[serde(skip_serializing)]
-    pub(super) conns: Vec<Arc<Web3Connection>>,
+    pub(super) conns: Vec<Arc<Web3Rpc>>,
     pub(super) num_checked_conns: usize,
     pub(super) includes_backups: bool,
 }
 
-impl ConsensusConnections {
+impl ConsensusWeb3Rpcs {
     pub fn num_conns(&self) -> usize {
         self.conns.len()
     }
@@ -31,7 +31,7 @@ impl ConsensusConnections {
     // TODO: sum_hard_limit?
 }
 
-impl fmt::Debug for ConsensusConnections {
+impl fmt::Debug for ConsensusWeb3Rpcs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
         // TODO: print the actual conns?
@@ -42,7 +42,7 @@ impl fmt::Debug for ConsensusConnections {
     }
 }
 
-impl Web3Connections {
+impl Web3Rpcs {
     pub fn head_block(&self) -> Option<ArcBlock> {
         self.watch_consensus_head_receiver
             .as_ref()
