@@ -332,6 +332,9 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] add archive depth to app config
 - [x] use from_block and to_block so that eth_getLogs is routed correctly
 - [x] improve eth_sendRawTransaction server selection
+- [x] don't cache methods that are usually very large
+- [x] use http provider when available
+- [ ] don't use new_head_provider anywhere except new head subscription
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly

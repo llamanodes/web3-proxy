@@ -30,7 +30,7 @@ pub enum OpenRequestResult {
 #[derive(Debug)]
 pub struct OpenRequestHandle {
     authorization: Arc<Authorization>,
-    conn: Arc<Web3Rpc>,
+    rpc: Arc<Web3Rpc>,
 }
 
 /// Depending on the context, RPC errors can require different handling.
@@ -124,17 +124,17 @@ impl OpenRequestHandle {
     pub async fn new(authorization: Arc<Authorization>, conn: Arc<Web3Rpc>) -> Self {
         Self {
             authorization,
-            conn,
+            rpc: conn,
         }
     }
 
     pub fn connection_name(&self) -> String {
-        self.conn.name.clone()
+        self.rpc.name.clone()
     }
 
     #[inline]
     pub fn clone_connection(&self) -> Arc<Web3Rpc> {
-        self.conn.clone()
+        self.rpc.clone()
     }
 
     /// Send a web3 request
@@ -154,7 +154,7 @@ impl OpenRequestHandle {
         // TODO: use tracing spans
         // TODO: including params in this log is way too verbose
         // trace!(rpc=%self.conn, %method, "request");
-        trace!("requesting from {}", self.conn);
+        trace!("requesting from {}", self.rpc);
 
         let mut provider: Option<Arc<Web3Provider>> = None;
         let mut logged = false;
@@ -167,7 +167,7 @@ impl OpenRequestHandle {
                 break;
             }
 
-            let unlocked_provider = self.conn.new_head_client.read().await;
+            let unlocked_provider = self.rpc.provider.read().await;
 
             if let Some(unlocked_provider) = unlocked_provider.clone() {
                 provider = Some(unlocked_provider);
@@ -175,7 +175,7 @@ impl OpenRequestHandle {
             }
 
             if !logged {
-                debug!("no provider for open handle on {}", self.conn);
+                debug!("no provider for open handle on {}", self.rpc);
                 logged = true;
             }
 
@@ -286,10 +286,10 @@ impl OpenRequestHandle {
 
                 if let Some(msg) = msg {
                     if msg.starts_with("execution reverted") {
-                        trace!("revert from {}", self.conn);
+                        trace!("revert from {}", self.rpc);
                         ResponseTypes::Revert
                     } else if msg.contains("limit") || msg.contains("request") {
-                        trace!("rate limit from {}", self.conn);
+                        trace!("rate limit from {}", self.rpc);
                         ResponseTypes::RateLimit
                     } else {
                         ResponseTypes::Ok
@@ -302,10 +302,10 @@ impl OpenRequestHandle {
             };
 
             if matches!(response_type, ResponseTypes::RateLimit) {
-                if let Some(hard_limit_until) = self.conn.hard_limit_until.as_ref() {
+                if let Some(hard_limit_until) = self.rpc.hard_limit_until.as_ref() {
                     let retry_at = Instant::now() + Duration::from_secs(1);
 
-                    trace!("retry {} at: {:?}", self.conn, retry_at);
+                    trace!("retry {} at: {:?}", self.rpc, retry_at);
 
                     hard_limit_until.send_replace(retry_at);
                 }
@@ -318,14 +318,14 @@ impl OpenRequestHandle {
                     if matches!(response_type, ResponseTypes::Revert) {
                         debug!(
                             "bad response from {}! method={} params={:?} err={:?}",
-                            self.conn, method, params, err
+                            self.rpc, method, params, err
                         );
                     }
                 }
                 RequestRevertHandler::TraceLevel => {
                     trace!(
                         "bad response from {}! method={} params={:?} err={:?}",
-                        self.conn,
+                        self.rpc,
                         method,
                         params,
                         err
@@ -335,20 +335,20 @@ impl OpenRequestHandle {
                     // TODO: include params if not running in release mode
                     error!(
                         "bad response from {}! method={} err={:?}",
-                        self.conn, method, err
+                        self.rpc, method, err
                     );
                 }
                 RequestRevertHandler::WarnLevel => {
                     // TODO: include params if not running in release mode
                     warn!(
                         "bad response from {}! method={} err={:?}",
-                        self.conn, method, err
+                        self.rpc, method, err
                     );
                 }
                 RequestRevertHandler::Save => {
                     trace!(
                         "bad response from {}! method={} params={:?} err={:?}",
-                        self.conn,
+                        self.rpc,
                         method,
                         params,
                         err
