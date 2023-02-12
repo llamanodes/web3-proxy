@@ -56,17 +56,17 @@ impl Web3Rpcs {
     /// Spawn durable connections to multiple Web3 providers.
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
+        block_map: BlockHashesCache,
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
-        server_configs: HashMap<String, Web3RpcConfig>,
         http_client: Option<reqwest::Client>,
-        redis_pool: Option<redis_rate_limiter::RedisPool>,
-        block_map: BlockHashesCache,
-        watch_consensus_head_sender: Option<watch::Sender<ArcBlock>>,
-        min_sum_soft_limit: u32,
         min_head_rpcs: usize,
-        pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
+        min_sum_soft_limit: u32,
         pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
+        pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
+        redis_pool: Option<redis_rate_limiter::RedisPool>,
+        server_configs: HashMap<String, Web3RpcConfig>,
+        watch_consensus_head_sender: Option<watch::Sender<ArcBlock>>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
@@ -160,6 +160,7 @@ impl Web3Rpcs {
                             block_map,
                             block_sender,
                             pending_tx_id_sender,
+                            true,
                         )
                         .await
                 });
@@ -343,7 +344,7 @@ impl Web3Rpcs {
             .into_iter()
             .map(|active_request_handle| async move {
                 let result: Result<Box<RawValue>, _> = active_request_handle
-                    .request(method, &json!(&params), error_level.into())
+                    .request(method, &json!(&params), error_level.into(), None)
                     .await;
                 result
             })
@@ -473,12 +474,20 @@ impl Web3Rpcs {
                     for x in self
                         .conns
                         .values()
-                        .filter(|x| if allow_backups { true } else { !x.backup })
-                        .filter(|x| !skip.contains(x))
-                        .filter(|x| x.has_block_data(min_block_needed))
                         .filter(|x| {
-                            if let Some(max_block_needed) = max_block_needed {
-                                x.has_block_data(max_block_needed)
+                            if !allow_backups && x.backup {
+                                false
+                            } else if skip.contains(x) {
+                                false
+                            } else if !x.has_block_data(min_block_needed) {
+                                false
+                            } else if max_block_needed
+                                .and_then(|max_block_needed| {
+                                    Some(!x.has_block_data(max_block_needed))
+                                })
+                                .unwrap_or(false)
+                            {
+                                false
                             } else {
                                 true
                             }
@@ -521,58 +530,22 @@ impl Web3Rpcs {
         let mut earliest_retry_at = None;
 
         for usable_rpcs in usable_rpcs_by_head_num_and_weight.into_values().rev() {
-            // under heavy load, it is possible for even our best server to be negative
-            let mut minimum = f64::MAX;
-            let mut maximum = f64::MIN;
-
             // we sort on a combination of values. cache them here so that we don't do this math multiple times.
-            let mut available_request_map: HashMap<_, f64> = usable_rpcs
+            // TODO: is this necessary if we use sort_by_cached_key?
+            let available_request_map: HashMap<_, f64> = usable_rpcs
                 .iter()
                 .map(|rpc| {
-                    // TODO: are active requests what we want? do we want a counter for requests in the last second + any actives longer than that?
-                    // TODO: get active requests out of redis (that's definitely too slow)
-                    // TODO: do something with hard limit instead? (but that is hitting redis too much)
-                    let active_requests = rpc.active_requests() as f64;
-                    let soft_limit = rpc.soft_limit as f64;
-
-                    let available_requests = soft_limit - active_requests;
-
-                    // trace!("available requests on {}: {}", rpc, available_requests);
-
-                    minimum = minimum.min(available_requests);
-                    maximum = maximum.max(available_requests);
-
-                    (rpc, available_requests)
+                    // TODO: weighted sort by remaining hard limit?
+                    // TODO: weighted sort by soft_limit - ewma_active_requests? that assumes soft limits are any good
+                    (rpc, 1.0)
                 })
                 .collect();
 
-            // trace!("minimum available requests: {}", minimum);
-            // trace!("maximum available requests: {}", maximum);
-
-            if maximum < 0.0 {
-                // TODO: if maximum < 0 and there are other tiers on the same block, we should include them now
-                warn!("soft limits overloaded: {} to {}", minimum, maximum)
-            }
-
-            // choose_multiple_weighted can't have negative numbers. shift up if any are negative
-            // TODO: is this a correct way to shift?
-            if minimum < 0.0 {
-                available_request_map = available_request_map
-                    .into_iter()
-                    .map(|(rpc, available_requests)| {
-                        // TODO: is simple addition the right way to shift everyone?
-                        // TODO: probably want something non-linear
-                        // minimum is negative, so we subtract to make available requests bigger
-                        let x = available_requests - minimum;
-
-                        (rpc, x)
-                    })
-                    .collect()
-            }
+            debug!("todo: better sort here");
 
             let sorted_rpcs = {
                 if usable_rpcs.len() == 1 {
-                    // TODO: return now instead? we shouldn't need another alloc
+                    // TODO: try the next tier
                     vec![usable_rpcs.get(0).expect("there should be 1")]
                 } else {
                     let mut rng = thread_fast_rng::thread_fast_rng();
@@ -589,12 +562,10 @@ impl Web3Rpcs {
             };
 
             // now that the rpcs are sorted, try to get an active request handle for one of them
+            // TODO: pick two randomly and choose the one with the lower rpc.latency.ewma
             for best_rpc in sorted_rpcs.into_iter() {
                 // increment our connection counter
-                match best_rpc
-                    .try_request_handle(authorization, min_block_needed.is_none())
-                    .await
-                {
+                match best_rpc.try_request_handle(authorization, None).await {
                     Ok(OpenRequestResult::Handle(handle)) => {
                         // trace!("opened handle: {}", best_rpc);
                         return Ok(OpenRequestResult::Handle(handle));
@@ -741,10 +712,7 @@ impl Web3Rpcs {
             }
 
             // check rate limits and increment our connection counter
-            match connection
-                .try_request_handle(authorization, min_block_needed.is_none())
-                .await
-            {
+            match connection.try_request_handle(authorization, None).await {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
@@ -827,6 +795,7 @@ impl Web3Rpcs {
                             &request.method,
                             &json!(request.params),
                             RequestRevertHandler::Save,
+                            None,
                         )
                         .await;
 
@@ -1214,7 +1183,6 @@ mod tests {
     use super::*;
     use crate::rpcs::{
         blockchain::{ConsensusFinder, SavedBlock},
-        one::ProviderState,
         provider::Web3Provider,
     };
     use ethers::types::{Block, U256};
@@ -1338,9 +1306,6 @@ mod tests {
 
         let head_rpc = Web3Rpc {
             name: "synced".to_string(),
-            provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
-                Web3Provider::Mock,
-            ))),
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,
@@ -1352,9 +1317,6 @@ mod tests {
 
         let lagged_rpc = Web3Rpc {
             name: "lagged".to_string(),
-            provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
-                Web3Provider::Mock,
-            ))),
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,
@@ -1553,9 +1515,6 @@ mod tests {
 
         let pruned_rpc = Web3Rpc {
             name: "pruned".to_string(),
-            provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
-                Web3Provider::Mock,
-            ))),
             soft_limit: 3_000,
             automatic_block_limit: false,
             backup: false,
@@ -1567,9 +1526,6 @@ mod tests {
 
         let archive_rpc = Web3Rpc {
             name: "archive".to_string(),
-            provider_state: AsyncRwLock::new(ProviderState::Connected(Arc::new(
-                Web3Provider::Mock,
-            ))),
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,

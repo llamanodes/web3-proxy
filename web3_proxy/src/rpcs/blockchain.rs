@@ -149,12 +149,13 @@ impl Web3Rpcs {
         // TODO: if error, retry?
         let block: ArcBlock = match rpc {
             Some(rpc) => rpc
-                .wait_for_request_handle(authorization, Some(Duration::from_secs(30)), false)
+                .wait_for_request_handle(authorization, Some(Duration::from_secs(30)), None)
                 .await?
                 .request::<_, Option<_>>(
                     "eth_getBlockByHash",
                     &json!(get_block_params),
                     Level::Error.into(),
+                    None,
                 )
                 .await?
                 .context("no block!")?,

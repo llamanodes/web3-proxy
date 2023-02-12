@@ -1,6 +1,6 @@
 use super::one::Web3Rpc;
 use super::provider::Web3Provider;
-use crate::frontend::authorization::{Authorization, AuthorizationType};
+use crate::frontend::authorization::Authorization;
 use anyhow::Context;
 use chrono::Utc;
 use entities::revert_log;
@@ -11,7 +11,6 @@ use log::{debug, error, trace, warn, Level};
 use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
 use serde_json::json;
 use std::fmt;
-use std::sync::atomic;
 use std::sync::Arc;
 use thread_fast_rng::rand::Rng;
 use tokio::time::{sleep, Duration, Instant};
@@ -27,11 +26,11 @@ pub enum OpenRequestResult {
 }
 
 /// Make RPC requests through this handle and drop it when you are done.
+/// Opening this handle checks rate limits. Developers, try to keep opening a handle and using it as close together as possible
 #[derive(Debug)]
 pub struct OpenRequestHandle {
     authorization: Arc<Authorization>,
     conn: Arc<Web3Rpc>,
-    provider: Arc<Web3Provider>,
 }
 
 /// Depending on the context, RPC errors can require different handling.
@@ -123,60 +122,9 @@ impl Authorization {
 
 impl OpenRequestHandle {
     pub async fn new(authorization: Arc<Authorization>, conn: Arc<Web3Rpc>) -> Self {
-        // TODO: take request_id as an argument?
-        // TODO: attach a unique id to this? customer requests have one, but not internal queries
-        // TODO: what ordering?!
-        conn.active_requests.fetch_add(1, atomic::Ordering::Relaxed);
-
-        let mut provider = None;
-        let mut logged = false;
-        while provider.is_none() {
-            // trace!("waiting on provider: locking...");
-
-            let ready_provider = conn
-                .provider_state
-                .read()
-                .await
-                // TODO: hard code true, or take a bool in the `new` function?
-                .provider(true)
-                .await
-                .cloned();
-            // trace!("waiting on provider: unlocked!");
-
-            match ready_provider {
-                None => {
-                    if !logged {
-                        logged = true;
-                        warn!("no provider for {}!", conn);
-                    }
-
-                    // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
-                    // TODO: sleep how long? subscribe to something instead? maybe use a watch handle?
-                    // TODO: this is going to be way too verbose!
-                    sleep(Duration::from_millis(100)).await
-                }
-                Some(x) => provider = Some(x),
-            }
-        }
-        let provider = provider.expect("provider was checked already");
-
-        // TODO: handle overflows?
-        // TODO: what ordering?
-        match authorization.as_ref().authorization_type {
-            AuthorizationType::Frontend => {
-                conn.frontend_requests
-                    .fetch_add(1, atomic::Ordering::Relaxed);
-            }
-            AuthorizationType::Internal => {
-                conn.internal_requests
-                    .fetch_add(1, atomic::Ordering::Relaxed);
-            }
-        }
-
         Self {
             authorization,
             conn,
-            provider,
         }
     }
 
@@ -196,6 +144,7 @@ impl OpenRequestHandle {
         method: &str,
         params: &P,
         revert_handler: RequestRevertHandler,
+        unlocked_provider: Option<Arc<Web3Provider>>,
     ) -> Result<R, ProviderError>
     where
         // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
@@ -205,12 +154,45 @@ impl OpenRequestHandle {
         // TODO: use tracing spans
         // TODO: including params in this log is way too verbose
         // trace!(rpc=%self.conn, %method, "request");
+        trace!("requesting from {}", self.conn);
+
+        let mut provider: Option<Arc<Web3Provider>> = None;
+        let mut logged = false;
+        while provider.is_none() {
+            // trace!("waiting on provider: locking...");
+
+            // TODO: this should *not* be new_head_client. that is dedicated to only new heads
+            if let Some(unlocked_provider) = unlocked_provider {
+                provider = Some(unlocked_provider);
+                break;
+            }
+
+            let unlocked_provider = self.conn.new_head_client.read().await;
+
+            if let Some(unlocked_provider) = unlocked_provider.clone() {
+                provider = Some(unlocked_provider);
+                break;
+            }
+
+            if !logged {
+                debug!("no provider for open handle on {}", self.conn);
+                logged = true;
+            }
+
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        let provider = provider.expect("provider was checked already");
 
         // TODO: replace ethers-rs providers with our own that supports streaming the responses
-        let response = match &*self.provider {
+        let response = match provider.as_ref() {
+            #[cfg(test)]
             Web3Provider::Mock => unimplemented!(),
-            Web3Provider::Http(provider) => provider.request(method, params).await,
-            Web3Provider::Ws(provider) => provider.request(method, params).await,
+            Web3Provider::Ws(p) => p.request(method, params).await,
+            Web3Provider::Http(p) | Web3Provider::Both(p, _) => {
+                // TODO: i keep hearing that http is faster. but ws has always been better for me. investigate more with actual benchmarks
+                p.request(method, params).await
+            }
         };
 
         // // TODO: i think ethers already has trace logging (and does it much more fancy)
@@ -266,8 +248,22 @@ impl OpenRequestHandle {
             // check for "execution reverted" here
             let response_type = if let ProviderError::JsonRpcClientError(err) = err {
                 // Http and Ws errors are very similar, but different types
-                let msg = match &*self.provider {
+                let msg = match &*provider {
+                    #[cfg(test)]
                     Web3Provider::Mock => unimplemented!(),
+                    Web3Provider::Both(_, _) => {
+                        if let Some(HttpClientError::JsonRpcError(err)) =
+                            err.downcast_ref::<HttpClientError>()
+                        {
+                            Some(&err.message)
+                        } else if let Some(WsClientError::JsonRpcError(err)) =
+                            err.downcast_ref::<WsClientError>()
+                        {
+                            Some(&err.message)
+                        } else {
+                            None
+                        }
+                    }
                     Web3Provider::Http(_) => {
                         if let Some(HttpClientError::JsonRpcError(err)) =
                             err.downcast_ref::<HttpClientError>()
@@ -375,13 +371,5 @@ impl OpenRequestHandle {
         }
 
         response
-    }
-}
-
-impl Drop for OpenRequestHandle {
-    fn drop(&mut self) {
-        self.conn
-            .active_requests
-            .fetch_sub(1, atomic::Ordering::AcqRel);
     }
 }

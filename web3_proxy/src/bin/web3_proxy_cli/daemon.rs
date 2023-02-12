@@ -205,31 +205,27 @@ mod tests {
                 (
                     "anvil".to_string(),
                     Web3RpcConfig {
-                        disabled: false,
-                        display_name: None,
-                        url: anvil.endpoint(),
-                        backup: Some(false),
-                        block_data_limit: None,
+                        http_url: Some(anvil.endpoint()),
                         soft_limit: 100,
-                        hard_limit: None,
                         tier: 0,
-                        subscribe_txs: Some(false),
-                        extra: Default::default(),
+                        ..Default::default()
                     },
                 ),
                 (
                     "anvil_ws".to_string(),
                     Web3RpcConfig {
-                        disabled: false,
-                        display_name: None,
-                        url: anvil.ws_endpoint(),
-                        backup: Some(false),
-                        block_data_limit: None,
+                        ws_url: Some(anvil.ws_endpoint()),
                         soft_limit: 100,
-                        hard_limit: None,
                         tier: 0,
-                        subscribe_txs: Some(false),
-                        extra: Default::default(),
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "anvil_both".to_string(),
+                    Web3RpcConfig {
+                        http_url: Some(anvil.endpoint()),
+                        ws_url: Some(anvil.ws_endpoint()),
+                        ..Default::default()
                     },
                 ),
             ]),
