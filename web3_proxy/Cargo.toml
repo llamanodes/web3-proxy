@@ -27,9 +27,9 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 
 anyhow = { version = "1.0.69", features = ["backtrace"] }
 argh = "0.1.10"
-axum = { version = "0.6.4", features = ["headers", "ws"] }
+axum = { version = "0.6.5", features = ["headers", "ws"] }
 axum-client-ip = "0.4.0"
-axum-macros = "0.3.2"
+axum-macros = "0.3.3"
 chrono = "0.4.23"
 counter = "0.5.7"
 derive_more = "0.99.17"
@@ -48,7 +48,7 @@ http = "0.2.8"
 ipnet = "2.7.1"
 itertools = "0.10.5"
 log = "0.4.17"
-moka = { version = "0.9.7", default-features = false, features = ["future"] }
+moka = { version = "0.10.0", default-features = false, features = ["future"] }
 notify = "5.1.0"
 num = "0.4.0"
 num-traits = "0.2.15"
