@@ -482,7 +482,7 @@ impl Web3ProxyApp {
         let http_client = Some(
             reqwest::ClientBuilder::new()
                 .connect_timeout(Duration::from_secs(5))
-                .timeout(Duration::from_secs(60))
+                .timeout(Duration::from_secs(5 * 60))
                 .user_agent(APP_USER_AGENT)
                 .build()?,
         );
@@ -573,17 +573,17 @@ impl Web3ProxyApp {
 
         // connect to the load balanced rpcs
         let (balanced_rpcs, balanced_handle) = Web3Rpcs::spawn(
+            block_map.clone(),
             top_config.app.chain_id,
             db_conn.clone(),
-            balanced_rpcs,
             http_client.clone(),
-            vredis_pool.clone(),
-            block_map.clone(),
-            Some(watch_consensus_head_sender),
-            top_config.app.min_sum_soft_limit,
             top_config.app.min_synced_rpcs,
-            Some(pending_tx_sender.clone()),
+            top_config.app.min_sum_soft_limit,
             pending_transactions.clone(),
+            Some(pending_tx_sender.clone()),
+            vredis_pool.clone(),
+            balanced_rpcs,
+            Some(watch_consensus_head_sender),
         )
         .await
         .context("spawning balanced rpcs")?;
@@ -599,21 +599,22 @@ impl Web3ProxyApp {
             None
         } else {
             let (private_rpcs, private_handle) = Web3Rpcs::spawn(
+                block_map,
                 top_config.app.chain_id,
                 db_conn.clone(),
-                private_rpcs,
                 http_client.clone(),
+                0,
+                0,
+                pending_transactions.clone(),
+                // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits, but they should have
+                None,
                 vredis_pool.clone(),
-                block_map,
+                private_rpcs,
                 // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
                 // they also often have low rate limits
                 // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
+                // TODO: but maybe we could include privates in the "backup" tier
                 None,
-                0,
-                0,
-                // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits
-                None,
-                pending_transactions.clone(),
             )
             .await
             .context("spawning private_rpcs")?;
@@ -1035,9 +1036,17 @@ impl Web3ProxyApp {
             | "db_getString"
             | "db_putHex"
             | "db_putString"
+            | "debug_accountRange"
+            | "debug_backtraceAt"
+            | "debug_blockProfile"
             | "debug_chaindbCompact"
+            | "debug_chaindbProperty"
+            | "debug_cpuProfile"
+            | "debug_freeOSMemory"
             | "debug_freezeClient"
+            | "debug_gcStats"
             | "debug_goTrace"
+            | "debug_memStats"
             | "debug_mutexProfile"
             | "debug_setBlockProfileRate"
             | "debug_setGCPercent"

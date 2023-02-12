@@ -2,22 +2,45 @@ use anyhow::Context;
 use derive_more::From;
 use std::time::Duration;
 
+// TODO: our own structs for these that handle streaming large responses
+type EthersHttpProvider = ethers::providers::Provider<ethers::providers::Http>;
+type EthersWsProvider = ethers::providers::Provider<ethers::providers::Ws>;
+
 /// Use HTTP and WS providers.
 // TODO: instead of an enum, I tried to use Box<dyn Provider>, but hit <https://github.com/gakonst/ethers-rs/issues/592>
+// TODO: custom types that let us stream JSON responses
 #[derive(From)]
 pub enum Web3Provider {
-    Http(ethers::providers::Provider<ethers::providers::Http>),
-    Ws(ethers::providers::Provider<ethers::providers::Ws>),
-    // TODO: only include this for tests.
+    Both(EthersHttpProvider, EthersWsProvider),
+    Http(EthersHttpProvider),
+    // TODO: deadpool? custom tokio-tungstenite
+    Ws(EthersWsProvider),
+    #[cfg(test)]
     Mock,
 }
 
 impl Web3Provider {
     pub fn ready(&self) -> bool {
         match self {
-            Self::Mock => true,
+            Self::Both(_, ws) => ws.as_ref().ready(),
             Self::Http(_) => true,
-            Self::Ws(provider) => provider.as_ref().ready(),
+            Self::Ws(ws) => ws.as_ref().ready(),
+            #[cfg(test)]
+            Self::Mock => true,
+        }
+    }
+
+    pub fn http(&self) -> Option<&EthersHttpProvider> {
+        match self {
+            Self::Http(x) => Some(x),
+            _ => None,
+        }
+    }
+
+    pub fn ws(&self) -> Option<&EthersWsProvider> {
+        match self {
+            Self::Both(_, x) | Self::Ws(x) => Some(x),
+            _ => None,
         }
     }
 
