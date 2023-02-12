@@ -541,7 +541,7 @@ impl Web3Rpcs {
                 })
                 .collect();
 
-            trace!("todo: better sort here");
+            warn!("todo: better sort here");
 
             let sorted_rpcs = {
                 if usable_rpcs.len() == 1 {

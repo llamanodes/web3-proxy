@@ -64,7 +64,7 @@ pub struct Web3Rpc {
     /// it is an async lock because we hold it open across awaits
     /// this provider is only used for new heads subscriptions
     /// TODO: put the provider inside an arc?
-    pub(super) new_head_client: AsyncRwLock<Option<Arc<Web3Provider>>>,
+    pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// keep track of hard limits
     pub(super) hard_limit_until: Option<watch::Sender<Instant>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
@@ -397,7 +397,7 @@ impl Web3Rpc {
         chain_id: u64,
         db_conn: Option<&DatabaseConnection>,
     ) -> anyhow::Result<()> {
-        if let Ok(mut unlocked_provider) = self.new_head_client.try_write() {
+        if let Ok(mut unlocked_provider) = self.provider.try_write() {
             #[cfg(test)]
             if let Some(Web3Provider::Mock) = unlocked_provider.as_deref() {
                 return Ok(());
@@ -494,7 +494,7 @@ impl Web3Rpc {
 
             info!("successfully connected to {}", self);
         } else {
-            if self.new_head_client.read().await.is_none() {
+            if self.provider.read().await.is_none() {
                 return Err(anyhow!("failed waiting for client"));
             }
         };
@@ -625,7 +625,7 @@ impl Web3Rpc {
                     loop {
                         // TODO: what if we just happened to have this check line up with another restart?
                         // TODO: think more about this
-                        if let Some(client) = &*conn.new_head_client.read().await {
+                        if let Some(client) = &*conn.provider.read().await {
                             // trace!("health check unlocked with error on {}", conn);
                             // returning error will trigger a reconnect
                             // TODO: do a query of some kind
@@ -700,7 +700,7 @@ impl Web3Rpc {
     ) -> anyhow::Result<()> {
         trace!("watching new heads on {}", self);
 
-        let unlocked_provider = self.new_head_client.read().await;
+        let unlocked_provider = self.provider.read().await;
 
         match unlocked_provider.as_deref() {
             Some(Web3Provider::Http(_client)) => {
@@ -871,7 +871,7 @@ impl Web3Rpc {
     ) -> anyhow::Result<()> {
         // TODO: give this a separate client. don't use new_head_client for everything. especially a firehose this big
         // TODO: timeout
-        let provider = self.new_head_client.read().await;
+        let provider = self.provider.read().await;
 
         trace!("watching pending transactions on {}", self);
         // TODO: does this keep the lock open for too long?
@@ -983,7 +983,7 @@ impl Web3Rpc {
     ) -> anyhow::Result<OpenRequestResult> {
         // TODO: think more about this read block
         // TODO: this should *not* be new_head_client. this should be a separate object
-        if unlocked_provider.is_some() || self.new_head_client.read().await.is_some() {
+        if unlocked_provider.is_some() || self.provider.read().await.is_some() {
             // we already have an unlocked provider. no need to lock
         } else {
             return Ok(OpenRequestResult::NotReady(self.backup));
