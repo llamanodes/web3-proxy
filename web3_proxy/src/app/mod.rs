@@ -10,7 +10,7 @@ use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{
     JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest, JsonRpcRequestEnum,
 };
-use crate::rpcs::blockchain::{ArcBlock, SavedBlock};
+use crate::rpcs::blockchain::{BlockHashesCache, Web3ProxyBlock};
 use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::transactions::TxStatus;
@@ -23,7 +23,7 @@ use derive_more::From;
 use entities::sea_orm_active_enums::LogLevel;
 use entities::user;
 use ethers::core::utils::keccak256;
-use ethers::prelude::{Address, Block, Bytes, Transaction, TxHash, H256, U64};
+use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U64};
 use ethers::types::U256;
 use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
@@ -69,9 +69,9 @@ pub static REQUEST_PERIOD: u64 = 60;
 #[derive(From)]
 struct ResponseCacheKey {
     // if none, this is cached until evicted
-    from_block: Option<SavedBlock>,
+    from_block: Option<Web3ProxyBlock>,
     // to_block is only set when ranges of blocks are requested (like with eth_getLogs)
-    to_block: Option<SavedBlock>,
+    to_block: Option<Web3ProxyBlock>,
     method: String,
     // TODO: better type for this
     params: Option<serde_json::Value>,
@@ -204,7 +204,7 @@ pub struct Web3ProxyApp {
     response_cache: ResponseCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
-    watch_consensus_head_receiver: watch::Receiver<ArcBlock>,
+    watch_consensus_head_receiver: watch::Receiver<Web3ProxyBlock>,
     pending_tx_sender: broadcast::Sender<TxStatus>,
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
@@ -542,7 +542,7 @@ impl Web3ProxyApp {
 
         // TODO: i don't like doing Block::default here! Change this to "None"?
         let (watch_consensus_head_sender, watch_consensus_head_receiver) =
-            watch::channel(Arc::new(Block::default()));
+            watch::channel(Web3ProxyBlock::default());
         // TODO: will one receiver lagging be okay? how big should this be?
         let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
 
@@ -563,11 +563,11 @@ impl Web3ProxyApp {
         // TODO: limits from config
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         // TODO: how can we do the weigher better?
-        let block_map = Cache::builder()
+        let block_map: BlockHashesCache = Cache::builder()
             .max_capacity(1024 * 1024 * 1024)
-            .weigher(|_k, v: &ArcBlock| {
+            .weigher(|_k, v: &Web3ProxyBlock| {
                 // TODO: is this good enough?
-                1 + v.transactions.len().try_into().unwrap_or(u32::MAX)
+                1 + v.block.transactions.len().try_into().unwrap_or(u32::MAX)
             })
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
@@ -577,6 +577,8 @@ impl Web3ProxyApp {
             top_config.app.chain_id,
             db_conn.clone(),
             http_client.clone(),
+            top_config.app.max_block_age,
+            top_config.app.max_block_lag,
             top_config.app.min_synced_rpcs,
             top_config.app.min_sum_soft_limit,
             pending_transactions.clone(),
@@ -603,6 +605,9 @@ impl Web3ProxyApp {
                 top_config.app.chain_id,
                 db_conn.clone(),
                 http_client.clone(),
+                // private rpcs don't get subscriptions, so no need for max_block_age or max_block_lag
+                None,
+                None,
                 0,
                 0,
                 pending_transactions.clone(),
@@ -735,7 +740,7 @@ impl Web3ProxyApp {
         Ok((app, cancellable_handles, important_background_handles).into())
     }
 
-    pub fn head_block_receiver(&self) -> watch::Receiver<ArcBlock> {
+    pub fn head_block_receiver(&self) -> watch::Receiver<Web3ProxyBlock> {
         self.watch_consensus_head_receiver.clone()
     }
 
@@ -1481,7 +1486,7 @@ impl Web3ProxyApp {
                             .await?;
 
                         Some(ResponseCacheKey {
-                            from_block: Some(SavedBlock::new(request_block)),
+                            from_block: Some(request_block),
                             to_block: None,
                             method: method.to_string(),
                             // TODO: hash here?
@@ -1521,8 +1526,8 @@ impl Web3ProxyApp {
                             .await?;
 
                         Some(ResponseCacheKey {
-                            from_block: Some(SavedBlock::new(from_block)),
-                            to_block: Some(SavedBlock::new(to_block)),
+                            from_block: Some(from_block),
+                            to_block: Some(to_block),
                             method: method.to_string(),
                             // TODO: hash here?
                             params: request.params.clone(),
@@ -1537,8 +1542,8 @@ impl Web3ProxyApp {
                     let authorization = authorization.clone();
 
                     if let Some(cache_key) = cache_key {
-                        let from_block_num = cache_key.from_block.as_ref().map(|x| x.number());
-                        let to_block_num = cache_key.to_block.as_ref().map(|x| x.number());
+                        let from_block_num = cache_key.from_block.as_ref().map(|x| *x.number());
+                        let to_block_num = cache_key.to_block.as_ref().map(|x| *x.number());
 
                         self.response_cache
                             .try_get_with(cache_key, async move {

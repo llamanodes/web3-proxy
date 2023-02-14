@@ -80,12 +80,7 @@ pub async fn clean_block_number(
                             .context("fetching block number from hash")?;
 
                         // TODO: set change to true? i think not we should probably use hashes for everything.
-                        (
-                            block
-                                .number
-                                .expect("blocks here should always have numbers"),
-                            false,
-                        )
+                        (*block.number(), false)
                     } else {
                         return Err(anyhow::anyhow!("blockHash missing"));
                     }

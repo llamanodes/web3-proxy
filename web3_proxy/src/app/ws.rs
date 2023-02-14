@@ -72,7 +72,7 @@ impl Web3ProxyApp {
                             "params": {
                                 "subscription": subscription_id,
                                 // TODO: option to include full transaction objects instead of just the hashes?
-                                "result": new_head.as_ref(),
+                                "result": new_head.block,
                             },
                         });
 

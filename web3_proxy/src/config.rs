@@ -1,9 +1,9 @@
-use crate::rpcs::blockchain::BlockHashesCache;
+use crate::app::AnyhowJoinHandle;
+use crate::rpcs::blockchain::{BlockHashesCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
-use crate::{app::AnyhowJoinHandle, rpcs::blockchain::ArcBlock};
 use argh::FromArgs;
 use ethers::prelude::TxHash;
-use ethers::types::U256;
+use ethers::types::{U256, U64};
 use hashbrown::HashMap;
 use log::warn;
 use migration::sea_orm::DatabaseConnection;
@@ -11,7 +11,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-pub type BlockAndRpc = (Option<ArcBlock>, Arc<Web3Rpc>);
+pub type BlockAndRpc = (Option<Web3ProxyBlock>, Arc<Web3Rpc>);
 pub type TxHashAndRpc = (TxHash, Arc<Web3Rpc>);
 
 #[derive(Debug, FromArgs)]
@@ -104,6 +104,12 @@ pub struct AppConfig {
     /// None = no code needed
     pub invite_code: Option<String>,
     pub login_domain: Option<String>,
+
+    /// do not serve any requests if the best known block is older than this many seconds.
+    pub max_block_age: Option<u64>,
+
+    /// do not serve any requests if the best known block is behind the best known block by more than this many blocks.
+    pub max_block_lag: Option<U64>,
 
     /// Rate limit for bearer token authenticated entrypoints.
     /// This is separate from the rpc limits.
