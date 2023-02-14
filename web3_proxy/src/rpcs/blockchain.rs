@@ -8,6 +8,7 @@ use crate::{config::BlockAndRpc, jsonrpc::JsonRpcRequest};
 use anyhow::Context;
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
+use hashbrown::HashSet;
 use log::{debug, error, trace, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
@@ -315,7 +316,16 @@ impl Web3Rpcs {
     ) -> anyhow::Result<()> {
         // TODO: indexmap or hashmap? what hasher? with_capacity?
         // TODO: this will grow unbounded. prune old heads on this at the same time we prune the graph?
-        let mut connection_heads = ConsensusFinder::new(self.max_block_age, self.max_block_lag);
+        let configured_tiers: Vec<u64> = self
+            .conns
+            .values()
+            .map(|x| x.tier)
+            .collect::<HashSet<u64>>()
+            .into_iter()
+            .collect();
+
+        let mut connection_heads =
+            ConsensusFinder::new(&configured_tiers, self.max_block_age, self.max_block_lag);
 
         loop {
             match block_receiver.recv_async().await {

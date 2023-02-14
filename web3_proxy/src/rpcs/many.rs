@@ -1373,7 +1373,7 @@ mod tests {
         let authorization = Arc::new(Authorization::internal(None).unwrap());
 
         let (head_block_sender, _head_block_receiver) = watch::channel(Default::default());
-        let mut consensus_finder = ConsensusFinder::new(None, None);
+        let mut consensus_finder = ConsensusFinder::new(&[0, 1, 2, 3], None, None);
 
         // process None so that
         conns
@@ -1584,7 +1584,7 @@ mod tests {
         let authorization = Arc::new(Authorization::internal(None).unwrap());
 
         let (head_block_sender, _head_block_receiver) = watch::channel(Default::default());
-        let mut connection_heads = ConsensusFinder::new(None, None);
+        let mut connection_heads = ConsensusFinder::new(&[0, 1, 2, 3], None, None);
 
         conns
             .process_block_from_rpc(
