@@ -3,6 +3,7 @@ use crate::frontend::authorization::Authorization;
 use super::blockchain::Web3ProxyBlock;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
+use anyhow::Context;
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use log::{debug, trace, warn};
@@ -371,9 +372,19 @@ pub struct ConsensusFinder {
 }
 
 impl ConsensusFinder {
-    pub fn new(max_block_age: Option<u64>, max_block_lag: Option<U64>) -> Self {
+    pub fn new(
+        configured_tiers: &[u64],
+        max_block_age: Option<u64>,
+        max_block_lag: Option<U64>,
+    ) -> Self {
+        // TODO: this will need some thought when config reloading is written
+        let tiers = configured_tiers
+            .iter()
+            .map(|x| (*x, Default::default()))
+            .collect();
+
         Self {
-            tiers: Default::default(),
+            tiers,
             max_block_age,
             max_block_lag,
         }
@@ -413,8 +424,10 @@ impl ConsensusFinder {
     pub fn insert(&mut self, rpc: &Web3Rpc, new_block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
         let mut old = None;
 
+        // TODO: error if rpc.tier is not in self.tiers
+
         for (i, tier_group) in self.tiers.iter_mut().rev() {
-            if i > &rpc.tier {
+            if i < &rpc.tier {
                 break;
             }
 
@@ -443,7 +456,8 @@ impl ConsensusFinder {
                 // we don't know if its on the heaviest chain yet
                 rpc_head_block = web3_connections
                     .try_cache_block(rpc_head_block, false)
-                    .await?;
+                    .await
+                    .context("failed caching block")?;
 
                 // if let Some(max_block_lag) = max_block_lag {
                 //     if rpc_head_block.number() < ??? {
@@ -486,14 +500,18 @@ impl ConsensusFinder {
         Ok(changed)
     }
 
-    // TODO: this could definitely be cleaner. i don't like the error handling/unwrapping
     pub async fn best_consensus_connections(
         &mut self,
         authorization: &Arc<Authorization>,
         web3_connections: &Web3Rpcs,
-    ) -> Option<ConsensusWeb3Rpcs> {
+    ) -> anyhow::Result<ConsensusWeb3Rpcs> {
         // TODO: attach context to these?
-        let highest_known_block = self.all_rpcs_group()?.highest_block.as_ref()?;
+        let highest_known_block = self
+            .all_rpcs_group()
+            .context("no rpcs")?
+            .highest_block
+            .as_ref()
+            .context("no highest block")?;
 
         trace!("highest_known_block: {}", highest_known_block);
 
@@ -518,10 +536,10 @@ impl ConsensusFinder {
                 trace!("success on tier {}", i);
                 // we got one! hopefully it didn't need to use any backups.
                 // but even if it did need backup servers, that is better than going to a worse tier
-                return Some(consensus_head_connections);
+                return Ok(consensus_head_connections);
             }
         }
 
-        return None;
+        return Err(anyhow::anyhow!("failed finding consensus on all tiers"));
     }
 }
