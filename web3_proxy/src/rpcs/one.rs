@@ -1,5 +1,5 @@
 ///! Rate-limited communication with a web3 provider.
-use super::blockchain::{ArcBlock, BlockHashesCache, SavedBlock};
+use super::blockchain::{ArcBlock, BlockHashesCache, Web3ProxyBlock};
 use super::provider::Web3Provider;
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
@@ -81,7 +81,7 @@ pub struct Web3Rpc {
     /// Lower tiers are higher priority when sending requests
     pub(super) tier: u64,
     /// TODO: change this to a watch channel so that http providers can subscribe and take action on change.
-    pub(super) head_block: RwLock<Option<SavedBlock>>,
+    pub(super) head_block: RwLock<Option<Web3ProxyBlock>>,
     /// Track how fast this RPC is
     pub(super) latency: Web3RpcLatencies,
 }
@@ -308,9 +308,9 @@ impl Web3Rpc {
     }
 
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
-        let head_block_num = match self.head_block.read().clone() {
+        let head_block_num = match self.head_block.read().as_ref() {
             None => return false,
-            Some(x) => x.number(),
+            Some(x) => *x.number(),
         };
 
         // this rpc doesn't have that block yet. still syncing
@@ -525,9 +525,9 @@ impl Web3Rpc {
                 None
             }
             Ok(Some(new_head_block)) => {
-                let new_hash = new_head_block
-                    .hash
-                    .context("sending block to connections")?;
+                let new_head_block = Web3ProxyBlock::new(new_head_block);
+
+                let new_hash = *new_head_block.hash();
 
                 // if we already have this block saved, set new_head_block to that arc. otherwise store this copy
                 let new_head_block = block_map
@@ -628,6 +628,7 @@ impl Web3Rpc {
                         if let Some(client) = &*conn.provider.read().await {
                             // trace!("health check unlocked with error on {}", conn);
                             // returning error will trigger a reconnect
+                            // also, do the health check as a way of keeping this rpc's request_ewma accurate
                             // TODO: do a query of some kind
                         }
 
@@ -1164,7 +1165,7 @@ mod tests {
 
         let random_block = Arc::new(random_block);
 
-        let head_block = SavedBlock::new(random_block);
+        let head_block = Web3ProxyBlock::new(random_block);
         let block_data_limit = u64::MAX;
 
         let x = Web3Rpc {
@@ -1194,7 +1195,7 @@ mod tests {
             .as_secs()
             .into();
 
-        let head_block: SavedBlock = Arc::new(Block {
+        let head_block: Web3ProxyBlock = Arc::new(Block {
             hash: Some(H256::random()),
             number: Some(1_000_000.into()),
             timestamp: now,

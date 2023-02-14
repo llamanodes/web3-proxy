@@ -1,8 +1,8 @@
 ///! Load balanced communication with a group of web3 rpc providers
-use super::blockchain::{ArcBlock, BlockHashesCache};
+use super::blockchain::{BlockHashesCache, Web3ProxyBlock};
+use super::consensus::ConsensusWeb3Rpcs;
 use super::one::Web3Rpc;
 use super::request::{OpenRequestHandle, OpenRequestResult, RequestRevertHandler};
-use super::synced_connections::ConsensusWeb3Rpcs;
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
@@ -38,9 +38,9 @@ pub struct Web3Rpcs {
     /// any requests will be forwarded to one (or more) of these connections
     pub(crate) conns: HashMap<String, Arc<Web3Rpc>>,
     /// all providers with the same consensus head block. won't update if there is no `self.watch_consensus_head_sender`
-    pub(super) watch_consensus_connections_sender: watch::Sender<Arc<ConsensusWeb3Rpcs>>,
+    pub(super) watch_consensus_rpcs_sender: watch::Sender<Arc<ConsensusWeb3Rpcs>>,
     /// this head receiver makes it easy to wait until there is a new block
-    pub(super) watch_consensus_head_receiver: Option<watch::Receiver<ArcBlock>>,
+    pub(super) watch_consensus_head_receiver: Option<watch::Receiver<Web3ProxyBlock>>,
     pub(super) pending_transactions:
         Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
@@ -48,8 +48,14 @@ pub struct Web3Rpcs {
     pub(super) block_hashes: BlockHashesCache,
     /// blocks on the heaviest chain
     pub(super) block_numbers: Cache<U64, H256, hashbrown::hash_map::DefaultHashBuilder>,
+    /// the number of rpcs required to agree on consensus for the head block (thundering herd protection)
     pub(super) min_head_rpcs: usize,
+    /// the soft limit required to agree on consensus for the head block. (thundering herd protection)
     pub(super) min_sum_soft_limit: u32,
+    /// how far behind the highest known block height we can be before we stop serving requests
+    pub(super) max_block_lag: Option<U64>,
+    /// how old our consensus head block we can be before we stop serving requests
+    pub(super) max_block_age: Option<u64>,
 }
 
 impl Web3Rpcs {
@@ -60,13 +66,15 @@ impl Web3Rpcs {
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
         http_client: Option<reqwest::Client>,
+        max_block_age: Option<u64>,
+        max_block_lag: Option<U64>,
         min_head_rpcs: usize,
         min_sum_soft_limit: u32,
         pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
         server_configs: HashMap<String, Web3RpcConfig>,
-        watch_consensus_head_sender: Option<watch::Sender<ArcBlock>>,
+        watch_consensus_head_sender: Option<watch::Sender<Web3ProxyBlock>>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
@@ -212,13 +220,15 @@ impl Web3Rpcs {
 
         let connections = Arc::new(Self {
             conns: connections,
-            watch_consensus_connections_sender,
+            watch_consensus_rpcs_sender: watch_consensus_connections_sender,
             watch_consensus_head_receiver,
             pending_transactions,
             block_hashes,
             block_numbers,
             min_sum_soft_limit,
             min_head_rpcs,
+            max_block_age,
+            max_block_lag,
         });
 
         let authorization = Arc::new(Authorization::internal(db_conn.clone())?);
@@ -254,7 +264,7 @@ impl Web3Rpcs {
         authorization: Arc<Authorization>,
         pending_tx_id_receiver: flume::Receiver<TxHashAndRpc>,
         block_receiver: flume::Receiver<BlockAndRpc>,
-        head_block_sender: Option<watch::Sender<ArcBlock>>,
+        head_block_sender: Option<watch::Sender<Web3ProxyBlock>>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         let mut futures = vec![];
@@ -455,7 +465,7 @@ impl Web3Rpcs {
         max_block_needed: Option<&U64>,
     ) -> anyhow::Result<OpenRequestResult> {
         let usable_rpcs_by_head_num_and_weight: BTreeMap<(Option<U64>, u64), Vec<Arc<Web3Rpc>>> = {
-            let synced_connections = self.watch_consensus_connections_sender.borrow().clone();
+            let synced_connections = self.watch_consensus_rpcs_sender.borrow().clone();
 
             let head_block_num = if let Some(head_block) = synced_connections.head_block.as_ref() {
                 head_block.number()
@@ -499,7 +509,7 @@ impl Web3Rpcs {
                         match x_head_block {
                             None => continue,
                             Some(x_head) => {
-                                let key = (Some(x_head.number()), u64::MAX - x.tier);
+                                let key = (Some(*x_head.number()), u64::MAX - x.tier);
 
                                 m.entry(key).or_insert_with(Vec::new).push(x);
                             }
@@ -508,6 +518,7 @@ impl Web3Rpcs {
                 }
                 cmp::Ordering::Equal => {
                     // need the consensus head block. filter the synced rpcs
+                    // TODO: this doesn't properly check the allow_backups variable!
                     for x in synced_connections
                         .conns
                         .iter()
@@ -519,7 +530,7 @@ impl Web3Rpcs {
                     }
                 }
                 cmp::Ordering::Greater => {
-                    // TODO? if the blocks is close and wait_for_sync and allow_backups, wait for change on a watch_consensus_connections_receiver().subscribe()
+                    // TODO? if the blocks is close, wait for change on a watch_consensus_connections_receiver().subscribe()
                     return Ok(OpenRequestResult::NotReady(allow_backups));
                 }
             }
@@ -670,11 +681,7 @@ impl Web3Rpcs {
 
         let mut tried = HashSet::new();
 
-        let mut synced_conns = self
-            .watch_consensus_connections_sender
-            .borrow()
-            .conns
-            .clone();
+        let mut synced_conns = self.watch_consensus_rpcs_sender.borrow().conns.clone();
 
         // synced connections are all on the same block. sort them by tier with higher soft limits first
         synced_conns.sort_by_cached_key(rpc_sync_status_sort_key);
@@ -754,7 +761,7 @@ impl Web3Rpcs {
         let mut skip_rpcs = vec![];
         let mut method_not_available_response = None;
 
-        let mut watch_consensus_connections = self.watch_consensus_connections_sender.subscribe();
+        let mut watch_consensus_connections = self.watch_consensus_rpcs_sender.subscribe();
 
         // TODO: maximum retries? right now its the total number of servers
         loop {
@@ -1144,7 +1151,7 @@ impl Serialize for Web3Rpcs {
         state.serialize_field("conns", &conns)?;
 
         {
-            let consensus_connections = self.watch_consensus_connections_sender.borrow().clone();
+            let consensus_connections = self.watch_consensus_rpcs_sender.borrow().clone();
             // TODO: rename synced_connections to consensus_connections?
             state.serialize_field("synced_connections", &consensus_connections)?;
         }
@@ -1181,10 +1188,8 @@ mod tests {
     // TODO: why is this allow needed? does tokio::test get in the way somehow?
     #![allow(unused_imports)]
     use super::*;
-    use crate::rpcs::{
-        blockchain::{ConsensusFinder, SavedBlock},
-        provider::Web3Provider,
-    };
+    use crate::rpcs::consensus::ConsensusFinder;
+    use crate::rpcs::{blockchain::Web3ProxyBlock, provider::Web3Provider};
     use ethers::types::{Block, U256};
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
@@ -1213,7 +1218,7 @@ mod tests {
 
         let blocks: Vec<_> = [block_0, block_1, block_2]
             .into_iter()
-            .map(|x| SavedBlock::new(Arc::new(x)))
+            .map(|x| Web3ProxyBlock::new(Arc::new(x)))
             .collect();
 
         let mut rpcs: Vec<_> = [
@@ -1298,9 +1303,8 @@ mod tests {
         let lagged_block = Arc::new(lagged_block);
         let head_block = Arc::new(head_block);
 
-        // TODO: write a impl From for Block -> BlockId?
-        let mut lagged_block: SavedBlock = lagged_block.into();
-        let mut head_block: SavedBlock = head_block.into();
+        let mut lagged_block: Web3ProxyBlock = lagged_block.into();
+        let mut head_block: Web3ProxyBlock = head_block.into();
 
         let block_data_limit = u64::MAX;
 
@@ -1312,6 +1316,7 @@ mod tests {
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
+            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
 
@@ -1323,6 +1328,7 @@ mod tests {
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: RwLock::new(Some(lagged_block.clone())),
+            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
 
@@ -1340,13 +1346,13 @@ mod tests {
             (lagged_rpc.name.clone(), lagged_rpc.clone()),
         ]);
 
-        let (watch_consensus_connections_sender, _) = watch::channel(Default::default());
+        let (watch_consensus_rpcs_sender, _) = watch::channel(Default::default());
 
         // TODO: make a Web3Rpcs::new
         let conns = Web3Rpcs {
             conns,
             watch_consensus_head_receiver: None,
-            watch_consensus_connections_sender,
+            watch_consensus_rpcs_sender,
             pending_transactions: Cache::builder()
                 .max_capacity(10_000)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
@@ -1356,32 +1362,37 @@ mod tests {
             block_numbers: Cache::builder()
                 .max_capacity(10_000)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
+            // TODO: test max_block_age?
+            max_block_age: None,
+            // TODO: test max_block_lag?
+            max_block_lag: None,
             min_head_rpcs: 1,
             min_sum_soft_limit: 1,
         };
 
         let authorization = Arc::new(Authorization::internal(None).unwrap());
 
-        let (head_block_sender, _head_block_receiver) =
-            watch::channel::<ArcBlock>(Default::default());
-        let mut connection_heads = ConsensusFinder::default();
+        let (head_block_sender, _head_block_receiver) = watch::channel(Default::default());
+        let mut consensus_finder = ConsensusFinder::new(None, None);
 
         // process None so that
         conns
             .process_block_from_rpc(
                 &authorization,
-                &mut connection_heads,
+                &mut consensus_finder,
                 None,
                 lagged_rpc.clone(),
                 &head_block_sender,
                 &None,
             )
             .await
-            .unwrap();
+            .expect(
+                "its lagged, but it should still be seen as consensus if its the first to report",
+            );
         conns
             .process_block_from_rpc(
                 &authorization,
-                &mut connection_heads,
+                &mut consensus_finder,
                 None,
                 head_rpc.clone(),
                 &head_block_sender,
@@ -1414,12 +1425,12 @@ mod tests {
         assert!(matches!(x, OpenRequestResult::NotReady(true)));
 
         // add lagged blocks to the conns. both servers should be allowed
-        lagged_block.block = conns.save_block(lagged_block.block, true).await.unwrap();
+        lagged_block = conns.try_cache_block(lagged_block, true).await.unwrap();
 
         conns
             .process_block_from_rpc(
                 &authorization,
-                &mut connection_heads,
+                &mut consensus_finder,
                 Some(lagged_block.clone()),
                 lagged_rpc,
                 &head_block_sender,
@@ -1430,7 +1441,7 @@ mod tests {
         conns
             .process_block_from_rpc(
                 &authorization,
-                &mut connection_heads,
+                &mut consensus_finder,
                 Some(lagged_block.clone()),
                 head_rpc.clone(),
                 &head_block_sender,
@@ -1442,12 +1453,12 @@ mod tests {
         assert_eq!(conns.num_synced_rpcs(), 2);
 
         // add head block to the conns. lagged_rpc should not be available
-        head_block.block = conns.save_block(head_block.block, true).await.unwrap();
+        head_block = conns.try_cache_block(head_block, true).await.unwrap();
 
         conns
             .process_block_from_rpc(
                 &authorization,
-                &mut connection_heads,
+                &mut consensus_finder,
                 Some(head_block.clone()),
                 head_rpc,
                 &head_block_sender,
@@ -1511,7 +1522,7 @@ mod tests {
             ..Default::default()
         };
 
-        let head_block: SavedBlock = Arc::new(head_block).into();
+        let head_block: Web3ProxyBlock = Arc::new(head_block).into();
 
         let pruned_rpc = Web3Rpc {
             name: "pruned".to_string(),
@@ -1548,13 +1559,13 @@ mod tests {
             (archive_rpc.name.clone(), archive_rpc.clone()),
         ]);
 
-        let (watch_consensus_connections_sender, _) = watch::channel(Default::default());
+        let (watch_consensus_rpcs_sender, _) = watch::channel(Default::default());
 
         // TODO: make a Web3Rpcs::new
         let conns = Web3Rpcs {
             conns,
             watch_consensus_head_receiver: None,
-            watch_consensus_connections_sender,
+            watch_consensus_rpcs_sender,
             pending_transactions: Cache::builder()
                 .max_capacity(10)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
@@ -1566,13 +1577,14 @@ mod tests {
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
             min_head_rpcs: 1,
             min_sum_soft_limit: 3_000,
+            max_block_age: None,
+            max_block_lag: None,
         };
 
         let authorization = Arc::new(Authorization::internal(None).unwrap());
 
-        let (head_block_sender, _head_block_receiver) =
-            watch::channel::<ArcBlock>(Default::default());
-        let mut connection_heads = ConsensusFinder::default();
+        let (head_block_sender, _head_block_receiver) = watch::channel(Default::default());
+        let mut connection_heads = ConsensusFinder::new(None, None);
 
         conns
             .process_block_from_rpc(
