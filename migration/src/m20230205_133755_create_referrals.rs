@@ -57,12 +57,11 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(Referee::UsedReferralCode)
                             .string()
-                            .unique_key()
                             .not_null()
                     )
                     .foreign_key(
                         sea_query::ForeignKey::create()
-                            .from(Referee::Table, Referee::UserId)
+                            .from(Referee::Table, Referee::UsedReferralCode)
                             .to(Referrer::Table, Referrer::ReferralCode),
                     )
                     .col(

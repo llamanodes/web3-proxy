@@ -2,14 +2,13 @@ use anyhow::{self, Result};
 use thread_fast_rng::rand::distributions::Alphanumeric;
 use thread_fast_rng::rand::{Rng, thread_rng};
 
-pub struct ReferralCode(String);
+pub struct ReferralCode(pub String);
 
 impl Default for ReferralCode {
     fn default() -> Self {
         let mut rng = thread_rng();
         let chars: String = (0..32).map(|_| rng.sample(Alphanumeric) as char).collect();
-        println!("Random chars: {}", chars);
-        Self(format!("llamanodes-{}", rand_string))
+        Self(format!("llamanodes-{}", chars))
     }
 }
 

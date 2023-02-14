@@ -16,11 +16,12 @@ use axum::{
     response::IntoResponse,
     Extension, Json, TypedHeader,
 };
+use crate::frontend::authorization::{Authorization as InternalAuthorization, RequestMetadata};
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::sea_orm_active_enums::LogLevel;
-use entities::{login, pending_login, referral, revert_log, rpc_key, rpc_request, user, user_tier};
+use entities::{login, pending_login, referrer, referee, revert_log, rpc_key, rpc_request, user, user_tier};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
@@ -41,10 +42,11 @@ use std::sync::Arc;
 use ethers::abi::ParamType;
 use ethers::prelude::H256;
 use ethers::types::Transaction;
+use futures::TryFutureExt;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
 use entities;
-use entities::prelude::{Referral, UserTier};
+use entities::prelude::{Referrer, Referee, UserTier};
 use migration::extension::postgres::Type;
 use thread_fast_rng::rand;
 use crate::frontend::errors::FrontendErrorResponse;
@@ -283,8 +285,8 @@ pub async fn user_login_post(
     let caller = user::Entity::find()
         .filter(user::Column::Address.eq(our_msg.address.as_ref()))
         .one(db_replica.conn())
-        .await
-        .unwrap();
+        .await?;
+    // .ok_or(FrontendErrorResponse::BadRequest("Login address was not previously found".to_string()))
 
     let db_conn = app.db_conn().context("login requires a db")?;
 
@@ -296,61 +298,25 @@ pub async fn user_login_post(
             // TODO: more advanced invite codes that set different request/minute and concurrency limits
             // Do nothing if app config is none (then there is basically no authentication invitation, and the user can process with a free tier ...
 
-            let txn;
+            let txn = db_conn.begin().await?;
 
-            let user_referrer;  // : Option<Referral>
-            if let Some(invite_code) = &app.config.invite_code {
-                if query.invite_code.as_ref() != Some(invite_code) {
-                    return Err(anyhow::anyhow!("checking invite_code").into());
-                }
-            }
-
-            if invite_code.is_some() {
-                // If it is not inside, also check in the database
-                user_referrer = referral::Entity::find()
-                    .filter(referral::Column::ReferralCode.eq(referral_link))
-                    .one(db_replica.conn())
-                    .await?
-                    .ok_or(
-                        FrontendErrorResponse::BadRequest(
-                            format!("The referral_link you provided does not exist {}", referral_code)
-                        )
-                    )?;
-
-                // Create a new item in the database,
-                // marking this guy as the referrer (and ignoring a duplicate insert, if there is any...)
-                // First person to make the referral gets all credits
-                // Generate a random referral code ...
-                let used_referral = referral::ActiveModel {
-                    // address: sea_orm::Set(our_msg.address.into()),
-                    used_referral_code: Some(user_referrer.referral_code),
-                    user_id: caller.id,
-                    ..Default::default()
-                };
-
-                txn = db_conn.begin().await?;
-                used_referral.insert(&txn).await?;
-            } else if app.config.invite_code.is_none() {
-                // Pass
-                txn = db_conn.begin().await?;
-            }
+            // First add a user
 
             // the only thing we need from them is an address
             // everything else is optional
             // TODO: different invite codes should allow different levels
             // TODO: maybe decrement a count on the invite code?
+            // TODO: There will be two different transactions. The first one inserts the user, the second one marks the user as being referred
             let caller = user::ActiveModel {
                 address: sea_orm::Set(our_msg.address.into()),
                 ..Default::default()
             };
 
-            let caller = caller.insert(&txn).await?;
-
             // create the user's first api key
             let rpc_secret_key = RpcSecretKey::new();
 
             let user_rpc_key = rpc_key::ActiveModel {
-                user_id: sea_orm::Set(caller.id),
+                user_id: caller.id.clone(),
                 secret_key: sea_orm::Set(rpc_secret_key.into()),
                 description: sea_orm::Set(None),
                 ..Default::default()
@@ -360,6 +326,42 @@ pub async fn user_login_post(
                 .insert(&txn)
                 .await
                 .context("Failed saving new user key")?;
+
+            // TODO: What does this return, the model (?)
+            let caller = caller.insert(&txn).await?;
+
+            let user_referrer;  // : Option<Referral>
+            if let Some(invite_code) = &app.config.invite_code {
+                if query.invite_code.as_ref() != Some(invite_code) {
+                    return Err(anyhow::anyhow!("checking invite_code").into());
+                }
+
+                // TODO: the invite code is the referral link, right ?
+
+                // If it is not inside, also check in the database
+                user_referrer = referrer::Entity::find()
+                    .filter(referrer::Column::ReferralCode.eq(invite_code))
+                    .one(db_replica.conn())
+                    .await?
+                    .ok_or(
+                        FrontendErrorResponse::BadRequest(
+                            format!("The referral_link you provided does not exist {}", invite_code)
+                        )
+                    )?;
+
+                // Create a new item in the database,
+                // marking this guy as the referrer (and ignoring a duplicate insert, if there is any...)
+                // First person to make the referral gets all credits
+                // Generate a random referral code ...
+                let used_referral = referee::ActiveModel {
+                    used_referral_code: sea_orm::Set(user_referrer.referral_code),
+                    user_id: sea_orm::Set(caller.id),
+                    ..Default::default()
+                };
+                used_referral.insert(&txn).await?;
+            } else if app.config.invite_code.is_none() {
+                // Pass (Actually, what is this again? This is for the Trial invite code, right?
+            }
 
             let user_rpc_keys = vec![user_rpc_key];
 
@@ -372,7 +374,7 @@ pub async fn user_login_post(
         }
         Some(caller) => {
 
-            // Let's say that a user that exists can actually
+            // Let's say that a user that exists can actually also redeem a key in retrospect...
 
             // the user is already registered
             let user_rpc_keys = rpc_key::Entity::find()
@@ -859,8 +861,8 @@ pub async fn rpc_keys_management(
 //     let db_conn = app.db_conn()?;
 // }
 
-#[debug_handle]
-pub async fn user_increase_credits(
+#[debug_handler]
+pub async fn user_increase_balance(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(mut params): Query<HashMap<String, String>>,
@@ -884,74 +886,98 @@ pub async fn user_increase_credits(
 
     // We don't check the trace, the transaction must be a naive, simple send transaction (for now at least...)
     // TODO: Get the respective transaction ...
-    let tx: Transaction = match rpc.try_request_handle(authorization, false).await {
-        Ok(OpenRequestResult::Handle(handle)) => {
-            handle.request(
-                "eth_getTransactionByHash",
-                &json!(Option::None::<()>),
-                Level::Trace.into(),
-            ).await
-        }
-        Ok(_) => {
-            // TODO: actually retry?
-            FrontendErrorResponse::StatusCode(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "We retrieved no handle! Should try again!".to_string(),
-                None,
-            )
-        }
-        Err(err) => {
-            log::trace!(
-                    "cancelled funneling transaction {} from {}: {:?}",
-                    pending_tx_id,
-                    rpc,
-                    err,
-                );
-            FrontendErrorResponse::StatusCode(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "We retrieved no handle! Should try again!".to_string(),
-                None,
-            )
-        }
-    }?;
 
-    // Make sure that from coincides with the user that is calling this ...
-    // Actually, this doesn't matter ...
-    let contract = match tx.to {
-        None => {
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "The Transaction is not a Transfer".to_string(),
-                None,
-            )
-        }
-        Some(contract) => contract
-    }?;
+    // Where do I get the authorization from ...
+    let authorization = Arc::new(InternalAuthorization::internal(None).unwrap());
+    let rpc = app.balanced_rpcs.get(app.balanced_rpcs.conns.keys().into_iter().collect::<Vec<_>>()[0]).unwrap();
 
-    // Throw error if this is a currency that we do not support
-    if !CURRENCIES.contains_key(&k) {
-        return Err(FrontendErrorResponse::BadRequest("We do not support this currency / contract".to_string()));
-    }
+    // Get the rpc from the app ..
+    // TODO: Implement logic to parse events from transaction hash
+    // let tx: Transaction = match rpc.try_request_handle(&authorization, false).await {
+    //     Ok(OpenRequestResult::Handle(handle)) => {
+    //         // TODO: Figure out how to pass the transaction hash as a parameter ...
+    //         handle.request(
+    //             "eth_getTransactionByHash",
+    //             &json!(Option::None::<()>),  // &vec![ParamType::String(tx_hash.to_string())], // ,  // TODO: Insert the hash that we want to validate here
+    //             Level::Trace.into(),
+    //             )
+    //             .await
+    //             .map_err(|_|
+    //                 FrontendErrorResponse::StatusCode(
+    //                     StatusCode::SERVICE_UNAVAILABLE,
+    //                     "Request failed!".to_string(),
+    //                     None,
+    //                 )
+    //             )
+    //     }
+    //     Ok(_) => {
+    //         // TODO: actually retry?
+    //         Err(FrontendErrorResponse::StatusCode(
+    //             StatusCode::SERVICE_UNAVAILABLE,
+    //             "We retrieved no handle! Should try again!".to_string(),
+    //             None,
+    //         ))
+    //     }
+    //     Err(err) => {
+    //         // TODO: Just skip this part until one item responds ...
+    //         log::trace!(
+    //                 "cancelled funneling transaction {} from {}: {:?}",
+    //                 tx_hash,
+    //                 rpc,
+    //                 err,
+    //             );
+    //         Err(FrontendErrorResponse::StatusCode(
+    //             StatusCode::SERVICE_UNAVAILABLE,
+    //             "We retrieved no handle! Should try again!".to_string(),
+    //             None,
+    //         ))
+    //     }
+    // }?;
+    //
+    // // Make sure that from coincides with the user that is calling this ...
+    // // Actually, this doesn't matter ...
+    // let contract = match tx.to {
+    //     None => {
+    //         Err(FrontendErrorResponse::BadRequest("The Transaction is not a Transfer".to_string()))
+    //     }
+    //     Some(contract) => {
+    //         // Make sure that the contract is our contract ...
+    //         if app.config.deposit_contract == contract {
+    //             Ok(contract)
+    //         } else {
+    //             Err(FrontendErrorResponse::BadRequest(format!("Transfer was not into our deposit contract {:?}", contract)))
+    //         }
+    //     }
+    // }?;
+    //
+    // // Throw error if this is a currency that we do not support
+    // // TODO: Just gotta detect an event I guess ... No need to cross-compare with currencies
+    // // TODO: Figure out how to read out events from the transaction! (maybe from trace or sth lol)
+    // // Decode the transaction of the contract ...
+    //
+    // // Given all traces for the transaction, run the logs ...
+    // let (account, token, amount) = ethers::abi::decode(
+    //     &[
+    //         ParamType::Address,
+    //         ParamType::Address,
+    //         ParamType::Uint(256usize)
+    //     ],
+    //     tx.data
+    // ).into()?[0];
 
-    // Decode the transaction of the contract ...
-    // ethers::abi::decode(
-    //     &[ParamType::Address],
-    //     tx.
-    // )
+    println!("Account found");
 
 
     // TODO: Decode the data of the transaction. The to-address must be an ERC20, one of the stablecoins ...
 
-    // abi::decode()
-
-
-    Ok(())
+    unimplemented!();
+    // Ok(())
 }
 
 /// Create or get the existing referral link.
 /// This is the link that the user can share to third parties, and get credits.
 /// Applies to premium users only
-#[debug_handle]
+#[debug_handler]
 pub async fn user_referral_link_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
@@ -966,11 +992,11 @@ pub async fn user_referral_link_get(
         .context("getting replica db for user's revert logs")?;
 
     // Second, check if the user is a premium user
-    let user_tier: UserTier = user_tier::Entity::find()
-        .filter(user_tier::Column::UserId.eq(user.id))
+    let user_tier = user_tier::Entity::find()
+        .filter(user_tier::Column::Id.eq(user.user_tier_id))
         .one(db_replica.conn())
         .await?
-        .ok_or(FrontendErrorResponse::BadRequest(StatusCode::BAD_REQUEST, "Could not find user in db although bearer token is there!".to_string()))?;
+        .ok_or(FrontendErrorResponse::BadRequest("Could not find user in db although bearer token is there!".to_string()))?;
 
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
     if user_tier.title != "Premium" {
@@ -978,30 +1004,29 @@ pub async fn user_referral_link_get(
     }
 
     // Then get the referral token
-    let user_referral: Option<Referral> = referral::Entity::find()
-        .filter(referral::Column::UserId.eq(user.id))
+    let user_referrer = referrer::Entity::find()
+        .filter(referrer::Column::UserId.eq(user.id))
         .one(db_replica.conn())
         .await?;
 
-    let (referral_code, status_code) = match user_referral {
+    let (referral_code, status_code) = match user_referrer {
         Some(x) => (x.referral_code, StatusCode::OK),
         None => {
 
             // Connect to the database for mutable write
-            let db_conn = app
-                .db_conn()?;
+            let db_conn = app.db_conn().context("getting db_conn")?;
 
             let referral_code = ReferralCode::default().0;
 
             let txn = db_conn.begin().await?;
 
-            // Create a new referral code
-            let referral_entry = referral::ActiveModel {
-                used_referral_code: None,
-                user_id: user.id,
+            // Log that this guy was referred by another guy
+            // Do not automatically create a new
+            let referrer_entry = referee::ActiveModel {
+                user_id: sea_orm::ActiveValue::Set(user.id),
                 ..Default::default()
             };
-            referral_entry.insert(&txn).await?;
+            referrer_entry.insert(&txn).await?;
             txn.commit().await?;
             (referral_code, StatusCode::CREATED)
         }
@@ -1009,7 +1034,6 @@ pub async fn user_referral_link_get(
 
     let response_json = json!({
         "referral_code": referral_code,
-        "bearer_token": user_bearer_token,
         "user": user,
     });
 

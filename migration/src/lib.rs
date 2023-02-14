@@ -16,6 +16,7 @@ mod m20230119_204135_better_free_tier;
 mod m20230205_130035_create_balance;
 mod m20230205_133204_create_requests;
 mod m20230205_133755_create_referrals;
+mod m20230214_134254_increase_balance_transactions;
 
 pub struct Migrator;
 
@@ -39,6 +40,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20230205_130035_create_balance::Migration),
             Box::new(m20230205_133204_create_requests::Migration),
             Box::new(m20230205_133755_create_referrals::Migration),
+            Box::new(m20230214_134254_increase_balance_transactions::Migration),
         ]
     }
 }

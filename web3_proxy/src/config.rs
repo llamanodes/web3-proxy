@@ -3,7 +3,7 @@ use crate::rpcs::one::Web3Rpc;
 use crate::{app::AnyhowJoinHandle, rpcs::blockchain::ArcBlock};
 use argh::FromArgs;
 use ethers::prelude::TxHash;
-use ethers::types::U256;
+use ethers::types::{Address, U256};
 use hashbrown::HashMap;
 use log::warn;
 use migration::sea_orm::DatabaseConnection;
@@ -93,6 +93,9 @@ pub struct AppConfig {
     /// 0 = block all requests
     /// None = allow all requests
     pub default_user_max_requests_per_period: Option<u64>,
+
+    /// Default ERC address for out deposit contract
+    pub deposit_contract: Address,
 
     /// minimum amount to increase eth_estimateGas results
     pub gas_increase_min: Option<U256>,

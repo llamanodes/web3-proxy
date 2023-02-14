@@ -157,7 +157,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/user/keys", post(users::rpc_keys_management))
         .route("/user/keys", put(users::rpc_keys_management))
         .route("/user/referral/:referral_link", get(users::user_referral_link_get))
-        .route("/user/balance/:tx_hash", get(users::user_increase_credits))
+        .route("/user/balance/:tx_hash", get(users::user_increase_balance))
         .route("/user/revert_logs", get(users::user_revert_logs_get))
         .route(
             "/user/stats/aggregate",
