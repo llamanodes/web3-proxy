@@ -458,10 +458,7 @@ impl Web3Rpcs {
                                 max_block_needed
                             ))
                         }
-                        cmp::Ordering::Less => {
-                            // hmmmm
-                            todo!("now what do we do?");
-                        }
+                        cmp::Ordering::Less => min_block_needed.cmp(head_block_num),
                     }
                 }
             };

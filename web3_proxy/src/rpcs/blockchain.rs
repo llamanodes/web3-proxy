@@ -415,6 +415,8 @@ impl Web3Rpcs {
 
         // TODO: what should we do if the block number of new_synced_connections is < old_synced_connections? wait?
 
+        let consensus_tier = new_synced_connections.tier;
+        let total_tiers = consensus_finder.len();
         let backups_needed = new_synced_connections.backups_needed;
         let consensus_head_block = new_synced_connections.head_block.clone();
         let num_consensus_rpcs = new_synced_connections.num_conns();
@@ -434,7 +436,9 @@ impl Web3Rpcs {
             match &old_consensus_head_connections.head_block {
                 None => {
                     debug!(
-                        "first {}{}/{}/{} block={}, rpc={}",
+                        "first {}/{} {}{}/{}/{} block={}, rpc={}",
+                        consensus_tier,
+                        total_tiers,
                         backups_voted_str,
                         num_consensus_rpcs,
                         num_active_rpcs,
@@ -469,7 +473,9 @@ impl Web3Rpcs {
                                 // no change in hash. no need to use head_block_sender
                                 // TODO: trace level if rpc is backup
                                 debug!(
-                                    "con {}{}/{}/{} con={} rpc={}@{}",
+                                    "con {}/{} {}{}/{}/{} con={} rpc={}@{}",
+                                    consensus_tier,
+                                    total_tiers,
                                     backups_voted_str,
                                     num_consensus_rpcs,
                                     num_active_rpcs,
@@ -486,7 +492,9 @@ impl Web3Rpcs {
                                 }
 
                                 debug!(
-                                    "unc {}{}/{}/{} con_head={} old={} rpc={}@{}",
+                                    "unc {}/{} {}{}/{}/{} con_head={} old={} rpc={}@{}",
+                                    consensus_tier,
+                                    total_tiers,
                                     backups_voted_str,
                                     num_consensus_rpcs,
                                     num_active_rpcs,
@@ -511,7 +519,9 @@ impl Web3Rpcs {
                             // this is unlikely but possible
                             // TODO: better log
                             warn!(
-                                "chain rolled back {}{}/{}/{} con={} old={} rpc={}@{}",
+                                "chain rolled back {}/{} {}{}/{}/{} con={} old={} rpc={}@{}",
+                                consensus_tier,
+                                total_tiers,
                                 backups_voted_str,
                                 num_consensus_rpcs,
                                 num_active_rpcs,
@@ -541,7 +551,9 @@ impl Web3Rpcs {
                         }
                         Ordering::Greater => {
                             debug!(
-                                "new {}{}/{}/{} con={} rpc={}@{}",
+                                "new {}/{} {}{}/{}/{} con={} rpc={}@{}",
+                                consensus_tier,
+                                total_tiers,
                                 backups_voted_str,
                                 num_consensus_rpcs,
                                 num_active_rpcs,
@@ -573,7 +585,9 @@ impl Web3Rpcs {
             if num_active_rpcs >= self.min_head_rpcs {
                 // no consensus!!!
                 error!(
-                    "non {}{}/{}/{} rpc={}@{}",
+                    "non {}/{} {}{}/{}/{} rpc={}@{}",
+                    consensus_tier,
+                    total_tiers,
                     backups_voted_str,
                     num_consensus_rpcs,
                     num_active_rpcs,
@@ -584,7 +598,9 @@ impl Web3Rpcs {
             } else {
                 // no consensus, but we do not have enough rpcs connected yet to panic
                 debug!(
-                    "non {}{}/{}/{} rpc={}@{}",
+                    "non {}/{} {}{}/{}/{} rpc={}@{}",
+                    consensus_tier,
+                    total_tiers,
                     backups_voted_str,
                     num_consensus_rpcs,
                     num_active_rpcs,
