@@ -61,6 +61,12 @@ impl Web3ProxyApp {
                     );
 
                     while let Some(new_head) = head_block_receiver.next().await {
+                        let new_head = if let Some(new_head) = new_head {
+                            new_head
+                        } else {
+                            continue;
+                        };
+
                         // TODO: what should the payload for RequestMetadata be?
                         let request_metadata =
                             Arc::new(RequestMetadata::new(REQUEST_PERIOD, 0).unwrap());
