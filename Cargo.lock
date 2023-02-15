@@ -1804,6 +1804,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 
 [[package]]
+name = "ewma"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f20267f3a8b678b7151c0c508002e79126144a5d47badddec7f31ddc1f4c754"
+
+[[package]]
 name = "eyre"
 version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3126,6 +3132,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "ordered-float"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d84eb1409416d254e4a9c8fa56cc24701755025b458f0fcd8e59e1f5f40c23bf"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -5770,6 +5785,7 @@ dependencies = [
  "entities",
  "env_logger",
  "ethers",
+ "ewma",
  "fdlimit",
  "flume",
  "futures",
@@ -5788,6 +5804,7 @@ dependencies = [
  "num",
  "num-traits",
  "once_cell",
+ "ordered-float",
  "pagerduty-rs",
  "parking_lot 0.12.1",
  "prettytable",
