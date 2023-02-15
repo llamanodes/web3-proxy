@@ -3,6 +3,7 @@
 pub mod prelude;
 
 pub mod admin;
+pub mod admin_trail;
 pub mod login;
 pub mod pending_login;
 pub mod referral;
