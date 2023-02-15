@@ -65,7 +65,7 @@ pub async fn query_admin_modify_usertier<'a>(
     // Check if the caller is an admin (i.e. if he is in an admin table)
     let admin: admin::Model = admin::Entity::find()
         .filter(admin::Column::UserId.eq(caller_id))
-        .one(db_replica.conn())
+        .one(&db_conn)
         .await?
         .ok_or(FrontendErrorResponse::AccessDenied)?;
 
@@ -74,7 +74,7 @@ pub async fn query_admin_modify_usertier<'a>(
     // Fetch the admin, and the user
     let user: user::Model = user::Entity::find()
         .filter(user::Column::Address.eq(user_address))
-        .one(db_replica.conn())
+        .one(&db_conn)
         .await?
         .ok_or(FrontendErrorResponse::BadRequest("No user with this id found".to_string()))?;
     // Return early if the target user_tier_id is the same as the original user_tier_id
@@ -86,7 +86,7 @@ pub async fn query_admin_modify_usertier<'a>(
     // Now we can modify the user's tier
     let new_user_tier: user_tier::Model = user_tier::Entity::find()
         .filter(user_tier::Column::Title.eq(user_tier_title.clone()))
-        .one(db_replica.conn())
+        .one(&db_conn)
         .await?
         .ok_or(FrontendErrorResponse::BadRequest("User Tier name was not found".to_string()))?;
 
@@ -105,7 +105,7 @@ pub async fn query_admin_modify_usertier<'a>(
     // Query the login table, and get all bearer tokens by this user
     let bearer_tokens = login::Entity::find()
         .filter(login::Column::UserId.eq(user.id))
-        .all(db_replica.conn())
+        .all(&db_conn)
         .await?;
 
     // Now delete these tokens ...

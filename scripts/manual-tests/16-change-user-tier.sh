@@ -1,5 +1,5 @@
-# docker-compose up -d
 # rm -rf data/
+# docker-compose up -d
 # sea-orm-cli migrate up
 
 # Use CLI to create the admin that will call the endpoint
