@@ -19,18 +19,18 @@ pub struct ConsensusWeb3Rpcs {
     pub(super) head_block: Option<Web3ProxyBlock>,
     // TODO: this should be able to serialize, but it isn't
     #[serde(skip_serializing)]
-    pub(super) conns: Vec<Arc<Web3Rpc>>,
+    pub(super) rpcs: Vec<Arc<Web3Rpc>>,
     pub(super) backups_voted: Option<Web3ProxyBlock>,
     pub(super) backups_needed: bool,
 }
 
 impl ConsensusWeb3Rpcs {
     pub fn num_conns(&self) -> usize {
-        self.conns.len()
+        self.rpcs.len()
     }
 
     pub fn sum_soft_limit(&self) -> u32 {
-        self.conns.iter().fold(0, |sum, rpc| sum + rpc.soft_limit)
+        self.rpcs.iter().fold(0, |sum, rpc| sum + rpc.soft_limit)
     }
 
     // TODO: sum_hard_limit?
@@ -42,7 +42,7 @@ impl fmt::Debug for ConsensusWeb3Rpcs {
         // TODO: print the actual conns?
         f.debug_struct("ConsensusConnections")
             .field("head_block", &self.head_block)
-            .field("num_conns", &self.conns.len())
+            .field("num_conns", &self.rpcs.len())
             .finish_non_exhaustive()
     }
 }
@@ -52,7 +52,7 @@ impl Web3Rpcs {
     pub fn head_block(&self) -> Option<Web3ProxyBlock> {
         self.watch_consensus_head_receiver
             .as_ref()
-            .map(|x| x.borrow().clone())
+            .and_then(|x| x.borrow().clone())
     }
 
     // TODO: return a ref?
@@ -66,11 +66,11 @@ impl Web3Rpcs {
     }
 
     pub fn synced(&self) -> bool {
-        !self.watch_consensus_rpcs_sender.borrow().conns.is_empty()
+        !self.watch_consensus_rpcs_sender.borrow().rpcs.is_empty()
     }
 
     pub fn num_synced_rpcs(&self) -> usize {
-        self.watch_consensus_rpcs_sender.borrow().conns.len()
+        self.watch_consensus_rpcs_sender.borrow().rpcs.len()
     }
 }
 
@@ -243,7 +243,7 @@ impl ConnectionsGroup {
                     continue;
                 }
 
-                if let Some(rpc) = web3_rpcs.conns.get(rpc_name.as_str()) {
+                if let Some(rpc) = web3_rpcs.by_name.get(rpc_name.as_str()) {
                     if backup_rpcs_voted.is_some() {
                         // backups already voted for a head block. don't change it
                     } else {
@@ -257,7 +257,7 @@ impl ConnectionsGroup {
                 } else {
                     // i don't think this is an error. i think its just if a reconnect is currently happening
                     warn!("connection missing: {}", rpc_name);
-                    debug!("web3_rpcs.conns: {:#?}", web3_rpcs.conns);
+                    debug!("web3_rpcs.conns: {:#?}", web3_rpcs.by_name);
                 }
             }
 
@@ -340,7 +340,7 @@ impl ConnectionsGroup {
         // success! this block has enough soft limit and nodes on it (or on later blocks)
         let conns: Vec<Arc<Web3Rpc>> = primary_consensus_rpcs
             .into_iter()
-            .filter_map(|conn_name| web3_rpcs.conns.get(conn_name).cloned())
+            .filter_map(|conn_name| web3_rpcs.by_name.get(conn_name).cloned())
             .collect();
 
         #[cfg(debug_assertions)]
@@ -350,7 +350,7 @@ impl ConnectionsGroup {
 
         Ok(ConsensusWeb3Rpcs {
             head_block: Some(maybe_head_block),
-            conns,
+            rpcs: conns,
             backups_voted: backup_rpcs_voted,
             backups_needed: primary_rpcs_voted.is_none(),
         })
@@ -528,7 +528,7 @@ impl ConsensusFinder {
         // TODO: find the best tier with a connectionsgroup. best case, this only queries the first tier
         // TODO: do we need to calculate all of them? I think having highest_known_block included as part of min_block_num should make that unnecessary
         for (i, x) in self.tiers.iter() {
-            trace!("checking tier {}", i);
+            trace!("checking tier {}: {:#?}", i, x.rpc_name_to_block);
             if let Ok(consensus_head_connections) = x
                 .consensus_head_connections(authorization, web3_connections, min_block_num)
                 .await
@@ -541,5 +541,13 @@ impl ConsensusFinder {
         }
 
         return Err(anyhow::anyhow!("failed finding consensus on all tiers"));
+    }
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn test_simplest_case_consensus_head_connections() {
+        todo!();
     }
 }

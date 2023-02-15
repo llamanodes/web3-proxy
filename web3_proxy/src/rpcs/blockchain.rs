@@ -5,7 +5,7 @@ use super::one::Web3Rpc;
 use super::transactions::TxStatus;
 use crate::frontend::authorization::Authorization;
 use crate::{config::BlockAndRpc, jsonrpc::JsonRpcRequest};
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use hashbrown::HashSet;
@@ -45,7 +45,11 @@ impl PartialEq for Web3ProxyBlock {
 
 impl Web3ProxyBlock {
     /// A new block has arrived over a subscription
-    pub fn new(block: ArcBlock) -> Self {
+    pub fn try_new(block: ArcBlock) -> Option<Self> {
+        if block.number.is_none() || block.hash.is_none() {
+            return None;
+        }
+
         let mut x = Self {
             block,
             received_age: None,
@@ -56,7 +60,7 @@ impl Web3ProxyBlock {
         // TODO: emit a stat for received_age
         x.received_age = Some(x.age());
 
-        x
+        Some(x)
     }
 
     pub fn age(&self) -> u64 {
@@ -97,12 +101,20 @@ impl Web3ProxyBlock {
     }
 }
 
-impl From<ArcBlock> for Web3ProxyBlock {
-    fn from(x: ArcBlock) -> Self {
-        Web3ProxyBlock {
+impl TryFrom<ArcBlock> for Web3ProxyBlock {
+    type Error = anyhow::Error;
+
+    fn try_from(x: ArcBlock) -> Result<Self, Self::Error> {
+        if x.number.is_none() || x.hash.is_none() {
+            return Err(anyhow!("Blocks here must have a number of hash"));
+        }
+
+        let b = Web3ProxyBlock {
             block: x,
             received_age: None,
-        }
+        };
+
+        Ok(b)
     }
 }
 
@@ -184,7 +196,13 @@ impl Web3Rpcs {
                     None,
                 )
                 .await?
-                .map(Into::into)
+                .and_then(|x| {
+                    if x.number.is_none() {
+                        None
+                    } else {
+                        x.try_into().ok()
+                    }
+                })
                 .context("no block!")?,
             None => {
                 // TODO: helper for method+params => JsonRpcRequest
@@ -208,8 +226,10 @@ impl Web3Rpcs {
 
                 let block: Option<ArcBlock> = serde_json::from_str(block.get())?;
 
-                // TODO: from isn't great here. received time is going to be weird
-                block.map(Into::into).context("no block!")?
+                let block: ArcBlock = block.context("no block in the response")?;
+
+                // TODO: received time is going to be weird
+                Web3ProxyBlock::try_from(block)?
             }
         };
 
@@ -252,7 +272,11 @@ impl Web3Rpcs {
 
         // be sure the requested block num exists
         // TODO: is this okay? what if we aren't synced?!
-        let mut head_block_num = *consensus_head_receiver.borrow_and_update().number();
+        let mut head_block_num = *consensus_head_receiver
+            .borrow_and_update()
+            .as_ref()
+            .context("no consensus head block")?
+            .number();
 
         loop {
             if num <= &head_block_num {
@@ -262,7 +286,9 @@ impl Web3Rpcs {
             trace!("waiting for future block {} > {}", num, head_block_num);
             consensus_head_receiver.changed().await?;
 
-            head_block_num = *consensus_head_receiver.borrow_and_update().number();
+            if let Some(head) = consensus_head_receiver.borrow_and_update().as_ref() {
+                head_block_num = *head.number();
+            }
         }
 
         let block_depth = (head_block_num - num).as_u64();
@@ -297,7 +323,7 @@ impl Web3Rpcs {
 
         let block: ArcBlock = serde_json::from_str(raw_block.get())?;
 
-        let block = Web3ProxyBlock::from(block);
+        let block = Web3ProxyBlock::try_from(block)?;
 
         // the block was fetched using eth_getBlockByNumber, so it should have all fields and be on the heaviest chain
         let block = self.try_cache_block(block, true).await?;
@@ -311,13 +337,13 @@ impl Web3Rpcs {
         block_receiver: flume::Receiver<BlockAndRpc>,
         // TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
         // Geth's subscriptions have the same potential for skipping blocks.
-        head_block_sender: watch::Sender<Web3ProxyBlock>,
+        head_block_sender: watch::Sender<Option<Web3ProxyBlock>>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         // TODO: indexmap or hashmap? what hasher? with_capacity?
         // TODO: this will grow unbounded. prune old heads on this at the same time we prune the graph?
         let configured_tiers: Vec<u64> = self
-            .conns
+            .by_name
             .values()
             .map(|x| x.tier)
             .collect::<HashSet<u64>>()
@@ -363,7 +389,7 @@ impl Web3Rpcs {
         consensus_finder: &mut ConsensusFinder,
         rpc_head_block: Option<Web3ProxyBlock>,
         rpc: Arc<Web3Rpc>,
-        head_block_sender: &watch::Sender<Web3ProxyBlock>,
+        head_block_sender: &watch::Sender<Option<Web3ProxyBlock>>,
         pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         // TODO: how should we handle an error here?
@@ -392,12 +418,11 @@ impl Web3Rpcs {
         let backups_needed = new_synced_connections.backups_needed;
         let consensus_head_block = new_synced_connections.head_block.clone();
         let num_consensus_rpcs = new_synced_connections.num_conns();
-        let num_checked_rpcs = 0; // TODO: figure this out
         let num_active_rpcs = consensus_finder
             .all_rpcs_group()
             .map(|x| x.len())
             .unwrap_or_default();
-        let total_rpcs = self.conns.len();
+        let total_rpcs = self.by_name.len();
 
         let old_consensus_head_connections = self
             .watch_consensus_rpcs_sender
@@ -409,10 +434,9 @@ impl Web3Rpcs {
             match &old_consensus_head_connections.head_block {
                 None => {
                     debug!(
-                        "first {}{}/{}/{}/{} block={}, rpc={}",
+                        "first {}{}/{}/{} block={}, rpc={}",
                         backups_voted_str,
                         num_consensus_rpcs,
-                        num_checked_rpcs,
                         num_active_rpcs,
                         total_rpcs,
                         consensus_head_block,
@@ -429,7 +453,7 @@ impl Web3Rpcs {
                         self.try_cache_block(consensus_head_block, true).await?;
 
                     head_block_sender
-                        .send(consensus_head_block)
+                        .send(Some(consensus_head_block))
                         .context("head_block_sender sending consensus_head_block")?;
                 }
                 Some(old_head_block) => {
@@ -445,10 +469,9 @@ impl Web3Rpcs {
                                 // no change in hash. no need to use head_block_sender
                                 // TODO: trace level if rpc is backup
                                 debug!(
-                                    "con {}{}/{}/{}/{} con={} rpc={}@{}",
+                                    "con {}{}/{}/{} con={} rpc={}@{}",
                                     backups_voted_str,
                                     num_consensus_rpcs,
-                                    num_checked_rpcs,
                                     num_active_rpcs,
                                     total_rpcs,
                                     consensus_head_block,
@@ -463,10 +486,9 @@ impl Web3Rpcs {
                                 }
 
                                 debug!(
-                                    "unc {}{}/{}/{}/{} con_head={} old={} rpc={}@{}",
+                                    "unc {}{}/{}/{} con_head={} old={} rpc={}@{}",
                                     backups_voted_str,
                                     num_consensus_rpcs,
-                                    num_checked_rpcs,
                                     num_active_rpcs,
                                     total_rpcs,
                                     consensus_head_block,
@@ -481,7 +503,7 @@ impl Web3Rpcs {
                                     .context("save consensus_head_block as heaviest chain")?;
 
                                 head_block_sender
-                                    .send(consensus_head_block)
+                                    .send(Some(consensus_head_block))
                                     .context("head_block_sender sending consensus_head_block")?;
                             }
                         }
@@ -489,10 +511,9 @@ impl Web3Rpcs {
                             // this is unlikely but possible
                             // TODO: better log
                             warn!(
-                                "chain rolled back {}{}/{}/{}/{} con={} old={} rpc={}@{}",
+                                "chain rolled back {}{}/{}/{} con={} old={} rpc={}@{}",
                                 backups_voted_str,
                                 num_consensus_rpcs,
-                                num_checked_rpcs,
                                 num_active_rpcs,
                                 total_rpcs,
                                 consensus_head_block,
@@ -515,15 +536,14 @@ impl Web3Rpcs {
                                 )?;
 
                             head_block_sender
-                                .send(consensus_head_block)
+                                .send(Some(consensus_head_block))
                                 .context("head_block_sender sending consensus_head_block")?;
                         }
                         Ordering::Greater => {
                             debug!(
-                                "new {}{}/{}/{}/{} con={} rpc={}@{}",
+                                "new {}{}/{}/{} con={} rpc={}@{}",
                                 backups_voted_str,
                                 num_consensus_rpcs,
-                                num_checked_rpcs,
                                 num_active_rpcs,
                                 total_rpcs,
                                 consensus_head_block,
@@ -539,7 +559,7 @@ impl Web3Rpcs {
                             let consensus_head_block =
                                 self.try_cache_block(consensus_head_block, true).await?;
 
-                            head_block_sender.send(consensus_head_block)?;
+                            head_block_sender.send(Some(consensus_head_block))?;
                         }
                     }
                 }
@@ -550,23 +570,23 @@ impl Web3Rpcs {
                 .map(|x| x.to_string())
                 .unwrap_or_else(|| "None".to_string());
 
-            if num_checked_rpcs >= self.min_head_rpcs {
+            if num_active_rpcs >= self.min_head_rpcs {
+                // no consensus!!!
                 error!(
-                    "non {}{}/{}/{}/{} rpc={}@{}",
+                    "non {}{}/{}/{} rpc={}@{}",
                     backups_voted_str,
                     num_consensus_rpcs,
-                    num_checked_rpcs,
                     num_active_rpcs,
                     total_rpcs,
                     rpc,
                     rpc_head_str,
                 );
             } else {
+                // no consensus, but we do not have enough rpcs connected yet to panic
                 debug!(
-                    "non {}{}/{}/{}/{} rpc={}@{}",
+                    "non {}{}/{}/{} rpc={}@{}",
                     backups_voted_str,
                     num_consensus_rpcs,
-                    num_checked_rpcs,
                     num_active_rpcs,
                     total_rpcs,
                     rpc,

@@ -16,6 +16,7 @@ use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::{HashMap, HashSet};
+use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use moka::future::{Cache, ConcurrentCacheExt};
@@ -23,6 +24,7 @@ use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
+use std::cmp::min_by_key;
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -36,11 +38,11 @@ use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBeh
 #[derive(From)]
 pub struct Web3Rpcs {
     /// any requests will be forwarded to one (or more) of these connections
-    pub(crate) conns: HashMap<String, Arc<Web3Rpc>>,
+    pub(crate) by_name: HashMap<String, Arc<Web3Rpc>>,
     /// all providers with the same consensus head block. won't update if there is no `self.watch_consensus_head_sender`
     pub(super) watch_consensus_rpcs_sender: watch::Sender<Arc<ConsensusWeb3Rpcs>>,
     /// this head receiver makes it easy to wait until there is a new block
-    pub(super) watch_consensus_head_receiver: Option<watch::Receiver<Web3ProxyBlock>>,
+    pub(super) watch_consensus_head_receiver: Option<watch::Receiver<Option<Web3ProxyBlock>>>,
     pub(super) pending_transactions:
         Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
@@ -74,7 +76,7 @@ impl Web3Rpcs {
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
         server_configs: HashMap<String, Web3RpcConfig>,
-        watch_consensus_head_sender: Option<watch::Sender<Web3ProxyBlock>>,
+        watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
@@ -219,7 +221,7 @@ impl Web3Rpcs {
             watch_consensus_head_sender.as_ref().map(|x| x.subscribe());
 
         let connections = Arc::new(Self {
-            conns: connections,
+            by_name: connections,
             watch_consensus_rpcs_sender: watch_consensus_connections_sender,
             watch_consensus_head_receiver,
             pending_transactions,
@@ -253,7 +255,7 @@ impl Web3Rpcs {
     }
 
     pub fn get(&self, conn_name: &str) -> Option<&Arc<Web3Rpc>> {
-        self.conns.get(conn_name)
+        self.by_name.get(conn_name)
     }
 
     /// subscribe to blocks and transactions from all the backend rpcs.
@@ -264,7 +266,7 @@ impl Web3Rpcs {
         authorization: Arc<Authorization>,
         pending_tx_id_receiver: flume::Receiver<TxHashAndRpc>,
         block_receiver: flume::Receiver<BlockAndRpc>,
-        head_block_sender: Option<watch::Sender<Web3ProxyBlock>>,
+        head_block_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         let mut futures = vec![];
@@ -426,70 +428,64 @@ impl Web3Rpcs {
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
     ) -> anyhow::Result<OpenRequestResult> {
-        if let Ok(without_backups) = self
-            ._best_consensus_head_connection(
-                false,
-                authorization,
-                request_metadata,
-                skip,
-                min_block_needed,
-                max_block_needed,
-            )
-            .await
-        {
-            // TODO: this might use backups too eagerly. but even when we allow backups, we still prioritize our own
-            if matches!(without_backups, OpenRequestResult::Handle(_)) {
-                return Ok(without_backups);
-            }
-        }
-
-        self._best_consensus_head_connection(
-            true,
-            authorization,
-            request_metadata,
-            skip,
-            min_block_needed,
-            max_block_needed,
-        )
-        .await
-    }
-
-    /// get the best available rpc server with the consensus head block. it might have blocks after the consensus head
-    async fn _best_consensus_head_connection(
-        &self,
-        allow_backups: bool,
-        authorization: &Arc<Authorization>,
-        request_metadata: Option<&Arc<RequestMetadata>>,
-        skip: &[Arc<Web3Rpc>],
-        min_block_needed: Option<&U64>,
-        max_block_needed: Option<&U64>,
-    ) -> anyhow::Result<OpenRequestResult> {
-        let usable_rpcs_by_head_num_and_weight: BTreeMap<(Option<U64>, u64), Vec<Arc<Web3Rpc>>> = {
+        let usable_rpcs_by_tier_and_head_number: BTreeMap<(u64, Option<U64>), Vec<Arc<Web3Rpc>>> = {
             let synced_connections = self.watch_consensus_rpcs_sender.borrow().clone();
 
-            let head_block_num = if let Some(head_block) = synced_connections.head_block.as_ref() {
-                head_block.number()
-            } else {
-                // TODO: optionally wait for a head block >= min_block_needed
-                return Ok(OpenRequestResult::NotReady(allow_backups));
+            let (head_block_num, head_block_age) =
+                if let Some(head_block) = synced_connections.head_block.as_ref() {
+                    (head_block.number(), head_block.age())
+                } else {
+                    // TODO: optionally wait for a head_block.number() >= min_block_needed
+                    // TODO: though i think that wait would actually need to be earlier in the request
+                    return Ok(OpenRequestResult::NotReady);
+                };
+
+            let needed_blocks_comparison = match (min_block_needed, max_block_needed) {
+                (None, None) => {
+                    // no required block given. treat this like the requested the consensus head block
+                    cmp::Ordering::Equal
+                }
+                (None, Some(max_block_needed)) => max_block_needed.cmp(head_block_num),
+                (Some(min_block_needed), None) => min_block_needed.cmp(head_block_num),
+                (Some(min_block_needed), Some(max_block_needed)) => {
+                    match min_block_needed.cmp(max_block_needed) {
+                        cmp::Ordering::Equal => min_block_needed.cmp(head_block_num),
+                        cmp::Ordering::Greater => {
+                            return Err(anyhow::anyhow!(
+                                "Invalid blocks bounds requested. min ({}) > max ({})",
+                                min_block_needed,
+                                max_block_needed
+                            ))
+                        }
+                        cmp::Ordering::Less => {
+                            // hmmmm
+                            todo!("now what do we do?");
+                        }
+                    }
+                }
             };
 
-            let min_block_needed = min_block_needed.unwrap_or(&head_block_num);
-
+            // collect "usable_rpcs_by_head_num_and_weight"
+            // TODO: MAKE SURE None SORTS LAST?
             let mut m = BTreeMap::new();
 
-            match min_block_needed.cmp(&head_block_num) {
+            match needed_blocks_comparison {
                 cmp::Ordering::Less => {
-                    // need an old block. check all the rpcs. prefer the most synced
+                    // need an old block. check all the rpcs. ignore rpcs that are still syncing
+
+                    let min_block_age =
+                        self.max_block_age.map(|x| head_block_age.saturating_sub(x));
+                    let min_sync_num = self.max_block_lag.map(|x| head_block_num.saturating_sub(x));
+
+                    // TODO: cache this somehow?
+                    // TODO: maybe have a helper on synced_connections? that way sum_soft_limits/min_synced_rpcs will be DRY
                     for x in self
-                        .conns
+                        .by_name
                         .values()
                         .filter(|x| {
-                            if !allow_backups && x.backup {
-                                false
-                            } else if skip.contains(x) {
-                                false
-                            } else if !x.has_block_data(min_block_needed) {
+                            // TODO: move a bunch of this onto a rpc.is_synced function
+                            if skip.contains(x) {
+                                // we've already tried this server or have some other reason to skip it
                                 false
                             } else if max_block_needed
                                 .and_then(|max_block_needed| {
@@ -497,8 +493,18 @@ impl Web3Rpcs {
                                 })
                                 .unwrap_or(false)
                             {
+                                // server does not have the max block
+                                false
+                            } else if min_block_needed
+                                .and_then(|min_block_needed| {
+                                    Some(!x.has_block_data(min_block_needed))
+                                })
+                                .unwrap_or(false)
+                            {
+                                // server does not have the min block
                                 false
                             } else {
+                                // server has the block we need!
                                 true
                             }
                         })
@@ -506,32 +512,43 @@ impl Web3Rpcs {
                     {
                         let x_head_block = x.head_block.read().clone();
 
-                        match x_head_block {
-                            None => continue,
-                            Some(x_head) => {
-                                let key = (Some(*x_head.number()), u64::MAX - x.tier);
+                        if let Some(x_head) = x_head_block {
+                            // TODO: should nodes that are ahead of the consensus block have priority? seems better to spread the load
+                            let x_head_num = x_head.number().min(head_block_num);
 
-                                m.entry(key).or_insert_with(Vec::new).push(x);
+                            // TODO: do we really need to check head_num and age?
+                            if let Some(min_sync_num) = min_sync_num.as_ref() {
+                                if x_head_num < min_sync_num {
+                                    continue;
+                                }
                             }
+                            if let Some(min_block_age) = min_block_age {
+                                if x_head.age() < min_block_age {
+                                    // rpc is still syncing
+                                    continue;
+                                }
+                            }
+
+                            let key = (x.tier, Some(*x_head_num));
+
+                            m.entry(key).or_insert_with(Vec::new).push(x);
                         }
                     }
+
+                    // TODO: check min_synced_rpcs and min_sum_soft_limits? or maybe better to just try to serve the request?
                 }
                 cmp::Ordering::Equal => {
                     // need the consensus head block. filter the synced rpcs
-                    // TODO: this doesn't properly check the allow_backups variable!
-                    for x in synced_connections
-                        .conns
-                        .iter()
-                        .filter(|x| !skip.contains(x))
-                    {
-                        let key = (None, u64::MAX - x.tier);
+                    for x in synced_connections.rpcs.iter().filter(|x| !skip.contains(x)) {
+                        // the key doesn't matter if we are checking synced connections. its already sized to what we need
+                        let key = (0, None);
 
                         m.entry(key).or_insert_with(Vec::new).push(x.clone());
                     }
                 }
                 cmp::Ordering::Greater => {
-                    // TODO? if the blocks is close, wait for change on a watch_consensus_connections_receiver().subscribe()
-                    return Ok(OpenRequestResult::NotReady(allow_backups));
+                    // TODO? if the blocks is close, maybe we could wait for change on a watch_consensus_connections_receiver().subscribe()
+                    return Ok(OpenRequestResult::NotReady);
                 }
             }
 
@@ -540,42 +557,24 @@ impl Web3Rpcs {
 
         let mut earliest_retry_at = None;
 
-        for usable_rpcs in usable_rpcs_by_head_num_and_weight.into_values().rev() {
-            // we sort on a combination of values. cache them here so that we don't do this math multiple times.
-            // TODO: is this necessary if we use sort_by_cached_key?
-            let available_request_map: HashMap<_, f64> = usable_rpcs
-                .iter()
-                .map(|rpc| {
-                    // TODO: weighted sort by remaining hard limit?
-                    // TODO: weighted sort by soft_limit - ewma_active_requests? that assumes soft limits are any good
-                    (rpc, 1.0)
-                })
-                .collect();
-
-            warn!("todo: better sort here");
-
-            let sorted_rpcs = {
-                if usable_rpcs.len() == 1 {
-                    // TODO: try the next tier
-                    vec![usable_rpcs.get(0).expect("there should be 1")]
-                } else {
-                    let mut rng = thread_fast_rng::thread_fast_rng();
-
-                    usable_rpcs
-                        .choose_multiple_weighted(&mut rng, usable_rpcs.len(), |rpc| {
-                            *available_request_map
-                                .get(rpc)
-                                .expect("rpc should always be in available_request_map")
-                        })
-                        .unwrap()
-                        .collect::<Vec<_>>()
-                }
+        for mut usable_rpcs in usable_rpcs_by_tier_and_head_number.into_values() {
+            // sort the tier randomly
+            if usable_rpcs.len() == 1 {
+                // TODO: include an rpc from the next tier?
+            } else {
+                // we can't get the rng outside of this loop because it is not Send
+                // this function should be pretty fast anyway, so it shouldn't matter too much
+                let mut rng = thread_fast_rng::thread_fast_rng();
+                usable_rpcs.shuffle(&mut rng);
             };
 
-            // now that the rpcs are sorted, try to get an active request handle for one of them
-            // TODO: pick two randomly and choose the one with the lower rpc.latency.ewma
-            for best_rpc in sorted_rpcs.into_iter() {
-                // increment our connection counter
+            // now that the rpcs are shuffled, try to get an active request handle for one of them
+            // pick the first two and try the one with the lower rpc.latency.ewma
+            // TODO: chunks or tuple windows?
+            for (rpc_a, rpc_b) in usable_rpcs.into_iter().circular_tuple_windows() {
+                let best_rpc = min_by_key(rpc_a, rpc_b, |x| x.latency.request_ewma);
+
+                // just because it has lower latency doesn't mean we are sure to get a connection
                 match best_rpc.try_request_handle(authorization, None).await {
                     Ok(OpenRequestResult::Handle(handle)) => {
                         // trace!("opened handle: {}", best_rpc);
@@ -584,7 +583,7 @@ impl Web3Rpcs {
                     Ok(OpenRequestResult::RetryAt(retry_at)) => {
                         earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                     }
-                    Ok(OpenRequestResult::NotReady(_)) => {
+                    Ok(OpenRequestResult::NotReady) => {
                         // TODO: log a warning? emit a stat?
                     }
                     Err(err) => {
@@ -614,7 +613,7 @@ impl Web3Rpcs {
 
                 // TODO: should we log here?
 
-                Ok(OpenRequestResult::NotReady(allow_backups))
+                Ok(OpenRequestResult::NotReady)
             }
             Some(earliest_retry_at) => {
                 warn!("no servers on {:?}! {:?}", self, earliest_retry_at);
@@ -676,19 +675,19 @@ impl Web3Rpcs {
         let mut max_count = if let Some(max_count) = max_count {
             max_count
         } else {
-            self.conns.len()
+            self.by_name.len()
         };
 
         let mut tried = HashSet::new();
 
-        let mut synced_conns = self.watch_consensus_rpcs_sender.borrow().conns.clone();
+        let mut synced_conns = self.watch_consensus_rpcs_sender.borrow().rpcs.clone();
 
         // synced connections are all on the same block. sort them by tier with higher soft limits first
         synced_conns.sort_by_cached_key(rpc_sync_status_sort_key);
 
         // if there aren't enough synced connections, include more connections
         // TODO: only do this sorting if the synced_conns isn't enough
-        let mut all_conns: Vec<_> = self.conns.values().cloned().collect();
+        let mut all_conns: Vec<_> = self.by_name.values().cloned().collect();
         all_conns.sort_by_cached_key(rpc_sync_status_sort_key);
 
         for connection in itertools::chain(synced_conns, all_conns) {
@@ -728,7 +727,7 @@ impl Web3Rpcs {
                     max_count -= 1;
                     selected_rpcs.push(handle)
                 }
-                Ok(OpenRequestResult::NotReady(_)) => {
+                Ok(OpenRequestResult::NotReady) => {
                     warn!("no request handle for {}", connection)
                 }
                 Err(err) => {
@@ -767,7 +766,7 @@ impl Web3Rpcs {
         loop {
             let num_skipped = skip_rpcs.len();
 
-            if num_skipped == self.conns.len() {
+            if num_skipped == self.by_name.len() {
                 break;
             }
 
@@ -918,7 +917,7 @@ impl Web3Rpcs {
                         }
                     }
                 }
-                OpenRequestResult::NotReady(backups_included) => {
+                OpenRequestResult::NotReady => {
                     if let Some(request_metadata) = request_metadata {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
@@ -930,7 +929,7 @@ impl Web3Rpcs {
                     if let Some(min_block_needed) = min_block_needed {
                         let mut theres_a_chance = false;
 
-                        for potential_conn in self.conns.values() {
+                        for potential_conn in self.by_name.values() {
                             if skip_rpcs.contains(potential_conn) {
                                 continue;
                             }
@@ -951,23 +950,10 @@ impl Web3Rpcs {
                         }
                     }
 
-                    if backups_included {
-                        // if NotReady and we tried backups, there's no chance
-                        warn!("No servers ready even after checking backups");
-                        break;
-                    }
+                    debug!("No servers ready. Waiting up for change in synced servers");
 
-                    debug!("No servers ready. Waiting up to 1 second for change in synced servers");
-
-                    // TODO: exponential backoff?
-                    tokio::select! {
-                        _ = sleep(Duration::from_secs(1)) => {
-                            // do NOT pop the last rpc off skip here
-                        }
-                        _ = watch_consensus_connections.changed() => {
-                            watch_consensus_connections.borrow_and_update();
-                        }
-                    }
+                    watch_consensus_connections.changed().await?;
+                    watch_consensus_connections.borrow_and_update();
                 }
             }
         }
@@ -984,7 +970,7 @@ impl Web3Rpcs {
                 .store(true, Ordering::Release);
         }
 
-        let num_conns = self.conns.len();
+        let num_conns = self.by_name.len();
         let num_skipped = skip_rpcs.len();
 
         if num_skipped == 0 {
@@ -1135,7 +1121,7 @@ impl fmt::Debug for Web3Rpcs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
         f.debug_struct("Web3Rpcs")
-            .field("conns", &self.conns)
+            .field("rpcs", &self.by_name)
             .finish_non_exhaustive()
     }
 }
@@ -1147,8 +1133,8 @@ impl Serialize for Web3Rpcs {
     {
         let mut state = serializer.serialize_struct("Web3Rpcs", 6)?;
 
-        let conns: Vec<&Web3Rpc> = self.conns.values().map(|x| x.as_ref()).collect();
-        state.serialize_field("conns", &conns)?;
+        let rpcs: Vec<&Web3Rpc> = self.by_name.values().map(|x| x.as_ref()).collect();
+        state.serialize_field("rpcs", &rpcs)?;
 
         {
             let consensus_connections = self.watch_consensus_rpcs_sender.borrow().clone();
@@ -1218,7 +1204,7 @@ mod tests {
 
         let blocks: Vec<_> = [block_0, block_1, block_2]
             .into_iter()
-            .map(|x| Web3ProxyBlock::new(Arc::new(x)))
+            .map(|x| Web3ProxyBlock::try_new(Arc::new(x)).unwrap())
             .collect();
 
         let mut rpcs: Vec<_> = [
@@ -1303,8 +1289,8 @@ mod tests {
         let lagged_block = Arc::new(lagged_block);
         let head_block = Arc::new(head_block);
 
-        let mut lagged_block: Web3ProxyBlock = lagged_block.into();
-        let mut head_block: Web3ProxyBlock = head_block.into();
+        let mut lagged_block: Web3ProxyBlock = lagged_block.try_into().unwrap();
+        let mut head_block: Web3ProxyBlock = head_block.try_into().unwrap();
 
         let block_data_limit = u64::MAX;
 
@@ -1341,7 +1327,7 @@ mod tests {
         let head_rpc = Arc::new(head_rpc);
         let lagged_rpc = Arc::new(lagged_rpc);
 
-        let conns = HashMap::from([
+        let rpcs_by_name = HashMap::from([
             (head_rpc.name.clone(), head_rpc.clone()),
             (lagged_rpc.name.clone(), lagged_rpc.clone()),
         ]);
@@ -1349,8 +1335,8 @@ mod tests {
         let (watch_consensus_rpcs_sender, _) = watch::channel(Default::default());
 
         // TODO: make a Web3Rpcs::new
-        let conns = Web3Rpcs {
-            conns,
+        let rpcs = Web3Rpcs {
+            by_name: rpcs_by_name,
             watch_consensus_head_receiver: None,
             watch_consensus_rpcs_sender,
             pending_transactions: Cache::builder()
@@ -1376,38 +1362,33 @@ mod tests {
         let mut consensus_finder = ConsensusFinder::new(&[0, 1, 2, 3], None, None);
 
         // process None so that
-        conns
-            .process_block_from_rpc(
-                &authorization,
-                &mut consensus_finder,
-                None,
-                lagged_rpc.clone(),
-                &head_block_sender,
-                &None,
-            )
-            .await
-            .expect(
-                "its lagged, but it should still be seen as consensus if its the first to report",
-            );
-        conns
-            .process_block_from_rpc(
-                &authorization,
-                &mut consensus_finder,
-                None,
-                head_rpc.clone(),
-                &head_block_sender,
-                &None,
-            )
-            .await
-            .unwrap();
+        rpcs.process_block_from_rpc(
+            &authorization,
+            &mut consensus_finder,
+            None,
+            lagged_rpc.clone(),
+            &head_block_sender,
+            &None,
+        )
+        .await
+        .expect("its lagged, but it should still be seen as consensus if its the first to report");
+        rpcs.process_block_from_rpc(
+            &authorization,
+            &mut consensus_finder,
+            None,
+            head_rpc.clone(),
+            &head_block_sender,
+            &None,
+        )
+        .await
+        .unwrap();
 
         // no head block because the rpcs haven't communicated through their channels
-        assert!(conns.head_block_hash().is_none());
+        assert!(rpcs.head_block_hash().is_none());
 
         // all_backend_connections gives all non-backup servers regardless of sync status
         assert_eq!(
-            conns
-                .all_connections(&authorization, None, None, None, false)
+            rpcs.all_connections(&authorization, None, None, None, false)
                 .await
                 .unwrap()
                 .len(),
@@ -1415,87 +1396,80 @@ mod tests {
         );
 
         // best_synced_backend_connection requires servers to be synced with the head block
-        let x = conns
+        let x = rpcs
             .best_consensus_head_connection(&authorization, None, &[], None, None)
             .await
             .unwrap();
 
         dbg!(&x);
 
-        assert!(matches!(x, OpenRequestResult::NotReady(true)));
+        assert!(matches!(x, OpenRequestResult::NotReady));
 
-        // add lagged blocks to the conns. both servers should be allowed
-        lagged_block = conns.try_cache_block(lagged_block, true).await.unwrap();
+        // add lagged blocks to the rpcs. both servers should be allowed
+        lagged_block = rpcs.try_cache_block(lagged_block, true).await.unwrap();
 
-        conns
-            .process_block_from_rpc(
-                &authorization,
-                &mut consensus_finder,
-                Some(lagged_block.clone()),
-                lagged_rpc,
-                &head_block_sender,
-                &None,
-            )
-            .await
-            .unwrap();
-        conns
-            .process_block_from_rpc(
-                &authorization,
-                &mut consensus_finder,
-                Some(lagged_block.clone()),
-                head_rpc.clone(),
-                &head_block_sender,
-                &None,
-            )
-            .await
-            .unwrap();
+        rpcs.process_block_from_rpc(
+            &authorization,
+            &mut consensus_finder,
+            Some(lagged_block.clone()),
+            lagged_rpc,
+            &head_block_sender,
+            &None,
+        )
+        .await
+        .unwrap();
+        rpcs.process_block_from_rpc(
+            &authorization,
+            &mut consensus_finder,
+            Some(lagged_block.clone()),
+            head_rpc.clone(),
+            &head_block_sender,
+            &None,
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(conns.num_synced_rpcs(), 2);
+        assert_eq!(rpcs.num_synced_rpcs(), 2);
 
-        // add head block to the conns. lagged_rpc should not be available
-        head_block = conns.try_cache_block(head_block, true).await.unwrap();
+        // add head block to the rpcs. lagged_rpc should not be available
+        head_block = rpcs.try_cache_block(head_block, true).await.unwrap();
 
-        conns
-            .process_block_from_rpc(
-                &authorization,
-                &mut consensus_finder,
-                Some(head_block.clone()),
-                head_rpc,
-                &head_block_sender,
-                &None,
-            )
-            .await
-            .unwrap();
+        rpcs.process_block_from_rpc(
+            &authorization,
+            &mut consensus_finder,
+            Some(head_block.clone()),
+            head_rpc,
+            &head_block_sender,
+            &None,
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(conns.num_synced_rpcs(), 1);
+        assert_eq!(rpcs.num_synced_rpcs(), 1);
 
         assert!(matches!(
-            conns
-                .best_consensus_head_connection(&authorization, None, &[], None, None)
+            rpcs.best_consensus_head_connection(&authorization, None, &[], None, None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         assert!(matches!(
-            conns
-                .best_consensus_head_connection(&authorization, None, &[], Some(&0.into()), None)
+            rpcs.best_consensus_head_connection(&authorization, None, &[], Some(&0.into()), None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         assert!(matches!(
-            conns
-                .best_consensus_head_connection(&authorization, None, &[], Some(&1.into()), None)
+            rpcs.best_consensus_head_connection(&authorization, None, &[], Some(&1.into()), None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // future block should not get a handle
         assert!(matches!(
-            conns
-                .best_consensus_head_connection(&authorization, None, &[], Some(&2.into()), None)
+            rpcs.best_consensus_head_connection(&authorization, None, &[], Some(&2.into()), None)
                 .await,
-            Ok(OpenRequestResult::NotReady(true))
+            Ok(OpenRequestResult::NotReady)
         ));
     }
 
@@ -1522,7 +1496,7 @@ mod tests {
             ..Default::default()
         };
 
-        let head_block: Web3ProxyBlock = Arc::new(head_block).into();
+        let head_block: Web3ProxyBlock = Arc::new(head_block).try_into().unwrap();
 
         let pruned_rpc = Web3Rpc {
             name: "pruned".to_string(),
@@ -1554,7 +1528,7 @@ mod tests {
         let pruned_rpc = Arc::new(pruned_rpc);
         let archive_rpc = Arc::new(archive_rpc);
 
-        let conns = HashMap::from([
+        let rpcs_by_name = HashMap::from([
             (pruned_rpc.name.clone(), pruned_rpc.clone()),
             (archive_rpc.name.clone(), archive_rpc.clone()),
         ]);
@@ -1562,8 +1536,8 @@ mod tests {
         let (watch_consensus_rpcs_sender, _) = watch::channel(Default::default());
 
         // TODO: make a Web3Rpcs::new
-        let conns = Web3Rpcs {
-            conns,
+        let rpcs = Web3Rpcs {
+            by_name: rpcs_by_name,
             watch_consensus_head_receiver: None,
             watch_consensus_rpcs_sender,
             pending_transactions: Cache::builder()
@@ -1576,7 +1550,7 @@ mod tests {
                 .max_capacity(10)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
             min_head_rpcs: 1,
-            min_sum_soft_limit: 3_000,
+            min_sum_soft_limit: 4_000,
             max_block_age: None,
             max_block_lag: None,
         };
@@ -1586,34 +1560,34 @@ mod tests {
         let (head_block_sender, _head_block_receiver) = watch::channel(Default::default());
         let mut connection_heads = ConsensusFinder::new(&[0, 1, 2, 3], None, None);
 
-        conns
-            .process_block_from_rpc(
-                &authorization,
-                &mut connection_heads,
-                Some(head_block.clone()),
-                pruned_rpc.clone(),
-                &head_block_sender,
-                &None,
-            )
-            .await
-            .unwrap();
-        conns
-            .process_block_from_rpc(
-                &authorization,
-                &mut connection_heads,
-                Some(head_block.clone()),
-                archive_rpc.clone(),
-                &head_block_sender,
-                &None,
-            )
-            .await
-            .unwrap();
+        // min sum soft limit will require tier 2
+        rpcs.process_block_from_rpc(
+            &authorization,
+            &mut connection_heads,
+            Some(head_block.clone()),
+            pruned_rpc.clone(),
+            &head_block_sender,
+            &None,
+        )
+        .await
+        .unwrap_err();
 
-        assert_eq!(conns.num_synced_rpcs(), 2);
+        rpcs.process_block_from_rpc(
+            &authorization,
+            &mut connection_heads,
+            Some(head_block.clone()),
+            archive_rpc.clone(),
+            &head_block_sender,
+            &None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(rpcs.num_synced_rpcs(), 2);
 
         // best_synced_backend_connection requires servers to be synced with the head block
         // TODO: test with and without passing the head_block.number?
-        let best_head_server = conns
+        let best_head_server = rpcs
             .best_consensus_head_connection(
                 &authorization,
                 None,
@@ -1623,12 +1597,14 @@ mod tests {
             )
             .await;
 
+        debug!("best_head_server: {:#?}", best_head_server);
+
         assert!(matches!(
             best_head_server.unwrap(),
             OpenRequestResult::Handle(_)
         ));
 
-        let best_archive_server = conns
+        let best_archive_server = rpcs
             .best_consensus_head_connection(&authorization, None, &[], Some(&1.into()), None)
             .await;
 

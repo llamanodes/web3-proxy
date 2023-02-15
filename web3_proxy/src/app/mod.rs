@@ -204,7 +204,7 @@ pub struct Web3ProxyApp {
     response_cache: ResponseCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
-    watch_consensus_head_receiver: watch::Receiver<Web3ProxyBlock>,
+    watch_consensus_head_receiver: watch::Receiver<Option<Web3ProxyBlock>>,
     pending_tx_sender: broadcast::Sender<TxStatus>,
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
@@ -541,8 +541,7 @@ impl Web3ProxyApp {
         };
 
         // TODO: i don't like doing Block::default here! Change this to "None"?
-        let (watch_consensus_head_sender, watch_consensus_head_receiver) =
-            watch::channel(Web3ProxyBlock::default());
+        let (watch_consensus_head_sender, watch_consensus_head_receiver) = watch::channel(None);
         // TODO: will one receiver lagging be okay? how big should this be?
         let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
 
@@ -624,7 +623,7 @@ impl Web3ProxyApp {
             .await
             .context("spawning private_rpcs")?;
 
-            if private_rpcs.conns.is_empty() {
+            if private_rpcs.by_name.is_empty() {
                 None
             } else {
                 // save the handle to catch any errors
@@ -740,7 +739,7 @@ impl Web3ProxyApp {
         Ok((app, cancellable_handles, important_background_handles).into())
     }
 
-    pub fn head_block_receiver(&self) -> watch::Receiver<Web3ProxyBlock> {
+    pub fn head_block_receiver(&self) -> watch::Receiver<Option<Web3ProxyBlock>> {
         self.watch_consensus_head_receiver.clone()
     }
 
@@ -938,7 +937,7 @@ impl Web3ProxyApp {
             JsonRpcRequestEnum::Single(request) => {
                 let (response, rpcs) = timeout(
                     max_time,
-                    self.proxy_cached_request(&authorization, request, proxy_mode),
+                    self.proxy_cached_request(&authorization, request, proxy_mode, None),
                 )
                 .await??;
 
@@ -971,10 +970,26 @@ impl Web3ProxyApp {
 
         // TODO: spawn so the requests go in parallel? need to think about rate limiting more if we do that
         // TODO: improve flattening
+
+        // get the head block now so that any requests that need it all use the same block
+        // TODO: FrontendErrorResponse that handles "no servers synced" in a consistent way
+        // TODO: this still has an edge condition if there is a reorg in the middle of the request!!!
+        let head_block_num = self
+            .balanced_rpcs
+            .head_block_num()
+            .context(anyhow::anyhow!("no servers synced"))?;
+
         let responses = join_all(
             requests
                 .into_iter()
-                .map(|request| self.proxy_cached_request(authorization, request, proxy_mode))
+                .map(|request| {
+                    self.proxy_cached_request(
+                        authorization,
+                        request,
+                        proxy_mode,
+                        Some(head_block_num),
+                    )
+                })
                 .collect::<Vec<_>>(),
         )
         .await;
@@ -1023,6 +1038,7 @@ impl Web3ProxyApp {
         authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
         proxy_mode: ProxyMode,
+        head_block_num: Option<U64>,
     ) -> Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // trace!("Received request: {:?}", request);
 
@@ -1139,7 +1155,7 @@ impl Web3ProxyApp {
                 serde_json::Value::Array(vec![])
             }
             "eth_blockNumber" => {
-                match self.balanced_rpcs.head_block_num() {
+                match head_block_num.or(self.balanced_rpcs.head_block_num()) {
                     Some(head_block_num) => {
                         json!(head_block_num)
                     }
@@ -1237,7 +1253,11 @@ impl Web3ProxyApp {
                     (&self.balanced_rpcs, default_num)
                 };
 
-                let head_block_num = self.balanced_rpcs.head_block_num();
+                let head_block_num = head_block_num
+                    .or(self.balanced_rpcs.head_block_num())
+                    .ok_or_else(|| anyhow::anyhow!("no servers synced"))?;
+
+                // TODO: error/wait if no head block!
 
                 // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
                 let mut response = private_rpcs
@@ -1245,7 +1265,7 @@ impl Web3ProxyApp {
                         authorization,
                         &request,
                         Some(request_metadata.clone()),
-                        head_block_num.as_ref(),
+                        Some(&head_block_num),
                         None,
                         Level::Trace,
                         num,
@@ -1440,9 +1460,8 @@ impl Web3ProxyApp {
                 // emit stats
 
                 // TODO: if no servers synced, wait for them to be synced? probably better to error and let haproxy retry another server
-                let head_block_num = self
-                    .balanced_rpcs
-                    .head_block_num()
+                let head_block_num = head_block_num
+                    .or(self.balanced_rpcs.head_block_num())
                     .context("no servers synced")?;
 
                 // we do this check before checking caches because it might modify the request params

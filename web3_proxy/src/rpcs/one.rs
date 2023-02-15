@@ -41,6 +41,7 @@ pub struct Web3RpcLatencies {
 
 impl Default for Web3RpcLatencies {
     fn default() -> Self {
+        todo!("use ewma crate, not u32");
         Self {
             new_head: Histogram::new(3).unwrap(),
             new_head_ewma: 0,
@@ -525,7 +526,7 @@ impl Web3Rpc {
                 None
             }
             Ok(Some(new_head_block)) => {
-                let new_head_block = Web3ProxyBlock::new(new_head_block);
+                let new_head_block = Web3ProxyBlock::try_new(new_head_block).unwrap();
 
                 let new_hash = *new_head_block.hash();
 
@@ -955,7 +956,7 @@ impl Web3Rpc {
 
                     sleep_until(retry_at).await;
                 }
-                Ok(OpenRequestResult::NotReady(_)) => {
+                Ok(OpenRequestResult::NotReady) => {
                     // TODO: when can this happen? log? emit a stat?
                     trace!("{} has no handle ready", self);
 
@@ -987,7 +988,7 @@ impl Web3Rpc {
         if unlocked_provider.is_some() || self.provider.read().await.is_some() {
             // we already have an unlocked provider. no need to lock
         } else {
-            return Ok(OpenRequestResult::NotReady(self.backup));
+            return Ok(OpenRequestResult::NotReady);
         }
 
         if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
@@ -1029,7 +1030,7 @@ impl Web3Rpc {
                     return Ok(OpenRequestResult::RetryAt(retry_at));
                 }
                 RedisRateLimitResult::RetryNever => {
-                    return Ok(OpenRequestResult::NotReady(self.backup));
+                    return Ok(OpenRequestResult::NotReady);
                 }
             }
         };
@@ -1165,7 +1166,7 @@ mod tests {
 
         let random_block = Arc::new(random_block);
 
-        let head_block = Web3ProxyBlock::new(random_block);
+        let head_block = Web3ProxyBlock::try_new(random_block).unwrap();
         let block_data_limit = u64::MAX;
 
         let x = Web3Rpc {
@@ -1201,7 +1202,8 @@ mod tests {
             timestamp: now,
             ..Default::default()
         })
-        .into();
+        .try_into()
+        .unwrap();
 
         let block_data_limit = 64;
 
