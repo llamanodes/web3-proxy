@@ -20,6 +20,7 @@ use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use moka::future::{Cache, ConcurrentCacheExt};
+use ordered_float::OrderedFloat;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
@@ -572,7 +573,9 @@ impl Web3Rpcs {
             // pick the first two and try the one with the lower rpc.latency.ewma
             // TODO: chunks or tuple windows?
             for (rpc_a, rpc_b) in usable_rpcs.into_iter().circular_tuple_windows() {
-                let best_rpc = min_by_key(rpc_a, rpc_b, |x| x.latency.request_ewma);
+                let best_rpc = min_by_key(rpc_a, rpc_b, |x| {
+                    OrderedFloat(x.request_latency.read().ewma.value())
+                });
 
                 // just because it has lower latency doesn't mean we are sure to get a connection
                 match best_rpc.try_request_handle(authorization, None).await {
@@ -1154,18 +1157,19 @@ impl Serialize for Web3Rpcs {
 
 /// sort by block number (descending) and tier (ascending)
 /// TODO: should this be moved into a `impl Web3Rpc`?
+/// TODO: i think we still have sorts scattered around the code that should use this
 /// TODO: take AsRef or something like that? We don't need an Arc here
-fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (u64, u64, u32) {
-    let reversed_head_block = u64::MAX
+fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (U64, u64, OrderedFloat<f64>) {
+    let reversed_head_block = U64::MAX
         - x.head_block
             .read()
             .as_ref()
-            .map(|x| x.number().as_u64())
-            .unwrap_or(0);
+            .map(|x| *x.number())
+            .unwrap_or_default();
 
     let tier = x.tier;
 
-    let request_ewma = x.latency.request_ewma;
+    let request_ewma = OrderedFloat(x.request_latency.read().ewma.value());
 
     (reversed_head_block, tier, request_ewma)
 }
@@ -1340,13 +1344,10 @@ mod tests {
             watch_consensus_head_receiver: None,
             watch_consensus_rpcs_sender,
             pending_transactions: Cache::builder()
-                .max_capacity(10_000)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
             block_hashes: Cache::builder()
-                .max_capacity(10_000)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
             block_numbers: Cache::builder()
-                .max_capacity(10_000)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
             // TODO: test max_block_age?
             max_block_age: None,
@@ -1541,13 +1542,10 @@ mod tests {
             watch_consensus_head_receiver: None,
             watch_consensus_rpcs_sender,
             pending_transactions: Cache::builder()
-                .max_capacity(10)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
             block_hashes: Cache::builder()
-                .max_capacity(10)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
             block_numbers: Cache::builder()
-                .max_capacity(10)
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
             min_head_rpcs: 1,
             min_sum_soft_limit: 4_000,
