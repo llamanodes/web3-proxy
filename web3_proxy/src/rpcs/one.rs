@@ -21,33 +21,74 @@ use serde_json::json;
 use std::cmp::min;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{self, AtomicU64};
+use std::sync::atomic::{self, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use thread_fast_rng::rand::Rng;
 use thread_fast_rng::thread_fast_rng;
 use tokio::sync::{broadcast, oneshot, watch, RwLock as AsyncRwLock};
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
 
-pub struct Web3RpcLatencies {
-    /// Traack how far behind the fastest node we are
-    pub new_head: Histogram<u64>,
-    /// exponentially weighted moving average of how far behind the fastest node we are
-    pub new_head_ewma: u32,
-    /// Track how long an rpc call takes on average
-    pub request: Histogram<u64>,
-    /// exponentially weighted moving average of how far behind the fastest node we are
-    pub request_ewma: u32,
+pub struct Latency {
+    /// Track how many milliseconds slower we are than the fastest node
+    pub histogram: Histogram<u64>,
+    /// exponentially weighted moving average of how many milliseconds behind the fastest node we are
+    pub ewma: ewma::EWMA,
 }
 
-impl Default for Web3RpcLatencies {
+impl Serialize for Latency {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("latency", 6)?;
+
+        state.serialize_field("ewma_ms", &self.ewma.value())?;
+
+        state.serialize_field("histogram_len", &self.histogram.len())?;
+        state.serialize_field("mean_ms", &self.histogram.mean())?;
+        state.serialize_field("p50_ms", &self.histogram.value_at_quantile(0.50))?;
+        state.serialize_field("p75_ms", &self.histogram.value_at_quantile(0.75))?;
+        state.serialize_field("p99_ms", &self.histogram.value_at_quantile(0.99))?;
+
+        state.end()
+    }
+}
+
+impl Latency {
+    pub fn record(&mut self, milliseconds: f64) {
+        self.ewma.add(milliseconds);
+
+        // histogram needs ints and not floats
+        self.histogram.record(milliseconds as u64).unwrap();
+    }
+}
+
+impl Default for Latency {
     fn default() -> Self {
-        todo!("use ewma crate, not u32");
-        Self {
-            new_head: Histogram::new(3).unwrap(),
-            new_head_ewma: 0,
-            request: Histogram::new(3).unwrap(),
-            request_ewma: 0,
-        }
+        // TODO: what should the default sigfig be?
+        let sigfig = 0;
+
+        // TODO: what should the default span be? 25 requests? have a "new"
+        let span = 25.0;
+
+        Self::new(sigfig, span).expect("default histogram sigfigs should always work")
+    }
+}
+
+impl Latency {
+    pub fn new(sigfig: u8, span: f64) -> Result<Self, hdrhistogram::CreationError> {
+        let alpha = Self::span_to_alpha(span);
+
+        let histogram = Histogram::new(sigfig)?;
+
+        Ok(Self {
+            histogram,
+            ewma: ewma::EWMA::new(alpha),
+        })
+    }
+
+    fn span_to_alpha(span: f64) -> f64 {
+        2.0 / (span + 1.0)
     }
 }
 
@@ -83,8 +124,13 @@ pub struct Web3Rpc {
     pub(super) tier: u64,
     /// TODO: change this to a watch channel so that http providers can subscribe and take action on change.
     pub(super) head_block: RwLock<Option<Web3ProxyBlock>>,
-    /// Track how fast this RPC is
-    pub(super) latency: Web3RpcLatencies,
+    /// Track head block latency
+    pub(super) head_latency: RwLock<Latency>,
+    /// Track request latency
+    pub(super) request_latency: RwLock<Latency>,
+    /// Track total requests served
+    /// TODO: maybe move this to graphana
+    pub(super) total_requests: AtomicUsize,
 }
 
 impl Web3Rpc {
@@ -1081,7 +1127,7 @@ impl Serialize for Web3Rpc {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Rpc", 9)?;
+        let mut state = serializer.serialize_struct("Web3Rpc", 10)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
@@ -1103,17 +1149,17 @@ impl Serialize for Web3Rpc {
 
         state.serialize_field("soft_limit", &self.soft_limit)?;
 
-        // TODO: keep this for the "popularity_contest" command? or maybe better to just use graphana?
-        // state.serialize_field(
-        //     "frontend_requests",
-        //     &self.frontend_requests.load(atomic::Ordering::Relaxed),
-        // )?;
+        // TODO: maybe this is too much data. serialize less?
+        state.serialize_field("head_block", &*self.head_block.read())?;
 
-        {
-            // TODO: maybe this is too much data. serialize less?
-            let head_block = &*self.head_block.read();
-            state.serialize_field("head_block", head_block)?;
-        }
+        state.serialize_field("head_latency", &*self.head_latency.read())?;
+
+        state.serialize_field("request_latency", &*self.request_latency.read())?;
+
+        state.serialize_field(
+            "total_requests",
+            &self.total_requests.load(atomic::Ordering::Relaxed),
+        )?;
 
         state.end()
     }
@@ -1207,7 +1253,6 @@ mod tests {
 
         let block_data_limit = 64;
 
-        // TODO: this is getting long. have a `impl Default`
         let x = Web3Rpc {
             name: "name".to_string(),
             soft_limit: 1_000,

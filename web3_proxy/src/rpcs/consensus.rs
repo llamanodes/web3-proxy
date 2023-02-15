@@ -7,15 +7,18 @@ use anyhow::Context;
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use log::{debug, trace, warn};
+use moka::future::Cache;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
+use tokio::time::Instant;
 
 /// A collection of Web3Rpcs that are on the same block.
 /// Serialize is so we can print it on our debug endpoint
 #[derive(Clone, Default, Serialize)]
 pub struct ConsensusWeb3Rpcs {
+    pub(super) tier: u64,
     pub(super) head_block: Option<Web3ProxyBlock>,
     // TODO: this should be able to serialize, but it isn't
     #[serde(skip_serializing)]
@@ -74,22 +77,25 @@ impl Web3Rpcs {
     }
 }
 
+type FirstSeenCache = Cache<H256, Instant, hashbrown::hash_map::DefaultHashBuilder>;
+
 pub struct ConnectionsGroup {
     rpc_name_to_block: HashMap<String, Web3ProxyBlock>,
     // TODO: what if there are two blocks with the same number?
     highest_block: Option<Web3ProxyBlock>,
-}
-
-impl Default for ConnectionsGroup {
-    fn default() -> Self {
-        Self {
-            rpc_name_to_block: Default::default(),
-            highest_block: Default::default(),
-        }
-    }
+    /// used to track rpc.head_latency. The same cache should be shared between all ConnectionsGroups
+    first_seen: FirstSeenCache,
 }
 
 impl ConnectionsGroup {
+    pub fn new(first_seen: FirstSeenCache) -> Self {
+        Self {
+            rpc_name_to_block: Default::default(),
+            highest_block: Default::default(),
+            first_seen,
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.rpc_name_to_block.len()
     }
@@ -115,7 +121,17 @@ impl ConnectionsGroup {
         }
     }
 
-    fn insert(&mut self, rpc: &Web3Rpc, block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
+    async fn insert(&mut self, rpc: &Web3Rpc, block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
+        let first_seen = self
+            .first_seen
+            .get_with(*block.hash(), async move { Instant::now() })
+            .await;
+
+        // TODO: this should be 0 if we are first seen, but i think it will be slightly non-zero
+        rpc.head_latency
+            .write()
+            .record(first_seen.elapsed().as_secs_f64() * 1000.0);
+
         // TODO: what about a reorg to the same height?
         if Some(block.number()) > self.highest_block.as_ref().map(|x| x.number()) {
             self.highest_block = Some(block.clone());
@@ -179,6 +195,7 @@ impl ConnectionsGroup {
         authorization: &Arc<Authorization>,
         web3_rpcs: &Web3Rpcs,
         min_consensus_block_num: Option<U64>,
+        tier: &u64,
     ) -> anyhow::Result<ConsensusWeb3Rpcs> {
         let mut maybe_head_block = match self.highest_block.clone() {
             None => return Err(anyhow::anyhow!("no blocks known")),
@@ -191,12 +208,17 @@ impl ConnectionsGroup {
             if let Some(min_consensus_block_num) = min_consensus_block_num {
                 maybe_head_block
                     .number()
+                    .saturating_add(1.into())
                     .saturating_sub(min_consensus_block_num)
                     .as_u64()
             } else {
-                // TODO: get from app config? different chains probably should have different values. 10 is probably too much
                 10
             };
+
+        trace!(
+            "max_lag_consensus_to_highest: {}",
+            max_lag_consensus_to_highest
+        );
 
         let num_known = self.rpc_name_to_block.len();
 
@@ -338,7 +360,7 @@ impl ConnectionsGroup {
         }
 
         // success! this block has enough soft limit and nodes on it (or on later blocks)
-        let conns: Vec<Arc<Web3Rpc>> = primary_consensus_rpcs
+        let rpcs: Vec<Arc<Web3Rpc>> = primary_consensus_rpcs
             .into_iter()
             .filter_map(|conn_name| web3_rpcs.by_name.get(conn_name).cloned())
             .collect();
@@ -349,8 +371,9 @@ impl ConnectionsGroup {
         let _ = maybe_head_block.number();
 
         Ok(ConsensusWeb3Rpcs {
+            tier: *tier,
             head_block: Some(maybe_head_block),
-            rpcs: conns,
+            rpcs,
             backups_voted: backup_rpcs_voted,
             backups_needed: primary_rpcs_voted.is_none(),
         })
@@ -377,10 +400,15 @@ impl ConsensusFinder {
         max_block_age: Option<u64>,
         max_block_lag: Option<U64>,
     ) -> Self {
+        // TODO: what's a good capacity for this?
+        let first_seen = Cache::builder()
+            .max_capacity(16)
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+
         // TODO: this will need some thought when config reloading is written
         let tiers = configured_tiers
             .iter()
-            .map(|x| (*x, Default::default()))
+            .map(|x| (*x, ConnectionsGroup::new(first_seen.clone())))
             .collect();
 
         Self {
@@ -389,9 +417,11 @@ impl ConsensusFinder {
             max_block_lag,
         }
     }
-}
 
-impl ConsensusFinder {
+    pub fn len(&self) -> usize {
+        self.tiers.len()
+    }
+
     /// get the ConnectionsGroup that contains all rpcs
     /// panics if there are no tiers
     pub fn all_rpcs_group(&self) -> Option<&ConnectionsGroup> {
@@ -421,7 +451,11 @@ impl ConsensusFinder {
     }
 
     /// returns the block that the rpc was on before updating to the new_block
-    pub fn insert(&mut self, rpc: &Web3Rpc, new_block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
+    pub async fn insert(
+        &mut self,
+        rpc: &Web3Rpc,
+        new_block: Web3ProxyBlock,
+    ) -> Option<Web3ProxyBlock> {
         let mut old = None;
 
         // TODO: error if rpc.tier is not in self.tiers
@@ -432,7 +466,7 @@ impl ConsensusFinder {
             }
 
             // TODO: should new_block be a ref?
-            let x = tier_group.insert(rpc, new_block.clone());
+            let x = tier_group.insert(rpc, new_block.clone()).await;
 
             if old.is_none() && x.is_some() {
                 old = x;
@@ -473,7 +507,7 @@ impl ConsensusFinder {
                     }
                 }
 
-                if let Some(prev_block) = self.insert(&rpc, rpc_head_block.clone()) {
+                if let Some(prev_block) = self.insert(&rpc, rpc_head_block.clone()).await {
                     if prev_block.hash() == rpc_head_block.hash() {
                         // this block was already sent by this rpc. return early
                         false
@@ -527,13 +561,13 @@ impl ConsensusFinder {
         // TODO: how should errors be handled?
         // TODO: find the best tier with a connectionsgroup. best case, this only queries the first tier
         // TODO: do we need to calculate all of them? I think having highest_known_block included as part of min_block_num should make that unnecessary
-        for (i, x) in self.tiers.iter() {
-            trace!("checking tier {}: {:#?}", i, x.rpc_name_to_block);
+        for (tier, x) in self.tiers.iter() {
+            trace!("checking tier {}: {:#?}", tier, x.rpc_name_to_block);
             if let Ok(consensus_head_connections) = x
-                .consensus_head_connections(authorization, web3_connections, min_block_num)
+                .consensus_head_connections(authorization, web3_connections, min_block_num, tier)
                 .await
             {
-                trace!("success on tier {}", i);
+                trace!("success on tier {}", tier);
                 // we got one! hopefully it didn't need to use any backups.
                 // but even if it did need backup servers, that is better than going to a worse tier
                 return Ok(consensus_head_connections);
@@ -546,8 +580,8 @@ impl ConsensusFinder {
 
 #[cfg(test)]
 mod test {
-    #[test]
-    fn test_simplest_case_consensus_head_connections() {
-        todo!();
-    }
+    // #[test]
+    // fn test_simplest_case_consensus_head_connections() {
+    //     todo!();
+    // }
 }

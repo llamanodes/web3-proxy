@@ -183,6 +183,12 @@ impl OpenRequestHandle {
 
         let provider = provider.expect("provider was checked already");
 
+        self.rpc
+            .total_requests
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let start = Instant::now();
+
         // TODO: replace ethers-rs providers with our own that supports streaming the responses
         let response = match provider.as_ref() {
             #[cfg(test)]
@@ -367,6 +373,12 @@ impl OpenRequestHandle {
                     tokio::spawn(f);
                 }
             }
+        } else {
+            // TODO: locking now will slow us down. send latency into a channel instead
+            self.rpc
+                .request_latency
+                .write()
+                .record(start.elapsed().as_secs_f64() * 1000.0);
         }
 
         response
