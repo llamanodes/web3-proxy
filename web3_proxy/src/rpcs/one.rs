@@ -690,7 +690,7 @@ impl Web3Rpc {
 
                         // TODO: what if we just happened to have this check line up with another restart?
                         // TODO: think more about this
-                        if let Some(client) = &*conn.provider.read().await {
+                        if let Some(client) = conn.provider.read().await.clone() {
                             // health check as a way of keeping this rpc's request_ewma accurate
                             // TODO: do something different if this is a backup server?
 
@@ -711,11 +711,13 @@ impl Web3Rpc {
                                 }) {
                                     let authorization = authorization.clone();
                                     let conn = conn.clone();
-                                    let x = async move {
-                                        conn.try_request_handle(&authorization, None).await
-                                    };
 
-                                    if let Ok(OpenRequestResult::Handle(x)) = x.await {
+                                    let x = async move {
+                                        conn.try_request_handle(&authorization, Some(client)).await
+                                    }
+                                    .await;
+
+                                    if let Ok(OpenRequestResult::Handle(x)) = x {
                                         if let Ok(Some(x)) = x
                                             .request::<_, Option<Transaction>>(
                                                 "eth_getTransactionByHash",
