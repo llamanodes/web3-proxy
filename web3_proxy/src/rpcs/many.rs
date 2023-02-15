@@ -1134,7 +1134,8 @@ impl Serialize for Web3Rpcs {
         let mut state = serializer.serialize_struct("Web3Rpcs", 6)?;
 
         let rpcs: Vec<&Web3Rpc> = self.by_name.values().map(|x| x.as_ref()).collect();
-        state.serialize_field("rpcs", &rpcs)?;
+        // TODO: coordinate with frontend team to rename "conns" to "rpcs"
+        state.serialize_field("conns", &rpcs)?;
 
         {
             let consensus_connections = self.watch_consensus_rpcs_sender.borrow().clone();
