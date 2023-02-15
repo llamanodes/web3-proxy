@@ -55,6 +55,9 @@ pub async fn query_admin_modify_usertier<'a>(
         .context("query_admin_modify_user had a redis connection error")?
         .context("query_admin_modify_user needs a redis")?;
 
+    // Will modify logic here
+
+
     // Try to get the user who is calling from redis (if existent) / else from the database
     // TODO: Make a single query, where you retrieve the user, and directly from it the secondary user (otherwise we do two jumpy, which is unnecessary)
     // get the user id first. if it is 0, we should use a cache on the app
