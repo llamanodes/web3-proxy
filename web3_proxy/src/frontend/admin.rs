@@ -21,8 +21,8 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::sea_orm_active_enums::{LogLevel, Role};
-use entities::{admin, login, pending_login, revert_log, rpc_key, secondary_user, user, user_tier};
-use ethers::{prelude::Address, types::Bytes};
+use entities::{admin, admin_trail, login, pending_login, revert_log, rpc_key, secondary_user, user, user_tier};
+use ethers::{abi::AbiEncode, prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
@@ -60,7 +60,7 @@ pub async fn admin_change_user_roles(
     Ok(response)
 }
 
-/// `GET /admin/login/:user_address` -- Being an admin, login as a user in read-only mode
+/// `GET /admin/imitate-login/:admin_address/:user_address` -- Being an admin, login as a user in read-only mode
 ///
 /// - user_address that is to be logged in by
 /// We assume that the admin has already logged in, and has a bearer token ...
@@ -95,41 +95,17 @@ pub async fn admin_login_get(
     // get the admin field ...
     let admin_address: Address = params
         .get("admin_address")
-        .ok_or_else(||
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Unable to find admin_address key in request".to_string(),
-                None,
-            )
-        )?
+        .ok_or_else(|| FrontendErrorResponse::BadRequest("Unable to find admin_address key in request".to_string()))?
         .parse::<Address>()
-        .map_err(|err| {
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Unable to parse user_address as an Address".to_string(),
-                Some(err.into())
-            )
-        })?;
+        .map_err(|err| { FrontendErrorResponse::BadRequest("Unable to parse user_address as an Address".to_string()) })?;
 
 
     // Fetch the user_address parameter from the login string ... (as who we want to be logging in ...)
     let user_address: Vec<u8> = params
         .get("user_address")
-        .ok_or_else(||
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Unable to find user_address key in request".to_string(),
-                None,
-            )
-        )?
+        .ok_or_else(|| FrontendErrorResponse::BadRequest("Unable to find user_address key in request".to_string()))?
         .parse::<Address>()
-        .map_err(|err| {
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Unable to parse user_address as an Address".to_string(),
-                Some(err.into()),
-            )
-        })?
+        .map_err(|err| { FrontendErrorResponse::BadRequest("Unable to parse user_address as an Address".to_string(), ) })?
         .to_fixed_bytes().into();
 
     // We want to login to llamanodes.com
@@ -149,7 +125,7 @@ pub async fn admin_login_get(
         // TODO: accept a login_domain from the request?
         domain: login_domain.parse().unwrap(),
         // In the case of the admin, the admin needs to sign the message, so we include this logic ...
-        address: admin_address.to_fixed_bytes(),// user_address.to_fixed_bytes(),
+        address: admin_address.to_fixed_bytes(), // user_address.to_fixed_bytes(),
         // TODO: config for statement
         statement: Some("🦙🦙🦙🦙🦙".to_string()),
         // TODO: don't unwrap
@@ -175,6 +151,25 @@ pub async fn admin_login_get(
         .await?
         .ok_or(FrontendErrorResponse::BadRequest("Could not find user in db".to_string()))?;
 
+    let admin = user::Entity::find()
+        .filter(user::Column::Address.eq(admin_address.encode()))
+        .one(db_replica.conn())
+        .await?
+        .ok_or(FrontendErrorResponse::BadRequest("Could not find admin in db".to_string()))?;
+
+    // Note that the admin is trying to log in as this user
+    let trail = admin_trail::ActiveModel {
+        caller: sea_orm::Set(admin.id),
+        imitating_user: sea_orm::Set(Some(user.id)),
+        endpoint: sea_orm::Set("admin_login_get".to_string()),
+        payload: sea_orm::Set(format!("{:?}", params)),
+        ..Default::default()
+    };
+    trail
+        .save(&db_conn)
+        .await
+        .context("saving user's pending_login")?;
+
     // Can there be two login-sessions at the same time?
     // I supposed if the user logs in, the admin would be logged out and vice versa
 
@@ -198,7 +193,7 @@ pub async fn admin_login_get(
     user_pending_login
         .save(&db_conn)
         .await
-        .context("saving user's pending_login")?;
+        .context("saving an admin trail pre login")?;
 
     // there are multiple ways to sign messages and not all wallets support them
     // TODO: default message eip from config?
@@ -284,6 +279,10 @@ pub async fn admin_login_post(
     // default options are fine. the message includes timestamp and domain and nonce
     let verify_config = VerificationOpts::default();
 
+    let db_conn = app
+        .db_conn()
+        .context("deleting expired pending logins requires a db")?;
+
     if let Err(err_1) = our_msg
         .verify(&their_sig, &verify_config)
         .await
@@ -294,9 +293,6 @@ pub async fn admin_login_post(
             .verify_eip191(&their_sig)
             .context("verifying eip191 signature against our local message")
         {
-            let db_conn = app
-                .db_conn()
-                .context("deleting expired pending logins requires a db")?;
 
             // delete ALL expired rows.
             let now = Utc::now();
@@ -334,6 +330,20 @@ pub async fn admin_login_post(
         .one(db_replica.conn())
         .await?
         .context("admin address was not found!")?;
+
+    // Add a message that the admin has logged in
+    // Note that the admin is trying to log in as this user
+    let trail = admin_trail::ActiveModel {
+        caller: sea_orm::Set(admin.id),
+        imitating_user: sea_orm::Set(Some(imitating_user.id)),
+        endpoint: sea_orm::Set("admin_login_post".to_string()),
+        payload: sea_orm::Set(format!("{:?}", payload)),
+        ..Default::default()
+    };
+    trail
+        .save(&db_conn)
+        .await
+        .context("saving an admin trail post login")?;
 
     // I supposed we also get the rpc_key, whatever this is used for (?).
     // I think the RPC key should still belong to the admin though in this case ...
@@ -380,8 +390,6 @@ pub async fn admin_login_post(
         expires_at: sea_orm::Set(expires_at),
         read_only: sea_orm::Set(true)
     };
-
-    let db_conn = app.db_conn().context("Getting database connection")?;
 
     user_login
         .save(&db_conn)
