@@ -556,9 +556,12 @@ impl Web3ProxyApp {
         // TODO: ttl on this? or is max_capacity fine?
         let pending_transactions = Cache::builder()
             .max_capacity(10_000)
+            // TODO: different chains might handle this differently
+            // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
+            .time_to_idle(Duration::from_secs(300))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
-        // keep 1GB of blocks in the cache
+        // keep 1GB/5 minutes of blocks in the cache
         // TODO: limits from config
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         // TODO: how can we do the weigher better?
@@ -568,6 +571,8 @@ impl Web3ProxyApp {
                 // TODO: is this good enough?
                 1 + v.block.transactions.len().try_into().unwrap_or(u32::MAX)
             })
+            // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
+            .time_to_idle(Duration::from_secs(300))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // connect to the load balanced rpcs
@@ -690,6 +695,8 @@ impl Web3ProxyApp {
                     u32::MAX
                 }
             })
+            // TODO: what should we set? 10 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
+            .time_to_idle(Duration::from_secs(600))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // all the users are the same size, so no need for a weigher
