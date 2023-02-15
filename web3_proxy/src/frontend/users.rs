@@ -21,8 +21,8 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::sea_orm_active_enums::LogLevel;
-use entities::{login, pending_login, referrer, referee, revert_log, rpc_key, rpc_request, user, user_tier};
-use ethers::{prelude::Address, types::Bytes};
+use entities::{login, pending_login, referrer, referee, revert_log, rpc_key, rpc_request, user, user_tier, increase_balance_receipt, balance};
+use ethers::{prelude::{Address, EthEvent}, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
@@ -36,12 +36,14 @@ use migration::sea_orm::{
 use serde::Deserialize;
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
-use std::ops::Add;
+use std::ops::{Add, Div};
 use std::str::FromStr;
 use std::sync::Arc;
-use ethers::abi::ParamType;
+use ethers::abi::{Error, ParamType, Token};
 use ethers::prelude::H256;
+use ethers::prelude::sourcemap::parse;
 use ethers::types::{Log, Transaction, TransactionReceipt, U256};
+use ethers::utils::hex;
 use futures::TryFutureExt;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
@@ -869,33 +871,46 @@ pub async fn user_increase_balance(
 ) -> FrontendResult {
 
     // Check that the user is logged-in and authorized. We don't need a semaphore here btw
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let (recipient, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     // Get the transaction hash, and the amount that the user wants to top up by.
     // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
     let tx_hash: H256 = params.remove("tx_hash")
         .ok_or(
-            FrontendErrorResponse::BadRequest("You have not provided the tx_hash in which you paid in".to_string(), )
+            FrontendErrorResponse::BadRequest("You have not provided the tx_hash in which you paid in".to_string())
         )?
         .parse()
         .context("unable to parse tx_hash")?;
 
     // We don't check the trace, the transaction must be a naive, simple send transaction (for now at least...)
     // TODO: Get the respective transaction ...
+    let db_conn = app.db_conn().context("query_user_stats needs a db")?;
+    let db_replica = app
+        .db_replica()
+        .context("query_user_stats needs a db replica")?;
 
     // Where do I get the authorization from ...
     let authorization = Arc::new(InternalAuthorization::internal(None).unwrap());
     let rpc = app.balanced_rpcs.get(app.balanced_rpcs.conns.keys().into_iter().collect::<Vec<_>>()[0]).unwrap();
 
+    // Return straight false if the tx was already added ...
+    let receipt = increase_balance_receipt::Entity::find()
+        .filter(increase_balance_receipt::Column::TxHash.eq(hex::encode(tx_hash)))
+        .one(&db_conn)
+        .await?;
+    if receipt.is_some() {
+        return Err(FrontendErrorResponse::BadRequest("The transaction you provided has already been accounted for!".to_string()));
+    }
+
     // Get the rpc from the app ..
     // TODO: Implement logic to parse events from transaction hash
-    let mut request_parameters = HashMap();
-    request_parameters.insert("hash", block_number);
-    request_parameters.insert("address", app.config.deposit_contract);
+    let mut request_parameters = HashMap::new();
+    // TODO: Maybe do decode instead
+    request_parameters.insert("hash", serde_json::Value::String(hex::encode(tx_hash)));
+    request_parameters.insert("address", serde_json::Value::String(format!("{}", &app.config.deposit_contract)));
 
     // Just iterate through all logs, and add them to the transaction list if there is any
     // Address will be hardcoded in the config
-
     let transaction_receipt: TransactionReceipt = match rpc.try_request_handle(&authorization, false).await {
         Ok(OpenRequestResult::Handle(handle)) => {
             // TODO: Figure out how to pass the transaction hash as a parameter ...
@@ -903,7 +918,7 @@ pub async fn user_increase_balance(
                 "eth_getTransactionReceipt",
                 &json!(request_parameters),  // &vec![ParamType::String(tx_hash.to_string())], // ,  // TODO: Insert the hash that we want to validate here
                 Level::Trace.into(),
-                )
+            )
                 .await
                 .map_err(|_|
                     FrontendErrorResponse::StatusCode(
@@ -937,58 +952,118 @@ pub async fn user_increase_balance(
         }
     }?;
 
-    #[derive(EthEvent)]
-    struct PaymentReceived {
-        account: Address,
-        token: Address,
-        amount: U256,
-    };
+    // Go through all logs, this should prob capture it,
+    // At least according to this SE logs are just concatenations of the underlying types (like a struct..)
+    // https://ethereum.stackexchange.com/questions/87653/how-to-decode-log-event-of-my-transaction-log
 
-    let ev: Vec<PaymentReceived> = ethers_contract::parse_logs(tx_receipt)?;
+    // Make sure there is only a single log within that transaction ...
+    // I don't know how to best cover the case that there might be multiple logs inside
 
+    for log in transaction_receipt.logs {
+        println!("Should be all from the deposit contract {:?}", log.address);
+        println!("Check the data if we can decode it {:?}", log.data);
+        // TODO: Will this work? Depends how logs are encoded
+        let (recipient_account, token, amount): (Address, Address, U256) = match ethers::abi::decode(
+            &[
+                ParamType::Address,
+                ParamType::Address,
+                ParamType::Uint(256usize)
+            ],
+            &log.data,
+        ) {
+            Ok(tpl) => {
+                Ok(
+                    (
+                        tpl.get(0).unwrap().clone().into_address().context("Could not decode address")?,
+                        tpl.get(1).unwrap().clone().into_address().context("Could not decode token address")?,
+                        tpl.get(2).unwrap().clone().into_uint().context("Could not decode amount")?
+                    )
+                )
+            },
+            Err(err) => {
+                Err(FrontendErrorResponse::BadRequest(format!("Log could not be decoded: {:?}", err)))
+            }
+        }?;
 
-    // Iterate through all logs
-    // for log in transaction_receipt.logs {}
+        // Get user. If the user does not exist, throw error (user has to sign up first, for now)
+        // Already done in the cache ...
+        // let recipient = match user::Entity::find()
+        //     .filter(user::Column::Address.eq(recipient_account))
+        //     .one(db_replica.conn())
+        //     .await? {
+        //         Some(user) => Ok(user),
+        //         Err(err) => {
+        //             Err(FrontendErrorResponse::BadRequest(
+        //                 "The user must have signed up first. They are currently not signed up!".to_string()
+        //             ))
+        //         }
+        // }?;
 
+        // Skip if the token is not of interest, otherwise add a balance to the contract (according to the amount)
+        if !app.config.accepted_deposit_tokens.contains(&hex::encode(token)) {}// Could also just hardcode all the tokens we accept in the yaml
+        let status_code: StatusCode;
+        let response_json: serde_json::Value;
+        let usdc = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse::<Address>().unwrap();
+        if token == usdc {
 
-    // Make sure that from coincides with the user that is calling this ...
-    // Actually, this doesn't matter ...
-    // let contract = match tx.to {
-    //     None => {
-    //         Err(FrontendErrorResponse::BadRequest("The Transaction is not a Transfer".to_string()))
-    //     }
-    //     Some(contract) => {
-    //         // Make sure that the contract is our contract ...
-    //         if app.config.deposit_contract == contract {
-    //             Ok(contract)
-    //         } else {
-    //             Err(FrontendErrorResponse::BadRequest(format!("Transfer was not into our deposit contract {:?}", contract)))
-    //         }
-    //     }
-    // }?;
-    //
-    // // Throw error if this is a currency that we do not support
-    // // TODO: Just gotta detect an event I guess ... No need to cross-compare with currencies
-    // // TODO: Figure out how to read out events from the transaction! (maybe from trace or sth lol)
-    // // Decode the transaction of the contract ...
-    //
-    // // Given all traces for the transaction, run the logs ...
-    // let (account, token, amount) = ethers::abi::decode(
-    //     &[
-    //         ParamType::Address,
-    //         ParamType::Address,
-    //         ParamType::Uint(256usize)
-    //     ],
-    //     tx.data
-    // ).into()?[0];
+            // Increase balance by amount (whatever amount corresponds to ...)
+            // let's say 1 USD is 1_000_000 credits
+            // Basically credits are in the order of 10^6 per dollar
+            let amount = amount
+                .checked_div(U256::from(10).checked_pow(U256::from(12)).unwrap())
+                .context("Division error, this should never happen")?.as_u64();
 
-    println!("Account found");
+            // Check if the item is in the database. If it is not, then add it into the database
+            let user_balance = balance::Entity::find()
+                .filter(balance::Column::UserId.eq(recipient.id))
+                .one(&db_conn)
+                .await?;
 
+            let txn = db_conn.begin().await?;
+            match user_balance {
+                Some(user_balance) => {
+                    let balance_plus_amount = user_balance.balance + amount;
+                    // Update the entry, adding the balance
+                    let mut user_balance = user_balance.into_active_model();
+                    user_balance.balance = sea_orm::Set(balance_plus_amount);
+                    user_balance.save(&txn).await?;
+                }
+                None => {
+                    // Create the entry with the respective balance
+                    let user_balance = balance::ActiveModel {
+                        balance: sea_orm::ActiveValue::Set(amount),
+                        ..Default::default()
+                    };
+                    user_balance.save(&txn).await?;
+                }
+            };
 
-    // TODO: Decode the data of the transaction. The to-address must be an ERC20, one of the stablecoins ...
+            let receipt = increase_balance_receipt::ActiveModel {
+                tx_hash: sea_orm::ActiveValue::Set(hex::encode(tx_hash)),
+                ..Default::default()
+            };
+            receipt.save(&txn).await?;
+            txn.commit().await?;
 
-    unimplemented!();
-    // Ok(())
+            // Can return here
+            (status_code, response_json) = (StatusCode::CREATED, json!({
+                "tx_hash": tx_hash,
+                "amount": amount
+            }))
+        } else {
+            // Do nothing
+            warn!("Found an event with a token that's not supported: {:?}", token);
+            (status_code, response_json) = (StatusCode::OK, json!({
+                "tx_hash": tx_hash,
+                "amount": 0
+            }));
+        }
+        let response = (status_code, Json(response_json)).into_response();
+        // Return early if the log was added
+        return Ok(response.into());
+    }
+
+    Err(FrontendErrorResponse::BadRequest("No such transaction was found!".to_string()))
 }
 
 /// Create or get the existing referral link.
@@ -1036,7 +1111,6 @@ pub async fn user_referral_link_get(
             let referral_code = ReferralCode::default().0;
 
             let txn = db_conn.begin().await?;
-
             // Log that this guy was referred by another guy
             // Do not automatically create a new
             let referrer_entry = referee::ActiveModel {

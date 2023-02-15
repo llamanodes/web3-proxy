@@ -95,7 +95,10 @@ pub struct AppConfig {
     pub default_user_max_requests_per_period: Option<u64>,
 
     /// Default ERC address for out deposit contract
-    pub deposit_contract: Address,
+    pub deposit_contract: String,
+
+    /// Accepted ERC20 tokens for the deposit contract
+    pub accepted_deposit_tokens: Vec<String>,
 
     /// minimum amount to increase eth_estimateGas results
     pub gas_increase_min: Option<U256>,
