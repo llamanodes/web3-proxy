@@ -699,40 +699,40 @@ impl Web3Rpc {
 
                             if new_total_requests - old_total_requests < 10 {
                                 // TODO: if this fails too many times, reset the connection
-                                let head_block = conn.head_block.read().clone();
+                                // let head_block = conn.head_block.read().clone();
 
-                                if let Some((block_hash, txid)) = head_block.and_then(|x| {
-                                    let block = x.block.clone();
+                                // if let Some((block_hash, txid)) = head_block.and_then(|x| {
+                                //     let block = x.block.clone();
 
-                                    let block_hash = block.hash?;
-                                    let txid = block.transactions.last().cloned()?;
+                                //     let block_hash = block.hash?;
+                                //     let txid = block.transactions.last().cloned()?;
 
-                                    Some((block_hash, txid))
-                                }) {
-                                    let authorization = authorization.clone();
-                                    let conn = conn.clone();
+                                //     Some((block_hash, txid))
+                                // }) {
+                                //     let authorization = authorization.clone();
+                                //     let conn = conn.clone();
 
-                                    let x = async move {
-                                        conn.try_request_handle(&authorization, Some(client)).await
-                                    }
-                                    .await;
+                                //     let x = async move {
+                                //         conn.try_request_handle(&authorization, Some(client)).await
+                                //     }
+                                //     .await;
 
-                                    if let Ok(OpenRequestResult::Handle(x)) = x {
-                                        if let Ok(Some(x)) = x
-                                            .request::<_, Option<Transaction>>(
-                                                "eth_getTransactionByHash",
-                                                &txid,
-                                                revert_handler,
-                                                None,
-                                            )
-                                            .await
-                                        {
-                                            // TODO: make this flatter
-                                            // TODO: do more (fair, not random) things here
-                                            // let  = x.request("eth_getCode", (tx.to.unwrap_or(Address::zero()), block_hash), RequestRevertHandler::ErrorLevel, Some(client.clone()))
-                                        }
-                                    }
-                                }
+                                //     if let Ok(OpenRequestResult::Handle(x)) = x {
+                                //         if let Ok(Some(x)) = x
+                                //             .request::<_, Option<Transaction>>(
+                                //                 "eth_getTransactionByHash",
+                                //                 &txid,
+                                //                 revert_handler,
+                                //                 None,
+                                //             )
+                                //             .await
+                                //         {
+                                //             // TODO: make this flatter
+                                //             // TODO: do more (fair, not random) things here
+                                //             // let  = x.request("eth_getCode", (tx.to.unwrap_or(Address::zero()), block_hash), RequestRevertHandler::ErrorLevel, Some(client.clone()))
+                                //         }
+                                //     }
+                                // }
                             }
 
                             old_total_requests = new_total_requests;
