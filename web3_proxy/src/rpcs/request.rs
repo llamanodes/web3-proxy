@@ -33,6 +33,7 @@ pub struct OpenRequestHandle {
 }
 
 /// Depending on the context, RPC errors can require different handling.
+#[derive(Copy, Clone)]
 pub enum RequestRevertHandler {
     /// Log at the trace level. Use when errors are expected.
     TraceLevel,
@@ -373,12 +374,10 @@ impl OpenRequestHandle {
                     tokio::spawn(f);
                 }
             }
-        } else {
-            // TODO: locking now will slow us down. send latency into a channel instead
-            self.rpc
-                .request_latency
-                .write()
-                .record(start.elapsed().as_secs_f64() * 1000.0);
+        } else if let Some(x) = self.rpc.request_latency_sender.as_ref() {
+            if let Err(err) = x.send(start.elapsed()) {
+                error!("no request latency sender! {:#?}", err);
+            }
         }
 
         response
