@@ -108,24 +108,6 @@ pub async fn query_admin_modify_usertier<'a>(
         .all(db_replica.conn())
         .await?;
 
-    // TODO: Remove from Redis
-    // Remove multiple items simultaneously, but this should be quick let's not prematurely optimize
-    let recent_user_id_key = format!("recent_users:id:{}", app.config.chain_id);
-    let salt = app
-        .config
-        .public_recent_ips_salt
-        .as_ref()
-        .expect("public_recent_ips_salt must exist in here");
-
-    // TODO: How do I remove the redis items (?)
-    for bearer_token in bearer_tokens {
-        let salted_user_id = format!("{}:{}", salt, bearer_token.user_id);
-        let hashed_user_id = Bytes::from(keccak256(salted_user_id.as_bytes()));
-        redis_conn
-            .zrem(&recent_user_id_key, hashed_user_id.to_string())
-            .await?;
-    }
-
     // Now delete these tokens ...
     login::Entity::delete_many()
         .filter(login::Column::UserId.eq(user.id))
