@@ -374,10 +374,12 @@ impl OpenRequestHandle {
                     tokio::spawn(f);
                 }
             }
-        } else if let Some(x) = self.rpc.request_latency_sender.as_ref() {
-            if let Err(err) = x.send(start.elapsed()) {
-                error!("no request latency sender! {:#?}", err);
-            }
+        } else {
+            let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+            let mut latency_recording = self.rpc.request_latency.write();
+
+            latency_recording.record(latency_ms);
         }
 
         response
