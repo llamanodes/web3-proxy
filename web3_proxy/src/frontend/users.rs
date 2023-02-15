@@ -41,7 +41,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use ethers::abi::ParamType;
 use ethers::prelude::H256;
-use ethers::types::Transaction;
+use ethers::types::{Log, Transaction, TransactionReceipt, U256};
 use futures::TryFutureExt;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
@@ -875,11 +875,7 @@ pub async fn user_increase_balance(
     // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
     let tx_hash: H256 = params.remove("tx_hash")
         .ok_or(
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "You have not provided a tx-hash that shows how much you paid in".to_string(),
-                None,
-            )
+            FrontendErrorResponse::BadRequest("You have not provided the tx_hash in which you paid in".to_string(), )
         )?
         .parse()
         .context("unable to parse tx_hash")?;
@@ -893,49 +889,70 @@ pub async fn user_increase_balance(
 
     // Get the rpc from the app ..
     // TODO: Implement logic to parse events from transaction hash
-    // let tx: Transaction = match rpc.try_request_handle(&authorization, false).await {
-    //     Ok(OpenRequestResult::Handle(handle)) => {
-    //         // TODO: Figure out how to pass the transaction hash as a parameter ...
-    //         handle.request(
-    //             "eth_getTransactionByHash",
-    //             &json!(Option::None::<()>),  // &vec![ParamType::String(tx_hash.to_string())], // ,  // TODO: Insert the hash that we want to validate here
-    //             Level::Trace.into(),
-    //             )
-    //             .await
-    //             .map_err(|_|
-    //                 FrontendErrorResponse::StatusCode(
-    //                     StatusCode::SERVICE_UNAVAILABLE,
-    //                     "Request failed!".to_string(),
-    //                     None,
-    //                 )
-    //             )
-    //     }
-    //     Ok(_) => {
-    //         // TODO: actually retry?
-    //         Err(FrontendErrorResponse::StatusCode(
-    //             StatusCode::SERVICE_UNAVAILABLE,
-    //             "We retrieved no handle! Should try again!".to_string(),
-    //             None,
-    //         ))
-    //     }
-    //     Err(err) => {
-    //         // TODO: Just skip this part until one item responds ...
-    //         log::trace!(
-    //                 "cancelled funneling transaction {} from {}: {:?}",
-    //                 tx_hash,
-    //                 rpc,
-    //                 err,
-    //             );
-    //         Err(FrontendErrorResponse::StatusCode(
-    //             StatusCode::SERVICE_UNAVAILABLE,
-    //             "We retrieved no handle! Should try again!".to_string(),
-    //             None,
-    //         ))
-    //     }
-    // }?;
-    //
-    // // Make sure that from coincides with the user that is calling this ...
-    // // Actually, this doesn't matter ...
+    let mut request_parameters = HashMap();
+    request_parameters.insert("hash", block_number);
+    request_parameters.insert("address", app.config.deposit_contract);
+
+    // Just iterate through all logs, and add them to the transaction list if there is any
+    // Address will be hardcoded in the config
+
+    let transaction_receipt: TransactionReceipt = match rpc.try_request_handle(&authorization, false).await {
+        Ok(OpenRequestResult::Handle(handle)) => {
+            // TODO: Figure out how to pass the transaction hash as a parameter ...
+            handle.request(
+                "eth_getTransactionReceipt",
+                &json!(request_parameters),  // &vec![ParamType::String(tx_hash.to_string())], // ,  // TODO: Insert the hash that we want to validate here
+                Level::Trace.into(),
+                )
+                .await
+                .map_err(|_|
+                    FrontendErrorResponse::StatusCode(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "Request failed!".to_string(),
+                        None,
+                    )
+                )
+        }
+        Ok(_) => {
+            // TODO: actually retry?
+            Err(FrontendErrorResponse::StatusCode(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "We retrieved no handle! Should try again!".to_string(),
+                None,
+            ))
+        }
+        Err(err) => {
+            // TODO: Just skip this part until one item responds ...
+            log::trace!(
+                    "cancelled funneling transaction {} from {}: {:?}",
+                    tx_hash,
+                    rpc,
+                    err,
+                );
+            Err(FrontendErrorResponse::StatusCode(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "We retrieved no handle! Should try again!".to_string(),
+                None,
+            ))
+        }
+    }?;
+
+    #[derive(EthEvent)]
+    struct PaymentReceived {
+        account: Address,
+        token: Address,
+        amount: U256,
+    };
+
+    let ev: Vec<PaymentReceived> = ethers_contract::parse_logs(tx_receipt)?;
+
+
+    // Iterate through all logs
+    // for log in transaction_receipt.logs {}
+
+
+    // Make sure that from coincides with the user that is calling this ...
+    // Actually, this doesn't matter ...
     // let contract = match tx.to {
     //     None => {
     //         Err(FrontendErrorResponse::BadRequest("The Transaction is not a Transfer".to_string()))
