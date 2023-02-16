@@ -712,7 +712,7 @@ impl Web3Rpc {
                                         if let Ok(Some(x)) = x
                                             .request::<_, Option<Transaction>>(
                                                 "eth_getTransactionByHash",
-                                                &txid,
+                                                &(txid,),
                                                 revert_handler,
                                                 None,
                                             )
