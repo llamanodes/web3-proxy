@@ -1175,7 +1175,7 @@ impl Web3ProxyApp {
                     }
                 }
             }
-            "eth_chainId" => serde_json::Value::Number(U64::from(self.config.chain_id)),
+            "eth_chainId" => json!(U64::from(self.config.chain_id)),
             // TODO: eth_callBundle (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_callbundle)
             // TODO: eth_cancelPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_cancelprivatetransaction, but maybe just reject)
             // TODO: eth_sendPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_sendprivatetransaction)
@@ -1225,7 +1225,7 @@ impl Web3ProxyApp {
             // TODO: eth_gasPrice that does awesome magic to predict the future
             "eth_hashrate" => {
                 // no stats on this. its cheap
-                serde_json::Value::Number(U64::zero())
+                json!(U64::zero())
             }
             "eth_mining" => {
                 // no stats on this. its cheap
@@ -1391,7 +1391,7 @@ impl Web3ProxyApp {
             "net_peerCount" => {
                 // no stats on this. its cheap
                 // TODO: do something with proxy_mode here?
-                serde_json::Value::Number(U64::from(self.balanced_rpcs.num_synced_rpcs()))
+                json!(U64::from(self.balanced_rpcs.num_synced_rpcs()))
             }
             "web3_clientVersion" => {
                 // no stats on this. its cheap
