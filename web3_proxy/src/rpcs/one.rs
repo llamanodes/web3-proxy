@@ -883,7 +883,11 @@ impl Web3Rpc {
                             broadcast::error::RecvError::Lagged(lagged) => {
                                 // querying the block was delayed
                                 // this can happen if tokio is very busy or waiting for requests limits took too long
-                                warn!("http interval on {} lagging by {}!", self, lagged);
+                                if self.backup {
+                                    debug!("http interval on {} lagging by {}!", self, lagged);
+                                } else {
+                                    warn!("http interval on {} lagging by {}!", self, lagged);
+                                }
                             }
                         }
                     }
