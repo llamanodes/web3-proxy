@@ -1175,9 +1175,7 @@ impl Web3ProxyApp {
                     }
                 }
             }
-            "eth_chainId" => {
-                json!(U64::from(self.config.chain_id))
-            }
+            "eth_chainId" => serde_json::Value::Number(U64::from(self.config.chain_id)),
             // TODO: eth_callBundle (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_callbundle)
             // TODO: eth_cancelPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_cancelprivatetransaction, but maybe just reject)
             // TODO: eth_sendPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_sendprivatetransaction)
@@ -1227,11 +1225,11 @@ impl Web3ProxyApp {
             // TODO: eth_gasPrice that does awesome magic to predict the future
             "eth_hashrate" => {
                 // no stats on this. its cheap
-                json!(U64::zero())
+                serde_json::Value::Number(U64::zero())
             }
             "eth_mining" => {
                 // no stats on this. its cheap
-                json!(false)
+                serde_json::Value::Bool(false)
             }
             // TODO: eth_sendBundle (flashbots command)
             // broadcast transactions to all private rpcs at once
@@ -1363,7 +1361,7 @@ impl Web3ProxyApp {
             "eth_syncing" => {
                 // no stats on this. its cheap
                 // TODO: return a real response if all backends are syncing or if no servers in sync
-                json!(false)
+                serde_json::Value::Bool(false)
             }
             "eth_subscribe" => {
                 return Ok((
@@ -1388,12 +1386,12 @@ impl Web3ProxyApp {
             "net_listening" => {
                 // no stats on this. its cheap
                 // TODO: only if there are some backends on balanced_rpcs?
-                json!(true)
+                serde_json::Value::Bool(true)
             }
             "net_peerCount" => {
                 // no stats on this. its cheap
                 // TODO: do something with proxy_mode here?
-                self.balanced_rpcs.num_synced_rpcs().into()
+                serde_json::Value::Number(U64::from(self.balanced_rpcs.num_synced_rpcs()))
             }
             "web3_clientVersion" => {
                 // no stats on this. its cheap
