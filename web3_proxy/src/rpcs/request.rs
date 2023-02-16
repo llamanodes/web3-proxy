@@ -375,12 +375,13 @@ impl OpenRequestHandle {
                 }
             }
         } else {
-            let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+            // TODO: record request latency
+            // let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
 
             // TODO: is this lock here a problem? should this be done through a channel? i started to code it, but it didn't seem to matter
-            let mut latency_recording = self.rpc.request_latency.write();
+            // let mut latency_recording = self.rpc.request_latency.write();
 
-            latency_recording.record(latency_ms);
+            // latency_recording.record(latency_ms);
         }
 
         response

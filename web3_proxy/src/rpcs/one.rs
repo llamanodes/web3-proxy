@@ -671,8 +671,14 @@ impl Web3Rpc {
 
                     // TODO: how often? different depending on the chain?
                     // TODO: reset this timeout when a new block is seen? we need to keep request_latency updated though
-                    let health_sleep_seconds = 10;
+                    // let health_sleep_seconds = 10;
 
+                    futures::future::pending::<()>().await;
+
+                    Ok(())
+
+                    // TODO: benchmark this and lock contention
+                    /*
                     let mut old_total_requests = 0;
                     let mut new_total_requests;
 
@@ -729,6 +735,7 @@ impl Web3Rpc {
                             old_total_requests = new_total_requests;
                         }
                     }
+                    */
                 };
 
                 futures.push(flatten_handle(tokio::spawn(f)));
