@@ -55,6 +55,11 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(
+                        ColumnDef::new(Referee::CreditsApplied)
+                            .boolean()
+                            .not_null()
+                    )
+                    .col(
                         ColumnDef::new(Referee::UsedReferralCode)
                             .string()
                             .not_null()
@@ -105,7 +110,8 @@ enum Referee {
     Table,
     Id,
     UserId,
-    UsedReferralCode
+    UsedReferralCode,
+    CreditsApplied
 }
 
 #[derive(Iden)]

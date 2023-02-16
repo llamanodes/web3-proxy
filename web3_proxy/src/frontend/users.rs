@@ -572,7 +572,7 @@ pub async fn user_balance_get(
     Ok(Json(response).into_response())
 }
 
-/// `POST /user/balance/:txhash` -- Manually process a confirmed txid to update a user's balance.
+/// `POST /user/balance/:tx_hash` -- Manually process a confirmed txid to update a user's balance.
 ///
 /// We will subscribe to events to watch for any user deposits, but sometimes events can be missed.
 ///
@@ -718,6 +718,7 @@ pub async fn user_balance_post(
         if !app.config.accepted_deposit_tokens.contains(&hex::encode(token)) {}// Could also just hardcode all the tokens we accept in the yaml
         let status_code: StatusCode;
         let response_json: serde_json::Value;
+        // TODO: Can change with accepted currencies hashmap
         let usdc = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse::<Address>().unwrap();
         if token == usdc {
 

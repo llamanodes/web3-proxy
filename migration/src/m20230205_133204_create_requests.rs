@@ -29,6 +29,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                     )
                     .col(
+                        ColumnDef::new(RpcRequest::UsedCredits)
+                            .integer()
+                            .not_null()
+                    )
+                    .col(
                         ColumnDef::new(RpcRequest::UserId)
                             .big_unsigned()
                             .not_null()
@@ -57,7 +62,8 @@ enum RpcRequest {
     Id,
     UserId,
     TxHash,
-    Chain
+    Chain,
+    UsedCredits
 }
 
 #[derive(Iden)]
