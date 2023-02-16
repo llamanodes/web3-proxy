@@ -127,10 +127,11 @@ impl ConnectionsGroup {
             .get_with(*block.hash(), async move { Instant::now() })
             .await;
 
-        // TODO: this should be 0 if we are first seen, but i think it will be slightly non-zero
-        rpc.head_latency
-            .write()
-            .record(first_seen.elapsed().as_secs_f64() * 1000.0);
+        // TODO: this should be 0 if we are first seen, but i think it will be slightly non-zero.
+        // calculate elapsed time before trying to lock.
+        let latency = first_seen.elapsed();
+
+        rpc.head_latency.write().record(latency);
 
         // TODO: what about a reorg to the same height?
         if Some(block.number()) > self.highest_block.as_ref().map(|x| x.number()) {

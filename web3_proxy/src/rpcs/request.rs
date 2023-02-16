@@ -139,6 +139,7 @@ impl OpenRequestHandle {
 
     /// Send a web3 request
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
+    /// depending on how things are locked, you might need to pass the provider in
     pub async fn request<P, R>(
         self,
         method: &str,
@@ -156,30 +157,23 @@ impl OpenRequestHandle {
         // trace!(rpc=%self.conn, %method, "request");
         trace!("requesting from {}", self.rpc);
 
-        let mut provider: Option<Arc<Web3Provider>> = None;
+        let mut provider = if unlocked_provider.is_some() {
+            unlocked_provider
+        } else {
+            self.rpc.provider.read().await.clone()
+        };
+
         let mut logged = false;
         while provider.is_none() {
             // trace!("waiting on provider: locking...");
-
-            // TODO: this should *not* be new_head_client. that is dedicated to only new heads
-            if let Some(unlocked_provider) = unlocked_provider {
-                provider = Some(unlocked_provider);
-                break;
-            }
-
-            let unlocked_provider = self.rpc.provider.read().await;
-
-            if let Some(unlocked_provider) = unlocked_provider.clone() {
-                provider = Some(unlocked_provider);
-                break;
-            }
+            sleep(Duration::from_millis(100)).await;
 
             if !logged {
                 debug!("no provider for open handle on {}", self.rpc);
                 logged = true;
             }
 
-            sleep(Duration::from_millis(100)).await;
+            provider = self.rpc.provider.read().await.clone();
         }
 
         let provider = provider.expect("provider was checked already");
@@ -188,7 +182,11 @@ impl OpenRequestHandle {
             .total_requests
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        let start = Instant::now();
+        self.rpc
+            .active_requests
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        // let latency = Instant::now();
 
         // TODO: replace ethers-rs providers with our own that supports streaming the responses
         let response = match provider.as_ref() {
@@ -200,6 +198,13 @@ impl OpenRequestHandle {
                 p.request(method, params).await
             }
         };
+
+        // note. we intentionally do not record this latency now. we do NOT want to measure errors
+        // let latency = latency.elapsed();
+
+        self.rpc
+            .active_requests
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
         // // TODO: i think ethers already has trace logging (and does it much more fancy)
         // trace!(

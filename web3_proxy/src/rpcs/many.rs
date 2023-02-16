@@ -27,7 +27,7 @@ use serde_json::json;
 use serde_json::value::RawValue;
 use std::cmp::min_by_key;
 use std::collections::BTreeMap;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
 use std::{cmp, fmt};
 use thread_fast_rng::rand::seq::SliceRandom;
@@ -592,7 +592,7 @@ impl Web3Rpcs {
                 // TODO: cached key to save a read lock
                 // TODO: ties to the server with the smallest block_data_limit
                 let best_rpc = min_by_key(rpc_a, rpc_b, |x| {
-                    OrderedFloat(x.request_latency.read().ewma.value())
+                    OrderedFloat(x.head_latency.read().value())
                 });
                 trace!("winner: {}", best_rpc);
 
@@ -1159,9 +1159,16 @@ fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (U64, u64, OrderedFloat<f64>) {
 
     let tier = x.tier;
 
-    let request_ewma = OrderedFloat(x.request_latency.read().ewma.value());
+    // TODO: use request instead of head latency
+    let head_ewma = x.head_latency.read().value();
 
-    (reversed_head_block, tier, request_ewma)
+    let active_requests = x.active_requests.load(atomic::Ordering::Relaxed) as f64;
+
+    // TODO: i'm not sure head * active is exactly right. but we'll see
+    // TODO: i don't think this actually counts as peak. investigate with atomics.rs and peak_ewma.rs
+    let peak_ewma = OrderedFloat(head_ewma * active_requests);
+
+    (reversed_head_block, tier, peak_ewma)
 }
 
 mod tests {
