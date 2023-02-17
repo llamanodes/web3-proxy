@@ -61,6 +61,12 @@ impl Web3ProxyApp {
                     );
 
                     while let Some(new_head) = head_block_receiver.next().await {
+                        let new_head = if let Some(new_head) = new_head {
+                            new_head
+                        } else {
+                            continue;
+                        };
+
                         // TODO: what should the payload for RequestMetadata be?
                         let request_metadata =
                             Arc::new(RequestMetadata::new(REQUEST_PERIOD, 0).unwrap());
@@ -72,7 +78,7 @@ impl Web3ProxyApp {
                             "params": {
                                 "subscription": subscription_id,
                                 // TODO: option to include full transaction objects instead of just the hashes?
-                                "result": new_head.as_ref(),
+                                "result": new_head.block,
                             },
                         });
 

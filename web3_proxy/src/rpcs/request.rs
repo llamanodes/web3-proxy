@@ -1,6 +1,6 @@
 use super::one::Web3Rpc;
 use super::provider::Web3Provider;
-use crate::frontend::authorization::{Authorization, AuthorizationType};
+use crate::frontend::authorization::Authorization;
 use anyhow::Context;
 use chrono::Utc;
 use entities::revert_log;
@@ -11,7 +11,6 @@ use log::{debug, error, trace, warn, Level};
 use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
 use serde_json::json;
 use std::fmt;
-use std::sync::atomic;
 use std::sync::Arc;
 use thread_fast_rng::rand::Rng;
 use tokio::time::{sleep, Duration, Instant};
@@ -21,20 +20,20 @@ pub enum OpenRequestResult {
     Handle(OpenRequestHandle),
     /// Unable to start a request. Retry at the given time.
     RetryAt(Instant),
-    /// Unable to start a request because the server is not synced
-    /// contains "true" if backup servers were attempted
-    NotReady(bool),
+    /// Unable to start a request because no servers are synced
+    NotReady,
 }
 
 /// Make RPC requests through this handle and drop it when you are done.
+/// Opening this handle checks rate limits. Developers, try to keep opening a handle and using it as close together as possible
 #[derive(Debug)]
 pub struct OpenRequestHandle {
     authorization: Arc<Authorization>,
-    conn: Arc<Web3Rpc>,
-    provider: Arc<Web3Provider>,
+    rpc: Arc<Web3Rpc>,
 }
 
 /// Depending on the context, RPC errors can require different handling.
+#[derive(Copy, Clone)]
 pub enum RequestRevertHandler {
     /// Log at the trace level. Use when errors are expected.
     TraceLevel,
@@ -123,79 +122,30 @@ impl Authorization {
 
 impl OpenRequestHandle {
     pub async fn new(authorization: Arc<Authorization>, conn: Arc<Web3Rpc>) -> Self {
-        // TODO: take request_id as an argument?
-        // TODO: attach a unique id to this? customer requests have one, but not internal queries
-        // TODO: what ordering?!
-        conn.active_requests.fetch_add(1, atomic::Ordering::Relaxed);
-
-        let mut provider = None;
-        let mut logged = false;
-        while provider.is_none() {
-            // trace!("waiting on provider: locking...");
-
-            let ready_provider = conn
-                .provider_state
-                .read()
-                .await
-                // TODO: hard code true, or take a bool in the `new` function?
-                .provider(true)
-                .await
-                .cloned();
-            // trace!("waiting on provider: unlocked!");
-
-            match ready_provider {
-                None => {
-                    if !logged {
-                        logged = true;
-                        warn!("no provider for {}!", conn);
-                    }
-
-                    // TODO: how should this work? a reconnect should be in progress. but maybe force one now?
-                    // TODO: sleep how long? subscribe to something instead? maybe use a watch handle?
-                    // TODO: this is going to be way too verbose!
-                    sleep(Duration::from_millis(100)).await
-                }
-                Some(x) => provider = Some(x),
-            }
-        }
-        let provider = provider.expect("provider was checked already");
-
-        // TODO: handle overflows?
-        // TODO: what ordering?
-        match authorization.as_ref().authorization_type {
-            AuthorizationType::Frontend => {
-                conn.frontend_requests
-                    .fetch_add(1, atomic::Ordering::Relaxed);
-            }
-            AuthorizationType::Internal => {
-                conn.internal_requests
-                    .fetch_add(1, atomic::Ordering::Relaxed);
-            }
-        }
-
         Self {
             authorization,
-            conn,
-            provider,
+            rpc: conn,
         }
     }
 
     pub fn connection_name(&self) -> String {
-        self.conn.name.clone()
+        self.rpc.name.clone()
     }
 
     #[inline]
     pub fn clone_connection(&self) -> Arc<Web3Rpc> {
-        self.conn.clone()
+        self.rpc.clone()
     }
 
     /// Send a web3 request
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
+    /// depending on how things are locked, you might need to pass the provider in
     pub async fn request<P, R>(
         self,
         method: &str,
         params: &P,
         revert_handler: RequestRevertHandler,
+        unlocked_provider: Option<Arc<Web3Provider>>,
     ) -> Result<R, ProviderError>
     where
         // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
@@ -205,13 +155,56 @@ impl OpenRequestHandle {
         // TODO: use tracing spans
         // TODO: including params in this log is way too verbose
         // trace!(rpc=%self.conn, %method, "request");
+        trace!("requesting from {}", self.rpc);
+
+        let mut provider = if unlocked_provider.is_some() {
+            unlocked_provider
+        } else {
+            self.rpc.provider.read().await.clone()
+        };
+
+        let mut logged = false;
+        while provider.is_none() {
+            // trace!("waiting on provider: locking...");
+            sleep(Duration::from_millis(100)).await;
+
+            if !logged {
+                debug!("no provider for open handle on {}", self.rpc);
+                logged = true;
+            }
+
+            provider = self.rpc.provider.read().await.clone();
+        }
+
+        let provider = provider.expect("provider was checked already");
+
+        self.rpc
+            .total_requests
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        self.rpc
+            .active_requests
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        // let latency = Instant::now();
 
         // TODO: replace ethers-rs providers with our own that supports streaming the responses
-        let response = match &*self.provider {
+        let response = match provider.as_ref() {
+            #[cfg(test)]
             Web3Provider::Mock => unimplemented!(),
-            Web3Provider::Http(provider) => provider.request(method, params).await,
-            Web3Provider::Ws(provider) => provider.request(method, params).await,
+            Web3Provider::Ws(p) => p.request(method, params).await,
+            Web3Provider::Http(p) | Web3Provider::Both(p, _) => {
+                // TODO: i keep hearing that http is faster. but ws has always been better for me. investigate more with actual benchmarks
+                p.request(method, params).await
+            }
         };
+
+        // note. we intentionally do not record this latency now. we do NOT want to measure errors
+        // let latency = latency.elapsed();
+
+        self.rpc
+            .active_requests
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
         // // TODO: i think ethers already has trace logging (and does it much more fancy)
         // trace!(
@@ -266,8 +259,22 @@ impl OpenRequestHandle {
             // check for "execution reverted" here
             let response_type = if let ProviderError::JsonRpcClientError(err) = err {
                 // Http and Ws errors are very similar, but different types
-                let msg = match &*self.provider {
+                let msg = match &*provider {
+                    #[cfg(test)]
                     Web3Provider::Mock => unimplemented!(),
+                    Web3Provider::Both(_, _) => {
+                        if let Some(HttpClientError::JsonRpcError(err)) =
+                            err.downcast_ref::<HttpClientError>()
+                        {
+                            Some(&err.message)
+                        } else if let Some(WsClientError::JsonRpcError(err)) =
+                            err.downcast_ref::<WsClientError>()
+                        {
+                            Some(&err.message)
+                        } else {
+                            None
+                        }
+                    }
                     Web3Provider::Http(_) => {
                         if let Some(HttpClientError::JsonRpcError(err)) =
                             err.downcast_ref::<HttpClientError>()
@@ -290,10 +297,10 @@ impl OpenRequestHandle {
 
                 if let Some(msg) = msg {
                     if msg.starts_with("execution reverted") {
-                        trace!("revert from {}", self.conn);
+                        trace!("revert from {}", self.rpc);
                         ResponseTypes::Revert
                     } else if msg.contains("limit") || msg.contains("request") {
-                        trace!("rate limit from {}", self.conn);
+                        trace!("rate limit from {}", self.rpc);
                         ResponseTypes::RateLimit
                     } else {
                         ResponseTypes::Ok
@@ -306,10 +313,10 @@ impl OpenRequestHandle {
             };
 
             if matches!(response_type, ResponseTypes::RateLimit) {
-                if let Some(hard_limit_until) = self.conn.hard_limit_until.as_ref() {
+                if let Some(hard_limit_until) = self.rpc.hard_limit_until.as_ref() {
                     let retry_at = Instant::now() + Duration::from_secs(1);
 
-                    trace!("retry {} at: {:?}", self.conn, retry_at);
+                    trace!("retry {} at: {:?}", self.rpc, retry_at);
 
                     hard_limit_until.send_replace(retry_at);
                 }
@@ -322,14 +329,14 @@ impl OpenRequestHandle {
                     if matches!(response_type, ResponseTypes::Revert) {
                         debug!(
                             "bad response from {}! method={} params={:?} err={:?}",
-                            self.conn, method, params, err
+                            self.rpc, method, params, err
                         );
                     }
                 }
                 RequestRevertHandler::TraceLevel => {
                     trace!(
                         "bad response from {}! method={} params={:?} err={:?}",
-                        self.conn,
+                        self.rpc,
                         method,
                         params,
                         err
@@ -339,20 +346,20 @@ impl OpenRequestHandle {
                     // TODO: include params if not running in release mode
                     error!(
                         "bad response from {}! method={} err={:?}",
-                        self.conn, method, err
+                        self.rpc, method, err
                     );
                 }
                 RequestRevertHandler::WarnLevel => {
                     // TODO: include params if not running in release mode
                     warn!(
                         "bad response from {}! method={} err={:?}",
-                        self.conn, method, err
+                        self.rpc, method, err
                     );
                 }
                 RequestRevertHandler::Save => {
                     trace!(
                         "bad response from {}! method={} params={:?} err={:?}",
-                        self.conn,
+                        self.rpc,
                         method,
                         params,
                         err
@@ -372,16 +379,16 @@ impl OpenRequestHandle {
                     tokio::spawn(f);
                 }
             }
+        } else {
+            // TODO: record request latency
+            // let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+            // TODO: is this lock here a problem? should this be done through a channel? i started to code it, but it didn't seem to matter
+            // let mut latency_recording = self.rpc.request_latency.write();
+
+            // latency_recording.record(latency_ms);
         }
 
         response
-    }
-}
-
-impl Drop for OpenRequestHandle {
-    fn drop(&mut self) {
-        self.conn
-            .active_requests
-            .fetch_sub(1, atomic::Ordering::AcqRel);
     }
 }
