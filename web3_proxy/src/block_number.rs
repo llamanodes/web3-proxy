@@ -80,12 +80,7 @@ pub async fn clean_block_number(
                             .context("fetching block number from hash")?;
 
                         // TODO: set change to true? i think not we should probably use hashes for everything.
-                        (
-                            block
-                                .number
-                                .expect("blocks here should always have numbers"),
-                            false,
-                        )
+                        (*block.number(), false)
                     } else {
                         return Err(anyhow::anyhow!("blockHash missing"));
                     }
@@ -132,6 +127,12 @@ pub async fn block_needed(
     head_block_num: U64,
     rpcs: &Web3Rpcs,
 ) -> anyhow::Result<BlockNeeded> {
+    // some requests have potentially very large responses
+    // TODO: only skip caching if the response actually is large
+    if method.starts_with("trace_") || method == "debug_traceTransaction" {
+        return Ok(BlockNeeded::CacheNever);
+    }
+
     let params = if let Some(params) = params {
         // grab the params so we can inspect and potentially modify them
         params
@@ -215,8 +216,8 @@ pub async fn block_needed(
                 };
 
                 return Ok(BlockNeeded::CacheRange {
-                    from_block_num: from_block_num,
-                    to_block_num: to_block_num,
+                    from_block_num,
+                    to_block_num,
                     cache_errors: true,
                 });
             }

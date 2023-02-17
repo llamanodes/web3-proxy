@@ -330,6 +330,11 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] block all admin_ rpc commands
 - [x] remove the "metered" crate now that we save aggregate queries?
 - [x] add archive depth to app config
+- [x] use from_block and to_block so that eth_getLogs is routed correctly
+- [x] improve eth_sendRawTransaction server selection
+- [x] don't cache methods that are usually very large
+- [x] use http provider when available
+- [ ] don't use new_head_provider anywhere except new head subscription
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
@@ -339,6 +344,12 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
   - https://github.com/moka-rs/moka/issues/201
+- [ ] have multiple providers on each backend rpc. one websocket for newHeads. and then http providers for handling requests
+  - erigon only streams the JSON over HTTP. that code isn't enabled for websockets. so this should save memory on the erigon servers
+  - i think this also means we don't need to worry about changing the id that the user gives us.
+  - have the healthcheck get the block over http. if it errors, or doesn't match what the websocket says, something is wrong (likely a deadlock in the websocket code)
+- [ ] maybe we shouldn't route eth_getLogs to syncing nodes. serving queries slows down sync significantly
+  - change the send_best function to only include servers that are at least close to fully synced
 - [ ] have private transactions be enabled by a url setting rather than a setting on the key
 - [ ] cli for adding rpc keys to an existing user
 - [ ] rate limiting/throttling on query_user_stats 
@@ -349,6 +360,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
   - if total difficulty is set and non-zero, use it for consensus instead of just the number
 - [ ] query_user_stats cache hit rate
+- [ ] need debounce on reconnect. websockets are closing on us and then we reconnect twice. locks on ProviderState need more thought
 - [ ] having the whole block in status is very verbose. trim it down
 - [ ] `cost estimate` script
   - sum bytes and number of requests. prompt hosting costs. divide
