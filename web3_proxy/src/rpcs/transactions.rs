@@ -28,13 +28,15 @@ impl Web3Rpcs {
         // TODO: might not be a race. might be a nonce thats higher than the current account nonce. geth discards chains
         // TODO: yearn devs have had better luck with batching these, but i think that's likely just adding a delay itself
         // TODO: if one rpc fails, try another?
-        let tx: Transaction = match rpc.try_request_handle(authorization, false).await {
+        // TODO: try_request_handle, or wait_for_request_handle? I think we want wait here
+        let tx: Transaction = match rpc.try_request_handle(authorization, None).await {
             Ok(OpenRequestResult::Handle(handle)) => {
                 handle
                     .request(
                         "eth_getTransactionByHash",
                         &(pending_tx_id,),
                         Level::Error.into(),
+                        None,
                     )
                     .await?
             }

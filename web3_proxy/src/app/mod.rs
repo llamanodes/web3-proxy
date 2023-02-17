@@ -10,7 +10,7 @@ use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{
     JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest, JsonRpcRequestEnum,
 };
-use crate::rpcs::blockchain::{ArcBlock, SavedBlock};
+use crate::rpcs::blockchain::{BlockHashesCache, Web3ProxyBlock};
 use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::transactions::TxStatus;
@@ -23,7 +23,7 @@ use derive_more::From;
 use entities::sea_orm_active_enums::LogLevel;
 use entities::user;
 use ethers::core::utils::keccak256;
-use ethers::prelude::{Address, Block, Bytes, Transaction, TxHash, H256, U64};
+use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U64};
 use ethers::types::U256;
 use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
@@ -69,9 +69,9 @@ pub static REQUEST_PERIOD: u64 = 60;
 #[derive(From)]
 struct ResponseCacheKey {
     // if none, this is cached until evicted
-    from_block: Option<SavedBlock>,
+    from_block: Option<Web3ProxyBlock>,
     // to_block is only set when ranges of blocks are requested (like with eth_getLogs)
-    to_block: Option<SavedBlock>,
+    to_block: Option<Web3ProxyBlock>,
     method: String,
     // TODO: better type for this
     params: Option<serde_json::Value>,
@@ -204,7 +204,7 @@ pub struct Web3ProxyApp {
     response_cache: ResponseCache,
     // don't drop this or the sender will stop working
     // TODO: broadcast channel instead?
-    watch_consensus_head_receiver: watch::Receiver<ArcBlock>,
+    watch_consensus_head_receiver: watch::Receiver<Option<Web3ProxyBlock>>,
     pending_tx_sender: broadcast::Sender<TxStatus>,
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
@@ -482,7 +482,7 @@ impl Web3ProxyApp {
         let http_client = Some(
             reqwest::ClientBuilder::new()
                 .connect_timeout(Duration::from_secs(5))
-                .timeout(Duration::from_secs(60))
+                .timeout(Duration::from_secs(5 * 60))
                 .user_agent(APP_USER_AGENT)
                 .build()?,
         );
@@ -541,8 +541,7 @@ impl Web3ProxyApp {
         };
 
         // TODO: i don't like doing Block::default here! Change this to "None"?
-        let (watch_consensus_head_sender, watch_consensus_head_receiver) =
-            watch::channel(Arc::new(Block::default()));
+        let (watch_consensus_head_sender, watch_consensus_head_receiver) = watch::channel(None);
         // TODO: will one receiver lagging be okay? how big should this be?
         let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
 
@@ -557,33 +556,40 @@ impl Web3ProxyApp {
         // TODO: ttl on this? or is max_capacity fine?
         let pending_transactions = Cache::builder()
             .max_capacity(10_000)
+            // TODO: different chains might handle this differently
+            // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
+            .time_to_idle(Duration::from_secs(300))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
-        // keep 1GB of blocks in the cache
+        // keep 1GB/5 minutes of blocks in the cache
         // TODO: limits from config
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         // TODO: how can we do the weigher better?
-        let block_map = Cache::builder()
+        let block_map: BlockHashesCache = Cache::builder()
             .max_capacity(1024 * 1024 * 1024)
-            .weigher(|_k, v: &ArcBlock| {
+            .weigher(|_k, v: &Web3ProxyBlock| {
                 // TODO: is this good enough?
-                1 + v.transactions.len().try_into().unwrap_or(u32::MAX)
+                1 + v.block.transactions.len().try_into().unwrap_or(u32::MAX)
             })
+            // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
+            .time_to_idle(Duration::from_secs(300))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // connect to the load balanced rpcs
         let (balanced_rpcs, balanced_handle) = Web3Rpcs::spawn(
+            block_map.clone(),
             top_config.app.chain_id,
             db_conn.clone(),
-            balanced_rpcs,
             http_client.clone(),
-            vredis_pool.clone(),
-            block_map.clone(),
-            Some(watch_consensus_head_sender),
-            top_config.app.min_sum_soft_limit,
+            top_config.app.max_block_age,
+            top_config.app.max_block_lag,
             top_config.app.min_synced_rpcs,
-            Some(pending_tx_sender.clone()),
+            top_config.app.min_sum_soft_limit,
             pending_transactions.clone(),
+            Some(pending_tx_sender.clone()),
+            vredis_pool.clone(),
+            balanced_rpcs,
+            Some(watch_consensus_head_sender),
         )
         .await
         .context("spawning balanced rpcs")?;
@@ -599,26 +605,30 @@ impl Web3ProxyApp {
             None
         } else {
             let (private_rpcs, private_handle) = Web3Rpcs::spawn(
+                block_map,
                 top_config.app.chain_id,
                 db_conn.clone(),
-                private_rpcs,
                 http_client.clone(),
+                // private rpcs don't get subscriptions, so no need for max_block_age or max_block_lag
+                None,
+                None,
+                0,
+                0,
+                pending_transactions.clone(),
+                // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits, but they should have
+                None,
                 vredis_pool.clone(),
-                block_map,
+                private_rpcs,
                 // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
                 // they also often have low rate limits
                 // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
+                // TODO: but maybe we could include privates in the "backup" tier
                 None,
-                0,
-                0,
-                // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits
-                None,
-                pending_transactions.clone(),
             )
             .await
             .context("spawning private_rpcs")?;
 
-            if private_rpcs.conns.is_empty() {
+            if private_rpcs.by_name.is_empty() {
                 None
             } else {
                 // save the handle to catch any errors
@@ -685,6 +695,8 @@ impl Web3ProxyApp {
                     u32::MAX
                 }
             })
+            // TODO: what should we set? 10 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
+            .time_to_idle(Duration::from_secs(600))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // all the users are the same size, so no need for a weigher
@@ -734,7 +746,7 @@ impl Web3ProxyApp {
         Ok((app, cancellable_handles, important_background_handles).into())
     }
 
-    pub fn head_block_receiver(&self) -> watch::Receiver<ArcBlock> {
+    pub fn head_block_receiver(&self) -> watch::Receiver<Option<Web3ProxyBlock>> {
         self.watch_consensus_head_receiver.clone()
     }
 
@@ -932,7 +944,7 @@ impl Web3ProxyApp {
             JsonRpcRequestEnum::Single(request) => {
                 let (response, rpcs) = timeout(
                     max_time,
-                    self.proxy_cached_request(&authorization, request, proxy_mode),
+                    self.proxy_cached_request(&authorization, request, proxy_mode, None),
                 )
                 .await??;
 
@@ -965,10 +977,26 @@ impl Web3ProxyApp {
 
         // TODO: spawn so the requests go in parallel? need to think about rate limiting more if we do that
         // TODO: improve flattening
+
+        // get the head block now so that any requests that need it all use the same block
+        // TODO: FrontendErrorResponse that handles "no servers synced" in a consistent way
+        // TODO: this still has an edge condition if there is a reorg in the middle of the request!!!
+        let head_block_num = self
+            .balanced_rpcs
+            .head_block_num()
+            .context(anyhow::anyhow!("no servers synced"))?;
+
         let responses = join_all(
             requests
                 .into_iter()
-                .map(|request| self.proxy_cached_request(authorization, request, proxy_mode))
+                .map(|request| {
+                    self.proxy_cached_request(
+                        authorization,
+                        request,
+                        proxy_mode,
+                        Some(head_block_num),
+                    )
+                })
                 .collect::<Vec<_>>(),
         )
         .await;
@@ -1017,6 +1045,7 @@ impl Web3ProxyApp {
         authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
         proxy_mode: ProxyMode,
+        head_block_num: Option<U64>,
     ) -> Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // trace!("Received request: {:?}", request);
 
@@ -1035,9 +1064,17 @@ impl Web3ProxyApp {
             | "db_getString"
             | "db_putHex"
             | "db_putString"
+            | "debug_accountRange"
+            | "debug_backtraceAt"
+            | "debug_blockProfile"
             | "debug_chaindbCompact"
+            | "debug_chaindbProperty"
+            | "debug_cpuProfile"
+            | "debug_freeOSMemory"
             | "debug_freezeClient"
+            | "debug_gcStats"
             | "debug_goTrace"
+            | "debug_memStats"
             | "debug_mutexProfile"
             | "debug_setBlockProfileRate"
             | "debug_setGCPercent"
@@ -1125,7 +1162,7 @@ impl Web3ProxyApp {
                 serde_json::Value::Array(vec![])
             }
             "eth_blockNumber" => {
-                match self.balanced_rpcs.head_block_num() {
+                match head_block_num.or(self.balanced_rpcs.head_block_num()) {
                     Some(head_block_num) => {
                         json!(head_block_num)
                     }
@@ -1138,9 +1175,7 @@ impl Web3ProxyApp {
                     }
                 }
             }
-            "eth_chainId" => {
-                json!(U64::from(self.config.chain_id))
-            }
+            "eth_chainId" => json!(U64::from(self.config.chain_id)),
             // TODO: eth_callBundle (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_callbundle)
             // TODO: eth_cancelPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_cancelprivatetransaction, but maybe just reject)
             // TODO: eth_sendPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_sendprivatetransaction)
@@ -1157,6 +1192,7 @@ impl Web3ProxyApp {
                         authorization,
                         request,
                         Some(&request_metadata),
+                        None,
                         None,
                     )
                     .await?;
@@ -1193,7 +1229,7 @@ impl Web3ProxyApp {
             }
             "eth_mining" => {
                 // no stats on this. its cheap
-                json!(false)
+                serde_json::Value::Bool(false)
             }
             // TODO: eth_sendBundle (flashbots command)
             // broadcast transactions to all private rpcs at once
@@ -1222,12 +1258,19 @@ impl Web3ProxyApp {
                     (&self.balanced_rpcs, default_num)
                 };
 
+                let head_block_num = head_block_num
+                    .or(self.balanced_rpcs.head_block_num())
+                    .ok_or_else(|| anyhow::anyhow!("no servers synced"))?;
+
+                // TODO: error/wait if no head block!
+
                 // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
                 let mut response = private_rpcs
                     .try_send_all_synced_connections(
                         authorization,
                         &request,
                         Some(request_metadata.clone()),
+                        Some(&head_block_num),
                         None,
                         Level::Trace,
                         num,
@@ -1318,7 +1361,7 @@ impl Web3ProxyApp {
             "eth_syncing" => {
                 // no stats on this. its cheap
                 // TODO: return a real response if all backends are syncing or if no servers in sync
-                json!(false)
+                serde_json::Value::Bool(false)
             }
             "eth_subscribe" => {
                 return Ok((
@@ -1343,12 +1386,12 @@ impl Web3ProxyApp {
             "net_listening" => {
                 // no stats on this. its cheap
                 // TODO: only if there are some backends on balanced_rpcs?
-                json!(true)
+                serde_json::Value::Bool(true)
             }
             "net_peerCount" => {
                 // no stats on this. its cheap
                 // TODO: do something with proxy_mode here?
-                self.balanced_rpcs.num_synced_rpcs().into()
+                json!(U64::from(self.balanced_rpcs.num_synced_rpcs()))
             }
             "web3_clientVersion" => {
                 // no stats on this. its cheap
@@ -1422,9 +1465,8 @@ impl Web3ProxyApp {
                 // emit stats
 
                 // TODO: if no servers synced, wait for them to be synced? probably better to error and let haproxy retry another server
-                let head_block_num = self
-                    .balanced_rpcs
-                    .head_block_num()
+                let head_block_num = head_block_num
+                    .or(self.balanced_rpcs.head_block_num())
                     .context("no servers synced")?;
 
                 // we do this check before checking caches because it might modify the request params
@@ -1468,7 +1510,7 @@ impl Web3ProxyApp {
                             .await?;
 
                         Some(ResponseCacheKey {
-                            from_block: Some(SavedBlock::new(request_block)),
+                            from_block: Some(request_block),
                             to_block: None,
                             method: method.to_string(),
                             // TODO: hash here?
@@ -1508,8 +1550,8 @@ impl Web3ProxyApp {
                             .await?;
 
                         Some(ResponseCacheKey {
-                            from_block: Some(SavedBlock::new(from_block)),
-                            to_block: Some(SavedBlock::new(to_block)),
+                            from_block: Some(from_block),
+                            to_block: Some(to_block),
                             method: method.to_string(),
                             // TODO: hash here?
                             params: request.params.clone(),
@@ -1524,7 +1566,8 @@ impl Web3ProxyApp {
                     let authorization = authorization.clone();
 
                     if let Some(cache_key) = cache_key {
-                        let from_block_num = cache_key.from_block.as_ref().map(|x| x.number());
+                        let from_block_num = cache_key.from_block.as_ref().map(|x| *x.number());
+                        let to_block_num = cache_key.to_block.as_ref().map(|x| *x.number());
 
                         self.response_cache
                             .try_get_with(cache_key, async move {
@@ -1537,6 +1580,7 @@ impl Web3ProxyApp {
                                         request,
                                         Some(&request_metadata),
                                         from_block_num.as_ref(),
+                                        to_block_num.as_ref(),
                                     )
                                     .await?;
 
@@ -1545,7 +1589,7 @@ impl Web3ProxyApp {
 
                                 // TODO: only cache the inner response
                                 // TODO: how are we going to stream this?
-                                // TODO: check response size. if its very large, return it in a custom Error type that bypasses caching
+                                // TODO: check response size. if its very large, return it in a custom Error type that bypasses caching? or will moka do that for us?
                                 Ok::<_, anyhow::Error>(response)
                             })
                             .await
@@ -1564,6 +1608,7 @@ impl Web3ProxyApp {
                                 &authorization,
                                 request,
                                 Some(&request_metadata),
+                                None,
                                 None,
                             )
                             .await?
