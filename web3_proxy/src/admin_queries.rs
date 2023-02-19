@@ -16,6 +16,11 @@ use migration::sea_orm::{self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoA
 use log::info;
 use redis_rate_limiter::redis::AsyncCommands;
 
+// TODO: Add some logic to check if the operating user is an admin
+// If he is, return true
+// If he is not, return false
+// This function is used to give permission to certain users
+
 
 pub async fn query_admin_modify_usertier<'a>(
     app: &'a Web3ProxyApp,

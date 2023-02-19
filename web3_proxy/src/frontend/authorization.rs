@@ -9,7 +9,7 @@ use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
-use entities::{login, rpc_key, user, user_tier};
+use entities::{admin, login, rpc_key, user, user_tier};
 use ethers::types::Bytes;
 use ethers::utils::keccak256;
 use futures::TryFutureExt;

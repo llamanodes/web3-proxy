@@ -168,8 +168,15 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
             get(users::user_stats_aggregated_get),
         )
         .route("/user/stats/detailed", get(users::user_stats_detailed_get))
-        .route("/admin/modify_role", get(admin::admin_change_user_roles))
         .route("/user/logout", post(users::user_logout_post))
+        .route("/admin/modify_role", get(admin::admin_change_user_roles))
+        .route("/admin/imitate-login/:user_address", get(admin::admin_login_get))
+        .route(
+            "/user/imitate-login/:user_address/:message_eip",
+            get(admin::admin_login_get),
+        )
+        .route("/admin/imitate-login", post(admin::admin_login_post))
+        .route("/admin/imitate-logout", post(admin::admin_login_post))
         //
         // Axum layers
         // layers are ordered bottom up
