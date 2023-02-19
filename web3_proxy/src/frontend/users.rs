@@ -44,6 +44,7 @@ use ulid::Ulid;
 use entities::user::Relation::UserTier;
 use migration::extension::postgres::Type;
 use thread_fast_rng::rand;
+use crate::admin_queries::query_admin_modify_usertier;
 use crate::frontend::errors::FrontendErrorResponse;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
@@ -954,119 +955,7 @@ pub async fn admin_change_user_roles(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
+    let response = query_admin_modify_usertier(&app, bearer, &params).await?;
 
-    // Make sure that the bearer exists, and has admin rights ...
-    let user_address: Vec<u8> = params
-        .get("user_address")
-        .ok_or_else(||
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Unable to find user_address key in request".to_string(),
-                None,
-            )
-        )?
-        .parse::<Address>()
-        .map_err(|err| {
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Unable to parse user_address as an Address".to_string(),
-                Some(err.into()),
-            )
-        })?
-        .to_fixed_bytes().into();
-    let user_tier_title = params
-        .get("user_tier_title")
-        .ok_or_else(|| FrontendErrorResponse::StatusCode(
-            StatusCode::BAD_REQUEST,
-            "Unable to get the user_tier_title key from the request".to_string(),
-            None,
-        ))?;
-
-    // Create database connections and all that
-    let db_conn = app.db_conn().context("admin_change_user_roles needs a db")?;
-    let db_replica = app
-        .db_replica()
-        .context("admin_change_user_roles needs a db replica")?;
-    let mut redis_conn = app
-        .redis_conn()
-        .await
-        .context("admin_change_user_roles had a redis connection error")?
-        .context("admin_change_user_roles needs a redis")?;
-
-    // TODO: Make a single query, where you retrieve the user, and directly from it the secondary user (otherwise we do two jumpy, which is unnecessary)
-    // get the user id first. if it is 0, we should use a cache on the app
-    let user_id = get_user_id_from_params(&mut redis_conn, &db_conn, &db_replica, bearer, &params).await?;
-
-    let mut response_body = HashMap::new();
-    response_body.insert(
-        "user_id",
-        serde_json::Value::Number(user_id.into()),
-    );
-
-    // Get both the user and user role
-    let user: user::Model = user::Entity::find_by_id(user_id)
-        .one(&db_conn)
-        .await?
-        .context("No user with this id found!")?;
-    // TODO: Let's connect the string, and find the previous string of the user id ... (this might be ok for now too thought)
-    response_body.insert(
-        "previous_tier",
-        serde_json::Value::Number(user.user_tier_id.into()),
-    );
-
-    // Modify the user-role ...
-    // Check if this use has admin privileges ...
-    let user_role: secondary_user::Model = secondary_user::Entity::find()
-        .filter(secondary_user::Column::UserId.eq(user_id))
-        .one(&db_conn)
-        .await?
-        .context("No user tier found with that name")?;
-    println!("User role is: {:?}", user_role);
-
-    // Return error if the user is not an admin or a user
-    match user_role.role {
-        Role::Owner | Role::Admin => {
-            // Change the user tier, we can copy a bunch of the functionality from the user-tier address
-
-            // Check if all the required parameters are included in the request, if not, return an error
-            let user = user::Entity::find()
-                .filter(user::Column::Address.eq(user_address))
-                .one(&db_conn)
-                .await?
-                .context("No user found with that key")?;
-
-            // TODO: don't serialize the rpc key
-            debug!("user: {:#?}", user);
-
-            let user_tier = user_tier::Entity::find()
-                .filter(user_tier::Column::Title.eq(user_tier_title.clone()))
-                .one(&db_conn)
-                .await?
-                .context("No user tier found with that name")?;
-            debug!("user_tier: {:#?}", user_tier);
-
-            if user.user_tier_id == user_tier.id {
-                info!("user already has that tier");
-            } else {
-                let mut user = user.into_active_model();
-
-                user.user_tier_id = sea_orm::Set(user_tier.id);
-
-                user.save(&db_conn).await?;
-
-                info!("user's tier changed");
-            }
-
-        }
-        Role::Collaborator => {
-            return Err(anyhow::anyhow!("you do not have admin rights!").into());
-        }
-    };
-
-    response_body.insert(
-        "user_id",
-        serde_json::Value::Number(user_id.into()),
-    );
-    let mut response = Json(&response_body).into_response();
-    Ok(response)
+    response
 }

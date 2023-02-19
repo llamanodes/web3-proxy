@@ -1,5 +1,6 @@
 pub mod app;
 pub mod app_stats;
+pub mod admin_queries;
 pub mod block_number;
 pub mod config;
 pub mod frontend;
