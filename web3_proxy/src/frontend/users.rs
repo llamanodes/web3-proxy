@@ -21,7 +21,7 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::sea_orm_active_enums::{LogLevel, Role};
-use entities::{login, pending_login, referral, revert_log, rpc_key, secondary_user, user, user_tier};
+use entities::{login, pending_login, revert_log, rpc_key, secondary_user, user, user_tier};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};

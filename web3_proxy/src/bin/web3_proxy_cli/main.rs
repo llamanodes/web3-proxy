@@ -306,6 +306,15 @@ fn main() -> anyhow::Result<()> {
 
                 x.main(&db_conn).await
             }
+            SubCommand::ChangeUserAdminStatus(x) => {
+                let db_url = cli_config
+                    .db_url
+                    .expect("'--config' (with a db) or '--db-url' is required to run change_user_admin_status");
+
+                let db_conn = get_db(db_url, 1, 1).await?;
+
+                x.main(&db_conn).await
+            }
             SubCommand::ChangeUserTierByAddress(x) => {
                 let db_url = cli_config
                     .db_url
