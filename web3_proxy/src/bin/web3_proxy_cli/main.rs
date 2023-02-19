@@ -1,4 +1,5 @@
 mod change_user_address;
+mod change_user_admin_status;
 mod change_user_tier;
 mod change_user_tier_by_address;
 mod change_user_tier_by_key;
@@ -71,6 +72,7 @@ pub struct Web3ProxyCli {
 enum SubCommand {
     ChangeUserAddress(change_user_address::ChangeUserAddressSubCommand),
     ChangeUserTier(change_user_tier::ChangeUserTierSubCommand),
+    ChangeUserAdminStatus(change_user_admin_status::ChangeUserAdminStatusSubCommand),
     ChangeUserTierByAddress(change_user_tier_by_address::ChangeUserTierByAddressSubCommand),
     ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeySubCommand),
     CheckConfig(check_config::CheckConfigSubCommand),
@@ -281,6 +283,15 @@ fn main() -> anyhow::Result<()> {
                 let db_url = cli_config
                     .db_url
                     .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+
+                let db_conn = get_db(db_url, 1, 1).await?;
+
+                x.main(&db_conn).await
+            }
+            SubCommand::ChangeUserAdminStatus(x) => {
+                let db_url = cli_config
+                    .db_url
+                    .expect("'--config' (with a db) or '--db-url' is required to run change user admin status");
 
                 let db_conn = get_db(db_url, 1, 1).await?;
 

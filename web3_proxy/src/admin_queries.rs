@@ -14,6 +14,7 @@ use hashbrown::HashMap;
 use http::StatusCode;
 use migration::sea_orm::{self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use log::info;
+use redis_rate_limiter::redis::AsyncCommands;
 
 
 pub async fn query_admin_modify_usertier<'a>(
@@ -110,6 +111,9 @@ pub async fn query_admin_modify_usertier<'a>(
 
     // Finally, remove the user from redis
     // TODO: Also remove the user from the redis
+    // redis_conn.zrem();
+    // redis_conn.get::<_, u64>(&user.) // TODO: Where do i find the bearer token ...
+
 
     Ok(Json(&response_body).into_response())
 

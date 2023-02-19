@@ -2,7 +2,6 @@
 
 pub mod prelude;
 
-pub mod credits;
 pub mod admin;
 pub mod login;
 pub mod pending_login;
