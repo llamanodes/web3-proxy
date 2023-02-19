@@ -8,12 +8,12 @@ use crate::frontend::authorization::Authorization;
 use crate::rpcs::request::RequestRevertHandler;
 use anyhow::{anyhow, Context};
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
-use ethers::types::{Transaction, U256};
+use ethers::types::{Address, Transaction, U256};
 use futures::future::try_join_all;
 use futures::StreamExt;
-use hdrhistogram::Histogram;
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
+use ordered_float::OrderedFloat;
 use parking_lot::RwLock;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
@@ -30,10 +30,8 @@ use tokio::sync::{broadcast, oneshot, watch, RwLock as AsyncRwLock};
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
 
 pub struct Latency {
-    /// Track how many milliseconds slower we are than the fastest node
-    pub histogram: Histogram<u64>,
     /// exponentially weighted moving average of how many milliseconds behind the fastest node we are
-    pub ewma: ewma::EWMA,
+    ewma: ewma::EWMA,
 }
 
 impl Serialize for Latency {
@@ -41,51 +39,52 @@ impl Serialize for Latency {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("latency", 6)?;
-
-        state.serialize_field("ewma_ms", &self.ewma.value())?;
-
-        state.serialize_field("histogram_len", &self.histogram.len())?;
-        state.serialize_field("mean_ms", &self.histogram.mean())?;
-        state.serialize_field("p50_ms", &self.histogram.value_at_quantile(0.50))?;
-        state.serialize_field("p75_ms", &self.histogram.value_at_quantile(0.75))?;
-        state.serialize_field("p99_ms", &self.histogram.value_at_quantile(0.99))?;
-
-        state.end()
+        serializer.serialize_f64(self.ewma.value())
     }
 }
 
 impl Latency {
-    pub fn record(&mut self, milliseconds: f64) {
-        self.ewma.add(milliseconds);
+    #[inline(always)]
+    pub fn record(&mut self, duration: Duration) {
+        self.record_ms(duration.as_secs_f64() * 1000.0);
+    }
 
-        // histogram needs ints and not floats
-        self.histogram.record(milliseconds as u64).unwrap();
+    #[inline(always)]
+    pub fn record_ms(&mut self, milliseconds: f64) {
+        self.ewma.add(milliseconds);
+    }
+
+    #[inline(always)]
+    pub fn value(&self) -> f64 {
+        self.ewma.value()
     }
 }
 
 impl Default for Latency {
     fn default() -> Self {
-        // TODO: what should the default sigfig be?
-        let sigfig = 0;
-
         // TODO: what should the default span be? 25 requests? have a "new"
         let span = 25.0;
 
-        Self::new(sigfig, span).expect("default histogram sigfigs should always work")
+        let start = 1000.0;
+
+        Self::new(span, start)
     }
 }
 
 impl Latency {
-    pub fn new(sigfig: u8, span: f64) -> Result<Self, hdrhistogram::CreationError> {
+    // depending on the span, start might not be perfect
+    pub fn new(span: f64, start: f64) -> Self {
         let alpha = Self::span_to_alpha(span);
 
-        let histogram = Histogram::new(sigfig)?;
+        let mut ewma = ewma::EWMA::new(alpha);
 
-        Ok(Self {
-            histogram,
-            ewma: ewma::EWMA::new(alpha),
-        })
+        if start > 0.0 {
+            for _ in 0..(span as u64) {
+                ewma.add(start);
+            }
+        }
+
+        Self { ewma }
     }
 
     fn span_to_alpha(span: f64) -> f64 {
@@ -127,11 +126,13 @@ pub struct Web3Rpc {
     pub(super) head_block: RwLock<Option<Web3ProxyBlock>>,
     /// Track head block latency
     pub(super) head_latency: RwLock<Latency>,
-    /// Track request latency
-    pub(super) request_latency: RwLock<Latency>,
+    // /// Track request latency
+    // /// TODO: refactor this. this lock kills perf. for now just use head_latency
+    // pub(super) request_latency: RwLock<Latency>,
     /// Track total requests served
     /// TODO: maybe move this to graphana
     pub(super) total_requests: AtomicUsize,
+    pub(super) active_requests: AtomicUsize,
 }
 
 impl Web3Rpc {
@@ -257,6 +258,18 @@ impl Web3Rpc {
         };
 
         Ok((new_connection, handle))
+    }
+
+    pub async fn peak_ewma(&self) -> OrderedFloat<f64> {
+        // TODO: use request instead of head latency? that was killing perf though
+        let head_ewma = self.head_latency.read().value();
+
+        // TODO: what ordering?
+        let active_requests = self.active_requests.load(atomic::Ordering::Relaxed) as f64;
+
+        // TODO: i'm not sure head * active is exactly right. but we'll see
+        // TODO: i don't think this actually counts as peak. investigate with atomics.rs and peak_ewma.rs
+        OrderedFloat(head_ewma * active_requests)
     }
 
     // TODO: would be great if rpcs exposed this. see https://github.com/ledgerwatch/erigon/issues/6391
@@ -671,14 +684,9 @@ impl Web3Rpc {
 
                     // TODO: how often? different depending on the chain?
                     // TODO: reset this timeout when a new block is seen? we need to keep request_latency updated though
-                    // let health_sleep_seconds = 10;
-
-                    futures::future::pending::<()>().await;
-
-                    Ok(())
+                    let health_sleep_seconds = 10;
 
                     // TODO: benchmark this and lock contention
-                    /*
                     let mut old_total_requests = 0;
                     let mut new_total_requests;
 
@@ -696,6 +704,7 @@ impl Web3Rpc {
 
                             if new_total_requests - old_total_requests < 10 {
                                 // TODO: if this fails too many times, reset the connection
+                                // TODO: move this into a function and the chaining should be easier
                                 let head_block = conn.head_block.read().clone();
 
                                 if let Some((block_hash, txid)) = head_block.and_then(|x| {
@@ -706,28 +715,65 @@ impl Web3Rpc {
 
                                     Some((block_hash, txid))
                                 }) {
-                                    let authorization = authorization.clone();
-                                    let conn = conn.clone();
+                                    let to = conn
+                                        .wait_for_query::<_, Option<Transaction>>(
+                                            "eth_getTransactionByHash",
+                                            &(txid,),
+                                            revert_handler,
+                                            authorization.clone(),
+                                            Some(client.clone()),
+                                        )
+                                        .await
+                                        .and_then(|tx| {
+                                            let tx = tx.context("no transaction found")?;
 
-                                    let x = async move {
-                                        conn.try_request_handle(&authorization, Some(client)).await
-                                    }
-                                    .await;
+                                            // TODO: what default? something real?
+                                            let to = tx.to.unwrap_or_else(|| {
+                                                "0xdead00000000000000000000000000000000beef"
+                                                    .parse::<Address>()
+                                                    .expect("deafbeef")
+                                            });
 
-                                    if let Ok(OpenRequestResult::Handle(x)) = x {
-                                        if let Ok(Some(x)) = x
-                                            .request::<_, Option<Transaction>>(
-                                                "eth_getTransactionByHash",
-                                                &(txid,),
+                                            Ok(to)
+                                        });
+
+                                    let code = match to {
+                                        Err(err) => {
+                                            if conn.backup {
+                                                debug!(
+                                                    "{} failed health check query! {:#?}",
+                                                    conn, err
+                                                );
+                                            } else {
+                                                warn!(
+                                                    "{} failed health check query! {:#?}",
+                                                    conn, err
+                                                );
+                                            }
+                                            continue;
+                                        }
+                                        Ok(to) => {
+                                            conn.wait_for_query::<_, Option<Bytes>>(
+                                                "eth_getCode",
+                                                &(to, block_hash),
                                                 revert_handler,
-                                                None,
+                                                authorization.clone(),
+                                                Some(client),
                                             )
                                             .await
-                                        {
-                                            // TODO: make this flatter
-                                            // TODO: do more (fair, not random) things here
-                                            // let  = x.request("eth_getCode", (tx.to.unwrap_or(Address::zero()), block_hash), RequestRevertHandler::ErrorLevel, Some(client.clone()))
                                         }
+                                    };
+
+                                    if let Err(err) = code {
+                                        if conn.backup {
+                                            debug!(
+                                                "{} failed health check query! {:#?}",
+                                                conn, err
+                                            );
+                                        } else {
+                                            warn!("{} failed health check query! {:#?}", conn, err);
+                                        }
+                                        continue;
                                     }
                                 }
                             }
@@ -735,7 +781,6 @@ impl Web3Rpc {
                             old_total_requests = new_total_requests;
                         }
                     }
-                    */
                 };
 
                 futures.push(flatten_handle(tokio::spawn(f)));
@@ -1144,6 +1189,26 @@ impl Web3Rpc {
 
         Ok(OpenRequestResult::Handle(handle))
     }
+
+    pub async fn wait_for_query<P, R>(
+        self: &Arc<Self>,
+        method: &str,
+        params: &P,
+        revert_handler: RequestRevertHandler,
+        authorization: Arc<Authorization>,
+        unlocked_provider: Option<Arc<Web3Provider>>,
+    ) -> anyhow::Result<R>
+    where
+        // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
+        P: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
+        R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug,
+    {
+        self.wait_for_request_handle(&authorization, None, None)
+            .await?
+            .request::<P, R>(method, params, revert_handler, unlocked_provider)
+            .await
+            .context("ProviderError from the backend")
+    }
 }
 
 impl fmt::Debug for Web3Provider {
@@ -1211,9 +1276,7 @@ impl Serialize for Web3Rpc {
         // TODO: maybe this is too much data. serialize less?
         state.serialize_field("head_block", &*self.head_block.read())?;
 
-        state.serialize_field("head_latency", &*self.head_latency.read())?;
-
-        state.serialize_field("request_latency", &*self.request_latency.read())?;
+        state.serialize_field("head_latency", &self.head_latency.read().value())?;
 
         state.serialize_field(
             "total_requests",
