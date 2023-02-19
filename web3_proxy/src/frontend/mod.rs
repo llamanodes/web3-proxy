@@ -167,6 +167,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
             get(users::user_stats_aggregated_get),
         )
         .route("/user/stats/detailed", get(users::user_stats_detailed_get))
+        .route("/user/modify_role", get(users::admin_change_user_roles))
         .route("/user/logout", post(users::user_logout_post))
         //
         // Axum layers
