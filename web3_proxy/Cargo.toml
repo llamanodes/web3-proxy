@@ -27,7 +27,7 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 
 anyhow = { version = "1.0.69", features = ["backtrace"] }
 argh = "0.1.10"
-axum = { version = "0.6.6", features = ["headers", "ws"] }
+axum = { version = "0.6.7", features = ["headers", "ws"] }
 axum-client-ip = "0.4.0"
 axum-macros = "0.3.4"
 chrono = "0.4.23"
@@ -44,7 +44,7 @@ gethostname = "0.4.1"
 glob = "0.3.1"
 handlebars = "4.3.6"
 hashbrown = { version = "0.13.2", features = ["serde"] }
-http = "0.2.8"
+http = "0.2.9"
 influxdb2 = { version = "0.3", features = ["rustls"], default-features = false }
 ipnet = "2.7.1"
 itertools = "0.10.5"
@@ -67,9 +67,9 @@ serde = { version = "1.0.152", features = [] }
 serde_json = { version = "1.0.93", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.2.1"
 siwe = "0.5.0"
-time = "0.3.17"
+time = "0.3.19"
 tokio = { version = "1.25.0", features = ["full"] }
-tokio-stream = { version = "0.1.11", features = ["sync"] }
+tokio-stream = { version = "0.1.12", features = ["sync"] }
 tokio-uring = { version = "0.4.0", optional = true }
 toml = "0.7.2"
 tower = "0.4.13"
