@@ -139,7 +139,7 @@ pub struct AppConfig {
     /// None = allow all requests
     pub public_requests_per_period: Option<u64>,
 
-    /// Salt for hashing recent ips
+    /// Salt for hashing recent ips. Not a perfect way to introduce privacy, but better than nothing
     pub public_recent_ips_salt: Option<String>,
 
     /// RPC responses are cached locally
@@ -162,6 +162,15 @@ pub struct AppConfig {
     /// maximum size of the connection pool for the cache
     /// If none, the minimum * 2 is used
     pub volatile_redis_max_connections: Option<usize>,
+
+    /// influxdb host for stats
+    pub influxdb_host: Option<String>,
+
+    /// influxdb org for stats
+    pub influxdb_org: Option<String>,
+
+    /// influxdb token for stats
+    pub influxdb_token: Option<String>,
 
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]

@@ -4,7 +4,6 @@ use log::info;
 use migration::sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
 use std::fs::{self, create_dir_all};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 /// Export users from the database.
@@ -21,7 +20,7 @@ impl UserExportSubCommand {
         // create the output dir if it does not exist
         create_dir_all(&self.output_dir)?;
 
-        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        let now = chrono::Utc::now().timestamp();
 
         let export_dir = Path::new(&self.output_dir);
 

@@ -3,10 +3,6 @@
 use super::authorization::{login_is_authorized, RpcSecretKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
-use crate::user_queries::{get_page_from_params, get_user_id_from_params};
-use crate::user_queries::{
-    get_chain_id_from_params, get_query_start_from_params, query_user_stats, StatResponse,
-};
 use entities::prelude::{User, SecondaryUser};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
@@ -20,7 +16,7 @@ use axum::{
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
-use entities::sea_orm_active_enums::{LogLevel, Role};
+use entities::sea_orm_active_enums::{Role};
 use entities::{admin, admin_trail, login, pending_login, revert_log, rpc_key, secondary_user, user, user_tier};
 use ethers::{abi::AbiEncode, prelude::Address, types::Bytes};
 use hashbrown::HashMap;

@@ -335,6 +335,35 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] don't cache methods that are usually very large
 - [x] use http provider when available
 - [ ] don't use new_head_provider anywhere except new head subscription
+- [x] remove the "metered" crate now that we save aggregate queries?
+- [x] don't use systemtime. use chrono
+- [x] graceful shutdown
+  - [x] frontend needs to shut down first. this will stop serving requests on /health and so new requests should quickly stop being routed to us
+  - [x] when frontend has finished, tell all the other tasks to stop
+  - [x] stats buffer needs to flush to both the database and influxdb
+- [x] `rpc_accounting` script
+- [x] period_datetime should always round to the start of the minute. this will ensure aggregations use as few rows as possible
+- [x] weighted random choice should still prioritize non-archive servers
+    - maybe shuffle randomly and then sort by (block_limit, random_index)?
+    - maybe sum available_requests grouped by archive/non-archive. only limit to non-archive if they have enough?
+- [x] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
+- [x] add a "backup" tier that is only used if balanced_rpcs has "no servers synced"
+  - use this tier to check timestamp on latest block. if we are behind that by more than a few seconds, something is wrong
+- [x] `change_user_tier_by_address` script
+- [x] emit stats for user's successes, retries, failures, with the types of requests, chain, rpc
+- [x] add caching to speed up stat queries
+- [x] config parsing is strict right now. this makes it hard to deploy on git push since configs need to change along with it
+  - changed to only emit a warning if there is an unknown configuration key
+- [x] make the "not synced" error more verbose
+- [x] short lived cache on /health
+- [x] cache /status for longer
+- [x] sort connections during eth_sendRawTransaction
+- [x] block all admin_ rpc commands
+- [x] remove the "metered" crate now that we save aggregate queries?
+- [x] add archive depth to app config
+- [x] improve "archive_needed" boolean. change to "block_depth"
+- [x] keep score of new_head timings for all rpcs
+- [x] having the whole block in /status is very verbose. trim it down
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
@@ -351,60 +380,54 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] maybe we shouldn't route eth_getLogs to syncing nodes. serving queries slows down sync significantly
   - change the send_best function to only include servers that are at least close to fully synced
 - [ ] have private transactions be enabled by a url setting rather than a setting on the key
+- [ ] enable mev protected transactions with either a /protect/ url (instead of /private/) or the database (when on /rpc/)
 - [ ] cli for adding rpc keys to an existing user
+- [ ] rename "private" to "mev protected" to avoid confusion about private transactions being public once they are mined
+- [ ] allow restricting an rpc key to specific chains
+- [ ] writes to request_latency should be handled by a background task so they don't slow down the request
+  - maybe we can use https://docs.rs/hdrhistogram/latest/hdrhistogram/sync/struct.SyncHistogram.html
+- [ ] keep re-broadcasting transactions until they are confirmed
+- [ ] if mev protection is disabled, we should send to *both* balanced_rpcs *and* private_rps
+- [ ] if mev protection is enabled, we should sent to *only* private_rpcs
 - [ ] rate limiting/throttling on query_user_stats 
 - [ ] minimum allowed query_start on query_user_stats
-- [ ] setting request limits to None is broken. it does maxu64 and then internal deferred rate limiter counts try to *99/100
-- [ ] during shutdown, mark the proxy unhealthy and send unsubscribe responses for any open websocket subscriptions
+- [ ] setting request limits to None is broken. it does maxu64 and then internal deferred rate limiter counts overflows when it does to `x*99/100`
+- [ ] during shutdown, send unsubscribe responses for any open websocket subscriptions
 - [ ] some chains still use total_difficulty. have total_difficulty be used only if the chain needs it
   - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
   - if total difficulty is set and non-zero, use it for consensus instead of just the number
 - [ ] query_user_stats cache hit rate
 - [ ] need debounce on reconnect. websockets are closing on us and then we reconnect twice. locks on ProviderState need more thought
-- [ ] having the whole block in status is very verbose. trim it down
-- [ ] `cost estimate` script
-  - sum bytes and number of requests. prompt hosting costs. divide
-- [ ] `stat delay` script 
-  - query database for newest stat
-- [ ] period_datetime should always be :00. right now it depends on start time 
+- [ ] having the whole block in /status is very verbose. trim it down
 - [ ] we have our hard rate limiter set up with a period of 60. but most providers have period of 1- [ ] two servers running will confuse rpc_accounting!
   - it won't happen with users often because they should be sticky to one proxy, but unauthenticated users will definitely hit this
   - one option: we need the insert to be an upsert, but how do we merge historgrams?
-- [ ] don't use systemtime. use chrono
 - [ ] soft limit needs more thought
     - it should be the min of total_sum_soft_limit (from only non-lagged servers) and min_sum_soft_limit
     - otherwise it won't track anything and will just give errors.
     - but if web3 proxy has just started, we should give some time otherwise we will thundering herd the first server that responds
 - [ ] connection pool for websockets. use tokio-tungstenite directly. no need for ethers providers since serde_json is enough for us
     - this should also get us closer to being able to do our own streaming json parser where we can 
-- [ ] get `oldest_allowed` out of config. or calculate automatically based on block time.
-- [ ] `change_user_tier_by_address` script
 - [ ] figure out if "could not get block from params" is a problem worth logging
     - maybe it was an ots request?
-- [ ] eth_subscribe rpc_accounting has everything as cache_hits. should we instead count it as one background request?
+- [ ] change redirect_rpc_key_url to match the newest url scheme
 - [ ] implement filters
 - [ ] implement remaining subscriptions
     - would be nice if our subscriptions had better gaurentees than geth/erigon do, but maybe simpler to just setup a broadcast channel and proxy all the respones to a backend instead
 - [ ] tests should use `test-env-log = "0.2.8"`
-- [ ] weighted random choice should still prioritize non-archive servers
-    - maybe shuffle randomly and then sort by (block_limit, random_index)?
-    - maybe sum available_requests grouped by archive/non-archive. only limit to non-archive if they have enough?
 - [ ] some places we call it "accounting" others a "stat". be consistent
 - [ ] cli commands to search users by key
 - [ ] cli flag to set prometheus port
 - [ ] flamegraphs show 25% of the time to be in moka-housekeeper. tune that
-- [ ] remove/change the "active_requests" counter? maybe only once we have dynamic soft limits?
 - [ ] refactor so configs can change while running
   - this will probably be a rather large change, but is necessary when we have autoscaling
   - create the app without applying any config to it
   - have a blocking future watching the config file and calling app.apply_config() on first load and on change
   - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
-- [ ] config parsing is strict right now. this makes it hard to deploy on git push since configs need to change along with it
-- [ ] when displaying the user's data, they just see an opaque id for their tier. We should join that data
+- [ ] when displaying the user's data, they just see an opaque id for their tier. We should join that data so they see the tier name and limits
 - [ ] add indexes to speed up stat queries
 - [ ] the public rpc is rate limited by ip and the authenticated rpc is rate limit by key
     - this means if a dapp uses the authenticated RPC on their website, they could get rate limited more easily
-- [ ] add cacheing to speed up stat queries
 - [ ] take an option to set a non-default role when creating a user
 - [ ] different prune levels for free tiers
 - [ ] have a test that runs ethspam and versus
@@ -418,14 +441,10 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] after running for a while, https://eth-ski.llamanodes.com/status is only at 157 blocks and hashes. i thought they would be near 10k after running for a while
     - adding uptime to the status should help
     - i think this is already in our todo list
-- [ ] improve private transactions. keep re-broadcasting until they are confirmed
 - [ ] write a test that uses the cli to create a user and modifies their key
 - [ ] Uuid/Ulid instead of big_unsigned for database ids
   - might have to use Uuid in sea-orm and then convert to Ulid on display
   - https://www.kostolansky.sk/posts/how-to-migrate-to-uuid/
-- [ ] make the "not synced" error more verbose
-  - I think there is a bug in our synced_rpcs filtering. likely in has_block_data
-  - seeing "not synced" when I load https://vfat.tools/esd/
 - [ ] emit stdandard deviation?
 - [ ] emit global stat on retry
 - [ ] emit global stat on no servers synced
@@ -477,20 +496,21 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] nice output when cargo doc is run
 - [ ] cache more things locally or in redis
 - [ ] stats when forks are resolved (and what chain they were on?)
-- [ ] emit stats for user's successes, retries, failures, with the types of requests, chain, rpc
 - [ ] Only subscribe to transactions when someone is listening and if the server has opted in to it
 - [ ] When sending eth_sendRawTransaction, retry errors
 - [ ] If we need an archive server and no servers in sync, exit immediately with an error instead of waiting 60 seconds
 - [ ] 120 second timeout is too short. Maybe do that for free tier and larger timeout for paid. Problem is that some queries can take over 1000 seconds
-- [ ] when handling errors from axum parsing the Json...Enum, the errors don't get wrapped in json. i think we need a axum::Layer
+- [ ] when handling errors from axum parsing the Json...Enum in the function signature, the errors don't get wrapped in json. i think we need a axum::Layer
 - [ ] don't "unwrap" anywhere. give proper errors
 - [ ] handle log subscriptions
   - probably as a paid feature
-- [ ] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
-- [ ] add a "failover" tier that is only used if balanced_rpcs has "no servers synced"
-  - use this tier (and private tier) to check timestamp on latest block. if we are behind that by more than a few seconds, something is wrong
 - [ ] relevant erigon changelogs: add pendingTransactionWithBody subscription method (#5675)
 - [ ] change_user_tier_by_key should not show the rpc key id. that way our ansible playbook won't expose it
+- [ ] change scoring for rpcs again. "p2c ewma"
+  - [ ] weighted random sort: (soft_limit - ewma active requests * num web3_proxy servers)
+    - 2. soft_limit
+  - [ ] pick 2 servers from the random sort.
+    - [ ] exponential weighted moving average for block subscriptions of time behind the first server (works well for ws but not http)
 
 
 ## V2
@@ -635,3 +655,4 @@ in another repo: event subscriber
 - [ ] have an upgrade tier that queries multiple backends at once. returns on first Ok result, collects errors. if no Ok, find the most common error and then respond with that
 - [ ] give public_recent_ips_salt a better, more general, name
 - [ ] include tier in the head block logs?
+- [ ] calculate archive depth automatically based on block_data_limits 

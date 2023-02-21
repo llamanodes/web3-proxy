@@ -5,7 +5,7 @@ use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::Authorization;
-use crate::rpcs::request::RequestRevertHandler;
+use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use ethers::types::{Address, Transaction, U256};
@@ -104,10 +104,9 @@ pub struct Web3Rpc {
     pub(super) http_client: Option<reqwest::Client>,
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
-    /// this provider is only used for new heads subscriptions
-    /// TODO: put the provider inside an arc?
+    /// TODO: is this only used for new heads subscriptions? if so, rename
     pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
-    /// keep track of hard limits
+    /// keep track of hard limits. Optional because we skip this code for our own servers.
     pub(super) hard_limit_until: Option<watch::Sender<Instant>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     /// We do not use the deferred rate limiter because going over limits would cause errors
@@ -231,6 +230,7 @@ impl Web3Rpc {
             backup,
             block_data_limit,
             tier: config.tier,
+            head_block: RwLock::new(Default::default()),
             ..Default::default()
         };
 
@@ -260,7 +260,7 @@ impl Web3Rpc {
         Ok((new_connection, handle))
     }
 
-    pub async fn peak_ewma(&self) -> OrderedFloat<f64> {
+    pub fn peak_ewma(&self) -> OrderedFloat<f64> {
         // TODO: use request instead of head latency? that was killing perf though
         let head_ewma = self.head_latency.read().value();
 
@@ -376,6 +376,12 @@ impl Web3Rpc {
 
         // this rpc doesn't have that block yet. still syncing
         if needed_block_num > &head_block_num {
+            trace!(
+                "{} has head {} but needs {}",
+                self,
+                head_block_num,
+                needed_block_num,
+            );
             return false;
         }
 
@@ -384,7 +390,17 @@ impl Web3Rpc {
 
         let oldest_block_num = head_block_num.saturating_sub(block_data_limit);
 
-        *needed_block_num >= oldest_block_num
+        if needed_block_num < &oldest_block_num {
+            trace!(
+                "{} needs {} but the oldest available is {}",
+                self,
+                needed_block_num,
+                oldest_block_num
+            );
+            return false;
+        }
+
+        true
     }
 
     /// reconnect to the provider. errors are retried forever with exponential backoff with jitter.
@@ -423,7 +439,8 @@ impl Web3Rpc {
 
         // retry until we succeed
         while let Err(err) = self.connect(block_sender, chain_id, db_conn).await {
-            // thread_rng is crytographically secure. we don't need that here
+            // thread_rng is crytographically secure. we don't need that here. use thread_fast_rng instead
+            // TODO: min of 1 second? sleep longer if rate limited?
             sleep_ms = min(
                 cap_ms,
                 thread_fast_rng().gen_range(base_ms..(sleep_ms * range_multiplier)),
@@ -439,7 +456,7 @@ impl Web3Rpc {
 
             log::log!(
                 error_level,
-                "Failed reconnect to {}! Retry in {}ms. err={:?}",
+                "Failed (re)connect to {}! Retry in {}ms. err={:?}",
                 self,
                 retry_in.as_millis(),
                 err,
@@ -651,10 +668,10 @@ impl Web3Rpc {
         reconnect: bool,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<()> {
-        let revert_handler = if self.backup {
-            RequestRevertHandler::DebugLevel
+        let error_handler = if self.backup {
+            RequestErrorHandler::DebugLevel
         } else {
-            RequestRevertHandler::ErrorLevel
+            RequestErrorHandler::ErrorLevel
         };
 
         loop {
@@ -719,7 +736,7 @@ impl Web3Rpc {
                                         .wait_for_query::<_, Option<Transaction>>(
                                             "eth_getTransactionByHash",
                                             &(txid,),
-                                            revert_handler,
+                                            error_handler,
                                             authorization.clone(),
                                             Some(client.clone()),
                                         )
@@ -756,7 +773,7 @@ impl Web3Rpc {
                                             conn.wait_for_query::<_, Option<Bytes>>(
                                                 "eth_getCode",
                                                 &(to, block_hash),
-                                                revert_handler,
+                                                error_handler,
                                                 authorization.clone(),
                                                 Some(client),
                                             )
@@ -1142,7 +1159,7 @@ impl Web3Rpc {
         }
 
         if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
-            let hard_limit_ready = hard_limit_until.borrow().clone();
+            let hard_limit_ready = hard_limit_until.borrow().to_owned();
 
             let now = Instant::now();
 
@@ -1174,7 +1191,7 @@ impl Web3Rpc {
                     }
 
                     if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
-                        hard_limit_until.send_replace(retry_at.clone());
+                        hard_limit_until.send_replace(retry_at);
                     }
 
                     return Ok(OpenRequestResult::RetryAt(retry_at));
@@ -1194,7 +1211,7 @@ impl Web3Rpc {
         self: &Arc<Self>,
         method: &str,
         params: &P,
-        revert_handler: RequestRevertHandler,
+        revert_handler: RequestErrorHandler,
         authorization: Arc<Authorization>,
         unlocked_provider: Option<Arc<Web3Provider>>,
     ) -> anyhow::Result<R>
@@ -1251,7 +1268,7 @@ impl Serialize for Web3Rpc {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Rpc", 10)?;
+        let mut state = serializer.serialize_struct("Web3Rpc", 9)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
@@ -1315,15 +1332,10 @@ mod tests {
     #![allow(unused_imports)]
     use super::*;
     use ethers::types::{Block, U256};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_archive_node_has_block_data() {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("cannot tell the time")
-            .as_secs()
-            .into();
+        let now = chrono::Utc::now().timestamp().into();
 
         let random_block = Block {
             hash: Some(H256::random()),
@@ -1358,11 +1370,7 @@ mod tests {
 
     #[test]
     fn test_pruned_node_has_block_data() {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("cannot tell the time")
-            .as_secs()
-            .into();
+        let now = chrono::Utc::now().timestamp().into();
 
         let head_block: Web3ProxyBlock = Arc::new(Block {
             hash: Some(H256::random()),
@@ -1399,11 +1407,7 @@ mod tests {
     // TODO: think about how to bring the concept of a "lagged" node back
     #[test]
     fn test_lagged_node_not_has_block_data() {
-        let now: U256 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("cannot tell the time")
-            .as_secs()
-            .into();
+        let now = chrono::Utc::now().timestamp().into();
 
         // head block is an hour old
         let head_block = Block {
@@ -1415,7 +1419,7 @@ mod tests {
 
         let head_block = Arc::new(head_block);
 
-        let head_block = SavedBlock::new(head_block);
+        let head_block = Web3ProxyBlock::new(head_block);
         let block_data_limit = u64::MAX;
 
         let metrics = OpenRequestHandleMetrics::default();

@@ -97,18 +97,18 @@ impl SentrydSubCommand {
             .or_else(|| top_config.map(|x| x.app.chain_id))
             .context("--config or --chain-id required")?;
 
-        let primary_proxy = self.web3_proxy.trim_end_matches("/").to_string();
+        let primary_proxy = self.web3_proxy.trim_end_matches('/').to_string();
 
         let other_proxy: Vec<_> = self
             .other_proxy
             .into_iter()
-            .map(|x| x.trim_end_matches("/").to_string())
+            .map(|x| x.trim_end_matches('/').to_string())
             .collect();
 
         let other_rpc: Vec<_> = self
             .other_rpc
             .into_iter()
-            .map(|x| x.trim_end_matches("/").to_string())
+            .map(|x| x.trim_end_matches('/').to_string())
             .collect();
 
         let seconds = self.seconds.unwrap_or(60);

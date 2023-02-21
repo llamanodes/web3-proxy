@@ -1,11 +1,11 @@
 //! Websocket-specific functions for the Web3ProxyApp
 
-use super::{Web3ProxyApp, REQUEST_PERIOD};
-use crate::app_stats::ProxyResponseStat;
+use super::Web3ProxyApp;
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::rpcs::transactions::TxStatus;
+use crate::stats::RpcQueryStats;
 use anyhow::Context;
 use axum::extract::ws::Message;
 use ethers::prelude::U64;
@@ -33,8 +33,7 @@ impl Web3ProxyApp {
             .context("finding request size")?
             .len();
 
-        let request_metadata =
-            Arc::new(RequestMetadata::new(REQUEST_PERIOD, request_bytes).unwrap());
+        let request_metadata = Arc::new(RequestMetadata::new(request_bytes).unwrap());
 
         let (subscription_abort_handle, subscription_registration) = AbortHandle::new_pair();
 
@@ -68,8 +67,7 @@ impl Web3ProxyApp {
                         };
 
                         // TODO: what should the payload for RequestMetadata be?
-                        let request_metadata =
-                            Arc::new(RequestMetadata::new(REQUEST_PERIOD, 0).unwrap());
+                        let request_metadata = Arc::new(RequestMetadata::new(0).unwrap());
 
                         // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
                         let response_json = json!({
@@ -97,7 +95,7 @@ impl Web3ProxyApp {
                         };
 
                         if let Some(stat_sender) = stat_sender.as_ref() {
-                            let response_stat = ProxyResponseStat::new(
+                            let response_stat = RpcQueryStats::new(
                                 "eth_subscription(newHeads)".to_string(),
                                 authorization.clone(),
                                 request_metadata.clone(),
@@ -135,8 +133,7 @@ impl Web3ProxyApp {
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
-                        let request_metadata =
-                            Arc::new(RequestMetadata::new(REQUEST_PERIOD, 0).unwrap());
+                        let request_metadata = Arc::new(RequestMetadata::new(0).unwrap());
 
                         let new_tx = match new_tx_state {
                             TxStatus::Pending(tx) => tx,
@@ -169,7 +166,7 @@ impl Web3ProxyApp {
                         };
 
                         if let Some(stat_sender) = stat_sender.as_ref() {
-                            let response_stat = ProxyResponseStat::new(
+                            let response_stat = RpcQueryStats::new(
                                 "eth_subscription(newPendingTransactions)".to_string(),
                                 authorization.clone(),
                                 request_metadata.clone(),
@@ -211,8 +208,7 @@ impl Web3ProxyApp {
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
-                        let request_metadata =
-                            Arc::new(RequestMetadata::new(REQUEST_PERIOD, 0).unwrap());
+                        let request_metadata = Arc::new(RequestMetadata::new(0).unwrap());
 
                         let new_tx = match new_tx_state {
                             TxStatus::Pending(tx) => tx,
@@ -246,7 +242,7 @@ impl Web3ProxyApp {
                         };
 
                         if let Some(stat_sender) = stat_sender.as_ref() {
-                            let response_stat = ProxyResponseStat::new(
+                            let response_stat = RpcQueryStats::new(
                                 "eth_subscription(newPendingFullTransactions)".to_string(),
                                 authorization.clone(),
                                 request_metadata.clone(),
@@ -288,8 +284,7 @@ impl Web3ProxyApp {
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
-                        let request_metadata =
-                            Arc::new(RequestMetadata::new(REQUEST_PERIOD, 0).unwrap());
+                        let request_metadata = Arc::new(RequestMetadata::new(0).unwrap());
 
                         let new_tx = match new_tx_state {
                             TxStatus::Pending(tx) => tx,
@@ -323,7 +318,7 @@ impl Web3ProxyApp {
                         };
 
                         if let Some(stat_sender) = stat_sender.as_ref() {
-                            let response_stat = ProxyResponseStat::new(
+                            let response_stat = RpcQueryStats::new(
                                 "eth_subscription(newPendingRawTransactions)".to_string(),
                                 authorization.clone(),
                                 request_metadata.clone(),
@@ -354,7 +349,7 @@ impl Web3ProxyApp {
         let response = JsonRpcForwardedResponse::from_value(json!(subscription_id), id);
 
         if let Some(stat_sender) = self.stat_sender.as_ref() {
-            let response_stat = ProxyResponseStat::new(
+            let response_stat = RpcQueryStats::new(
                 request_json.method.clone(),
                 authorization.clone(),
                 request_metadata,

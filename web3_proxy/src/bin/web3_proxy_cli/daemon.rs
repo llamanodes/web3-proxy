@@ -2,12 +2,12 @@
 
 use argh::FromArgs;
 use futures::StreamExt;
-use log::{error, info, warn};
+use log::{error, info, trace, warn};
 use num::Zero;
 use tokio::sync::broadcast;
 use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use web3_proxy::config::TopConfig;
-use web3_proxy::{frontend, metrics_frontend};
+use web3_proxy::{frontend, prometheus};
 
 /// start the main proxy daemon
 #[derive(FromArgs, PartialEq, Debug, Eq)]
@@ -25,7 +25,7 @@ pub struct ProxydSubCommand {
 
 impl ProxydSubCommand {
     pub async fn main(self, top_config: TopConfig, num_workers: usize) -> anyhow::Result<()> {
-        let (shutdown_sender, _) = broadcast::channel(1);
+        let (shutdown_sender, _shutdown_receiver) = broadcast::channel(1);
 
         run(
             top_config,
@@ -43,7 +43,7 @@ async fn run(
     frontend_port: u16,
     prometheus_port: u16,
     num_workers: usize,
-    shutdown_sender: broadcast::Sender<()>,
+    frontend_shutdown_sender: broadcast::Sender<()>,
 ) -> anyhow::Result<()> {
     // tokio has code for catching ctrl+c so we use that
     // this shutdown sender is currently only used in tests, but we might make a /shutdown endpoint or something
@@ -51,40 +51,78 @@ async fn run(
 
     let app_frontend_port = frontend_port;
     let app_prometheus_port = prometheus_port;
-    let mut shutdown_receiver = shutdown_sender.subscribe();
+
+    // TODO: should we use a watch or broadcast for these?
+    let (app_shutdown_sender, _app_shutdown_receiver) = broadcast::channel(1);
+
+    let frontend_shutdown_receiver = frontend_shutdown_sender.subscribe();
+    let prometheus_shutdown_receiver = app_shutdown_sender.subscribe();
+
+    // TODO: should we use a watch or broadcast for these?
+    let (frontend_shutdown_complete_sender, mut frontend_shutdown_complete_receiver) =
+        broadcast::channel(1);
 
     // start the main app
     let mut spawned_app =
-        Web3ProxyApp::spawn(top_config, num_workers, shutdown_sender.subscribe()).await?;
+        Web3ProxyApp::spawn(top_config, num_workers, app_shutdown_sender.clone()).await?;
 
     // start the prometheus metrics port
-    let prometheus_handle = tokio::spawn(metrics_frontend::serve(
+    let prometheus_handle = tokio::spawn(prometheus::serve(
         spawned_app.app.clone(),
         app_prometheus_port,
+        prometheus_shutdown_receiver,
     ));
 
     // wait until the app has seen its first consensus head block
-    // TODO: if backups were included, wait a little longer?
-    let _ = spawned_app.app.head_block_receiver().changed().await;
+    // if backups were included, wait a little longer
+    for _ in 0..3 {
+        let _ = spawned_app.consensus_connections_watcher.changed().await;
+
+        let consensus = spawned_app
+            .consensus_connections_watcher
+            .borrow_and_update();
+
+        if consensus.backups_needed {
+            info!(
+                "waiting longer. found consensus with backups: {}",
+                consensus.head_block.as_ref().unwrap(),
+            );
+        } else {
+            // TODO: also check that we have at least one archive node connected?
+            break;
+        }
+    }
 
     // start the frontend port
-    let frontend_handle = tokio::spawn(frontend::serve(app_frontend_port, spawned_app.app.clone()));
+    let frontend_handle = tokio::spawn(frontend::serve(
+        app_frontend_port,
+        spawned_app.app.clone(),
+        frontend_shutdown_receiver,
+        frontend_shutdown_complete_sender,
+    ));
+
+    let frontend_handle = flatten_handle(frontend_handle);
 
     // if everything is working, these should all run forever
+    let mut exited_with_err = false;
+    let mut frontend_exited = false;
     tokio::select! {
         x = flatten_handles(spawned_app.app_handles) => {
             match x {
                 Ok(_) => info!("app_handle exited"),
                 Err(e) => {
-                    return Err(e);
+                    error!("app_handle exited: {:#?}", e);
+                    exited_with_err = true;
                 }
             }
         }
-        x = flatten_handle(frontend_handle) => {
+        x = frontend_handle => {
+            frontend_exited = true;
             match x {
                 Ok(_) => info!("frontend exited"),
                 Err(e) => {
-                    return Err(e);
+                    error!("frontend exited: {:#?}", e);
+                    exited_with_err = true;
                 }
             }
         }
@@ -92,35 +130,62 @@ async fn run(
             match x {
                 Ok(_) => info!("prometheus exited"),
                 Err(e) => {
-                    return Err(e);
+                    error!("prometheus exited: {:#?}", e);
+                    exited_with_err = true;
                 }
             }
         }
         x = tokio::signal::ctrl_c() => {
+            // TODO: unix terminate signal, too
             match x {
                 Ok(_) => info!("quiting from ctrl-c"),
                 Err(e) => {
-                    return Err(e.into());
+                    // TODO: i don't think this is possible
+                    error!("error quiting from ctrl-c: {:#?}", e);
+                    exited_with_err = true;
                 }
             }
         }
-        x = shutdown_receiver.recv() => {
+        // TODO: how can we properly watch background handles here? this returns None immediatly and the app exits. i think the bug is somewhere else though
+        x = spawned_app.background_handles.next() => {
             match x {
-                Ok(_) => info!("quiting from shutdown receiver"),
-                Err(e) => {
-                    return Err(e.into());
+                Some(Ok(_)) => info!("quiting from background handles"),
+                Some(Err(e)) => {
+                    error!("quiting from background handle error: {:#?}", e);
+                    exited_with_err = true;
+                }
+                None => {
+                    // TODO: is this an error?
+                    warn!("background handles exited");
                 }
             }
         }
     };
 
-    // one of the handles stopped. send a value so the others know to shut down
-    if let Err(err) = shutdown_sender.send(()) {
-        warn!("shutdown sender err={:?}", err);
+    // if a future above completed, make sure the frontend knows to start turning off
+    if !frontend_exited {
+        if let Err(err) = frontend_shutdown_sender.send(()) {
+            // TODO: this is actually expected if the frontend is already shut down
+            warn!("shutdown sender err={:?}", err);
+        };
+    }
+
+    // TODO: wait until the frontend completes
+    if let Err(err) = frontend_shutdown_complete_receiver.recv().await {
+        warn!("shutdown completition err={:?}", err);
+    } else {
+        info!("frontend exited gracefully");
+    }
+
+    // now that the frontend is complete, tell all the other futures to finish
+    if let Err(err) = app_shutdown_sender.send(()) {
+        warn!("backend sender err={:?}", err);
     };
 
-    // wait for things like saving stats to the database to complete
-    info!("waiting on important background tasks");
+    info!(
+        "waiting on {} important background tasks",
+        spawned_app.background_handles.len()
+    );
     let mut background_errors = 0;
     while let Some(x) = spawned_app.background_handles.next().await {
         match x {
@@ -132,15 +197,19 @@ async fn run(
                 error!("{:?}", e);
                 background_errors += 1;
             }
-            Ok(Ok(_)) => continue,
+            Ok(Ok(_)) => {
+                // TODO: how can we know which handle exited?
+                trace!("a background handle exited");
+                continue;
+            }
         }
     }
 
-    if background_errors.is_zero() {
+    if background_errors.is_zero() && !exited_with_err {
         info!("finished");
         Ok(())
     } else {
-        // TODO: collect instead?
+        // TODO: collect all the errors here instead?
         Err(anyhow::anyhow!("finished with errors!"))
     }
 }
@@ -233,15 +302,14 @@ mod tests {
             extra: Default::default(),
         };
 
-        let (shutdown_sender, _) = broadcast::channel(1);
+        let (shutdown_sender, _shutdown_receiver) = broadcast::channel(1);
 
         // spawn another thread for running the app
         // TODO: allow launching into the local tokio runtime instead of creating a new one?
         let handle = {
-            let shutdown_sender = shutdown_sender.clone();
-
             let frontend_port = 0;
             let prometheus_port = 0;
+            let shutdown_sender = shutdown_sender.clone();
 
             tokio::spawn(async move {
                 run(
