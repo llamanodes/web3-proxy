@@ -1,6 +1,6 @@
 use crate::config::TopConfig;
 use gethostname::gethostname;
-use log::{debug, error};
+use log::{debug, error, warn};
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
 use pagerduty_rs::types::{AlertTrigger, AlertTriggerPayload, Event};
 use serde::Serialize;
@@ -124,7 +124,7 @@ pub fn pagerduty_alert_for_config<T: Serialize>(
 ) -> AlertTrigger<T> {
     let chain_id = top_config.app.chain_id;
 
-    let client_url = top_config.app.redirect_public_url.clone();
+    let client_url = top_config.app.redirect_public_url;
 
     pagerduty_alert(
         Some(chain_id),
@@ -140,6 +140,7 @@ pub fn pagerduty_alert_for_config<T: Serialize>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn pagerduty_alert<T: Serialize>(
     chain_id: Option<u64>,
     class: Option<String>,
@@ -156,8 +157,12 @@ pub fn pagerduty_alert<T: Serialize>(
 
     let group = chain_id.map(|x| format!("chain #{}", x));
 
-    let source =
-        source.unwrap_or_else(|| gethostname().into_string().unwrap_or("unknown".to_string()));
+    let source = source.unwrap_or_else(|| {
+        gethostname().into_string().unwrap_or_else(|err| {
+            warn!("unable to handle hostname: {:#?}", err);
+            "unknown".to_string()
+        })
+    });
 
     let mut s = DefaultHasher::new();
     // TODO: include severity here?
@@ -186,6 +191,6 @@ pub fn pagerduty_alert<T: Serialize>(
         images: None,
         links: None,
         client: Some(client),
-        client_url: client_url,
+        client_url,
     }
 }

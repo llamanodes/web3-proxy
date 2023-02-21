@@ -249,6 +249,9 @@ fn main() -> anyhow::Result<()> {
     }
 
     // set up tokio's async runtime
+    #[cfg(tokio_uring)]
+    let mut rt_builder = tokio_uring::Builder::new_multi_thread();
+    #[cfg(not(tokio_uring))]
     let mut rt_builder = runtime::Builder::new_multi_thread();
 
     rt_builder.enable_all();

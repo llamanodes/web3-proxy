@@ -1,8 +1,8 @@
-///! Load balanced communication with a group of web3 rpc providers
+///! Load balanced communication with a group of web3 providers
 use super::blockchain::{BlockHashesCache, Web3ProxyBlock};
 use super::consensus::ConsensusWeb3Rpcs;
 use super::one::Web3Rpc;
-use super::request::{OpenRequestHandle, OpenRequestResult, RequestRevertHandler};
+use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
@@ -46,7 +46,6 @@ pub struct Web3Rpcs {
     pub(super) watch_consensus_head_receiver: Option<watch::Receiver<Option<Web3ProxyBlock>>>,
     pub(super) pending_transactions:
         Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
-    /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
     pub(super) block_hashes: BlockHashesCache,
     /// blocks on the heaviest chain
@@ -78,7 +77,11 @@ impl Web3Rpcs {
         redis_pool: Option<redis_rate_limiter::RedisPool>,
         server_configs: HashMap<String, Web3RpcConfig>,
         watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
-    ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
+    ) -> anyhow::Result<(
+        Arc<Self>,
+        AnyhowJoinHandle<()>,
+        watch::Receiver<Arc<ConsensusWeb3Rpcs>>,
+    )> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
 
@@ -184,7 +187,6 @@ impl Web3Rpcs {
         let mut connections = HashMap::new();
         let mut handles = vec![];
 
-        // TODO: futures unordered?
         while let Some(x) = spawn_handles.next().await {
             match x {
                 Ok(Ok((connection, handle))) => {
@@ -216,7 +218,8 @@ impl Web3Rpcs {
             .max_capacity(10_000)
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
-        let (watch_consensus_connections_sender, _) = watch::channel(Default::default());
+        let (watch_consensus_connections_sender, consensus_connections_watcher) =
+            watch::channel(Default::default());
 
         let watch_consensus_head_receiver =
             watch_consensus_head_sender.as_ref().map(|x| x.subscribe());
@@ -252,7 +255,7 @@ impl Web3Rpcs {
             })
         };
 
-        Ok((connections, handle))
+        Ok((connections, handle, consensus_connections_watcher))
     }
 
     pub fn get(&self, conn_name: &str) -> Option<&Arc<Web3Rpc>> {
@@ -591,9 +594,7 @@ impl Web3Rpcs {
                 trace!("{} vs {}", rpc_a, rpc_b);
                 // TODO: cached key to save a read lock
                 // TODO: ties to the server with the smallest block_data_limit
-                let best_rpc = min_by_key(rpc_a, rpc_b, |x| {
-                    OrderedFloat(x.head_latency.read().value())
-                });
+                let best_rpc = min_by_key(rpc_a, rpc_b, |x| x.peak_ewma());
                 trace!("winner: {}", best_rpc);
 
                 // just because it has lower latency doesn't mean we are sure to get a connection
@@ -607,7 +608,7 @@ impl Web3Rpcs {
                     }
                     Ok(OpenRequestResult::NotReady) => {
                         // TODO: log a warning? emit a stat?
-                        trace!("best_rpc not ready");
+                        trace!("best_rpc not ready: {}", best_rpc);
                     }
                     Err(err) => {
                         warn!("No request handle for {}. err={:?}", best_rpc, err)
@@ -787,9 +788,7 @@ impl Web3Rpcs {
 
         // TODO: maximum retries? right now its the total number of servers
         loop {
-            let num_skipped = skip_rpcs.len();
-
-            if num_skipped == self.by_name.len() {
+            if skip_rpcs.len() == self.by_name.len() {
                 break;
             }
 
@@ -806,11 +805,10 @@ impl Web3Rpcs {
                 OpenRequestResult::Handle(active_request_handle) => {
                     // save the rpc in case we get an error and want to retry on another server
                     // TODO: look at backend_requests instead
-                    skip_rpcs.push(active_request_handle.clone_connection());
+                    let rpc = active_request_handle.clone_connection();
+                    skip_rpcs.push(rpc.clone());
 
                     if let Some(request_metadata) = request_metadata {
-                        let rpc = active_request_handle.clone_connection();
-
                         request_metadata
                             .response_from_backup_rpc
                             .store(rpc.backup, Ordering::Release);
@@ -823,7 +821,7 @@ impl Web3Rpcs {
                         .request(
                             &request.method,
                             &json!(request.params),
-                            RequestRevertHandler::Save,
+                            RequestErrorHandler::SaveRevert,
                             None,
                         )
                         .await;
@@ -1060,7 +1058,7 @@ impl Web3Rpcs {
                     // TODO: return a 502? if it does?
                     // return Err(anyhow::anyhow!("no available rpcs!"));
                     // TODO: sleep how long?
-                    // TODO: subscribe to something in ConsensusConnections instead
+                    // TODO: subscribe to something in ConsensusWeb3Rpcs instead
                     sleep(Duration::from_millis(200)).await;
 
                     continue;
@@ -1180,7 +1178,6 @@ mod tests {
     use ethers::types::{Block, U256};
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock as AsyncRwLock;
 
     #[tokio::test]
@@ -1266,11 +1263,7 @@ mod tests {
             .is_test(true)
             .try_init();
 
-        let now: U256 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            .into();
+        let now = chrono::Utc::now().timestamp().into();
 
         let lagged_block = Block {
             hash: Some(H256::random()),
@@ -1479,11 +1472,7 @@ mod tests {
             .is_test(true)
             .try_init();
 
-        let now: U256 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            .into();
+        let now = chrono::Utc::now().timestamp().into();
 
         let head_block = Block {
             hash: Some(H256::random()),

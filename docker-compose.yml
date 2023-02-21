@@ -34,7 +34,7 @@ services:
       DOCKER_INFLUXDB_INIT_BUCKET: dev_web3_proxy
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: dev_web3_proxy_auth_token
     ports:
-      - 127.0.0.1:8086:8086
+      - 127.0.0.1:18086:8086
     volumes:
       - ./data/dev_influxdb/data:/var/lib/influxdb2
       - ./data/dev_influxdb/config:/etc/influxdb2

@@ -1,7 +1,6 @@
 //#![warn(missing_docs)]
 use anyhow::Context;
 use std::ops::Add;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{Duration, Instant};
 
 pub use deadpool_redis::redis;
@@ -48,10 +47,7 @@ impl RedisRateLimiter {
 
     pub fn now_as_secs(&self) -> f32 {
         // TODO: if system time doesn't match redis, this won't work great
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("cannot tell the time")
-            .as_secs_f32()
+        (chrono::Utc::now().timestamp_millis() as f32) / 1_000.0
     }
 
     pub fn period_id(&self, now_as_secs: f32) -> f32 {

@@ -3,7 +3,7 @@
 //! For ease of development, users can currently access these endponts.
 //! They will eventually move to another port.
 
-use super::{FrontendHealthCache, FrontendResponseCache, FrontendResponseCaches};
+use super::{FrontendHealthCache, FrontendJsonResponseCache, FrontendResponseCaches};
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_macros::debug_handler;
@@ -33,7 +33,7 @@ pub async fn health(
 #[debug_handler]
 pub async fn status(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    Extension(response_cache): Extension<FrontendResponseCache>,
+    Extension(response_cache): Extension<FrontendJsonResponseCache>,
 ) -> impl IntoResponse {
     let body = response_cache
         .get_with(FrontendResponseCaches::Status, async {

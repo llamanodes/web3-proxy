@@ -3,10 +3,11 @@
 use super::authorization::{login_is_authorized, RpcSecretKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
-use crate::user_queries::get_page_from_params;
-use crate::user_queries::{
-    get_chain_id_from_params, get_query_start_from_params, query_user_stats, StatResponse,
+use crate::http_params::{
+    get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
 };
+use crate::stats::db_queries::query_user_stats;
+use crate::stats::StatType;
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::{Header, Origin, Referer, UserAgent};
@@ -20,7 +21,7 @@ use crate::frontend::authorization::{Authorization as InternalAuthorization, Req
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
-use entities::sea_orm_active_enums::LogLevel;
+use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{login, pending_login, referrer, referee, revert_log, rpc_key, rpc_request, user, user_tier, increase_balance_receipt, balance};
 use ethers::{prelude::{Address, EthEvent}, types::Bytes};
 use hashbrown::HashMap;
@@ -576,9 +577,7 @@ pub async fn user_balance_get(
 ///
 /// We will subscribe to events to watch for any user deposits, but sometimes events can be missed.
 ///
-/// TODO: rate limit by user
-/// TODO: one key per request? maybe /user/balance/:rpc_key?
-/// TODO: this will change as we add better support for secondary users.
+/// TODO: change this. just have a /tx/:txhash that is open to anyone. rate limit like we rate limit /login
 #[debug_handler]
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -605,10 +604,6 @@ pub async fn user_balance_post(
         .db_replica()
         .context("query_user_stats needs a db replica")?;
 
-    // Where do I get the authorization from ...
-    let authorization = Arc::new(InternalAuthorization::internal(None).unwrap());
-    let rpc = app.balanced_rpcs.get(app.balanced_rpcs.conns.keys().into_iter().collect::<Vec<_>>()[0]).unwrap();
-
     // Return straight false if the tx was already added ...
     let receipt = increase_balance_receipt::Entity::find()
         .filter(increase_balance_receipt::Column::TxHash.eq(hex::encode(tx_hash)))
@@ -625,15 +620,20 @@ pub async fn user_balance_post(
     request_parameters.insert("hash", serde_json::Value::String(hex::encode(tx_hash)));
     request_parameters.insert("address", serde_json::Value::String(format!("{}", &app.config.deposit_contract)));
 
+    // Where do I get the authorization from ...
+    // let rpc = app.balanced_rpcs.best_available_rpc();  // .balanced_rpcs.get(app.balanced_rpcs.conns.keys().into_iter().collect::<Vec<_>>()[0]).unwrap();
+
     // Just iterate through all logs, and add them to the transaction list if there is any
     // Address will be hardcoded in the config
-    let transaction_receipt: TransactionReceipt = match rpc.try_request_handle(&authorization, false).await {
+    let authorization = Arc::new(InternalAuthorization::internal(None).unwrap());
+    let transaction_receipt: TransactionReceipt = match app.balanced_rpcs.best_available_rpc(&authorization, None, &[], None, None).await {
         Ok(OpenRequestResult::Handle(handle)) => {
             // TODO: Figure out how to pass the transaction hash as a parameter ...
             handle.request(
                 "eth_getTransactionReceipt",
                 &json!(request_parameters),  // &vec![ParamType::String(tx_hash.to_string())], // ,  // TODO: Insert the hash that we want to validate here
                 Level::Trace.into(),
+                None
             )
                 .await
                 .map_err(|_|
@@ -655,9 +655,8 @@ pub async fn user_balance_post(
         Err(err) => {
             // TODO: Just skip this part until one item responds ...
             log::trace!(
-                    "cancelled funneling transaction {} from {}: {:?}",
+                    "cancelled funneling transaction {} from: {:?}",
                     tx_hash,
-                    rpc,
                     err,
                 );
             Err(FrontendErrorResponse::StatusCode(
@@ -715,7 +714,9 @@ pub async fn user_balance_post(
         }?;
 
         // Skip if the token is not of interest, otherwise add a balance to the contract (according to the amount)
-        if !app.config.accepted_deposit_tokens.contains(&hex::encode(token)) {}// Could also just hardcode all the tokens we accept in the yaml
+        // TODO: Maybe check for accepted tokens here
+        // if !app.config.accepted_deposit_tokens.contains(&hex::encode(token)) {}// Could also just hardcode all the tokens we accept in the yaml
+
         let status_code: StatusCode;
         let response_json: serde_json::Value;
         // TODO: Can change with accepted currencies hashmap
@@ -783,8 +784,6 @@ pub async fn user_balance_post(
 }
 
 /// `GET /user/keys` -- Use a bearer token to get the user's api keys and their settings.
-///
-/// TODO: one key per request? maybe /user/keys/:rpc_key?
 #[debug_handler]
 pub async fn rpc_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -794,7 +793,7 @@ pub async fn rpc_keys_get(
 
     let db_replica = app
         .db_replica()
-        .context("getting db to fetch user's keys")?;
+        .context("db_replica is required to fetch a user's keys")?;
 
     let uks = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(user.id))
@@ -802,7 +801,6 @@ pub async fn rpc_keys_get(
         .await
         .context("failed loading user's key")?;
 
-    // TODO: stricter type on this?
     let response_json = json!({
         "user_id": user.id,
         "user_rpc_keys": uks
@@ -840,7 +838,7 @@ pub struct UserKeyManagement {
     allowed_referers: Option<String>,
     allowed_user_agents: Option<String>,
     description: Option<String>,
-    log_level: Option<LogLevel>,
+    log_level: Option<TrackingLevel>,
     // TODO: enable log_revert_trace: Option<f64>,
     private_txs: Option<bool>,
 }
@@ -1219,7 +1217,7 @@ pub async fn user_stats_aggregated_get(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    let response = query_user_stats(&app, bearer, &params, StatResponse::Aggregated).await?;
+    let response = query_user_stats(&app, bearer, &params, StatType::Aggregated).await?;
 
     Ok(response)
 }
@@ -1239,7 +1237,7 @@ pub async fn user_stats_detailed_get(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> FrontendResult {
-    let response = query_user_stats(&app, bearer, &params, StatResponse::Detailed).await?;
+    let response = query_user_stats(&app, bearer, &params, StatType::Detailed).await?;
 
     Ok(response)
 }

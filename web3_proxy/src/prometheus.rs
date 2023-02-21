@@ -5,40 +5,31 @@ use axum::{routing::get, Extension, Router};
 use log::info;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 
 use crate::app::Web3ProxyApp;
 
 /// Run a prometheus metrics server on the given port.
-
-pub async fn serve(app: Arc<Web3ProxyApp>, port: u16) -> anyhow::Result<()> {
-    // build our application with a route
-    // order most to least common
-    // TODO: 404 any unhandled routes?
+pub async fn serve(
+    app: Arc<Web3ProxyApp>,
+    port: u16,
+    mut shutdown_receiver: broadcast::Receiver<()>,
+) -> anyhow::Result<()> {
+    // routes should be ordered most to least common
     let app = Router::new().route("/", get(root)).layer(Extension(app));
 
-    // run our app with hyper
-    // TODO: allow only listening on localhost?
+    // TODO: config for the host?
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("prometheus listening on port {}", port);
-    // TODO: into_make_service is enough if we always run behind a proxy. make into_make_service_with_connect_info optional?
 
-    /*
-    InsecureClientIp sequentially looks for an IP in:
-      - x-forwarded-for header (de-facto standard)
-      - x-real-ip header
-      - forwarded header (new standard)
-      - axum::extract::ConnectInfo (if not behind proxy)
-
-    Since we run behind haproxy, x-forwarded-for will be set.
-    We probably won't need into_make_service_with_connect_info, but it shouldn't hurt.
-    */
-    let service = app.into_make_service_with_connect_info::<SocketAddr>();
-    // let service = app.into_make_service();
+    let service = app.into_make_service();
 
     // `axum::Server` is a re-export of `hyper::Server`
     axum::Server::bind(&addr)
-        // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .serve(service)
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_receiver.recv().await;
+        })
         .await
         .map_err(Into::into)
 }
