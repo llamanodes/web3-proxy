@@ -288,6 +288,10 @@ async fn proxy_web3_socket(
         response_sender,
         proxy_mode,
     ));
+
+    // TODO: Add to the database that the guy made a request
+    // TODO: Apply referral logic if there is anything to be added
+
 }
 
 /// websockets support a few more methods than http clients

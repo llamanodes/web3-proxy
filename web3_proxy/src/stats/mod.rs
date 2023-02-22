@@ -61,6 +61,8 @@ struct RpcQueryKey {
     origin: Option<Origin>,
     /// None if the public url was used
     rpc_secret_key_id: Option<NonZeroU64>,
+    /// Credits used signifies how how much money was used up
+    credits_used: u64
 }
 
 /// round the unix epoch time to the start of a period
@@ -102,6 +104,8 @@ impl RpcQueryStats {
             }
         };
 
+        // TODO: Depending on method, add some arithmetic around calculating credits_used
+        let credits_used = 1;
         RpcQueryKey {
             response_timestamp,
             archive_needed: self.archive_request,
@@ -109,6 +113,7 @@ impl RpcQueryStats {
             method,
             rpc_secret_key_id,
             origin,
+            credits_used
         }
     }
 
@@ -121,6 +126,8 @@ impl RpcQueryStats {
         // everyone gets grouped together
         let rpc_secret_key_id = None;
 
+        // TODO: Again, depending on method, add credits used
+        let credits_used = 1;
         RpcQueryKey {
             response_timestamp: self.response_timestamp,
             archive_needed: self.archive_request,
@@ -128,6 +135,7 @@ impl RpcQueryStats {
             method,
             rpc_secret_key_id,
             origin,
+            credits_used
         }
     }
 
@@ -154,6 +162,8 @@ impl RpcQueryStats {
             }
         };
 
+        // Again depending on method, add credits_used
+        let credits_used = 1;
         RpcQueryKey {
             response_timestamp: self.response_timestamp,
             archive_needed: self.archive_request,
@@ -161,6 +171,7 @@ impl RpcQueryStats {
             method,
             rpc_secret_key_id,
             origin,
+            credits_used
         }
     }
 }
@@ -250,6 +261,7 @@ impl BufferedRpcQueryStats {
             sum_request_bytes: sea_orm::Set(self.sum_request_bytes),
             sum_response_millis: sea_orm::Set(self.sum_response_millis),
             sum_response_bytes: sea_orm::Set(self.sum_response_bytes),
+            credits_used: sea_orm::Set(key.credits_used)
         };
 
         rpc_accounting_v2::Entity::insert(accounting_entry)

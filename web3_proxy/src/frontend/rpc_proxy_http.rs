@@ -201,5 +201,8 @@ async fn _proxy_web3_rpc_with_key(
         rpcs.parse().expect("W3P-BACKEND-RPCS should always parse"),
     );
 
+    // TODO: Add to the database that the guy made a request
+    // TODO: Apply referral logic if there is anything to be added
+
     Ok(response)
 }
