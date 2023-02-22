@@ -576,26 +576,33 @@ pub async fn user_balance_get(
 /// `POST /user/balance/:tx_hash` -- Manually process a confirmed txid to update a user's balance.
 ///
 /// We will subscribe to events to watch for any user deposits, but sometimes events can be missed.
-///
 /// TODO: change this. just have a /tx/:txhash that is open to anyone. rate limit like we rate limit /login
 #[debug_handler]
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-    Query(mut params): Query<HashMap<String, String>>,
+    Path(mut params): Path<HashMap<String, String>>,
 ) -> FrontendResult {
+
+    warn!("Calling user balance tx_hash backend");
 
     // Check that the user is logged-in and authorized. We don't need a semaphore here btw
     let (caller, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
+    warn!("Caller is: {:?}", caller);
+
     // Get the transaction hash, and the amount that the user wants to top up by.
     // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
-    let tx_hash: H256 = params.remove("tx_hash")
+    let tx_hash: H256 = params
+        .remove("tx_hash")
+        // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(
             FrontendErrorResponse::BadRequest("You have not provided the tx_hash in which you paid in".to_string())
         )?
         .parse()
         .context("unable to parse tx_hash")?;
+
+    warn!("Found tx hash: {:?}", tx_hash);
 
     // We don't check the trace, the transaction must be a naive, simple send transaction (for now at least...)
     // TODO: Get the respective transaction ...
@@ -613,12 +620,16 @@ pub async fn user_balance_post(
         return Err(FrontendErrorResponse::BadRequest("The transaction you provided has already been accounted for!".to_string()));
     }
 
+    warn!("Receipt: {:?}", receipt);
+
     // Get the rpc from the app ..
     // TODO: Implement logic to parse events from transaction hash
     let mut request_parameters = HashMap::new();
     // TODO: Maybe do decode instead
     request_parameters.insert("hash", serde_json::Value::String(hex::encode(tx_hash)));
     request_parameters.insert("address", serde_json::Value::String(format!("{}", &app.config.deposit_contract)));
+
+    warn!("Request Parameters: {:?}", request_parameters);
 
     // Where do I get the authorization from ...
     // let rpc = app.balanced_rpcs.best_available_rpc();  // .balanced_rpcs.get(app.balanced_rpcs.conns.keys().into_iter().collect::<Vec<_>>()[0]).unwrap();
@@ -629,17 +640,18 @@ pub async fn user_balance_post(
     let transaction_receipt: TransactionReceipt = match app.balanced_rpcs.best_available_rpc(&authorization, None, &[], None, None).await {
         Ok(OpenRequestResult::Handle(handle)) => {
             // TODO: Figure out how to pass the transaction hash as a parameter ...
+            warn!("Params are: {:?}", &vec![format!("0x{}", hex::encode(tx_hash))]);
             handle.request(
                 "eth_getTransactionReceipt",
-                &json!(request_parameters),  // &vec![ParamType::String(tx_hash.to_string())], // ,  // TODO: Insert the hash that we want to validate here
+                &vec![format!("0x{}", hex::encode(tx_hash))],  // &json!(request_parameters),  //  // ,  // TODO: Insert the hash that we want to validate here
                 Level::Trace.into(),
                 None
             )
                 .await
-                .map_err(|_|
+                .map_err(|err|
                     FrontendErrorResponse::StatusCode(
                         StatusCode::SERVICE_UNAVAILABLE,
-                        "Request failed!".to_string(),
+                        format!("Request to RPC failed! {:?}", err).to_string(),
                         None,
                     )
                 )
@@ -666,6 +678,7 @@ pub async fn user_balance_post(
             ))
         }
     }?;
+    warn!("Tx receipt: {:?}", transaction_receipt);
 
     // Go through all logs, this should prob capture it,
     // At least according to this SE logs are just concatenations of the underlying types (like a struct..)
@@ -675,8 +688,12 @@ pub async fn user_balance_post(
     // I don't know how to best cover the case that there might be multiple logs inside
 
     for log in transaction_receipt.logs {
-        println!("Should be all from the deposit contract {:?}", log.address);
-        println!("Check the data if we can decode it {:?}", log.data);
+        warn!("Should be all from the deposit contract {:?}", log.address);
+        if hex::encode(log.address) != app.config.deposit_contract {
+            warn!("Wrong log address: {:?} {:?}", hex::encode(log.address), app.config.deposit_contract);
+            continue;
+        }
+        warn!("Check the data if we can decode it {:?}", log.data);
         // TODO: Will this work? Depends how logs are encoded
         let (recipient_account, token, amount): (Address, Address, U256) = match ethers::abi::decode(
             &[
