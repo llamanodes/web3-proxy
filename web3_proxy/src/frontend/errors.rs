@@ -11,7 +11,7 @@ use axum::{
 use derive_more::From;
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
-use log::{debug, trace, warn};
+use log::{debug, error, trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
@@ -30,6 +30,7 @@ pub enum FrontendErrorResponse {
     Database(DbErr),
     Headers(headers::Error),
     HeaderToString(ToStrError),
+    InfluxDb2RequestError(influxdb2::RequestError),
     InvalidHeaderValue(InvalidHeaderValue),
     IpAddrParse(AddrParseError),
     JoinError(JoinError),
@@ -85,7 +86,7 @@ impl FrontendErrorResponse {
                 )
             }
             Self::Database(err) => {
-                warn!("database err={:?}", err);
+                error!("database err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
@@ -102,6 +103,18 @@ impl FrontendErrorResponse {
                     JsonRpcForwardedResponse::from_str(
                         &format!("{}", err),
                         Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::InfluxDb2RequestError(err) => {
+                // TODO: attach a request id to the message and to this error so that if people report problems, we can dig in sentry to find out more
+                error!("influxdb2 err={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "influxdb2 error!",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
                 )

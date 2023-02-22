@@ -5,7 +5,7 @@ use crate::app::Web3ProxyApp;
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
 };
-use crate::stats::db_queries::query_user_stats;
+use crate::stats::influxdb_queries::query_user_stats;
 use crate::stats::StatType;
 use crate::user_token::UserBearerToken;
 use crate::{PostLogin, PostLoginQuery};

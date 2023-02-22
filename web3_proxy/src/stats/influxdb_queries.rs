@@ -3,24 +3,26 @@ use crate::{
     app::Web3ProxyApp,
     frontend::errors::FrontendErrorResponse,
     http_params::{
-        get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
-        get_query_stop_from_params, get_query_window_seconds_from_params, get_user_id_from_params,
+        get_chain_id_from_params, get_query_start_from_params, get_query_stop_from_params,
+        get_query_window_seconds_from_params, get_user_id_from_params,
     },
 };
 use anyhow::Context;
 use axum::{
     headers::{authorization::Bearer, Authorization},
-    response::Response,
-    TypedHeader,
+    response::{IntoResponse, Response},
+    Json, TypedHeader,
 };
 use chrono::{DateTime, FixedOffset};
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::models::Query;
 use influxdb2::FromDataPoint;
+use serde::Serialize;
 use serde_json::json;
 
-#[derive(Debug, Default, FromDataPoint)]
+// TODO: include chain_id, method, and some other things in this struct
+#[derive(Debug, Default, FromDataPoint, Serialize)]
 pub struct AggregatedRpcAccounting {
     field: String,
     value: f64,
@@ -57,7 +59,6 @@ pub async fn query_user_stats<'a>(
     let query_start = get_query_start_from_params(params)?.timestamp();
     let query_stop = get_query_stop_from_params(params)?.timestamp();
     let chain_id = get_chain_id_from_params(app, params)?;
-    let page = get_page_from_params(params)?;
 
     let measurement = if user_id == 0 {
         "global_proxy"
@@ -99,9 +100,11 @@ pub async fn query_user_stats<'a>(
             |> yield(name: "mean")
     "#);
 
-    let query = Query::new(qs.to_string());
+    let query = Query::new(query.to_string());
 
+    // TODO: do not unwrap. add this error to FrontErrorResponse
+    // TODO: StatType::Aggregated and StatType::Detailed might need different types
     let res: Vec<AggregatedRpcAccounting> = influxdb_client.query(Some(query)).await?;
 
-    todo!();
+    Ok(Json(json!(res)).into_response())
 }
