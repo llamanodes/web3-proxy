@@ -707,13 +707,13 @@ impl Web3Rpc {
                                 // TODO: move this into a function and the chaining should be easier
                                 let head_block = conn.head_block.read().clone();
 
-                                if let Some((block_hash, txid)) = head_block.and_then(|x| {
+                                if let Some((block_number, txid)) = head_block.and_then(|x| {
                                     let block = x.block.clone();
 
-                                    let block_hash = block.hash?;
+                                    let block_number = block.number?;
                                     let txid = block.transactions.last().cloned()?;
 
-                                    Some((block_hash, txid))
+                                    Some((block_number, txid))
                                 }) {
                                     let to = conn
                                         .wait_for_query::<_, Option<Transaction>>(
@@ -755,7 +755,7 @@ impl Web3Rpc {
                                         Ok(to) => {
                                             conn.wait_for_query::<_, Option<Bytes>>(
                                                 "eth_getCode",
-                                                &(to, block_hash),
+                                                &(to, block_number),
                                                 revert_handler,
                                                 authorization.clone(),
                                                 Some(client),
