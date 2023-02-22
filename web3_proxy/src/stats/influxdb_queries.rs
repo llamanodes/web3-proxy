@@ -17,8 +17,15 @@ use chrono::{DateTime, FixedOffset};
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::models::Query;
-use influxdb2::{Client, FromDataPoint};
+use influxdb2::FromDataPoint;
 use serde_json::json;
+
+#[derive(Debug, Default, FromDataPoint)]
+pub struct AggregatedRpcAccounting {
+    field: String,
+    value: f64,
+    time: DateTime<FixedOffset>,
+}
 
 pub async fn query_user_stats<'a>(
     app: &'a Web3ProxyApp,
@@ -92,9 +99,9 @@ pub async fn query_user_stats<'a>(
             |> yield(name: "mean")
     "#);
 
-    let query = Query::new(query);
+    let query = Query::new(qs.to_string());
 
-    // let res: Vec<_> = influxdb_client.query(Some(query)).await?;
+    let res: Vec<AggregatedRpcAccounting> = influxdb_client.query(Some(query)).await?;
 
     todo!();
 }
