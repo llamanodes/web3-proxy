@@ -773,13 +773,15 @@ impl Web3Rpc {
 
                             new_total_requests = rpc.total_requests.load(atomic::Ordering::Relaxed);
 
+                            // TODO: how many requests should we require in order to skip a health check?
                             if new_total_requests - old_total_requests < 10 {
                                 // TODO: if this fails too many times, reset the connection
                                 // TODO: move this into a function and the chaining should be easier
                                 let head_block = rpc.head_block.read().clone();
 
                                 if let Some((block_number, txid)) = head_block.and_then(|x| {
-                                    let block = x.block;
+                                    // let block = x.block;
+                                    let block = x.block.clone();
 
                                     let block_number = block.number?;
                                     let txid = block.transactions.last().cloned()?;

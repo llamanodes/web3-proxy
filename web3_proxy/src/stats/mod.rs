@@ -1,5 +1,5 @@
 //! Store "stats" in a database for billing and a different database for graphing
-//! 
+//!
 //! TODO: move some of these structs/functions into their own file?
 pub mod db_queries;
 pub mod influxdb_queries;

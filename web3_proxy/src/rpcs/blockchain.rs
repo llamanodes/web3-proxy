@@ -334,7 +334,7 @@ impl Web3Rpcs {
         // TODO: request_metadata or authorization?
         // we don't actually set min_block_needed here because all nodes have all blocks
         let response = self
-            .try_send_best_consensus_head_connection(authorization, request, None, None, None)
+            .try_send_best_consensus_head_connection(authorization, request, None, Some(num), None)
             .await?;
 
         if let Some(err) = response.error {

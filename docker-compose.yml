@@ -31,7 +31,7 @@ services:
       DOCKER_INFLUXDB_INIT_USERNAME: dev_web3_proxy
       DOCKER_INFLUXDB_INIT_PASSWORD: dev_web3_proxy
       DOCKER_INFLUXDB_INIT_ORG: dev_org
-      DOCKER_INFLUXDB_INIT_BUCKET: dev_web3_proxy
+      DOCKER_INFLUXDB_INIT_BUCKET: web3_proxy
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: dev_web3_proxy_auth_token
     ports:
       - 127.0.0.1:18086:8086

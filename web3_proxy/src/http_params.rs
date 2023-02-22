@@ -176,11 +176,37 @@ pub fn get_query_start_from_params(
         },
         |x: &String| {
             // parse the given timestamp
-            let x = x.parse::<i64>().context("parsing timestamp query param")?;
+            let x = x
+                .parse::<i64>()
+                .context("parsing start timestamp query param")?;
 
-            // TODO: error code 401
-            let x =
-                NaiveDateTime::from_timestamp_opt(x, 0).context("parsing timestamp query param")?;
+            let x = NaiveDateTime::from_timestamp_opt(x, 0)
+                .context("parsing start timestamp query param")?;
+
+            Ok(x)
+        },
+    )
+}
+
+// TODO: return chrono::Utc instead?
+pub fn get_query_stop_from_params(
+    params: &HashMap<String, String>,
+) -> anyhow::Result<chrono::NaiveDateTime> {
+    params.get("query_stop").map_or_else(
+        || {
+            // no timestamp in params. set default
+            let x = chrono::Utc::now();
+
+            Ok(x.naive_utc())
+        },
+        |x: &String| {
+            // parse the given timestamp
+            let x = x
+                .parse::<i64>()
+                .context("parsing stop timestamp query param")?;
+
+            let x = NaiveDateTime::from_timestamp_opt(x, 0)
+                .context("parsing stop timestamp query param")?;
 
             Ok(x)
         },
