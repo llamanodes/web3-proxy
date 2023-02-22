@@ -6287,6 +6287,7 @@ dependencies = [
  "hdrhistogram",
  "http",
  "influxdb2",
+ "influxdb2-structmap",
  "ipnet",
  "itertools",
  "log",
