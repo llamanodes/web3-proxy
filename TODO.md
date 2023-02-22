@@ -334,6 +334,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] improve eth_sendRawTransaction server selection
 - [x] don't cache methods that are usually very large
 - [x] use http provider when available
+- [x] per-chain rpc rate limits
 - [ ] don't use new_head_provider anywhere except new head subscription
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
