@@ -358,7 +358,11 @@ impl Web3Rpc {
                 .store(limit, atomic::Ordering::Release);
         }
 
-        info!("block data limit on {}: {:?}", self, limit);
+        if limit == Some(u64::MAX) {
+            info!("block data limit on {}: archive", self);
+        } else {
+            info!("block data limit on {}: {:?}", self, limit);
+        }
 
         Ok(limit)
     }
