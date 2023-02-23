@@ -40,7 +40,7 @@ use siwe::{Message, VerificationOpts};
 use std::ops::{Add, Div};
 use std::str::FromStr;
 use std::sync::Arc;
-use ethers::abi::{Error, ParamType, Token};
+use ethers::abi::{AbiEncode, Error, ParamType, Token};
 use ethers::prelude::H256;
 use ethers::prelude::sourcemap::parse;
 use ethers::types::{Log, Transaction, TransactionReceipt, U256};
@@ -584,12 +584,8 @@ pub async fn user_balance_post(
     Path(mut params): Path<HashMap<String, String>>,
 ) -> FrontendResult {
 
-    warn!("Calling user balance tx_hash backend");
-
     // Check that the user is logged-in and authorized. We don't need a semaphore here btw
     let (caller, _semaphore) = app.bearer_is_authorized(bearer).await?;
-
-    warn!("Caller is: {:?}", caller);
 
     // Get the transaction hash, and the amount that the user wants to top up by.
     // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
@@ -601,8 +597,6 @@ pub async fn user_balance_post(
         )?
         .parse()
         .context("unable to parse tx_hash")?;
-
-    warn!("Found tx hash: {:?}", tx_hash);
 
     // We don't check the trace, the transaction must be a naive, simple send transaction (for now at least...)
     // TODO: Get the respective transaction ...
@@ -619,21 +613,7 @@ pub async fn user_balance_post(
     if receipt.is_some() {
         return Err(FrontendErrorResponse::BadRequest("The transaction you provided has already been accounted for!".to_string()));
     }
-
-    warn!("Receipt: {:?}", receipt);
-
-    // Get the rpc from the app ..
-    // TODO: Implement logic to parse events from transaction hash
-    let mut request_parameters = HashMap::new();
-    // TODO: Maybe do decode instead
-    request_parameters.insert("hash", serde_json::Value::String(hex::encode(tx_hash)));
-    request_parameters.insert("address", serde_json::Value::String(format!("{}", &app.config.deposit_contract)));
-
-    warn!("Request Parameters: {:?}", request_parameters);
-
-    // Where do I get the authorization from ...
-    // let rpc = app.balanced_rpcs.best_available_rpc();  // .balanced_rpcs.get(app.balanced_rpcs.conns.keys().into_iter().collect::<Vec<_>>()[0]).unwrap();
-
+    debug!("Receipt: {:?}", receipt);
     // Just iterate through all logs, and add them to the transaction list if there is any
     // Address will be hardcoded in the config
     let authorization = Arc::new(InternalAuthorization::internal(None).unwrap());
@@ -643,7 +623,7 @@ pub async fn user_balance_post(
             warn!("Params are: {:?}", &vec![format!("0x{}", hex::encode(tx_hash))]);
             handle.request(
                 "eth_getTransactionReceipt",
-                &vec![format!("0x{}", hex::encode(tx_hash))],  // &json!(request_parameters),  //  // ,  // TODO: Insert the hash that we want to validate here
+                &vec![format!("0x{}", hex::encode(tx_hash))],
                 Level::Trace.into(),
                 None
             )
@@ -678,7 +658,7 @@ pub async fn user_balance_post(
             ))
         }
     }?;
-    warn!("Tx receipt: {:?}", transaction_receipt);
+    debug!("Tx receipt: {:?}", transaction_receipt);
 
     // Go through all logs, this should prob capture it,
     // At least according to this SE logs are just concatenations of the underlying types (like a struct..)
@@ -688,38 +668,49 @@ pub async fn user_balance_post(
     // I don't know how to best cover the case that there might be multiple logs inside
 
     for log in transaction_receipt.logs {
+
         warn!("Should be all from the deposit contract {:?}", log.address);
-        if hex::encode(log.address) != app.config.deposit_contract {
+        if format!("0x{}", hex::encode(log.address)) != app.config.deposit_contract {
             warn!("Wrong log address: {:?} {:?}", hex::encode(log.address), app.config.deposit_contract);
             continue;
         }
+
+        // Get the topics out
+        let token: Address = Address::from(log.topics.get(1).unwrap().to_owned()); // .split_off(12).into();
+        let recipient_account: Address = Address::from(log.topics.get(2).unwrap().to_owned()); // .split_off(12).into();
+
         warn!("Check the data if we can decode it {:?}", log.data);
         // TODO: Will this work? Depends how logs are encoded
-        let (recipient_account, token, amount): (Address, Address, U256) = match ethers::abi::decode(
+        // recipient_account, token,
+        let amount: U256 = match ethers::abi::decode(
             &[
-                ParamType::Address,
-                ParamType::Address,
+                // ParamType::Address,
+                // ParamType::Address,
                 ParamType::Uint(256usize)
             ],
             &log.data,
         ) {
             Ok(tpl) => {
-                Ok(
-                    (
-                        tpl.get(0).unwrap().clone().into_address().context("Could not decode address")?,
-                        tpl.get(1).unwrap().clone().into_address().context("Could not decode token address")?,
-                        tpl.get(2).unwrap().clone().into_uint().context("Could not decode amount")?
-                    )
-                )
+                Ok(tpl.get(0).unwrap().clone().into_uint().context("Could not decode amount")?)
             }
             Err(err) => {
                 Err(FrontendErrorResponse::BadRequest(format!("Log could not be decoded: {:?}", err)))
             }
         }?;
 
+        warn!("Coded items are: {:?} {:?} {:?}", hex::encode(recipient_account), hex::encode(token), amount);
+        // warn!("Recipient account is: ")
+
+        warn!("Recipient address is: {:?}", recipient_account);
+        warn!("Recipient address is: {:?}", recipient_account.encode());
+
+        // First, find all users ...
+        let all_users = user::Entity::find().all(db_replica.conn()).await?;
+        warn!("All users are: {:?}", all_users);
+
         // Encoding is inefficient, revisit later
         let recipient = match user::Entity::find()
-            .filter(user::Column::Address.eq(hex::encode(recipient_account)))
+            .filter(user::Column::Address.eq(&recipient_account.encode()[12..]))
             .one(db_replica.conn())
             .await? {
             Some(x) => Ok(x),
@@ -737,67 +728,72 @@ pub async fn user_balance_post(
         let status_code: StatusCode;
         let response_json: serde_json::Value;
         // TODO: Can change with accepted currencies hashmap
-        let usdc = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse::<Address>().unwrap();
-        if token == usdc {
+        // let target_token = "c9fcfa7e28ff320c49967f4522ebc709aa1fde7c".parse::<Address>().unwrap();
+        // debug!("Token vs target token are: {:?} {:?}", token, target_token);
+        // if token == target_token {
+        // TODO: Check for accepted tokens, and how to get them
 
-            // Increase balance by amount (whatever amount corresponds to ...)
-            // let's say 1 USD is 1_000_000 credits
-            // Basically credits are in the order of 10^6 per dollar
-            let amount = amount
-                .checked_div(U256::from(10).checked_pow(U256::from(12)).unwrap())
-                .context("Division error, this should never happen")?.as_u64();
+        // Increase balance by amount (whatever amount corresponds to ...)
+        // let's say 1 USD is 1_000_000 credits
+        // Basically credits are in the order of 10^6 per dollar
+        warn!("Checking amount");
+        let amount = amount.as_u64();
+        //     .checked_div(U256::from(10).checked_pow(U256::from(12)).unwrap())
+        //     .context("Division error, this should never happen")?.as_u64();
 
-            // Check if the item is in the database. If it is not, then add it into the database
-            let user_balance = balance::Entity::find()
-                .filter(balance::Column::UserId.eq(recipient.id))
-                .one(&db_conn)
-                .await?;
+        // Check if the item is in the database. If it is not, then add it into the database
+        let user_balance = balance::Entity::find()
+            .filter(balance::Column::UserId.eq(recipient.id))
+            .one(&db_conn)
+            .await?;
+        debug!("User balance is: {:?}", user_balance);
 
-            let txn = db_conn.begin().await?;
-            match user_balance {
-                Some(user_balance) => {
-                    let balance_plus_amount = user_balance.balance + amount;
-                    // Update the entry, adding the balance
-                    let mut user_balance = user_balance.into_active_model();
-                    user_balance.balance = sea_orm::Set(balance_plus_amount);
-                    user_balance.save(&txn).await?;
-                }
-                None => {
-                    // Create the entry with the respective balance
-                    let user_balance = balance::ActiveModel {
-                        balance: sea_orm::ActiveValue::Set(amount),
-                        ..Default::default()
-                    };
-                    user_balance.save(&txn).await?;
-                }
-            };
+        let txn = db_conn.begin().await?;
+        match user_balance {
+            Some(user_balance) => {
+                let balance_plus_amount = user_balance.balance + amount;
+                debug!("New user balance is: {:?}", balance_plus_amount);
+                // Update the entry, adding the balance
+                let mut user_balance = user_balance.into_active_model();
+                user_balance.balance = sea_orm::Set(balance_plus_amount);
+                debug!("New user balance model is: {:?}", user_balance);
+                user_balance.save(&txn).await?;
+                // txn.commit().await?;
+                // user_balance
+            }
+            None => {
+                // Create the entry with the respective balance
+                let user_balance = balance::ActiveModel {
+                    balance: sea_orm::ActiveValue::Set(amount),
+                    user_id: sea_orm::ActiveValue::Set(recipient.id),
+                    ..Default::default()
+                };
+                debug!("New user balance model is: {:?}", user_balance);
+                user_balance.save(&txn).await?;
+                // txn.commit().await?;
+                // user_balance // .try_into_model().unwrap()
+            }
+        };
+        debug!("Setting tx_hash: {:?}", tx_hash);
+        let receipt = increase_balance_receipt::ActiveModel {
+            tx_hash: sea_orm::ActiveValue::Set(hex::encode(tx_hash)),
+            ..Default::default()
+        };
+        receipt.save(&txn).await?;
+        txn.commit().await?;
+        debug!("Submitted saving");
 
-            let receipt = increase_balance_receipt::ActiveModel {
-                tx_hash: sea_orm::ActiveValue::Set(hex::encode(tx_hash)),
-                ..Default::default()
-            };
-            receipt.save(&txn).await?;
-            txn.commit().await?;
-
-            // Can return here
-            (status_code, response_json) = (StatusCode::CREATED, json!({
-                "tx_hash": tx_hash,
-                "amount": amount
-            }))
-        } else {
-            // Do nothing
-            warn!("Found an event with a token that's not supported: {:?}", token);
-            (status_code, response_json) = (StatusCode::OK, json!({
-                "tx_hash": tx_hash,
-                "amount": 0
-            }));
-        }
-        let response = (status_code, Json(response_json)).into_response();
+        // Can return here
+        debug!("Returning response");
+        let response = (StatusCode::CREATED, Json(json!({
+            "tx_hash": tx_hash,
+            "amount": amount
+        }))).into_response();
         // Return early if the log was added
         return Ok(response.into());
     }
 
-    Err(FrontendErrorResponse::BadRequest("No such transaction was found!".to_string()))
+    Err(FrontendErrorResponse::BadRequest("No such transaction was found, or token is not supported!".to_string()))
 }
 
 /// `GET /user/keys` -- Use a bearer token to get the user's api keys and their settings.
