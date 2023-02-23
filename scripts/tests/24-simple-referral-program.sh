@@ -78,10 +78,20 @@ curl \
 -H "Authorization: Bearer 01GSXRC05VESBJ9H24N1H040JE" \
 -X GET "127.0.0.1:8544/user/balance/0xcda6202f6d12e1a8d954d4aeda9e0bd622980151808b5c27d516ddce8aeff980"
 
+## Check if calling an RPC endpoint logs the stats
+## This one does already even it seems
+curl -X POST -H "Content-Type: application/json" --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}' 127.0.0.1:8544
 
-##  Make user premium tier (unlimited, tier 2 or above (?))
+## Make the user into a premium user manually inside the database
+## unlimited, tier 2 or above I assume
 ##
-##  Login admin
-#
-##  Make admin call "get referral code"
+##  Make premium call "get referral code"
+curl \
+-H "Authorization: Bearer 01GSXRC05VESBJ9H24N1H040JE" \
+-X GET "127.0.0.1:8544/user/referral"
+# {"referral_code":"llamanodes-hE7T9HvAzvLXfPYrPD4iwbwCUlQoEgki","user":{"address":"0xeb3e928a2e54be013ef8241d4c9eaf4dfae94d5a","description":null,"email":null,"id":1,"user_tier_id":4}}
+
+# Getting referral code, now a third party needs to log in basically
+# (after that the accounting is easy... spend per user must be tracked)
+
 

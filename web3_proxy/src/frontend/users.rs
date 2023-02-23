@@ -1110,8 +1110,9 @@ pub async fn user_referral_link_get(
         .await?
         .ok_or(FrontendErrorResponse::BadRequest("Could not find user in db although bearer token is there!".to_string()))?;
 
+    warn!("User tier is: {:?}", user_tier);
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
-    if user_tier.title != "Premium" {
+    if user_tier.id < 2 {
         return Err(anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into());
     }
 
@@ -1129,12 +1130,12 @@ pub async fn user_referral_link_get(
             let db_conn = app.db_conn().context("getting db_conn")?;
 
             let referral_code = ReferralCode::default().0;
-
             let txn = db_conn.begin().await?;
             // Log that this guy was referred by another guy
             // Do not automatically create a new
-            let referrer_entry = referee::ActiveModel {
+            let referrer_entry = referrer::ActiveModel {
                 user_id: sea_orm::ActiveValue::Set(user.id),
+                referral_code: sea_orm::ActiveValue::Set(referral_code.clone()),
                 ..Default::default()
             };
             referrer_entry.insert(&txn).await?;

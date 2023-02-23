@@ -162,7 +162,8 @@ pub async fn serve(
         .route("/user/keys", get(users::rpc_keys_get))
         .route("/user/keys", post(users::rpc_keys_management))
         .route("/user/keys", put(users::rpc_keys_management))
-        .route("/user/referral/:referral_link", get(users::user_referral_link_get))
+        // .route("/user/referral/:referral_link", get(users::user_referral_link_get))
+        .route("/user/referral", get(users::user_referral_link_get))
         .route("/user/revert_logs", get(users::user_revert_logs_get))
         .route(
             "/user/stats/aggregate",
