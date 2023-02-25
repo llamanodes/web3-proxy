@@ -335,7 +335,9 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] don't cache methods that are usually very large
 - [x] use http provider when available
 - [x] per-chain rpc rate limits
-- [ ] don't use new_head_provider anywhere except new head subscription
+- [-] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
+- [x] add a "failover" tier that is only used if balanced_rpcs has "no servers synced"
+  - use this tier (and private tier) to check timestamp on latest block. if we are behind that by more than a few seconds, something is wrong
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
@@ -345,10 +347,16 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
   - https://github.com/moka-rs/moka/issues/201
+- [ ] refactor so configs can change while running
+  - this will probably be a rather large change, but is necessary when we have autoscaling
+  - create the app without applying any config to it
+  - have a blocking future watching the config file and calling app.apply_config() on first load and on change
+  - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
 - [ ] have multiple providers on each backend rpc. one websocket for newHeads. and then http providers for handling requests
   - erigon only streams the JSON over HTTP. that code isn't enabled for websockets. so this should save memory on the erigon servers
   - i think this also means we don't need to worry about changing the id that the user gives us.
   - have the healthcheck get the block over http. if it errors, or doesn't match what the websocket says, something is wrong (likely a deadlock in the websocket code)
+- [ ] don't use new_head_provider anywhere except new head subscription
 - [ ] maybe we shouldn't route eth_getLogs to syncing nodes. serving queries slows down sync significantly
   - change the send_best function to only include servers that are at least close to fully synced
 - [ ] have private transactions be enabled by a url setting rather than a setting on the key
@@ -372,10 +380,6 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - it won't happen with users often because they should be sticky to one proxy, but unauthenticated users will definitely hit this
   - one option: we need the insert to be an upsert, but how do we merge historgrams?
 - [ ] don't use systemtime. use chrono
-- [ ] soft limit needs more thought
-    - it should be the min of total_sum_soft_limit (from only non-lagged servers) and min_sum_soft_limit
-    - otherwise it won't track anything and will just give errors.
-    - but if web3 proxy has just started, we should give some time otherwise we will thundering herd the first server that responds
 - [ ] connection pool for websockets. use tokio-tungstenite directly. no need for ethers providers since serde_json is enough for us
     - this should also get us closer to being able to do our own streaming json parser where we can 
 - [ ] get `oldest_allowed` out of config. or calculate automatically based on block time.
@@ -392,14 +396,8 @@ These are not yet ordered. There might be duplicates. We might not actually need
     - maybe sum available_requests grouped by archive/non-archive. only limit to non-archive if they have enough?
 - [ ] some places we call it "accounting" others a "stat". be consistent
 - [ ] cli commands to search users by key
-- [ ] cli flag to set prometheus port
+- [x] cli flag to set prometheus port
 - [ ] flamegraphs show 25% of the time to be in moka-housekeeper. tune that
-- [ ] remove/change the "active_requests" counter? maybe only once we have dynamic soft limits?
-- [ ] refactor so configs can change while running
-  - this will probably be a rather large change, but is necessary when we have autoscaling
-  - create the app without applying any config to it
-  - have a blocking future watching the config file and calling app.apply_config() on first load and on change
-  - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
 - [ ] config parsing is strict right now. this makes it hard to deploy on git push since configs need to change along with it
 - [ ] when displaying the user's data, they just see an opaque id for their tier. We should join that data
 - [ ] add indexes to speed up stat queries
@@ -487,12 +485,12 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] don't "unwrap" anywhere. give proper errors
 - [ ] handle log subscriptions
   - probably as a paid feature
-- [ ] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
-- [ ] add a "failover" tier that is only used if balanced_rpcs has "no servers synced"
-  - use this tier (and private tier) to check timestamp on latest block. if we are behind that by more than a few seconds, something is wrong
 - [ ] relevant erigon changelogs: add pendingTransactionWithBody subscription method (#5675)
 - [ ] change_user_tier_by_key should not show the rpc key id. that way our ansible playbook won't expose it
 - [ ] make sure all our responses follow the spec: https://www.jsonrpc.org/specification#examples
+- [ ] min_sum_soft_limit should be automatic based on the apps average rps plus a buffer.
+  - if min_sum_soft_limit > max_sum_soft_limit, just wait for all? emit a warning
+- [ ] a script for load testing a server and calculating its hard and soft limits
 
 ## V2
 
