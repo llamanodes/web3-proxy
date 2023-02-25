@@ -31,7 +31,7 @@ use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
 use std::{cmp, fmt};
 use thread_fast_rng::rand::seq::SliceRandom;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, watch, RwLock as AsyncRwLock};
 use tokio::task;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 
@@ -62,6 +62,91 @@ pub struct Web3Rpcs {
 }
 
 impl Web3Rpcs {
+    pub async fn min_head_rpcs(&self) -> usize {
+        self.min_head_rpcs
+    }
+
+    pub async fn apply_server_configs(
+        &self,
+        server_configs: HashMap<String, Web3RpcConfig>,
+    ) -> anyhow::Result<()> {
+        // turn configs into connections (in parallel)
+        // TODO: move this into a helper function. then we can use it when configs change (will need a remove function too)
+        let mut spawn_handles: FuturesUnordered<_> = server_configs
+            .into_iter()
+            .filter_map(|(server_name, server_config)| {
+                if server_config.disabled {
+                    info!("{} is disabled", server_name);
+                    return None;
+                }
+
+                let db_conn = db_conn.clone();
+                let http_client = http_client.clone();
+                let redis_pool = redis_pool.clone();
+                let http_interval_sender = http_interval_sender.clone();
+
+                let block_sender = if watch_consensus_head_sender.is_some() {
+                    Some(block_sender.clone())
+                } else {
+                    None
+                };
+
+                let pending_tx_id_sender = Some(pending_tx_id_sender.clone());
+                let block_map = block_map.clone();
+
+                debug!("spawning {}", server_name);
+
+                let handle = tokio::spawn(async move {
+                    server_config
+                        .spawn(
+                            server_name,
+                            db_conn,
+                            redis_pool,
+                            chain_id,
+                            http_client,
+                            http_interval_sender,
+                            block_map,
+                            block_sender,
+                            pending_tx_id_sender,
+                            true,
+                        )
+                        .await
+                });
+
+                Some(handle)
+            })
+            .collect();
+
+        // map of connection names to their connection
+        let mut connections = AsyncRwLock::new(HashMap::new());
+        let mut handles = vec![];
+
+        while let Some(x) = spawn_handles.next().await {
+            match x {
+                Ok(Ok((connection, _handle))) => {
+                    // web3 connection worked
+                    connections
+                        .write()
+                        .await
+                        .insert(connection.name.clone(), connection);
+
+                    // TODO: what should we do with the handle? at least log any errors
+                }
+                Ok(Err(err)) => {
+                    // if we got an error here, the app can continue on
+                    // TODO: include context about which connection failed
+                    error!("Unable to create connection. err={:?}", err);
+                }
+                Err(err) => {
+                    // something actually bad happened. exit with an error
+                    return Err(err.into());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Spawn durable connections to multiple Web3 providers.
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
@@ -76,13 +161,12 @@ impl Web3Rpcs {
         pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
-        server_configs: HashMap<String, Web3RpcConfig>,
         watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
 
-        // TODO: query the rpc to get the actual expected block time, or get from config?
+        // TODO: query the rpc to get the actual expected block time, or get from config? maybe have this be part of a health check?
         let expected_block_time_ms = match chain_id {
             // ethereum
             1 => 12_000,
@@ -132,77 +216,6 @@ impl Web3Rpcs {
         } else {
             None
         };
-
-        // turn configs into connections (in parallel)
-        // TODO: move this into a helper function. then we can use it when configs change (will need a remove function too)
-        let mut spawn_handles: FuturesUnordered<_> = server_configs
-            .into_iter()
-            .filter_map(|(server_name, server_config)| {
-                if server_config.disabled {
-                    info!("{} is disabled", server_name);
-                    return None;
-                }
-
-                let db_conn = db_conn.clone();
-                let http_client = http_client.clone();
-                let redis_pool = redis_pool.clone();
-                let http_interval_sender = http_interval_sender.clone();
-
-                let block_sender = if watch_consensus_head_sender.is_some() {
-                    Some(block_sender.clone())
-                } else {
-                    None
-                };
-
-                let pending_tx_id_sender = Some(pending_tx_id_sender.clone());
-                let block_map = block_map.clone();
-
-                debug!("spawning {}", server_name);
-
-                let handle = tokio::spawn(async move {
-                    server_config
-                        .spawn(
-                            server_name,
-                            db_conn,
-                            redis_pool,
-                            chain_id,
-                            http_client,
-                            http_interval_sender,
-                            block_map,
-                            block_sender,
-                            pending_tx_id_sender,
-                            true,
-                        )
-                        .await
-                });
-
-                Some(handle)
-            })
-            .collect();
-
-        // map of connection names to their connection
-        let mut connections = HashMap::new();
-        let mut handles = vec![];
-
-        // TODO: futures unordered?
-        while let Some(x) = spawn_handles.next().await {
-            match x {
-                Ok(Ok((connection, handle))) => {
-                    // web3 connection worked
-                    connections.insert(connection.name.clone(), connection);
-                    handles.push(handle);
-                }
-                Ok(Err(err)) => {
-                    // if we got an error here, the app can continue on
-                    // TODO: include context about which connection failed
-                    error!("Unable to create connection. err={:?}", err);
-                }
-                Err(err) => {
-                    // something actually bad happened. exit with an error
-                    return Err(err.into());
-                }
-            }
-        }
 
         // TODO: max_capacity and time_to_idle from config
         // all block hashes are the same size, so no need for weigher

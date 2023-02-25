@@ -496,6 +496,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 
 These are not ordered. I think some rows also accidently got deleted here. Check git history.
 
+- [ ] less Arc (and more pin?). we use arcs on a lot of things where i think a &self should work fine.
 - [ ] automatically tune database and redis connection pool size
 - [ ] if db is down, keep logins cached longer. at least only new logins will have trouble then
 - [ ] handle user payments
