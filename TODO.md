@@ -492,7 +492,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - use this tier (and private tier) to check timestamp on latest block. if we are behind that by more than a few seconds, something is wrong
 - [ ] relevant erigon changelogs: add pendingTransactionWithBody subscription method (#5675)
 - [ ] change_user_tier_by_key should not show the rpc key id. that way our ansible playbook won't expose it
-
+- [ ] make sure all our responses follow the spec: https://www.jsonrpc.org/specification#examples
 
 ## V2
 
