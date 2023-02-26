@@ -10,7 +10,6 @@ pub use super::revert_log::Entity as RevertLog;
 pub use super::rpc_accounting::Entity as RpcAccounting;
 pub use super::rpc_accounting_v2::Entity as RpcAccountingV2;
 pub use super::rpc_key::Entity as RpcKey;
-pub use super::rpc_request::Entity as RpcRequest;
 pub use super::secondary_user::Entity as SecondaryUser;
 pub use super::user::Entity as User;
 pub use super::user_tier::Entity as UserTier;
