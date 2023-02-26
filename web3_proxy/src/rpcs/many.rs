@@ -885,7 +885,7 @@ impl Web3Rpcs {
                                             continue;
                                         }
 
-                                        // others look like this
+                                        // others look like this (this is the example in the official spec)
                                         if error_msg == "Method not found" {
                                             method_not_available_response = Some(response);
                                             continue;

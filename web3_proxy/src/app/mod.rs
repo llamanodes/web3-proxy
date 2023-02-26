@@ -706,31 +706,31 @@ impl Web3ProxyApp {
         let mut login_rate_limiter = None;
 
         if let Some(redis_pool) = vredis_pool.as_ref() {
-            let rpc_rrl = RedisRateLimiter::new(
-                "web3_proxy",
-                "frontend",
-                // TODO: think about this unwrapping
-                top_config
-                    .app
-                    .public_requests_per_period
-                    .unwrap_or(u64::MAX),
-                60.0,
-                redis_pool.clone(),
-            );
+            if let Some(public_requests_per_period) = top_config.app.public_requests_per_period {
+                // chain id is included in the app name so that rpc rate limits are per-chain
+                let rpc_rrl = RedisRateLimiter::new(
+                    &format!("web3_proxy:{}", top_config.app.chain_id),
+                    "frontend",
+                    public_requests_per_period,
+                    60.0,
+                    redis_pool.clone(),
+                );
 
-            // these two rate limiters can share the base limiter
-            // these are deferred rate limiters because we don't want redis network requests on the hot path
-            // TODO: take cache_size from config
-            frontend_ip_rate_limiter = Some(DeferredRateLimiter::<IpAddr>::new(
-                10_000,
-                "ip",
-                rpc_rrl.clone(),
-                None,
-            ));
-            frontend_registered_user_rate_limiter = Some(DeferredRateLimiter::<u64>::new(
-                10_000, "key", rpc_rrl, None,
-            ));
+                // these two rate limiters can share the base limiter
+                // these are deferred rate limiters because we don't want redis network requests on the hot path
+                // TODO: take cache_size from config
+                frontend_ip_rate_limiter = Some(DeferredRateLimiter::<IpAddr>::new(
+                    10_000,
+                    "ip",
+                    rpc_rrl.clone(),
+                    None,
+                ));
+                frontend_registered_user_rate_limiter = Some(DeferredRateLimiter::<u64>::new(
+                    10_000, "key", rpc_rrl, None,
+                ));
+            }
 
+            // login rate limiter
             login_rate_limiter = Some(RedisRateLimiter::new(
                 "web3_proxy",
                 "login",
