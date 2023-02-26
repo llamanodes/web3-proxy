@@ -176,6 +176,7 @@ pub struct PostLoginQuery {
     /// The invite code (if any) is set in the application's config.
     /// This may eventually provide some sort of referral bonus.
     pub invite_code: Option<String>,
+    pub referral_code: Option<String>
 }
 
 /// JSON body to our `post_login` handler.
@@ -289,6 +290,7 @@ pub async fn user_login_post(
         .filter(user::Column::Address.eq(our_msg.address.as_ref()))
         .one(db_replica.conn())
         .await?;
+
     // .ok_or(FrontendErrorResponse::BadRequest("Login address was not previously found".to_string()))
 
     let db_conn = app.db_conn().context("login requires a db")?;
@@ -300,6 +302,15 @@ pub async fn user_login_post(
             // check the invite code
             // TODO: more advanced invite codes that set different request/minute and concurrency limits
             // Do nothing if app config is none (then there is basically no authentication invitation, and the user can process with a free tier ...
+
+            // Prematurely return if there is no invite code, and no referral code
+            // TODO: Referral code
+            if query.invite_code.is_none() || query.referral_code.is_none() {
+                return Err(anyhow::anyhow!("No invite code, nor referral code was provided").into());
+            }
+            if query.invite_code.is_some() && query.invite_code != app.config.invite_code {
+                return Err(anyhow::anyhow!("Invite code is not correct! {:?}", query).into());
+            }
 
             let txn = db_conn.begin().await?;
 
@@ -315,11 +326,13 @@ pub async fn user_login_post(
                 ..Default::default()
             };
 
+            let caller = caller.insert(&txn).await?;
+
             // create the user's first api key
             let rpc_secret_key = RpcSecretKey::new();
 
             let user_rpc_key = rpc_key::ActiveModel {
-                user_id: caller.id.clone(),
+                user_id: sea_orm::Set(caller.id.clone()),
                 secret_key: sea_orm::Set(rpc_secret_key.into()),
                 description: sea_orm::Set(None),
                 ..Default::default()
@@ -330,25 +343,25 @@ pub async fn user_login_post(
                 .await
                 .context("Failed saving new user key")?;
 
-            // TODO: What does this return, the model (?)
-            let caller = caller.insert(&txn).await?;
+            let user_rpc_keys = vec![user_rpc_key];
 
-            let user_referrer;  // : Option<Referral>
-            if let Some(invite_code) = &app.config.invite_code {
-                if query.invite_code.as_ref() != Some(invite_code) {
-                    return Err(anyhow::anyhow!("checking invite_code").into());
-                }
+            // Also add a part for the invite code, i.e. who invited this guy
 
-                // TODO: the invite code is the referral link, right ?
+            // save the user and key to the database
+            txn.commit().await?;
 
+            let txn = db_conn.begin().await?;
+            // First, optionally catch a referral code from the parameters if there is any
+            if let Some(referral_code) = query.referral_code.as_ref() {
                 // If it is not inside, also check in the database
-                user_referrer = referrer::Entity::find()
-                    .filter(referrer::Column::ReferralCode.eq(invite_code))
+                warn!("Using register referral code:  {:?}", referral_code);
+                let user_referrer = referrer::Entity::find()
+                    .filter(referrer::Column::ReferralCode.eq(referral_code))
                     .one(db_replica.conn())
                     .await?
                     .ok_or(
                         FrontendErrorResponse::BadRequest(
-                            format!("The referral_link you provided does not exist {}", invite_code)
+                            format!("The referral_link you provided does not exist {}", referral_code)
                         )
                     )?;
 
@@ -359,18 +372,11 @@ pub async fn user_login_post(
                 let used_referral = referee::ActiveModel {
                     used_referral_code: sea_orm::Set(user_referrer.referral_code),
                     user_id: sea_orm::Set(caller.id),
+                    credits_applied: sea_orm::Set(false),
                     ..Default::default()
                 };
                 used_referral.insert(&txn).await?;
-            } else if app.config.invite_code.is_none() {
-                // Pass (Actually, what is this again? This is for the Trial invite code, right?
             }
-
-            let user_rpc_keys = vec![user_rpc_key];
-
-            // Also add a part for the invite code, i.e. who invited this guy
-
-            // save the user and key to the database
             txn.commit().await?;
 
             (caller, user_rpc_keys, StatusCode::CREATED)
@@ -378,6 +384,35 @@ pub async fn user_login_post(
         Some(caller) => {
 
             // Let's say that a user that exists can actually also redeem a key in retrospect...
+            let txn = db_conn.begin().await?;
+            // TODO: Move this into a common variable outside ...
+            // First, optionally catch a referral code from the parameters if there is any
+            if let Some(referral_code) = query.referral_code.as_ref() {
+                // If it is not inside, also check in the database
+                warn!("Using referral code: {:?}", referral_code);
+                let user_referrer = referrer::Entity::find()
+                    .filter(referrer::Column::ReferralCode.eq(referral_code))
+                    .one(db_replica.conn())
+                    .await?
+                    .ok_or(
+                        FrontendErrorResponse::BadRequest(
+                            format!("The referral_link you provided does not exist {}", referral_code)
+                        )
+                    )?;
+
+                // Create a new item in the database,
+                // marking this guy as the referrer (and ignoring a duplicate insert, if there is any...)
+                // First person to make the referral gets all credits
+                // Generate a random referral code ...
+                let used_referral = referee::ActiveModel {
+                    used_referral_code: sea_orm::Set(user_referrer.referral_code),
+                    user_id: sea_orm::Set(caller.id),
+                    credits_applied: sea_orm::Set(false),
+                    ..Default::default()
+                };
+                used_referral.insert(&txn).await?;
+            }
+            txn.commit().await?;
 
             // the user is already registered
             let user_rpc_keys = rpc_key::Entity::find()
