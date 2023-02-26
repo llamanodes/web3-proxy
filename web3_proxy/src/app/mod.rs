@@ -10,7 +10,7 @@ use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{
     JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest, JsonRpcRequestEnum,
 };
-use crate::rpcs::blockchain::{BlockHashesCache, Web3ProxyBlock};
+use crate::rpcs::blockchain::{Web3ProxyBlock};
 use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::transactions::TxStatus;
@@ -199,6 +199,7 @@ impl DatabaseReplica {
 pub struct Web3ProxyApp {
     /// Send requests to the best server available
     pub balanced_rpcs: Arc<Web3Rpcs>,
+    pub http_client: Option<reqwest::Client>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     pub private_rpcs: Option<Arc<Web3Rpcs>>,
     response_cache: ResponseCache,
@@ -354,6 +355,8 @@ pub async fn get_migrated_db(
 pub struct Web3ProxyAppSpawn {
     /// the app. probably clone this to use in other groups of handles
     pub app: Arc<Web3ProxyApp>,
+    /// handles for the balanced and private rpcs
+    pub app_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
     /// these are important and must be allowed to finish
     pub background_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
 }
@@ -365,6 +368,29 @@ impl Web3ProxyApp {
         num_workers: usize,
         shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
+        // safety checks on the config
+        // while i would prefer this to be in a "apply_top_config" function, that is a larger refactor
+        if let Some(redirect) = &top_config.app.redirect_rpc_key_url {
+            assert!(
+                redirect.contains("{{rpc_key_id}}"),
+                "redirect_rpc_key_url user url must contain \"{{rpc_key_id}}\""
+            );
+        }
+
+        if !top_config.extra.is_empty() {
+            warn!(
+                "unknown TopConfig fields!: {:?}",
+                top_config.app.extra.keys()
+            );
+        }
+
+        if !top_config.app.extra.is_empty() {
+            warn!(
+                "unknown Web3ProxyAppConfig fields!: {:?}",
+                top_config.app.extra.keys()
+            );
+        }
+
         // we must wait for these to end on their own (and they need to subscribe to shutdown_sender)
         let important_background_handles = FuturesUnordered::new();
 
@@ -491,6 +517,47 @@ impl Web3ProxyApp {
                 .build()?,
         );
 
+        // create rate limiters
+        // these are optional. they require redis
+        let mut frontend_ip_rate_limiter = None;
+        let mut frontend_registered_user_rate_limiter = None;
+        let mut login_rate_limiter = None;
+
+        if let Some(redis_pool) = vredis_pool.as_ref() {
+            if let Some(public_requests_per_period) = top_config.app.public_requests_per_period {
+                // chain id is included in the app name so that rpc rate limits are per-chain
+                let rpc_rrl = RedisRateLimiter::new(
+                    &format!("web3_proxy:{}", top_config.app.chain_id),
+                    "frontend",
+                    public_requests_per_period,
+                    60.0,
+                    redis_pool.clone(),
+                );
+
+                // these two rate limiters can share the base limiter
+                // these are deferred rate limiters because we don't want redis network requests on the hot path
+                // TODO: take cache_size from config
+                frontend_ip_rate_limiter = Some(DeferredRateLimiter::<IpAddr>::new(
+                    10_000,
+                    "ip",
+                    rpc_rrl.clone(),
+                    None,
+                ));
+                frontend_registered_user_rate_limiter = Some(DeferredRateLimiter::<u64>::new(
+                    10_000, "key", rpc_rrl, None,
+                ));
+            }
+
+            // login rate limiter
+            login_rate_limiter = Some(RedisRateLimiter::new(
+                "web3_proxy",
+                "login",
+                top_config.app.login_rate_limit_per_period,
+                60.0,
+                redis_pool.clone(),
+            ));
+        }
+
         // TODO: i don't like doing Block::default here! Change this to "None"?
         let (watch_consensus_head_sender, watch_consensus_head_receiver) = watch::channel(None);
         // TODO: will one receiver lagging be okay? how big should this be?
@@ -508,20 +575,6 @@ impl Web3ProxyApp {
         let pending_transactions = Cache::builder()
             .max_capacity(10_000)
             // TODO: different chains might handle this differently
-            // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
-            .time_to_idle(Duration::from_secs(300))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-
-        // keep 1GB/5 minutes of blocks in the cache
-        // TODO: limits from config
-        // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
-        // TODO: how can we do the weigher better?
-        let block_map: BlockHashesCache = Cache::builder()
-            .max_capacity(1024 * 1024 * 1024)
-            .weigher(|_k, v: &Web3ProxyBlock| {
-                // TODO: is this good enough?
-                1 + v.block.transactions.len().try_into().unwrap_or(u32::MAX)
-            })
             // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
             .time_to_idle(Duration::from_secs(300))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
@@ -567,10 +620,10 @@ impl Web3ProxyApp {
             .time_to_idle(Duration::from_secs(120))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
-        // set up a Web3Rpcs object to hold all our connections
-        // TODO: for now, only the server_configs can change
-        let (balanced_rpcs, balanced_handle) = Web3Rpcs::spawn(
-            block_map.clone(),
+        let app_handles = FuturesUnordered::new();
+
+        // prepare a Web3Rpcs to hold all our balanced connections
+        let (balanced_rpcs, balanced_rpcs_handle) = Web3Rpcs::spawn(
             top_config.app.chain_id,
             db_conn.clone(),
             http_client.clone(),
@@ -580,25 +633,21 @@ impl Web3ProxyApp {
             top_config.app.min_sum_soft_limit,
             pending_transactions.clone(),
             Some(pending_tx_sender.clone()),
-            vredis_pool.clone(),
             Some(watch_consensus_head_sender),
         )
         .await
         .context("spawning balanced rpcs")?;
 
-        // connect to the load balanced rpcs
-        balanced_rpcs.apply_server_configs(top_config.balanced_rpcs);
+        app_handles.push(balanced_rpcs_handle);
 
-        // connect to the private rpcs
+        // prepare a Web3Rpcs to hold all our private connections
         // only some chains have this, so this is optional
-        let private_rpc_configs = top_config.private_rpcs.unwrap_or_default();
-        let private_rpcs = if private_rpc_configs.is_empty() {
+        let private_rpcs = if top_config.private_rpcs.is_none() {
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             None
         } else {
             // TODO: do something with the spawn handle
-            let (private_rpcs, _) = Web3Rpcs::spawn(
-                block_map,
+            let (private_rpcs, private_rpcs_handle) = Web3Rpcs::spawn(
                 top_config.app.chain_id,
                 db_conn.clone(),
                 http_client.clone(),
@@ -610,7 +659,6 @@ impl Web3ProxyApp {
                 pending_transactions.clone(),
                 // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits, but they should have
                 None,
-                vredis_pool.clone(),
                 // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
                 // they also often have low rate limits
                 // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
@@ -620,18 +668,15 @@ impl Web3ProxyApp {
             .await
             .context("spawning private_rpcs")?;
 
-            private_rpcs.apply_server_configs(private_rpc_configs);
+            app_handles.push(private_rpcs_handle);
 
-            if private_rpcs.by_name.is_empty() {
-                None
-            } else {
-                Some(private_rpcs)
-            }
+            Some(private_rpcs)
         };
 
         let app = Self {
-            config: top_config.app,
+            config: top_config.app.clone(),
             balanced_rpcs,
+            http_client,
             private_rpcs,
             response_cache,
             watch_consensus_head_receiver,
@@ -652,103 +697,30 @@ impl Web3ProxyApp {
 
         let app = Arc::new(app);
 
-        app.apply_config(top_config).await?;
-
+        app.apply_top_config(top_config).await?;
         // TODO: use channel for receiving new top_configs
         // TODO: return a channel for sending new top_configs
 
-        Ok((app, important_background_handles).into())
+        Ok((app, app_handles, important_background_handles).into())
     }
 
-    /// update the app's balanced_rpcs and private_rpcs
-    /// TODO: make more of the app mutable. for now, db and
-    pub async fn apply_server_configs(
-        self: Arc<Self>,
-        top_config: TopConfig,
-    ) -> anyhow::Result<()> {
-        // safety checks on the config
-        if let Some(redirect) = &top_config.app.redirect_rpc_key_url {
-            assert!(
-                redirect.contains("{{rpc_key_id}}"),
-                "redirect_rpc_key_url user url must contain \"{{rpc_key_id}}\""
-            );
-        }
+    pub async fn apply_top_config(&self, new_top_config: TopConfig) -> anyhow::Result<()> {
+        // TODO: also update self.config from new_top_config.app
 
-        if !top_config.extra.is_empty() {
-            warn!(
-                "unknown TopConfig fields!: {:?}",
-                top_config.app.extra.keys()
-            );
-        }
+        // connect to the backends
+        self.balanced_rpcs
+            .apply_server_configs(self, new_top_config.balanced_rpcs)
+            .await?;
 
-        if !top_config.app.extra.is_empty() {
-            warn!(
-                "unknown Web3ProxyAppConfig fields!: {:?}",
-                top_config.app.extra.keys()
-            );
-        }
-
-        let balanced_rpcs = top_config.balanced_rpcs;
-
-        // safety check on balanced_rpcs
-        if balanced_rpcs.len() < top_config.app.min_synced_rpcs {
-            return Err(anyhow::anyhow!(
-                "Only {}/{} rpcs! Add more balanced_rpcs or reduce min_synced_rpcs.",
-                balanced_rpcs.len(),
-                top_config.app.min_synced_rpcs
-            ));
-        }
-
-        // safety check on sum soft limit
-        let sum_soft_limit = balanced_rpcs.values().fold(0, |acc, x| acc + x.soft_limit);
-
-        if sum_soft_limit < top_config.app.min_sum_soft_limit {
-            return Err(anyhow::anyhow!(
-                "Only {}/{} soft limit! Add more balanced_rpcs, increase soft limits, or reduce min_sum_soft_limit.",
-                sum_soft_limit,
-                top_config.app.min_sum_soft_limit
-            ));
-        }
-
-        // create rate limiters
-        // these are optional. they require redis
-        let mut frontend_ip_rate_limiter = None;
-        let mut frontend_registered_user_rate_limiter = None;
-        let mut login_rate_limiter = None;
-
-        if let Some(redis_pool) = vredis_pool.as_ref() {
-            if let Some(public_requests_per_period) = top_config.app.public_requests_per_period {
-                // chain id is included in the app name so that rpc rate limits are per-chain
-                let rpc_rrl = RedisRateLimiter::new(
-                    &format!("web3_proxy:{}", top_config.app.chain_id),
-                    "frontend",
-                    public_requests_per_period,
-                    60.0,
-                    redis_pool.clone(),
-                );
-
-                // these two rate limiters can share the base limiter
-                // these are deferred rate limiters because we don't want redis network requests on the hot path
-                // TODO: take cache_size from config
-                frontend_ip_rate_limiter = Some(DeferredRateLimiter::<IpAddr>::new(
-                    10_000,
-                    "ip",
-                    rpc_rrl.clone(),
-                    None,
-                ));
-                frontend_registered_user_rate_limiter = Some(DeferredRateLimiter::<u64>::new(
-                    10_000, "key", rpc_rrl, None,
-                ));
+        if let Some(private_rpc_configs) = new_top_config.private_rpcs {
+            if let Some(private_rpcs) = self.private_rpcs.as_ref() {
+                private_rpcs
+                    .apply_server_configs(self, private_rpc_configs)
+                    .await?;
+            } else {
+                // TODO: maybe we should have private_rpcs just be empty instead of being None
+                todo!("handle toggling private_rpcs")
             }
-
-            // login rate limiter
-            login_rate_limiter = Some(RedisRateLimiter::new(
-                "web3_proxy",
-                "login",
-                top_config.app.login_rate_limit_per_period,
-                60.0,
-                redis_pool.clone(),
-            ));
         }
 
         Ok(())

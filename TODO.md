@@ -676,3 +676,4 @@ in another repo: event subscriber
 - [ ] have an upgrade tier that queries multiple backends at once. returns on first Ok result, collects errors. if no Ok, find the most common error and then respond with that
 - [ ] give public_recent_ips_salt a better, more general, name
 - [ ] include tier in the head block logs?
+- [ ] i think i use FuturesUnordered when a try_join_all might be better

@@ -1,5 +1,5 @@
 use crate::app::AnyhowJoinHandle;
-use crate::rpcs::blockchain::{BlockHashesCache, Web3ProxyBlock};
+use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
 use ethers::prelude::TxHash;
@@ -253,7 +253,7 @@ impl Web3RpcConfig {
         chain_id: u64,
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        block_map: BlockHashesCache,
+        blocks_by_hash_cache: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
         reconnect: bool,
@@ -270,7 +270,7 @@ impl Web3RpcConfig {
             http_client,
             http_interval_sender,
             redis_pool,
-            block_map,
+            blocks_by_hash_cache,
             block_sender,
             tx_id_sender,
             reconnect,

@@ -1,5 +1,5 @@
 ///! Rate-limited communication with a web3 provider.
-use super::blockchain::{ArcBlock, BlockHashesCache, Web3ProxyBlock};
+use super::blockchain::{ArcBlock, BlocksByHashCache, Web3ProxyBlock};
 use super::provider::Web3Provider;
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
@@ -151,7 +151,7 @@ impl Web3Rpc {
         redis_pool: Option<RedisPool>,
         // TODO: think more about soft limit. watching ewma of requests is probably better. but what should the random sort be on? maybe group on tier is enough
         // soft_limit: u32,
-        block_map: BlockHashesCache,
+        block_map: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
@@ -571,7 +571,7 @@ impl Web3Rpc {
         self: &Arc<Self>,
         new_head_block: Result<Option<ArcBlock>, ProviderError>,
         block_sender: &flume::Sender<BlockAndRpc>,
-        block_map: BlockHashesCache,
+        block_map: BlocksByHashCache,
     ) -> anyhow::Result<()> {
         let new_head_block = match new_head_block {
             Ok(None) => {
@@ -648,7 +648,7 @@ impl Web3Rpc {
     async fn subscribe(
         self: Arc<Self>,
         authorization: &Arc<Authorization>,
-        block_map: BlockHashesCache,
+        block_map: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         chain_id: u64,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
@@ -848,7 +848,7 @@ impl Web3Rpc {
         authorization: Arc<Authorization>,
         http_interval_receiver: Option<broadcast::Receiver<()>>,
         block_sender: flume::Sender<BlockAndRpc>,
-        block_map: BlockHashesCache,
+        block_map: BlocksByHashCache,
     ) -> anyhow::Result<()> {
         trace!("watching new heads on {}", self);
 

@@ -53,7 +53,7 @@ impl fmt::Debug for ConsensusWeb3Rpcs {
 impl Web3Rpcs {
     // TODO: return a ref?
     pub fn head_block(&self) -> Option<Web3ProxyBlock> {
-        self.watch_consensus_head_receiver
+        self.watch_consensus_head_sender
             .as_ref()
             .and_then(|x| x.borrow().clone())
     }

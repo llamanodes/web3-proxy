@@ -1,9 +1,9 @@
 ///! Load balanced communication with a group of web3 rpc providers
-use super::blockchain::{BlockHashesCache, Web3ProxyBlock};
+use super::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use super::consensus::ConsensusWeb3Rpcs;
 use super::one::Web3Rpc;
 use super::request::{OpenRequestHandle, OpenRequestResult, RequestRevertHandler};
-use crate::app::{flatten_handle, AnyhowJoinHandle};
+use crate::app::{flatten_handle, AnyhowJoinHandle, Web3ProxyApp};
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
@@ -38,19 +38,27 @@ use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBeh
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
 pub struct Web3Rpcs {
+    /// if watch_consensus_head_sender is some, Web3Rpc inside self will send blocks here when they get them
+    pub(crate) block_sender: flume::Sender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
     /// any requests will be forwarded to one (or more) of these connections
     pub(crate) by_name: HashMap<String, Arc<Web3Rpc>>,
+    pub(crate) http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
     /// all providers with the same consensus head block. won't update if there is no `self.watch_consensus_head_sender`
+    /// TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
+    /// TODO: why is watch_consensus_head_sender in an Option, but this one isn't?
+    /// Geth's subscriptions have the same potential for skipping blocks.
     pub(super) watch_consensus_rpcs_sender: watch::Sender<Arc<ConsensusWeb3Rpcs>>,
     /// this head receiver makes it easy to wait until there is a new block
-    pub(super) watch_consensus_head_receiver: Option<watch::Receiver<Option<Web3ProxyBlock>>>,
-    pub(super) pending_transactions:
+    pub(super) watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
+    pub(super) pending_transaction_cache:
         Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
+    pub(super) pending_tx_id_receiver: flume::Receiver<TxHashAndRpc>,
+    pub(super) pending_tx_id_sender: flume::Sender<TxHashAndRpc>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
-    pub(super) block_hashes: BlockHashesCache,
+    pub(super) blocks_by_hash: BlocksByHashCache,
     /// blocks on the heaviest chain
-    pub(super) block_numbers: Cache<U64, H256, hashbrown::hash_map::DefaultHashBuilder>,
+    pub(super) blocks_by_number: Cache<U64, H256, hashbrown::hash_map::DefaultHashBuilder>,
     /// the number of rpcs required to agree on consensus for the head block (thundering herd protection)
     pub(super) min_head_rpcs: usize,
     /// the soft limit required to agree on consensus for the head block. (thundering herd protection)
@@ -62,95 +70,9 @@ pub struct Web3Rpcs {
 }
 
 impl Web3Rpcs {
-    pub async fn min_head_rpcs(&self) -> usize {
-        self.min_head_rpcs
-    }
-
-    pub async fn apply_server_configs(
-        &self,
-        server_configs: HashMap<String, Web3RpcConfig>,
-    ) -> anyhow::Result<()> {
-        // turn configs into connections (in parallel)
-        // TODO: move this into a helper function. then we can use it when configs change (will need a remove function too)
-        let mut spawn_handles: FuturesUnordered<_> = server_configs
-            .into_iter()
-            .filter_map(|(server_name, server_config)| {
-                if server_config.disabled {
-                    info!("{} is disabled", server_name);
-                    return None;
-                }
-
-                let db_conn = db_conn.clone();
-                let http_client = http_client.clone();
-                let redis_pool = redis_pool.clone();
-                let http_interval_sender = http_interval_sender.clone();
-
-                let block_sender = if watch_consensus_head_sender.is_some() {
-                    Some(block_sender.clone())
-                } else {
-                    None
-                };
-
-                let pending_tx_id_sender = Some(pending_tx_id_sender.clone());
-                let block_map = block_map.clone();
-
-                debug!("spawning {}", server_name);
-
-                let handle = tokio::spawn(async move {
-                    server_config
-                        .spawn(
-                            server_name,
-                            db_conn,
-                            redis_pool,
-                            chain_id,
-                            http_client,
-                            http_interval_sender,
-                            block_map,
-                            block_sender,
-                            pending_tx_id_sender,
-                            true,
-                        )
-                        .await
-                });
-
-                Some(handle)
-            })
-            .collect();
-
-        // map of connection names to their connection
-        let mut connections = AsyncRwLock::new(HashMap::new());
-        let mut handles = vec![];
-
-        while let Some(x) = spawn_handles.next().await {
-            match x {
-                Ok(Ok((connection, _handle))) => {
-                    // web3 connection worked
-                    connections
-                        .write()
-                        .await
-                        .insert(connection.name.clone(), connection);
-
-                    // TODO: what should we do with the handle? at least log any errors
-                }
-                Ok(Err(err)) => {
-                    // if we got an error here, the app can continue on
-                    // TODO: include context about which connection failed
-                    error!("Unable to create connection. err={:?}", err);
-                }
-                Err(err) => {
-                    // something actually bad happened. exit with an error
-                    return Err(err.into());
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     /// Spawn durable connections to multiple Web3 providers.
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
-        block_map: BlockHashesCache,
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
         http_client: Option<reqwest::Client>,
@@ -158,9 +80,8 @@ impl Web3Rpcs {
         max_block_lag: Option<U64>,
         min_head_rpcs: usize,
         min_sum_soft_limit: u32,
-        pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
+        pending_transaction_cache: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
-        redis_pool: Option<redis_rate_limiter::RedisPool>,
         watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     ) -> anyhow::Result<(Arc<Self>, AnyhowJoinHandle<()>)> {
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
@@ -217,30 +138,40 @@ impl Web3Rpcs {
             None
         };
 
-        // TODO: max_capacity and time_to_idle from config
-        // all block hashes are the same size, so no need for weigher
-        let block_hashes = Cache::builder()
+        // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
+        // TODO: how can we do the weigher better? need to know actual allocated size
+        // TODO: limits from config
+        let blocks_by_hash: BlocksByHashCache = Cache::builder()
+            .max_capacity(1024 * 1024 * 1024)
+            .weigher(|_k, v: &Web3ProxyBlock| {
+                1 + v.block.transactions.len().try_into().unwrap_or(u32::MAX)
+            })
             .time_to_idle(Duration::from_secs(600))
-            .max_capacity(10_000)
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+
         // all block numbers are the same size, so no need for weigher
-        let block_numbers = Cache::builder()
+        // TODO: limits from config
+        let blocks_by_number = Cache::builder()
             .time_to_idle(Duration::from_secs(600))
             .max_capacity(10_000)
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
-        let (watch_consensus_connections_sender, _) = watch::channel(Default::default());
+        let (watch_consensus_rpcs_sender, _) = watch::channel(Default::default());
 
-        let watch_consensus_head_receiver =
-            watch_consensus_head_sender.as_ref().map(|x| x.subscribe());
+        // by_name starts empty. self.apply_server_configs will add to it
+        let by_name = Default::default();
 
         let connections = Arc::new(Self {
-            by_name: connections,
-            watch_consensus_rpcs_sender: watch_consensus_connections_sender,
-            watch_consensus_head_receiver,
-            pending_transactions,
-            block_hashes,
-            block_numbers,
+            block_sender,
+            by_name,
+            http_interval_sender,
+            watch_consensus_rpcs_sender,
+            watch_consensus_head_sender,
+            pending_transaction_cache,
+            pending_tx_id_sender,
+            pending_tx_id_receiver,
+            blocks_by_hash,
+            blocks_by_number,
             min_sum_soft_limit,
             min_head_rpcs,
             max_block_age,
@@ -254,13 +185,7 @@ impl Web3Rpcs {
 
             tokio::spawn(async move {
                 connections
-                    .subscribe(
-                        authorization,
-                        pending_tx_id_receiver,
-                        block_receiver,
-                        watch_consensus_head_sender,
-                        pending_tx_sender,
-                    )
+                    .subscribe(authorization, block_receiver, pending_tx_sender)
                     .await
             })
         };
@@ -268,8 +193,122 @@ impl Web3Rpcs {
         Ok((connections, handle))
     }
 
+    /// update the rpcs in this group
+    pub async fn apply_server_configs(
+        &self,
+        app: &Web3ProxyApp,
+        rpc_configs: HashMap<String, Web3RpcConfig>,
+    ) -> anyhow::Result<()> {
+        // safety checks
+        if rpc_configs.len() < app.config.min_synced_rpcs {
+            return Err(anyhow::anyhow!(
+                "Only {}/{} rpcs! Add more rpcs or reduce min_synced_rpcs.",
+                rpc_configs.len(),
+                app.config.min_synced_rpcs
+            ));
+        }
+
+        // safety check on sum soft limit
+        // TODO: will need to think about this more once sum_soft_limit is dynamic
+        let sum_soft_limit = rpc_configs.values().fold(0, |acc, x| acc + x.soft_limit);
+
+        // TODO: < is a bit dangerous, we should require a buffer
+        if sum_soft_limit < self.min_sum_soft_limit {
+            return Err(anyhow::anyhow!(
+                "Only {}/{} soft limit! Add more rpcs, increase soft limits, or reduce min_sum_soft_limit.",
+                sum_soft_limit,
+                self.min_sum_soft_limit
+            ));
+        }
+
+        // turn configs into connections (in parallel)
+        // TODO: move this into a helper function. then we can use it when configs change (will need a remove function too)
+        let mut spawn_handles: FuturesUnordered<_> = rpc_configs
+            .into_iter()
+            .filter_map(|(server_name, server_config)| {
+                if server_config.disabled {
+                    info!("{} is disabled", server_name);
+                    return None;
+                }
+
+                let db_conn = app.db_conn();
+                let http_client = app.http_client.clone();
+                let vredis_pool = app.vredis_pool.clone();
+
+                let block_sender = if self.watch_consensus_head_sender.is_some() {
+                    Some(self.block_sender.clone())
+                } else {
+                    None
+                };
+
+                let pending_tx_id_sender = Some(self.pending_tx_id_sender.clone());
+                let blocks_by_hash = self.blocks_by_hash.clone();
+                let http_interval_sender = self.http_interval_sender.clone();
+                let chain_id = app.config.chain_id;
+
+                debug!("spawning {}", server_name);
+
+                let handle = tokio::spawn(async move {
+                    server_config
+                        .spawn(
+                            server_name,
+                            db_conn,
+                            vredis_pool,
+                            chain_id,
+                            http_client,
+                            http_interval_sender,
+                            blocks_by_hash,
+                            block_sender,
+                            pending_tx_id_sender,
+                            true,
+                        )
+                        .await
+                });
+
+                Some(handle)
+            })
+            .collect();
+
+        // map of connection names to their connection
+        let connections = AsyncRwLock::new(HashMap::new());
+
+        while let Some(x) = spawn_handles.next().await {
+            match x {
+                Ok(Ok((connection, _handle))) => {
+                    // web3 connection worked
+                    let old_rpc = connections
+                        .write()
+                        .await
+                        .insert(connection.name.clone(), connection);
+
+                    if let Some(old_rpc) = old_rpc {
+                        todo!("do something to make the old one shutdown");
+                    }
+
+                    // TODO: what should we do with the new handle? make sure error logs aren't dropped
+                }
+                Ok(Err(err)) => {
+                    // if we got an error here, the app can continue on
+                    // TODO: include context about which connection failed
+                    // TODO: will this retry automatically? i don't think so
+                    error!("Unable to create connection. err={:?}", err);
+                }
+                Err(err) => {
+                    // something actually bad happened. exit with an error
+                    return Err(err.into());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn get(&self, conn_name: &str) -> Option<&Arc<Web3Rpc>> {
         self.by_name.get(conn_name)
+    }
+
+    pub async fn min_head_rpcs(&self) -> usize {
+        self.min_head_rpcs
     }
 
     /// subscribe to blocks and transactions from all the backend rpcs.
@@ -278,9 +317,7 @@ impl Web3Rpcs {
     async fn subscribe(
         self: Arc<Self>,
         authorization: Arc<Authorization>,
-        pending_tx_id_receiver: flume::Receiver<TxHashAndRpc>,
         block_receiver: flume::Receiver<BlockAndRpc>,
-        head_block_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         let mut futures = vec![];
@@ -292,6 +329,7 @@ impl Web3Rpcs {
         if let Some(pending_tx_sender) = pending_tx_sender.clone() {
             let clone = self.clone();
             let authorization = authorization.clone();
+            let pending_tx_id_receiver = self.pending_tx_id_receiver.clone();
             let handle = task::spawn(async move {
                 // TODO: set up this future the same as the block funnel
                 while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv_async().await {
@@ -311,7 +349,7 @@ impl Web3Rpcs {
         }
 
         // setup the block funnel
-        if let Some(head_block_sender) = head_block_sender {
+        if self.watch_consensus_head_sender.is_some() {
             let connections = Arc::clone(&self);
             let pending_tx_sender = pending_tx_sender.clone();
 
@@ -319,12 +357,7 @@ impl Web3Rpcs {
                 .name("process_incoming_blocks")
                 .spawn(async move {
                     connections
-                        .process_incoming_blocks(
-                            &authorization,
-                            block_receiver,
-                            head_block_sender,
-                            pending_tx_sender,
-                        )
+                        .process_incoming_blocks(&authorization, block_receiver, pending_tx_sender)
                         .await
                 })?;
 
@@ -1148,12 +1181,12 @@ impl Serialize for Web3Rpcs {
             state.serialize_field("synced_connections", &consensus_connections)?;
         }
 
-        self.block_hashes.sync();
-        self.block_numbers.sync();
-        state.serialize_field("block_hashes_count", &self.block_hashes.entry_count())?;
-        state.serialize_field("block_hashes_size", &self.block_hashes.weighted_size())?;
-        state.serialize_field("block_numbers_count", &self.block_numbers.entry_count())?;
-        state.serialize_field("block_numbers_size", &self.block_numbers.weighted_size())?;
+        self.blocks_by_hash.sync();
+        self.blocks_by_number.sync();
+        state.serialize_field("block_hashes_count", &self.blocks_by_hash.entry_count())?;
+        state.serialize_field("block_hashes_size", &self.blocks_by_hash.weighted_size())?;
+        state.serialize_field("block_numbers_count", &self.blocks_by_number.entry_count())?;
+        state.serialize_field("block_numbers_size", &self.blocks_by_number.weighted_size())?;
         state.end()
     }
 }
@@ -1346,18 +1379,25 @@ mod tests {
             (lagged_rpc.name.clone(), lagged_rpc.clone()),
         ]);
 
+        let (block_sender, _) = flume::unbounded();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (watch_consensus_rpcs_sender, _) = watch::channel(Default::default());
+        let (watch_consensus_head_sender, _) = watch::channel(Default::default());
 
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
+            block_sender,
             by_name: rpcs_by_name,
-            watch_consensus_head_receiver: None,
+            http_interval_sender: None,
+            watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
-            pending_transactions: Cache::builder()
+            pending_transaction_cache: Cache::builder()
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
-            block_hashes: Cache::builder()
+            pending_tx_id_receiver,
+            pending_tx_id_sender,
+            blocks_by_hash: Cache::builder()
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
-            block_numbers: Cache::builder()
+            blocks_by_number: Cache::builder()
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
             // TODO: test max_block_age?
             max_block_age: None,
@@ -1369,7 +1409,6 @@ mod tests {
 
         let authorization = Arc::new(Authorization::internal(None).unwrap());
 
-        let (head_block_sender, _head_block_receiver) = watch::channel(Default::default());
         let mut consensus_finder = ConsensusFinder::new(&[0, 1, 2, 3], None, None);
 
         // process None so that
@@ -1378,7 +1417,6 @@ mod tests {
             &mut consensus_finder,
             None,
             lagged_rpc.clone(),
-            &head_block_sender,
             &None,
         )
         .await
@@ -1388,7 +1426,6 @@ mod tests {
             &mut consensus_finder,
             None,
             head_rpc.clone(),
-            &head_block_sender,
             &None,
         )
         .await
@@ -1424,7 +1461,6 @@ mod tests {
             &mut consensus_finder,
             Some(lagged_block.clone()),
             lagged_rpc,
-            &head_block_sender,
             &None,
         )
         .await
@@ -1434,7 +1470,6 @@ mod tests {
             &mut consensus_finder,
             Some(lagged_block.clone()),
             head_rpc.clone(),
-            &head_block_sender,
             &None,
         )
         .await
@@ -1450,7 +1485,6 @@ mod tests {
             &mut consensus_finder,
             Some(head_block.clone()),
             head_rpc,
-            &head_block_sender,
             &None,
         )
         .await
@@ -1545,18 +1579,26 @@ mod tests {
             (archive_rpc.name.clone(), archive_rpc.clone()),
         ]);
 
+        let (block_sender, _) = flume::unbounded();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (watch_consensus_rpcs_sender, _) = watch::channel(Default::default());
+        let (watch_consensus_head_sender, _watch_consensus_head_receiver) =
+            watch::channel(Default::default());
 
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
+            block_sender,
             by_name: rpcs_by_name,
-            watch_consensus_head_receiver: None,
+            http_interval_sender: None,
+            watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
-            pending_transactions: Cache::builder()
+            pending_transaction_cache: Cache::builder()
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
-            block_hashes: Cache::builder()
+            pending_tx_id_receiver,
+            pending_tx_id_sender,
+            blocks_by_hash: Cache::builder()
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
-            block_numbers: Cache::builder()
+            blocks_by_number: Cache::builder()
                 .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
             min_head_rpcs: 1,
             min_sum_soft_limit: 4_000,
@@ -1566,7 +1608,6 @@ mod tests {
 
         let authorization = Arc::new(Authorization::internal(None).unwrap());
 
-        let (head_block_sender, _head_block_receiver) = watch::channel(Default::default());
         let mut connection_heads = ConsensusFinder::new(&[0, 1, 2, 3], None, None);
 
         // min sum soft limit will require tier 2
@@ -1575,7 +1616,6 @@ mod tests {
             &mut connection_heads,
             Some(head_block.clone()),
             pruned_rpc.clone(),
-            &head_block_sender,
             &None,
         )
         .await
@@ -1586,7 +1626,6 @@ mod tests {
             &mut connection_heads,
             Some(head_block.clone()),
             archive_rpc.clone(),
-            &head_block_sender,
             &None,
         )
         .await
