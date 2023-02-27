@@ -70,7 +70,7 @@ pub async fn clean_block_number(
                 // convert the json value to a BlockNumber
                 let (block_num, change) = if let Some(obj) = x.as_object_mut() {
                     // it might be a Map like `{"blockHash": String("0xa5626dc20d3a0a209b1de85521717a3e859698de8ce98bca1b16822b7501f74b")}`
-                    if let Some(block_hash) = obj.remove("blockHash") {
+                    if let Some(block_hash) = obj.get("blockHash").cloned() {
                         let block_hash: H256 =
                             serde_json::from_value(block_hash).context("decoding blockHash")?;
 
@@ -79,7 +79,7 @@ pub async fn clean_block_number(
                             .await
                             .context("fetching block number from hash")?;
 
-                        // TODO: set change to true? i think not we should probably use hashes for everything.
+                        // TODO: we do not change the
                         (*block.number(), false)
                     } else {
                         return Err(anyhow::anyhow!("blockHash missing"));
@@ -176,6 +176,7 @@ pub async fn block_needed(
         "eth_getLogs" => {
             // TODO: think about this more
             // TODO: jsonrpc has a specific code for this
+            // TODO: this shouldn't be a 500. this should
             let obj = params[0]
                 .as_object_mut()
                 .ok_or_else(|| anyhow::anyhow!("invalid format"))?;
