@@ -275,19 +275,20 @@ impl Web3Rpcs {
 
         while let Some(x) = spawn_handles.next().await {
             match x {
-                Ok(Ok((connection, _handle))) => {
-                    // TODO: wait for connection to have a block by watching a channel instead of looping
-                    while connection.head_block.read().is_none() {
-                        sleep(Duration::from_millis(100)).await;
-                    }
-
+                Ok(Ok((rpc, _handle))) => {
                     // web3 connection worked
-                    let old_rpc = self
-                        .by_name
-                        .write()
-                        .insert(connection.name.clone(), connection);
+                    let old_rpc = self.by_name.write().insert(rpc.name.clone(), rpc.clone());
 
                     if let Some(old_rpc) = old_rpc {
+                        if old_rpc.head_block.read().is_some() {
+                            debug!("waiting for new {} to sync", rpc);
+                            // TODO: wait for connection to have a block by watching a channel instead of looping
+                            // TODO: maximum wait time or this could block things for too long
+                            while rpc.head_block.read().is_none() {
+                                sleep(Duration::from_millis(100)).await;
+                            }
+                        }
+
                         old_rpc.disconnect().await.context("disconnect old rpc")?;
                     }
 
