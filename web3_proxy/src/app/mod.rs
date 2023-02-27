@@ -68,7 +68,7 @@ pub static APP_USER_AGENT: &str = concat!(
 /// TODO: allow customizing the request period?
 pub static REQUEST_PERIOD: u64 = 60;
 
-#[derive(From)]
+#[derive(Debug, From)]
 struct ResponseCacheKey {
     // if none, this is cached until evicted
     from_block: Option<Web3ProxyBlock>,
@@ -1598,6 +1598,7 @@ impl Web3ProxyApp {
                         })
                     }
                 };
+                trace!("cache_key: {:#?}", cache_key);
 
                 let mut response = {
                     let request_metadata = request_metadata.clone();

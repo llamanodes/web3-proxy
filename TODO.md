@@ -357,6 +357,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - erigon only streams the JSON over HTTP. that code isn't enabled for websockets. so this should save memory on the erigon servers
   - i think this also means we don't need to worry about changing the id that the user gives us.
 - [x] eth_getLogs is going to unsynced nodes because it only checks start block and not the end block
+- [x] fix caching getLogs with blockhash
 - [-] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends

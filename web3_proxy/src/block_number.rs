@@ -4,7 +4,7 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
-use log::warn;
+use log::{debug, trace, warn};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -176,13 +176,13 @@ pub async fn block_needed(
         "eth_getLogs" => {
             // TODO: think about this more
             // TODO: jsonrpc has a specific code for this
-            // TODO: this shouldn't be a 500. this should
+            // TODO: this shouldn't be a 500. this should be a 400. 500 will make haproxy retry a bunch
             let obj = params[0]
                 .as_object_mut()
                 .ok_or_else(|| anyhow::anyhow!("invalid format"))?;
 
             if obj.contains_key("blockHash") {
-                1
+                return Ok(BlockNeeded::CacheSuccessForever);
             } else {
                 let from_block_num = if let Some(x) = obj.get_mut("fromBlock") {
                     // TODO: use .take instead of clone
@@ -191,6 +191,7 @@ pub async fn block_needed(
                     let (block_num, change) = block_num_to_U64(block_num, head_block_num);
 
                     if change {
+                        trace!("changing fromBlock in eth_getLogs. {} -> {}", x, block_num);
                         *x = json!(block_num);
                     }
 
@@ -208,6 +209,7 @@ pub async fn block_needed(
                     let (block_num, change) = block_num_to_U64(block_num, head_block_num);
 
                     if change {
+                        trace!("changing toBlock in eth_getLogs. {} -> {}", x, block_num);
                         *x = json!(block_num);
                     }
 
