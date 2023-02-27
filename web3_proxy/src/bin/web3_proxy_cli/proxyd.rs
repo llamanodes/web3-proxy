@@ -1,13 +1,11 @@
 #![forbid(unsafe_code)]
-
-use std::path::PathBuf;
-use std::{fs, thread};
-
 use argh::FromArgs;
 use futures::StreamExt;
-use inotify::{EventMask, Inotify, WatchMask};
 use log::{error, info, warn};
 use num::Zero;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::{fs, thread};
 use tokio::sync::broadcast;
 use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use web3_proxy::config::TopConfig;
@@ -51,7 +49,7 @@ impl ProxydSubCommand {
 }
 
 async fn run(
-    top_config: TopConfig,
+    mut top_config: TopConfig,
     top_config_path: Option<PathBuf>,
     frontend_port: u16,
     prometheus_port: u16,
@@ -68,51 +66,81 @@ async fn run(
 
     // start the main app
     let mut spawned_app =
-        Web3ProxyApp::spawn(top_config, num_workers, shutdown_sender.subscribe()).await?;
+        Web3ProxyApp::spawn(top_config.clone(), num_workers, shutdown_sender.subscribe()).await?;
 
     // start thread for watching config
     if let Some(top_config_path) = top_config_path {
-        let mut inotify = Inotify::init().expect("Failed to initialize inotify");
-
-        inotify
-            .add_watch(top_config_path.clone(), WatchMask::MODIFY)
-            .expect("Failed to add inotify watch on config");
-
-        let mut buffer = [0u8; 4096];
-
         let config_sender = spawned_app.new_top_config_sender;
+        /*
+        #[cfg(feature = "inotify")]
+        {
+            let mut inotify = Inotify::init().expect("Failed to initialize inotify");
 
-        // TODO: exit the app if this handle exits
-        // TODO: debounce
-        thread::spawn(move || loop {
-            let events = inotify
-                .read_events_blocking(&mut buffer)
-                .expect("Failed to read inotify events");
+            inotify
+                .add_watch(top_config_path.clone(), WatchMask::MODIFY)
+                .expect("Failed to add inotify watch on config");
 
-            for event in events {
-                if event.mask.contains(EventMask::MODIFY) {
-                    info!("config changed");
-                    match fs::read_to_string(&top_config_path) {
-                        Ok(top_config) => match toml::from_str(&top_config) {
-                            Ok(top_config) => {
-                                config_sender.send(top_config).unwrap();
-                            }
+            let mut buffer = [0u8; 4096];
+
+            // TODO: exit the app if this handle exits
+            thread::spawn(move || loop {
+                // TODO: debounce
+
+                let events = inotify
+                    .read_events_blocking(&mut buffer)
+                    .expect("Failed to read inotify events");
+
+                for event in events {
+                    if event.mask.contains(EventMask::MODIFY) {
+                        info!("config changed");
+                        match fs::read_to_string(&top_config_path) {
+                            Ok(top_config) => match toml::from_str(&top_config) {
+                                Ok(top_config) => {
+                                    config_sender.send(top_config).unwrap();
+                                }
+                                Err(err) => {
+                                    // TODO: panic?
+                                    error!("Unable to parse config! {:#?}", err);
+                                }
+                            },
                             Err(err) => {
                                 // TODO: panic?
-                                error!("Unable to parse config! {:#?}", err);
+                                error!("Unable to read config! {:#?}", err);
                             }
-                        },
+                        };
+                    } else {
+                        // TODO: is "MODIFY" enough, or do we want CLOSE_WRITE?
+                        unimplemented!();
+                    }
+                }
+            });
+        }
+        */
+        // #[cfg(not(feature = "inotify"))]
+        {
+            thread::spawn(move || loop {
+                match fs::read_to_string(&top_config_path) {
+                    Ok(new_top_config) => match toml::from_str(&new_top_config) {
+                        Ok(new_top_config) => {
+                            if new_top_config != top_config {
+                                top_config = new_top_config;
+                                config_sender.send(top_config.clone()).unwrap();
+                            }
+                        }
                         Err(err) => {
                             // TODO: panic?
-                            error!("Unable to read config! {:#?}", err);
+                            error!("Unable to parse config! {:#?}", err);
                         }
-                    };
-                } else {
-                    // TODO: is "MODIFY" enough, or do we want CLOSE_WRITE?
-                    unimplemented!();
+                    },
+                    Err(err) => {
+                        // TODO: panic?
+                        error!("Unable to read config! {:#?}", err);
+                    }
                 }
-            }
-        });
+
+                thread::sleep(Duration::from_secs(10));
+            });
+        }
     }
 
     // start the prometheus metrics port

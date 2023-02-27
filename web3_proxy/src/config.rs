@@ -38,7 +38,7 @@ pub struct CliConfig {
     pub cookie_key_filename: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct TopConfig {
     pub app: AppConfig,
     pub balanced_rpcs: HashMap<String, Web3RpcConfig>,
@@ -51,7 +51,7 @@ pub struct TopConfig {
 
 /// shared configuration between Web3Rpcs
 // TODO: no String, only &str
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct AppConfig {
     /// Request limit for allowed origins for anonymous users.
     /// These requests get rate limited by IP.
@@ -203,7 +203,7 @@ fn default_response_cache_max_bytes() -> u64 {
 }
 
 /// Configuration for a backend web3 RPC server
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct Web3RpcConfig {
     /// simple way to disable a connection without deleting the row
     #[serde(default)]
