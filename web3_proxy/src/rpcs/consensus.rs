@@ -16,10 +16,11 @@ use tokio::time::Instant;
 
 /// A collection of Web3Rpcs that are on the same block.
 /// Serialize is so we can print it on our debug endpoint
-#[derive(Clone, Default, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct ConsensusWeb3Rpcs {
+    // TODO: tier should be an option, or we should have consensus be stored as an Option<ConsensusWeb3Rpcs>
     pub(super) tier: u64,
-    pub(super) head_block: Option<Web3ProxyBlock>,
+    pub(super) head_block: Web3ProxyBlock,
     // TODO: this should be able to serialize, but it isn't
     #[serde(skip_serializing)]
     pub(super) rpcs: Vec<Arc<Web3Rpc>>,
@@ -69,11 +70,23 @@ impl Web3Rpcs {
     }
 
     pub fn synced(&self) -> bool {
-        !self.watch_consensus_rpcs_sender.borrow().rpcs.is_empty()
+        let consensus = self.watch_consensus_rpcs_sender.borrow();
+
+        if let Some(consensus) = consensus.as_ref() {
+            !consensus.rpcs.is_empty()
+        } else {
+            false
+        }
     }
 
     pub fn num_synced_rpcs(&self) -> usize {
-        self.watch_consensus_rpcs_sender.borrow().rpcs.len()
+        let consensus = self.watch_consensus_rpcs_sender.borrow();
+
+        if let Some(consensus) = consensus.as_ref() {
+            consensus.rpcs.len()
+        } else {
+            0
+        }
     }
 }
 
@@ -98,6 +111,10 @@ impl ConnectionsGroup {
 
     pub fn len(&self) -> usize {
         self.rpc_name_to_block.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rpc_name_to_block.is_empty()
     }
 
     fn remove(&mut self, rpc_name: &str) -> Option<Web3ProxyBlock> {
@@ -255,14 +272,14 @@ impl ConnectionsGroup {
 
             // not enough rpcs on this block. check the parent block
             match web3_rpcs
-                .block(authorization, &maybe_head_block.parent_hash(), None)
+                .block(authorization, maybe_head_block.parent_hash(), None)
                 .await
             {
                 Ok(parent_block) => {
                     // trace!(
                     //     child=%maybe_head_hash, parent=%parent_block.hash.unwrap(), "avoiding thundering herd. checking consensus on parent block",
                     // );
-                    maybe_head_block = parent_block.into();
+                    maybe_head_block = parent_block;
                     continue;
                 }
                 Err(err) => {
@@ -325,7 +342,7 @@ impl ConnectionsGroup {
 
         Ok(ConsensusWeb3Rpcs {
             tier: *tier,
-            head_block: Some(maybe_head_block),
+            head_block: maybe_head_block,
             rpcs,
             backups_voted: backup_rpcs_voted,
             backups_needed: primary_rpcs_voted.is_none(),
@@ -369,6 +386,10 @@ impl ConsensusFinder {
 
     pub fn len(&self) -> usize {
         self.tiers.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tiers.is_empty()
     }
 
     /// get the ConnectionsGroup that contains all rpcs
@@ -457,26 +478,18 @@ impl ConsensusFinder {
                 }
 
                 if let Some(prev_block) = self.insert(&rpc, rpc_head_block.clone()).await {
-                    if prev_block.hash() == rpc_head_block.hash() {
-                        // this block was already sent by this rpc. return early
-                        false
-                    } else {
-                        // new block for this rpc
-                        true
-                    }
+                    // false if this block was already sent by this rpc. return early
+                    // true if new block for this rpc
+                    prev_block.hash() != rpc_head_block.hash()
                 } else {
                     // first block for this rpc
                     true
                 }
             }
             None => {
-                if self.remove(&rpc).is_none() {
-                    // this rpc was already removed
-                    false
-                } else {
-                    // rpc head changed from being synced to not
-                    true
-                }
+                // false if this rpc was already removed
+                // true if rpc head changed from being synced to not
+                self.remove(&rpc).is_some()
             }
         };
 

@@ -6,11 +6,11 @@ mod check_config;
 mod count_users;
 mod create_key;
 mod create_user;
-mod daemon;
 mod drop_migration_lock;
 mod list_user_tier;
 mod pagerduty;
 mod popularity_contest;
+mod proxyd;
 mod rpc_accounting;
 mod sentryd;
 mod transfer_key;
@@ -80,7 +80,7 @@ enum SubCommand {
     DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
     Pagerduty(pagerduty::PagerdutySubCommand),
     PopularityContest(popularity_contest::PopularityContestSubCommand),
-    Proxyd(daemon::ProxydSubCommand),
+    Proxyd(proxyd::ProxydSubCommand),
     RpcAccounting(rpc_accounting::RpcAccountingSubCommand),
     Sentryd(sentryd::SentrydSubCommand),
     TransferKey(transfer_key::TransferKeySubCommand),
@@ -92,6 +92,9 @@ enum SubCommand {
 }
 
 fn main() -> anyhow::Result<()> {
+    // this probably won't matter for us in docker, but better safe than sorry
+    fdlimit::raise_fd_limit();
+
     #[cfg(feature = "deadlock")]
     {
         // spawn a thread for deadlock detection
@@ -142,9 +145,6 @@ fn main() -> anyhow::Result<()> {
         .join(","),
     };
 
-    // this probably won't matter for us in docker, but better safe than sorry
-    fdlimit::raise_fd_limit();
-
     let mut cli_config: Web3ProxyCli = argh::from_env();
 
     if cli_config.config.is_none() && cli_config.db_url.is_none() && cli_config.sentry_url.is_none()
@@ -154,12 +154,13 @@ fn main() -> anyhow::Result<()> {
         cli_config.config = Some("./config/development.toml".to_string());
     }
 
-    let top_config = if let Some(top_config_path) = cli_config.config.clone() {
+    let (top_config, top_config_path) = if let Some(top_config_path) = cli_config.config.clone() {
         let top_config_path = Path::new(&top_config_path)
             .canonicalize()
             .context(format!("checking for config at {}", top_config_path))?;
 
-        let top_config: String = fs::read_to_string(top_config_path)?;
+        let top_config: String = fs::read_to_string(top_config_path.clone())?;
+
         let mut top_config: TopConfig = toml::from_str(&top_config)?;
 
         // TODO: this doesn't seem to do anything
@@ -184,9 +185,9 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        Some(top_config)
+        (Some(top_config), Some(top_config_path))
     } else {
-        None
+        (None, None)
     };
 
     let logger = env_logger::builder().parse_filters(&rust_log).build();
@@ -343,8 +344,10 @@ fn main() -> anyhow::Result<()> {
             }
             SubCommand::Proxyd(x) => {
                 let top_config = top_config.expect("--config is required to run proxyd");
+                let top_config_path =
+                    top_config_path.expect("path must be set if top_config exists");
 
-                x.main(top_config, num_workers).await
+                x.main(top_config, top_config_path, num_workers).await
             }
             SubCommand::DropMigrationLock(x) => {
                 let db_url = cli_config

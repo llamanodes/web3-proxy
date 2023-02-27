@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use std::path::PathBuf;
+
 use argh::FromArgs;
 use futures::StreamExt;
 use log::{error, info, warn};
@@ -24,11 +26,19 @@ pub struct ProxydSubCommand {
 }
 
 impl ProxydSubCommand {
-    pub async fn main(self, top_config: TopConfig, num_workers: usize) -> anyhow::Result<()> {
+    pub async fn main(
+        self,
+        top_config: TopConfig,
+        top_config_path: PathBuf,
+        num_workers: usize,
+    ) -> anyhow::Result<()> {
         let (shutdown_sender, _) = broadcast::channel(1);
+
+        // TODO: i think there is a small race. if config_path changes
 
         run(
             top_config,
+            Some(top_config_path),
             self.port,
             self.prometheus_port,
             num_workers,
@@ -40,6 +50,7 @@ impl ProxydSubCommand {
 
 async fn run(
     top_config: TopConfig,
+    top_config_path: Option<PathBuf>,
     frontend_port: u16,
     prometheus_port: u16,
     num_workers: usize,
@@ -54,8 +65,13 @@ async fn run(
     let mut shutdown_receiver = shutdown_sender.subscribe();
 
     // start the main app
-    let mut spawned_app =
-        Web3ProxyApp::spawn(top_config, num_workers, shutdown_sender.subscribe()).await?;
+    let mut spawned_app = Web3ProxyApp::spawn(
+        top_config,
+        top_config_path,
+        num_workers,
+        shutdown_sender.subscribe(),
+    )
+    .await?;
 
     // start the prometheus metrics port
     let prometheus_handle = tokio::spawn(metrics_frontend::serve(
@@ -246,6 +262,7 @@ mod tests {
             tokio::spawn(async move {
                 run(
                     top_config,
+                    None,
                     frontend_port,
                     prometheus_port,
                     2,

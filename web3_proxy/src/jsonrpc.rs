@@ -211,6 +211,7 @@ impl JsonRpcForwardedResponse {
             error: Some(JsonRpcErrorData {
                 code: code.unwrap_or(-32099),
                 message,
+                // TODO: accept data as an argument
                 data: None,
             }),
         }

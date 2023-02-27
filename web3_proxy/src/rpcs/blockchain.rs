@@ -8,7 +8,7 @@ use crate::{config::BlockAndRpc, jsonrpc::JsonRpcRequest};
 use anyhow::{anyhow, Context};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
-use log::{debug, error, trace, warn, Level};
+use log::{debug, trace, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use serde_json::json;
@@ -72,7 +72,7 @@ impl Web3ProxyBlock {
         if block_timestamp < now {
             // this server is still syncing from too far away to serve requests
             // u64 is safe because ew checked equality above
-            (now - block_timestamp).as_secs() as u64
+            (now - block_timestamp).as_secs()
         } else {
             0
         }
@@ -392,8 +392,7 @@ impl Web3Rpcs {
             .await
             .context("no consensus head block!")
             .map_err(|err| {
-                self.watch_consensus_rpcs_sender
-                    .send_replace(Arc::new(Default::default()));
+                self.watch_consensus_rpcs_sender.send_replace(None);
 
                 err
             })?;
@@ -414,100 +413,73 @@ impl Web3Rpcs {
 
         let old_consensus_head_connections = self
             .watch_consensus_rpcs_sender
-            .send_replace(Arc::new(new_synced_connections));
+            .send_replace(Some(Arc::new(new_synced_connections)));
 
         let backups_voted_str = if backups_needed { "B " } else { "" };
 
-        if let Some(consensus_head_block) = consensus_head_block {
-            match &old_consensus_head_connections.head_block {
-                None => {
-                    debug!(
-                        "first {}/{} {}{}/{}/{} block={}, rpc={}",
-                        consensus_tier,
-                        total_tiers,
-                        backups_voted_str,
-                        num_consensus_rpcs,
-                        num_active_rpcs,
-                        total_rpcs,
-                        consensus_head_block,
-                        rpc,
-                    );
+        match old_consensus_head_connections.as_ref() {
+            None => {
+                debug!(
+                    "first {}/{} {}{}/{}/{} block={}, rpc={}",
+                    consensus_tier,
+                    total_tiers,
+                    backups_voted_str,
+                    num_consensus_rpcs,
+                    num_active_rpcs,
+                    total_rpcs,
+                    consensus_head_block,
+                    rpc,
+                );
 
-                    if backups_needed {
-                        // TODO: what else should be in this error?
-                        warn!("Backup RPCs are in use!");
-                    }
-
-                    // this should already be cached
-                    let consensus_head_block =
-                        self.try_cache_block(consensus_head_block, true).await?;
-
-                    watch_consensus_head_sender
-                        .send(Some(consensus_head_block))
-                        .context(
-                            "watch_consensus_head_sender failed sending first consensus_head_block",
-                        )?;
+                if backups_needed {
+                    // TODO: what else should be in this error?
+                    warn!("Backup RPCs are in use!");
                 }
-                Some(old_head_block) => {
-                    // TODO: do this log item better
-                    let rpc_head_str = new_block
-                        .map(|x| x.to_string())
-                        .unwrap_or_else(|| "None".to_string());
 
-                    match consensus_head_block.number().cmp(&old_head_block.number()) {
-                        Ordering::Equal => {
-                            // multiple blocks with the same fork!
-                            if consensus_head_block.hash() == old_head_block.hash() {
-                                // no change in hash. no need to use watch_consensus_head_sender
-                                // TODO: trace level if rpc is backup
-                                debug!(
-                                    "con {}/{} {}{}/{}/{} con={} rpc={}@{}",
-                                    consensus_tier,
-                                    total_tiers,
-                                    backups_voted_str,
-                                    num_consensus_rpcs,
-                                    num_active_rpcs,
-                                    total_rpcs,
-                                    consensus_head_block,
-                                    rpc,
-                                    rpc_head_str,
-                                )
-                            } else {
-                                // hash changed
-                                if backups_needed {
-                                    // TODO: what else should be in this error?
-                                    warn!("Backup RPCs are in use!");
-                                }
+                // this should already be cached
+                let consensus_head_block = self.try_cache_block(consensus_head_block, true).await?;
 
-                                debug!(
-                                    "unc {}/{} {}{}/{}/{} con_head={} old={} rpc={}@{}",
-                                    consensus_tier,
-                                    total_tiers,
-                                    backups_voted_str,
-                                    num_consensus_rpcs,
-                                    num_active_rpcs,
-                                    total_rpcs,
-                                    consensus_head_block,
-                                    old_head_block,
-                                    rpc,
-                                    rpc_head_str,
-                                );
+                watch_consensus_head_sender
+                    .send(Some(consensus_head_block))
+                    .context(
+                        "watch_consensus_head_sender failed sending first consensus_head_block",
+                    )?;
+            }
+            Some(old_consensus_connections) => {
+                let old_head_block = &old_consensus_connections.head_block;
 
-                                let consensus_head_block = self
-                                    .try_cache_block(consensus_head_block, true)
-                                    .await
-                                    .context("save consensus_head_block as heaviest chain")?;
+                // TODO: do this log item better
+                let rpc_head_str = new_block
+                    .map(|x| x.to_string())
+                    .unwrap_or_else(|| "None".to_string());
 
-                                watch_consensus_head_sender
-                                    .send(Some(consensus_head_block))
-                                    .context("watch_consensus_head_sender failed sending uncled consensus_head_block")?;
+                match consensus_head_block.number().cmp(old_head_block.number()) {
+                    Ordering::Equal => {
+                        // multiple blocks with the same fork!
+                        if consensus_head_block.hash() == old_head_block.hash() {
+                            // no change in hash. no need to use watch_consensus_head_sender
+                            // TODO: trace level if rpc is backup
+                            debug!(
+                                "con {}/{} {}{}/{}/{} con={} rpc={}@{}",
+                                consensus_tier,
+                                total_tiers,
+                                backups_voted_str,
+                                num_consensus_rpcs,
+                                num_active_rpcs,
+                                total_rpcs,
+                                consensus_head_block,
+                                rpc,
+                                rpc_head_str,
+                            )
+                        } else {
+                            // hash changed
+                            if backups_needed {
+                                // TODO: what else should be in this error?
+                                warn!("Backup RPCs are in use!");
                             }
-                        }
-                        Ordering::Less => {
-                            // this is unlikely but possible
-                            // TODO: better log
-                            warn!(
-                                "chain rolled back {}/{} {}{}/{}/{} con={} old={} rpc={}@{}",
+
+                            debug!(
+                                "unc {}/{} {}{}/{}/{} con_head={} old={} rpc={}@{}",
                                 consensus_tier,
                                 total_tiers,
                                 backups_voted_str,
@@ -520,82 +492,73 @@ impl Web3Rpcs {
                                 rpc_head_str,
                             );
 
-                            if backups_needed {
-                                // TODO: what else should be in this error?
-                                warn!("Backup RPCs are in use!");
-                            }
-
-                            // TODO: tell save_block to remove any higher block numbers from the cache. not needed because we have other checks on requested blocks being > head, but still seems like a good idea
                             let consensus_head_block = self
                                 .try_cache_block(consensus_head_block, true)
                                 .await
-                                .context(
-                                    "save_block sending consensus_head_block as heaviest chain",
-                                )?;
+                                .context("save consensus_head_block as heaviest chain")?;
 
                             watch_consensus_head_sender
                                 .send(Some(consensus_head_block))
-                                .context("watch_consensus_head_sender failed sending rollback consensus_head_block")?;
-                        }
-                        Ordering::Greater => {
-                            debug!(
-                                "new {}/{} {}{}/{}/{} con={} rpc={}@{}",
-                                consensus_tier,
-                                total_tiers,
-                                backups_voted_str,
-                                num_consensus_rpcs,
-                                num_active_rpcs,
-                                total_rpcs,
-                                consensus_head_block,
-                                rpc,
-                                rpc_head_str,
-                            );
-
-                            if backups_needed {
-                                // TODO: what else should be in this error?
-                                warn!("Backup RPCs are in use!");
-                            }
-
-                            let consensus_head_block =
-                                self.try_cache_block(consensus_head_block, true).await?;
-
-                            watch_consensus_head_sender.send(Some(consensus_head_block)).context("watch_consensus_head_sender failed sending new consensus_head_block")?;
+                                .context("watch_consensus_head_sender failed sending uncled consensus_head_block")?;
                         }
                     }
-                }
-            }
-        } else {
-            // TODO: do this log item better
-            let rpc_head_str = new_block
-                .map(|x| x.to_string())
-                .unwrap_or_else(|| "None".to_string());
+                    Ordering::Less => {
+                        // this is unlikely but possible
+                        // TODO: better log
+                        warn!(
+                            "chain rolled back {}/{} {}{}/{}/{} con={} old={} rpc={}@{}",
+                            consensus_tier,
+                            total_tiers,
+                            backups_voted_str,
+                            num_consensus_rpcs,
+                            num_active_rpcs,
+                            total_rpcs,
+                            consensus_head_block,
+                            old_head_block,
+                            rpc,
+                            rpc_head_str,
+                        );
 
-            if num_active_rpcs >= self.min_head_rpcs {
-                // no consensus!!!
-                error!(
-                    "non {}/{} {}{}/{}/{} rpc={}@{}",
-                    consensus_tier,
-                    total_tiers,
-                    backups_voted_str,
-                    num_consensus_rpcs,
-                    num_active_rpcs,
-                    total_rpcs,
-                    rpc,
-                    rpc_head_str,
-                );
-            } else {
-                // no consensus, but we do not have enough rpcs connected yet to panic
-                debug!(
-                    "non {}/{} {}{}/{}/{} rpc={}@{}",
-                    consensus_tier,
-                    total_tiers,
-                    backups_voted_str,
-                    num_consensus_rpcs,
-                    num_active_rpcs,
-                    total_rpcs,
-                    rpc,
-                    rpc_head_str,
-                );
+                        if backups_needed {
+                            // TODO: what else should be in this error?
+                            warn!("Backup RPCs are in use!");
+                        }
+
+                        // TODO: tell save_block to remove any higher block numbers from the cache. not needed because we have other checks on requested blocks being > head, but still seems like a good idea
+                        let consensus_head_block = self
+                            .try_cache_block(consensus_head_block, true)
+                            .await
+                            .context("save_block sending consensus_head_block as heaviest chain")?;
+
+                        watch_consensus_head_sender
+                            .send(Some(consensus_head_block))
+                            .context("watch_consensus_head_sender failed sending rollback consensus_head_block")?;
+                    }
+                    Ordering::Greater => {
+                        debug!(
+                            "new {}/{} {}{}/{}/{} con={} rpc={}@{}",
+                            consensus_tier,
+                            total_tiers,
+                            backups_voted_str,
+                            num_consensus_rpcs,
+                            num_active_rpcs,
+                            total_rpcs,
+                            consensus_head_block,
+                            rpc,
+                            rpc_head_str,
+                        );
+
+                        if backups_needed {
+                            // TODO: what else should be in this error?
+                            warn!("Backup RPCs are in use!");
+                        }
+
+                        let consensus_head_block =
+                            self.try_cache_block(consensus_head_block, true).await?;
+
+                        watch_consensus_head_sender.send(Some(consensus_head_block)).context("watch_consensus_head_sender failed sending new consensus_head_block")?;
+                    }
+                }
             }
         }
 

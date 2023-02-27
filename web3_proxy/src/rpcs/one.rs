@@ -558,10 +558,8 @@ impl Web3Rpc {
             drop(unlocked_provider);
 
             info!("successfully connected to {}", self);
-        } else {
-            if self.provider.read().await.is_none() {
-                return Err(anyhow!("failed waiting for client"));
-            }
+        } else if self.provider.read().await.is_none() {
+            return Err(anyhow!("failed waiting for client"));
         };
 
         Ok(())
@@ -604,7 +602,7 @@ impl Web3Rpc {
                 {
                     let mut head_block = self.head_block.write();
 
-                    let _ = head_block.insert(new_head_block.clone().into());
+                    let _ = head_block.insert(new_head_block.clone());
                 }
 
                 if self.block_data_limit() == U64::zero() {
@@ -712,7 +710,7 @@ impl Web3Rpc {
                                 let head_block = conn.head_block.read().clone();
 
                                 if let Some((block_number, txid)) = head_block.and_then(|x| {
-                                    let block = x.block.clone();
+                                    let block = x.block;
 
                                     let block_number = block.number?;
                                     let txid = block.transactions.last().cloned()?;
@@ -1146,7 +1144,7 @@ impl Web3Rpc {
         }
 
         if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
-            let hard_limit_ready = hard_limit_until.borrow().clone();
+            let hard_limit_ready = *hard_limit_until.borrow();
 
             let now = Instant::now();
 
@@ -1178,7 +1176,7 @@ impl Web3Rpc {
                     }
 
                     if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
-                        hard_limit_until.send_replace(retry_at.clone());
+                        hard_limit_until.send_replace(retry_at);
                     }
 
                     return Ok(OpenRequestResult::RetryAt(retry_at));
@@ -1355,7 +1353,7 @@ mod tests {
 
         assert!(x.has_block_data(&0.into()));
         assert!(x.has_block_data(&1.into()));
-        assert!(x.has_block_data(&head_block.number()));
+        assert!(x.has_block_data(head_block.number()));
         assert!(!x.has_block_data(&(head_block.number() + 1)));
         assert!(!x.has_block_data(&(head_block.number() + 1000)));
     }
@@ -1394,7 +1392,7 @@ mod tests {
         assert!(!x.has_block_data(&1.into()));
         assert!(!x.has_block_data(&(head_block.number() - block_data_limit - 1)));
         assert!(x.has_block_data(&(head_block.number() - block_data_limit)));
-        assert!(x.has_block_data(&head_block.number()));
+        assert!(x.has_block_data(head_block.number()));
         assert!(!x.has_block_data(&(head_block.number() + 1)));
         assert!(!x.has_block_data(&(head_block.number() + 1000)));
     }
