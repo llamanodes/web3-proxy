@@ -3,7 +3,7 @@
 # We only pay the installation cost once, 
 # it will be cached from the second build onwards
 #
-FROM rust:1-bullseye AS builder
+FROM rust:1.67.1-bullseye AS builder
 
 WORKDIR /app
 ENV CARGO_TERM_COLOR always

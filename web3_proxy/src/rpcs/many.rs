@@ -9,6 +9,7 @@ use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
+use anyhow::Context;
 use counter::Counter;
 use derive_more::From;
 use ethers::prelude::{ProviderError, TxHash, H256, U64};
@@ -282,7 +283,7 @@ impl Web3Rpcs {
                         .insert(connection.name.clone(), connection);
 
                     if let Some(old_rpc) = old_rpc {
-                        todo!("do something to make the old one shutdown");
+                        old_rpc.disconnect().await.context("disconnect old rpc")?;
                     }
 
                     // TODO: what should we do with the new handle? make sure error logs aren't dropped

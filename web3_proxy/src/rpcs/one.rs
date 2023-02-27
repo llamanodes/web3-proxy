@@ -22,7 +22,7 @@ use serde_json::json;
 use std::cmp::min;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{self, AtomicU64, AtomicUsize};
+use std::sync::atomic::{self, AtomicBool, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use thread_fast_rng::rand::Rng;
 use thread_fast_rng::thread_fast_rng;
@@ -133,6 +133,8 @@ pub struct Web3Rpc {
     /// TODO: maybe move this to graphana
     pub(super) total_requests: AtomicUsize,
     pub(super) active_requests: AtomicUsize,
+    pub(super) reconnect: AtomicBool,
+    pub(super) disconnect_watch: Option<watch::Sender<bool>>,
 }
 
 impl Web3Rpc {
@@ -217,6 +219,9 @@ impl Web3Rpc {
             }
         }
 
+        let (disconnect_sender, disconnect_receiver) = watch::channel(false);
+        let reconnect = reconnect.into();
+
         let new_connection = Self {
             name,
             db_conn: db_conn.clone(),
@@ -230,7 +235,9 @@ impl Web3Rpc {
             automatic_block_limit,
             backup,
             block_data_limit,
+            reconnect,
             tier: config.tier,
+            disconnect_watch: Some(disconnect_sender),
             ..Default::default()
         };
 
@@ -249,8 +256,8 @@ impl Web3Rpc {
                         block_map,
                         block_sender,
                         chain_id,
+                        disconnect_receiver,
                         http_interval_sender,
-                        reconnect,
                         tx_id_sender,
                     )
                     .await
@@ -565,6 +572,22 @@ impl Web3Rpc {
         Ok(())
     }
 
+    pub async fn disconnect(&self) -> anyhow::Result<()> {
+        self.reconnect.store(false, atomic::Ordering::Release);
+
+        let mut provider = self.provider.write().await;
+
+        info!("disconnecting {}", self);
+
+        *provider = None;
+
+        if let Err(err) = self.disconnect_watch.as_ref().unwrap().send(true) {
+            warn!("failed sending disconnect watch: {:?}", err);
+        };
+
+        Ok(())
+    }
+
     async fn send_head_block_result(
         self: &Arc<Self>,
         new_head_block: Result<Option<ArcBlock>, ProviderError>,
@@ -588,7 +611,8 @@ impl Web3Rpc {
                 None
             }
             Ok(Some(new_head_block)) => {
-                let new_head_block = Web3ProxyBlock::try_new(new_head_block).unwrap();
+                let new_head_block = Web3ProxyBlock::try_new(new_head_block)
+                    .expect("blocks from newHeads subscriptions should also convert");
 
                 let new_hash = *new_head_block.hash();
 
@@ -649,8 +673,8 @@ impl Web3Rpc {
         block_map: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         chain_id: u64,
+        disconnect_receiver: watch::Receiver<bool>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        reconnect: bool,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<()> {
         let revert_handler = if self.backup {
@@ -665,15 +689,14 @@ impl Web3Rpc {
             let mut futures = vec![];
 
             {
-                // health check
                 // TODO: move this into a proper function
                 let authorization = authorization.clone();
                 let block_sender = block_sender.clone();
-                let conn = self.clone();
+                let rpc = self.clone();
                 let (ready_tx, ready_rx) = oneshot::channel();
                 let f = async move {
                     // initial sleep to allow for the initial connection
-                    conn.retrying_connect(
+                    rpc.retrying_connect(
                         block_sender.as_ref(),
                         chain_id,
                         authorization.db_conn.as_ref(),
@@ -695,19 +718,22 @@ impl Web3Rpc {
                     loop {
                         sleep(Duration::from_secs(health_sleep_seconds)).await;
 
+                        // health check
+                        // TODO: lower this log level once disconnect works
+                        debug!("health check on {}", rpc);
+
                         // TODO: what if we just happened to have this check line up with another restart?
                         // TODO: think more about this
-                        if let Some(client) = conn.provider.read().await.clone() {
+                        if let Some(client) = rpc.provider.read().await.clone() {
                             // health check as a way of keeping this rpc's request_ewma accurate
                             // TODO: do something different if this is a backup server?
 
-                            new_total_requests =
-                                conn.total_requests.load(atomic::Ordering::Relaxed);
+                            new_total_requests = rpc.total_requests.load(atomic::Ordering::Relaxed);
 
                             if new_total_requests - old_total_requests < 10 {
                                 // TODO: if this fails too many times, reset the connection
                                 // TODO: move this into a function and the chaining should be easier
-                                let head_block = conn.head_block.read().clone();
+                                let head_block = rpc.head_block.read().clone();
 
                                 if let Some((block_number, txid)) = head_block.and_then(|x| {
                                     let block = x.block;
@@ -717,7 +743,7 @@ impl Web3Rpc {
 
                                     Some((block_number, txid))
                                 }) {
-                                    let to = conn
+                                    let to = rpc
                                         .wait_for_query::<_, Option<Transaction>>(
                                             "eth_getTransactionByHash",
                                             &(txid,),
@@ -741,21 +767,21 @@ impl Web3Rpc {
 
                                     let code = match to {
                                         Err(err) => {
-                                            if conn.backup {
+                                            if rpc.backup {
                                                 debug!(
                                                     "{} failed health check query! {:#?}",
-                                                    conn, err
+                                                    rpc, err
                                                 );
                                             } else {
                                                 warn!(
                                                     "{} failed health check query! {:#?}",
-                                                    conn, err
+                                                    rpc, err
                                                 );
                                             }
                                             continue;
                                         }
                                         Ok(to) => {
-                                            conn.wait_for_query::<_, Option<Bytes>>(
+                                            rpc.wait_for_query::<_, Option<Bytes>>(
                                                 "eth_getCode",
                                                 &(to, block_number),
                                                 revert_handler,
@@ -767,13 +793,10 @@ impl Web3Rpc {
                                     };
 
                                     if let Err(err) = code {
-                                        if conn.backup {
-                                            debug!(
-                                                "{} failed health check query! {:#?}",
-                                                conn, err
-                                            );
+                                        if rpc.backup {
+                                            debug!("{} failed health check query! {:#?}", rpc, err);
                                         } else {
-                                            warn!("{} failed health check query! {:#?}", conn, err);
+                                            warn!("{} failed health check query! {:#?}", rpc, err);
                                         }
                                         continue;
                                     }
@@ -816,7 +839,7 @@ impl Web3Rpc {
                     break;
                 }
                 Err(err) => {
-                    if reconnect {
+                    if self.reconnect.load(atomic::Ordering::Acquire) {
                         warn!("{} connection ended. err={:?}", self, err);
 
                         self.clone()
@@ -827,6 +850,9 @@ impl Web3Rpc {
                                 true,
                             )
                             .await?;
+                    } else if *disconnect_receiver.borrow() {
+                        info!("{} is disconnecting", self);
+                        break;
                     } else {
                         error!("{} subscription exited. err={:?}", self, err);
                         return Err(err);
@@ -838,6 +864,10 @@ impl Web3Rpc {
         info!("all subscriptions on {} completed", self);
 
         Ok(())
+    }
+
+    fn should_disconnect(&self) -> bool {
+        *self.disconnect_watch.as_ref().unwrap().borrow()
     }
 
     /// Subscribe to new blocks.
@@ -861,7 +891,7 @@ impl Web3Rpc {
 
                 let mut last_hash = H256::zero();
 
-                loop {
+                while !self.should_disconnect() {
                     // TODO: what should the max_wait be?
                     match self
                         .wait_for_request_handle(&authorization, None, unlocked_provider.clone())
@@ -982,6 +1012,11 @@ impl Web3Rpc {
                     .await?;
 
                 while let Some(new_block) = stream.next().await {
+                    // TODO: select on disconnect_watch instead of waiting for a block to arrive
+                    if self.should_disconnect() {
+                        break;
+                    }
+
                     // TODO: check the new block's hash to be sure we don't send dupes
                     let new_hash = new_block
                         .hash
@@ -1002,19 +1037,20 @@ impl Web3Rpc {
                     .await?;
                 }
 
-                // clear the head block. this might not be needed, but it won't hurt
-                self.send_head_block_result(Ok(None), &block_sender, block_map)
-                    .await?;
-
                 // TODO: is this always an error?
                 // TODO: we probably don't want a warn and to return error
-                warn!("new_heads subscription to {} ended", self);
-                Err(anyhow::anyhow!("new_heads subscription ended"))
+                debug!("new_heads subscription to {} ended", self);
             }
             None => todo!("what should happen now? wait for a connection?"),
             #[cfg(test)]
             Some(Web3Provider::Mock) => unimplemented!(),
         }
+
+        // clear the head block. this might not be needed, but it won't hurt
+        self.send_head_block_result(Ok(None), &block_sender, block_map)
+            .await?;
+
+        Ok(())
     }
 
     /// Turn on the firehose of pending transactions
@@ -1057,15 +1093,26 @@ impl Web3Rpc {
                         .context("tx_id_sender")?;
 
                     // TODO: periodically check for listeners. if no one is subscribed, unsubscribe and wait for a subscription
+
+                    // TODO: select on this instead of checking every loop
+                    if self.should_disconnect() {
+                        break;
+                    }
                 }
 
                 // TODO: is this always an error?
                 // TODO: we probably don't want a warn and to return error
-                warn!("pending_transactions subscription ended on {}", self);
-                return Err(anyhow::anyhow!("pending_transactions subscription ended"));
+                debug!("pending_transactions subscription ended on {}", self);
             }
             #[cfg(test)]
-            Some(Web3Provider::Mock) => futures::future::pending::<()>().await,
+            Some(Web3Provider::Mock) => {
+                let mut disconnect_watch = self.disconnect_watch.as_ref().unwrap().subscribe();
+
+                if !*disconnect_watch.borrow_and_update() {
+                    // wait for disconnect_watch to change
+                    disconnect_watch.changed().await?;
+                }
+            }
         }
 
         Ok(())

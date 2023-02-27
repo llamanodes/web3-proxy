@@ -680,3 +680,6 @@ in another repo: event subscriber
 - [ ] i think i use FuturesUnordered when a try_join_all might be better
 - [ ] since we are read-heavy on our configs, maybe we should use a cache
   - "using a thread local storage and explicit types" https://docs.rs/arc-swap/latest/arc_swap/cache/struct.Cache.html
+- [ ] tests for config reloading
+- [ ] use pin instead of arc for a bunch of things?
+  - https://fasterthanli.me/articles/pin-and-suffering

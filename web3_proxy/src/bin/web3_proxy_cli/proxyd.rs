@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
+use std::{fs, thread};
 
 use argh::FromArgs;
 use futures::StreamExt;
+use inotify::{EventMask, Inotify, WatchMask};
 use log::{error, info, warn};
 use num::Zero;
 use tokio::sync::broadcast;
@@ -65,13 +67,53 @@ async fn run(
     let mut shutdown_receiver = shutdown_sender.subscribe();
 
     // start the main app
-    let mut spawned_app = Web3ProxyApp::spawn(
-        top_config,
-        top_config_path,
-        num_workers,
-        shutdown_sender.subscribe(),
-    )
-    .await?;
+    let mut spawned_app =
+        Web3ProxyApp::spawn(top_config, num_workers, shutdown_sender.subscribe()).await?;
+
+    // start thread for watching config
+    if let Some(top_config_path) = top_config_path {
+        let mut inotify = Inotify::init().expect("Failed to initialize inotify");
+
+        inotify
+            .add_watch(top_config_path.clone(), WatchMask::MODIFY)
+            .expect("Failed to add inotify watch on config");
+
+        let mut buffer = [0u8; 4096];
+
+        let config_sender = spawned_app.new_top_config_sender;
+
+        // TODO: exit the app if this handle exits
+        // TODO: debounce
+        thread::spawn(move || loop {
+            let events = inotify
+                .read_events_blocking(&mut buffer)
+                .expect("Failed to read inotify events");
+
+            for event in events {
+                if event.mask.contains(EventMask::MODIFY) {
+                    info!("config changed");
+                    match fs::read_to_string(&top_config_path) {
+                        Ok(top_config) => match toml::from_str(&top_config) {
+                            Ok(top_config) => {
+                                config_sender.send(top_config).unwrap();
+                            }
+                            Err(err) => {
+                                // TODO: panic?
+                                error!("Unable to parse config! {:#?}", err);
+                            }
+                        },
+                        Err(err) => {
+                            // TODO: panic?
+                            error!("Unable to read config! {:#?}", err);
+                        }
+                    };
+                } else {
+                    // TODO: is "MODIFY" enough, or do we want CLOSE_WRITE?
+                    unimplemented!();
+                }
+            }
+        });
+    }
 
     // start the prometheus metrics port
     let prometheus_handle = tokio::spawn(metrics_frontend::serve(

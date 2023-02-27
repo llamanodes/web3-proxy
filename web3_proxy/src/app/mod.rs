@@ -26,7 +26,7 @@ use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U64};
 use ethers::types::U256;
 use ethers::utils::rlp::{Decodable, Rlp};
-use futures::future::{join_all, pending};
+use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
 use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
@@ -37,20 +37,18 @@ use migration::sea_orm::{
 use migration::sea_query::table::ColumnDef;
 use migration::{Alias, DbErr, Migrator, MigratorTrait, Table};
 use moka::future::Cache;
-use notify_debouncer_mini::{new_debouncer, notify, DebounceEventResult};
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use serde::Serialize;
 use serde_json::json;
 use serde_json::value::to_raw_value;
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::num::NonZeroU64;
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use std::{fmt, fs};
 use tokio::sync::{broadcast, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
@@ -361,13 +359,14 @@ pub struct Web3ProxyAppSpawn {
     pub app_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
     /// these are important and must be allowed to finish
     pub background_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
+    /// config changes are sent here
+    pub new_top_config_sender: watch::Sender<TopConfig>,
 }
 
 impl Web3ProxyApp {
     /// The main entrypoint.
     pub async fn spawn(
         top_config: TopConfig,
-        top_config_path: Option<PathBuf>,
         num_workers: usize,
         shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
@@ -703,48 +702,20 @@ impl Web3ProxyApp {
 
         // watch for config changes
         // TODO: initial config reload should be from this channel. not from the call to spawn
-        if let Some(top_config_path) = top_config_path {
-            let (top_config_sender, mut top_config_receiver) = watch::channel(top_config);
 
-            // TODO: i think the debouncer is exiting
-            let mut debouncer = new_debouncer(
-                Duration::from_secs(2),
-                None,
-                move |res: DebounceEventResult| match res {
-                    Ok(events) => events.iter().for_each(|e| {
-                        debug!("Event {:?} for {:?}", e.kind, e.path);
+        let (new_top_config_sender, mut new_top_config_receiver) = watch::channel(top_config);
 
-                        // TODO: use tokio::fs here?
-                        let new_top_config: String = fs::read_to_string(&e.path).unwrap();
-
-                        let new_top_config: TopConfig = toml::from_str(&new_top_config).unwrap();
-
-                        top_config_sender.send_replace(new_top_config);
-                    }),
-                    Err(errors) => errors
-                        .iter()
-                        .for_each(|e| error!("config watcher error {:#?}", e)),
-                },
-            )
-            .context("failed starting debouncer config watcher")?;
-
-            // Add a path to be watched. All files and directories at that path and below will be monitored for changes.
-            info!("watching config @ {}", top_config_path.display());
-            debouncer
-                .watcher()
-                .watch(top_config_path.as_path(), notify::RecursiveMode::Recursive)
-                .context("failed starting config watcher")?;
-
+        {
             let app = app.clone();
             let config_handle = tokio::spawn(async move {
                 loop {
-                    let new_top_config = top_config_receiver.borrow_and_update().to_owned();
+                    let new_top_config = new_top_config_receiver.borrow_and_update().to_owned();
 
                     app.apply_top_config(new_top_config)
                         .await
                         .context("failed applying new top_config")?;
 
-                    top_config_receiver
+                    new_top_config_receiver
                         .changed()
                         .await
                         .context("failed awaiting top_config change")?;
@@ -754,13 +725,15 @@ impl Web3ProxyApp {
             });
 
             app_handles.push(config_handle);
-        } else {
-            // no path to config, so we don't know what to watch
-            // this isn't an error. the config might just be in memory
-            app.apply_top_config(top_config).await?;
         }
 
-        Ok((app, app_handles, important_background_handles).into())
+        Ok((
+            app,
+            app_handles,
+            important_background_handles,
+            new_top_config_sender,
+        )
+            .into())
     }
 
     pub async fn apply_top_config(&self, new_top_config: TopConfig) -> anyhow::Result<()> {
