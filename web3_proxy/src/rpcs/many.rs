@@ -21,6 +21,7 @@ use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use moka::future::{Cache, ConcurrentCacheExt};
 use ordered_float::OrderedFloat;
+use parking_lot::RwLock;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
@@ -31,7 +32,7 @@ use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
 use std::{cmp, fmt};
 use thread_fast_rng::rand::seq::SliceRandom;
-use tokio::sync::{broadcast, watch, RwLock as AsyncRwLock};
+use tokio::sync::{broadcast, watch};
 use tokio::task;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 
@@ -41,7 +42,9 @@ pub struct Web3Rpcs {
     /// if watch_consensus_head_sender is some, Web3Rpc inside self will send blocks here when they get them
     pub(crate) block_sender: flume::Sender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
     /// any requests will be forwarded to one (or more) of these connections
-    pub(crate) by_name: HashMap<String, Arc<Web3Rpc>>,
+    /// TODO: i tried to make this an AsyncRwLock, but then we have trouble serializing it
+    /// TODO: maybe an ArcSwap would be better. writes are rare
+    pub(crate) by_name: RwLock<HashMap<String, Arc<Web3Rpc>>>,
     pub(crate) http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
     /// all providers with the same consensus head block. won't update if there is no `self.watch_consensus_head_sender`
     /// TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
@@ -269,16 +272,13 @@ impl Web3Rpcs {
             })
             .collect();
 
-        // map of connection names to their connection
-        let connections = AsyncRwLock::new(HashMap::new());
-
         while let Some(x) = spawn_handles.next().await {
             match x {
                 Ok(Ok((connection, _handle))) => {
                     // web3 connection worked
-                    let old_rpc = connections
+                    let old_rpc = self
+                        .by_name
                         .write()
-                        .await
                         .insert(connection.name.clone(), connection);
 
                     if let Some(old_rpc) = old_rpc {
@@ -303,11 +303,11 @@ impl Web3Rpcs {
         Ok(())
     }
 
-    pub fn get(&self, conn_name: &str) -> Option<&Arc<Web3Rpc>> {
-        self.by_name.get(conn_name)
+    pub fn get(&self, conn_name: &str) -> Option<Arc<Web3Rpc>> {
+        self.by_name.read().get(conn_name).cloned()
     }
 
-    pub async fn min_head_rpcs(&self) -> usize {
+    pub fn min_head_rpcs(&self) -> usize {
         self.min_head_rpcs
     }
 
@@ -526,6 +526,7 @@ impl Web3Rpcs {
                     // TODO: maybe have a helper on synced_connections? that way sum_soft_limits/min_synced_rpcs will be DRY
                     for x in self
                         .by_name
+                        .read()
                         .values()
                         .filter(|x| {
                             // TODO: move a bunch of this onto a rpc.is_synced function
@@ -744,7 +745,7 @@ impl Web3Rpcs {
         let mut max_count = if let Some(max_count) = max_count {
             max_count
         } else {
-            self.by_name.len()
+            self.by_name.read().len()
         };
 
         let mut tried = HashSet::new();
@@ -756,7 +757,7 @@ impl Web3Rpcs {
 
         // if there aren't enough synced connections, include more connections
         // TODO: only do this sorting if the synced_conns isn't enough
-        let mut all_conns: Vec<_> = self.by_name.values().cloned().collect();
+        let mut all_conns: Vec<_> = self.by_name.read().values().cloned().collect();
         all_conns.sort_by_cached_key(rpc_sync_status_sort_key);
 
         for connection in itertools::chain(synced_conns, all_conns) {
@@ -835,7 +836,7 @@ impl Web3Rpcs {
         loop {
             let num_skipped = skip_rpcs.len();
 
-            if num_skipped == self.by_name.len() {
+            if num_skipped >= self.by_name.read().len() {
                 break;
             }
 
@@ -1008,7 +1009,7 @@ impl Web3Rpcs {
             return Ok(r);
         }
 
-        let num_conns = self.by_name.len();
+        let num_conns = self.by_name.read().len();
         let num_skipped = skip_rpcs.len();
 
         if num_skipped == 0 {
@@ -1171,9 +1172,12 @@ impl Serialize for Web3Rpcs {
     {
         let mut state = serializer.serialize_struct("Web3Rpcs", 6)?;
 
-        let rpcs: Vec<&Web3Rpc> = self.by_name.values().map(|x| x.as_ref()).collect();
-        // TODO: coordinate with frontend team to rename "conns" to "rpcs"
-        state.serialize_field("conns", &rpcs)?;
+        {
+            let by_name = self.by_name.read();
+            let rpcs: Vec<&Web3Rpc> = by_name.values().map(|x| x.as_ref()).collect();
+            // TODO: coordinate with frontend team to rename "conns" to "rpcs"
+            state.serialize_field("conns", &rpcs)?;
+        }
 
         {
             let consensus_connections = self.watch_consensus_rpcs_sender.borrow().clone();
@@ -1387,7 +1391,7 @@ mod tests {
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
             block_sender,
-            by_name: rpcs_by_name,
+            by_name: RwLock::new(rpcs_by_name),
             http_interval_sender: None,
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
@@ -1409,7 +1413,7 @@ mod tests {
 
         let authorization = Arc::new(Authorization::internal(None).unwrap());
 
-        let mut consensus_finder = ConsensusFinder::new(&[0, 1, 2, 3], None, None);
+        let mut consensus_finder = ConsensusFinder::new(None, None);
 
         // process None so that
         rpcs.process_block_from_rpc(
@@ -1588,7 +1592,7 @@ mod tests {
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
             block_sender,
-            by_name: rpcs_by_name,
+            by_name: RwLock::new(rpcs_by_name),
             http_interval_sender: None,
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
@@ -1608,7 +1612,7 @@ mod tests {
 
         let authorization = Arc::new(Authorization::internal(None).unwrap());
 
-        let mut connection_heads = ConsensusFinder::new(&[0, 1, 2, 3], None, None);
+        let mut connection_heads = ConsensusFinder::new(None, None);
 
         // min sum soft limit will require tier 2
         rpcs.process_block_from_rpc(

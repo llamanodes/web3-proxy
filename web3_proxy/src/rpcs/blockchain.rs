@@ -8,7 +8,6 @@ use crate::{config::BlockAndRpc, jsonrpc::JsonRpcRequest};
 use anyhow::{anyhow, Context};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
-use hashbrown::HashSet;
 use log::{debug, error, trace, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
@@ -339,18 +338,7 @@ impl Web3Rpcs {
         // Geth's subscriptions have the same potential for skipping blocks.
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
-        // TODO: indexmap or hashmap? what hasher? with_capacity?
-        // TODO: this will grow unbounded. prune old heads on this at the same time we prune the graph?
-        let configured_tiers: Vec<u64> = self
-            .by_name
-            .values()
-            .map(|x| x.tier)
-            .collect::<HashSet<u64>>()
-            .into_iter()
-            .collect();
-
-        let mut connection_heads =
-            ConsensusFinder::new(&configured_tiers, self.max_block_age, self.max_block_lag);
+        let mut connection_heads = ConsensusFinder::new(self.max_block_age, self.max_block_lag);
 
         loop {
             match block_receiver.recv_async().await {
@@ -385,13 +373,13 @@ impl Web3Rpcs {
         &self,
         authorization: &Arc<Authorization>,
         consensus_finder: &mut ConsensusFinder,
-        rpc_head_block: Option<Web3ProxyBlock>,
+        new_block: Option<Web3ProxyBlock>,
         rpc: Arc<Web3Rpc>,
         pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         // TODO: how should we handle an error here?
         if !consensus_finder
-            .update_rpc(rpc_head_block.clone(), rpc.clone(), self)
+            .update_rpc(new_block.clone(), rpc.clone(), self)
             .await
             .context("failed to update rpc")?
         {
@@ -422,7 +410,7 @@ impl Web3Rpcs {
             .all_rpcs_group()
             .map(|x| x.len())
             .unwrap_or_default();
-        let total_rpcs = self.by_name.len();
+        let total_rpcs = self.by_name.read().len();
 
         let old_consensus_head_connections = self
             .watch_consensus_rpcs_sender
@@ -462,7 +450,7 @@ impl Web3Rpcs {
                 }
                 Some(old_head_block) => {
                     // TODO: do this log item better
-                    let rpc_head_str = rpc_head_block
+                    let rpc_head_str = new_block
                         .map(|x| x.to_string())
                         .unwrap_or_else(|| "None".to_string());
 
@@ -578,7 +566,7 @@ impl Web3Rpcs {
             }
         } else {
             // TODO: do this log item better
-            let rpc_head_str = rpc_head_block
+            let rpc_head_str = new_block
                 .map(|x| x.to_string())
                 .unwrap_or_else(|| "None".to_string());
 

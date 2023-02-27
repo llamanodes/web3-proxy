@@ -141,54 +141,6 @@ impl ConnectionsGroup {
         self.rpc_name_to_block.insert(rpc.name.clone(), block)
     }
 
-    // // TODO: do this during insert/remove?
-    // pub(self) async fn highest_block(
-    //     &self,
-    //     authorization: &Arc<Authorization>,
-    //     web3_rpcs: &Web3Rpcs,
-    // ) -> Option<ArcBlock> {
-    //     let mut checked_heads = HashSet::with_capacity(self.rpc_name_to_hash.len());
-    //     let mut highest_block = None::<ArcBlock>;
-
-    //     for (rpc_name, rpc_head_hash) in self.rpc_name_to_hash.iter() {
-    //         // don't waste time checking the same hash multiple times
-    //         if checked_heads.contains(rpc_head_hash) {
-    //             continue;
-    //         }
-
-    //         let rpc_block = match web3_rpcs
-    //             .get_block_from_rpc(rpc_name, rpc_head_hash, authorization)
-    //             .await
-    //         {
-    //             Ok(x) => x,
-    //             Err(err) => {
-    //                 warn!(
-    //                     "failed getting block {} from {} while finding highest block number: {:?}",
-    //                     rpc_head_hash, rpc_name, err,
-    //                 );
-    //                 continue;
-    //             }
-    //         };
-
-    //         checked_heads.insert(rpc_head_hash);
-
-    //         // if this is the first block we've tried
-    //         // or if this rpc's newest block has a higher number
-    //         // we used to check total difficulty, but that isn't a thing anymore on ETH
-    //         // TODO: we still need total difficulty on some other PoW chains. whats annoying is it isn't considered part of the "block header" just the block. so websockets don't return it
-    //         let highest_num = highest_block
-    //             .as_ref()
-    //             .map(|x| x.number.expect("blocks here should always have a number"));
-    //         let rpc_num = rpc_block.as_ref().number;
-
-    //         if rpc_num > highest_num {
-    //             highest_block = Some(rpc_block);
-    //         }
-    //     }
-
-    //     highest_block
-    // }
-
     /// min_consensus_block_num keeps us from ever going backwards.
     /// TODO: think about min_consensus_block_num more. i think this might cause an outage if the chain is doing weird things. but 503s is probably better than broken data.
     pub(self) async fn consensus_head_connections(
@@ -266,7 +218,7 @@ impl ConnectionsGroup {
                     continue;
                 }
 
-                if let Some(rpc) = web3_rpcs.by_name.get(rpc_name.as_str()) {
+                if let Some(rpc) = web3_rpcs.by_name.read().get(rpc_name.as_str()) {
                     if backup_rpcs_voted.is_some() {
                         // backups already voted for a head block. don't change it
                     } else {
@@ -280,7 +232,7 @@ impl ConnectionsGroup {
                 } else {
                     // i don't think this is an error. i think its just if a reconnect is currently happening
                     warn!("connection missing: {}", rpc_name);
-                    debug!("web3_rpcs.conns: {:#?}", web3_rpcs.by_name);
+                    debug!("web3_rpcs.by_name: {:#?}", web3_rpcs.by_name);
                 }
             }
 
@@ -363,7 +315,7 @@ impl ConnectionsGroup {
         // success! this block has enough soft limit and nodes on it (or on later blocks)
         let rpcs: Vec<Arc<Web3Rpc>> = primary_consensus_rpcs
             .into_iter()
-            .filter_map(|conn_name| web3_rpcs.by_name.get(conn_name).cloned())
+            .filter_map(|conn_name| web3_rpcs.by_name.read().get(conn_name).cloned())
             .collect();
 
         #[cfg(debug_assertions)]
@@ -396,20 +348,16 @@ pub struct ConsensusFinder {
 }
 
 impl ConsensusFinder {
-    pub fn new(
-        configured_tiers: &[u64],
-        max_block_age: Option<u64>,
-        max_block_lag: Option<U64>,
-    ) -> Self {
-        // TODO: what's a good capacity for this?
+    pub fn new(max_block_age: Option<u64>, max_block_lag: Option<U64>) -> Self {
+        // TODO: what's a good capacity for this? it shouldn't need to be very large
+        // TODO: if we change Web3ProxyBlock to store the instance, i think we could use the block_by_hash cache
         let first_seen = Cache::builder()
             .max_capacity(16)
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
-        // TODO: this will need some thought when config reloading is written
-        let tiers = configured_tiers
-            .iter()
-            .map(|x| (*x, ConnectionsGroup::new(first_seen.clone())))
+        // TODO: hard coding 0-9 isn't great, but its easier than refactoring this to be smart about config reloading
+        let tiers = (0..10)
+            .map(|x| (x, ConnectionsGroup::new(first_seen.clone())))
             .collect();
 
         Self {

@@ -677,3 +677,5 @@ in another repo: event subscriber
 - [ ] give public_recent_ips_salt a better, more general, name
 - [ ] include tier in the head block logs?
 - [ ] i think i use FuturesUnordered when a try_join_all might be better
+- [ ] since we are read-heavy on our configs, maybe we should use a cache
+  - "using a thread local storage and explicit types" https://docs.rs/arc-swap/latest/arc_swap/cache/struct.Cache.html
