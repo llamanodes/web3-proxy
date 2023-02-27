@@ -573,17 +573,21 @@ impl Web3Rpc {
     }
 
     pub async fn disconnect(&self) -> anyhow::Result<()> {
-        self.reconnect.store(false, atomic::Ordering::Release);
-
-        let mut provider = self.provider.write().await;
-
         info!("disconnecting {}", self);
 
-        *provider = None;
+        self.reconnect.store(false, atomic::Ordering::Release);
 
         if let Err(err) = self.disconnect_watch.as_ref().unwrap().send(true) {
             warn!("failed sending disconnect watch: {:?}", err);
         };
+
+        trace!("disconnecting (locking) {}", self);
+
+        let mut provider = self.provider.write().await;
+
+        trace!("disconnecting (clearing provider) {}", self);
+
+        *provider = None;
 
         Ok(())
     }
@@ -715,12 +719,15 @@ impl Web3Rpc {
                     let mut old_total_requests = 0;
                     let mut new_total_requests;
 
+                    // health check loop
                     loop {
+                        if rpc.should_disconnect() {
+                            break;
+                        }
+
                         sleep(Duration::from_secs(health_sleep_seconds)).await;
 
-                        // health check
-                        // TODO: lower this log level once disconnect works
-                        debug!("health check on {}", rpc);
+                        trace!("health check on {}", rpc);
 
                         // TODO: what if we just happened to have this check line up with another restart?
                         // TODO: think more about this
@@ -806,6 +813,9 @@ impl Web3Rpc {
                             old_total_requests = new_total_requests;
                         }
                     }
+                    debug!("health checks for {} exited", rpc);
+
+                    Ok(())
                 };
 
                 futures.push(flatten_handle(tokio::spawn(f)));

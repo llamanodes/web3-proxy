@@ -248,8 +248,12 @@ impl ConnectionsGroup {
                     }
                 } else {
                     // i don't think this is an error. i think its just if a reconnect is currently happening
-                    warn!("connection missing: {}", rpc_name);
-                    debug!("web3_rpcs.by_name: {:#?}", web3_rpcs.by_name);
+                    if web3_rpcs.synced() {
+                        warn!("connection missing: {}", rpc_name);
+                        debug!("web3_rpcs.by_name: {:#?}", web3_rpcs.by_name);
+                    } else {
+                        return Err(anyhow::anyhow!("not synced"));
+                    }
                 }
             }
 
