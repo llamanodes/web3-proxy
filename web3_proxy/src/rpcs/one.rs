@@ -577,9 +577,9 @@ impl Web3Rpc {
     }
 
     pub async fn disconnect(&self) -> anyhow::Result<()> {
-        let age = self.created_at.unwrap().elapsed().as_millis();
+        let age = self.created_at.unwrap().elapsed().as_secs();
 
-        info!("disconnecting {} ({}ms old)", self, age);
+        info!("disconnecting {} ({}s old)", self, age);
 
         self.reconnect.store(false, atomic::Ordering::Release);
 
@@ -587,11 +587,11 @@ impl Web3Rpc {
             warn!("failed sending disconnect watch: {:?}", err);
         };
 
-        trace!("disconnecting (locking) {} ({}ms old)", self, age);
+        trace!("disconnecting (locking) {} ({}s old)", self, age);
 
         let mut provider = self.provider.write().await;
 
-        trace!("disconnecting (clearing provider) {} ({}ms old)", self, age);
+        trace!("disconnecting (clearing provider) {} ({}s old)", self, age);
 
         *provider = None;
 
@@ -616,7 +616,7 @@ impl Web3Rpc {
 
                     let age = self.created_at.unwrap().elapsed().as_millis();
 
-                    warn!("clearing head block on {} ({}ms old)!", self, age);
+                    debug!("clearing head block on {} ({}ms old)!", self, age);
 
                     *head_block = None;
                 }
