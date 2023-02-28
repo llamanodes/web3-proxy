@@ -1016,16 +1016,22 @@ impl Web3ProxyApp {
         // TODO: i'm sure this could be done better with iterators
         // TODO: stream the response?
         let mut collected: Vec<JsonRpcForwardedResponse> = Vec::with_capacity(num_requests);
-        let mut collected_rpcs: HashSet<Arc<Web3Rpc>> = HashSet::new();
+        let mut collected_rpc_names: HashSet<String> = HashSet::new();
+        let mut collected_rpcs: Vec<Arc<Web3Rpc>> = vec![];
         for response in responses {
             // TODO: any way to attach the tried rpcs to the error? it is likely helpful
             let (response, rpcs) = response?;
 
             collected.push(response);
-            collected_rpcs.extend(rpcs.into_iter());
+            collected_rpcs.extend(rpcs.into_iter().filter(|x| {
+                if collected_rpc_names.contains(&x.name) {
+                    false
+                } else {
+                    collected_rpc_names.insert(x.name.clone());
+                    true
+                }
+            }));
         }
-
-        let collected_rpcs: Vec<_> = collected_rpcs.into_iter().collect();
 
         Ok((collected, collected_rpcs))
     }

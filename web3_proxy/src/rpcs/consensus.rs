@@ -93,7 +93,7 @@ impl Web3Rpcs {
 type FirstSeenCache = Cache<H256, Instant, hashbrown::hash_map::DefaultHashBuilder>;
 
 pub struct ConnectionsGroup {
-    rpc_name_to_block: HashMap<String, Web3ProxyBlock>,
+    rpc_to_block: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
     // TODO: what if there are two blocks with the same number?
     highest_block: Option<Web3ProxyBlock>,
     /// used to track rpc.head_latency. The same cache should be shared between all ConnectionsGroups
@@ -103,27 +103,27 @@ pub struct ConnectionsGroup {
 impl ConnectionsGroup {
     pub fn new(first_seen: FirstSeenCache) -> Self {
         Self {
-            rpc_name_to_block: Default::default(),
+            rpc_to_block: Default::default(),
             highest_block: Default::default(),
             first_seen,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.rpc_name_to_block.len()
+        self.rpc_to_block.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.rpc_name_to_block.is_empty()
+        self.rpc_to_block.is_empty()
     }
 
-    fn remove(&mut self, rpc_name: &str) -> Option<Web3ProxyBlock> {
-        if let Some(removed_block) = self.rpc_name_to_block.remove(rpc_name) {
+    fn remove(&mut self, rpc: &Arc<Web3Rpc>) -> Option<Web3ProxyBlock> {
+        if let Some(removed_block) = self.rpc_to_block.remove(rpc) {
             match self.highest_block.as_mut() {
                 None => {}
                 Some(current_highest_block) => {
                     if removed_block.hash() == current_highest_block.hash() {
-                        for maybe_highest_block in self.rpc_name_to_block.values() {
+                        for maybe_highest_block in self.rpc_to_block.values() {
                             if maybe_highest_block.number() > current_highest_block.number() {
                                 *current_highest_block = maybe_highest_block.clone();
                             };
@@ -138,7 +138,7 @@ impl ConnectionsGroup {
         }
     }
 
-    async fn insert(&mut self, rpc: &Web3Rpc, block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
+    async fn insert(&mut self, rpc: Arc<Web3Rpc>, block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
         let first_seen = self
             .first_seen
             .get_with(*block.hash(), async move { Instant::now() })
@@ -155,7 +155,7 @@ impl ConnectionsGroup {
             self.highest_block = Some(block.clone());
         }
 
-        self.rpc_name_to_block.insert(rpc.name.clone(), block)
+        self.rpc_to_block.insert(rpc, block)
     }
 
     /// min_consensus_block_num keeps us from ever going backwards.
@@ -190,7 +190,7 @@ impl ConnectionsGroup {
             max_lag_consensus_to_highest
         );
 
-        let num_known = self.rpc_name_to_block.len();
+        let num_known = self.rpc_to_block.len();
 
         if num_known < web3_rpcs.min_head_rpcs {
             return Err(anyhow::anyhow!(
@@ -221,21 +221,22 @@ impl ConnectionsGroup {
             let maybe_head_hash = maybe_head_block.hash();
 
             // find all rpcs with maybe_head_hash as their current head
-            for (rpc_name, rpc_head) in self.rpc_name_to_block.iter() {
+            for (rpc, rpc_head) in self.rpc_to_block.iter() {
                 if rpc_head.hash() != maybe_head_hash {
                     // connection is not on the desired block
                     continue;
                 }
-                if backup_consensus_rpcs.contains(rpc_name.as_str()) {
+                let rpc_name = rpc.name.as_str();
+                if backup_consensus_rpcs.contains(rpc_name) {
                     // connection is on a later block in this same chain
                     continue;
                 }
-                if primary_consensus_rpcs.contains(rpc_name.as_str()) {
+                if primary_consensus_rpcs.contains(rpc_name) {
                     // connection is on a later block in this same chain
                     continue;
                 }
 
-                if let Some(rpc) = web3_rpcs.by_name.read().get(rpc_name.as_str()) {
+                if let Some(rpc) = web3_rpcs.by_name.read().get(rpc_name) {
                     if backup_rpcs_voted.is_some() {
                         // backups already voted for a head block. don't change it
                     } else {
@@ -407,14 +408,14 @@ impl ConsensusFinder {
         self.tiers.values_mut().last()
     }
 
-    pub fn remove(&mut self, rpc: &Web3Rpc) -> Option<Web3ProxyBlock> {
+    pub fn remove(&mut self, rpc: &Arc<Web3Rpc>) -> Option<Web3ProxyBlock> {
         let mut removed = None;
 
         for (i, tier_group) in self.tiers.iter_mut().rev() {
             if i < &rpc.tier {
                 break;
             }
-            let x = tier_group.remove(rpc.name.as_str());
+            let x = tier_group.remove(rpc);
 
             if removed.is_none() && x.is_some() {
                 removed = x;
@@ -427,7 +428,7 @@ impl ConsensusFinder {
     /// returns the block that the rpc was on before updating to the new_block
     pub async fn insert(
         &mut self,
-        rpc: &Web3Rpc,
+        rpc: &Arc<Web3Rpc>,
         new_block: Web3ProxyBlock,
     ) -> Option<Web3ProxyBlock> {
         let mut old = None;
@@ -440,7 +441,7 @@ impl ConsensusFinder {
             }
 
             // TODO: should new_block be a ref?
-            let x = tier_group.insert(rpc, new_block.clone()).await;
+            let x = tier_group.insert(rpc.clone(), new_block.clone()).await;
 
             if old.is_none() && x.is_some() {
                 old = x;
@@ -528,7 +529,7 @@ impl ConsensusFinder {
         // TODO: find the best tier with a connectionsgroup. best case, this only queries the first tier
         // TODO: do we need to calculate all of them? I think having highest_known_block included as part of min_block_num should make that unnecessary
         for (tier, x) in self.tiers.iter() {
-            trace!("checking tier {}: {:#?}", tier, x.rpc_name_to_block);
+            trace!("checking tier {}: {:#?}", tier, x.rpc_to_block);
             if let Ok(consensus_head_connections) = x
                 .consensus_head_connections(authorization, web3_connections, min_block_num, tier)
                 .await

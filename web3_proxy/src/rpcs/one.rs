@@ -135,6 +135,7 @@ pub struct Web3Rpc {
     pub(super) active_requests: AtomicUsize,
     pub(super) reconnect: AtomicBool,
     pub(super) disconnect_watch: Option<watch::Sender<bool>>,
+    pub(super) created_at: Option<Instant>,
 }
 
 impl Web3Rpc {
@@ -158,6 +159,8 @@ impl Web3Rpc {
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
     ) -> anyhow::Result<(Arc<Web3Rpc>, AnyhowJoinHandle<()>)> {
+        let created_at = Instant::now();
+
         let hard_limit = match (config.hard_limit, redis_pool) {
             (None, None) => None,
             (Some(hard_limit), Some(redis_pool)) => {
@@ -238,6 +241,7 @@ impl Web3Rpc {
             reconnect,
             tier: config.tier,
             disconnect_watch: Some(disconnect_sender),
+            created_at: Some(created_at),
             ..Default::default()
         };
 
@@ -573,7 +577,9 @@ impl Web3Rpc {
     }
 
     pub async fn disconnect(&self) -> anyhow::Result<()> {
-        info!("disconnecting {}", self);
+        let age = self.created_at.unwrap().elapsed().as_millis();
+
+        info!("disconnecting {} ({}ms old)", self, age);
 
         self.reconnect.store(false, atomic::Ordering::Release);
 
@@ -581,11 +587,11 @@ impl Web3Rpc {
             warn!("failed sending disconnect watch: {:?}", err);
         };
 
-        trace!("disconnecting (locking) {}", self);
+        trace!("disconnecting (locking) {} ({}ms old)", self, age);
 
         let mut provider = self.provider.write().await;
 
-        trace!("disconnecting (clearing provider) {}", self);
+        trace!("disconnecting (clearing provider) {} ({}ms old)", self, age);
 
         *provider = None;
 
@@ -607,7 +613,10 @@ impl Web3Rpc {
                         // we previously sent a None. return early
                         return Ok(());
                     }
-                    warn!("clearing head block on {}!", self);
+
+                    let age = self.created_at.unwrap().elapsed().as_millis();
+
+                    warn!("clearing head block on {} ({}ms old)!", self, age);
 
                     *head_block = None;
                 }
@@ -1279,8 +1288,16 @@ impl fmt::Debug for Web3Provider {
 
 impl Hash for Web3Rpc {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // TODO: is this enough?
         self.name.hash(state);
+        self.display_name.hash(state);
+        self.http_url.hash(state);
+        self.ws_url.hash(state);
+        self.automatic_block_limit.hash(state);
+        self.backup.hash(state);
+        // TODO: including soft_limit might need to change if we change them to be dynamic
+        self.soft_limit.hash(state);
+        self.tier.hash(state);
+        self.created_at.hash(state);
     }
 }
 
