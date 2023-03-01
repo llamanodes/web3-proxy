@@ -11,12 +11,10 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Login::Table)
-                    .add_column(
-                        ColumnDef::new(Login::ReadOnly)
-                            .boolean()
-                            .not_null()
-                    ).to_owned()
-            ).await
+                    .add_column(ColumnDef::new(Login::ReadOnly).boolean().not_null())
+                    .to_owned(),
+            )
+            .await
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -26,8 +24,9 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(Login::Table)
                     .drop_column(Login::ReadOnly)
-                    .to_owned()
-            ).await
+                    .to_owned(),
+            )
+            .await
     }
 }
 
@@ -35,8 +34,8 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum Login {
     Table,
-    Id,
-    BearerToken,
+    // Id,
+    // BearerToken,
     ReadOnly,
-    UserId,
+    // UserId,
 }

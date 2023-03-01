@@ -74,11 +74,38 @@ async fn _proxy_web3_rpc(
 
     // TODO: this might be slow. think about this more
     // TODO: special string if no rpcs were used (cache hit)?
-    let rpcs: String = rpcs.into_iter().map(|x| x.name.clone()).join(",");
+    let mut backup_used = false;
+
+    let rpcs: String = rpcs
+        .into_iter()
+        .map(|x| {
+            if x.backup {
+                backup_used = true;
+            }
+            x.name.clone()
+        })
+        .join(",");
 
     headers.insert(
-        "W3P-BACKEND-RPCS",
+        "X-W3P-BACKEND-RPCS",
         rpcs.parse().expect("W3P-BACKEND-RPCS should always parse"),
+    );
+
+    headers.insert(
+        "X-W3P-BACKUP-RPC",
+        backup_used
+            .to_string()
+            .parse()
+            .expect("W3P-BACKEND-RPCS should always parse"),
+    );
+
+    // TODO: add a header if a backend rpc was used
+
+    headers.insert(
+        "X-W3P-CLIENT-IP",
+        ip.to_string()
+            .parse()
+            .expect("X-CLIENT-IP should always parse"),
     );
 
     Ok(response)
@@ -184,6 +211,8 @@ async fn _proxy_web3_rpc_with_key(
 
     let authorization = Arc::new(authorization);
 
+    let rpc_secret_key_id = authorization.checks.rpc_secret_key_id;
+
     let (response, rpcs, _semaphore) = app
         .proxy_web3_rpc(authorization, payload, proxy_mode)
         .await
@@ -193,13 +222,48 @@ async fn _proxy_web3_rpc_with_key(
 
     let headers = response.headers_mut();
 
+    let mut backup_used = false;
+
     // TODO: special string if no rpcs were used (cache hit)? or is an empty string fine? maybe the rpc name + "cached"
-    let rpcs: String = rpcs.into_iter().map(|x| x.name.clone()).join(",");
+    let rpcs: String = rpcs
+        .into_iter()
+        .map(|x| {
+            if x.backup {
+                backup_used = true;
+            }
+            x.name.clone()
+        })
+        .join(",");
 
     headers.insert(
-        "W3P-BACKEND-RPCs",
+        "X-W3P-BACKEND-RPCs",
         rpcs.parse().expect("W3P-BACKEND-RPCS should always parse"),
     );
+
+    headers.insert(
+        "X-W3P-BACKUP-RPC",
+        backup_used
+            .to_string()
+            .parse()
+            .expect("W3P-BACKEND-RPCS should always parse"),
+    );
+
+    headers.insert(
+        "X-W3P-CLIENT-IP",
+        ip.to_string()
+            .parse()
+            .expect("X-CLIENT-IP should always parse"),
+    );
+
+    if let Some(rpc_secret_key_id) = rpc_secret_key_id {
+        headers.insert(
+            "X-W3P-KEY-ID",
+            rpc_secret_key_id
+                .to_string()
+                .parse()
+                .expect("X-CLIENT-IP should always parse"),
+        );
+    }
 
     Ok(response)
 }

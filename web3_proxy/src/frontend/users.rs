@@ -1,14 +1,13 @@
 //! Handle registration, logins, and managing account data.
-
 use super::authorization::{login_is_authorized, RpcSecretKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
-use crate::user_queries::{get_page_from_params, get_user_id_from_params};
+use crate::user_queries::get_page_from_params;
 use crate::user_queries::{
     get_chain_id_from_params, get_query_start_from_params, query_user_stats, StatResponse,
 };
-use entities::prelude::{User, SecondaryUser};
 use crate::user_token::UserBearerToken;
+use crate::{PostLogin, PostLoginQuery};
 use anyhow::Context;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::{
@@ -20,14 +19,14 @@ use axum::{
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
-use entities::sea_orm_active_enums::{LogLevel, Role};
-use entities::{login, pending_login, revert_log, rpc_key, secondary_user, user, user_tier};
+use entities::sea_orm_active_enums::LogLevel;
+use entities::{login, pending_login, revert_log, rpc_key, user};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
 use itertools::Itertools;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use migration::sea_orm::prelude::Uuid;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
@@ -41,12 +40,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
-use entities::user::Relation::UserTier;
-use migration::extension::postgres::Type;
-use thread_fast_rng::rand;
-use crate::admin_queries::query_admin_modify_usertier;
-use crate::frontend::errors::FrontendErrorResponse;
-use crate::{PostLogin, PostLoginQuery};
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
 ///
@@ -135,7 +128,7 @@ pub async fn user_login_get(
         nonce: sea_orm::Set(uuid),
         message: sea_orm::Set(message.to_string()),
         expires_at: sea_orm::Set(expires_at),
-        imitating_user: sea_orm::Set(None)
+        imitating_user: sea_orm::Set(None),
     };
 
     user_pending_login
@@ -355,7 +348,7 @@ pub async fn user_login_post(
         bearer_token: sea_orm::Set(user_bearer_token.uuid()),
         user_id: sea_orm::Set(u.id),
         expires_at: sea_orm::Set(expires_at),
-        read_only: sea_orm::Set(false)
+        read_only: sea_orm::Set(false),
     };
 
     user_login

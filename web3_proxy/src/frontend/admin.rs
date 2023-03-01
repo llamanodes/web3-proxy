@@ -1,16 +1,13 @@
 //! Handle admin helper logic
 
-use super::authorization::{login_is_authorized, RpcSecretKey};
+use super::authorization::login_is_authorized;
 use super::errors::FrontendResult;
+use crate::admin_queries::query_admin_modify_usertier;
 use crate::app::Web3ProxyApp;
-use crate::user_queries::{get_page_from_params, get_user_id_from_params};
-use crate::user_queries::{
-    get_chain_id_from_params, get_query_start_from_params, query_user_stats, StatResponse,
-};
-use entities::prelude::{User, SecondaryUser};
+use crate::frontend::errors::FrontendErrorResponse;
 use crate::user_token::UserBearerToken;
+use crate::PostLogin;
 use anyhow::Context;
-use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -20,20 +17,15 @@ use axum::{
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
-use entities::sea_orm_active_enums::{LogLevel, Role};
-use entities::{admin, admin_trail, login, pending_login, revert_log, rpc_key, secondary_user, user, user_tier};
+use entities::{admin_trail, login, pending_login, rpc_key, user};
 use ethers::{abi::AbiEncode, prelude::Address, types::Bytes};
 use hashbrown::HashMap;
-use http::{HeaderValue, StatusCode};
-use ipnet::IpNet;
-use itertools::Itertools;
-use log::{debug, info, warn};
+use http::StatusCode;
+use log::{debug, warn};
 use migration::sea_orm::prelude::Uuid;
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-    QueryOrder, TransactionTrait, TryIntoModel,
+    self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
-use serde::Deserialize;
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
@@ -41,9 +33,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
-use crate::admin_queries::query_admin_modify_usertier;
-use crate::frontend::errors::FrontendErrorResponse;
-use crate::{PostLogin, PostLoginQuery};
 
 /// `GET /admin/modify_role` -- As an admin, modify a user's user-tier
 ///
@@ -95,18 +84,34 @@ pub async fn admin_login_get(
     // get the admin field ...
     let admin_address: Address = params
         .get("admin_address")
-        .ok_or_else(|| FrontendErrorResponse::BadRequest("Unable to find admin_address key in request".to_string()))?
+        .ok_or_else(|| {
+            FrontendErrorResponse::BadRequest(
+                "Unable to find admin_address key in request".to_string(),
+            )
+        })?
         .parse::<Address>()
-        .map_err(|err| { FrontendErrorResponse::BadRequest("Unable to parse user_address as an Address".to_string()) })?;
-
+        .map_err(|_err| {
+            FrontendErrorResponse::BadRequest(
+                "Unable to parse admin_address as an Address".to_string(),
+            )
+        })?;
 
     // Fetch the user_address parameter from the login string ... (as who we want to be logging in ...)
     let user_address: Vec<u8> = params
         .get("user_address")
-        .ok_or_else(|| FrontendErrorResponse::BadRequest("Unable to find user_address key in request".to_string()))?
+        .ok_or_else(|| {
+            FrontendErrorResponse::BadRequest(
+                "Unable to find user_address key in request".to_string(),
+            )
+        })?
         .parse::<Address>()
-        .map_err(|err| { FrontendErrorResponse::BadRequest("Unable to parse user_address as an Address".to_string(), ) })?
-        .to_fixed_bytes().into();
+        .map_err(|_err| {
+            FrontendErrorResponse::BadRequest(
+                "Unable to parse user_address as an Address".to_string(),
+            )
+        })?
+        .to_fixed_bytes()
+        .into();
 
     // We want to login to llamanodes.com
     let login_domain = app
@@ -141,7 +146,9 @@ pub async fn admin_login_get(
     };
 
     let db_conn = app.db_conn().context("login requires a database")?;
-    let db_replica = app.db_replica().context("login requires a replica database")?;
+    let db_replica = app
+        .db_replica()
+        .context("login requires a replica database")?;
 
     // Get the user that we want to imitate from the read-only database (their id ...)
     // TODO: Only get the id, not the whole user object ...
@@ -149,13 +156,17 @@ pub async fn admin_login_get(
         .filter(user::Column::Address.eq(user_address))
         .one(db_replica.conn())
         .await?
-        .ok_or(FrontendErrorResponse::BadRequest("Could not find user in db".to_string()))?;
+        .ok_or(FrontendErrorResponse::BadRequest(
+            "Could not find user in db".to_string(),
+        ))?;
 
     let admin = user::Entity::find()
         .filter(user::Column::Address.eq(admin_address.encode()))
         .one(db_replica.conn())
         .await?
-        .ok_or(FrontendErrorResponse::BadRequest("Could not find admin in db".to_string()))?;
+        .ok_or(FrontendErrorResponse::BadRequest(
+            "Could not find admin in db".to_string(),
+        ))?;
 
     // Note that the admin is trying to log in as this user
     let trail = admin_trail::ActiveModel {
@@ -187,7 +198,7 @@ pub async fn admin_login_get(
         nonce: sea_orm::Set(uuid),
         message: sea_orm::Set(message.to_string()),
         expires_at: sea_orm::Set(expires_at),
-        imitating_user: sea_orm::Set(Some(user.id))
+        imitating_user: sea_orm::Set(Some(user.id)),
     };
 
     user_pending_login
@@ -221,7 +232,6 @@ pub async fn admin_login_get(
 pub async fn admin_login_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     InsecureClientIp(ip): InsecureClientIp,
-    Query(query): Query<PostLoginQuery>,
     Json(payload): Json<PostLogin>,
 ) -> FrontendResult {
     login_is_authorized(&app, ip).await?;
@@ -293,7 +303,6 @@ pub async fn admin_login_post(
             .verify_eip191(&their_sig)
             .context("verifying eip191 signature against our local message")
         {
-
             // delete ALL expired rows.
             let now = Utc::now();
             let delete_result = pending_login::Entity::delete_many()
@@ -309,12 +318,12 @@ pub async fn admin_login_post(
                 err_1,
                 err_191
             )
-                .into());
+            .into());
         }
     }
 
-    // TODO: Maybe add a context?
-    let imitating_user_id = user_pending_login.imitating_user
+    let imitating_user_id = user_pending_login
+        .imitating_user
         .context("getting address of the imitating user")?;
 
     // TODO: limit columns or load whole user?
@@ -386,9 +395,9 @@ pub async fn admin_login_post(
     let user_login = login::ActiveModel {
         id: sea_orm::NotSet,
         bearer_token: sea_orm::Set(user_bearer_token.uuid()),
-        user_id: sea_orm::Set(imitating_user.id),  // Yes, this should be the user ... because the rest of the applications takes this item, from the initial user
+        user_id: sea_orm::Set(imitating_user.id), // Yes, this should be the user ... because the rest of the applications takes this item, from the initial user
         expires_at: sea_orm::Set(expires_at),
-        read_only: sea_orm::Set(true)
+        read_only: sea_orm::Set(true),
     };
 
     user_login
@@ -405,7 +414,6 @@ pub async fn admin_login_post(
     }
 
     Ok(response)
-
 }
 
 // TODO: This is basically an exact copy of the user endpoint, I should probabl refactor this code ...

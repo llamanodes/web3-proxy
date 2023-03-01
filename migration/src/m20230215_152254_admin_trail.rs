@@ -87,7 +87,7 @@ enum AdminTrail {
 enum User {
     Table,
     Id,
-    Address,
-    Description,
-    Email,
+    // Address,
+    // Description,
+    // Email,
 }

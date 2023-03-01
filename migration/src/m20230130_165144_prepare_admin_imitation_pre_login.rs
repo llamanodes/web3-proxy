@@ -10,19 +10,18 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(PendingLogin::Table)
-                    .add_column(
-                        ColumnDef::new(PendingLogin::ImitatingUser)
-                            .big_unsigned()
+                    .add_column(ColumnDef::new(PendingLogin::ImitatingUser).big_unsigned())
+                    .add_foreign_key(
+                        TableForeignKey::new()
+                            .name("fk-pending_login-imitating_user")
+                            .from_tbl(PendingLogin::Table)
+                            .to_tbl(User::Table)
+                            .from_col(PendingLogin::ImitatingUser)
+                            .to_col(User::Id),
                     )
-                    .add_foreign_key(&TableForeignKey::new()
-                        .name("fk-pending_login-imitating_user")
-                        .from_tbl(PendingLogin::Table)
-                        .to_tbl(User::Table)
-                        .from_col(PendingLogin::ImitatingUser)
-                        .to_col(User::Id)
-                    )
-                    .to_owned()
-            ).await
+                    .to_owned(),
+            )
+            .await
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -32,8 +31,9 @@ impl MigrationTrait for Migration {
                     .table(PendingLogin::Table)
                     .drop_foreign_key(Alias::new("fk-pending_login-imitating_user"))
                     .drop_column(PendingLogin::ImitatingUser)
-                    .to_owned()
-            ).await
+                    .to_owned(),
+            )
+            .await
     }
 }
 
@@ -41,10 +41,10 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum PendingLogin {
     Table,
-    Id,
-    Nonce,
-    Message,
-    ExpiresAt,
+    // Id,
+    // Nonce,
+    // Message,
+    // ExpiresAt,
     ImitatingUser,
 }
 
@@ -52,5 +52,5 @@ enum PendingLogin {
 #[derive(Iden)]
 enum User {
     Table,
-    Id
+    Id,
 }

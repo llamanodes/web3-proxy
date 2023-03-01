@@ -1,15 +1,11 @@
 use anyhow::Context;
 use argh::FromArgs;
 use entities::{admin, login, user};
-use ethers::types::{Address, Bytes};
-use ethers::utils::keccak256;
-use http::StatusCode;
-use log::{debug, info};
+use ethers::types::Address;
+use log::debug;
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, IntoActiveModel,
-    QueryFilter,
+    self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
 };
-use web3_proxy::frontend::errors::FrontendErrorResponse;
 
 /// change a user's admin status. eiter they are an admin, or they aren't
 #[derive(FromArgs, PartialEq, Eq, Debug)]
@@ -44,7 +40,8 @@ impl ChangeUserAdminStatusSubCommand {
         match admin::Entity::find()
             .filter(admin::Column::UserId.eq(address))
             .one(db_conn)
-            .await? {
+            .await?
+        {
             Some(old_admin) if !should_be_admin => {
                 // User is already an admin, but shouldn't be
                 old_admin.delete(db_conn).await?;
@@ -64,12 +61,6 @@ impl ChangeUserAdminStatusSubCommand {
                 return Ok(());
             }
         }
-
-        // Get the bearer tokens of this user and delete them ...
-        let bearer_tokens = login::Entity::find()
-            .filter(login::Column::UserId.eq(user.id))
-            .all(db_conn)
-            .await?;
 
         // Remove any user logins from the database (incl. bearer tokens)
         let delete_result = login::Entity::delete_many()

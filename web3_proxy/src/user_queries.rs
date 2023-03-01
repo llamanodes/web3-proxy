@@ -9,7 +9,6 @@ use axum::{
     TypedHeader,
 };
 use chrono::{NaiveDateTime, Utc};
-use ethers::prelude::Address;
 use entities::{login, rpc_accounting, rpc_key};
 use hashbrown::HashMap;
 use http::StatusCode;

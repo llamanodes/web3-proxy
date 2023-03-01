@@ -117,7 +117,7 @@ pub struct Web3Rpc {
     /// use web3 queries to find the block data limit for archive/pruned nodes
     pub(super) automatic_block_limit: bool,
     /// only use this rpc if everything else is lagging too far. this allows us to ignore fast but very low limit rpcs
-    pub(super) backup: bool,
+    pub backup: bool,
     /// TODO: have an enum for this so that "no limit" prints pretty?
     pub(super) block_data_limit: AtomicU64,
     /// Lower tiers are higher priority when sending requests
