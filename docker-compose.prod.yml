@@ -18,6 +18,22 @@ services:
     volumes:
       - ./data/prod_mysql:/var/lib/mysql
 
+  # influxdb for stats
+  influxdb:
+    image: influxdb:2.6.1-alpine
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: web3_proxy
+      DOCKER_INFLUXDB_INIT_PASSWORD: web3_proxy
+      DOCKER_INFLUXDB_INIT_ORG: ski_llamanodes
+      DOCKER_INFLUXDB_INIT_BUCKET: web3_proxy
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: web3_proxy_auth_token
+    ports:
+      - 127.0.0.1:8086:8086
+    volumes:
+      - ./data/influxdb/data:/var/lib/influxdb2
+      - ./data/influxdb/config:/etc/influxdb2
+
   adminer:
     image: adminer
     ports:
