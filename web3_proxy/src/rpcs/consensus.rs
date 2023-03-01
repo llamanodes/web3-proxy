@@ -93,9 +93,9 @@ impl Web3Rpcs {
 type FirstSeenCache = Cache<H256, Instant, hashbrown::hash_map::DefaultHashBuilder>;
 
 pub struct ConnectionsGroup {
-    rpc_to_block: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
+    pub rpc_to_block: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
     // TODO: what if there are two blocks with the same number?
-    highest_block: Option<Web3ProxyBlock>,
+    pub highest_block: Option<Web3ProxyBlock>,
     /// used to track rpc.head_latency. The same cache should be shared between all ConnectionsGroups
     first_seen: FirstSeenCache,
 }

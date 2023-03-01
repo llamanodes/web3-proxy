@@ -702,6 +702,7 @@ impl Web3Rpcs {
     /// this prefers synced servers, but it will return servers even if they aren't fully in sync.
     /// This is useful for broadcasting signed transactions.
     // TODO: better type on this that can return an anyhow::Result
+    // TODO: this is broken
     pub async fn all_connections(
         &self,
         authorization: &Arc<Authorization>,
@@ -1199,7 +1200,7 @@ impl Serialize for Web3Rpcs {
 /// TODO: should this be moved into a `impl Web3Rpc`?
 /// TODO: i think we still have sorts scattered around the code that should use this
 /// TODO: take AsRef or something like that? We don't need an Arc here
-fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (U64, u64, OrderedFloat<f64>) {
+fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (U64, u64, bool, OrderedFloat<f64>) {
     let reversed_head_block = U64::MAX
         - x.head_block
             .read()
@@ -1209,7 +1210,8 @@ fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (U64, u64, OrderedFloat<f64>) {
 
     let tier = x.tier;
 
-    // TODO: use request instead of head latency
+    // TODO: use request latency instead of head latency
+    // TODO: have the latency decay automatically
     let head_ewma = x.head_latency.read().value();
 
     let active_requests = x.active_requests.load(atomic::Ordering::Relaxed) as f64;
@@ -1218,7 +1220,9 @@ fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (U64, u64, OrderedFloat<f64>) {
     // TODO: i don't think this actually counts as peak. investigate with atomics.rs and peak_ewma.rs
     let peak_ewma = OrderedFloat(head_ewma * active_requests);
 
-    (reversed_head_block, tier, peak_ewma)
+    let backup = x.backup;
+
+    (reversed_head_block, tier, backup, peak_ewma)
 }
 
 mod tests {
@@ -1670,5 +1674,9 @@ mod tests {
                 error!("unexpected result: {:?}", x);
             }
         }
+    }
+
+    fn test_all_connections() {
+        todo!()
     }
 }
