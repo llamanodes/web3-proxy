@@ -1288,7 +1288,7 @@ impl Web3ProxyApp {
                         authorization,
                         &request,
                         Some(request_metadata.clone()),
-                        Some(&head_block_num),
+                        None,
                         None,
                         Level::Trace,
                         num,
