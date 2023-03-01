@@ -1826,6 +1826,18 @@ mod tests {
             all_connections.unwrap().len(),
             2,
             "wrong number of connections"
+        );
+
+        let all_connections = rpcs
+            .all_connections(&authorization, None, None, None, false)
+            .await;
+
+        debug!("all_connections: {:#?}", all_connections);
+
+        assert_eq!(
+            all_connections.unwrap().len(),
+            2,
+            "wrong number of connections"
         )
     }
 }
