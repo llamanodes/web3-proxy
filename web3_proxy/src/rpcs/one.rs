@@ -697,9 +697,9 @@ impl Web3Rpc {
         };
 
         loop {
-            let http_interval_receiver = http_interval_sender.as_ref().map(|x| x.subscribe());
-
             let mut futures = vec![];
+
+            let http_interval_receiver = http_interval_sender.as_ref().map(|x| x.subscribe());
 
             {
                 // TODO: move this into a proper function

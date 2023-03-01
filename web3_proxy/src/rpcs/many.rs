@@ -128,6 +128,7 @@ impl Web3Rpcs {
 
                         if sender.send(()).is_err() {
                             // errors are okay. they mean that all receivers have been dropped, or the rpcs just haven't started yet
+                            // TODO: i'm seeing this error a lot more than expected
                             trace!("no http receivers");
                         };
                     }
@@ -548,6 +549,11 @@ impl Web3Rpcs {
                                 .unwrap_or(false)
                             {
                                 // server does not have the max block
+                                trace!(
+                                    "{} does not have the max block ({:?})",
+                                    x,
+                                    max_block_needed
+                                );
                                 false
                             } else {
                                 !min_block_needed
@@ -573,7 +579,7 @@ impl Web3Rpcs {
                             if let Some(min_block_age) = min_block_age {
                                 if x_head.age() > min_block_age {
                                     // rpc is still syncing
-                                    trace!("block is too old");
+                                    trace!("server's block is too old");
                                     continue;
                                 }
                             }
@@ -818,9 +824,7 @@ impl Web3Rpcs {
 
         // TODO: maximum retries? right now its the total number of servers
         loop {
-            let num_skipped = skip_rpcs.len();
-
-            if num_skipped >= self.by_name.read().len() {
+            if skip_rpcs.len() >= self.by_name.read().len() {
                 break;
             }
 
@@ -997,29 +1001,26 @@ impl Web3Rpcs {
         let num_skipped = skip_rpcs.len();
 
         if num_skipped == 0 {
-            error!("No servers synced ({} known). None skipped", num_conns);
-
-            // TODO: what error code?
-            Ok(JsonRpcForwardedResponse::from_str(
-                "No servers synced",
-                Some(-32000),
-                Some(request.id),
-            ))
+            error!(
+                "No servers synced ({:?}-{:?}) ({} known). None skipped",
+                min_block_needed, max_block_needed, num_conns
+            );
+            debug!("{}", serde_json::to_string(&request).unwrap());
         } else {
             // TODO: warn? debug? trace?
             warn!(
                 "Requested data was not available on {}/{} servers",
                 num_skipped, num_conns
             );
-
-            // TODO: what error code?
-            // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
-            Ok(JsonRpcForwardedResponse::from_str(
-                "Requested data is not available",
-                Some(-32043),
-                Some(request.id),
-            ))
         }
+
+        // TODO: what error code?
+        // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
+        Ok(JsonRpcForwardedResponse::from_str(
+            "Requested data is not available",
+            Some(-32043),
+            Some(request.id),
+        ))
     }
 
     /// be sure there is a timeout on this or it might loop forever
@@ -1035,6 +1036,8 @@ impl Web3Rpcs {
         max_count: Option<usize>,
         always_include_backups: bool,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
+        let mut watch_consensus_rpcs = self.watch_consensus_rpcs_sender.subscribe();
+
         loop {
             match self
                 .all_connections(
@@ -1083,18 +1086,19 @@ impl Web3Rpcs {
                         .await;
                 }
                 Err(None) => {
-                    warn!("No servers in sync on {:?}! Retrying", self);
+                    warn!(
+                        "No servers in sync on {:?} (block {:?} - {:?})! Retrying",
+                        self, min_block_needed, max_block_needed
+                    );
 
                     if let Some(request_metadata) = &request_metadata {
+                        // TODO: if this times out, i think we drop this
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
-                    // TODO: i don't think this will ever happen
-                    // TODO: return a 502? if it does?
-                    // return Err(anyhow::anyhow!("no available rpcs!"));
-                    // TODO: sleep how long?
-                    // TODO: subscribe to something in ConsensusConnections instead
-                    sleep(Duration::from_millis(200)).await;
+                    watch_consensus_rpcs.changed().await?;
+
+                    watch_consensus_rpcs.borrow_and_update();
 
                     continue;
                 }
@@ -1108,7 +1112,12 @@ impl Web3Rpcs {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
-                    sleep_until(retry_at).await;
+                    tokio::select! {
+                        _ = sleep_until(retry_at) => {}
+                        _ = watch_consensus_rpcs.changed() => {
+                            watch_consensus_rpcs.borrow_and_update();
+                        }
+                    }
 
                     continue;
                 }
