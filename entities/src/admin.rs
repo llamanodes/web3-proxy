@@ -5,16 +5,12 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
-#[sea_orm(table_name = "login")]
+#[sea_orm(table_name = "admin")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: u64,
     #[sea_orm(unique)]
-    #[serde(serialize_with = "serialization::uuid_as_ulid")]
-    pub bearer_token: Uuid,
     pub user_id: u64,
-    pub expires_at: DateTimeUtc,
-    pub read_only: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

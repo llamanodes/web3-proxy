@@ -1,4 +1,5 @@
 mod change_user_address;
+mod change_user_admin_status;
 mod change_user_tier;
 mod change_user_tier_by_address;
 mod change_user_tier_by_key;
@@ -70,6 +71,7 @@ pub struct Web3ProxyCli {
 #[argh(subcommand)]
 enum SubCommand {
     ChangeUserAddress(change_user_address::ChangeUserAddressSubCommand),
+    ChangeUserAdminStatus(change_user_admin_status::ChangeUserAdminStatusSubCommand),
     ChangeUserTier(change_user_tier::ChangeUserTierSubCommand),
     ChangeUserTierByAddress(change_user_tier_by_address::ChangeUserTierByAddressSubCommand),
     ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeySubCommand),
@@ -287,6 +289,15 @@ fn main() -> anyhow::Result<()> {
 
                 x.main(&db_conn).await
             }
+            SubCommand::ChangeUserAdminStatus(x) => {
+                let db_url = cli_config
+                    .db_url
+                    .expect("'--config' (with a db) or '--db-url' is required to run change_user_admin_status");
+
+                let db_conn = get_db(db_url, 1, 1).await?;
+
+                x.main(&db_conn).await
+            }
             SubCommand::ChangeUserTier(x) => {
                 let db_url = cli_config
                     .db_url
@@ -299,7 +310,7 @@ fn main() -> anyhow::Result<()> {
             SubCommand::ChangeUserTierByAddress(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+                    .expect("'--config' (with a db) or '--db-url' is required to run change_user_admin_status");
 
                 let db_conn = get_db(db_url, 1, 1).await?;
 
