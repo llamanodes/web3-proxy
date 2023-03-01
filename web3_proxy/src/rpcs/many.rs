@@ -315,6 +315,14 @@ impl Web3Rpcs {
         self.by_name.read().get(conn_name).cloned()
     }
 
+    pub fn len(&self) -> usize {
+        self.by_name.read().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_name.read().is_empty()
+    }
+
     pub fn min_head_rpcs(&self) -> usize {
         self.min_head_rpcs
     }

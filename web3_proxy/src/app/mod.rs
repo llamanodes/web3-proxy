@@ -1265,7 +1265,7 @@ impl Web3ProxyApp {
                 };
 
                 let (private_rpcs, num) = if let Some(private_rpcs) = self.private_rpcs.as_ref() {
-                    if authorization.checks.private_txs {
+                    if !private_rpcs.is_empty() && authorization.checks.private_txs {
                         // if we are sending the transaction privately, no matter the proxy_mode, we send to ALL private rpcs
                         (private_rpcs, None)
                     } else {
@@ -1283,12 +1283,13 @@ impl Web3ProxyApp {
                 // TODO: error/wait if no head block!
 
                 // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
+                // TODO: what lag should we allow?
                 let mut response = private_rpcs
                     .try_send_all_synced_connections(
                         authorization,
                         &request,
                         Some(request_metadata.clone()),
-                        None,
+                        Some(&head_block_num.saturating_sub(2.into())),
                         None,
                         Level::Trace,
                         num,
