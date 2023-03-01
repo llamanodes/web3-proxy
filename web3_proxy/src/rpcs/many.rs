@@ -752,29 +752,29 @@ impl Web3Rpcs {
                 break;
             }
 
-            if tried.contains(&rpc.name) {
+            if tried.contains(&rpc) {
                 continue;
             }
 
             trace!("trying {}", rpc);
 
-            tried.insert(rpc.name.clone());
+            tried.insert(rpc.clone());
 
             if !allow_backups && rpc.backup {
-                trace!("{} is a backup. skipping", rpc);
+                warn!("{} is a backup. skipping", rpc);
                 continue;
             }
 
             if let Some(block_needed) = min_block_needed {
                 if !rpc.has_block_data(block_needed) {
-                    trace!("{} is missing min_block_needed. skipping", rpc);
+                    warn!("{} is missing min_block_needed. skipping", rpc);
                     continue;
                 }
             }
 
             if let Some(block_needed) = max_block_needed {
                 if !rpc.has_block_data(block_needed) {
-                    trace!("{} is missing max_block_needed. skipping", rpc);
+                    warn!("{} is missing max_block_needed. skipping", rpc);
                     continue;
                 }
             }
@@ -783,7 +783,7 @@ impl Web3Rpcs {
             match rpc.try_request_handle(authorization, None).await {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
-                    trace!("{} is rate limited. skipping", rpc);
+                    warn!("{} is rate limited. skipping", rpc);
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                 }
                 Ok(OpenRequestResult::Handle(handle)) => {
