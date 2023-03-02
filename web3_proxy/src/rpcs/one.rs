@@ -899,7 +899,7 @@ impl Web3Rpc {
     ) -> anyhow::Result<()> {
         trace!("watching new heads on {}", self);
 
-        let mut unlocked_provider = self.provider.read().await;
+        let mut unlocked_provider = self.provider.read().await.clone();
 
         let mut logged = false;
         while unlocked_provider.is_none() {
@@ -907,11 +907,11 @@ impl Web3Rpc {
             sleep(Duration::from_millis(100)).await;
 
             if !logged {
-                debug!("no provider for subscribe_new_heads on {}", self.rpc);
+                debug!("no provider for subscribe_new_heads on {}", self);
                 logged = true;
             }
 
-            unlocked_provider = self.rpc.provider.read().await.clone();
+            unlocked_provider = self.provider.read().await.clone();
         }
 
         match unlocked_provider.as_deref() {
@@ -1093,7 +1093,7 @@ impl Web3Rpc {
     ) -> anyhow::Result<()> {
         // TODO: give this a separate client. don't use new_head_client for everything. especially a firehose this big
         // TODO: timeout
-        let mut provider = self.provider.read().await;
+        let mut provider = self.provider.read().await.clone();
 
         let mut logged = false;
         while provider.is_none() {
@@ -1103,15 +1103,13 @@ impl Web3Rpc {
             if !logged {
                 debug!(
                     "no provider for subscribe_pending_transactions handle on {}",
-                    self.rpc
+                    self
                 );
                 logged = true;
             }
 
-            provider = self.rpc.provider.read().await.clone();
+            provider = self.provider.read().await.clone();
         }
-
-        let provider = provider.expect("provider was checked already");
 
         trace!("watching pending transactions on {}", self);
         // TODO: does this keep the lock open for too long?
