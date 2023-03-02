@@ -899,7 +899,20 @@ impl Web3Rpc {
     ) -> anyhow::Result<()> {
         trace!("watching new heads on {}", self);
 
-        let unlocked_provider = self.provider.read().await;
+        let mut unlocked_provider = self.provider.read().await;
+
+        let mut logged = false;
+        while unlocked_provider.is_none() {
+            // trace!("waiting on unlocked_provider: locking...");
+            sleep(Duration::from_millis(100)).await;
+
+            if !logged {
+                debug!("no provider for subscribe_new_heads on {}", self.rpc);
+                logged = true;
+            }
+
+            unlocked_provider = self.rpc.provider.read().await.clone();
+        }
 
         match unlocked_provider.as_deref() {
             Some(Web3Provider::Http(_client)) => {
@@ -1060,7 +1073,7 @@ impl Web3Rpc {
                 // TODO: we probably don't want a warn and to return error
                 debug!("new_heads subscription to {} ended", self);
             }
-            None => todo!("what should happen now? wait for a connection?"),
+            None => unimplemented!("there should always be a provider"),
             #[cfg(test)]
             Some(Web3Provider::Mock) => unimplemented!(),
         }
@@ -1080,7 +1093,25 @@ impl Web3Rpc {
     ) -> anyhow::Result<()> {
         // TODO: give this a separate client. don't use new_head_client for everything. especially a firehose this big
         // TODO: timeout
-        let provider = self.provider.read().await;
+        let mut provider = self.provider.read().await;
+
+        let mut logged = false;
+        while provider.is_none() {
+            // trace!("waiting on provider: locking...");
+            sleep(Duration::from_millis(100)).await;
+
+            if !logged {
+                debug!(
+                    "no provider for subscribe_pending_transactions handle on {}",
+                    self.rpc
+                );
+                logged = true;
+            }
+
+            provider = self.rpc.provider.read().await.clone();
+        }
+
+        let provider = provider.expect("provider was checked already");
 
         trace!("watching pending transactions on {}", self);
         // TODO: does this keep the lock open for too long?
