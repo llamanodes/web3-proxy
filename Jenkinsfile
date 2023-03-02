@@ -99,19 +99,6 @@ pipeline {
                         }
                     }
                 }
-                stage('Build and push arm64_graviton1 image') {
-                    agent {
-                        label 'arm64_graviton1'
-                    }
-                    environment {
-                        ARCH="arm64_graviton1"
-                    }
-                    steps {
-                        script {
-                            buildAndPush()
-                        }
-                    }
-                }
                 stage('Build and push arm64_graviton2 image') {
                     agent {
                         label 'arm64_graviton2'
