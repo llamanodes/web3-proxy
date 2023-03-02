@@ -358,6 +358,10 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - i think this also means we don't need to worry about changing the id that the user gives us.
 - [x] eth_getLogs is going to unsynced nodes because it only checks start block and not the end block
 - [x] fix caching getLogs with blockhash
+- [x] fix trying to send signed transactions to an empty list of private_rpcs
+- [x] improve logging around consensus head.
+  - it was "num in best synced tier"/num rpc connected/num rpc known.
+  - it should be "num with best head in best synced tier/num with best head in any tier/num rpcs connected/num rpcs known
 - [-] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
@@ -384,6 +388,9 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] have private transactions be enabled by a url setting rather than a setting on the key
 - [ ] cli for adding rpc keys to an existing user
 - [ ] rate limiting/throttling on query_user_stats 
+- [ ] web3rpc configs should have a max_concurrent_requests
+    - will probably want a tool for calculating a safe value for this. too low and we could kill our performance
+- [ ] rename "concurrent" requests to "parallel" requests
 - [ ] minimum allowed query_start on query_user_stats
 - [ ] setting request limits to None is broken. it does maxu64 and then internal deferred rate limiter counts try to *99/100
 - [ ] during shutdown, mark the proxy unhealthy and send unsubscribe responses for any open websocket subscriptions
