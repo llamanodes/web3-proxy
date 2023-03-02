@@ -50,6 +50,7 @@ impl PopularityContestSubCommand {
         let mut by_tier = BTreeMap::<u64, Vec<_>>::new();
         let mut tier_requests = BTreeMap::<u64, u64>::new();
         let mut total_requests = 0;
+        let mut highest_block = 0;
 
         for conn in conns {
             let conn = conn.as_object().unwrap();
@@ -79,6 +80,8 @@ impl PopularityContestSubCommand {
                 .and_then(|x| U64::from_str(x.as_str().unwrap()).ok())
                 .map(|x| x.as_u64())
                 .unwrap_or_default();
+
+            highest_block = highest_block.max(head_block);
 
             let head_latency = conn.get("head_latency").unwrap().as_f64().unwrap();
 
@@ -117,7 +120,7 @@ impl PopularityContestSubCommand {
             "rpc_requests",
             "tier_request_pct",
             "total_pct",
-            "head_block",
+            "head_lag",
             "head_latency",
             "request_latency",
         ]);
@@ -148,7 +151,7 @@ impl PopularityContestSubCommand {
                     rpc.requests,
                     tier_request_pct,
                     total_request_pct,
-                    rpc.head_block,
+                    highest_block - rpc.head_block,
                     format!("{:.3}", rpc.head_latency),
                     format!("{:.3}", rpc.request_latency),
                 ]);
