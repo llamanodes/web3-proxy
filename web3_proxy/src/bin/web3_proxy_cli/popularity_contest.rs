@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{cmp::Reverse, collections::BTreeMap};
 
 // show what nodes are used most often
 use argh::FromArgs;
@@ -102,8 +102,10 @@ impl PopularityContestSubCommand {
 
         let total_requests = total_requests as f32;
 
-        for (tier, rpcs) in by_tier.iter() {
+        for (tier, rpcs) in by_tier.iter_mut() {
             let t = (*tier_requests.get(tier).unwrap()) as f32;
+
+            rpcs.sort_by_cached_key(|x| Reverse(x.requests));
 
             for rpc in rpcs.iter() {
                 let tier_request_pct = if t == 0.0 {
