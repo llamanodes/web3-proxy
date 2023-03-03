@@ -59,12 +59,12 @@ async fn _proxy_web3_rpc(
     // TODO: do we care about keeping the TypedHeader wrapper?
     let origin = origin.map(|x| x.0);
 
-    let (authorization, semaphore) = ip_is_authorized(&app, ip, origin).await?;
+    let (authorization, semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode).await?;
 
     let authorization = Arc::new(authorization);
 
     let (response, rpcs, _semaphore) = app
-        .proxy_web3_rpc(authorization, payload, proxy_mode)
+        .proxy_web3_rpc(authorization, payload)
         .await
         .map(|(x, y)| (x, y, semaphore))?;
 
@@ -74,11 +74,38 @@ async fn _proxy_web3_rpc(
 
     // TODO: this might be slow. think about this more
     // TODO: special string if no rpcs were used (cache hit)?
-    let rpcs: String = rpcs.into_iter().map(|x| x.name.clone()).join(",");
+    let mut backup_used = false;
+
+    let rpcs: String = rpcs
+        .into_iter()
+        .map(|x| {
+            if x.backup {
+                backup_used = true;
+            }
+            x.name.clone()
+        })
+        .join(",");
 
     headers.insert(
-        "W3P-BACKEND-RPCS",
+        "X-W3P-BACKEND-RPCS",
         rpcs.parse().expect("W3P-BACKEND-RPCS should always parse"),
+    );
+
+    headers.insert(
+        "X-W3P-BACKUP-RPC",
+        backup_used
+            .to_string()
+            .parse()
+            .expect("W3P-BACKEND-RPCS should always parse"),
+    );
+
+    // TODO: add a header if a backend rpc was used
+
+    headers.insert(
+        "X-W3P-CLIENT-IP",
+        ip.to_string()
+            .parse()
+            .expect("X-CLIENT-IP should always parse"),
     );
 
     Ok(response)
@@ -107,6 +134,29 @@ pub async fn proxy_web3_rpc_with_key(
         rpc_key,
         payload,
         ProxyMode::Best,
+    )
+    .await
+}
+
+#[debug_handler]
+pub async fn debug_proxy_web3_rpc_with_key(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: InsecureClientIp,
+    origin: Option<TypedHeader<Origin>>,
+    referer: Option<TypedHeader<Referer>>,
+    user_agent: Option<TypedHeader<UserAgent>>,
+    Path(rpc_key): Path<String>,
+    Json(payload): Json<JsonRpcRequestEnum>,
+) -> FrontendResult {
+    _proxy_web3_rpc_with_key(
+        app,
+        ip,
+        origin,
+        referer,
+        user_agent,
+        rpc_key,
+        payload,
+        ProxyMode::Debug,
     )
     .await
 }
@@ -177,6 +227,7 @@ async fn _proxy_web3_rpc_with_key(
         rpc_key,
         ip,
         origin.map(|x| x.0),
+        proxy_mode,
         referer.map(|x| x.0),
         user_agent.map(|x| x.0),
     )
@@ -184,8 +235,10 @@ async fn _proxy_web3_rpc_with_key(
 
     let authorization = Arc::new(authorization);
 
+    let rpc_secret_key_id = authorization.checks.rpc_secret_key_id;
+
     let (response, rpcs, _semaphore) = app
-        .proxy_web3_rpc(authorization, payload, proxy_mode)
+        .proxy_web3_rpc(authorization, payload)
         .await
         .map(|(x, y)| (x, y, semaphore))?;
 
@@ -193,13 +246,48 @@ async fn _proxy_web3_rpc_with_key(
 
     let headers = response.headers_mut();
 
+    let mut backup_used = false;
+
     // TODO: special string if no rpcs were used (cache hit)? or is an empty string fine? maybe the rpc name + "cached"
-    let rpcs: String = rpcs.into_iter().map(|x| x.name.clone()).join(",");
+    let rpcs: String = rpcs
+        .into_iter()
+        .map(|x| {
+            if x.backup {
+                backup_used = true;
+            }
+            x.name.clone()
+        })
+        .join(",");
 
     headers.insert(
-        "W3P-BACKEND-RPCs",
+        "X-W3P-BACKEND-RPCs",
         rpcs.parse().expect("W3P-BACKEND-RPCS should always parse"),
     );
+
+    headers.insert(
+        "X-W3P-BACKUP-RPC",
+        backup_used
+            .to_string()
+            .parse()
+            .expect("W3P-BACKEND-RPCS should always parse"),
+    );
+
+    headers.insert(
+        "X-W3P-CLIENT-IP",
+        ip.to_string()
+            .parse()
+            .expect("X-CLIENT-IP should always parse"),
+    );
+
+    if let Some(rpc_secret_key_id) = rpc_secret_key_id {
+        headers.insert(
+            "X-W3P-KEY-ID",
+            rpc_secret_key_id
+                .to_string()
+                .parse()
+                .expect("X-CLIENT-IP should always parse"),
+        );
+    }
 
     Ok(response)
 }

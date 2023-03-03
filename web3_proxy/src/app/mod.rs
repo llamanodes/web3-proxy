@@ -10,7 +10,7 @@ use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{
     JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest, JsonRpcRequestEnum,
 };
-use crate::rpcs::blockchain::{BlockHashesCache, Web3ProxyBlock};
+use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::transactions::TxStatus;
@@ -37,6 +37,8 @@ use migration::sea_orm::{
 use migration::sea_query::table::ColumnDef;
 use migration::{Alias, DbErr, Migrator, MigratorTrait, Table};
 use moka::future::Cache;
+use rdkafka::message::{Header, OwnedHeaders};
+use rdkafka::producer::FutureRecord;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use serde::Serialize;
@@ -66,7 +68,7 @@ pub static APP_USER_AGENT: &str = concat!(
 /// TODO: allow customizing the request period?
 pub static REQUEST_PERIOD: u64 = 60;
 
-#[derive(From)]
+#[derive(Debug, From)]
 struct ResponseCacheKey {
     // if none, this is cached until evicted
     from_block: Option<Web3ProxyBlock>,
@@ -179,6 +181,7 @@ pub struct AuthorizationChecks {
     pub log_revert_chance: f64,
     /// if true, transactions are broadcast to private mempools. They will still be public on the blockchain!
     pub private_txs: bool,
+    pub proxy_mode: ProxyMode,
 }
 
 /// Simple wrapper so that we can keep track of read only connections.
@@ -199,6 +202,7 @@ impl DatabaseReplica {
 pub struct Web3ProxyApp {
     /// Send requests to the best server available
     pub balanced_rpcs: Arc<Web3Rpcs>,
+    pub http_client: Option<reqwest::Client>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     pub private_rpcs: Option<Arc<Web3Rpcs>>,
     response_cache: ResponseCache,
@@ -224,6 +228,7 @@ pub struct Web3ProxyApp {
     pub bearer_token_semaphores:
         Cache<UserBearerToken, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub stat_sender: Option<flume::Sender<Web3ProxyStat>>,
+    pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -354,10 +359,12 @@ pub async fn get_migrated_db(
 pub struct Web3ProxyAppSpawn {
     /// the app. probably clone this to use in other groups of handles
     pub app: Arc<Web3ProxyApp>,
-    // cancellable handles
+    /// handles for the balanced and private rpcs
     pub app_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
     /// these are important and must be allowed to finish
     pub background_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
+    /// config changes are sent here
+    pub new_top_config_sender: watch::Sender<TopConfig>,
 }
 
 impl Web3ProxyApp {
@@ -368,6 +375,8 @@ impl Web3ProxyApp {
         shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         // safety checks on the config
+        // while i would prefer this to be in a "apply_top_config" function, that is a larger refactor
+        // TODO: maybe don't spawn with a config at all. have all config updates come through an apply_top_config call
         if let Some(redirect) = &top_config.app.redirect_rpc_key_url {
             assert!(
                 redirect.contains("{{rpc_key_id}}"),
@@ -389,10 +398,15 @@ impl Web3ProxyApp {
             );
         }
 
+        // these futures are key parts of the app. if they stop running, the app has encountered an irrecoverable error
+        let app_handles = FuturesUnordered::new();
+
+        // we must wait for these to end on their own (and they need to subscribe to shutdown_sender)
+        let important_background_handles = FuturesUnordered::new();
+
+        // connect to the database and make sure the latest migrations have run
         let mut db_conn = None::<DatabaseConnection>;
         let mut db_replica = None::<DatabaseReplica>;
-
-        // connect to mysql and make sure the latest migrations have run
         if let Some(db_url) = top_config.app.db_url.clone() {
             let db_min_connections = top_config
                 .app
@@ -447,46 +461,25 @@ impl Web3ProxyApp {
             warn!("no database. some features will be disabled");
         };
 
-        let balanced_rpcs = top_config.balanced_rpcs;
+        // connect to kafka for logging requests from the /debug/ urls
 
-        // safety check on balanced_rpcs
-        if balanced_rpcs.len() < top_config.app.min_synced_rpcs {
-            return Err(anyhow::anyhow!(
-                "Only {}/{} rpcs! Add more balanced_rpcs or reduce min_synced_rpcs.",
-                balanced_rpcs.len(),
-                top_config.app.min_synced_rpcs
-            ));
+        let mut kafka_producer: Option<rdkafka::producer::FutureProducer> = None;
+        if let Some(kafka_brokers) = top_config.app.kafka_urls.clone() {
+            match rdkafka::ClientConfig::new()
+                .set("bootstrap.servers", kafka_brokers)
+                .set("message.timeout.ms", "5000")
+                .create()
+            {
+                Ok(k) => kafka_producer = Some(k),
+                Err(err) => error!("Failed connecting to kafka. This will not retry. {:?}", err),
+            }
+        }
+        #[cfg(not(rdkafka))]
+        if top_config.app.kafka_urls.is_some() {
+            warn!("rdkafka rust feature is not enabled!");
         }
 
-        // safety check on sum soft limit
-        let sum_soft_limit = balanced_rpcs.values().fold(0, |acc, x| acc + x.soft_limit);
-
-        if sum_soft_limit < top_config.app.min_sum_soft_limit {
-            return Err(anyhow::anyhow!(
-                "Only {}/{} soft limit! Add more balanced_rpcs, increase soft limits, or reduce min_sum_soft_limit.",
-                sum_soft_limit,
-                top_config.app.min_sum_soft_limit
-            ));
-        }
-
-        let private_rpcs = top_config.private_rpcs.unwrap_or_default();
-
-        // these are safe to cancel
-        let cancellable_handles = FuturesUnordered::new();
-        // we must wait for these to end on their own (and they need to subscribe to shutdown_sender)
-        let important_background_handles = FuturesUnordered::new();
-
-        // make a http shared client
-        // TODO: can we configure the connection pool? should we?
-        // TODO: timeouts from config. defaults are hopefully good
-        let http_client = Some(
-            reqwest::ClientBuilder::new()
-                .connect_timeout(Duration::from_secs(5))
-                .timeout(Duration::from_secs(5 * 60))
-                .user_agent(APP_USER_AGENT)
-                .build()?,
-        );
-
+        // TODO: do this during apply_config so that we can change redis url while running
         // create a connection pool for redis
         // a failure to connect does NOT block the application from starting
         let vredis_pool = match top_config.app.volatile_redis_url.as_ref() {
@@ -540,103 +533,16 @@ impl Web3ProxyApp {
             None
         };
 
-        // TODO: i don't like doing Block::default here! Change this to "None"?
-        let (watch_consensus_head_sender, watch_consensus_head_receiver) = watch::channel(None);
-        // TODO: will one receiver lagging be okay? how big should this be?
-        let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
-
-        // TODO: use this? it could listen for confirmed transactions and then clear pending_transactions, but the head_block_sender is doing that
-        // TODO: don't drop the pending_tx_receiver. instead, read it to mark transactions as "seen". once seen, we won't re-send them?
-        // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
-        // TODO: we should still have some sort of expiration or maximum size limit for the map
-        drop(pending_tx_receiver);
-
-        // TODO: capacity from configs
-        // all these are the same size, so no need for a weigher
-        // TODO: ttl on this? or is max_capacity fine?
-        let pending_transactions = Cache::builder()
-            .max_capacity(10_000)
-            // TODO: different chains might handle this differently
-            // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
-            .time_to_idle(Duration::from_secs(300))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-
-        // keep 1GB/5 minutes of blocks in the cache
-        // TODO: limits from config
-        // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
-        // TODO: how can we do the weigher better?
-        let block_map: BlockHashesCache = Cache::builder()
-            .max_capacity(1024 * 1024 * 1024)
-            .weigher(|_k, v: &Web3ProxyBlock| {
-                // TODO: is this good enough?
-                1 + v.block.transactions.len().try_into().unwrap_or(u32::MAX)
-            })
-            // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
-            .time_to_idle(Duration::from_secs(300))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-
-        // connect to the load balanced rpcs
-        let (balanced_rpcs, balanced_handle) = Web3Rpcs::spawn(
-            block_map.clone(),
-            top_config.app.chain_id,
-            db_conn.clone(),
-            http_client.clone(),
-            top_config.app.max_block_age,
-            top_config.app.max_block_lag,
-            top_config.app.min_synced_rpcs,
-            top_config.app.min_sum_soft_limit,
-            pending_transactions.clone(),
-            Some(pending_tx_sender.clone()),
-            vredis_pool.clone(),
-            balanced_rpcs,
-            Some(watch_consensus_head_sender),
-        )
-        .await
-        .context("spawning balanced rpcs")?;
-
-        // save the handle to catch any errors
-        cancellable_handles.push(balanced_handle);
-
-        // connect to the private rpcs
-        // only some chains have this, so this is optional
-        let private_rpcs = if private_rpcs.is_empty() {
-            // TODO: do None instead of clone?
-            warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
-            None
-        } else {
-            let (private_rpcs, private_handle) = Web3Rpcs::spawn(
-                block_map,
-                top_config.app.chain_id,
-                db_conn.clone(),
-                http_client.clone(),
-                // private rpcs don't get subscriptions, so no need for max_block_age or max_block_lag
-                None,
-                None,
-                0,
-                0,
-                pending_transactions.clone(),
-                // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits, but they should have
-                None,
-                vredis_pool.clone(),
-                private_rpcs,
-                // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
-                // they also often have low rate limits
-                // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
-                // TODO: but maybe we could include privates in the "backup" tier
-                None,
-            )
-            .await
-            .context("spawning private_rpcs")?;
-
-            if private_rpcs.by_name.is_empty() {
-                None
-            } else {
-                // save the handle to catch any errors
-                cancellable_handles.push(private_handle);
-
-                Some(private_rpcs)
-            }
-        };
+        // make a http shared client
+        // TODO: can we configure the connection pool? should we?
+        // TODO: timeouts from config. defaults are hopefully good
+        let http_client = Some(
+            reqwest::ClientBuilder::new()
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(5 * 60))
+                .user_agent(APP_USER_AGENT)
+                .build()?,
+        );
 
         // create rate limiters
         // these are optional. they require redis
@@ -679,6 +585,27 @@ impl Web3ProxyApp {
             ));
         }
 
+        // TODO: i don't like doing Block::default here! Change this to "None"?
+        let (watch_consensus_head_sender, watch_consensus_head_receiver) = watch::channel(None);
+        // TODO: will one receiver lagging be okay? how big should this be?
+        let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
+
+        // TODO: use this? it could listen for confirmed transactions and then clear pending_transactions, but the head_block_sender is doing that
+        // TODO: don't drop the pending_tx_receiver. instead, read it to mark transactions as "seen". once seen, we won't re-send them?
+        // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
+        // TODO: we should still have some sort of expiration or maximum size limit for the map
+        drop(pending_tx_receiver);
+
+        // TODO: capacity from configs
+        // all these are the same size, so no need for a weigher
+        // TODO: ttl on this? or is max_capacity fine?
+        let pending_transactions = Cache::builder()
+            .max_capacity(10_000)
+            // TODO: different chains might handle this differently
+            // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
+            .time_to_idle(Duration::from_secs(300))
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
         // TODO: don't allow any response to be bigger than X% of the cache
         let response_cache = Cache::builder()
@@ -720,9 +647,62 @@ impl Web3ProxyApp {
             .time_to_idle(Duration::from_secs(120))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
+        // prepare a Web3Rpcs to hold all our balanced connections
+        let (balanced_rpcs, balanced_rpcs_handle) = Web3Rpcs::spawn(
+            top_config.app.chain_id,
+            db_conn.clone(),
+            http_client.clone(),
+            top_config.app.max_block_age,
+            top_config.app.max_block_lag,
+            top_config.app.min_synced_rpcs,
+            top_config.app.min_sum_soft_limit,
+            pending_transactions.clone(),
+            Some(pending_tx_sender.clone()),
+            Some(watch_consensus_head_sender),
+        )
+        .await
+        .context("spawning balanced rpcs")?;
+
+        app_handles.push(balanced_rpcs_handle);
+
+        // prepare a Web3Rpcs to hold all our private connections
+        // only some chains have this, so this is optional
+        let private_rpcs = if top_config.private_rpcs.is_none() {
+            warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
+            None
+        } else {
+            // TODO: do something with the spawn handle
+            let (private_rpcs, private_rpcs_handle) = Web3Rpcs::spawn(
+                top_config.app.chain_id,
+                db_conn.clone(),
+                http_client.clone(),
+                // private rpcs don't get subscriptions, so no need for max_block_age or max_block_lag
+                None,
+                None,
+                0,
+                0,
+                pending_transactions.clone(),
+                // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits, but they should have
+                None,
+                // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
+                // they also often have low rate limits
+                // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
+                // TODO: but maybe we could include privates in the "backup" tier
+                None,
+            )
+            .await
+            .context("spawning private_rpcs")?;
+
+            app_handles.push(private_rpcs_handle);
+
+            Some(private_rpcs)
+        };
+
         let app = Self {
-            config: top_config.app,
+            config: top_config.app.clone(),
             balanced_rpcs,
+            http_client,
+            kafka_producer,
             private_rpcs,
             response_cache,
             watch_consensus_head_receiver,
@@ -743,7 +723,62 @@ impl Web3ProxyApp {
 
         let app = Arc::new(app);
 
-        Ok((app, cancellable_handles, important_background_handles).into())
+        // watch for config changes
+        // TODO: initial config reload should be from this channel. not from the call to spawn
+
+        let (new_top_config_sender, mut new_top_config_receiver) = watch::channel(top_config);
+
+        {
+            let app = app.clone();
+            let config_handle = tokio::spawn(async move {
+                loop {
+                    let new_top_config = new_top_config_receiver.borrow_and_update().to_owned();
+
+                    app.apply_top_config(new_top_config)
+                        .await
+                        .context("failed applying new top_config")?;
+
+                    new_top_config_receiver
+                        .changed()
+                        .await
+                        .context("failed awaiting top_config change")?;
+
+                    info!("config changed");
+                }
+            });
+
+            app_handles.push(config_handle);
+        }
+
+        Ok((
+            app,
+            app_handles,
+            important_background_handles,
+            new_top_config_sender,
+        )
+            .into())
+    }
+
+    pub async fn apply_top_config(&self, new_top_config: TopConfig) -> anyhow::Result<()> {
+        // TODO: also update self.config from new_top_config.app
+
+        // connect to the backends
+        self.balanced_rpcs
+            .apply_server_configs(self, new_top_config.balanced_rpcs)
+            .await?;
+
+        if let Some(private_rpc_configs) = new_top_config.private_rpcs {
+            if let Some(private_rpcs) = self.private_rpcs.as_ref() {
+                private_rpcs
+                    .apply_server_configs(self, private_rpc_configs)
+                    .await?;
+            } else {
+                // TODO: maybe we should have private_rpcs just be empty instead of being None
+                todo!("handle toggling private_rpcs")
+            }
+        }
+
+        Ok(())
     }
 
     pub fn head_block_receiver(&self) -> watch::Receiver<Option<Web3ProxyBlock>> {
@@ -931,7 +966,6 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: Arc<Authorization>,
         request: JsonRpcRequestEnum,
-        proxy_mode: ProxyMode,
     ) -> Result<(JsonRpcForwardedResponseEnum, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // trace!(?request, "proxy_web3_rpc");
 
@@ -944,7 +978,7 @@ impl Web3ProxyApp {
             JsonRpcRequestEnum::Single(request) => {
                 let (response, rpcs) = timeout(
                     max_time,
-                    self.proxy_cached_request(&authorization, request, proxy_mode, None),
+                    self.proxy_cached_request(&authorization, request, None),
                 )
                 .await??;
 
@@ -953,7 +987,7 @@ impl Web3ProxyApp {
             JsonRpcRequestEnum::Batch(requests) => {
                 let (responses, rpcs) = timeout(
                     max_time,
-                    self.proxy_web3_rpc_requests(&authorization, requests, proxy_mode),
+                    self.proxy_web3_rpc_requests(&authorization, requests),
                 )
                 .await??;
 
@@ -970,7 +1004,6 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         requests: Vec<JsonRpcRequest>,
-        proxy_mode: ProxyMode,
     ) -> Result<(Vec<JsonRpcForwardedResponse>, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
@@ -990,12 +1023,7 @@ impl Web3ProxyApp {
             requests
                 .into_iter()
                 .map(|request| {
-                    self.proxy_cached_request(
-                        authorization,
-                        request,
-                        proxy_mode,
-                        Some(head_block_num),
-                    )
+                    self.proxy_cached_request(authorization, request, Some(head_block_num))
                 })
                 .collect::<Vec<_>>(),
         )
@@ -1004,16 +1032,22 @@ impl Web3ProxyApp {
         // TODO: i'm sure this could be done better with iterators
         // TODO: stream the response?
         let mut collected: Vec<JsonRpcForwardedResponse> = Vec::with_capacity(num_requests);
-        let mut collected_rpcs: HashSet<Arc<Web3Rpc>> = HashSet::new();
+        let mut collected_rpc_names: HashSet<String> = HashSet::new();
+        let mut collected_rpcs: Vec<Arc<Web3Rpc>> = vec![];
         for response in responses {
             // TODO: any way to attach the tried rpcs to the error? it is likely helpful
             let (response, rpcs) = response?;
 
             collected.push(response);
-            collected_rpcs.extend(rpcs.into_iter());
+            collected_rpcs.extend(rpcs.into_iter().filter(|x| {
+                if collected_rpc_names.contains(&x.name) {
+                    false
+                } else {
+                    collected_rpc_names.insert(x.name.clone());
+                    true
+                }
+            }));
         }
-
-        let collected_rpcs: Vec<_> = collected_rpcs.into_iter().collect();
 
         Ok((collected, collected_rpcs))
     }
@@ -1044,12 +1078,69 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
-        proxy_mode: ProxyMode,
         head_block_num: Option<U64>,
     ) -> Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // trace!("Received request: {:?}", request);
 
         let request_metadata = Arc::new(RequestMetadata::new(REQUEST_PERIOD, request.num_bytes())?);
+
+        let mut kafka_stuff = None;
+        if let Some(kafka_producer) = self.kafka_producer.clone() {
+            let kafka_topic = "proxy_cached_request".to_string();
+
+            let rpc_secret_key_id = authorization
+                .checks
+                .rpc_secret_key_id
+                .map(|x| x.get())
+                .unwrap_or_default();
+
+            let kafka_key = rmp_serde::to_vec(&rpc_secret_key_id)?;
+
+            let request_bytes = rmp_serde::to_vec(&request)?;
+
+            let request_hash = Some(keccak256(&request_bytes));
+
+            let chain_id = self.config.chain_id;
+
+            // another item is added with the response, so initial_capacity is +1 what is needed here
+            let kafka_headers = OwnedHeaders::new_with_capacity(4)
+                .insert(Header {
+                    key: "request_hash",
+                    value: request_hash.as_ref(),
+                })
+                .insert(Header {
+                    key: "head_block_num",
+                    value: head_block_num.map(|x| x.to_string()).as_ref(),
+                })
+                .insert(Header {
+                    key: "chain_id",
+                    value: Some(&chain_id.to_le_bytes()),
+                });
+
+            // save the key and headers for when we log the response
+            kafka_stuff = Some((
+                kafka_topic.clone(),
+                kafka_key.clone(),
+                kafka_headers.clone(),
+            ));
+
+            let f = async move {
+                let produce_future = kafka_producer.send(
+                    FutureRecord::to(&kafka_topic)
+                        .key(&kafka_key)
+                        .payload(&request_bytes)
+                        .headers(kafka_headers),
+                    Duration::from_secs(0),
+                );
+
+                if let Err((err, msg)) = produce_future.await {
+                    error!("produce kafka request log: {}. {:#?}", err, msg);
+                    // TODO: re-queue the msg?
+                }
+            };
+
+            tokio::spawn(f);
+        }
 
         // save the id so we can attach it to the response
         // TODO: instead of cloning, take the id out?
@@ -1188,7 +1279,6 @@ impl Web3ProxyApp {
                 let mut response = self
                     .balanced_rpcs
                     .try_proxy_connection(
-                        proxy_mode,
                         authorization,
                         request,
                         Some(&request_metadata),
@@ -1235,9 +1325,9 @@ impl Web3ProxyApp {
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => {
                 // TODO: how should we handle private_mode here?
-                let default_num = match proxy_mode {
+                let default_num = match authorization.checks.proxy_mode {
                     // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
-                    ProxyMode::Best => Some(4),
+                    ProxyMode::Best | ProxyMode::Debug => Some(4),
                     ProxyMode::Fastest(0) => None,
                     // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
                     // TODO: what if we do 2 per tier? we want to blast the third party rpcs
@@ -1247,7 +1337,7 @@ impl Web3ProxyApp {
                 };
 
                 let (private_rpcs, num) = if let Some(private_rpcs) = self.private_rpcs.as_ref() {
-                    if authorization.checks.private_txs {
+                    if !private_rpcs.is_empty() && authorization.checks.private_txs {
                         // if we are sending the transaction privately, no matter the proxy_mode, we send to ALL private rpcs
                         (private_rpcs, None)
                     } else {
@@ -1265,12 +1355,13 @@ impl Web3ProxyApp {
                 // TODO: error/wait if no head block!
 
                 // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
+                // TODO: what lag should we allow?
                 let mut response = private_rpcs
                     .try_send_all_synced_connections(
                         authorization,
                         &request,
                         Some(request_metadata.clone()),
-                        Some(&head_block_num),
+                        Some(&head_block_num.saturating_sub(2.into())),
                         None,
                         Level::Trace,
                         num,
@@ -1559,6 +1650,7 @@ impl Web3ProxyApp {
                         })
                     }
                 };
+                trace!("cache_key: {:#?}", cache_key);
 
                 let mut response = {
                     let request_metadata = request_metadata.clone();
@@ -1575,7 +1667,6 @@ impl Web3ProxyApp {
                                 let mut response = self
                                     .balanced_rpcs
                                     .try_proxy_connection(
-                                        proxy_mode,
                                         &authorization,
                                         request,
                                         Some(&request_metadata),
@@ -1604,7 +1695,6 @@ impl Web3ProxyApp {
                     } else {
                         self.balanced_rpcs
                             .try_proxy_connection(
-                                proxy_mode,
                                 &authorization,
                                 request,
                                 Some(&request_metadata),
@@ -1657,6 +1747,32 @@ impl Web3ProxyApp {
                 .send_async(response_stat.into())
                 .await
                 .context("stat_sender sending response stat")?;
+        }
+
+        if let Some((kafka_topic, kafka_key, kafka_headers)) = kafka_stuff {
+            let kafka_producer = self
+                .kafka_producer
+                .clone()
+                .expect("if headers are set, producer must exist");
+
+            let response_bytes =
+                rmp_serde::to_vec(&response).context("failed msgpack serialize response")?;
+
+            let f = async move {
+                let produce_future = kafka_producer.send(
+                    FutureRecord::to(&kafka_topic)
+                        .key(&kafka_key)
+                        .payload(&response_bytes)
+                        .headers(kafka_headers),
+                    Duration::from_secs(0),
+                );
+
+                if let Err((err, msg)) = produce_future.await {
+                    error!("produce kafka request log: {}. {:#?}", err, msg);
+                }
+            };
+
+            tokio::spawn(f);
         }
 
         Ok((response, rpcs))

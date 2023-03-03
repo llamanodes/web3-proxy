@@ -1,15 +1,15 @@
 use argh::FromArgs;
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// Second subcommand.
-#[argh(subcommand, name = "two")]
-pub struct SubCommandTwo {
+/// An example subcommand. Copy paste this into a new file.
+#[argh(subcommand, name = "example")]
+pub struct ExampleSubcommand {
     #[argh(switch)]
     /// whether to fooey
     fooey: bool,
 }
 
-impl SubCommandTwo {
+impl ExampleSubcommand {
     pub async fn main(self) -> anyhow::Result<()> {
         todo!()
     }

@@ -28,11 +28,12 @@ pub enum FrontendErrorResponse {
     BadRequest(String),
     SemaphoreAcquireError(AcquireError),
     Database(DbErr),
-    HeadersError(headers::Error),
+    Headers(headers::Error),
     HeaderToString(ToStrError),
     InvalidHeaderValue(InvalidHeaderValue),
     IpAddrParse(AddrParseError),
     JoinError(JoinError),
+    MsgPackEncode(rmp_serde::encode::Error),
     NotFound,
     RateLimited(Authorization, Option<Instant>),
     Redis(RedisError),
@@ -40,7 +41,7 @@ pub enum FrontendErrorResponse {
     StatusCode(StatusCode, String, Option<anyhow::Error>),
     /// TODO: what should be attached to the timout?
     Timeout(tokio::time::error::Elapsed),
-    UlidDecodeError(ulid::DecodeError),
+    UlidDecode(ulid::DecodeError),
     UnknownKey,
 }
 
@@ -94,7 +95,7 @@ impl FrontendErrorResponse {
                     ),
                 )
             }
-            Self::HeadersError(err) => {
+            Self::Headers(err) => {
                 warn!("HeadersError {:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
@@ -142,6 +143,17 @@ impl FrontendErrorResponse {
                         // TODO: different messages, too?
                         "Unable to complete request",
                         Some(code.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::MsgPackEncode(err) => {
+                debug!("MsgPackEncode Error: {}", err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        &format!("msgpack encode error: {}", err),
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
                         None,
                     ),
                 )
@@ -247,7 +259,7 @@ impl FrontendErrorResponse {
                     ),
                 )
             }
-            Self::UlidDecodeError(err) => {
+            Self::UlidDecode(err) => {
                 // trace!(?err, "UlidDecodeError");
                 (
                     StatusCode::BAD_REQUEST,

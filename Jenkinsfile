@@ -99,19 +99,6 @@ pipeline {
                         }
                     }
                 }
-                stage('Build and push arm64_graviton1 image') {
-                    agent {
-                        label 'arm64_graviton1'
-                    }
-                    environment {
-                        ARCH="arm64_graviton1"
-                    }
-                    steps {
-                        script {
-                            buildAndPush()
-                        }
-                    }
-                }
                 stage('Build and push arm64_graviton2 image') {
                     agent {
                         label 'arm64_graviton2'
@@ -137,37 +124,6 @@ pipeline {
                             buildAndPush()
                         }
                     }
-                }
-            }
-
-        }
-        stage('create (experimental) manifest') {
-            agent any
-            steps {
-                script {
-                    sh '''#!/bin/bash
-                        set -eux -o pipefail
-
-                        [ -n "$BRANCH_NAME" ]
-                        [ -n "$GIT_SHORT" ]
-                        [ -n "$LATEST_BRANCH" ]
-                        [ -n "$REGISTRY" ]
-
-                        function manifest {
-                            repo=$1
-
-                            docker manifest create "${repo}" --amend "${repo}_arm64_graviton2" --amend "${repo}_amd64_epyc2" --amend "${repo}_intel_xeon3"
-
-                            docker manifest push --purge "${repo}"
-                        }
-
-                        manifest "${REGISTRY}:git_${GIT_SHORT}"
-                        manifest "${REGISTRY}:branch_${BRANCH_NAME}"
-
-                        if [ "${BRANCH_NAME}" = "${LATEST_BRANCH}" ]; then
-                            manifest "${REGISTRY}:latest"
-                        fi
-                    '''
                 }
             }
         }

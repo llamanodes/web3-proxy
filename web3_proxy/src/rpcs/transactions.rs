@@ -82,7 +82,7 @@ impl Web3Rpcs {
         }
 
         // trace!(?pending_tx_id, "checking pending_transactions on {}", rpc);
-        if self.pending_transactions.contains_key(&pending_tx_id) {
+        if self.pending_transaction_cache.contains_key(&pending_tx_id) {
             // this transaction has already been processed
             return Ok(());
         }

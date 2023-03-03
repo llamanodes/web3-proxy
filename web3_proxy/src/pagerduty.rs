@@ -124,7 +124,7 @@ pub fn pagerduty_alert_for_config<T: Serialize>(
 ) -> AlertTrigger<T> {
     let chain_id = top_config.app.chain_id;
 
-    let client_url = top_config.app.redirect_public_url.clone();
+    let client_url = top_config.app.redirect_public_url;
 
     pagerduty_alert(
         Some(chain_id),
@@ -140,6 +140,7 @@ pub fn pagerduty_alert_for_config<T: Serialize>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn pagerduty_alert<T: Serialize>(
     chain_id: Option<u64>,
     class: Option<String>,
@@ -186,6 +187,6 @@ pub fn pagerduty_alert<T: Serialize>(
         images: None,
         links: None,
         client: Some(client),
-        client_url: client_url,
+        client_url,
     }
 }

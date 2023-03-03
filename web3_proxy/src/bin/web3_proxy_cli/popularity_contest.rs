@@ -1,7 +1,8 @@
-use std::collections::BTreeMap;
+use std::{cmp::Reverse, collections::BTreeMap, str::FromStr};
 
 // show what nodes are used most often
 use argh::FromArgs;
+use ethers::types::U64;
 use log::trace;
 use prettytable::{row, Table};
 
@@ -21,7 +22,10 @@ struct BackendRpcData<'a> {
     // tier: u64,
     // backup: bool,
     // block_data_limit: u64,
+    head_block: u64,
     requests: u64,
+    head_latency: f64,
+    request_latency: f64,
 }
 
 impl PopularityContestSubCommand {
@@ -46,6 +50,7 @@ impl PopularityContestSubCommand {
         let mut by_tier = BTreeMap::<u64, Vec<_>>::new();
         let mut tier_requests = BTreeMap::<u64, u64>::new();
         let mut total_requests = 0;
+        let mut highest_block = 0;
 
         for conn in conns {
             let conn = conn.as_object().unwrap();
@@ -55,10 +60,6 @@ impl PopularityContestSubCommand {
                 .unwrap_or_else(|| conn.get("name").unwrap())
                 .as_str()
                 .unwrap();
-
-            if name.ends_with("http") {
-                continue;
-            }
 
             let tier = conn.get("tier").unwrap().as_u64().unwrap();
 
@@ -72,12 +73,33 @@ impl PopularityContestSubCommand {
 
             let requests = conn.get("total_requests").unwrap().as_u64().unwrap();
 
+            let head_block = conn
+                .get("head_block")
+                .and_then(|x| x.get("block"))
+                .and_then(|x| x.get("number"))
+                .and_then(|x| U64::from_str(x.as_str().unwrap()).ok())
+                .map(|x| x.as_u64())
+                .unwrap_or_default();
+
+            highest_block = highest_block.max(head_block);
+
+            let head_latency = conn.get("head_latency").unwrap().as_f64().unwrap();
+
+            let request_latency = conn
+                .get("request_latency")
+                .unwrap_or(&serde_json::Value::Null)
+                .as_f64()
+                .unwrap_or_default();
+
             let rpc_data = BackendRpcData {
                 name,
                 // tier,
                 // backup,
                 // block_data_limit,
                 requests,
+                head_block,
+                head_latency,
+                request_latency,
             };
 
             total_requests += rpc_data.requests;
@@ -97,13 +119,18 @@ impl PopularityContestSubCommand {
             "tier",
             "rpc_requests",
             "tier_request_pct",
-            "total_pct"
+            "total_pct",
+            "head_lag",
+            "head_latency",
+            "request_latency",
         ]);
 
         let total_requests = total_requests as f32;
 
-        for (tier, rpcs) in by_tier.iter() {
+        for (tier, rpcs) in by_tier.iter_mut() {
             let t = (*tier_requests.get(tier).unwrap()) as f32;
+
+            rpcs.sort_by_cached_key(|x| Reverse(x.requests));
 
             for rpc in rpcs.iter() {
                 let tier_request_pct = if t == 0.0 {
@@ -123,7 +150,10 @@ impl PopularityContestSubCommand {
                     tier,
                     rpc.requests,
                     tier_request_pct,
-                    total_request_pct
+                    total_request_pct,
+                    highest_block - rpc.head_block,
+                    format!("{:.3}", rpc.head_latency),
+                    format!("{:.3}", rpc.request_latency),
                 ]);
             }
         }

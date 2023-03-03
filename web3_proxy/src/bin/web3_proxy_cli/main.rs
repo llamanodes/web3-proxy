@@ -1,4 +1,5 @@
 mod change_user_address;
+mod change_user_admin_status;
 mod change_user_tier;
 mod change_user_tier_by_address;
 mod change_user_tier_by_key;
@@ -6,12 +7,13 @@ mod check_config;
 mod count_users;
 mod create_key;
 mod create_user;
-mod daemon;
 mod drop_migration_lock;
 mod list_user_tier;
 mod pagerduty;
 mod popularity_contest;
+mod proxyd;
 mod rpc_accounting;
+mod search_kafka;
 mod sentryd;
 mod transfer_key;
 mod user_export;
@@ -36,11 +38,7 @@ use web3_proxy::{
 };
 
 #[cfg(feature = "deadlock")]
-use parking_lot::deadlock;
-#[cfg(feature = "deadlock")]
-use std::thread;
-#[cfg(feature = "deadlock")]
-use tokio::time::Duration;
+use {parking_lot::deadlock, std::thread, tokio::time::Duration};
 
 #[derive(Debug, FromArgs)]
 /// Command line interface for admins to interact with web3_proxy
@@ -70,6 +68,7 @@ pub struct Web3ProxyCli {
 #[argh(subcommand)]
 enum SubCommand {
     ChangeUserAddress(change_user_address::ChangeUserAddressSubCommand),
+    ChangeUserAdminStatus(change_user_admin_status::ChangeUserAdminStatusSubCommand),
     ChangeUserTier(change_user_tier::ChangeUserTierSubCommand),
     ChangeUserTierByAddress(change_user_tier_by_address::ChangeUserTierByAddressSubCommand),
     ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeySubCommand),
@@ -80,8 +79,9 @@ enum SubCommand {
     DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
     Pagerduty(pagerduty::PagerdutySubCommand),
     PopularityContest(popularity_contest::PopularityContestSubCommand),
-    Proxyd(daemon::ProxydSubCommand),
+    Proxyd(proxyd::ProxydSubCommand),
     RpcAccounting(rpc_accounting::RpcAccountingSubCommand),
+    SearchKafka(search_kafka::SearchKafkaSubCommand),
     Sentryd(sentryd::SentrydSubCommand),
     TransferKey(transfer_key::TransferKeySubCommand),
     UserExport(user_export::UserExportSubCommand),
@@ -92,6 +92,9 @@ enum SubCommand {
 }
 
 fn main() -> anyhow::Result<()> {
+    // this probably won't matter for us in docker, but better safe than sorry
+    fdlimit::raise_fd_limit();
+
     #[cfg(feature = "deadlock")]
     {
         // spawn a thread for deadlock detection
@@ -142,9 +145,6 @@ fn main() -> anyhow::Result<()> {
         .join(","),
     };
 
-    // this probably won't matter for us in docker, but better safe than sorry
-    fdlimit::raise_fd_limit();
-
     let mut cli_config: Web3ProxyCli = argh::from_env();
 
     if cli_config.config.is_none() && cli_config.db_url.is_none() && cli_config.sentry_url.is_none()
@@ -154,12 +154,13 @@ fn main() -> anyhow::Result<()> {
         cli_config.config = Some("./config/development.toml".to_string());
     }
 
-    let top_config = if let Some(top_config_path) = cli_config.config.clone() {
+    let (top_config, top_config_path) = if let Some(top_config_path) = cli_config.config.clone() {
         let top_config_path = Path::new(&top_config_path)
             .canonicalize()
             .context(format!("checking for config at {}", top_config_path))?;
 
-        let top_config: String = fs::read_to_string(top_config_path)?;
+        let top_config: String = fs::read_to_string(top_config_path.clone())?;
+
         let mut top_config: TopConfig = toml::from_str(&top_config)?;
 
         // TODO: this doesn't seem to do anything
@@ -184,9 +185,9 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        Some(top_config)
+        (Some(top_config), Some(top_config_path))
     } else {
-        None
+        (None, None)
     };
 
     let logger = env_logger::builder().parse_filters(&rust_log).build();
@@ -286,6 +287,15 @@ fn main() -> anyhow::Result<()> {
 
                 x.main(&db_conn).await
             }
+            SubCommand::ChangeUserAdminStatus(x) => {
+                let db_url = cli_config
+                    .db_url
+                    .expect("'--config' (with a db) or '--db-url' is required to run change_user_admin_status");
+
+                let db_conn = get_db(db_url, 1, 1).await?;
+
+                x.main(&db_conn).await
+            }
             SubCommand::ChangeUserTier(x) => {
                 let db_url = cli_config
                     .db_url
@@ -298,7 +308,7 @@ fn main() -> anyhow::Result<()> {
             SubCommand::ChangeUserTierByAddress(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+                    .expect("'--config' (with a db) or '--db-url' is required to run change_user_admin_status");
 
                 let db_conn = get_db(db_url, 1, 1).await?;
 
@@ -343,8 +353,10 @@ fn main() -> anyhow::Result<()> {
             }
             SubCommand::Proxyd(x) => {
                 let top_config = top_config.expect("--config is required to run proxyd");
+                let top_config_path =
+                    top_config_path.expect("path must be set if top_config exists");
 
-                x.main(top_config, num_workers).await
+                x.main(top_config, top_config_path, num_workers).await
             }
             SubCommand::DropMigrationLock(x) => {
                 let db_url = cli_config
@@ -364,6 +376,9 @@ fn main() -> anyhow::Result<()> {
                 x.main(pagerduty_async, top_config).await
             }
             SubCommand::PopularityContest(x) => x.main().await,
+            SubCommand::SearchKafka(x) => {
+                x.main(top_config.unwrap()).await
+            },
             SubCommand::Sentryd(x) => {
                 if cli_config.sentry_url.is_none() {
                     warn!("sentry_url is not set! Logs will only show in this console");

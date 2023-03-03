@@ -1,5 +1,5 @@
 ///! Rate-limited communication with a web3 provider.
-use super::blockchain::{ArcBlock, BlockHashesCache, Web3ProxyBlock};
+use super::blockchain::{ArcBlock, BlocksByHashCache, Web3ProxyBlock};
 use super::provider::Web3Provider;
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
@@ -22,7 +22,7 @@ use serde_json::json;
 use std::cmp::min;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{self, AtomicU64, AtomicUsize};
+use std::sync::atomic::{self, AtomicBool, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use thread_fast_rng::rand::Rng;
 use thread_fast_rng::thread_fast_rng;
@@ -105,7 +105,7 @@ pub struct Web3Rpc {
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
     /// this provider is only used for new heads subscriptions
-    /// TODO: put the provider inside an arc?
+    /// TODO: watch channel instead of a lock
     pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// keep track of hard limits
     pub(super) hard_limit_until: Option<watch::Sender<Instant>>,
@@ -117,7 +117,7 @@ pub struct Web3Rpc {
     /// use web3 queries to find the block data limit for archive/pruned nodes
     pub(super) automatic_block_limit: bool,
     /// only use this rpc if everything else is lagging too far. this allows us to ignore fast but very low limit rpcs
-    pub(super) backup: bool,
+    pub backup: bool,
     /// TODO: have an enum for this so that "no limit" prints pretty?
     pub(super) block_data_limit: AtomicU64,
     /// Lower tiers are higher priority when sending requests
@@ -133,6 +133,10 @@ pub struct Web3Rpc {
     /// TODO: maybe move this to graphana
     pub(super) total_requests: AtomicUsize,
     pub(super) active_requests: AtomicUsize,
+    pub(super) reconnect: AtomicBool,
+    /// this is only inside an Option so that the "Default" derive works. it will always be set.
+    pub(super) disconnect_watch: Option<watch::Sender<bool>>,
+    pub(super) created_at: Option<Instant>,
 }
 
 impl Web3Rpc {
@@ -151,11 +155,13 @@ impl Web3Rpc {
         redis_pool: Option<RedisPool>,
         // TODO: think more about soft limit. watching ewma of requests is probably better. but what should the random sort be on? maybe group on tier is enough
         // soft_limit: u32,
-        block_map: BlockHashesCache,
+        block_map: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
     ) -> anyhow::Result<(Arc<Web3Rpc>, AnyhowJoinHandle<()>)> {
+        let created_at = Instant::now();
+
         let hard_limit = match (config.hard_limit, redis_pool) {
             (None, None) => None,
             (Some(hard_limit), Some(redis_pool)) => {
@@ -217,6 +223,9 @@ impl Web3Rpc {
             }
         }
 
+        let (disconnect_sender, disconnect_receiver) = watch::channel(false);
+        let reconnect = reconnect.into();
+
         let new_connection = Self {
             name,
             db_conn: db_conn.clone(),
@@ -230,7 +239,10 @@ impl Web3Rpc {
             automatic_block_limit,
             backup,
             block_data_limit,
+            reconnect,
             tier: config.tier,
+            disconnect_watch: Some(disconnect_sender),
+            created_at: Some(created_at),
             ..Default::default()
         };
 
@@ -249,8 +261,8 @@ impl Web3Rpc {
                         block_map,
                         block_sender,
                         chain_id,
+                        disconnect_receiver,
                         http_interval_sender,
-                        reconnect,
                         tx_id_sender,
                     )
                     .await
@@ -558,11 +570,31 @@ impl Web3Rpc {
             drop(unlocked_provider);
 
             info!("successfully connected to {}", self);
-        } else {
-            if self.provider.read().await.is_none() {
-                return Err(anyhow!("failed waiting for client"));
-            }
+        } else if self.provider.read().await.is_none() {
+            return Err(anyhow!("failed waiting for client"));
         };
+
+        Ok(())
+    }
+
+    pub async fn disconnect(&self) -> anyhow::Result<()> {
+        let age = self.created_at.unwrap().elapsed().as_secs();
+
+        info!("disconnecting {} ({}s old)", self, age);
+
+        self.reconnect.store(false, atomic::Ordering::Release);
+
+        if let Err(err) = self.disconnect_watch.as_ref().unwrap().send(true) {
+            warn!("failed sending disconnect watch: {:?}", err);
+        };
+
+        trace!("disconnecting (locking) {} ({}s old)", self, age);
+
+        let mut provider = self.provider.write().await;
+
+        trace!("disconnecting (clearing provider) {} ({}s old)", self, age);
+
+        *provider = None;
 
         Ok(())
     }
@@ -571,7 +603,7 @@ impl Web3Rpc {
         self: &Arc<Self>,
         new_head_block: Result<Option<ArcBlock>, ProviderError>,
         block_sender: &flume::Sender<BlockAndRpc>,
-        block_map: BlockHashesCache,
+        block_map: BlocksByHashCache,
     ) -> anyhow::Result<()> {
         let new_head_block = match new_head_block {
             Ok(None) => {
@@ -582,7 +614,10 @@ impl Web3Rpc {
                         // we previously sent a None. return early
                         return Ok(());
                     }
-                    warn!("clearing head block on {}!", self);
+
+                    let age = self.created_at.unwrap().elapsed().as_millis();
+
+                    debug!("clearing head block on {} ({}ms old)!", self, age);
 
                     *head_block = None;
                 }
@@ -590,7 +625,8 @@ impl Web3Rpc {
                 None
             }
             Ok(Some(new_head_block)) => {
-                let new_head_block = Web3ProxyBlock::try_new(new_head_block).unwrap();
+                let new_head_block = Web3ProxyBlock::try_new(new_head_block)
+                    .expect("blocks from newHeads subscriptions should also convert");
 
                 let new_hash = *new_head_block.hash();
 
@@ -604,7 +640,7 @@ impl Web3Rpc {
                 {
                     let mut head_block = self.head_block.write();
 
-                    let _ = head_block.insert(new_head_block.clone().into());
+                    let _ = head_block.insert(new_head_block.clone());
                 }
 
                 if self.block_data_limit() == U64::zero() {
@@ -641,6 +677,10 @@ impl Web3Rpc {
         Ok(())
     }
 
+    fn should_disconnect(&self) -> bool {
+        *self.disconnect_watch.as_ref().unwrap().borrow()
+    }
+
     /// subscribe to blocks and transactions with automatic reconnects
     /// This should only exit when the program is exiting.
     /// TODO: should more of these args be on self?
@@ -648,11 +688,11 @@ impl Web3Rpc {
     async fn subscribe(
         self: Arc<Self>,
         authorization: &Arc<Authorization>,
-        block_map: BlockHashesCache,
+        block_map: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         chain_id: u64,
+        disconnect_receiver: watch::Receiver<bool>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        reconnect: bool,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<()> {
         let revert_handler = if self.backup {
@@ -662,20 +702,19 @@ impl Web3Rpc {
         };
 
         loop {
-            let http_interval_receiver = http_interval_sender.as_ref().map(|x| x.subscribe());
-
             let mut futures = vec![];
 
+            let http_interval_receiver = http_interval_sender.as_ref().map(|x| x.subscribe());
+
             {
-                // health check
                 // TODO: move this into a proper function
                 let authorization = authorization.clone();
                 let block_sender = block_sender.clone();
-                let conn = self.clone();
+                let rpc = self.clone();
                 let (ready_tx, ready_rx) = oneshot::channel();
                 let f = async move {
                     // initial sleep to allow for the initial connection
-                    conn.retrying_connect(
+                    rpc.retrying_connect(
                         block_sender.as_ref(),
                         chain_id,
                         authorization.db_conn.as_ref(),
@@ -694,32 +733,38 @@ impl Web3Rpc {
                     let mut old_total_requests = 0;
                     let mut new_total_requests;
 
+                    // health check loop
                     loop {
+                        if rpc.should_disconnect() {
+                            break;
+                        }
+
                         sleep(Duration::from_secs(health_sleep_seconds)).await;
+
+                        trace!("health check on {}", rpc);
 
                         // TODO: what if we just happened to have this check line up with another restart?
                         // TODO: think more about this
-                        if let Some(client) = conn.provider.read().await.clone() {
+                        if let Some(client) = rpc.provider.read().await.clone() {
                             // health check as a way of keeping this rpc's request_ewma accurate
                             // TODO: do something different if this is a backup server?
 
-                            new_total_requests =
-                                conn.total_requests.load(atomic::Ordering::Relaxed);
+                            new_total_requests = rpc.total_requests.load(atomic::Ordering::Relaxed);
 
                             if new_total_requests - old_total_requests < 10 {
                                 // TODO: if this fails too many times, reset the connection
                                 // TODO: move this into a function and the chaining should be easier
-                                let head_block = conn.head_block.read().clone();
+                                let head_block = rpc.head_block.read().clone();
 
                                 if let Some((block_number, txid)) = head_block.and_then(|x| {
-                                    let block = x.block.clone();
+                                    let block = x.block;
 
                                     let block_number = block.number?;
                                     let txid = block.transactions.last().cloned()?;
 
                                     Some((block_number, txid))
                                 }) {
-                                    let to = conn
+                                    let to = rpc
                                         .wait_for_query::<_, Option<Transaction>>(
                                             "eth_getTransactionByHash",
                                             &(txid,),
@@ -743,21 +788,21 @@ impl Web3Rpc {
 
                                     let code = match to {
                                         Err(err) => {
-                                            if conn.backup {
+                                            if rpc.backup {
                                                 debug!(
                                                     "{} failed health check query! {:#?}",
-                                                    conn, err
+                                                    rpc, err
                                                 );
                                             } else {
                                                 warn!(
                                                     "{} failed health check query! {:#?}",
-                                                    conn, err
+                                                    rpc, err
                                                 );
                                             }
                                             continue;
                                         }
                                         Ok(to) => {
-                                            conn.wait_for_query::<_, Option<Bytes>>(
+                                            rpc.wait_for_query::<_, Option<Bytes>>(
                                                 "eth_getCode",
                                                 &(to, block_number),
                                                 revert_handler,
@@ -769,13 +814,10 @@ impl Web3Rpc {
                                     };
 
                                     if let Err(err) = code {
-                                        if conn.backup {
-                                            debug!(
-                                                "{} failed health check query! {:#?}",
-                                                conn, err
-                                            );
+                                        if rpc.backup {
+                                            debug!("{} failed health check query! {:#?}", rpc, err);
                                         } else {
-                                            warn!("{} failed health check query! {:#?}", conn, err);
+                                            warn!("{} failed health check query! {:#?}", rpc, err);
                                         }
                                         continue;
                                     }
@@ -785,6 +827,9 @@ impl Web3Rpc {
                             old_total_requests = new_total_requests;
                         }
                     }
+                    debug!("health checks for {} exited", rpc);
+
+                    Ok(())
                 };
 
                 futures.push(flatten_handle(tokio::spawn(f)));
@@ -818,7 +863,7 @@ impl Web3Rpc {
                     break;
                 }
                 Err(err) => {
-                    if reconnect {
+                    if self.reconnect.load(atomic::Ordering::Acquire) {
                         warn!("{} connection ended. err={:?}", self, err);
 
                         self.clone()
@@ -829,6 +874,9 @@ impl Web3Rpc {
                                 true,
                             )
                             .await?;
+                    } else if *disconnect_receiver.borrow() {
+                        info!("{} is disconnecting", self);
+                        break;
                     } else {
                         error!("{} subscription exited. err={:?}", self, err);
                         return Err(err);
@@ -848,14 +896,14 @@ impl Web3Rpc {
         authorization: Arc<Authorization>,
         http_interval_receiver: Option<broadcast::Receiver<()>>,
         block_sender: flume::Sender<BlockAndRpc>,
-        block_map: BlockHashesCache,
+        block_map: BlocksByHashCache,
     ) -> anyhow::Result<()> {
         trace!("watching new heads on {}", self);
 
-        let unlocked_provider = self.provider.read().await;
+        let provider = self.wait_for_provider().await;
 
-        match unlocked_provider.as_deref() {
-            Some(Web3Provider::Http(_client)) => {
+        match provider.as_ref() {
+            Web3Provider::Http(_client) => {
                 // there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
                 // TODO: try watch_blocks and fall back to this?
 
@@ -863,10 +911,11 @@ impl Web3Rpc {
 
                 let mut last_hash = H256::zero();
 
-                loop {
+                while !self.should_disconnect() {
                     // TODO: what should the max_wait be?
+                    // we do not pass unlocked_provider because we want to get a new one each call. otherwise we might re-use an old one
                     match self
-                        .wait_for_request_handle(&authorization, None, unlocked_provider.clone())
+                        .wait_for_request_handle(&authorization, None, None)
                         .await
                     {
                         Ok(active_request_handle) => {
@@ -949,10 +998,10 @@ impl Web3Rpc {
                     }
                 }
             }
-            Some(Web3Provider::Both(_, client)) | Some(Web3Provider::Ws(client)) => {
+            Web3Provider::Both(_, client) | Web3Provider::Ws(client) => {
                 // todo: move subscribe_blocks onto the request handle?
                 let active_request_handle = self
-                    .wait_for_request_handle(&authorization, None, unlocked_provider.clone())
+                    .wait_for_request_handle(&authorization, None, Some(provider.clone()))
                     .await;
                 let mut stream = client.subscribe_blocks().await?;
                 drop(active_request_handle);
@@ -963,13 +1012,13 @@ impl Web3Rpc {
                 // TODO: how does this get wrapped in an arc? does ethers handle that?
                 // TODO: do this part over http?
                 let block: Result<Option<ArcBlock>, _> = self
-                    .wait_for_request_handle(&authorization, None, unlocked_provider.clone())
+                    .wait_for_request_handle(&authorization, None, Some(provider.clone()))
                     .await?
                     .request(
                         "eth_getBlockByNumber",
                         &json!(("latest", false)),
                         Level::Warn.into(),
-                        unlocked_provider.clone(),
+                        Some(provider.clone()),
                     )
                     .await;
 
@@ -984,6 +1033,11 @@ impl Web3Rpc {
                     .await?;
 
                 while let Some(new_block) = stream.next().await {
+                    // TODO: select on disconnect_watch instead of waiting for a block to arrive
+                    if self.should_disconnect() {
+                        break;
+                    }
+
                     // TODO: check the new block's hash to be sure we don't send dupes
                     let new_hash = new_block
                         .hash
@@ -1004,19 +1058,19 @@ impl Web3Rpc {
                     .await?;
                 }
 
-                // clear the head block. this might not be needed, but it won't hurt
-                self.send_head_block_result(Ok(None), &block_sender, block_map)
-                    .await?;
-
                 // TODO: is this always an error?
                 // TODO: we probably don't want a warn and to return error
-                warn!("new_heads subscription to {} ended", self);
-                Err(anyhow::anyhow!("new_heads subscription ended"))
+                debug!("new_heads subscription to {} ended", self);
             }
-            None => todo!("what should happen now? wait for a connection?"),
             #[cfg(test)]
-            Some(Web3Provider::Mock) => unimplemented!(),
+            Web3Provider::Mock => unimplemented!(),
         }
+
+        // clear the head block. this might not be needed, but it won't hurt
+        self.send_head_block_result(Ok(None), &block_sender, block_map)
+            .await?;
+
+        Ok(())
     }
 
     /// Turn on the firehose of pending transactions
@@ -1027,25 +1081,19 @@ impl Web3Rpc {
     ) -> anyhow::Result<()> {
         // TODO: give this a separate client. don't use new_head_client for everything. especially a firehose this big
         // TODO: timeout
-        let provider = self.provider.read().await;
+        let provider = self.wait_for_provider().await;
 
         trace!("watching pending transactions on {}", self);
         // TODO: does this keep the lock open for too long?
-        match provider.as_deref() {
-            None => {
-                // TODO: wait for a provider
-                return Err(anyhow!("no provider"));
-            }
-            Some(Web3Provider::Http(provider)) => {
+        match provider.as_ref() {
+            Web3Provider::Http(provider) => {
                 // there is a "watch_pending_transactions" function, but a lot of public nodes do not support the necessary rpc endpoints
-                // TODO: maybe subscribe to self.head_block?
-                // TODO: this keeps a read lock guard open on provider_state forever. is that okay for an http client?
-                futures::future::pending::<()>().await;
+                self.wait_for_disconnect().await?;
             }
-            Some(Web3Provider::Both(_, client)) | Some(Web3Provider::Ws(client)) => {
+            Web3Provider::Both(_, client) | Web3Provider::Ws(client) => {
                 // TODO: maybe the subscribe_pending_txs function should be on the active_request_handle
                 let active_request_handle = self
-                    .wait_for_request_handle(&authorization, None, provider.clone())
+                    .wait_for_request_handle(&authorization, None, Some(provider.clone()))
                     .await?;
 
                 let mut stream = client.subscribe_pending_txs().await?;
@@ -1059,15 +1107,21 @@ impl Web3Rpc {
                         .context("tx_id_sender")?;
 
                     // TODO: periodically check for listeners. if no one is subscribed, unsubscribe and wait for a subscription
+
+                    // TODO: select on this instead of checking every loop
+                    if self.should_disconnect() {
+                        break;
+                    }
                 }
 
                 // TODO: is this always an error?
                 // TODO: we probably don't want a warn and to return error
-                warn!("pending_transactions subscription ended on {}", self);
-                return Err(anyhow::anyhow!("pending_transactions subscription ended"));
+                debug!("pending_transactions subscription ended on {}", self);
             }
             #[cfg(test)]
-            Some(Web3Provider::Mock) => futures::future::pending::<()>().await,
+            Web3Provider::Mock => {
+                self.wait_for_disconnect().await?;
+            }
         }
 
         Ok(())
@@ -1146,7 +1200,7 @@ impl Web3Rpc {
         }
 
         if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
-            let hard_limit_ready = hard_limit_until.borrow().clone();
+            let hard_limit_ready = *hard_limit_until.borrow();
 
             let now = Instant::now();
 
@@ -1178,7 +1232,7 @@ impl Web3Rpc {
                     }
 
                     if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
-                        hard_limit_until.send_replace(retry_at.clone());
+                        hard_limit_until.send_replace(retry_at);
                     }
 
                     return Ok(OpenRequestResult::RetryAt(retry_at));
@@ -1192,6 +1246,39 @@ impl Web3Rpc {
         let handle = OpenRequestHandle::new(authorization.clone(), self.clone()).await;
 
         Ok(OpenRequestResult::Handle(handle))
+    }
+
+    async fn wait_for_disconnect(&self) -> Result<(), tokio::sync::watch::error::RecvError> {
+        let mut disconnect_watch = self.disconnect_watch.as_ref().unwrap().subscribe();
+
+        loop {
+            if *disconnect_watch.borrow_and_update() {
+                // disconnect watch is set to "true"
+                return Ok(());
+            }
+
+            // wait for disconnect_watch to change
+            disconnect_watch.changed().await?;
+        }
+    }
+
+    async fn wait_for_provider(&self) -> Arc<Web3Provider> {
+        let mut provider = self.provider.read().await.clone();
+
+        let mut logged = false;
+        while provider.is_none() {
+            // trace!("waiting on unlocked_provider: locking...");
+            sleep(Duration::from_millis(100)).await;
+
+            if !logged {
+                debug!("waiting for provider on {}", self);
+                logged = true;
+            }
+
+            provider = self.provider.read().await.clone();
+        }
+
+        provider.unwrap()
     }
 
     pub async fn wait_for_query<P, R>(
@@ -1224,8 +1311,16 @@ impl fmt::Debug for Web3Provider {
 
 impl Hash for Web3Rpc {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // TODO: is this enough?
         self.name.hash(state);
+        self.display_name.hash(state);
+        self.http_url.hash(state);
+        self.ws_url.hash(state);
+        self.automatic_block_limit.hash(state);
+        self.backup.hash(state);
+        // TODO: including soft_limit might need to change if we change them to be dynamic
+        self.soft_limit.hash(state);
+        self.tier.hash(state);
+        self.created_at.hash(state);
     }
 }
 
@@ -1355,7 +1450,7 @@ mod tests {
 
         assert!(x.has_block_data(&0.into()));
         assert!(x.has_block_data(&1.into()));
-        assert!(x.has_block_data(&head_block.number()));
+        assert!(x.has_block_data(head_block.number()));
         assert!(!x.has_block_data(&(head_block.number() + 1)));
         assert!(!x.has_block_data(&(head_block.number() + 1000)));
     }
@@ -1394,7 +1489,7 @@ mod tests {
         assert!(!x.has_block_data(&1.into()));
         assert!(!x.has_block_data(&(head_block.number() - block_data_limit - 1)));
         assert!(x.has_block_data(&(head_block.number() - block_data_limit)));
-        assert!(x.has_block_data(&head_block.number()));
+        assert!(x.has_block_data(head_block.number()));
         assert!(!x.has_block_data(&(head_block.number() + 1)));
         assert!(!x.has_block_data(&(head_block.number() + 1000)));
     }

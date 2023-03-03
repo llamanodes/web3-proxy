@@ -1,5 +1,4 @@
 //! Handle registration, logins, and managing account data.
-
 use super::authorization::{login_is_authorized, RpcSecretKey};
 use super::errors::FrontendResult;
 use crate::app::Web3ProxyApp;
@@ -8,6 +7,7 @@ use crate::user_queries::{
     get_chain_id_from_params, get_query_start_from_params, query_user_stats, StatResponse,
 };
 use crate::user_token::UserBearerToken;
+use crate::{PostLogin, PostLoginQuery};
 use anyhow::Context;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::{
@@ -20,7 +20,7 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::sea_orm_active_enums::LogLevel;
-use entities::{login, pending_login, referral, revert_log, rpc_key, user, user_tier};
+use entities::{login, pending_login, revert_log, rpc_key, user};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
@@ -40,10 +40,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
-use entities::user::Relation::UserTier;
-use migration::extension::postgres::Type;
-use thread_fast_rng::rand;
-use crate::frontend::errors::FrontendErrorResponse;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
 ///
@@ -132,6 +128,7 @@ pub async fn user_login_get(
         nonce: sea_orm::Set(uuid),
         message: sea_orm::Set(message.to_string()),
         expires_at: sea_orm::Set(expires_at),
+        imitating_user: sea_orm::Set(None),
     };
 
     user_pending_login
@@ -156,24 +153,6 @@ pub async fn user_login_get(
     };
 
     Ok(message.into_response())
-}
-
-/// Query params for our `post_login` handler.
-#[derive(Debug, Deserialize)]
-pub struct PostLoginQuery {
-    /// While we are in alpha/beta, we require users to supply an invite code.
-    /// The invite code (if any) is set in the application's config.
-    /// This may eventually provide some sort of referral bonus.
-    pub invite_code: Option<String>,
-}
-
-/// JSON body to our `post_login` handler.
-/// Currently only siwe logins that send an address, msg, and sig are allowed.
-/// Email/password and other login methods are planned.
-#[derive(Debug, Deserialize)]
-pub struct PostLogin {
-    sig: String,
-    msg: String,
 }
 
 /// `POST /user/login` - Register or login by posting a signed "siwe" message.
@@ -369,6 +348,7 @@ pub async fn user_login_post(
         bearer_token: sea_orm::Set(user_bearer_token.uuid()),
         user_id: sea_orm::Set(u.id),
         expires_at: sea_orm::Set(expires_at),
+        read_only: sea_orm::Set(false),
     };
 
     user_login
@@ -755,86 +735,6 @@ pub async fn rpc_keys_management(
 
     Ok(Json(uk).into_response())
 }
-
-/// the JSON input to the `referral_link` handler
-#[debug_handle]
-pub async fn user_referral_link_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-    Query(params): Query<HashMap<String, String>>,
-) -> FrontendResult {
-
-    // First get the bearer token and check if the user is logged in
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
-
-    let db_replica = app
-        .db_replica()
-        .context("getting replica db for user's revert logs")?;
-
-    // Second, check if the user is a premium user
-    let user_tier: UserTier = user_tier::Entity::find()
-        .filter(user_tier::Column::UserId.eq(user.id))
-        .one(db_replica.conn())
-        .await?
-        .ok_or(
-            FrontendErrorResponse::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Could not find user in db although bearer token is there!".to_string(),
-                None,
-            )
-        )?;
-
-    // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
-    if user_tier.title != "Premium" {
-        return Err(anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into());
-    }
-
-    // Then get the referral token
-    let user_referral: Option<Referral> = refferal::Entity::find()
-        .filter(refferal::Column::UserId.eq(user.id))
-        .one(db_replica.conn())
-        .await?;
-
-    let (referral_code, status_code) = match user_referral {
-        Some(x) => (x.referral_code, StatusCode::OK),
-        None => {
-
-            // Connect to the database for mutable write
-            let db_conn = app
-                .db_conn()?;
-
-            let rand_string = rand::thread_rng()
-                .gen_ascii_chars()
-                .take(32)
-                .collect::<String>();
-            let referral_code = fmt!("llamanodes-{}", rand_string);
-
-            let txn = db_conn.begin().await?;
-
-            // Create a new referral code
-            let referral_entry = referral::ActiveModel {
-                referral_code: referral_code,
-                used_referral_code: None,
-                user_id: user.id,
-                ..Default::default()
-            };
-            referral_entry.insert(&txn).await?;
-            txn.commit().await?;
-            (referral_code, StatusCode::CREATED)
-        }
-    };
-
-    let response_json = json!({
-        "referral_code": referral_code,
-        "bearer_token": user_bearer_token,
-        "user": user,
-    });
-
-    let response = (status_code, Json(response_json)).into_response();
-    Ok(response)
-
-}
-
 
 /// `GET /user/revert_logs` -- Use a bearer token to get the user's revert logs.
 #[debug_handler]

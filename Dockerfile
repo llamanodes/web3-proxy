@@ -3,7 +3,7 @@
 # We only pay the installation cost once, 
 # it will be cached from the second build onwards
 #
-FROM rust:1-bullseye AS builder
+FROM rust:1.67.1-bullseye AS builder
 
 WORKDIR /app
 ENV CARGO_TERM_COLOR always
@@ -14,8 +14,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install cargo-nextest
 
 # foundry is needed to run tests
+# TODO: do this in a seperate FROM and COPY it in
 ENV PATH /root/.foundry/bin:$PATH
 RUN curl -L https://foundry.paradigm.xyz | bash && foundryup
+
+RUN apt-get update && apt-get install --yes librdkafka-dev && rm -rf /var/lib/apt/lists/*
 
 # copy the application
 COPY . .
@@ -29,7 +32,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # using a "release" profile (which install does) is **very** important
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
-    cargo install --locked --no-default-features --profile faster_release --root /opt/bin --path ./web3_proxy
+    cargo install \
+    --locked \
+    --no-default-features \
+    --profile faster_release \
+    --root /opt/bin \
+    --path ./web3_proxy
 
 #
 # We do not need the Rust toolchain to run the binary!

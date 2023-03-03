@@ -1,5 +1,5 @@
 use crate::app::AnyhowJoinHandle;
-use crate::rpcs::blockchain::{BlockHashesCache, Web3ProxyBlock};
+use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
 use ethers::prelude::TxHash;
@@ -38,7 +38,7 @@ pub struct CliConfig {
     pub cookie_key_filename: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct TopConfig {
     pub app: AppConfig,
     pub balanced_rpcs: HashMap<String, Web3RpcConfig>,
@@ -51,7 +51,7 @@ pub struct TopConfig {
 
 /// shared configuration between Web3Rpcs
 // TODO: no String, only &str
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct AppConfig {
     /// Request limit for allowed origins for anonymous users.
     /// These requests get rate limited by IP.
@@ -103,6 +103,12 @@ pub struct AppConfig {
     /// Restrict user registration.
     /// None = no code needed
     pub invite_code: Option<String>,
+
+    /// Optional kafka brokers
+    /// Used by /debug/:rpc_key urls for logging requests and responses. No other endpoints log request/response data.
+    pub kafka_urls: Option<String>,
+
+    /// domain in sign-in-with-ethereum messages
     pub login_domain: Option<String>,
 
     /// do not serve any requests if the best known block is older than this many seconds.
@@ -203,7 +209,7 @@ fn default_response_cache_max_bytes() -> u64 {
 }
 
 /// Configuration for a backend web3 RPC server
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct Web3RpcConfig {
     /// simple way to disable a connection without deleting the row
     #[serde(default)]
@@ -253,7 +259,7 @@ impl Web3RpcConfig {
         chain_id: u64,
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        block_map: BlockHashesCache,
+        blocks_by_hash_cache: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
         reconnect: bool,
@@ -270,7 +276,7 @@ impl Web3RpcConfig {
             http_client,
             http_interval_sender,
             redis_pool,
-            block_map,
+            blocks_by_hash_cache,
             block_sender,
             tx_id_sender,
             reconnect,

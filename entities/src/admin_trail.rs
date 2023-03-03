@@ -3,41 +3,35 @@
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "referral")]
+#[sea_orm(table_name = "admin_trail")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
-    #[sea_orm(unique)]
-    pub referral_code: String,
-    pub used_referral_code: Option<String>,
-    #[sea_orm(unique)]
-    pub user_id: u64,
+    pub caller: u64,
+    pub imitating_user: Option<u64>,
+    pub endpoint: String,
+    pub payload: String,
+    pub timestamp: DateTimeUtc,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "Entity",
-        from = "Column::UsedReferralCode",
-        to = "Column::ReferralCode",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    SelfRef,
-    #[sea_orm(
         belongs_to = "super::user::Entity",
-        from = "Column::UserId",
+        from = "Column::Caller",
         to = "super::user::Column::Id",
         on_update = "NoAction",
         on_delete = "NoAction"
     )]
-    User,
-}
-
-impl Related<super::user::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::User.def()
-    }
+    User2,
+    #[sea_orm(
+        belongs_to = "super::user::Entity",
+        from = "Column::ImitatingUser",
+        to = "super::user::Column::Id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    User1,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -335,9 +335,34 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] don't cache methods that are usually very large
 - [x] use http provider when available
 - [x] per-chain rpc rate limits
-- [-] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
+- [x] canonical block checks giving weird errors. change healthcheck to use block number
+    [2023-02-21T02:58:06Z DEBUG web3_proxy::rpcs::request] error response from blastapi! method=eth_getCode params=(0xa9a8760b8333efae8c9c751e6695a11938ae4b90, 0x73a627f588338804e6dc880154728484f7e0373c29057408c6674d75bdc29d12) err=JsonRpcClientError(JsonRpcError(JsonRpcError { code: -32603, message: "hash 73a627f588338804e6dc880154728484f7e0373c29057408c6674d75bdc29d12 is not currently canonical", data: None }))
+    [2023-02-21T02:58:06Z DEBUG web3_proxy::rpcs::one] blastapi failed health check query! Error {
+            context: "ProviderError from the backend",
+            source: JsonRpcClientError(
+                JsonRpcError(
+                    JsonRpcError {
+                        code: -32603,
+                        message: "hash 73a627f588338804e6dc880154728484f7e0373c29057408c6674d75bdc29d12 is not currently canonical",
+                        data: None,
+                    },
+                ),
+            ),
+        }
 - [x] add a "failover" tier that is only used if balanced_rpcs has "no servers synced"
   - use this tier (and private tier) to check timestamp on latest block. if we are behind that by more than a few seconds, something is wrong
+- [x] cli flag to set prometheus port
+- [x] eth_getLogs is going to unsynced nodes because it only checks start block and not the end block
+- [x] have multiple providers on each backend rpc. one websocket for newHeads. and then http providers for handling requests
+  - erigon only streams the JSON over HTTP. that code isn't enabled for websockets. so this should save memory on the erigon servers
+  - i think this also means we don't need to worry about changing the id that the user gives us.
+- [x] eth_getLogs is going to unsynced nodes because it only checks start block and not the end block
+- [x] fix caching getLogs with blockhash
+- [x] fix trying to send signed transactions to an empty list of private_rpcs
+- [x] improve logging around consensus head.
+  - it was "num in best synced tier"/num rpc connected/num rpc known.
+  - it should be "num with best head in best synced tier/num with best head in any tier/num rpcs connected/num rpcs known
+- [-] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
@@ -352,18 +377,23 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - create the app without applying any config to it
   - have a blocking future watching the config file and calling app.apply_config() on first load and on change
   - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
-- [ ] have multiple providers on each backend rpc. one websocket for newHeads. and then http providers for handling requests
-  - erigon only streams the JSON over HTTP. that code isn't enabled for websockets. so this should save memory on the erigon servers
-  - i think this also means we don't need to worry about changing the id that the user gives us.
-  - have the healthcheck get the block over http. if it errors, or doesn't match what the websocket says, something is wrong (likely a deadlock in the websocket code)
+- change if premium concurrency limit to be against ip+rpckey
+  - then sites like curve.fi don't have to worry about their user count
+  - it does mean we will have a harder time capacity planning from the number of keys
+- [ ] eth_getLogs is going to unsynced nodes when synced nodes are available. always prefer synced nodes
+- [ ] have the healthcheck get the block over http. if it errors, or doesn't match what the websocket says, something is wrong (likely a deadlock in the websocket code)
 - [ ] don't use new_head_provider anywhere except new head subscription
 - [ ] maybe we shouldn't route eth_getLogs to syncing nodes. serving queries slows down sync significantly
   - change the send_best function to only include servers that are at least close to fully synced
 - [ ] have private transactions be enabled by a url setting rather than a setting on the key
 - [ ] cli for adding rpc keys to an existing user
 - [ ] rate limiting/throttling on query_user_stats 
+- [ ] web3rpc configs should have a max_concurrent_requests
+    - will probably want a tool for calculating a safe value for this. too low and we could kill our performance
+- [ ] rename "concurrent" requests to "parallel" requests
 - [ ] minimum allowed query_start on query_user_stats
 - [ ] setting request limits to None is broken. it does maxu64 and then internal deferred rate limiter counts try to *99/100
+- [ ] if kafka fails to connect at the start, automatically reconnect
 - [ ] during shutdown, mark the proxy unhealthy and send unsubscribe responses for any open websocket subscriptions
 - [ ] some chains still use total_difficulty. have total_difficulty be used only if the chain needs it
   - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header
@@ -396,7 +426,6 @@ These are not yet ordered. There might be duplicates. We might not actually need
     - maybe sum available_requests grouped by archive/non-archive. only limit to non-archive if they have enough?
 - [ ] some places we call it "accounting" others a "stat". be consistent
 - [ ] cli commands to search users by key
-- [x] cli flag to set prometheus port
 - [ ] flamegraphs show 25% of the time to be in moka-housekeeper. tune that
 - [ ] config parsing is strict right now. this makes it hard to deploy on git push since configs need to change along with it
 - [ ] when displaying the user's data, they just see an opaque id for their tier. We should join that data
@@ -488,14 +517,36 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] relevant erigon changelogs: add pendingTransactionWithBody subscription method (#5675)
 - [ ] change_user_tier_by_key should not show the rpc key id. that way our ansible playbook won't expose it
 - [ ] make sure all our responses follow the spec: https://www.jsonrpc.org/specification#examples
-- [ ] min_sum_soft_limit should be automatic based on the apps average rps plus a buffer.
-  - if min_sum_soft_limit > max_sum_soft_limit, just wait for all? emit a warning
+- [ ] min_sum_soft_limit should be automatic based on the app's average rps plus a buffer.
+  - [ ] add a rate counter to the balanced_rpcs
+  - [ ] every time a block is found, update min_sum_soft_limit
+  - [ ] add a min_sum_soft_limit_safety
+      - keeps the automaticly calculated limit from going so high that we stop serving requests
+  - [ ] add a min_sum_soft_limit_max_wait that advances the consensus block even if mins not met yet
 - [ ] a script for load testing a server and calculating its hard and soft limits
+- [ ] use https://github.com/dherman/esprit or similar to parse https://github.com/DefiLlama/chainlist/blob/main/constants/extraRpcs.js
+- [ ] update example.toml
+    - might need to make changes so the influxdb stuff is optional. david said it stopped right after starting
+- [ ] i'm seeing a bunch of errors with eth_getLogs.
+    - i think maybe my block number rewriting is causing problems. but maybe its just a user doing bad queries
+- [ ] Use "is_fresh" instead of our atomic bool
+    - moka 0.10 - Add entry and entry_by_ref APIs to sync and future caches (#193):
+        They allow users to perform more complex operations on a cache entry. At this point, the following operations (methods) are provided:
+            or_default
+            or_insert
+            or_insert_with
+            or_insert_with_if
+            or_optionally_insert_with
+            or_try_insert_with
+        The above methods return Entry type, which provides is_fresh method to check if the value was freshly computed or already existed in the cache.
+- [ ] lag message always shows on first response
+    - http interval on blastapi lagging by 1!
 
 ## V2
 
 These are not ordered. I think some rows also accidently got deleted here. Check git history.
 
+- [ ] less Arc (and more pin?). we use arcs on a lot of things where i think a &self should work fine.
 - [ ] automatically tune database and redis connection pool size
 - [ ] if db is down, keep logins cached longer. at least only new logins will have trouble then
 - [ ] handle user payments
@@ -634,3 +685,9 @@ in another repo: event subscriber
 - [ ] have an upgrade tier that queries multiple backends at once. returns on first Ok result, collects errors. if no Ok, find the most common error and then respond with that
 - [ ] give public_recent_ips_salt a better, more general, name
 - [ ] include tier in the head block logs?
+- [ ] i think i use FuturesUnordered when a try_join_all might be better
+- [ ] since we are read-heavy on our configs, maybe we should use a cache
+  - "using a thread local storage and explicit types" https://docs.rs/arc-swap/latest/arc_swap/cache/struct.Cache.html
+- [ ] tests for config reloading
+- [ ] use pin instead of arc for a bunch of things?
+  - https://fasterthanli.me/articles/pin-and-suffering

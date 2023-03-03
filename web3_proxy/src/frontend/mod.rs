@@ -2,6 +2,7 @@
 //!
 //! Important reading about axum extractors: https://docs.rs/axum/latest/axum/extract/index.html#the-order-of-extractors
 
+pub mod admin;
 pub mod authorization;
 pub mod errors;
 // TODO: these are only public so docs are generated. What's a better way to do this?
@@ -66,6 +67,15 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
             "/rpc/:rpc_key",
             post(rpc_proxy_http::proxy_web3_rpc_with_key),
         )
+        // authenticated debug route with and without trailing slash
+        .route(
+            "/debug/:rpc_key/",
+            post(rpc_proxy_http::debug_proxy_web3_rpc_with_key),
+        )
+        .route(
+            "/debug/:rpc_key",
+            post(rpc_proxy_http::debug_proxy_web3_rpc_with_key),
+        )
         // public fastest with and without trailing slash
         .route("/fastest/", post(rpc_proxy_http::fastest_proxy_web3_rpc))
         .route("/fastest", post(rpc_proxy_http::fastest_proxy_web3_rpc))
@@ -105,7 +115,15 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
             "/rpc/:rpc_key",
             get(rpc_proxy_ws::websocket_handler_with_key),
         )
-        // public fastest with and without trailing slash
+        // debug with and without trailing slash
+        .route(
+            "/debug/:rpc_key/",
+            get(rpc_proxy_ws::websocket_handler_with_key),
+        )
+        .route(
+            "/debug/:rpc_key",
+            get(rpc_proxy_ws::websocket_handler_with_key),
+        ) // public fastest with and without trailing slash
         .route("/fastest/", get(rpc_proxy_ws::fastest_websocket_handler))
         .route("/fastest", get(rpc_proxy_ws::fastest_websocket_handler))
         // authenticated fastest with and without trailing slash
@@ -156,7 +174,6 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         .route("/user/keys", get(users::rpc_keys_get))
         .route("/user/keys", post(users::rpc_keys_management))
         .route("/user/keys", put(users::rpc_keys_management))
-        .route("/user/referral_link", get(users::user_referral_link_get))
         .route("/user/revert_logs", get(users::user_revert_logs_get))
         .route(
             "/user/stats/aggregate",
@@ -168,6 +185,17 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         )
         .route("/user/stats/detailed", get(users::user_stats_detailed_get))
         .route("/user/logout", post(users::user_logout_post))
+        .route("/admin/modify_role", get(admin::admin_change_user_roles))
+        .route(
+            "/admin/imitate-login/:admin_address/:user_address",
+            get(admin::admin_login_get),
+        )
+        .route(
+            "/admin/imitate-login/:admin_address/:user_address/:message_eip",
+            get(admin::admin_login_get),
+        )
+        .route("/admin/imitate-login", post(admin::admin_login_post))
+        .route("/admin/imitate-logout", post(admin::admin_logout_post))
         //
         // Axum layers
         // layers are ordered bottom up

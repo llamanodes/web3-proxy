@@ -34,7 +34,7 @@ use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum ProxyMode {
     /// send to the "best" synced server
     Best,
@@ -42,6 +42,14 @@ pub enum ProxyMode {
     Fastest(usize),
     /// send to all servers for benchmarking. return the fastest non-error response
     Versus,
+    /// send all requests and responses to kafka
+    Debug,
+}
+
+impl Default for ProxyMode {
+    fn default() -> Self {
+        Self::Best
+    }
 }
 
 /// Public entrypoint for WebSocket JSON-RPC requests.
@@ -92,13 +100,13 @@ async fn _websocket_handler(
 ) -> FrontendResult {
     let origin = origin.map(|x| x.0);
 
-    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin).await?;
+    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode).await?;
 
     let authorization = Arc::new(authorization);
 
     match ws_upgrade {
         Some(ws) => Ok(ws
-            .on_upgrade(move |socket| proxy_web3_socket(app, authorization, socket, proxy_mode))
+            .on_upgrade(move |socket| proxy_web3_socket(app, authorization, socket))
             .into_response()),
         None => {
             if let Some(redirect) = &app.config.redirect_public_url {
@@ -130,6 +138,29 @@ pub async fn websocket_handler_with_key(
 ) -> FrontendResult {
     _websocket_handler_with_key(
         ProxyMode::Best,
+        app,
+        ip,
+        rpc_key,
+        origin,
+        referer,
+        user_agent,
+        ws_upgrade,
+    )
+    .await
+}
+
+#[debug_handler]
+pub async fn debug_websocket_handler_with_key(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: InsecureClientIp,
+    Path(rpc_key): Path<String>,
+    origin: Option<TypedHeader<Origin>>,
+    referer: Option<TypedHeader<Referer>>,
+    user_agent: Option<TypedHeader<UserAgent>>,
+    ws_upgrade: Option<WebSocketUpgrade>,
+) -> FrontendResult {
+    _websocket_handler_with_key(
+        ProxyMode::Debug,
         app,
         ip,
         rpc_key,
@@ -206,6 +237,7 @@ async fn _websocket_handler_with_key(
         rpc_key,
         ip,
         origin.map(|x| x.0),
+        proxy_mode,
         referer.map(|x| x.0),
         user_agent.map(|x| x.0),
     )
@@ -216,8 +248,9 @@ async fn _websocket_handler_with_key(
     let authorization = Arc::new(authorization);
 
     match ws_upgrade {
-        Some(ws_upgrade) => Ok(ws_upgrade
-            .on_upgrade(move |socket| proxy_web3_socket(app, authorization, socket, proxy_mode))),
+        Some(ws_upgrade) => {
+            Ok(ws_upgrade.on_upgrade(move |socket| proxy_web3_socket(app, authorization, socket)))
+        }
         None => {
             // if no websocket upgrade, this is probably a user loading the url with their browser
 
@@ -273,7 +306,6 @@ async fn proxy_web3_socket(
     app: Arc<Web3ProxyApp>,
     authorization: Arc<Authorization>,
     socket: WebSocket,
-    proxy_mode: ProxyMode,
 ) {
     // split the websocket so we can read and write concurrently
     let (ws_tx, ws_rx) = socket.split();
@@ -282,13 +314,7 @@ async fn proxy_web3_socket(
     let (response_sender, response_receiver) = flume::unbounded::<Message>();
 
     tokio::spawn(write_web3_socket(response_receiver, ws_tx));
-    tokio::spawn(read_web3_socket(
-        app,
-        authorization,
-        ws_rx,
-        response_sender,
-        proxy_mode,
-    ));
+    tokio::spawn(read_web3_socket(app, authorization, ws_rx, response_sender));
 }
 
 /// websockets support a few more methods than http clients
@@ -299,7 +325,6 @@ async fn handle_socket_payload(
     response_sender: &flume::Sender<Message>,
     subscription_count: &AtomicUsize,
     subscriptions: Arc<RwLock<HashMap<String, AbortHandle>>>,
-    proxy_mode: ProxyMode,
 ) -> (Message, Option<OwnedSemaphorePermit>) {
     let (authorization, semaphore) = match authorization.check_again(&app).await {
         Ok((a, s)) => (a, s),
@@ -392,7 +417,7 @@ async fn handle_socket_payload(
                     Ok(response.into())
                 }
                 _ => app
-                    .proxy_web3_rpc(authorization.clone(), json_request.into(), proxy_mode)
+                    .proxy_web3_rpc(authorization.clone(), json_request.into())
                     .await
                     .map_or_else(
                         |err| match err {
@@ -434,7 +459,6 @@ async fn read_web3_socket(
     authorization: Arc<Authorization>,
     mut ws_rx: SplitStream<WebSocket>,
     response_sender: flume::Sender<Message>,
-    proxy_mode: ProxyMode,
 ) {
     // TODO: need a concurrent hashmap
     let subscriptions = Arc::new(RwLock::new(HashMap::new()));
@@ -468,7 +492,6 @@ async fn read_web3_socket(
                                     &response_sender,
                                     &subscription_count,
                                     subscriptions,
-                                    proxy_mode,
                                 )
                                 .await;
 
@@ -500,7 +523,6 @@ async fn read_web3_socket(
                                     &response_sender,
                                     &subscription_count,
                                     subscriptions,
-                                    proxy_mode,
                                 )
                                 .await;
 

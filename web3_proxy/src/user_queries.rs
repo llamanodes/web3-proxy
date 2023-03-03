@@ -34,6 +34,7 @@ pub async fn get_user_id_from_params(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &HashMap<String, String>,
 ) -> Result<u64, FrontendErrorResponse> {
+    debug!("bearer and params are: {:?} {:?}", bearer, params);
     match (bearer, params.get("user_id")) {
         (Some(TypedHeader(Authorization(bearer))), Some(user_id)) => {
             // check for the bearer cache key

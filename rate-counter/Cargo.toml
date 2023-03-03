@@ -1,0 +1,9 @@
+[package]
+name = "rate-counter"
+version = "0.1.0"
+authors = ["Bryan Stitt <bryan@llamanodes.com>"]
+edition = "2021"
+
+[dependencies]
+flume = "0.10.14"
+tokio = { version = "1.25.0", features = ["time"] }

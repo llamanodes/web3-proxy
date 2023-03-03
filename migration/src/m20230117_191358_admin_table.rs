@@ -6,33 +6,28 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Replace the sample below with your own migration scripts
         manager
             .create_table(
                 Table::create()
-                    .table(Credits::Table)
-                    .if_not_exists()
+                    .table(Admin::Table)
                     .col(
-                        ColumnDef::new(Credits::Id)
-                            .integer()
+                        ColumnDef::new(Admin::Id)
+                            .big_unsigned()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(Credits::Credits)
-                            .big_unsigned()
-                            .not_null()
-                            .default(0)
-                    )
-                    .col(
-                        ColumnDef::new(Credits::UserId)
+                ColumnDef::new(Admin::UserId)
                             .big_unsigned()
                             .unique_key()
                             .not_null()
                     )
                     .foreign_key(
-                        sea_query::ForeignKey::create()
-                            .from(Credits::Table, Credits::UserId)
+                        ForeignKey::create()
+                            .name("fk-admin-user_id")
+                            .from(Admin::Table, Admin::UserId)
                             .to(User::Table, User::Id),
                     )
                     .to_owned(),
@@ -41,26 +36,23 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Replace the sample below with your own migration scripts
         manager
-            .drop_table(Table::drop().table(Credits::Table).to_owned())
+            .drop_table(Table::drop().table(Admin::Table).to_owned())
             .await
     }
 }
 
 /// Learn more at https://docs.rs/sea-query#iden
 #[derive(Iden)]
-enum Credits {
+enum User {
     Table,
-    Id,
-    UserId,
-    Credits,
+    Id
 }
 
 #[derive(Iden)]
-enum User {
+enum Admin {
     Table,
     Id,
-    Address,
-    Description,
-    Email,
+    UserId,
 }
