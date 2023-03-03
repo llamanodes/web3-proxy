@@ -34,7 +34,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install \
     --locked \
     --no-default-features \
-    --features rdkafka \
     --profile faster_release \
     --root /opt/bin \
     --path ./web3_proxy
