@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 ENV PATH /root/.foundry/bin:$PATH
 RUN curl -L https://foundry.paradigm.xyz | bash && foundryup
 
-RUN apt-get update && apt-get install librdkafka && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install librdkafka-dev && rm -rf /var/lib/apt/lists/*
 
 # copy the application
 COPY . .
