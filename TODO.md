@@ -381,6 +381,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] all anyhow::Results need to be replaced with FrontendErrorResponse. 
     - [ ] rename FrontendErrorResponse to Web3ProxyError
     - [ ] almost all the anyhows should be Web3ProxyError::BadRequest
+    - as is, these errors are seen as 500 errors and so haproxy keeps retrying them
 - change premium concurrency limit to be against ip+rpckey
   - then sites like curve.fi don't have to worry about their user count
   - it does mean we will have a harder time capacity planning from the number of keys
