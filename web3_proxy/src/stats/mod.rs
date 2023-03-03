@@ -43,6 +43,8 @@ pub struct RpcQueryStats {
     response_bytes: u64,
     response_millis: u64,
     response_timestamp: i64,
+    /// Credits used signifies how how much money was used up
+    credits_used: u64
 }
 
 #[derive(Clone, From, Hash, PartialEq, Eq)]
@@ -61,8 +63,6 @@ struct RpcQueryKey {
     origin: Option<Origin>,
     /// None if the public url was used
     rpc_secret_key_id: Option<NonZeroU64>,
-    /// Credits used signifies how how much money was used up
-    credits_used: u64
 }
 
 /// round the unix epoch time to the start of a period
@@ -105,15 +105,13 @@ impl RpcQueryStats {
         };
 
         // TODO: Depending on method, add some arithmetic around calculating credits_used
-        let credits_used = 1;
         RpcQueryKey {
             response_timestamp,
             archive_needed: self.archive_request,
             error_response: self.error_response,
             method,
             rpc_secret_key_id,
-            origin,
-            credits_used
+            origin
         }
     }
 
@@ -126,16 +124,13 @@ impl RpcQueryStats {
         // everyone gets grouped together
         let rpc_secret_key_id = None;
 
-        // TODO: Again, depending on method, add credits used
-        let credits_used = 1;
         RpcQueryKey {
             response_timestamp: self.response_timestamp,
             archive_needed: self.archive_request,
             error_response: self.error_response,
             method,
             rpc_secret_key_id,
-            origin,
-            credits_used
+            origin
         }
     }
 
@@ -162,16 +157,13 @@ impl RpcQueryStats {
             }
         };
 
-        // Again depending on method, add credits_used
-        let credits_used = 1;
         RpcQueryKey {
             response_timestamp: self.response_timestamp,
             archive_needed: self.archive_request,
             error_response: self.error_response,
             method,
             rpc_secret_key_id,
-            origin,
-            credits_used
+            origin
         }
     }
 }
@@ -187,6 +179,7 @@ pub struct BufferedRpcQueryStats {
     sum_request_bytes: u64,
     sum_response_bytes: u64,
     sum_response_millis: u64,
+    credits_used: u64
 }
 
 /// A stat that we aggregate and then store in a database.
@@ -231,6 +224,7 @@ impl BufferedRpcQueryStats {
         self.sum_request_bytes += stat.request_bytes;
         self.sum_response_bytes += stat.response_bytes;
         self.sum_response_millis += stat.response_millis;
+        self.credits_used += stat.credits_used;
     }
 
     // TODO: take a db transaction instead so that we can batch?
@@ -261,7 +255,7 @@ impl BufferedRpcQueryStats {
             sum_request_bytes: sea_orm::Set(self.sum_request_bytes),
             sum_response_millis: sea_orm::Set(self.sum_response_millis),
             sum_response_bytes: sea_orm::Set(self.sum_response_bytes),
-            credits_used: sea_orm::Set(key.credits_used)
+            credits_used: sea_orm::Set(self.credits_used)
         };
 
         rpc_accounting_v2::Entity::insert(accounting_entry)
@@ -311,6 +305,11 @@ impl BufferedRpcQueryStats {
                             Expr::col(rpc_accounting_v2::Column::SumResponseBytes)
                                 .add(self.sum_response_bytes),
                         ),
+                        (
+                            rpc_accounting_v2::Column::CreditsUsed,
+                            Expr::col(rpc_accounting_v2::Column::CreditsUsed)
+                                .add(self.credits_used),
+                        ),
                     ])
                     .to_owned(),
             )
@@ -354,7 +353,9 @@ impl BufferedRpcQueryStats {
             .field("cache_hits", self.cache_hits as i64)
             .field("sum_request_bytes", self.sum_request_bytes as i64)
             .field("sum_response_millis", self.sum_response_millis as i64)
-            .field("sum_response_bytes", self.sum_response_bytes as i64);
+            .field("sum_response_bytes", self.sum_response_bytes as i64)
+            // TODO: will this be enough of a range
+            .field("credits_used", self.credits_used as i64);
 
         builder = builder.timestamp(key.response_timestamp);
         let timestamp_precision = TimestampPrecision::Seconds;
@@ -387,6 +388,10 @@ impl RpcQueryStats {
         let response_millis = metadata.start_instant.elapsed().as_millis() as u64;
         let response_bytes = response_bytes as u64;
 
+        // TODO: Depending on the method, metadata and response bytes, pick a different number of credits used
+        // This can be a slightly more complex function as we ll
+        let credits_used = 1;
+
         let response_timestamp = Utc::now().timestamp();
 
         Self {
@@ -399,6 +404,7 @@ impl RpcQueryStats {
             response_bytes,
             response_millis,
             response_timestamp,
+            credits_used
         }
     }
 }
