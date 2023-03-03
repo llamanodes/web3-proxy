@@ -376,7 +376,7 @@ fn main() -> anyhow::Result<()> {
                 x.main(pagerduty_async, top_config).await
             }
             SubCommand::PopularityContest(x) => x.main().await,
-            SubCommand::SearchKafka(x) => x.main().await,
+            SubCommand::SearchKafka(x) => x.main(top_config.unwrap()).await,
             SubCommand::Sentryd(x) => {
                 if cli_config.sentry_url.is_none() {
                     warn!("sentry_url is not set! Logs will only show in this console");
