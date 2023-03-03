@@ -1,6 +1,5 @@
 pub mod app;
 pub mod atomics;
-pub mod balance;
 pub mod block_number;
 pub mod config;
 pub mod frontend;

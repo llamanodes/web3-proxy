@@ -22,7 +22,7 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::sea_orm_active_enums::TrackingLevel;
-use entities::{login, pending_login, referrer, referee, revert_log, rpc_key, rpc_request, user, user_tier, increase_balance_receipt, balance};
+use entities::{login, pending_login, referrer, referee, revert_log, rpc_key, user, user_tier, increase_balance_receipt, balance};
 use ethers::{prelude::{Address, EthEvent}, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
