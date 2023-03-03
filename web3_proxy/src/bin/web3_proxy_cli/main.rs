@@ -37,11 +37,7 @@ use web3_proxy::{
 };
 
 #[cfg(feature = "deadlock")]
-use parking_lot::deadlock;
-#[cfg(feature = "deadlock")]
-use std::thread;
-#[cfg(feature = "deadlock")]
-use tokio::time::Duration;
+use {parking_lot::deadlock, std::thread, tokio::time::Duration};
 
 #[derive(Debug, FromArgs)]
 /// Command line interface for admins to interact with web3_proxy

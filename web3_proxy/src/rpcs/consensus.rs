@@ -341,9 +341,10 @@ impl ConnectionsGroup {
             .collect();
 
         #[cfg(debug_assertions)]
-        let _ = maybe_head_block.hash();
-        #[cfg(debug_assertions)]
-        let _ = maybe_head_block.number();
+        {
+            let _ = maybe_head_block.hash();
+            let _ = maybe_head_block.number();
+        }
 
         Ok(ConsensusWeb3Rpcs {
             tier: *tier,
