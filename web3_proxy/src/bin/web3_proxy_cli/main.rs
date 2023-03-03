@@ -13,6 +13,7 @@ mod pagerduty;
 mod popularity_contest;
 mod proxyd;
 mod rpc_accounting;
+mod search_kafka;
 mod sentryd;
 mod transfer_key;
 mod user_export;
@@ -80,6 +81,7 @@ enum SubCommand {
     PopularityContest(popularity_contest::PopularityContestSubCommand),
     Proxyd(proxyd::ProxydSubCommand),
     RpcAccounting(rpc_accounting::RpcAccountingSubCommand),
+    SearchKafka(search_kafka::SearchKafkaSubCommand),
     Sentryd(sentryd::SentrydSubCommand),
     TransferKey(transfer_key::TransferKeySubCommand),
     UserExport(user_export::UserExportSubCommand),
@@ -374,6 +376,7 @@ fn main() -> anyhow::Result<()> {
                 x.main(pagerduty_async, top_config).await
             }
             SubCommand::PopularityContest(x) => x.main().await,
+            SubCommand::SearchKafka(x) => x.main().await,
             SubCommand::Sentryd(x) => {
                 if cli_config.sentry_url.is_none() {
                     warn!("sentry_url is not set! Logs will only show in this console");
