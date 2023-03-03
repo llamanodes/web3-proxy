@@ -1,22 +1,27 @@
 use anyhow::Context;
 use argh::FromArgs;
+use entities::rpc_key;
 use futures::TryStreamExt;
 use log::info;
+use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use rdkafka::{
     consumer::{Consumer, StreamConsumer},
     ClientConfig, Message,
 };
 use std::num::NonZeroU64;
-use web3_proxy::{config::TopConfig, frontend::authorization::RpcSecretKey};
+use uuid::Uuid;
+use web3_proxy::{app::get_db, config::TopConfig, frontend::authorization::RpcSecretKey};
 
 /// Second subcommand.
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 #[argh(subcommand, name = "search_kafka")]
 pub struct SearchKafkaSubCommand {
     #[argh(positional)]
-    group_id: String,
-    #[argh(positional)]
-    input_topic: String,
+    /// topics to read
+    topics: Vec<String>,
+    #[argh(option)]
+    /// optional group id
+    group_id: Option<String>,
     #[argh(option)]
     /// rpc_key to search. Be careful when handling keys!
     rpc_key: Option<RpcSecretKey>,
@@ -27,28 +32,64 @@ pub struct SearchKafkaSubCommand {
 
 impl SearchKafkaSubCommand {
     pub async fn main(self, top_config: TopConfig) -> anyhow::Result<()> {
+        let mut rpc_key_id = self.rpc_key_id.map(|x| x.get());
+
+        if let Some(rpc_key) = self.rpc_key {
+            let db_conn = get_db(top_config.app.db_url.unwrap(), 1, 1).await?;
+
+            let rpc_key: Uuid = rpc_key.into();
+
+            let x = rpc_key::Entity::find()
+                .filter(rpc_key::Column::SecretKey.eq(rpc_key))
+                .one(&db_conn)
+                .await?
+                .context("key not found")?;
+
+            rpc_key_id = Some(x.id);
+        }
+
+        let wanted_kafka_key = rpc_key_id.map(|x| rmp_serde::to_vec(&x).unwrap());
+
+        let wanted_kafka_key = wanted_kafka_key.as_ref().map(|x| &x[..]);
+
         let brokers = top_config
             .app
             .kafka_urls
             .context("top_config.app.kafka_urls is required")?;
 
-        // TODO: headers
-        // TODO: headers
-        let consumer: StreamConsumer = ClientConfig::new()
-            .set("group.id", &self.group_id)
+        let mut consumer = ClientConfig::new();
+
+        consumer
             .set("bootstrap.servers", &brokers)
             .set("enable.partition.eof", "false")
             .set("session.timeout.ms", "6000")
-            .set("enable.auto.commit", "false")
-            .create()
-            .context("Consumer creation failed")?;
+            .set("enable.auto.commit", "false");
 
+        if let Some(group_id) = self.group_id {
+            consumer.set("group.id", &group_id);
+        }
+
+        let consumer: StreamConsumer = consumer
+            .create()
+            .context("kafka consumer creation failed")?;
+
+        let topics: Vec<&str> = self.topics.iter().map(String::as_ref).collect();
+
+        // TODO: how should we set start/end timestamp for the consumer? i think we need to look at metadata
         consumer
-            .subscribe(&[&self.input_topic])
+            .subscribe(&topics)
             .expect("Can't subscribe to specified topic");
 
         let stream_processor = consumer.stream().try_for_each(|msg| async move {
-            info!("Message received: {}", msg.offset());
+            if msg.key() != wanted_kafka_key {
+                return Ok(());
+            }
+
+            // TODO: filter by headers?
+
+            info!("msg: {}", msg.offset());
+
+            // TODO: now what?
 
             Ok(())
         });

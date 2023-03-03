@@ -14,6 +14,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install cargo-nextest
 
 # foundry is needed to run tests
+# TODO: do this in a seperate FROM and COPY it in
 ENV PATH /root/.foundry/bin:$PATH
 RUN curl -L https://foundry.paradigm.xyz | bash && foundryup
 

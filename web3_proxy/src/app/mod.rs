@@ -1086,7 +1086,7 @@ impl Web3ProxyApp {
 
         let mut kafka_stuff = None;
         if let Some(kafka_producer) = self.kafka_producer.clone() {
-            let request_bytes = rmp_serde::to_vec(&request)?;
+            let kafka_topic = "proxy_cached_request".to_string();
 
             let rpc_secret_key_id = authorization
                 .checks
@@ -1094,15 +1094,15 @@ impl Web3ProxyApp {
                 .map(|x| x.get())
                 .unwrap_or_default();
 
-            let kafka_key = rmp_serde::to_vec(&rpc_secret_key_id)
-                .context("failed serializing kafka key")
-                .unwrap();
+            let kafka_key = rmp_serde::to_vec(&rpc_secret_key_id)?;
+
+            let request_bytes = rmp_serde::to_vec(&request)?;
 
             let request_hash = Some(keccak256(&request_bytes));
 
             let chain_id = self.config.chain_id;
 
-            // another item is added with the response
+            // another item is added with the response, so initial_capacity is +1 what is needed here
             let kafka_headers = OwnedHeaders::new_with_capacity(4)
                 .insert(Header {
                     key: "request_hash",
@@ -1118,11 +1118,15 @@ impl Web3ProxyApp {
                 });
 
             // save the key and headers for when we log the response
-            kafka_stuff = Some((kafka_key.clone(), kafka_headers.clone()));
+            kafka_stuff = Some((
+                kafka_topic.clone(),
+                kafka_key.clone(),
+                kafka_headers.clone(),
+            ));
 
             let f = async move {
                 let produce_future = kafka_producer.send(
-                    FutureRecord::to("proxy_rpc_request")
+                    FutureRecord::to(&kafka_topic)
                         .key(&kafka_key)
                         .payload(&request_bytes)
                         .headers(kafka_headers),
@@ -1131,6 +1135,7 @@ impl Web3ProxyApp {
 
                 if let Err((err, msg)) = produce_future.await {
                     error!("produce kafka request log: {}. {:#?}", err, msg);
+                    // TODO: re-queue the msg?
                 }
             };
 
@@ -1744,7 +1749,7 @@ impl Web3ProxyApp {
                 .context("stat_sender sending response stat")?;
         }
 
-        if let Some((kafka_key, kafka_headers)) = kafka_stuff {
+        if let Some((kafka_topic, kafka_key, kafka_headers)) = kafka_stuff {
             let kafka_producer = self
                 .kafka_producer
                 .clone()
@@ -1755,7 +1760,7 @@ impl Web3ProxyApp {
 
             let f = async move {
                 let produce_future = kafka_producer.send(
-                    FutureRecord::to("proxy_rpc_response")
+                    FutureRecord::to(&kafka_topic)
                         .key(&kafka_key)
                         .payload(&response_bytes)
                         .headers(kafka_headers),
