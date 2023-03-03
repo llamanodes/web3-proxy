@@ -362,6 +362,12 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] improve logging around consensus head.
   - it was "num in best synced tier"/num rpc connected/num rpc known.
   - it should be "num with best head in best synced tier/num with best head in any tier/num rpcs connected/num rpcs known
+- [x] add /debug/:rpckey endpoint that logs requests and responses to kafka
+- [x] refactor so configs can change while running
+  - this will probably be a rather large change, but is necessary when we have autoscaling
+  - create the app without applying any config to it
+  - have a blocking future watching the config file and calling app.apply_config() on first load and on change
+  - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
 - [-] if we subscribe to a server that is syncing, it gives us null block_data_limit. when it catches up, we don't ever send queries to it. we need to recheck block_data_limit
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
@@ -372,12 +378,10 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
   - https://github.com/moka-rs/moka/issues/201
-- [ ] refactor so configs can change while running
-  - this will probably be a rather large change, but is necessary when we have autoscaling
-  - create the app without applying any config to it
-  - have a blocking future watching the config file and calling app.apply_config() on first load and on change
-  - work started on this in the "config_reloads" branch. because of how we pass channels around during spawn, this requires a larger refactor.
-- change if premium concurrency limit to be against ip+rpckey
+- [ ] all anyhow::Results need to be replaced with FrontendErrorResponse. 
+    - [ ] rename FrontendErrorResponse to Web3ProxyError
+    - [ ] almost all the anyhows should be Web3ProxyError::BadRequest
+- change premium concurrency limit to be against ip+rpckey
   - then sites like curve.fi don't have to worry about their user count
   - it does mean we will have a harder time capacity planning from the number of keys
 - [ ] eth_getLogs is going to unsynced nodes when synced nodes are available. always prefer synced nodes

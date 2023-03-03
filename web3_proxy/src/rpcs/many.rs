@@ -518,6 +518,7 @@ impl Web3Rpcs {
                         }
                         cmp::Ordering::Greater => {
                             // TODO: force a debug log of the original request to see if our logic is wrong?
+                            // TODO: attach the rpc_key_id so we can find the user to ask if they need help
                             return Err(anyhow::anyhow!(
                                 "Invalid blocks bounds requested. min ({}) > max ({})",
                                 min_block_needed,
