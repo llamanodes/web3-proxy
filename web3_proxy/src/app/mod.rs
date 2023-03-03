@@ -37,6 +37,10 @@ use migration::sea_orm::{
 use migration::sea_query::table::ColumnDef;
 use migration::{Alias, DbErr, Migrator, MigratorTrait, Table};
 use moka::future::Cache;
+#[cfg(rdkafka)]
+use rdkafka::message::{Header, OwnedHeaders};
+#[cfg(rdkafka)]
+use rdkafka::producer::FutureRecord;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use serde::Serialize;
@@ -179,6 +183,7 @@ pub struct AuthorizationChecks {
     pub log_revert_chance: f64,
     /// if true, transactions are broadcast to private mempools. They will still be public on the blockchain!
     pub private_txs: bool,
+    pub proxy_mode: ProxyMode,
 }
 
 /// Simple wrapper so that we can keep track of read only connections.
@@ -225,6 +230,11 @@ pub struct Web3ProxyApp {
     pub bearer_token_semaphores:
         Cache<UserBearerToken, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub stat_sender: Option<flume::Sender<Web3ProxyStat>>,
+
+    #[cfg(rdkafka)]
+    pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
+    #[cfg(not(rdkafka))]
+    pub kafka_producer: Option<()>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -457,6 +467,29 @@ impl Web3ProxyApp {
             warn!("no database. some features will be disabled");
         };
 
+        // connect to kafka for logging requests from the /debug/ urls
+
+        #[cfg(rdkafka)]
+        let mut kafka_producer: Option<rdkafka::producer::FutureProducer> = None;
+        #[cfg(not(rdkafka))]
+        let kafka_producer: Option<()> = None;
+
+        #[cfg(rdkafka)]
+        if let Some(kafka_brokers) = top_config.app.kafka_urls.clone() {
+            match rdkafka::ClientConfig::new()
+                .set("bootstrap.servers", kafka_brokers)
+                .set("message.timeout.ms", "5000")
+                .create()
+            {
+                Ok(k) => kafka_producer = Some(k),
+                Err(err) => error!("Failed connecting to kafka. This will not retry. {:?}", err),
+            }
+        }
+        #[cfg(not(rdkafka))]
+        if top_config.app.kafka_urls.is_some() {
+            warn!("rdkafka rust feature is not enabled!");
+        }
+
         // TODO: do this during apply_config so that we can change redis url while running
         // create a connection pool for redis
         // a failure to connect does NOT block the application from starting
@@ -680,6 +713,7 @@ impl Web3ProxyApp {
             config: top_config.app.clone(),
             balanced_rpcs,
             http_client,
+            kafka_producer,
             private_rpcs,
             response_cache,
             watch_consensus_head_receiver,
@@ -943,7 +977,6 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: Arc<Authorization>,
         request: JsonRpcRequestEnum,
-        proxy_mode: ProxyMode,
     ) -> Result<(JsonRpcForwardedResponseEnum, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // trace!(?request, "proxy_web3_rpc");
 
@@ -956,7 +989,7 @@ impl Web3ProxyApp {
             JsonRpcRequestEnum::Single(request) => {
                 let (response, rpcs) = timeout(
                     max_time,
-                    self.proxy_cached_request(&authorization, request, proxy_mode, None),
+                    self.proxy_cached_request(&authorization, request, None),
                 )
                 .await??;
 
@@ -965,7 +998,7 @@ impl Web3ProxyApp {
             JsonRpcRequestEnum::Batch(requests) => {
                 let (responses, rpcs) = timeout(
                     max_time,
-                    self.proxy_web3_rpc_requests(&authorization, requests, proxy_mode),
+                    self.proxy_web3_rpc_requests(&authorization, requests),
                 )
                 .await??;
 
@@ -982,7 +1015,6 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         requests: Vec<JsonRpcRequest>,
-        proxy_mode: ProxyMode,
     ) -> Result<(Vec<JsonRpcForwardedResponse>, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
@@ -1002,12 +1034,7 @@ impl Web3ProxyApp {
             requests
                 .into_iter()
                 .map(|request| {
-                    self.proxy_cached_request(
-                        authorization,
-                        request,
-                        proxy_mode,
-                        Some(head_block_num),
-                    )
+                    self.proxy_cached_request(authorization, request, Some(head_block_num))
                 })
                 .collect::<Vec<_>>(),
         )
@@ -1062,12 +1089,61 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
-        proxy_mode: ProxyMode,
         head_block_num: Option<U64>,
     ) -> Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
         // trace!("Received request: {:?}", request);
 
         let request_metadata = Arc::new(RequestMetadata::new(REQUEST_PERIOD, request.num_bytes())?);
+
+        #[cfg(rdkafka)]
+        let mut kafka_stuff = None;
+
+        #[cfg(rdkafka)]
+        if let Some(kafka_producer) = self.kafka_producer.clone() {
+            let request_bytes = rmp_serde::to_vec(&request)?;
+
+            let rpc_secret_key_id = authorization
+                .checks
+                .rpc_secret_key_id
+                .map(|x| x.get())
+                .unwrap_or_default();
+
+            let kafka_key = rmp_serde::to_vec(&rpc_secret_key_id)
+                .context("failed serializing kafka key")
+                .unwrap();
+
+            let request_hash = Some(keccak256(&request_bytes));
+
+            // the third item is added with the response
+            let kafka_headers = OwnedHeaders::new_with_capacity(3)
+                .insert(Header {
+                    key: "request_hash",
+                    value: request_hash.as_ref(),
+                })
+                .insert(Header {
+                    key: "head_block_num",
+                    value: head_block_num.map(|x| x.to_string()).as_ref(),
+                });
+
+            // save the key and headers for when we log the response
+            kafka_stuff = Some((kafka_key.clone(), kafka_headers.clone()));
+
+            let f = async move {
+                let produce_future = kafka_producer.send(
+                    FutureRecord::to("proxy_rpc_request")
+                        .key(&kafka_key)
+                        .payload(&request_bytes)
+                        .headers(kafka_headers),
+                    Duration::from_secs(0),
+                );
+
+                if let Err((err, msg)) = produce_future.await {
+                    error!("produce kafka request log: {}. {:#?}", err, msg);
+                }
+            };
+
+            tokio::spawn(f);
+        }
 
         // save the id so we can attach it to the response
         // TODO: instead of cloning, take the id out?
@@ -1206,7 +1282,6 @@ impl Web3ProxyApp {
                 let mut response = self
                     .balanced_rpcs
                     .try_proxy_connection(
-                        proxy_mode,
                         authorization,
                         request,
                         Some(&request_metadata),
@@ -1253,9 +1328,9 @@ impl Web3ProxyApp {
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => {
                 // TODO: how should we handle private_mode here?
-                let default_num = match proxy_mode {
+                let default_num = match authorization.checks.proxy_mode {
                     // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
-                    ProxyMode::Best => Some(4),
+                    ProxyMode::Best | ProxyMode::Debug => Some(4),
                     ProxyMode::Fastest(0) => None,
                     // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
                     // TODO: what if we do 2 per tier? we want to blast the third party rpcs
@@ -1595,7 +1670,6 @@ impl Web3ProxyApp {
                                 let mut response = self
                                     .balanced_rpcs
                                     .try_proxy_connection(
-                                        proxy_mode,
                                         &authorization,
                                         request,
                                         Some(&request_metadata),
@@ -1624,7 +1698,6 @@ impl Web3ProxyApp {
                     } else {
                         self.balanced_rpcs
                             .try_proxy_connection(
-                                proxy_mode,
                                 &authorization,
                                 request,
                                 Some(&request_metadata),
@@ -1677,6 +1750,33 @@ impl Web3ProxyApp {
                 .send_async(response_stat.into())
                 .await
                 .context("stat_sender sending response stat")?;
+        }
+
+        #[cfg(rdkafka)]
+        if let Some((kafka_key, kafka_headers)) = kafka_stuff {
+            let kafka_producer = self
+                .kafka_producer
+                .clone()
+                .expect("if headers are set, producer must exist");
+
+            let response_bytes =
+                rmp_serde::to_vec(&response).context("failed msgpack serialize response")?;
+
+            let f = async move {
+                let produce_future = kafka_producer.send(
+                    FutureRecord::to("proxy_rpc_response")
+                        .key(&kafka_key)
+                        .payload(&response_bytes)
+                        .headers(kafka_headers),
+                    Duration::from_secs(0),
+                );
+
+                if let Err((err, msg)) = produce_future.await {
+                    error!("produce kafka request log: {}. {:#?}", err, msg);
+                }
+            };
+
+            tokio::spawn(f);
         }
 
         Ok((response, rpcs))

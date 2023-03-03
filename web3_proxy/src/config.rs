@@ -103,6 +103,12 @@ pub struct AppConfig {
     /// Restrict user registration.
     /// None = no code needed
     pub invite_code: Option<String>,
+
+    /// Optional kafka brokers
+    /// Used by /debug/:rpc_key urls for logging requests and responses. No other endpoints log request/response data.
+    pub kafka_urls: Option<String>,
+
+    /// domain in sign-in-with-ethereum messages
     pub login_domain: Option<String>,
 
     /// do not serve any requests if the best known block is older than this many seconds.

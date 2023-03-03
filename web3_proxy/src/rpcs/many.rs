@@ -1136,15 +1136,14 @@ impl Web3Rpcs {
 
     pub async fn try_proxy_connection(
         &self,
-        proxy_mode: ProxyMode,
         authorization: &Arc<Authorization>,
         request: JsonRpcRequest,
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
     ) -> anyhow::Result<JsonRpcForwardedResponse> {
-        match proxy_mode {
-            ProxyMode::Best => {
+        match authorization.checks.proxy_mode {
+            ProxyMode::Debug | ProxyMode::Best => {
                 self.try_send_best_consensus_head_connection(
                     authorization,
                     request,

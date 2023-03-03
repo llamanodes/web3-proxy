@@ -59,12 +59,12 @@ async fn _proxy_web3_rpc(
     // TODO: do we care about keeping the TypedHeader wrapper?
     let origin = origin.map(|x| x.0);
 
-    let (authorization, semaphore) = ip_is_authorized(&app, ip, origin).await?;
+    let (authorization, semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode).await?;
 
     let authorization = Arc::new(authorization);
 
     let (response, rpcs, _semaphore) = app
-        .proxy_web3_rpc(authorization, payload, proxy_mode)
+        .proxy_web3_rpc(authorization, payload)
         .await
         .map(|(x, y)| (x, y, semaphore))?;
 
@@ -139,6 +139,29 @@ pub async fn proxy_web3_rpc_with_key(
 }
 
 #[debug_handler]
+pub async fn debug_proxy_web3_rpc_with_key(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: InsecureClientIp,
+    origin: Option<TypedHeader<Origin>>,
+    referer: Option<TypedHeader<Referer>>,
+    user_agent: Option<TypedHeader<UserAgent>>,
+    Path(rpc_key): Path<String>,
+    Json(payload): Json<JsonRpcRequestEnum>,
+) -> FrontendResult {
+    _proxy_web3_rpc_with_key(
+        app,
+        ip,
+        origin,
+        referer,
+        user_agent,
+        rpc_key,
+        payload,
+        ProxyMode::Debug,
+    )
+    .await
+}
+
+#[debug_handler]
 pub async fn fastest_proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: InsecureClientIp,
@@ -204,6 +227,7 @@ async fn _proxy_web3_rpc_with_key(
         rpc_key,
         ip,
         origin.map(|x| x.0),
+        proxy_mode,
         referer.map(|x| x.0),
         user_agent.map(|x| x.0),
     )
@@ -214,7 +238,7 @@ async fn _proxy_web3_rpc_with_key(
     let rpc_secret_key_id = authorization.checks.rpc_secret_key_id;
 
     let (response, rpcs, _semaphore) = app
-        .proxy_web3_rpc(authorization, payload, proxy_mode)
+        .proxy_web3_rpc(authorization, payload)
         .await
         .map(|(x, y)| (x, y, semaphore))?;
 

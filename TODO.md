@@ -393,6 +393,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] rename "concurrent" requests to "parallel" requests
 - [ ] minimum allowed query_start on query_user_stats
 - [ ] setting request limits to None is broken. it does maxu64 and then internal deferred rate limiter counts try to *99/100
+- [ ] if kafka fails to connect at the start, automatically reconnect
 - [ ] during shutdown, mark the proxy unhealthy and send unsubscribe responses for any open websocket subscriptions
 - [ ] some chains still use total_difficulty. have total_difficulty be used only if the chain needs it
   - if total difficulty is not on the block and we aren't on ETH, fetch the full block instead of just the header

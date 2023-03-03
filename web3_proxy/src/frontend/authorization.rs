@@ -1,6 +1,7 @@
 //! Utilities for authorization of logged in and anonymous users.
 
 use super::errors::FrontendErrorResponse;
+use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{AuthorizationChecks, Web3ProxyApp, APP_USER_AGENT};
 use crate::rpcs::one::Web3Rpc;
 use crate::user_token::UserBearerToken;
@@ -205,6 +206,7 @@ impl Authorization {
         db_conn: Option<DatabaseConnection>,
         ip: IpAddr,
         origin: Option<Origin>,
+        proxy_mode: ProxyMode,
         referer: Option<Referer>,
         user_agent: Option<UserAgent>,
     ) -> anyhow::Result<Self> {
@@ -221,6 +223,7 @@ impl Authorization {
         // TODO: default or None?
         let authorization_checks = AuthorizationChecks {
             max_requests_per_period,
+            proxy_mode,
             ..Default::default()
         };
 
@@ -235,6 +238,7 @@ impl Authorization {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         authorization_checks: AuthorizationChecks,
         db_conn: Option<DatabaseConnection>,
@@ -311,7 +315,7 @@ pub async fn login_is_authorized(
     app: &Web3ProxyApp,
     ip: IpAddr,
 ) -> Result<Authorization, FrontendErrorResponse> {
-    let authorization = match app.rate_limit_login(ip).await? {
+    let authorization = match app.rate_limit_login(ip, ProxyMode::Best).await? {
         RateLimitResult::Allowed(authorization, None) => authorization,
         RateLimitResult::RateLimited(authorization, retry_at) => {
             return Err(FrontendErrorResponse::RateLimited(authorization, retry_at));
@@ -328,11 +332,17 @@ pub async fn ip_is_authorized(
     app: &Arc<Web3ProxyApp>,
     ip: IpAddr,
     origin: Option<Origin>,
+    proxy_mode: ProxyMode,
 ) -> Result<(Authorization, Option<OwnedSemaphorePermit>), FrontendErrorResponse> {
     // TODO: i think we could write an `impl From` for this
     // TODO: move this to an AuthorizedUser extrator
     let (authorization, semaphore) = match app
-        .rate_limit_by_ip(&app.config.allowed_origin_requests_per_period, ip, origin)
+        .rate_limit_by_ip(
+            &app.config.allowed_origin_requests_per_period,
+            ip,
+            origin,
+            proxy_mode,
+        )
         .await?
     {
         RateLimitResult::Allowed(authorization, semaphore) => (authorization, semaphore),
@@ -388,13 +398,14 @@ pub async fn key_is_authorized(
     rpc_key: RpcSecretKey,
     ip: IpAddr,
     origin: Option<Origin>,
+    proxy_mode: ProxyMode,
     referer: Option<Referer>,
     user_agent: Option<UserAgent>,
 ) -> Result<(Authorization, Option<OwnedSemaphorePermit>), FrontendErrorResponse> {
     // check the rate limits. error if over the limit
     // TODO: i think this should be in an "impl From" or "impl Into"
     let (authorization, semaphore) = match app
-        .rate_limit_by_rpc_key(ip, origin, referer, rpc_key, user_agent)
+        .rate_limit_by_rpc_key(ip, origin, proxy_mode, referer, rpc_key, user_agent)
         .await?
     {
         RateLimitResult::Allowed(authorization, semaphore) => (authorization, semaphore),
@@ -542,7 +553,11 @@ impl Web3ProxyApp {
         Ok((user, semaphore_permit))
     }
 
-    pub async fn rate_limit_login(&self, ip: IpAddr) -> anyhow::Result<RateLimitResult> {
+    pub async fn rate_limit_login(
+        &self,
+        ip: IpAddr,
+        proxy_mode: ProxyMode,
+    ) -> anyhow::Result<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_rpc_key?
 
         // we don't care about user agent or origin or referer
@@ -551,6 +566,7 @@ impl Web3ProxyApp {
             self.db_conn(),
             ip,
             None,
+            proxy_mode,
             None,
             None,
         )?;
@@ -597,6 +613,7 @@ impl Web3ProxyApp {
         allowed_origin_requests_per_period: &HashMap<String, u64>,
         ip: IpAddr,
         origin: Option<Origin>,
+        proxy_mode: ProxyMode,
     ) -> anyhow::Result<RateLimitResult> {
         // ip rate limits don't check referer or user agent
         // the do check
@@ -605,6 +622,7 @@ impl Web3ProxyApp {
             self.db_conn.clone(),
             ip,
             origin,
+            proxy_mode,
             None,
             None,
         )?;
@@ -653,6 +671,7 @@ impl Web3ProxyApp {
     // check the local cache for user data, or query the database
     pub(crate) async fn authorization_checks(
         &self,
+        proxy_mode: ProxyMode,
         rpc_secret_key: RpcSecretKey,
     ) -> anyhow::Result<AuthorizationChecks> {
         let authorization_checks: Result<_, Arc<anyhow::Error>> = self
@@ -752,6 +771,7 @@ impl Web3ProxyApp {
                             max_concurrent_requests: user_tier_model.max_concurrent_requests,
                             max_requests_per_period: user_tier_model.max_requests_per_period,
                             private_txs: rpc_key_model.private_txs,
+                            proxy_mode,
                         })
                     }
                     None => Ok(AuthorizationChecks::default()),
@@ -768,11 +788,12 @@ impl Web3ProxyApp {
         &self,
         ip: IpAddr,
         origin: Option<Origin>,
+        proxy_mode: ProxyMode,
         referer: Option<Referer>,
         rpc_key: RpcSecretKey,
         user_agent: Option<UserAgent>,
     ) -> anyhow::Result<RateLimitResult> {
-        let authorization_checks = self.authorization_checks(rpc_key).await?;
+        let authorization_checks = self.authorization_checks(proxy_mode, rpc_key).await?;
 
         // if no rpc_key_id matching the given rpc was found, then we can't rate limit by key
         if authorization_checks.rpc_secret_key_id.is_none() {
@@ -859,12 +880,13 @@ impl Authorization {
                 rpc_secret_key,
                 self.ip,
                 self.origin.clone(),
+                self.checks.proxy_mode,
                 self.referer.clone(),
                 self.user_agent.clone(),
             )
             .await?
         } else {
-            ip_is_authorized(app, self.ip, self.origin.clone()).await?
+            ip_is_authorized(app, self.ip, self.origin.clone(), self.checks.proxy_mode).await?
         };
 
         let a = Arc::new(a);
