@@ -503,6 +503,7 @@ impl Web3Rpcs {
             let head_block_num = synced_connections.head_block.number();
             let head_block_age = synced_connections.head_block.age();
 
+            // TODO: double check the logic on this. especially if only min is set
             let needed_blocks_comparison = match (min_block_needed, max_block_needed) {
                 (None, None) => {
                     // no required block given. treat this like the requested the consensus head block
@@ -512,15 +513,17 @@ impl Web3Rpcs {
                 (Some(min_block_needed), None) => min_block_needed.cmp(head_block_num),
                 (Some(min_block_needed), Some(max_block_needed)) => {
                     match min_block_needed.cmp(max_block_needed) {
-                        cmp::Ordering::Equal => min_block_needed.cmp(head_block_num),
+                        cmp::Ordering::Less | cmp::Ordering::Equal => {
+                            min_block_needed.cmp(head_block_num)
+                        }
                         cmp::Ordering::Greater => {
+                            // TODO: force a debug log of the original request to see if our logic is wrong?
                             return Err(anyhow::anyhow!(
                                 "Invalid blocks bounds requested. min ({}) > max ({})",
                                 min_block_needed,
                                 max_block_needed
-                            ))
+                            ));
                         }
-                        cmp::Ordering::Less => min_block_needed.cmp(head_block_num),
                     }
                 }
             };
