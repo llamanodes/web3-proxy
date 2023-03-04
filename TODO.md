@@ -385,12 +385,11 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - change premium concurrency limit to be against ip+rpckey
   - then sites like curve.fi don't have to worry about their user count
   - it does mean we will have a harder time capacity planning from the number of keys
-- [ ] eth_getLogs is going to unsynced nodes when synced nodes are available. always prefer synced nodes
 - [ ] have the healthcheck get the block over http. if it errors, or doesn't match what the websocket says, something is wrong (likely a deadlock in the websocket code)
 - [ ] don't use new_head_provider anywhere except new head subscription
-- [ ] maybe we shouldn't route eth_getLogs to syncing nodes. serving queries slows down sync significantly
+- [x] maybe we shouldn't route eth_getLogs to syncing nodes. serving queries slows down sync significantly
   - change the send_best function to only include servers that are at least close to fully synced
-- [ ] have private transactions be enabled by a url setting rather than a setting on the key
+- [-] have private transactions be enabled by a url setting rather than a setting on the key
 - [ ] cli for adding rpc keys to an existing user
 - [ ] rate limiting/throttling on query_user_stats 
 - [ ] web3rpc configs should have a max_concurrent_requests
