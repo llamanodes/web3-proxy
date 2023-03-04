@@ -10,6 +10,7 @@ use tokio::sync::broadcast;
 use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use web3_proxy::config::TopConfig;
 use web3_proxy::{frontend, prometheus};
+use anyhow::Context;
 
 /// start the main proxy daemon
 #[derive(FromArgs, PartialEq, Debug, Eq)]
@@ -113,23 +114,23 @@ async fn run(
 
     // wait until the app has seen its first consensus head block
     // if backups were included, wait a little longer
-    for _ in 0..3 {
-        let _ = spawned_app.consensus_connections_watcher.changed().await;
-
-        let consensus = spawned_app
-            .consensus_connections_watcher
-            .borrow_and_update();
-
-        if *consensus.context("Channel closed!")?.backups_needed {
-            info!(
-                "waiting longer. found consensus with backups: {}",
-                *consensus.context("Channel closed!")?.head_block.as_ref().unwrap(),
-            );
-        } else {
-            // TODO: also check that we have at least one archive node connected?
-            break;
-        }
-    }
+    // for _ in 0..3 {
+    //     let _ = spawned_app.consensus_connections_watcher.changed().await;
+    //
+    //     let consensus = spawned_app
+    //         .consensus_connections_watcher
+    //         .borrow_and_update();
+    //
+    //     if *consensus.context("Channel closed!")?.backups_needed {
+    //         info!(
+    //             "waiting longer. found consensus with backups: {}",
+    //             *consensus.context("Channel closed!")?.head_block.as_ref().unwrap(),
+    //         );
+    //     } else {
+    //         // TODO: also check that we have at least one archive node connected?
+    //         break;
+    //     }
+    // }
 
     // start the frontend port
     let frontend_handle = tokio::spawn(frontend::serve(

@@ -27,11 +27,7 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 
 anyhow = { version = "1.0.69", features = ["backtrace"] }
 argh = "0.1.10"
-<<<<<<< HEAD
 axum = { version = "0.6.8", features = ["headers", "ws"] }
-=======
-axum = { version = "0.6.7", features = ["headers", "ws"] }
->>>>>>> 698d53d (cargo upgrade)
 axum-client-ip = "0.4.0"
 axum-macros = "0.3.4"
 chrono = "0.4.23"
@@ -75,11 +71,7 @@ serde = { version = "1.0.152", features = [] }
 serde_json = { version = "1.0.93", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.2.1"
 siwe = "0.5.0"
-<<<<<<< HEAD
 time = "0.3.20"
-=======
-time = "0.3.19"
->>>>>>> 698d53d (cargo upgrade)
 tokio = { version = "1.25.0", features = ["full"] }
 tokio-stream = { version = "0.1.12", features = ["sync"] }
 tokio-uring = { version = "0.4.0", optional = true }
