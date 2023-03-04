@@ -13,7 +13,9 @@ RUSTFLAGS="--cfg tokio_unstable" cargo run create_user --address 0x077e43dcca20d
 RUSTFLAGS="--cfg tokio_unstable" cargo run --release -- proxyd
 
 # Check if the instance is running
-curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"web3_clientVersion","id":1}' 127.0.0.1:8544
+curl --verbose -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"web3_clientVersion","id":1}' 127.0.0.1:8544
+
+curl --verbose -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params": ["latest", false], "id":1}' 127.0.0.1:8544
 
 # Open this website to get the nonce to log in
 curl -X GET "http://127.0.0.1:8544/user/login/0xeB3E928A2E54BE013EF8241d4C9EaF4DfAE94D5a"

@@ -474,10 +474,6 @@ impl Web3ProxyApp {
                 Err(err) => error!("Failed connecting to kafka. This will not retry. {:?}", err),
             }
         }
-        #[cfg(not(rdkafka))]
-        if top_config.app.kafka_urls.is_some() {
-            warn!("rdkafka rust feature is not enabled!");
-        }
 
         // TODO: do this during apply_config so that we can change redis url while running
         // create a connection pool for redis
@@ -1085,61 +1081,64 @@ impl Web3ProxyApp {
         let request_metadata = Arc::new(RequestMetadata::new(REQUEST_PERIOD, request.num_bytes())?);
 
         let mut kafka_stuff = None;
-        if let Some(kafka_producer) = self.kafka_producer.clone() {
-            let kafka_topic = "proxy_cached_request".to_string();
 
-            let rpc_secret_key_id = authorization
-                .checks
-                .rpc_secret_key_id
-                .map(|x| x.get())
-                .unwrap_or_default();
+        if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
+            if let Some(kafka_producer) = self.kafka_producer.clone() {
+                let kafka_topic = "proxy_cached_request".to_string();
 
-            let kafka_key = rmp_serde::to_vec(&rpc_secret_key_id)?;
+                let rpc_secret_key_id = authorization
+                    .checks
+                    .rpc_secret_key_id
+                    .map(|x| x.get())
+                    .unwrap_or_default();
 
-            let request_bytes = rmp_serde::to_vec(&request)?;
+                let kafka_key = rmp_serde::to_vec(&rpc_secret_key_id)?;
 
-            let request_hash = Some(keccak256(&request_bytes));
+                let request_bytes = rmp_serde::to_vec(&request)?;
 
-            let chain_id = self.config.chain_id;
+                let request_hash = Some(keccak256(&request_bytes));
 
-            // another item is added with the response, so initial_capacity is +1 what is needed here
-            let kafka_headers = OwnedHeaders::new_with_capacity(4)
-                .insert(Header {
-                    key: "request_hash",
-                    value: request_hash.as_ref(),
-                })
-                .insert(Header {
-                    key: "head_block_num",
-                    value: head_block_num.map(|x| x.to_string()).as_ref(),
-                })
-                .insert(Header {
-                    key: "chain_id",
-                    value: Some(&chain_id.to_le_bytes()),
-                });
+                let chain_id = self.config.chain_id;
 
-            // save the key and headers for when we log the response
-            kafka_stuff = Some((
-                kafka_topic.clone(),
-                kafka_key.clone(),
-                kafka_headers.clone(),
-            ));
+                // another item is added with the response, so initial_capacity is +1 what is needed here
+                let kafka_headers = OwnedHeaders::new_with_capacity(4)
+                    .insert(Header {
+                        key: "request_hash",
+                        value: request_hash.as_ref(),
+                    })
+                    .insert(Header {
+                        key: "head_block_num",
+                        value: head_block_num.map(|x| x.to_string()).as_ref(),
+                    })
+                    .insert(Header {
+                        key: "chain_id",
+                        value: Some(&chain_id.to_le_bytes()),
+                    });
 
-            let f = async move {
-                let produce_future = kafka_producer.send(
-                    FutureRecord::to(&kafka_topic)
-                        .key(&kafka_key)
-                        .payload(&request_bytes)
-                        .headers(kafka_headers),
-                    Duration::from_secs(0),
-                );
+                // save the key and headers for when we log the response
+                kafka_stuff = Some((
+                    kafka_topic.clone(),
+                    kafka_key.clone(),
+                    kafka_headers.clone(),
+                ));
 
-                if let Err((err, msg)) = produce_future.await {
-                    error!("produce kafka request log: {}. {:#?}", err, msg);
-                    // TODO: re-queue the msg?
-                }
-            };
+                let f = async move {
+                    let produce_future = kafka_producer.send(
+                        FutureRecord::to(&kafka_topic)
+                            .key(&kafka_key)
+                            .payload(&request_bytes)
+                            .headers(kafka_headers),
+                        Duration::from_secs(0),
+                    );
 
-            tokio::spawn(f);
+                    if let Err((err, _)) = produce_future.await {
+                        error!("produce kafka request log: {}", err);
+                        // TODO: re-queue the msg?
+                    }
+                };
+
+                tokio::spawn(f);
+            }
         }
 
         // save the id so we can attach it to the response
@@ -1767,8 +1766,8 @@ impl Web3ProxyApp {
                     Duration::from_secs(0),
                 );
 
-                if let Err((err, msg)) = produce_future.await {
-                    error!("produce kafka request log: {}. {:#?}", err, msg);
+                if let Err((err, _)) = produce_future.await {
+                    error!("produce kafka response log: {}", err);
                 }
             };
 

@@ -39,6 +39,18 @@ services:
       - ./data/dev_influxdb/data:/var/lib/influxdb2
       - ./data/dev_influxdb/config:/etc/influxdb2
 
+  dev-kafka:
+    image: bitnami/kafka:3.4
+    ports:
+      - "127.0.0.1:19092:9092"
+    volumes:
+      - "./data/dev_kafka:/bitnami"
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=dev-zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    depends_on:
+      - dev-zookeeper
+
   # volatile redis for storing rate limits
   dev-vredis:
     extends:
@@ -46,3 +58,13 @@ services:
       service: volatile_redis
     ports:
       - 127.0.0.1:16379:6379
+
+  # TODO: kafka doesn't need zookeeper anymore, but all the docs still use it
+  dev-zookeeper:
+    image: bitnami/zookeeper:3.8
+    ports:
+      - "127.0.0.1:12181:2181"
+    volumes:
+      - "./data/zookeeper:/bitnami"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes

@@ -12,9 +12,10 @@ Each server has different limits to configure. The `soft_limit` is the number of
 
 ## Quick development
 
-1. Run `docker-compose up -d` to start the database and caches. See `docker-compose.yml` for details.
-2. Copy `./config/example.toml` to `./config/development.toml` and change settings to match your setup.
-3. Run `cargo` commands:
+1. `brew install librdkafka` or `sudo apt-get install librdkafka-dev`
+2. Run `docker-compose up -d` to start the database and caches. See `docker-compose.yml` for details.
+3. Copy `./config/example.toml` to `./config/development.toml` and change settings to match your setup.
+4. Run `cargo` commands:
 
 ```
 $ cargo run --release -- --help
