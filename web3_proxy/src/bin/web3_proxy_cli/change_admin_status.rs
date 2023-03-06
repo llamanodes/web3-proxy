@@ -2,7 +2,7 @@ use anyhow::Context;
 use argh::FromArgs;
 use entities::{admin, login, user};
 use ethers::types::Address;
-use log::debug;
+use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
 };
@@ -10,7 +10,7 @@ use migration::sea_orm::{
 /// change a user's admin status. eiter they are an admin, or they aren't
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 #[argh(subcommand, name = "change_admin_status")]
-pub struct ChangeUserAdminStatusSubCommand {
+pub struct ChangeAdminStatusSubCommand {
     /// the address of the user whose admin status you want to modify
     #[argh(positional)]
     address: String,
@@ -20,7 +20,7 @@ pub struct ChangeUserAdminStatusSubCommand {
     should_be_admin: bool,
 }
 
-impl ChangeUserAdminStatusSubCommand {
+impl ChangeAdminStatusSubCommand {
     pub async fn main(self, db_conn: &DatabaseConnection) -> anyhow::Result<()> {
         let address: Address = self.address.parse()?;
         let should_be_admin: bool = self.should_be_admin;
@@ -34,17 +34,18 @@ impl ChangeUserAdminStatusSubCommand {
             .await?
             .context(format!("No user with this id found {:?}", address))?;
 
-        debug!("user: {:#?}", user);
+        debug!("user: {}", serde_json::to_string_pretty(&user)?);
 
         // Check if there is a record in the database
         match admin::Entity::find()
-            .filter(admin::Column::UserId.eq(address))
+            .filter(admin::Column::UserId.eq(user.id))
             .one(db_conn)
             .await?
         {
             Some(old_admin) if !should_be_admin => {
                 // User is already an admin, but shouldn't be
                 old_admin.delete(db_conn).await?;
+                info!("revoked admin status");
             }
             None if should_be_admin => {
                 // User is not an admin yet, but should be
@@ -53,11 +54,11 @@ impl ChangeUserAdminStatusSubCommand {
                     ..Default::default()
                 };
                 new_admin.insert(db_conn).await?;
+                info!("granted admin status");
             }
             _ => {
-                // Do nothing in this case
-                debug!("no change needed for: {:#?}", user);
-                // Early return
+                info!("no change needed for: {:#?}", user);
+                // Since no change happened, we do not want to delete active logins. Return now.
                 return Ok(());
             }
         }
