@@ -74,6 +74,7 @@ pub fn panic_handler(
 
     let backtrace = Backtrace::force_capture();
 
+    // TODO: try to send to sentry and then put the sentry link into the page
     let details = format!("{:#?}\n{:#?}", panic_info, backtrace);
 
     if summary.starts_with("panicked at 'WS Server panic") {
