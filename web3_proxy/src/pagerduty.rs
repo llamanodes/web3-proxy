@@ -4,6 +4,7 @@ use log::{debug, error};
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
 use pagerduty_rs::types::{AlertTrigger, AlertTriggerPayload, Event};
 use serde::Serialize;
+use std::backtrace::Backtrace;
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -71,7 +72,9 @@ pub fn panic_handler(
 ) {
     let summary = format!("{}", panic_info);
 
-    let details = format!("{:#?}", panic_info);
+    let backtrace = Backtrace::force_capture();
+
+    let details = format!("{:#?}\n{:#?}", panic_info, backtrace);
 
     if summary.starts_with("panicked at 'WS Server panic") {
         // the ethers-rs library panics when websockets disconnect. this isn't a panic we care about reporting
