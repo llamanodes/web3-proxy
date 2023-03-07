@@ -77,6 +77,7 @@ enum SubCommand {
     CreateKey(create_key::CreateKeySubCommand),
     CreateUser(create_user::CreateUserSubCommand),
     DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
+    MigrateStatsToV2(migrate_stats_to_v2::MigrateStatsToV2),
     Pagerduty(pagerduty::PagerdutySubCommand),
     PopularityContest(popularity_contest::PopularityContestSubCommand),
     Proxyd(proxyd::ProxydSubCommand),
