@@ -21,7 +21,7 @@ use entities::{admin_trail, login, pending_login, rpc_key, user};
 use ethers::{abi::AbiEncode, prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use migration::sea_orm::prelude::Uuid;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -130,7 +130,7 @@ pub async fn admin_login_get(
         // TODO: accept a login_domain from the request?
         domain: login_domain.parse().unwrap(),
         // In the case of the admin, the admin needs to sign the message, so we include this logic ...
-        address: admin_address.to_fixed_bytes(), // user_address.to_fixed_bytes(),
+        address: admin_address.clone().to_fixed_bytes(), // user_address.to_fixed_bytes(),
         // TODO: config for statement
         statement: Some("🦙🦙🦙🦙🦙".to_string()),
         // TODO: don't unwrap
@@ -144,6 +144,10 @@ pub async fn admin_login_get(
         request_id: None,
         resources: vec![],
     };
+
+    let admin_address: Vec<u8> = admin_address
+        .to_fixed_bytes()
+        .into();
 
     let db_conn = app.db_conn().context("login requires a database")?;
     let db_replica = app
@@ -160,8 +164,11 @@ pub async fn admin_login_get(
             "Could not find user in db".to_string(),
         ))?;
 
+    // TODO: Gotta check if encoding messes up things maybe ...
+    info!("Admin address is: {:?}", admin_address);
+    info!("Encoded admin address is: {:?}", admin_address);
     let admin = user::Entity::find()
-        .filter(user::Column::Address.eq(admin_address.encode()))
+        .filter(user::Column::Address.eq(admin_address))
         .one(db_replica.conn())
         .await?
         .ok_or(FrontendErrorResponse::BadRequest(
