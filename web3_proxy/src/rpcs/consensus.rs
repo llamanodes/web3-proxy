@@ -267,7 +267,6 @@ impl ConnectionsGroup {
             }
 
             if backup_rpcs_voted.is_none()
-                && backup_consensus_rpcs != primary_consensus_rpcs
                 && backup_sum_soft_limit >= web3_rpcs.min_sum_soft_limit
                 && backup_consensus_rpcs.len() >= web3_rpcs.min_head_rpcs
             {
@@ -303,7 +302,7 @@ impl ConnectionsGroup {
                     );
 
                     if backup_rpcs_voted.is_some() {
-                        warn!("{}", err_msg);
+                        warn!("{}. using backup vote", err_msg);
                         break;
                     } else {
                         return Err(anyhow::anyhow!(err_msg));
@@ -334,24 +333,35 @@ impl ConnectionsGroup {
             ));
         }
 
-        // success! this block has enough soft limit and nodes on it (or on later blocks)
-        let rpcs: Vec<Arc<Web3Rpc>> = primary_consensus_rpcs
+        // success! a block has enough soft limit and nodes on it (or on later blocks)
+        let backups_needed;
+        let (head_block, consensus_rpcs) = if let Some(head_block) = primary_rpcs_voted {
+            backups_needed = false;
+            (head_block, primary_consensus_rpcs)
+        } else if let Some(head_block) = backup_rpcs_voted.clone() {
+            backups_needed = true;
+            (head_block, backup_consensus_rpcs)
+        } else {
+            return Err(anyhow::anyhow!("No head voted!"));
+        };
+
+        #[cfg(debug_assertions)]
+        {
+            let _ = head_block.hash();
+            let _ = head_block.number();
+        }
+
+        let consensus_rpcs: Vec<Arc<Web3Rpc>> = consensus_rpcs
             .into_iter()
             .filter_map(|conn_name| web3_rpcs.by_name.read().get(conn_name).cloned())
             .collect();
 
-        #[cfg(debug_assertions)]
-        {
-            let _ = maybe_head_block.hash();
-            let _ = maybe_head_block.number();
-        }
-
         Ok(ConsensusWeb3Rpcs {
             tier: *tier,
-            head_block: maybe_head_block,
-            rpcs,
+            head_block,
+            rpcs: consensus_rpcs,
             backups_voted: backup_rpcs_voted,
-            backups_needed: primary_rpcs_voted.is_none(),
+            backups_needed,
         })
     }
 }

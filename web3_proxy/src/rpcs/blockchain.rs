@@ -221,7 +221,13 @@ impl Web3Rpcs {
                     )
                     .await?;
 
-                let block = response.result.context("failed fetching block")?;
+                if let Some(err) = response.error {
+                    let err = anyhow::anyhow!("{:#?}", err);
+
+                    return Err(err.context("failed fetching block"));
+                }
+
+                let block = response.result.context("no error, but also no block")?;
 
                 let block: Option<ArcBlock> = serde_json::from_str(block.get())?;
 
@@ -482,10 +488,6 @@ impl Web3Rpcs {
                             )
                         } else {
                             // hash changed
-                            if backups_needed {
-                                // TODO: what else should be in this error?
-                                warn!("Backup RPCs are in use!");
-                            }
 
                             debug!(
                                 "unc {}/{} {}{}/{}/{}/{} con_head={} old={} rpc={}@{}",
