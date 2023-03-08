@@ -295,9 +295,9 @@ impl ConnectionsGroup {
                         primary_consensus_rpcs.len(),
                         num_known,
                         web3_rpcs.min_head_rpcs,
+                        soft_limit_percent,
                         primary_sum_soft_limit,
                         web3_rpcs.min_sum_soft_limit,
-                        soft_limit_percent,
                         err,
                     );
 
