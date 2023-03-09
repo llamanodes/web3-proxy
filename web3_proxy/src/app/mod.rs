@@ -1493,7 +1493,9 @@ impl Web3ProxyApp {
                 match &request.params {
                     Some(serde_json::Value::Array(params)) => {
                         // TODO: make a struct and use serde conversion to clean this up
-                        if params.len() != 1 || !params[0].is_string() {
+                        if params.len() != 1
+                            || !params.get(0).map(|x| x.is_string()).unwrap_or(false)
+                        {
                             // TODO: what error code?
                             return Ok((
                                 JsonRpcForwardedResponse::from_str(
