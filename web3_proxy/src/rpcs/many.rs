@@ -1014,10 +1014,18 @@ impl Web3Rpcs {
         let num_skipped = skip_rpcs.len();
 
         if num_skipped == 0 {
+            let consensus = watch_consensus_connections.borrow();
+
+            let head_block = consensus.as_ref().map(|x| &x.head_block);
+
             error!(
-                "No servers synced ({:?}-{:?}) ({} known). None skipped",
-                min_block_needed, max_block_needed, num_conns
+                "No servers synced ({:?}-{:?}, {:?}) ({} known). None skipped",
+                min_block_needed, max_block_needed, head_block, num_conns
             );
+
+            drop(consensus);
+
+            // TODO: remove this, or move to trace level
             debug!("{}", serde_json::to_string(&request).unwrap());
         } else {
             // TODO: warn? debug? trace?
