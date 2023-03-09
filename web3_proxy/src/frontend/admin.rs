@@ -18,7 +18,7 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::{admin_trail, login, pending_login, rpc_key, user};
-use ethers::{abi::AbiEncode, prelude::Address, types::Bytes};
+use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;
 use log::{debug, info, warn};
@@ -130,7 +130,7 @@ pub async fn admin_login_get(
         // TODO: accept a login_domain from the request?
         domain: login_domain.parse().unwrap(),
         // In the case of the admin, the admin needs to sign the message, so we include this logic ...
-        address: admin_address.clone().to_fixed_bytes(), // user_address.to_fixed_bytes(),
+        address: admin_address.to_fixed_bytes(), // user_address.to_fixed_bytes(),
         // TODO: config for statement
         statement: Some("🦙🦙🦙🦙🦙".to_string()),
         // TODO: don't unwrap
@@ -145,9 +145,7 @@ pub async fn admin_login_get(
         resources: vec![],
     };
 
-    let admin_address: Vec<u8> = admin_address
-        .to_fixed_bytes()
-        .into();
+    let admin_address: Vec<u8> = admin_address.to_fixed_bytes().into();
 
     let db_conn = app.db_conn().context("login requires a database")?;
     let db_replica = app
