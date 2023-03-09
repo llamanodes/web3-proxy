@@ -25,11 +25,12 @@ impl ChangeAdminStatusSubCommand {
         let address: Address = self.address.parse()?;
         let should_be_admin: bool = self.should_be_admin;
 
-        let address: Vec<u8> = address.to_fixed_bytes().into();
+        // we keep "address" around for use in logs
+        let address_vec: Vec<u8> = address.to_fixed_bytes().into();
 
         // Find user in database
         let user = user::Entity::find()
-            .filter(user::Column::Address.eq(address.clone()))
+            .filter(user::Column::Address.eq(address_vec))
             .one(db_conn)
             .await?
             .context(format!("No user with this id found {:?}", address))?;
