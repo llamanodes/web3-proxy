@@ -99,15 +99,6 @@ async fn _proxy_web3_rpc(
             .expect("W3P-BACKEND-RPCS should always parse"),
     );
 
-    // TODO: add a header if a backend rpc was used
-
-    headers.insert(
-        "X-W3P-CLIENT-IP",
-        ip.to_string()
-            .parse()
-            .expect("X-CLIENT-IP should always parse"),
-    );
-
     Ok(response)
 }
 
@@ -270,13 +261,6 @@ async fn _proxy_web3_rpc_with_key(
             .to_string()
             .parse()
             .expect("W3P-BACKEND-RPCS should always parse"),
-    );
-
-    headers.insert(
-        "X-W3P-CLIENT-IP",
-        ip.to_string()
-            .parse()
-            .expect("X-CLIENT-IP should always parse"),
     );
 
     if let Some(rpc_secret_key_id) = rpc_secret_key_id {
