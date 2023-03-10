@@ -31,9 +31,14 @@ pub async fn health(
 
 #[debug_handler]
 pub async fn status_headers(headers: HeaderMap) -> impl IntoResponse {
-    let headers: HashMap<Option<String>, String> = headers
+    let headers: HashMap<String, String> = headers
         .into_iter()
-        .map(|(k, v)| (k.map(|k| k.to_string()), format!("{:?}", v)))
+        .map(|(k, v)| {
+            (
+                k.map(|k| k.to_string()).unwrap_or_default(),
+                format!("{:?}", v),
+            )
+        })
         .collect();
 
     let body = json!({ "headers": headers });
