@@ -9,6 +9,7 @@ mod create_key;
 mod create_user;
 mod drop_migration_lock;
 mod list_user_tier;
+mod migrate_stats_to_v2;
 mod pagerduty;
 mod popularity_contest;
 mod proxyd;
@@ -370,6 +371,14 @@ fn main() -> anyhow::Result<()> {
                 // very intentionally, do NOT run migrations here
                 let db_conn = get_db(db_url, 1, 1).await?;
 
+                x.main(&db_conn).await
+            }
+            SubCommand::MigrateStatsToV2(x) => {
+                let db_url = cli_config
+                    .db_url
+                    .expect("'--config' (with a db) or '--db-url' is required to run the migration from stats-mysql to stats-influx");
+
+                let db_conn = get_db(db_url, 1, 1).await?;
                 x.main(&db_conn).await
             }
             SubCommand::Pagerduty(x) => {

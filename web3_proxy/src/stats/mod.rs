@@ -394,6 +394,7 @@ impl RpcQueryStats {
 impl StatBuffer {
     pub fn try_spawn(
         chain_id: u64,
+        bucket: String,
         db_conn: Option<DatabaseConnection>,
         influxdb_client: Option<influxdb2::Client>,
         db_save_interval_seconds: u32,
@@ -418,7 +419,7 @@ impl StatBuffer {
 
         // any errors inside this task will cause the application to exit
         let handle = tokio::spawn(async move {
-            new.aggregate_and_save_loop(stat_receiver, shutdown_receiver)
+            new.aggregate_and_save_loop(bucket, stat_receiver, shutdown_receiver)
                 .await
         });
 
@@ -427,6 +428,7 @@ impl StatBuffer {
 
     async fn aggregate_and_save_loop(
         &mut self,
+        bucket: String,
         stat_receiver: flume::Receiver<AppStat>,
         mut shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<()> {
@@ -486,14 +488,14 @@ impl StatBuffer {
 
                     for (key, stat) in global_timeseries_buffer.drain() {
                         // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
-                        if let Err(err) = stat.save_timeseries("dev_web3_proxy", "global_proxy", self.chain_id, influxdb_client, key).await {
+                        if let Err(err) = stat.save_timeseries(bucket.clone().as_ref(), "global_proxy", self.chain_id, influxdb_client, key).await {
                             error!("unable to save global stat! err={:?}", err);
                         };
                     }
 
                     for (key, stat) in opt_in_timeseries_buffer.drain() {
                         // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
-                        if let Err(err) = stat.save_timeseries("dev_web3_proxy", "opt_in_proxy", self.chain_id, influxdb_client, key).await {
+                        if let Err(err) = stat.save_timeseries(bucket.clone().as_ref(), "opt_in_proxy", self.chain_id, influxdb_client, key).await {
                             error!("unable to save opt-in stat! err={:?}", err);
                         };
                     }
@@ -538,7 +540,7 @@ impl StatBuffer {
             for (key, stat) in global_timeseries_buffer.drain() {
                 if let Err(err) = stat
                     .save_timeseries(
-                        "dev_web3_proxy",
+                        &bucket,
                         "global_proxy",
                         self.chain_id,
                         influxdb_client,
@@ -561,7 +563,7 @@ impl StatBuffer {
             for (key, stat) in opt_in_timeseries_buffer.drain() {
                 if let Err(err) = stat
                     .save_timeseries(
-                        "dev_web3_proxy",
+                        &bucket,
                         "opt_in_proxy",
                         self.chain_id,
                         influxdb_client,

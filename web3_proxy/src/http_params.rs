@@ -219,7 +219,7 @@ pub fn get_query_window_seconds_from_params(
     params.get("query_window_seconds").map_or_else(
         || {
             // no page in params. set default
-            Ok(0)
+            Ok(1)
         },
         |query_window_seconds: &String| {
             // parse the given timestamp
