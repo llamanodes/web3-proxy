@@ -158,6 +158,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
         //
         .route("/health", get(status::health))
         .route("/status", get(status::status))
+        .route("/status/headers", get(status::status_headers))
         //
         // User stuff
         //

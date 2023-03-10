@@ -7,6 +7,8 @@ use super::{FrontendHealthCache, FrontendResponseCache, FrontendResponseCaches};
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_macros::debug_handler;
+use hashbrown::HashMap;
+use http::HeaderMap;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -25,6 +27,18 @@ pub async fn health(
     } else {
         (StatusCode::SERVICE_UNAVAILABLE, ":(")
     }
+}
+
+#[debug_handler]
+pub async fn status_headers(headers: HeaderMap) -> impl IntoResponse {
+    let headers: HashMap<Option<String>, String> = headers
+        .into_iter()
+        .map(|(k, v)| (k.map(|k| k.to_string()), format!("{:?}", v)))
+        .collect();
+
+    let body = json!({ "headers": headers });
+
+    Json(body)
 }
 
 /// Very basic status page.
