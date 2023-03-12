@@ -22,6 +22,7 @@ use itertools::Itertools;
 use log::info;
 use serde::Serialize;
 use serde_json::{json};
+use crate::http_params::get_stats_column_from_params;
 
 // TODO: include chain_id, method, and some other things in this struct
 #[derive(Debug, Default, FromDataPoint, Serialize)]
@@ -66,6 +67,7 @@ pub async fn query_user_stats<'a>(
     let query_start = get_query_start_from_params(params)?.timestamp();
     let query_stop = get_query_stop_from_params(params)?.timestamp();
     let chain_id = get_chain_id_from_params(app, params)?;
+    let stats_column = get_stats_column_from_params(params)?;
 
     // query_window_seconds must be provided, and should be not 1s (?) by default ..
 
@@ -119,11 +121,15 @@ pub async fn query_user_stats<'a>(
         // StatType::Aggregated => f!(r#"|> filter(fn: (r) => r["_field"] == "frontend_requests")"#),
         // Let's show all endpoints in a detailed stats
         // StatType::Aggregated => "".to_string(),  // f!(r#"|> filter(fn: (r) => r["_field"] == "frontend_requests")"#),
-        StatType::Aggregated => f!(r#"|> filter(fn: (r) => r["_field"] == "frontend_requests" or r["_field"] == "backend_requests" or r["_field"] == "cache_hits" or r["_field"] == "cache_misses" or r["_field"] == "no_servers" or r["_field"] == "sum_request_bytes" or r["_field"] == "sum_response_bytes" or r["_field"] == "sum_response_millis")"#),
+        StatType::Aggregated => {
+            f!(r#"|> filter(fn: (r) => r["_field"] == "{stats_column}")"#)
+        },
+        // TODO: Detailed should still filter it, but just "group-by" method (call it once per each method ...
         StatType::Detailed => "".to_string(),
     };
 
     info!("Query start and stop are: {:?} {:?}", query_start, query_stop);
+    info!("Query column parameters are: {:?}", stats_column);
     info!("Query measurement is: {:?}", measurement);
     info!("Filters are: {:?} {:?}", filter_field, filter_chain_id);
     info!("Group is: {:?}", group);
