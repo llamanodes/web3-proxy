@@ -4,4 +4,4 @@
 
 
 curl -X GET \
-"http://localhost:8544/user/stats/aggregate?query_start=1678463411&query_window_seconds=1000000"
+"http://localhost:8544/user/stats/aggregate?query_start=1678780033&query_window_seconds=1000"
