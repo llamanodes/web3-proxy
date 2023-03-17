@@ -4,12 +4,12 @@ mod ws;
 use crate::block_number::{block_needed, BlockNeeded};
 use crate::config::{AppConfig, TopConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
-use crate::frontend::errors::FrontendErrorResponse;
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{
     JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest, JsonRpcRequestEnum,
 };
-use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
+use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::consensus::ConsensusWeb3Rpcs;
 use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
@@ -407,7 +407,7 @@ impl Web3ProxyApp {
         shutdown_sender: broadcast::Sender<()>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         let rpc_account_shutdown_recevier = shutdown_sender.subscribe();
-        let mut background_shutdown_receiver = shutdown_sender.subscribe();
+        let _background_shutdown_receiver = shutdown_sender.subscribe();
 
         // safety checks on the config
         // while i would prefer this to be in a "apply_top_config" function, that is a larger refactor
@@ -811,26 +811,27 @@ impl Web3ProxyApp {
 
             app_handles.push(config_handle);
         }
-// =======
-//         if important_background_handles.is_empty() {
-//             info!("no important background handles");
-//
-//             let f = tokio::spawn(async move {
-//                 let _ = background_shutdown_receiver.recv().await;
-//
-//                 Ok(())
-//             });
-//
-//             important_background_handles.push(f);
-// >>>>>>> 77df3fa (stats v2)
+        // =======
+        //         if important_background_handles.is_empty() {
+        //             info!("no important background handles");
+        //
+        //             let f = tokio::spawn(async move {
+        //                 let _ = background_shutdown_receiver.recv().await;
+        //
+        //                 Ok(())
+        //             });
+        //
+        //             important_background_handles.push(f);
+        // >>>>>>> 77df3fa (stats v2)
 
         Ok((
             app,
             app_handles,
             important_background_handles,
             new_top_config_sender,
-            consensus_connections_watcher
-        ).into())
+            consensus_connections_watcher,
+        )
+            .into())
     }
 
     pub async fn apply_top_config(&self, new_top_config: TopConfig) -> anyhow::Result<()> {
@@ -1041,7 +1042,7 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: Arc<Authorization>,
         request: JsonRpcRequestEnum,
-    ) -> Result<(JsonRpcForwardedResponseEnum, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
+    ) -> Web3ProxyResult<(JsonRpcForwardedResponseEnum, Vec<Arc<Web3Rpc>>)> {
         // trace!(?request, "proxy_web3_rpc");
 
         // even though we have timeouts on the requests to our backend providers,
@@ -1079,7 +1080,7 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         requests: Vec<JsonRpcRequest>,
-    ) -> Result<(Vec<JsonRpcForwardedResponse>, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
+    ) -> Web3ProxyResult<(Vec<JsonRpcForwardedResponse>, Vec<Arc<Web3Rpc>>)> {
         // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
 
@@ -1087,7 +1088,7 @@ impl Web3ProxyApp {
         // TODO: improve flattening
 
         // get the head block now so that any requests that need it all use the same block
-        // TODO: FrontendErrorResponse that handles "no servers synced" in a consistent way
+        // TODO: Web3ProxyError that handles "no servers synced" in a consistent way
         // TODO: this still has an edge condition if there is a reorg in the middle of the request!!!
         let head_block_num = self
             .balanced_rpcs
@@ -1153,7 +1154,7 @@ impl Web3ProxyApp {
         authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
         head_block_num: Option<U64>,
-    ) -> Result<(JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>), FrontendErrorResponse> {
+    ) -> Web3ProxyResult<(JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>)> {
         // trace!("Received request: {:?}", request);
 
         let request_metadata = Arc::new(RequestMetadata::new(request.num_bytes())?);
@@ -1591,7 +1592,7 @@ impl Web3ProxyApp {
                         )
                         .map_err(|x| {
                             trace!("bad request: {:?}", x);
-                            FrontendErrorResponse::BadRequest(
+                            Web3ProxyError::BadRequest(
                                 "param 0 could not be read as H256".to_string(),
                             )
                         })?;
@@ -1628,7 +1629,7 @@ impl Web3ProxyApp {
             method => {
                 if method.starts_with("admin_") {
                     // TODO: emit a stat? will probably just be noise
-                    return Err(FrontendErrorResponse::AccessDenied);
+                    return Err(Web3ProxyError::AccessDenied);
                 }
 
                 // emit stats

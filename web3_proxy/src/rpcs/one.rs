@@ -242,12 +242,12 @@ impl Web3Rpc {
             block_data_limit,
             reconnect,
             tier: config.tier,
-// <<<<<<< HEAD
+            // <<<<<<< HEAD
             disconnect_watch: Some(disconnect_sender),
             created_at: Some(created_at),
-// =======
+            // =======
             head_block: RwLock::new(Default::default()),
-// >>>>>>> 77df3fa (stats v2)
+            // >>>>>>> 77df3fa (stats v2)
             ..Default::default()
         };
 
@@ -1110,7 +1110,7 @@ impl Web3Rpc {
         trace!("watching pending transactions on {}", self);
         // TODO: does this keep the lock open for too long?
         match provider.as_ref() {
-            Web3Provider::Http(provider) => {
+            Web3Provider::Http(_provider) => {
                 // there is a "watch_pending_transactions" function, but a lot of public nodes do not support the necessary rpc endpoints
                 self.wait_for_disconnect().await?;
             }
@@ -1224,11 +1224,11 @@ impl Web3Rpc {
         }
 
         if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
-// <<<<<<< HEAD
+            // <<<<<<< HEAD
             let hard_limit_ready = *hard_limit_until.borrow();
-// =======
-//             let hard_limit_ready = hard_limit_until.borrow().to_owned();
-// >>>>>>> 77df3fa (stats v2)
+            // =======
+            //             let hard_limit_ready = hard_limit_until.borrow().to_owned();
+            // >>>>>>> 77df3fa (stats v2)
 
             let now = Instant::now();
 

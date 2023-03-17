@@ -1,5 +1,5 @@
 use crate::app::DatabaseReplica;
-use crate::frontend::errors::FrontendErrorResponse;
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::{app::Web3ProxyApp, user_token::UserBearerToken};
 use anyhow::Context;
 use axum::{
@@ -24,7 +24,7 @@ pub async fn get_user_id_from_params(
     // this is a long type. should we strip it down?
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &HashMap<String, String>,
-) -> Result<u64, FrontendErrorResponse> {
+) -> Web3ProxyResult<u64> {
     match (bearer, params.get("user_id")) {
         (Some(TypedHeader(Authorization(bearer))), Some(user_id)) => {
             // check for the bearer cache key
@@ -45,7 +45,7 @@ pub async fn get_user_id_from_params(
                         .one(db_replica.conn())
                         .await
                         .context("database error while querying for user")?
-                        .ok_or(FrontendErrorResponse::AccessDenied)?;
+                        .ok_or(Web3ProxyError::AccessDenied)?;
 
                     // if expired, delete ALL expired logins
                     let now = Utc::now();
@@ -60,7 +60,7 @@ pub async fn get_user_id_from_params(
                         // TODO: emit a stat? if this is high something weird might be happening
                         debug!("cleared expired logins: {:?}", delete_result);
 
-                        return Err(FrontendErrorResponse::AccessDenied);
+                        return Err(Web3ProxyError::AccessDenied);
                     }
 
                     save_to_redis = true;
@@ -76,7 +76,7 @@ pub async fn get_user_id_from_params(
             let user_id: u64 = user_id.parse().context("Parsing user_id param")?;
 
             if bearer_user_id != user_id {
-                return Err(FrontendErrorResponse::AccessDenied);
+                return Err(Web3ProxyError::AccessDenied);
             }
 
             if save_to_redis {
@@ -103,7 +103,7 @@ pub async fn get_user_id_from_params(
             // TODO: proper error code from a useful error code
             // TODO: maybe instead of this sharp edged warn, we have a config value?
             // TODO: check config for if we should deny or allow this
-            Err(FrontendErrorResponse::AccessDenied)
+            Err(Web3ProxyError::AccessDenied)
             // // TODO: make this a flag
             // warn!("allowing without auth during development!");
             // Ok(x.parse()?)
@@ -215,7 +215,7 @@ pub fn get_query_stop_from_params(
 
 pub fn get_query_window_seconds_from_params(
     params: &HashMap<String, String>,
-) -> Result<u64, FrontendErrorResponse> {
+) -> Web3ProxyResult<u64> {
     params.get("query_window_seconds").map_or_else(
         || {
             // no page in params. set default
@@ -225,7 +225,7 @@ pub fn get_query_window_seconds_from_params(
             // parse the given timestamp
             query_window_seconds.parse::<u64>().map_err(|err| {
                 trace!("Unable to parse rpc_key_id: {:#?}", err);
-                FrontendErrorResponse::BadRequest("Unable to parse rpc_key_id".to_string())
+                Web3ProxyError::BadRequest("Unable to parse rpc_key_id".to_string())
             })
         },
     )

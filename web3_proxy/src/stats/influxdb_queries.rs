@@ -1,7 +1,7 @@
 use super::StatType;
 use crate::{
     app::Web3ProxyApp,
-    frontend::errors::FrontendErrorResponse,
+    frontend::errors::Web3ProxyResponse,
     http_params::{
         get_chain_id_from_params, get_query_start_from_params, get_query_stop_from_params,
         get_query_window_seconds_from_params, get_user_id_from_params,
@@ -10,7 +10,7 @@ use crate::{
 use anyhow::Context;
 use axum::{
     headers::{authorization::Bearer, Authorization},
-    response::{IntoResponse, Response},
+    response::IntoResponse,
     Json, TypedHeader,
 };
 use chrono::{DateTime, FixedOffset};
@@ -34,7 +34,7 @@ pub async fn query_user_stats<'a>(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
-) -> Result<Response, FrontendErrorResponse> {
+) -> Web3ProxyResponse {
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
     let db_replica = app
         .db_replica()

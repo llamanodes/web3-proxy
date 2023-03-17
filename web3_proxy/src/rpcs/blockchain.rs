@@ -398,7 +398,7 @@ impl Web3Rpcs {
         consensus_finder: &mut ConsensusFinder,
         new_block: Option<Web3ProxyBlock>,
         rpc: Arc<Web3Rpc>,
-        pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
+        _pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         // TODO: how should we handle an error here?
         if !consensus_finder

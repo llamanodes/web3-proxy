@@ -1,10 +1,10 @@
 //! Handle admin helper logic
 
 use super::authorization::login_is_authorized;
-use super::errors::FrontendResult;
+use super::errors::Web3ProxyResponse;
 use crate::admin_queries::query_admin_modify_usertier;
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::FrontendErrorResponse;
+use crate::frontend::errors::Web3ProxyError;
 use crate::user_token::UserBearerToken;
 use crate::PostLogin;
 use anyhow::Context;
@@ -43,7 +43,7 @@ pub async fn admin_change_user_roles(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let response = query_admin_modify_usertier(&app, bearer, &params).await?;
 
     Ok(response)
@@ -58,7 +58,7 @@ pub async fn admin_login_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(mut params): Path<HashMap<String, String>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // First check if the login is authorized
     login_is_authorized(&app, ip).await?;
 
@@ -85,30 +85,22 @@ pub async fn admin_login_get(
     let admin_address: Address = params
         .get("admin_address")
         .ok_or_else(|| {
-            FrontendErrorResponse::BadRequest(
-                "Unable to find admin_address key in request".to_string(),
-            )
+            Web3ProxyError::BadRequest("Unable to find admin_address key in request".to_string())
         })?
         .parse::<Address>()
         .map_err(|_err| {
-            FrontendErrorResponse::BadRequest(
-                "Unable to parse admin_address as an Address".to_string(),
-            )
+            Web3ProxyError::BadRequest("Unable to parse admin_address as an Address".to_string())
         })?;
 
     // Fetch the user_address parameter from the login string ... (as who we want to be logging in ...)
     let user_address: Vec<u8> = params
         .get("user_address")
         .ok_or_else(|| {
-            FrontendErrorResponse::BadRequest(
-                "Unable to find user_address key in request".to_string(),
-            )
+            Web3ProxyError::BadRequest("Unable to find user_address key in request".to_string())
         })?
         .parse::<Address>()
         .map_err(|_err| {
-            FrontendErrorResponse::BadRequest(
-                "Unable to parse user_address as an Address".to_string(),
-            )
+            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".to_string())
         })?
         .to_fixed_bytes()
         .into();
@@ -156,7 +148,7 @@ pub async fn admin_login_get(
         .filter(user::Column::Address.eq(user_address))
         .one(db_replica.conn())
         .await?
-        .ok_or(FrontendErrorResponse::BadRequest(
+        .ok_or(Web3ProxyError::BadRequest(
             "Could not find user in db".to_string(),
         ))?;
 
@@ -164,7 +156,7 @@ pub async fn admin_login_get(
         .filter(user::Column::Address.eq(admin_address.encode()))
         .one(db_replica.conn())
         .await?
-        .ok_or(FrontendErrorResponse::BadRequest(
+        .ok_or(Web3ProxyError::BadRequest(
             "Could not find admin in db".to_string(),
         ))?;
 
@@ -233,7 +225,7 @@ pub async fn admin_login_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     InsecureClientIp(ip): InsecureClientIp,
     Json(payload): Json<PostLogin>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     login_is_authorized(&app, ip).await?;
 
     // Check for the signed bytes ..
@@ -422,7 +414,7 @@ pub async fn admin_login_post(
 pub async fn admin_logout_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let user_bearer = UserBearerToken::try_from(bearer)?;
 
     let db_conn = app.db_conn().context("database needed for user logout")?;

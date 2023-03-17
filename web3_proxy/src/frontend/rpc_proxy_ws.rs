@@ -3,7 +3,7 @@
 //! WebSockets are the preferred method of receiving requests, but not all clients have good support.
 
 use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, RequestMetadata};
-use super::errors::{FrontendErrorResponse, FrontendResult};
+use super::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::stats::RpcQueryStats;
 use crate::{
     app::Web3ProxyApp,
@@ -59,7 +59,7 @@ pub async fn websocket_handler(
     ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _websocket_handler(ProxyMode::Best, app, ip, origin, ws_upgrade).await
 }
 
@@ -71,7 +71,7 @@ pub async fn fastest_websocket_handler(
     ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // TODO: get the fastest number from the url params (default to 0/all)
     // TODO: config to disable this
     _websocket_handler(ProxyMode::Fastest(0), app, ip, origin, ws_upgrade).await
@@ -85,7 +85,7 @@ pub async fn versus_websocket_handler(
     ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // TODO: config to disable this
     _websocket_handler(ProxyMode::Versus, app, ip, origin, ws_upgrade).await
 }
@@ -96,7 +96,7 @@ async fn _websocket_handler(
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let origin = origin.map(|x| x.0);
 
     let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode).await?;
@@ -134,7 +134,7 @@ pub async fn websocket_handler_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _websocket_handler_with_key(
         ProxyMode::Best,
         app,
@@ -157,7 +157,7 @@ pub async fn debug_websocket_handler_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _websocket_handler_with_key(
         ProxyMode::Debug,
         app,
@@ -180,7 +180,7 @@ pub async fn fastest_websocket_handler_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // TODO: get the fastest number from the url params (default to 0/all)
     _websocket_handler_with_key(
         ProxyMode::Fastest(0),
@@ -204,7 +204,7 @@ pub async fn versus_websocket_handler_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _websocket_handler_with_key(
         ProxyMode::Versus,
         app,
@@ -228,7 +228,7 @@ async fn _websocket_handler_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let rpc_key = rpc_key.parse()?;
 
     let (authorization, _semaphore) = key_is_authorized(
@@ -260,7 +260,7 @@ async fn _websocket_handler_with_key(
                 &app.config.redirect_rpc_key_url,
                 authorization.checks.rpc_secret_key_id,
             ) {
-                (None, None, _) => Err(FrontendErrorResponse::StatusCode(
+                (None, None, _) => Err(Web3ProxyError::StatusCode(
                     StatusCode::BAD_REQUEST,
                     "this page is for rpcs".to_string(),
                     None,
@@ -273,7 +273,7 @@ async fn _websocket_handler_with_key(
 
                     if authorization.checks.rpc_secret_key_id.is_none() {
                         // i don't think this is possible
-                        Err(FrontendErrorResponse::StatusCode(
+                        Err(Web3ProxyError::StatusCode(
                             StatusCode::UNAUTHORIZED,
                             "AUTHORIZATION header required".to_string(),
                             None,
@@ -291,7 +291,7 @@ async fn _websocket_handler_with_key(
                     }
                 }
                 // any other combinations get a simple error
-                _ => Err(FrontendErrorResponse::StatusCode(
+                _ => Err(Web3ProxyError::StatusCode(
                     StatusCode::BAD_REQUEST,
                     "this page is for rpcs".to_string(),
                     None,
@@ -419,7 +419,7 @@ async fn handle_socket_payload(
                     .await
                     .map_or_else(
                         |err| match err {
-                            FrontendErrorResponse::Anyhow(err) => Err(err),
+                            Web3ProxyError::Anyhow(err) => Err(err),
                             _ => {
                                 error!("handle this better! {:?}", err);
                                 Err(anyhow::anyhow!("unexpected error! {:?}", err))

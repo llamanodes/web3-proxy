@@ -1,6 +1,6 @@
 //! Handle registration, logins, and managing account data.
 use super::authorization::{login_is_authorized, RpcSecretKey};
-use super::errors::FrontendResult;
+use super::errors::Web3ProxyResponse;
 use crate::app::Web3ProxyApp;
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
@@ -65,7 +65,7 @@ pub async fn user_login_get(
     InsecureClientIp(ip): InsecureClientIp,
     // TODO: what does axum's error handling look like if the path fails to parse?
     Path(mut params): Path<HashMap<String, String>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     login_is_authorized(&app, ip).await?;
 
     // create a message and save it in redis
@@ -165,7 +165,7 @@ pub async fn user_login_post(
     InsecureClientIp(ip): InsecureClientIp,
     Query(query): Query<PostLoginQuery>,
     Json(payload): Json<PostLogin>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     login_is_authorized(&app, ip).await?;
 
     // TODO: this seems too verbose. how can we simply convert a String into a [u8; 65]
@@ -373,7 +373,7 @@ pub async fn user_login_post(
 pub async fn user_logout_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let user_bearer = UserBearerToken::try_from(bearer)?;
 
     let db_conn = app.db_conn().context("database needed for user logout")?;
@@ -417,7 +417,7 @@ pub async fn user_logout_post(
 pub async fn user_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
 
     Ok(Json(user).into_response())
@@ -435,7 +435,7 @@ pub async fn user_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<UserPost>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
 
     let mut user: user::ActiveModel = user.into();
@@ -480,8 +480,8 @@ pub async fn user_post(
 pub async fn user_balance_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+) -> Web3ProxyResponse {
+    let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     todo!("user_balance_get");
 }
@@ -495,8 +495,8 @@ pub async fn user_balance_get(
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+) -> Web3ProxyResponse {
+    let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     todo!("user_balance_post");
 }
@@ -506,7 +506,7 @@ pub async fn user_balance_post(
 pub async fn rpc_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app
@@ -535,8 +535,8 @@ pub async fn rpc_keys_get(
 pub async fn rpc_keys_delete(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+) -> Web3ProxyResponse {
+    let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     // TODO: think about how cascading deletes and billing should work
     Err(anyhow::anyhow!("work in progress").into())
@@ -567,7 +567,7 @@ pub async fn rpc_keys_management(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<UserKeyManagement>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // TODO: is there a way we can know if this is a PUT or POST? right now we can modify or create keys with either. though that probably doesn't matter
 
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
@@ -738,7 +738,7 @@ pub async fn user_revert_logs_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(params): Query<HashMap<String, String>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     let chain_id = get_chain_id_from_params(app.as_ref(), &params)?;
@@ -808,7 +808,7 @@ pub async fn user_stats_aggregated_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let response = query_user_stats(&app, bearer, &params, StatType::Aggregated).await?;
 
     Ok(response)
@@ -828,7 +828,7 @@ pub async fn user_stats_detailed_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let response = query_user_stats(&app, bearer, &params, StatType::Detailed).await?;
 
     Ok(response)

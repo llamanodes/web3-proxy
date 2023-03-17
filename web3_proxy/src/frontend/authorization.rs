@@ -1,6 +1,6 @@
 //! Utilities for authorization of logged in and anonymous users.
 
-use super::errors::FrontendErrorResponse;
+use super::errors::{Web3ProxyError, Web3ProxyResult};
 use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{AuthorizationChecks, Web3ProxyApp, APP_USER_AGENT};
 use crate::rpcs::one::Web3Rpc;
@@ -308,14 +308,11 @@ impl Authorization {
 
 /// rate limit logins only by ip.
 /// we want all origins and referers and user agents to count together
-pub async fn login_is_authorized(
-    app: &Web3ProxyApp,
-    ip: IpAddr,
-) -> Result<Authorization, FrontendErrorResponse> {
+pub async fn login_is_authorized(app: &Web3ProxyApp, ip: IpAddr) -> Web3ProxyResult<Authorization> {
     let authorization = match app.rate_limit_login(ip, ProxyMode::Best).await? {
         RateLimitResult::Allowed(authorization, None) => authorization,
         RateLimitResult::RateLimited(authorization, retry_at) => {
-            return Err(FrontendErrorResponse::RateLimited(authorization, retry_at));
+            return Err(Web3ProxyError::RateLimited(authorization, retry_at));
         }
         // TODO: don't panic. give the user an error
         x => unimplemented!("rate_limit_login shouldn't ever see these: {:?}", x),
@@ -330,7 +327,7 @@ pub async fn ip_is_authorized(
     ip: IpAddr,
     origin: Option<Origin>,
     proxy_mode: ProxyMode,
-) -> Result<(Authorization, Option<OwnedSemaphorePermit>), FrontendErrorResponse> {
+) -> Web3ProxyResult<(Authorization, Option<OwnedSemaphorePermit>)> {
     // TODO: i think we could write an `impl From` for this
     // TODO: move this to an AuthorizedUser extrator
     let (authorization, semaphore) = match app
@@ -345,7 +342,7 @@ pub async fn ip_is_authorized(
         RateLimitResult::Allowed(authorization, semaphore) => (authorization, semaphore),
         RateLimitResult::RateLimited(authorization, retry_at) => {
             // TODO: in the background, emit a stat (maybe simplest to use a channel?)
-            return Err(FrontendErrorResponse::RateLimited(authorization, retry_at));
+            return Err(Web3ProxyError::RateLimited(authorization, retry_at));
         }
         // TODO: don't panic. give the user an error
         x => unimplemented!("rate_limit_by_ip shouldn't ever see these: {:?}", x),
@@ -389,7 +386,7 @@ pub async fn ip_is_authorized(
     Ok((authorization, semaphore))
 }
 
-/// like app.rate_limit_by_rpc_key but converts to a FrontendErrorResponse;
+/// like app.rate_limit_by_rpc_key but converts to a Web3ProxyError;
 pub async fn key_is_authorized(
     app: &Arc<Web3ProxyApp>,
     rpc_key: RpcSecretKey,
@@ -398,7 +395,7 @@ pub async fn key_is_authorized(
     proxy_mode: ProxyMode,
     referer: Option<Referer>,
     user_agent: Option<UserAgent>,
-) -> Result<(Authorization, Option<OwnedSemaphorePermit>), FrontendErrorResponse> {
+) -> Web3ProxyResult<(Authorization, Option<OwnedSemaphorePermit>)> {
     // check the rate limits. error if over the limit
     // TODO: i think this should be in an "impl From" or "impl Into"
     let (authorization, semaphore) = match app
@@ -407,9 +404,9 @@ pub async fn key_is_authorized(
     {
         RateLimitResult::Allowed(authorization, semaphore) => (authorization, semaphore),
         RateLimitResult::RateLimited(authorization, retry_at) => {
-            return Err(FrontendErrorResponse::RateLimited(authorization, retry_at));
+            return Err(Web3ProxyError::RateLimited(authorization, retry_at));
         }
-        RateLimitResult::UnknownKey => return Err(FrontendErrorResponse::UnknownKey),
+        RateLimitResult::UnknownKey => return Err(Web3ProxyError::UnknownKey),
     };
 
     // TODO: DRY and maybe optimize the hashing
@@ -517,7 +514,7 @@ impl Web3ProxyApp {
     pub async fn bearer_is_authorized(
         &self,
         bearer: Bearer,
-    ) -> Result<(user::Model, OwnedSemaphorePermit), FrontendErrorResponse> {
+    ) -> Web3ProxyResult<(user::Model, OwnedSemaphorePermit)> {
         // get the user id for this bearer token
         let user_bearer_token = UserBearerToken::try_from(bearer)?;
 
@@ -869,7 +866,7 @@ impl Authorization {
     pub async fn check_again(
         &self,
         app: &Arc<Web3ProxyApp>,
-    ) -> Result<(Arc<Self>, Option<OwnedSemaphorePermit>), FrontendErrorResponse> {
+    ) -> Web3ProxyResult<(Arc<Self>, Option<OwnedSemaphorePermit>)> {
         // TODO: we could probably do this without clones. but this is easy
         let (a, s) = if let Some(rpc_secret_key) = self.checks.rpc_secret_key {
             key_is_authorized(

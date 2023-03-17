@@ -17,12 +17,13 @@ use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
 use tokio::{sync::AcquireError, task::JoinError, time::Instant};
 
+pub type Web3ProxyResult<T> = Result<T, Web3ProxyError>;
 // TODO: take "IntoResponse" instead of Response?
-pub type FrontendResult = Result<Response, FrontendErrorResponse>;
+pub type Web3ProxyResponse = Web3ProxyResult<Response>;
 
 // TODO:
 #[derive(Debug, From)]
-pub enum FrontendErrorResponse {
+pub enum Web3ProxyError {
     AccessDenied,
     Anyhow(anyhow::Error),
     BadRequest(String),
@@ -46,7 +47,7 @@ pub enum FrontendErrorResponse {
     UnknownKey,
 }
 
-impl FrontendErrorResponse {
+impl Web3ProxyError {
     pub fn into_response_parts(self) -> (StatusCode, JsonRpcForwardedResponse) {
         match self {
             Self::AccessDenied => {
@@ -296,7 +297,7 @@ impl FrontendErrorResponse {
     }
 }
 
-impl IntoResponse for FrontendErrorResponse {
+impl IntoResponse for Web3ProxyError {
     fn into_response(self) -> Response {
         // TODO: include the request id in these so that users can give us something that will point to logs
         // TODO: status code is in the jsonrpc response and is also the first item in the tuple. DRY
@@ -307,5 +308,5 @@ impl IntoResponse for FrontendErrorResponse {
 }
 
 pub async fn handler_404() -> Response {
-    FrontendErrorResponse::NotFound.into_response()
+    Web3ProxyError::NotFound.into_response()
 }
