@@ -314,6 +314,16 @@ async fn proxy_web3_socket(
 
     tokio::spawn(write_web3_socket(response_receiver, ws_tx));
     tokio::spawn(read_web3_socket(app, authorization, ws_rx, response_sender));
+    // tokio::spawn(read_web3_socket(
+    //     app,
+    //     authorization,
+    //     ws_rx,
+    //     response_sender,
+    //     proxy_mode,
+    // ));
+
+    // TODO: Add to the database that the guy made a request
+    // TODO: Apply referral logic if there is anything to be added
 }
 
 /// websockets support a few more methods than http clients

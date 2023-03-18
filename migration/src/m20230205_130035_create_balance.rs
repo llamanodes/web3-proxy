@@ -10,24 +10,30 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(Admin::Table)
+                    .table(Balance::Table)
+                    .if_not_exists()
                     .col(
-                        ColumnDef::new(Admin::Id)
-                            .big_unsigned()
+                        ColumnDef::new(Balance::Id)
+                            .integer()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
                     .col(
-                ColumnDef::new(Admin::UserId)
+                        ColumnDef::new(Balance::Balance)
                             .big_unsigned()
                             .not_null()
                             .default(0)
                     )
+                    .col(
+                        ColumnDef::new(Balance::UserId)
+                            .big_unsigned()
+                            .unique_key()
+                            .not_null()
+                    )
                     .foreign_key(
-                        ForeignKey::create()
-                            .name("fk-admin-user_id")
-                            .from(Admin::Table, Admin::UserId)
+                        sea_query::ForeignKey::create()
+                            .from(Balance::Table, Balance::UserId)
                             .to(User::Table, User::Id),
                     )
                     .to_owned(),
@@ -38,7 +44,7 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // Replace the sample below with your own migration scripts
         manager
-            .drop_table(Table::drop().table(Admin::Table).to_owned())
+            .drop_table(Table::drop().table(Balance::Table).to_owned())
             .await
     }
 }
@@ -51,8 +57,9 @@ enum User {
 }
 
 #[derive(Iden)]
-enum Admin {
+enum Balance {
     Table,
     Id,
     UserId,
+    Balance,
 }

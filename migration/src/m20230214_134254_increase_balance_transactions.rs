@@ -6,29 +6,25 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
+
+        // Adds a table which keeps track of which transactions were already added (basically to prevent double spending)
         manager
             .create_table(
                 Table::create()
-                    .table(Admin::Table)
+                    .table(IncreaseBalanceReceipt::Table)
+                    .if_not_exists()
                     .col(
-                        ColumnDef::new(Admin::Id)
-                            .big_unsigned()
+                        ColumnDef::new(IncreaseBalanceReceipt::Id)
+                            .integer()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
                     .col(
-                ColumnDef::new(Admin::UserId)
-                            .big_unsigned()
+                        ColumnDef::new(IncreaseBalanceReceipt::TxHash)
+                            .string()
+                            .unique_key()
                             .not_null()
-                            .default(0)
-                    )
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk-admin-user_id")
-                            .from(Admin::Table, Admin::UserId)
-                            .to(User::Table, User::Id),
                     )
                     .to_owned(),
             )
@@ -38,21 +34,15 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // Replace the sample below with your own migration scripts
         manager
-            .drop_table(Table::drop().table(Admin::Table).to_owned())
+            .drop_table(Table::drop().table(IncreaseBalanceReceipt::Table).to_owned())
             .await
     }
 }
 
 /// Learn more at https://docs.rs/sea-query#iden
 #[derive(Iden)]
-enum User {
-    Table,
-    Id
-}
-
-#[derive(Iden)]
-enum Admin {
+enum IncreaseBalanceReceipt {
     Table,
     Id,
-    UserId,
+    TxHash
 }

@@ -4,7 +4,6 @@ use super::consensus::ConsensusWeb3Rpcs;
 use super::one::Web3Rpc;
 use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
 use crate::app::{flatten_handle, AnyhowJoinHandle, Web3ProxyApp};
-///! Load balanced communication with a group of web3 providers
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
@@ -884,11 +883,7 @@ impl Web3Rpcs {
 
         // TODO: maximum retries? right now its the total number of servers
         loop {
-// <<<<<<< HEAD
             if skip_rpcs.len() >= self.by_name.read().len() {
-// =======
-//             if skip_rpcs.len() == self.by_name.len() {
-// >>>>>>> 77df3fa (stats v2)
                 break;
             }
 

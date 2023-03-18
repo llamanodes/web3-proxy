@@ -17,17 +17,18 @@ use axum::{
     response::IntoResponse,
     Extension, Json, TypedHeader,
 };
+use crate::frontend::authorization::{Authorization as InternalAuthorization, RequestMetadata};
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::sea_orm_active_enums::TrackingLevel;
-use entities::{login, pending_login, revert_log, rpc_key, user};
-use ethers::{prelude::Address, types::Bytes};
+use entities::{login, referrer, referee, pending_login, revert_log, rpc_key, user, user_tier, increase_balance_receipt, balance};
+use ethers::{prelude::{Address, EthEvent}, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
 use itertools::Itertools;
-use log::{debug, warn};
+use log::{debug, Level, trace, warn};
 use migration::sea_orm::prelude::Uuid;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
@@ -36,11 +37,24 @@ use migration::sea_orm::{
 use serde::Deserialize;
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
-use std::ops::Add;
+use std::ops::{Add, Div};
 use std::str::FromStr;
 use std::sync::Arc;
+use ethers::abi::{AbiEncode, Error, ParamType, Token};
+use ethers::prelude::H256;
+use ethers::prelude::sourcemap::parse;
+use ethers::types::{Log, Transaction, TransactionReceipt, U256};
+use ethers::utils::hex;
+use futures::TryFutureExt;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
+use entities;
+use entities::prelude::{Referrer, Referee, UserTier};
+use migration::extension::postgres::Type;
+use thread_fast_rng::rand;
+use crate::frontend::errors::FrontendErrorResponse;
+use crate::referral_code::ReferralCode;
+use crate::rpcs::request::OpenRequestResult;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
 ///
@@ -249,75 +263,147 @@ pub async fn user_login_post(
                 err_1,
                 err_191
             )
-            .into());
+                .into());
         }
     }
 
     // TODO: limit columns or load whole user?
-    let u = user::Entity::find()
+    let caller = user::Entity::find()
         .filter(user::Column::Address.eq(our_msg.address.as_ref()))
         .one(db_replica.conn())
-        .await
-        .unwrap();
+        .await?;
+
+    // .ok_or(FrontendErrorResponse::BadRequest("Login address was not previously found".to_string()))
 
     let db_conn = app.db_conn().context("login requires a db")?;
 
-    let (u, uks, status_code) = match u {
+    let (caller, user_rpc_keys, status_code) = match caller {
         None => {
             // user does not exist yet
 
             // check the invite code
             // TODO: more advanced invite codes that set different request/minute and concurrency limits
-            if let Some(invite_code) = &app.config.invite_code {
-                if query.invite_code.as_ref() != Some(invite_code) {
-                    return Err(anyhow::anyhow!("checking invite_code").into());
-                }
+            // Do nothing if app config is none (then there is basically no authentication invitation, and the user can process with a free tier ...
+
+            // Prematurely return if there is no invite code, and no referral code
+            // TODO: Referral code
+            if query.invite_code.is_none() || query.referral_code.is_none() {
+                return Err(anyhow::anyhow!("No invite code, nor referral code was provided").into());
+            }
+            if query.invite_code.is_some() && query.invite_code != app.config.invite_code {
+                return Err(anyhow::anyhow!("Invite code is not correct! {:?}", query).into());
             }
 
             let txn = db_conn.begin().await?;
+
+            // First add a user
 
             // the only thing we need from them is an address
             // everything else is optional
             // TODO: different invite codes should allow different levels
             // TODO: maybe decrement a count on the invite code?
-            let u = user::ActiveModel {
+            // TODO: There will be two different transactions. The first one inserts the user, the second one marks the user as being referred
+            let caller = user::ActiveModel {
                 address: sea_orm::Set(our_msg.address.into()),
                 ..Default::default()
             };
 
-            let u = u.insert(&txn).await?;
+            let caller = caller.insert(&txn).await?;
 
             // create the user's first api key
             let rpc_secret_key = RpcSecretKey::new();
 
-            let uk = rpc_key::ActiveModel {
-                user_id: sea_orm::Set(u.id),
+            let user_rpc_key = rpc_key::ActiveModel {
+                user_id: sea_orm::Set(caller.id.clone()),
                 secret_key: sea_orm::Set(rpc_secret_key.into()),
                 description: sea_orm::Set(None),
                 ..Default::default()
             };
 
-            let uk = uk
+            let user_rpc_key = user_rpc_key
                 .insert(&txn)
                 .await
                 .context("Failed saving new user key")?;
 
-            let uks = vec![uk];
+            let user_rpc_keys = vec![user_rpc_key];
+
+            // Also add a part for the invite code, i.e. who invited this guy
 
             // save the user and key to the database
             txn.commit().await?;
 
-            (u, uks, StatusCode::CREATED)
+            let txn = db_conn.begin().await?;
+            // First, optionally catch a referral code from the parameters if there is any
+            if let Some(referral_code) = query.referral_code.as_ref() {
+                // If it is not inside, also check in the database
+                warn!("Using register referral code:  {:?}", referral_code);
+                let user_referrer = referrer::Entity::find()
+                    .filter(referrer::Column::ReferralCode.eq(referral_code))
+                    .one(db_replica.conn())
+                    .await?
+                    .ok_or(
+                        FrontendErrorResponse::BadRequest(
+                            format!("The referral_link you provided does not exist {}", referral_code)
+                        )
+                    )?;
+
+                // Create a new item in the database,
+                // marking this guy as the referrer (and ignoring a duplicate insert, if there is any...)
+                // First person to make the referral gets all credits
+                // Generate a random referral code ...
+                let used_referral = referee::ActiveModel {
+                    used_referral_code: sea_orm::Set(user_referrer.referral_code),
+                    user_id: sea_orm::Set(caller.id),
+                    credits_applied: sea_orm::Set(false),
+                    ..Default::default()
+                };
+                used_referral.insert(&txn).await?;
+            }
+            txn.commit().await?;
+
+            (caller, user_rpc_keys, StatusCode::CREATED)
         }
-        Some(u) => {
+        Some(caller) => {
+
+            // Let's say that a user that exists can actually also redeem a key in retrospect...
+            let txn = db_conn.begin().await?;
+            // TODO: Move this into a common variable outside ...
+            // First, optionally catch a referral code from the parameters if there is any
+            if let Some(referral_code) = query.referral_code.as_ref() {
+                // If it is not inside, also check in the database
+                warn!("Using referral code: {:?}", referral_code);
+                let user_referrer = referrer::Entity::find()
+                    .filter(referrer::Column::ReferralCode.eq(referral_code))
+                    .one(db_replica.conn())
+                    .await?
+                    .ok_or(
+                        FrontendErrorResponse::BadRequest(
+                            format!("The referral_link you provided does not exist {}", referral_code)
+                        )
+                    )?;
+
+                // Create a new item in the database,
+                // marking this guy as the referrer (and ignoring a duplicate insert, if there is any...)
+                // First person to make the referral gets all credits
+                // Generate a random referral code ...
+                let used_referral = referee::ActiveModel {
+                    used_referral_code: sea_orm::Set(user_referrer.referral_code),
+                    user_id: sea_orm::Set(caller.id),
+                    credits_applied: sea_orm::Set(false),
+                    ..Default::default()
+                };
+                used_referral.insert(&txn).await?;
+            }
+            txn.commit().await?;
+
             // the user is already registered
-            let uks = rpc_key::Entity::find()
-                .filter(rpc_key::Column::UserId.eq(u.id))
+            let user_rpc_keys = rpc_key::Entity::find()
+                .filter(rpc_key::Column::UserId.eq(caller.id))
                 .all(db_replica.conn())
                 .await
                 .context("failed loading user's key")?;
 
-            (u, uks, StatusCode::OK)
+            (caller, user_rpc_keys, StatusCode::OK)
         }
     };
 
@@ -327,12 +413,12 @@ pub async fn user_login_post(
     // json response with everything in it
     // we could return just the bearer token, but I think they will always request api keys and the user profile
     let response_json = json!({
-        "rpc_keys": uks
+        "rpc_keys": user_rpc_keys
             .into_iter()
-            .map(|uk| (uk.id, uk))
+            .map(|user_rpc_key| (user_rpc_key.id, user_rpc_key))
             .collect::<HashMap<_, _>>(),
         "bearer_token": user_bearer_token,
-        "user": u,
+        "user": caller,
     });
 
     let response = (status_code, Json(response_json)).into_response();
@@ -347,7 +433,7 @@ pub async fn user_login_post(
     let user_login = login::ActiveModel {
         id: sea_orm::NotSet,
         bearer_token: sea_orm::Set(user_bearer_token.uuid()),
-        user_id: sea_orm::Set(u.id),
+        user_id: sea_orm::Set(caller.id),
         expires_at: sea_orm::Set(expires_at),
         read_only: sea_orm::Set(false),
     };
@@ -483,22 +569,249 @@ pub async fn user_balance_get(
 ) -> FrontendResult {
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    todo!("user_balance_get");
+    let db_replica = app.db_replica().context("Getting database connection")?;
+
+    // Just return the balance for the user
+    let user_balance = match balance::Entity::find()
+        .filter(balance::Column::UserId.eq(user.id))
+        .one(db_replica.conn())
+        .await? {
+        Some(x) => x.balance,
+        None => 0
+        // That means the user has no balance as of yet
+        // (user exists, but balance entry does not exist)
+        // In that case add this guy here
+        // Err(FrontendErrorResponse::BadRequest("User not found!"))
+    };
+
+    let mut response = HashMap::new();
+    response.insert("balance", json!(user_balance));
+
+    // TODO: Gotta create a new table for the spend part
+    Ok(Json(response).into_response())
 }
 
-/// `POST /user/balance/:txhash` -- Manually process a confirmed txid to update a user's balance.
+/// `POST /user/balance/:tx_hash` -- Manually process a confirmed txid to update a user's balance.
 ///
 /// We will subscribe to events to watch for any user deposits, but sometimes events can be missed.
-///
 /// TODO: change this. just have a /tx/:txhash that is open to anyone. rate limit like we rate limit /login
 #[debug_handler]
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+    Path(mut params): Path<HashMap<String, String>>,
 ) -> FrontendResult {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    todo!("user_balance_post");
+    // Check that the user is logged-in and authorized. We don't need a semaphore here btw
+    let (caller, _semaphore) = app.bearer_is_authorized(bearer).await?;
+
+    // Get the transaction hash, and the amount that the user wants to top up by.
+    // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
+    let tx_hash: H256 = params
+        .remove("tx_hash")
+        // TODO: map_err so this becomes a 500. routing must be bad
+        .ok_or(
+            FrontendErrorResponse::BadRequest("You have not provided the tx_hash in which you paid in".to_string())
+        )?
+        .parse()
+        .context("unable to parse tx_hash")?;
+
+    // We don't check the trace, the transaction must be a naive, simple send transaction (for now at least...)
+    // TODO: Get the respective transaction ...
+    let db_conn = app.db_conn().context("query_user_stats needs a db")?;
+    let db_replica = app
+        .db_replica()
+        .context("query_user_stats needs a db replica")?;
+
+    // Return straight false if the tx was already added ...
+    let receipt = increase_balance_receipt::Entity::find()
+        .filter(increase_balance_receipt::Column::TxHash.eq(hex::encode(tx_hash)))
+        .one(&db_conn)
+        .await?;
+    if receipt.is_some() {
+        return Err(FrontendErrorResponse::BadRequest("The transaction you provided has already been accounted for!".to_string()));
+    }
+    debug!("Receipt: {:?}", receipt);
+    // Just iterate through all logs, and add them to the transaction list if there is any
+    // Address will be hardcoded in the config
+    let authorization = Arc::new(InternalAuthorization::internal(None).unwrap());
+    let transaction_receipt: TransactionReceipt = match app.balanced_rpcs.best_available_rpc(&authorization, None, &[], None, None).await {
+        Ok(OpenRequestResult::Handle(handle)) => {
+            // TODO: Figure out how to pass the transaction hash as a parameter ...
+            warn!("Params are: {:?}", &vec![format!("0x{}", hex::encode(tx_hash))]);
+            handle.request(
+                "eth_getTransactionReceipt",
+                &vec![format!("0x{}", hex::encode(tx_hash))],
+                Level::Trace.into(),
+                None
+            )
+                .await
+                .map_err(|err|
+                    FrontendErrorResponse::StatusCode(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        format!("Request to RPC failed! {:?}", err).to_string(),
+                        None,
+                    )
+                )
+        }
+        Ok(_) => {
+            // TODO: actually retry?
+            Err(FrontendErrorResponse::StatusCode(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "We retrieved no handle! Should try again!".to_string(),
+                None,
+            ))
+        }
+        Err(err) => {
+            // TODO: Just skip this part until one item responds ...
+            log::trace!(
+                    "cancelled funneling transaction {} from: {:?}",
+                    tx_hash,
+                    err,
+                );
+            Err(FrontendErrorResponse::StatusCode(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "We retrieved no handle! Should try again!".to_string(),
+                None,
+            ))
+        }
+    }?;
+    debug!("Tx receipt: {:?}", transaction_receipt);
+
+    // Go through all logs, this should prob capture it,
+    // At least according to this SE logs are just concatenations of the underlying types (like a struct..)
+    // https://ethereum.stackexchange.com/questions/87653/how-to-decode-log-event-of-my-transaction-log
+
+    // Make sure there is only a single log within that transaction ...
+    // I don't know how to best cover the case that there might be multiple logs inside
+
+    for log in transaction_receipt.logs {
+
+        warn!("Should be all from the deposit contract {:?}", log.address);
+        if format!("0x{}", hex::encode(log.address)) != app.config.deposit_contract {
+            warn!("Wrong log address: {:?} {:?}", hex::encode(log.address), app.config.deposit_contract);
+            continue;
+        }
+
+        // Get the topics out
+        let token: Address = Address::from(log.topics.get(1).unwrap().to_owned()); // .split_off(12).into();
+        let recipient_account: Address = Address::from(log.topics.get(2).unwrap().to_owned()); // .split_off(12).into();
+
+        warn!("Check the data if we can decode it {:?}", log.data);
+        // TODO: Will this work? Depends how logs are encoded
+        // recipient_account, token,
+        let amount: U256 = match ethers::abi::decode(
+            &[
+                // ParamType::Address,
+                // ParamType::Address,
+                ParamType::Uint(256usize)
+            ],
+            &log.data,
+        ) {
+            Ok(tpl) => {
+                Ok(tpl.get(0).unwrap().clone().into_uint().context("Could not decode amount")?)
+            }
+            Err(err) => {
+                Err(FrontendErrorResponse::BadRequest(format!("Log could not be decoded: {:?}", err)))
+            }
+        }?;
+
+        warn!("Coded items are: {:?} {:?} {:?}", hex::encode(recipient_account), hex::encode(token), amount);
+        // warn!("Recipient account is: ")
+
+        warn!("Recipient address is: {:?}", recipient_account);
+        warn!("Recipient address is: {:?}", recipient_account.encode());
+
+        // First, find all users ...
+        let all_users = user::Entity::find().all(db_replica.conn()).await?;
+        warn!("All users are: {:?}", all_users);
+
+        // Encoding is inefficient, revisit later
+        let recipient = match user::Entity::find()
+            .filter(user::Column::Address.eq(&recipient_account.encode()[12..]))
+            .one(db_replica.conn())
+            .await? {
+            Some(x) => Ok(x),
+            None => {
+                Err(FrontendErrorResponse::BadRequest(
+                    "The user must have signed up first. They are currently not signed up!".to_string()
+                ))
+            }
+        }?;
+
+        // Skip if the token is not of interest, otherwise add a balance to the contract (according to the amount)
+        // TODO: Maybe check for accepted tokens here
+        // if !app.config.accepted_deposit_tokens.contains(&hex::encode(token)) {}// Could also just hardcode all the tokens we accept in the yaml
+
+        let status_code: StatusCode;
+        let response_json: serde_json::Value;
+        // TODO: Can change with accepted currencies hashmap
+        // let target_token = "c9fcfa7e28ff320c49967f4522ebc709aa1fde7c".parse::<Address>().unwrap();
+        // debug!("Token vs target token are: {:?} {:?}", token, target_token);
+        // if token == target_token {
+        // TODO: Check for accepted tokens, and how to get them
+
+        // Increase balance by amount (whatever amount corresponds to ...)
+        // let's say 1 USD is 1_000_000 credits
+        // Basically credits are in the order of 10^6 per dollar
+        warn!("Checking amount");
+        let amount = amount.as_u64();
+        //     .checked_div(U256::from(10).checked_pow(U256::from(12)).unwrap())
+        //     .context("Division error, this should never happen")?.as_u64();
+
+        // Check if the item is in the database. If it is not, then add it into the database
+        let user_balance = balance::Entity::find()
+            .filter(balance::Column::UserId.eq(recipient.id))
+            .one(&db_conn)
+            .await?;
+        debug!("User balance is: {:?}", user_balance);
+
+        let txn = db_conn.begin().await?;
+        match user_balance {
+            Some(user_balance) => {
+                let balance_plus_amount = user_balance.balance + amount;
+                debug!("New user balance is: {:?}", balance_plus_amount);
+                // Update the entry, adding the balance
+                let mut user_balance = user_balance.into_active_model();
+                user_balance.balance = sea_orm::Set(balance_plus_amount);
+                debug!("New user balance model is: {:?}", user_balance);
+                user_balance.save(&txn).await?;
+                // txn.commit().await?;
+                // user_balance
+            }
+            None => {
+                // Create the entry with the respective balance
+                let user_balance = balance::ActiveModel {
+                    balance: sea_orm::ActiveValue::Set(amount),
+                    user_id: sea_orm::ActiveValue::Set(recipient.id),
+                    ..Default::default()
+                };
+                debug!("New user balance model is: {:?}", user_balance);
+                user_balance.save(&txn).await?;
+                // txn.commit().await?;
+                // user_balance // .try_into_model().unwrap()
+            }
+        };
+        debug!("Setting tx_hash: {:?}", tx_hash);
+        let receipt = increase_balance_receipt::ActiveModel {
+            tx_hash: sea_orm::ActiveValue::Set(hex::encode(tx_hash)),
+            ..Default::default()
+        };
+        receipt.save(&txn).await?;
+        txn.commit().await?;
+        debug!("Submitted saving");
+
+        // Can return here
+        debug!("Returning response");
+        let response = (StatusCode::CREATED, Json(json!({
+            "tx_hash": tx_hash,
+            "amount": amount
+        }))).into_response();
+        // Return early if the log was added
+        return Ok(response.into());
+    }
+
+    Err(FrontendErrorResponse::BadRequest("No such transaction was found, or token is not supported!".to_string()))
 }
 
 /// `GET /user/keys` -- Use a bearer token to get the user's api keys and their settings.
@@ -731,6 +1044,132 @@ pub async fn rpc_keys_management(
 
     Ok(Json(uk).into_response())
 }
+
+// TODO: Make sure that the input is also inside ...
+// /// Redeems an existing referral link.
+// ///
+// #[debug_handle]
+// pub async fn user_redeem_referral_link_get(
+//     Extension(app): Extension<Arc<Web3ProxyApp>>,
+//     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+//     Query(mut params): Query<HashMap<String, String>>,
+// ) -> FrontendResult {
+//
+//     // First get the bearer token and check if the user is logged in
+//     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+//
+//     // Then get the input, specifically the referral link. If this does not exist, it's a bad request
+//     let referral_link: String = params
+//         .remove("referral_link")
+//         // TODO: map_err so this becomes a 500. routing must be bad
+//         .ok_or(
+//             FrontendErrorResponse::StatusCode(
+//                 StatusCode::BAD_REQUEST,
+//                 "You called the referral link endpoint, but have not provided a referral_link".to_string(),
+//                 None,
+//             )
+//         )?
+//         .parse()
+//         .context("unable to parse address")?;
+//
+//     // Check if this referral link exists
+//     let db_replica = app
+//         .db_replica()
+//         .context("getting replica db for user's revert logs")?;
+//
+//     // Turn this into an active model that we can modify ...
+//     let user_referrer: Referral = refferal::Entity::find()
+//         .filter(refferal::Column::ReferralCode.eq(referral_link))
+//         .one(db_replica.conn())
+//         .await?
+//         .ok_or(
+//             FrontendErrorResponse::StatusCode(
+//                 StatusCode::BAD_REQUEST,
+//                 fmt!("The referral_link you provided does not exist {}", referral_code),
+//                 None,
+//             )
+//         )?;
+//
+//     // Get or create this user ...
+//     // Check if this user if premium, if not, return ...
+//
+//     // Add this user to the table of users (create, or write the used referral link).
+//     // user_referrer.used_referral_code =
+//     // TODO: Make sure that the invite link does not already redeem the login ...
+//
+//
+//     // Do nothing else for now, as the credit condition is only activated if enough credits are added
+//
+//     let db_conn = app.db_conn()?;
+// }
+
+/// Create or get the existing referral link.
+/// This is the link that the user can share to third parties, and get credits.
+/// Applies to premium users only
+#[debug_handler]
+pub async fn user_referral_link_get(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> FrontendResult {
+
+    // First get the bearer token and check if the user is logged in
+    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+
+    let db_replica = app
+        .db_replica()
+        .context("getting replica db for user's revert logs")?;
+
+    // Second, check if the user is a premium user
+    let user_tier = user_tier::Entity::find()
+        .filter(user_tier::Column::Id.eq(user.user_tier_id))
+        .one(db_replica.conn())
+        .await?
+        .ok_or(FrontendErrorResponse::BadRequest("Could not find user in db although bearer token is there!".to_string()))?;
+
+    warn!("User tier is: {:?}", user_tier);
+    // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
+    if user_tier.id < 2 {
+        return Err(anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into());
+    }
+
+    // Then get the referral token
+    let user_referrer = referrer::Entity::find()
+        .filter(referrer::Column::UserId.eq(user.id))
+        .one(db_replica.conn())
+        .await?;
+
+    let (referral_code, status_code) = match user_referrer {
+        Some(x) => (x.referral_code, StatusCode::OK),
+        None => {
+
+            // Connect to the database for mutable write
+            let db_conn = app.db_conn().context("getting db_conn")?;
+
+            let referral_code = ReferralCode::default().0;
+            let txn = db_conn.begin().await?;
+            // Log that this guy was referred by another guy
+            // Do not automatically create a new
+            let referrer_entry = referrer::ActiveModel {
+                user_id: sea_orm::ActiveValue::Set(user.id),
+                referral_code: sea_orm::ActiveValue::Set(referral_code.clone()),
+                ..Default::default()
+            };
+            referrer_entry.insert(&txn).await?;
+            txn.commit().await?;
+            (referral_code, StatusCode::CREATED)
+        }
+    };
+
+    let response_json = json!({
+        "referral_code": referral_code,
+        "user": user,
+    });
+
+    let response = (status_code, Json(response_json)).into_response();
+    Ok(response)
+}
+
 
 /// `GET /user/revert_logs` -- Use a bearer token to get the user's revert logs.
 #[debug_handler]

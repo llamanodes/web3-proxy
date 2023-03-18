@@ -24,6 +24,8 @@ pub struct Model {
     pub sum_request_bytes: u64,
     pub sum_response_millis: u64,
     pub sum_response_bytes: u64,
+    pub credits_used: u64,  // TODO: Check in MySQL what type this would correspond to ...
+    // TODO: We will be removing this table alltogether anyways, I could technically remove this already ...
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
