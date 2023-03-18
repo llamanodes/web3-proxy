@@ -442,6 +442,9 @@ impl StatBuffer {
         let mut opt_in_timeseries_buffer = HashMap::<RpcQueryKey, BufferedRpcQueryStats>::new();
         let mut accounting_db_buffer = HashMap::<RpcQueryKey, BufferedRpcQueryStats>::new();
 
+        // TODO: Somewhere here we should probably be updating the balance of the user
+        // And also update the credits used etc. for the referred user
+
         loop {
             tokio::select! {
                 stat = stat_receiver.recv_async() => {
