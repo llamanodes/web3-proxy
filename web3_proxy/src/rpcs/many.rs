@@ -1720,7 +1720,7 @@ mod tests {
             OpenRequestResult::Handle(_)
         ));
 
-        let best_available_server_from_none = rpcs
+        let _best_available_server_from_none = rpcs
             .best_available_rpc(&authorization, None, &[], None, None)
             .await;
 

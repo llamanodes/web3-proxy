@@ -175,7 +175,7 @@ impl From<RpcSecretKey> for Uuid {
 }
 
 impl Authorization {
-    pub fn internal(db_conn: Option<DatabaseConnection>) -> anyhow::Result<Self> {
+    pub fn internal(db_conn: Option<DatabaseConnection>) -> Web3ProxyResult<Self> {
         let authorization_checks = AuthorizationChecks {
             // any error logs on a local (internal) query are likely problems. log them all
             log_revert_chance: 1.0,
@@ -206,7 +206,7 @@ impl Authorization {
         proxy_mode: ProxyMode,
         referer: Option<Referer>,
         user_agent: Option<UserAgent>,
-    ) -> anyhow::Result<Self> {
+    ) -> Web3ProxyResult<Self> {
         // some origins can override max_requests_per_period for anon users
         let max_requests_per_period = origin
             .as_ref()
@@ -244,13 +244,13 @@ impl Authorization {
         referer: Option<Referer>,
         user_agent: Option<UserAgent>,
         authorization_type: AuthorizationType,
-    ) -> anyhow::Result<Self> {
+    ) -> Web3ProxyResult<Self> {
         // check ip
         match &authorization_checks.allowed_ips {
             None => {}
             Some(allowed_ips) => {
                 if !allowed_ips.iter().any(|x| x.contains(&ip)) {
-                    return Err(anyhow::anyhow!("IP ({}) is not allowed!", ip));
+                    return Err(Web3ProxyError::IpNotAllowed(ip));
                 }
             }
         }
@@ -259,10 +259,10 @@ impl Authorization {
         match (&origin, &authorization_checks.allowed_origins) {
             (None, None) => {}
             (Some(_), None) => {}
-            (None, Some(_)) => return Err(anyhow::anyhow!("Origin required")),
+            (None, Some(_)) => return Err(Web3ProxyError::OriginRequired),
             (Some(origin), Some(allowed_origins)) => {
                 if !allowed_origins.contains(origin) {
-                    return Err(anyhow::anyhow!("Origin ({}) is not allowed!", origin));
+                    return Err(Web3ProxyError::OriginNotAllowed(origin.clone()));
                 }
             }
         }
@@ -271,10 +271,10 @@ impl Authorization {
         match (&referer, &authorization_checks.allowed_referers) {
             (None, None) => {}
             (Some(_), None) => {}
-            (None, Some(_)) => return Err(anyhow::anyhow!("Referer required")),
+            (None, Some(_)) => return Err(Web3ProxyError::RefererRequired),
             (Some(referer), Some(allowed_referers)) => {
                 if !allowed_referers.contains(referer) {
-                    return Err(anyhow::anyhow!("Referer ({:?}) is not allowed!", referer));
+                    return Err(Web3ProxyError::RefererNotAllowed(referer.clone()));
                 }
             }
         }
@@ -283,13 +283,10 @@ impl Authorization {
         match (&user_agent, &authorization_checks.allowed_user_agents) {
             (None, None) => {}
             (Some(_), None) => {}
-            (None, Some(_)) => return Err(anyhow::anyhow!("User agent required")),
+            (None, Some(_)) => return Err(Web3ProxyError::UserAgentRequired),
             (Some(user_agent), Some(allowed_user_agents)) => {
                 if !allowed_user_agents.contains(user_agent) {
-                    return Err(anyhow::anyhow!(
-                        "User agent ({}) is not allowed!",
-                        user_agent
-                    ));
+                    return Err(Web3ProxyError::UserAgentNotAllowed(user_agent.clone()));
                 }
             }
         }
@@ -451,7 +448,7 @@ pub async fn key_is_authorized(
 
 impl Web3ProxyApp {
     /// Limit the number of concurrent requests from the given ip address.
-    pub async fn ip_semaphore(&self, ip: IpAddr) -> anyhow::Result<Option<OwnedSemaphorePermit>> {
+    pub async fn ip_semaphore(&self, ip: IpAddr) -> Web3ProxyResult<Option<OwnedSemaphorePermit>> {
         if let Some(max_concurrent_requests) = self.config.public_max_concurrent_requests {
             let semaphore = self
                 .ip_semaphores
@@ -551,7 +548,7 @@ impl Web3ProxyApp {
         &self,
         ip: IpAddr,
         proxy_mode: ProxyMode,
-    ) -> anyhow::Result<RateLimitResult> {
+    ) -> Web3ProxyResult<RateLimitResult> {
         // TODO: dry this up with rate_limit_by_rpc_key?
 
         // we don't care about user agent or origin or referer
@@ -608,7 +605,7 @@ impl Web3ProxyApp {
         ip: IpAddr,
         origin: Option<Origin>,
         proxy_mode: ProxyMode,
-    ) -> anyhow::Result<RateLimitResult> {
+    ) -> Web3ProxyResult<RateLimitResult> {
         // ip rate limits don't check referer or user agent
         // the do check origin because we can override rate limits for some origins
         let authorization = Authorization::external(
@@ -786,7 +783,7 @@ impl Web3ProxyApp {
         referer: Option<Referer>,
         rpc_key: RpcSecretKey,
         user_agent: Option<UserAgent>,
-    ) -> anyhow::Result<RateLimitResult> {
+    ) -> Web3ProxyResult<RateLimitResult> {
         let authorization_checks = self.authorization_checks(proxy_mode, rpc_key).await?;
 
         // if no rpc_key_id matching the given rpc was found, then we can't rate limit by key

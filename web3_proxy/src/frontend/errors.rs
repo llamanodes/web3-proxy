@@ -2,13 +2,16 @@
 
 use super::authorization::Authorization;
 use crate::jsonrpc::JsonRpcForwardedResponse;
+
+use std::net::IpAddr;
+
 use axum::{
     headers,
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
-use derive_more::From;
+use derive_more::{Display, Error, From};
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
 use log::{debug, error, trace, warn};
@@ -22,10 +25,13 @@ pub type Web3ProxyResult<T> = Result<T, Web3ProxyError>;
 pub type Web3ProxyResponse = Web3ProxyResult<Response>;
 
 // TODO:
-#[derive(Debug, From)]
+#[derive(Debug, Display, Error, From)]
 pub enum Web3ProxyError {
     AccessDenied,
+    #[error(ignore)]
     Anyhow(anyhow::Error),
+    #[error(ignore)]
+    #[from(ignore)]
     BadRequest(String),
     SemaphoreAcquireError(AcquireError),
     Database(DbErr),
@@ -34,17 +40,34 @@ pub enum Web3ProxyError {
     InfluxDb2RequestError(influxdb2::RequestError),
     InvalidHeaderValue(InvalidHeaderValue),
     IpAddrParse(AddrParseError),
+    #[error(ignore)]
+    #[from(ignore)]
+    IpNotAllowed(IpAddr),
     JoinError(JoinError),
     MsgPackEncode(rmp_serde::encode::Error),
     NotFound,
+    OriginRequired,
+    #[error(ignore)]
+    #[from(ignore)]
+    OriginNotAllowed(headers::Origin),
+    #[display(fmt = "{:?}, {:?}", _0, _1)]
     RateLimited(Authorization, Option<Instant>),
     Redis(RedisError),
+    RefererRequired,
+    #[display(fmt = "{:?}", _0)]
+    #[error(ignore)]
+    #[from(ignore)]
+    RefererNotAllowed(headers::Referer),
     /// simple way to return an error message to the user and an anyhow to our logs
+    #[display(fmt = "{}, {}, {:?}", _0, _1, _2)]
     StatusCode(StatusCode, String, Option<anyhow::Error>),
     /// TODO: what should be attached to the timout?
     Timeout(tokio::time::error::Elapsed),
     UlidDecode(ulid::DecodeError),
     UnknownKey,
+    UserAgentRequired,
+    #[error(ignore)]
+    UserAgentNotAllowed(headers::UserAgent),
 }
 
 impl Web3ProxyError {
@@ -131,6 +154,17 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::IpNotAllowed(ip) => {
+                warn!("IpNotAllowed ip={})", ip);
+                (
+                    StatusCode::FORBIDDEN,
+                    JsonRpcForwardedResponse::from_string(
+                        format!("IP ({}) is not allowed!", ip),
+                        Some(StatusCode::FORBIDDEN.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             Self::InvalidHeaderValue(err) => {
                 warn!("InvalidHeaderValue err={:?}", err);
                 (
@@ -184,6 +218,28 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::OriginRequired => {
+                warn!("OriginRequired");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "Origin required",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::OriginNotAllowed(origin) => {
+                warn!("OriginNotAllowed origin={}", origin);
+                (
+                    StatusCode::FORBIDDEN,
+                    JsonRpcForwardedResponse::from_string(
+                        format!("Origin ({}) is not allowed!", origin),
+                        Some(StatusCode::FORBIDDEN.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             // TODO: this should actually by the id of the key. multiple users might control one key
             Self::RateLimited(authorization, retry_at) => {
                 // TODO: emit a stat
@@ -223,6 +279,28 @@ impl Web3ProxyError {
                     JsonRpcForwardedResponse::from_str(
                         "redis error!",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::RefererRequired => {
+                warn!("referer required");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "Referer required",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::RefererNotAllowed(referer) => {
+                warn!("referer not allowed referer={:?}", referer);
+                (
+                    StatusCode::FORBIDDEN,
+                    JsonRpcForwardedResponse::from_string(
+                        format!("Referer ({:?}) is not allowed", referer),
+                        Some(StatusCode::FORBIDDEN.as_u16().into()),
                         None,
                     ),
                 )
@@ -293,6 +371,28 @@ impl Web3ProxyError {
                     None,
                 ),
             ),
+            Self::UserAgentRequired => {
+                warn!("UserAgentRequired");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "User agent required",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::UserAgentNotAllowed(ua) => {
+                warn!("UserAgentNotAllowed ua={}", ua);
+                (
+                    StatusCode::FORBIDDEN,
+                    JsonRpcForwardedResponse::from_string(
+                        format!("User agent ({}) is not allowed!", ua),
+                        Some(StatusCode::FORBIDDEN.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
         }
     }
 }
