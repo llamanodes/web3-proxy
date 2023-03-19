@@ -44,6 +44,7 @@ pub struct RpcQueryStats {
     response_timestamp: i64,
     /// Credits used signifies how how much money was used up
     credits_used: u64
+    // TODO: Should probably also include the user that this stemmed from ... or how is this handled (?)
 }
 
 #[derive(Clone, From, Hash, PartialEq, Eq)]
@@ -103,7 +104,8 @@ impl RpcQueryStats {
             }
         };
 
-        // TODO: Depending on method, add some arithmetic around calculating credits_used
+        // Depending on method, add some arithmetic around calculating credits_used
+        // I think balance should not go here, this looks more like a key thingy
         RpcQueryKey {
             response_timestamp,
             archive_needed: self.archive_request,
@@ -178,7 +180,7 @@ pub struct BufferedRpcQueryStats {
     sum_request_bytes: u64,
     sum_response_bytes: u64,
     sum_response_millis: u64,
-    credits_used: u64
+    sum_credits_used: u64
 }
 
 /// A stat that we aggregate and then store in a database.
@@ -223,7 +225,7 @@ impl BufferedRpcQueryStats {
         self.sum_request_bytes += stat.request_bytes;
         self.sum_response_bytes += stat.response_bytes;
         self.sum_response_millis += stat.response_millis;
-        self.credits_used += stat.credits_used;
+        self.sum_credits_used += stat.credits_used;
     }
 
     // TODO: take a db transaction instead so that we can batch?
@@ -254,7 +256,7 @@ impl BufferedRpcQueryStats {
             sum_request_bytes: sea_orm::Set(self.sum_request_bytes),
             sum_response_millis: sea_orm::Set(self.sum_response_millis),
             sum_response_bytes: sea_orm::Set(self.sum_response_bytes),
-            credits_used: sea_orm::Set(self.credits_used)
+            sum_credits_used: sea_orm::Set(self.sum_credits_used)
         };
 
         rpc_accounting_v2::Entity::insert(accounting_entry)
@@ -305,15 +307,34 @@ impl BufferedRpcQueryStats {
                                 .add(self.sum_response_bytes),
                         ),
                         (
-                            rpc_accounting_v2::Column::CreditsUsed,
-                            Expr::col(rpc_accounting_v2::Column::CreditsUsed)
-                                .add(self.credits_used),
+                            rpc_accounting_v2::Column::SumCreditsUsed,
+                            Expr::col(rpc_accounting_v2::Column::SumCreditsUsed)
+                                .add(self.sum_credits_used),
                         ),
                     ])
                     .to_owned(),
             )
             .exec(db_conn)
             .await?;
+
+        // All the referral & balance arithmetic takes place here
+        // TODO: Also update the referrer's balance
+        // TODO: Also update the referree's balance
+        // Apply bonus if possible
+        // Use db_conn for this ...
+
+        // (1) Check if referee has used up $100.00 USD in total (Have a config item that says how many credits account to 1$)
+        // (1.1) If not, do nothing. If yes, go to (2)
+
+        // (2)
+        // (1.2) If yes
+        //
+        // (1.1) If not skip
+        // (1.2) If yes
+        //      (1.2.1)
+
+
+
 
         Ok(())
     }
@@ -354,7 +375,7 @@ impl BufferedRpcQueryStats {
             .field("sum_response_millis", self.sum_response_millis as i64)
             .field("sum_response_bytes", self.sum_response_bytes as i64)
             // TODO: will this be enough of a range
-            .field("credits_used", self.credits_used as i64);
+            .field("sum_credits_used", self.sum_credits_used as i64);
 
         builder = builder.timestamp(key.response_timestamp);
         let timestamp_precision = TimestampPrecision::Seconds;
@@ -557,6 +578,7 @@ impl StatBuffer {
                 global_timeseries_buffer.len(),
             );
 
+            // TODO: Basically apply the credit-logic here, after the time-series has been writte into ...
             for (key, stat) in global_timeseries_buffer.drain() {
                 if let Err(err) = stat
                     .save_timeseries(
@@ -580,6 +602,7 @@ impl StatBuffer {
                 opt_in_timeseries_buffer.len(),
             );
 
+            // TODO: Basically apply the credit-logic here, after the time-series has been writte into ...
             for (key, stat) in opt_in_timeseries_buffer.drain() {
                 if let Err(err) = stat
                     .save_timeseries(

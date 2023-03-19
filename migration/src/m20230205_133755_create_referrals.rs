@@ -55,9 +55,21 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(Referee::CreditsApplied)
+                        ColumnDef::new(Referee::CreditsAppliedForReferee)
                             .boolean()
                             .not_null()
+                    )
+                    .col(
+                        ColumnDef::new(Referee::CreditsAppliedForReferrer)
+                            .big_unsigned()
+                            .not_null()
+                            .default(0)
+                    )
+                    .col(
+                        ColumnDef::new(Referee::ReferralStartDate)
+                            .date_time()
+                            .not_null()
+                            .extra("DEFAULT CURRENT_TIMESTAMP".to_string())
                     )
                     .col(
                         ColumnDef::new(Referee::UsedReferralCode)
@@ -111,7 +123,9 @@ enum Referee {
     Id,
     UserId,
     UsedReferralCode,
-    CreditsApplied
+    CreditsAppliedForReferrer,
+    CreditsAppliedForReferee,
+    ReferralStartDate
 }
 
 #[derive(Iden)]

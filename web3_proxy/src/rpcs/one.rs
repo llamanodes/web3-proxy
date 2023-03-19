@@ -242,12 +242,9 @@ impl Web3Rpc {
             block_data_limit,
             reconnect,
             tier: config.tier,
-// <<<<<<< HEAD
             disconnect_watch: Some(disconnect_sender),
             created_at: Some(created_at),
-// =======
             head_block: RwLock::new(Default::default()),
-// >>>>>>> 77df3fa (stats v2)
             ..Default::default()
         };
 

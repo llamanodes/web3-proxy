@@ -12,7 +12,7 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(RpcAccountingV2::Table)
                     .add_column(
-                        ColumnDef::new(RpcAccountingV2::CreditsUsed)
+                        ColumnDef::new(RpcAccountingV2::SumCreditsUsed)
                             .big_unsigned()
                             .not_null()
                     )
@@ -27,7 +27,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 sea_query::Table::alter()
                     .table(RpcAccountingV2::Table)
-                    .drop_column(RpcAccountingV2::CreditsUsed)
+                    .drop_column(RpcAccountingV2::SumCreditsUsed)
                     .to_owned()
             )
             .await
@@ -55,5 +55,5 @@ enum RpcAccountingV2 {
     SumRequestBytes,
     SumResponseMillis,
     SumResponseBytes,
-    CreditsUsed
+    SumCreditsUsed
 }
