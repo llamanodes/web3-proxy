@@ -61,7 +61,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(Referee::CreditsAppliedForReferrer)
-                            .big_unsigned()
+                            .decimal()
                             .not_null()
                             .default(0)
                     )

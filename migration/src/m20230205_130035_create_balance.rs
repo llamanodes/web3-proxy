@@ -20,10 +20,16 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(Balance::Balance)
-                            .big_unsigned()
+                        ColumnDef::new(Balance::AvailableBalance)
+                            .decimal()
                             .not_null()
-                            .default(0)
+                            .default(0.0)
+                    )
+                    .col(
+                        ColumnDef::new(Balance::UsedBalance)
+                            .decimal()
+                            .not_null()
+                            .default(0.0)
                     )
                     .col(
                         ColumnDef::new(Balance::UserId)
@@ -61,5 +67,6 @@ enum Balance {
     Table,
     Id,
     UserId,
-    Balance,
+    AvailableBalance,
+    UsedBalance
 }

@@ -29,7 +29,7 @@ use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
 use itertools::Itertools;
 use log::{debug, Level, trace, warn};
-use migration::sea_orm::prelude::Uuid;
+use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
     QueryOrder, TransactionTrait, TryIntoModel,
@@ -576,8 +576,8 @@ pub async fn user_balance_get(
         .filter(balance::Column::UserId.eq(user.id))
         .one(db_replica.conn())
         .await? {
-        Some(x) => x.balance,
-        None => 0
+        Some(x) => x.available_balance,
+        None => Decimal::from(0)
         // That means the user has no balance as of yet
         // (user exists, but balance entry does not exist)
         // In that case add this guy here
@@ -755,9 +755,17 @@ pub async fn user_balance_post(
         // let's say 1 USD is 1_000_000 credits
         // Basically credits are in the order of 10^6 per dollar
         warn!("Checking amount");
-        let amount = amount.as_u64();
         //     .checked_div(U256::from(10).checked_pow(U256::from(12)).unwrap())
         //     .context("Division error, this should never happen")?.as_u64();
+
+        // TODO: Make the conversion from token to credits here ...
+        // The balance can be dollars (credits are separate)
+
+        // For now, let's say that we have USDC / 6 decimal tokens
+        // so 1e6 = 1$ = Decimal(1)
+        // TODO: Let's assume that people don't buy too much at _once_
+        let amount = Decimal::from(amount.as_u128()) / Decimal::from(1e6 as u64);
+
 
         // Check if the item is in the database. If it is not, then add it into the database
         let user_balance = balance::Entity::find()
@@ -769,11 +777,11 @@ pub async fn user_balance_post(
         let txn = db_conn.begin().await?;
         match user_balance {
             Some(user_balance) => {
-                let balance_plus_amount = user_balance.balance + amount;
+                let balance_plus_amount = user_balance.available_balance + amount;
                 debug!("New user balance is: {:?}", balance_plus_amount);
                 // Update the entry, adding the balance
                 let mut user_balance = user_balance.into_active_model();
-                user_balance.balance = sea_orm::Set(balance_plus_amount);
+                user_balance.available_balance = sea_orm::Set(balance_plus_amount);
                 debug!("New user balance model is: {:?}", user_balance);
                 user_balance.save(&txn).await?;
                 // txn.commit().await?;
@@ -782,7 +790,8 @@ pub async fn user_balance_post(
             None => {
                 // Create the entry with the respective balance
                 let user_balance = balance::ActiveModel {
-                    balance: sea_orm::ActiveValue::Set(amount),
+                    available_balance: sea_orm::ActiveValue::Set(amount),
+                    // used_balance: sea_orm::ActiveValue::Set(0),
                     user_id: sea_orm::ActiveValue::Set(recipient.id),
                     ..Default::default()
                 };

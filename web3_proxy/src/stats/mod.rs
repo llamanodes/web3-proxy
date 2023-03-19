@@ -7,7 +7,7 @@ use crate::frontend::authorization::{Authorization, RequestMetadata};
 use axum::headers::Origin;
 use chrono::{TimeZone, Utc};
 use derive_more::From;
-use entities::rpc_accounting_v2;
+use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key, user};
 use entities::sea_orm_active_enums::TrackingLevel;
 use futures::stream;
 use hashbrown::HashMap;
@@ -23,6 +23,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
+use migration::ArrayType::Decimal;
 
 pub enum StatType {
     Aggregated,
@@ -317,24 +318,86 @@ impl BufferedRpcQueryStats {
             .exec(db_conn)
             .await?;
 
+        // TODO: Skip most of this stuff if there is no referral logic ...
+
         // All the referral & balance arithmetic takes place here
         // TODO: Also update the referrer's balance
         // TODO: Also update the referree's balance
         // Apply bonus if possible
         // Use db_conn for this ...
 
-        // (1) Check if referee has used up $100.00 USD in total (Have a config item that says how many credits account to 1$)
-        // (1.1) If not, do nothing. If yes, go to (2)
+        // TODO: get the referee, get the referrer
+        // TODO: Skip if the user was not registered, in that case there is no referee logic
+        // (1) Get the user with that RPC key. This is the referee
+        let sender_rpc_key = rpc_key::Entity::find()
+            // key.rpc_secret_key_id
+            .filter(rpc_key::Column::id.eq(key.rpc_secret_key_id))
+            .one(db_conn)
+            .await?;
 
-        // (2)
-        // (1.2) If yes
-        //
-        // (1.1) If not skip
-        // (1.2) If yes
-        //      (1.2.1)
+        let sender_user = user::Entity::find()
+            .filter(user::Column::id.eq(sender_rpc_key.id))
+            .one(db_conn)
+            .await?;
 
+        // TODO: I should probably generate join statements, so we don't have so much back and forths
+        // Get the referee, and the referrer
+        // (2) Look up the code that this user used. This is the referee table
+        let used_referral_code = referee::Entity::find()
+            .filter(referee::Entity::id.eq(sender_user.user_id))
+            .one(db_conn)
+            .await?;
 
+        // (3) Look up the matching referrer in the referrer table
+        // Referral table -> Get the referee id
+        let user_with_that_referral_code = referrer::Entity::find()
+            .filter(referrer::Entity::referral_code.eq(used_referral_code.used_referral_code))
+            .one(db_conn)
+            .await?;
 
+        // Ok, now we add the credits to both users if applicable...
+        // (4 onwards) Add balance to the referrer,
+
+        // (5) Check if referee has used up $100.00 USD in total (Have a config item that says how many credits account to 1$)
+        // Get balance for the referrer (optionally make it into an active model ...)
+        let sender_balance = balance::Entity::find()
+            .filter(balance::Entity::user_id.eq(used_referral_code.user_id))
+            .one(db_conn)
+            .await?;
+
+        let referrer_balance = balance::Entity::find()
+            .filter(balance::Entity::user_id.eq(user_with_that_referral_code.user_id))
+            .one(db_conn)
+            .await?;
+
+        let active_sender_balance = sender_balance.into_active_model();
+
+        // (5.1) If not, go to (7). If yes, go to (6)
+        // Hardcode this parameter also in config, so it's easier to tune
+        if referee_balance.credits_applied_for_referee && (referee_balance.used_balance + self.sum_credits_used) >= Decimal::from(100) {
+            // (6) If the credits have not yet been applied to the referee, apply 10M credits / $100.00 USD worth of credits.
+            // Make it into an active model, and add credits
+            // Also add credits_applied_for_referrer (maybe optionally ...)
+            active_sender_balance.available_balance += Decimal::from(100);
+            // Also mark referral as "credits_applied_for_referee"
+            active_sender_balance.credits_applied_for_referrer = true;
+        }
+
+        // (7) If the referral-start-date has not been passed, apply 10% of the credits to the referrer.
+        if referee_balance.referral_start_date.elapsed().as_secs() <= (365 * 24 * 60 * 60) {
+            let active_referrer_balance = referrer_balance.into_active_model();
+            // Apply to the referrer
+            // Make it into an active model, and add credits
+            // Also add credits_applied_for_referrer (maybe optionally ...)
+            active_sender_balance.credits_applied_for_referee += Decimal::from(self.sum_credits_used);
+            // Add 10% referral fees ...
+            active_referrer_balance.available_balance += Decimal::from(self.sum_credits_used / 10);
+            Decimal::from(self.sum_credits_used).save(&db_conn).await?;
+        }
+
+        // In any case, add this to "spent"
+        active_sender_balance.used_balance += Decimal::from(self.sum_credits_used);
+        active_sender_balance.save(&db_conn).await?;
 
         Ok(())
     }
