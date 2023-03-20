@@ -7,6 +7,7 @@ use super::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::stats::RpcQueryStats;
 use crate::{
     app::Web3ProxyApp,
+    frontend::errors::Web3ProxyResult,
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
 };
 use axum::headers::{Origin, Referer, UserAgent};
@@ -26,7 +27,7 @@ use futures::{
 use handlebars::Handlebars;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{error, info, trace, warn};
+use log::{info, trace, warn};
 use serde_json::json;
 use serde_json::value::to_raw_value;
 use std::sync::Arc;
@@ -112,11 +113,7 @@ async fn _websocket_handler(
                 // this is not a websocket. redirect to a friendly page
                 Ok(Redirect::permanent(redirect).into_response())
             } else {
-                // TODO: do not use an anyhow error. send the user a 400
-                Err(
-                    anyhow::anyhow!("redirect_public_url not set. only websockets work here")
-                        .into(),
-                )
+                Err(Web3ProxyError::WebsocketOnly)
             }
         }
     }
@@ -341,7 +338,7 @@ async fn handle_socket_payload(
         Ok(json_request) => {
             let id = json_request.id.clone();
 
-            let response: anyhow::Result<JsonRpcForwardedResponseEnum> = match &json_request.method
+            let response: Web3ProxyResult<JsonRpcForwardedResponseEnum> = match &json_request.method
                 [..]
             {
                 "eth_subscribe" => {
@@ -417,16 +414,7 @@ async fn handle_socket_payload(
                 _ => app
                     .proxy_web3_rpc(authorization.clone(), json_request.into())
                     .await
-                    .map_or_else(
-                        |err| match err {
-                            Web3ProxyError::Anyhow(err) => Err(err),
-                            _ => {
-                                error!("handle this better! {:?}", err);
-                                Err(anyhow::anyhow!("unexpected error! {:?}", err))
-                            }
-                        },
-                        |(response, _)| Ok(response),
-                    ),
+                    .map(|(response, _)| response),
             };
 
             (id, response)
@@ -442,9 +430,8 @@ async fn handle_socket_payload(
     let response_str = match response {
         Ok(x) => serde_json::to_string(&x).expect("to_string should always work here"),
         Err(err) => {
-            // we have an anyhow error. turn it into a response
-            let response = JsonRpcForwardedResponse::from_anyhow_error(err, None, Some(id));
-
+            let (_, mut response) = err.into_response_parts();
+            response.id = id;
             serde_json::to_string(&response).expect("to_string should always work here")
         }
     };

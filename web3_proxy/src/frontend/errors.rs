@@ -85,6 +85,7 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     UserAgentNotAllowed(headers::UserAgent),
     WatchRecvError(tokio::sync::watch::error::RecvError),
+    WebsocketOnly,
 }
 
 impl Web3ProxyError {
@@ -513,6 +514,17 @@ impl Web3ProxyError {
                     JsonRpcForwardedResponse::from_str(
                         "watch recv error!",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::WebsocketOnly => {
+                warn!("WebsocketOnly");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "redirect_public_url not set. only websockets work here",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
                         None,
                     ),
                 )

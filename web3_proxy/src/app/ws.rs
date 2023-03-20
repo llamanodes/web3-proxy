@@ -2,6 +2,7 @@
 
 use super::Web3ProxyApp;
 use crate::frontend::authorization::{Authorization, RequestMetadata};
+use crate::frontend::errors::Web3ProxyResult;
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::rpcs::transactions::TxStatus;
@@ -27,7 +28,7 @@ impl Web3ProxyApp {
         subscription_count: &'a AtomicUsize,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
         response_sender: flume::Sender<Message>,
-    ) -> anyhow::Result<(AbortHandle, JsonRpcForwardedResponse)> {
+    ) -> Web3ProxyResult<(AbortHandle, JsonRpcForwardedResponse)> {
         // TODO: this is not efficient
         let request_bytes = serde_json::to_string(&request_json)
             .context("finding request size")?
@@ -341,7 +342,7 @@ impl Web3ProxyApp {
                     );
                 });
             }
-            _ => return Err(anyhow::anyhow!("unimplemented")),
+            _ => return Err(anyhow::anyhow!("unimplemented").into()),
         }
 
         // TODO: do something with subscription_join_handle?
