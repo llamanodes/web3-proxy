@@ -19,30 +19,33 @@ use hashbrown::HashMap;
 use influxdb2::models::Query;
 use influxdb2::FromDataPoint;
 use itertools::Itertools;
-use log::info;
+use log::{info, warn};
 use serde::Serialize;
-use serde_json::{json};
+use serde_json::{json, Number, Value};
 use entities::{rpc_accounting, rpc_key};
 use crate::http_params::get_stats_column_from_params;
 
+// This type-API is extremely brittle! Make sure that the types conform 1-to-1 as defined here
+// https://docs.rs/influxdb2-structmap/0.2.0/src/influxdb2_structmap/value.rs.html#1-98
+// TODO: Run rustformat on it to see what the compiled produces for this
 #[derive(Debug, Default, FromDataPoint, Serialize)]
 pub struct AggregatedRpcAccounting {
-    chain_id: u64,
-    field: String,
-    value: f64,
-    time: DateTime<FixedOffset>,
-    error_response: bool,
-    archive_needed: bool,
+    chain_id: String,
+    _field: String,
+    _value: i64,
+    _time: DateTime<FixedOffset>,
+    error_response: String,
+    archive_needed: String,
 }
 
 #[derive(Debug, Default, FromDataPoint, Serialize)]
 pub struct DetailedRpcAccounting {
-    chain_id: u64,
-    field: String,
-    value: f64,
-    time: DateTime<FixedOffset>,
-    error_response: bool,
-    archive_needed: bool,
+    chain_id: String,
+    _field: String,
+    _value: i64,
+    _time: DateTime<FixedOffset>,
+    error_response: String,
+    archive_needed: String,
     method: String,
 }
 
@@ -189,7 +192,7 @@ pub async fn query_user_stats<'a>(
             {filter_field}
             {filter_chain_id}
             {group}
-            |> aggregateWindow(every: {query_window_seconds}s, fn: mean, createEmpty: false)
+            |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
             |> group()
     "#);
 
@@ -230,7 +233,7 @@ pub async fn query_user_stats<'a>(
             influx_responses
                 .into_iter()
                 .map(|x| {
-                    (x.time.clone(), x)
+                    (x._time.clone(), x)
                 })
                 .into_group_map()
             .into_iter()
@@ -250,27 +253,72 @@ pub async fn query_user_stats<'a>(
 
                 for x in grouped_items {
                     info!("Iterating over grouped item {:?}", x);
-                    out.insert(
-                        f!(r#"total_{x.field}"#),
-                        // serde_json::Value::Number(serde_json::Number::from(x.value))
-                        json!(x.value)
-                    );
+
+                    let key = format!("total_{}", x._field).to_string();
+                    info!("Looking at: {:?}", key);
+
+                    // Insert it once, and then fix it
+                    match out.get_mut(&key) {
+                        Some (existing) => {
+                            match existing {
+                                Value::Number(old_value) => {
+                                    // unwrap will error when someone has too many credits ..
+                                    let old_value = old_value.as_i64().unwrap();
+                                    warn!("Old value is {:?}", old_value);
+                                    *existing = serde_json::Value::Number(Number::from(old_value + x._value));
+                                    warn!("New value is {:?}", old_value);
+                                },
+                                _ => {panic!("Should be nothing but a number")}
+                            };
+                        }
+                        None => {
+                            warn!("Does not exist yet! Insert new!");
+                            out.insert(
+                                key,
+                                serde_json::Value::Number(Number::from(x._value))
+                            );
+                        }
+                    };
 
                     if !out.contains_key("query_window_timestamp") {
                         out.insert(
                             "query_window_timestamp".to_owned(),
                             // serde_json::Value::Number(x.time.timestamp().into())
-                            json!(x.time.timestamp())
+                            json!(x._time.timestamp())
                         );
                     }
 
+                    // Interpret archive needed as a boolean
+                    let archive_needed = match x.archive_needed.as_str() {
+                        "true" => {
+                            true
+                        },
+                        "false" => {
+                            false
+                        },
+                        _ => {
+                            panic!("This should never be!")
+                        }
+                    };
+                    let error_response = match x.error_response.as_str() {
+                        "true" => {
+                            true
+                        },
+                        "false" => {
+                            false
+                        },
+                        _ => {
+                            panic!("This should never be!")
+                        }
+                    };
+
                     // Add up to archive requests and error responses
                     // TODO: Gotta double check if errors & archive is based on frontend requests, or other metrics
-                    if x.field == "frontend_requests" && x.archive_needed {
-                        archive_requests += x.value as i32 // This is the number of requests
+                    if x._field == "frontend_requests" && archive_needed {
+                        archive_requests += x._value as u64 // This is the number of requests
                     }
-                    if x.field == "frontend_requests" && x.error_response {
-                        error_responses += x.value as i32
+                    if x._field == "frontend_requests" && error_response {
+                        error_responses += x._value as u64
                     }
 
                 }
@@ -294,7 +342,7 @@ pub async fn query_user_stats<'a>(
             influx_responses
                 .into_iter()
                 .map(|x| {
-                    ((x.time.clone(), x.method.clone()), x)
+                    ((x._time.clone(), x.method.clone()), x)
                 })
                 .into_group_map()
                 .into_iter()
@@ -313,27 +361,72 @@ pub async fn query_user_stats<'a>(
 
                     for x in grouped_items {
                         info!("Iterating over grouped item {:?}", x);
-                        out.insert(
-                            f!(r#"total_{x.field}"#),
-                            // serde_json::Value::Number(serde_json::Number::from(x.value))
-                            json!(x.value)
-                        );
+
+                        let key = format!("total_{}", x._field).to_string();
+                        info!("Looking at: {:?}", key);
+
+                        // Insert it once, and then fix it
+                        match out.get_mut(&key) {
+                            Some (existing) => {
+                                match existing {
+                                    Value::Number(old_value) => {
+                                        // unwrap will error when someone has too many credits ..
+                                        let old_value = old_value.as_i64().unwrap();
+                                        warn!("Old value is {:?}", old_value);
+                                        *existing = serde_json::Value::Number(Number::from(old_value + x._value));
+                                        warn!("New value is {:?}", old_value);
+                                    },
+                                    _ => {panic!("Should be nothing but a number")}
+                                };
+                            }
+                            None => {
+                                warn!("Does not exist yet! Insert new!");
+                                out.insert(
+                                    key,
+                                    serde_json::Value::Number(Number::from(x._value))
+                                );
+                            }
+                        };
 
                         if !out.contains_key("query_window_timestamp") {
                             out.insert(
                                 "query_window_timestamp".to_owned(),
                                 // serde_json::Value::Number(x.time.timestamp().into())
-                                json!(x.time.timestamp())
+                                json!(x._time.timestamp())
                             );
                         }
 
+                        // Interpret archive needed as a boolean
+                        let archive_needed = match x.archive_needed.as_str() {
+                            "true" => {
+                                true
+                            },
+                            "false" => {
+                                false
+                            },
+                            _ => {
+                                panic!("This should never be!")
+                            }
+                        };
+                        let error_response = match x.error_response.as_str() {
+                            "true" => {
+                                true
+                            },
+                            "false" => {
+                                false
+                            },
+                            _ => {
+                                panic!("This should never be!")
+                            }
+                        };
+
                         // Add up to archive requests and error responses
                         // TODO: Gotta double check if errors & archive is based on frontend requests, or other metrics
-                        if x.field == "frontend_requests" && x.archive_needed {
-                            archive_requests += x.value as i32 // This is the number of requests
+                        if x._field == "frontend_requests" && archive_needed {
+                            archive_requests += x._value as i32 // This is the number of requests
                         }
-                        if x.field == "frontend_requests" && x.error_response {
-                            error_responses += x.value as i32
+                        if x._field == "frontend_requests" && error_response {
+                            error_responses += x._value as i32
                         }
 
                     }
