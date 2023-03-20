@@ -778,7 +778,7 @@ impl Web3ProxyApp {
             })
             .await;
 
-        authorization_checks.map_err(Web3ProxyError::SeaRc)
+        authorization_checks.map_err(Web3ProxyError::Arc)
     }
 
     /// Authorized the ip/origin/referer/useragent and rate limit and concurrency

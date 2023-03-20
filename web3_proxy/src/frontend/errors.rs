@@ -31,6 +31,7 @@ pub enum Web3ProxyError {
     AccessDenied,
     #[error(ignore)]
     Anyhow(anyhow::Error),
+    Arc(Arc<Web3ProxyError>),
     #[error(ignore)]
     #[from(ignore)]
     BadRequest(String),
@@ -41,6 +42,7 @@ pub enum Web3ProxyError {
     EthersHttpClientError(ethers::prelude::HttpClientError),
     EthersProviderError(ethers::prelude::ProviderError),
     EthersWsClientError(ethers::prelude::WsClientError),
+    GasEstimateNotU256,
     Headers(headers::Error),
     HeaderToString(ToStrError),
     InfluxDb2RequestError(influxdb2::RequestError),
@@ -70,7 +72,9 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     #[from(ignore)]
     OriginNotAllowed(headers::Origin),
-    ParseBytesError(ethers::types::ParseBytesError),
+    #[display(fmt = "{:?}", _0)]
+    #[error(ignore)]
+    ParseBytesError(Option<ethers::types::ParseBytesError>),
     ParseMsgError(siwe::ParseError),
     ParseAddressError,
     #[display(fmt = "{:?}, {:?}", _0, _1)]
@@ -81,8 +85,8 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     #[from(ignore)]
     RefererNotAllowed(headers::Referer),
-    SeaRc(Arc<Web3ProxyError>),
     SemaphoreAcquireError(AcquireError),
+    SendAppStatError(flume::SendError<crate::stats::AppStat>),
     SerdeJson(serde_json::Error),
     /// simple way to return an error message to the user and an anyhow to our logs
     #[display(fmt = "{}, {}, {:?}", _0, _1, _2)]
@@ -213,6 +217,17 @@ impl Web3ProxyError {
                     JsonRpcForwardedResponse::from_str(
                         "ether ws client error",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::GasEstimateNotU256 => {
+                warn!("GasEstimateNotU256");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "gas estimate result is not an U256",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
                         None,
                     ),
                 )
@@ -548,7 +563,7 @@ impl Web3ProxyError {
                     ),
                 )
             }
-            Self::SeaRc(err) => match migration::SeaRc::try_unwrap(err) {
+            Self::Arc(err) => match Arc::try_unwrap(err) {
                 Ok(err) => err,
                 Err(err) => Self::Anyhow(anyhow::anyhow!("{}", err)),
             }
@@ -560,6 +575,17 @@ impl Web3ProxyError {
                     JsonRpcForwardedResponse::from_string(
                         // TODO: is it safe to expose all of our anyhow strings?
                         "semaphore acquire error".to_string(),
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::SendAppStatError(err) => {
+                error!("SendAppStatError err={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "error stat_sender sending response_stat",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
@@ -722,6 +748,12 @@ impl Web3ProxyError {
                 }
             }
         }
+    }
+}
+
+impl From<ethers::types::ParseBytesError> for Web3ProxyError {
+    fn from(err: ethers::types::ParseBytesError) -> Self {
+        Self::ParseBytesError(Some(err))
     }
 }
 

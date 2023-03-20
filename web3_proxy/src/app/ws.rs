@@ -2,12 +2,11 @@
 
 use super::Web3ProxyApp;
 use crate::frontend::authorization::{Authorization, RequestMetadata};
-use crate::frontend::errors::Web3ProxyResult;
+use crate::frontend::errors::{Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::rpcs::transactions::TxStatus;
 use crate::stats::RpcQueryStats;
-use anyhow::Context;
 use axum::extract::ws::Message;
 use ethers::prelude::U64;
 use futures::future::AbortHandle;
@@ -31,7 +30,7 @@ impl Web3ProxyApp {
     ) -> Web3ProxyResult<(AbortHandle, JsonRpcForwardedResponse)> {
         // TODO: this is not efficient
         let request_bytes = serde_json::to_string(&request_json)
-            .context("finding request size")?
+            .web3_context("finding request size")?
             .len();
 
         let request_metadata = Arc::new(RequestMetadata::new(request_bytes));

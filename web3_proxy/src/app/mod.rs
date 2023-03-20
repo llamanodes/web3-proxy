@@ -4,7 +4,7 @@ mod ws;
 use crate::block_number::{block_needed, BlockNeeded};
 use crate::config::{AppConfig, TopConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{
     JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest, JsonRpcRequestEnum,
@@ -1089,12 +1089,11 @@ impl Web3ProxyApp {
         // TODO: improve flattening
 
         // get the head block now so that any requests that need it all use the same block
-        // TODO: Web3ProxyError that handles "no servers synced" in a consistent way
         // TODO: this still has an edge condition if there is a reorg in the middle of the request!!!
         let head_block_num = self
             .balanced_rpcs
             .head_block_num()
-            .context(anyhow::anyhow!("no servers synced"))?;
+            .ok_or(Web3ProxyError::NoServersSynced)?;
 
         let responses = join_all(
             requests
@@ -1366,7 +1365,7 @@ impl Web3ProxyApp {
 
                 let mut gas_estimate: U256 = if let Some(gas_estimate) = response.result.take() {
                     serde_json::from_str(gas_estimate.get())
-                        .context("gas estimate result is not an U256")?
+                        .or(Err(Web3ProxyError::GasEstimateNotU256))?
                 } else {
                     // i think this is always an error response
                     let rpcs = request_metadata.backend_requests.lock().clone();
@@ -1456,15 +1455,15 @@ impl Web3ProxyApp {
                     {
                         let params = request
                             .params
-                            .context("there must be params if we got this far")?;
+                            .web3_context("there must be params if we got this far")?;
 
                         let params = params
                             .as_array()
-                            .context("there must be an array if we got this far")?
+                            .web3_context("there must be an array if we got this far")?
                             .get(0)
-                            .context("there must be an item if we got this far")?
+                            .web3_context("there must be an item if we got this far")?
                             .as_str()
-                            .context("there must be a string if we got this far")?;
+                            .web3_context("there must be a string if we got this far")?;
 
                         let params = Bytes::from_str(params)
                             .expect("there must be Bytes if we got this far");
@@ -1586,7 +1585,8 @@ impl Web3ProxyApp {
                         let param = Bytes::from_str(
                             params[0]
                                 .as_str()
-                                .context("parsing params 0 into str then bytes")?,
+                                .ok_or(Web3ProxyError::ParseBytesError(None))
+                                .web3_context("parsing params 0 into str then bytes")?,
                         )
                         .map_err(|x| {
                             trace!("bad request: {:?}", x);
@@ -1635,7 +1635,7 @@ impl Web3ProxyApp {
                 // TODO: if no servers synced, wait for them to be synced? probably better to error and let haproxy retry another server
                 let head_block_num = head_block_num
                     .or(self.balanced_rpcs.head_block_num())
-                    .context("no servers synced")?;
+                    .ok_or(Web3ProxyError::NoServersSynced)?;
 
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
@@ -1793,7 +1793,7 @@ impl Web3ProxyApp {
                     stat_sender
                         .send_async(response_stat.into())
                         .await
-                        .context("stat_sender sending response_stat")?;
+                        .map_err(Web3ProxyError::SendAppStatError)?;
                 }
 
                 return Ok((response, rpcs));
@@ -1816,7 +1816,7 @@ impl Web3ProxyApp {
             stat_sender
                 .send_async(response_stat.into())
                 .await
-                .context("stat_sender sending response stat")?;
+                .map_err(Web3ProxyError::SendAppStatError)?;
         }
 
         if let Some((kafka_topic, kafka_key, kafka_headers)) = kafka_stuff {
@@ -1826,7 +1826,7 @@ impl Web3ProxyApp {
                 .expect("if headers are set, producer must exist");
 
             let response_bytes =
-                rmp_serde::to_vec(&response).context("failed msgpack serialize response")?;
+                rmp_serde::to_vec(&response).web3_context("failed msgpack serialize response")?;
 
             let f = async move {
                 let produce_future = kafka_producer.send(
