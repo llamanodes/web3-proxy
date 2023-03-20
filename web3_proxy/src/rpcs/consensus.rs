@@ -2,7 +2,7 @@ use super::blockchain::Web3ProxyBlock;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use crate::frontend::authorization::Authorization;
-use anyhow::Context;
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use log::{debug, trace, warn};
@@ -169,9 +169,9 @@ impl ConnectionsGroup {
         web3_rpcs: &Web3Rpcs,
         min_consensus_block_num: Option<U64>,
         tier: &u64,
-    ) -> anyhow::Result<ConsensusWeb3Rpcs> {
+    ) -> Web3ProxyResult<ConsensusWeb3Rpcs> {
         let mut maybe_head_block = match self.highest_block.clone() {
-            None => return Err(anyhow::anyhow!("no blocks known")),
+            None => return Err(Web3ProxyError::NoBlocksKnown),
             Some(x) => x,
         };
 
@@ -196,11 +196,10 @@ impl ConnectionsGroup {
         let num_known = self.rpc_to_block.len();
 
         if num_known < web3_rpcs.min_head_rpcs {
-            return Err(anyhow::anyhow!(
-                "not enough rpcs connected: {}/{}",
+            return Err(Web3ProxyError::NotEnoughRpcs {
                 num_known,
-                web3_rpcs.min_head_rpcs,
-            ));
+                min_head_rpcs: web3_rpcs.min_head_rpcs,
+            });
         }
 
         let mut primary_rpcs_voted: Option<Web3ProxyBlock> = None;
@@ -256,7 +255,7 @@ impl ConnectionsGroup {
                         warn!("connection missing: {}", rpc_name);
                         debug!("web3_rpcs.by_name: {:#?}", web3_rpcs.by_name);
                     } else {
-                        return Err(anyhow::anyhow!("not synced"));
+                        return Err(Web3ProxyError::NoServersSynced);
                     }
                 }
             }
@@ -309,7 +308,7 @@ impl ConnectionsGroup {
                         warn!("{}", err_msg);
                         break;
                     } else {
-                        return Err(anyhow::anyhow!(err_msg));
+                        return Err(anyhow::anyhow!(err_msg).into());
                     }
                 }
             }
@@ -334,7 +333,8 @@ impl ConnectionsGroup {
                 primary_sum_soft_limit,
                 web3_rpcs.min_sum_soft_limit,
                 soft_limit_percent,
-            ));
+            )
+            .into());
         }
 
         // success! this block has enough soft limit and nodes on it (or on later blocks)
@@ -462,7 +462,7 @@ impl ConsensusFinder {
         rpc: Arc<Web3Rpc>,
         // we need this so we can save the block to caches. i don't like it though. maybe we should use a lazy_static Cache wrapper that has a "save_block" method?. i generally dislike globals but i also dislike all the types having to pass eachother around
         web3_connections: &Web3Rpcs,
-    ) -> anyhow::Result<bool> {
+    ) -> Web3ProxyResult<bool> {
         // add the rpc's block to connection_heads, or remove the rpc from connection_heads
         let changed = match rpc_head_block {
             Some(mut rpc_head_block) => {
@@ -470,7 +470,7 @@ impl ConsensusFinder {
                 rpc_head_block = web3_connections
                     .try_cache_block(rpc_head_block, false)
                     .await
-                    .context("failed caching block")?;
+                    .web3_context("failed caching block")?;
 
                 // if let Some(max_block_lag) = max_block_lag {
                 //     if rpc_head_block.number() < ??? {
@@ -509,14 +509,14 @@ impl ConsensusFinder {
         &mut self,
         authorization: &Arc<Authorization>,
         web3_connections: &Web3Rpcs,
-    ) -> anyhow::Result<ConsensusWeb3Rpcs> {
+    ) -> Web3ProxyResult<ConsensusWeb3Rpcs> {
         // TODO: attach context to these?
         let highest_known_block = self
             .all_rpcs_group()
-            .context("no rpcs")?
+            .web3_context("no rpcs")?
             .highest_block
             .as_ref()
-            .context("no highest block")?;
+            .web3_context("no highest block")?;
 
         trace!("highest_known_block: {}", highest_known_block);
 
@@ -545,7 +545,7 @@ impl ConsensusFinder {
             }
         }
 
-        return Err(anyhow::anyhow!("failed finding consensus on all tiers"));
+        return Err(anyhow::anyhow!("failed finding consensus on all tiers").into());
     }
 }
 

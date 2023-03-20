@@ -2,7 +2,7 @@
 
 use super::Web3ProxyApp;
 use crate::frontend::authorization::{Authorization, RequestMetadata};
-use crate::frontend::errors::{Web3ProxyErrorContext, Web3ProxyResult};
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::rpcs::transactions::TxStatus;
@@ -341,7 +341,7 @@ impl Web3ProxyApp {
                     );
                 });
             }
-            _ => return Err(anyhow::anyhow!("unimplemented").into()),
+            _ => return Err(Web3ProxyError::NotImplemented),
         }
 
         // TODO: do something with subscription_join_handle?

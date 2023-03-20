@@ -42,11 +42,13 @@ pub enum Web3ProxyError {
     EthersHttpClientError(ethers::prelude::HttpClientError),
     EthersProviderError(ethers::prelude::ProviderError),
     EthersWsClientError(ethers::prelude::WsClientError),
+    FlumeRecvError(flume::RecvError),
     GasEstimateNotU256,
     Headers(headers::Error),
     HeaderToString(ToStrError),
     InfluxDb2RequestError(influxdb2::RequestError),
     #[display(fmt = "{} > {}", min, max)]
+    #[from(ignore)]
     InvalidBlockBounds {
         min: u64,
         max: u64,
@@ -64,8 +66,16 @@ pub enum Web3ProxyError {
     IpNotAllowed(IpAddr),
     JoinError(JoinError),
     MsgPackEncode(rmp_serde::encode::Error),
-    NoServersSynced,
+    NoBlockNumberOrHash,
+    NoBlocksKnown,
     NoHandleReady,
+    NoServersSynced,
+    #[display(fmt = "{}/{}", num_known, min_head_rpcs)]
+    #[from(ignore)]
+    NotEnoughRpcs {
+        num_known: usize,
+        min_head_rpcs: usize,
+    },
     NotFound,
     NotImplemented,
     OriginRequired,
@@ -104,6 +114,7 @@ pub enum Web3ProxyError {
     UserIdZero,
     VerificationError(siwe::VerificationError),
     WatchRecvError(tokio::sync::watch::error::RecvError),
+    WatchSendError,
     WebsocketOnly,
     #[display(fmt = "{:?}, {}", _0, _1)]
     #[error(ignore)]
@@ -216,6 +227,17 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
                         "ether ws client error",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::FlumeRecvError(err) => {
+                warn!("FlumeRecvError err={:#?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "flume recv error!",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
@@ -398,12 +420,23 @@ impl Web3ProxyError {
                     ),
                 )
             }
-            Self::NoServersSynced => {
-                warn!("NoServersSynced");
+            Self::NoBlockNumberOrHash => {
+                warn!("NoBlockNumberOrHash");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "Blocks here must have a number or hash",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::NoBlocksKnown => {
+                error!("NoBlocksKnown");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
-                        "no servers synced",
+                        "no blocks known",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
@@ -415,6 +448,31 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
                         "unable to retry for request handle",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::NoServersSynced => {
+                warn!("NoServersSynced");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "no servers synced",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::NotEnoughRpcs {
+                num_known,
+                min_head_rpcs,
+            } => {
+                error!("NotEnoughRpcs {}/{}", num_known, min_head_rpcs);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_string(
+                        format!("not enough rpcs connected {}/{}", num_known, min_head_rpcs),
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
@@ -717,6 +775,17 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
                         "watch recv error!",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::WatchSendError => {
+                error!("WatchSendError");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "watch send error!",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
