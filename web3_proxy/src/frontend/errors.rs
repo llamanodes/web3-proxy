@@ -34,7 +34,10 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     #[from(ignore)]
     BadRequest(String),
+    BadRouting,
     Database(DbErr),
+    #[display(fmt = "{:#?}, {:#?}", _0, _1)]
+    EipVerificationFailed(Box<Web3ProxyError>, Box<Web3ProxyError>),
     EthersHttpClientError(ethers::prelude::HttpClientError),
     EthersProviderError(ethers::prelude::ProviderError),
     EthersWsClientError(ethers::prelude::WsClientError),
@@ -47,6 +50,12 @@ pub enum Web3ProxyError {
         max: u64,
     },
     InvalidHeaderValue(InvalidHeaderValue),
+    InvalidEip,
+    InvalidInviteCode,
+    InvalidReferer,
+    InvalidSignatureLength,
+    InvalidUserAgent,
+    InvalidUserKey,
     IpAddrParse(AddrParseError),
     #[error(ignore)]
     #[from(ignore)]
@@ -56,10 +65,14 @@ pub enum Web3ProxyError {
     NoServersSynced,
     NoHandleReady,
     NotFound,
+    NotImplemented,
     OriginRequired,
     #[error(ignore)]
     #[from(ignore)]
     OriginNotAllowed(headers::Origin),
+    ParseBytesError(ethers::types::ParseBytesError),
+    ParseMsgError(siwe::ParseError),
+    ParseAddressError,
     #[display(fmt = "{:?}, {:?}", _0, _1)]
     RateLimited(Authorization, Option<Instant>),
     Redis(RedisError),
@@ -84,9 +97,11 @@ pub enum Web3ProxyError {
     UserAgentRequired,
     #[error(ignore)]
     UserAgentNotAllowed(headers::UserAgent),
+    UserIdZero,
+    VerificationError(siwe::VerificationError),
     WatchRecvError(tokio::sync::watch::error::RecvError),
     WebsocketOnly,
-    #[display(fmt = "{}, {}", _0, _1)]
+    #[display(fmt = "{:?}, {}", _0, _1)]
     #[error(ignore)]
     WithContext(Option<Box<Web3ProxyError>>, String),
 }
@@ -130,6 +145,17 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::BadRouting => {
+                error!("BadRouting");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "bad routing",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             Self::Database(err) => {
                 error!("database err={:?}", err);
                 (
@@ -137,6 +163,23 @@ impl Web3ProxyError {
                     JsonRpcForwardedResponse::from_str(
                         "database error!",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::EipVerificationFailed(err_1, err_191) => {
+                warn!(
+                    "EipVerificationFailed err_1={:#?} err2={:#?}",
+                    err_1, err_191
+                );
+                (
+                    StatusCode::UNAUTHORIZED,
+                    JsonRpcForwardedResponse::from_string(
+                        format!(
+                            "both the primary and eip191 verification failed: {:#?}; {:#?}",
+                            err_1, err_191
+                        ),
+                        Some(StatusCode::UNAUTHORIZED.as_u16().into()),
                         None,
                     ),
                 )
@@ -244,6 +287,72 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::InvalidEip => {
+                warn!("InvalidEip");
+                (
+                    StatusCode::UNAUTHORIZED,
+                    JsonRpcForwardedResponse::from_str(
+                        "invalid message eip given",
+                        Some(StatusCode::UNAUTHORIZED.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::InvalidInviteCode => {
+                warn!("InvalidInviteCode");
+                (
+                    StatusCode::UNAUTHORIZED,
+                    JsonRpcForwardedResponse::from_str(
+                        "invalid invite code",
+                        Some(StatusCode::UNAUTHORIZED.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::InvalidReferer => {
+                warn!("InvalidReferer");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "invalid referer!",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::InvalidSignatureLength => {
+                warn!("InvalidSignatureLength");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "invalid signature length",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::InvalidUserAgent => {
+                warn!("InvalidUserAgent");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "invalid user agent!",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::InvalidUserKey => {
+                warn!("InvalidUserKey");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "UserKey was not a ULID or UUID",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             Self::JoinError(err) => {
                 let code = if err.is_cancelled() {
                     trace!("JoinError. likely shutting down. err={:?}", err);
@@ -308,6 +417,17 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::NotImplemented => {
+                warn!("NotImplemented");
+                (
+                    StatusCode::NOT_IMPLEMENTED,
+                    JsonRpcForwardedResponse::from_str(
+                        "work in progress",
+                        Some(StatusCode::NOT_IMPLEMENTED.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             Self::OriginRequired => {
                 warn!("OriginRequired");
                 (
@@ -326,6 +446,39 @@ impl Web3ProxyError {
                     JsonRpcForwardedResponse::from_string(
                         format!("Origin ({}) is not allowed!", origin),
                         Some(StatusCode::FORBIDDEN.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::ParseBytesError(err) => {
+                warn!("ParseBytesError err={:?}", err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "parse bytes error!",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::ParseMsgError(err) => {
+                warn!("ParseMsgError err={:?}", err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "parse message error!",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::ParseAddressError => {
+                warn!("ParseAddressError");
+                (
+                    StatusCode::UNAUTHORIZED,
+                    JsonRpcForwardedResponse::from_str(
+                        "unable to parse address",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
                         None,
                     ),
                 )
@@ -506,6 +659,28 @@ impl Web3ProxyError {
                     JsonRpcForwardedResponse::from_string(
                         format!("User agent ({}) is not allowed!", ua),
                         Some(StatusCode::FORBIDDEN.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::UserIdZero => {
+                warn!("UserIdZero");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "user ids should always be non-zero",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::VerificationError(err) => {
+                warn!("VerificationError err={:?}", err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "verification error!",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
                         None,
                     ),
                 )

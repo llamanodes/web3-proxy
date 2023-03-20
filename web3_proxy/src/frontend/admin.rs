@@ -4,10 +4,9 @@ use super::authorization::login_is_authorized;
 use super::errors::Web3ProxyResponse;
 use crate::admin_queries::query_admin_modify_usertier;
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::Web3ProxyError;
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::user_token::UserBearerToken;
 use crate::PostLogin;
-use anyhow::Context;
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -137,10 +136,10 @@ pub async fn admin_login_get(
         resources: vec![],
     };
 
-    let db_conn = app.db_conn().context("login requires a database")?;
+    let db_conn = app.db_conn().web3_context("login requires a database")?;
     let db_replica = app
         .db_replica()
-        .context("login requires a replica database")?;
+        .web3_context("login requires a replica database")?;
 
     // Get the user that we want to imitate from the read-only database (their id ...)
     // TODO: Only get the id, not the whole user object ...
@@ -171,7 +170,7 @@ pub async fn admin_login_get(
     trail
         .save(&db_conn)
         .await
-        .context("saving user's pending_login")?;
+        .web3_context("saving user's pending_login")?;
 
     // Can there be two login-sessions at the same time?
     // I supposed if the user logs in, the admin would be logged out and vice versa
@@ -196,7 +195,7 @@ pub async fn admin_login_get(
     user_pending_login
         .save(&db_conn)
         .await
-        .context("saving an admin trail pre login")?;
+        .web3_context("saving an admin trail pre login")?;
 
     // there are multiple ways to sign messages and not all wallets support them
     // TODO: default message eip from config?
@@ -210,7 +209,7 @@ pub async fn admin_login_get(
         "eip4361" => message.to_string(),
         _ => {
             // TODO: custom error that is handled a 401
-            return Err(anyhow::anyhow!("invalid message eip given").into());
+            return Err(Web3ProxyError::InvalidEip);
         }
     };
 
@@ -230,9 +229,9 @@ pub async fn admin_login_post(
 
     // Check for the signed bytes ..
     // TODO: this seems too verbose. how can we simply convert a String into a [u8; 65]
-    let their_sig_bytes = Bytes::from_str(&payload.sig).context("parsing sig")?;
+    let their_sig_bytes = Bytes::from_str(&payload.sig).web3_context("parsing sig")?;
     if their_sig_bytes.len() != 65 {
-        return Err(anyhow::anyhow!("checking signature length").into());
+        return Err(Web3ProxyError::InvalidSignatureLength);
     }
     let mut their_sig: [u8; 65] = [0; 65];
     for x in 0..65 {
@@ -242,17 +241,18 @@ pub async fn admin_login_post(
     // we can't trust that they didn't tamper with the message in some way. like some clients return it hex encoded
     // TODO: checking 0x seems fragile, but I think it will be fine. siwe message text shouldn't ever start with 0x
     let their_msg: Message = if payload.msg.starts_with("0x") {
-        let their_msg_bytes = Bytes::from_str(&payload.msg).context("parsing payload message")?;
+        let their_msg_bytes =
+            Bytes::from_str(&payload.msg).web3_context("parsing payload message")?;
 
         // TODO: lossy or no?
         String::from_utf8_lossy(their_msg_bytes.as_ref())
             .parse::<siwe::Message>()
-            .context("parsing hex string message")?
+            .web3_context("parsing hex string message")?
     } else {
         payload
             .msg
             .parse::<siwe::Message>()
-            .context("parsing string message")?
+            .web3_context("parsing string message")?
     };
 
     // the only part of the message we will trust is their nonce
@@ -260,7 +260,9 @@ pub async fn admin_login_post(
     let login_nonce = UserBearerToken::from_str(&their_msg.nonce)?;
 
     // fetch the message we gave them from our database
-    let db_replica = app.db_replica().context("Getting database connection")?;
+    let db_replica = app
+        .db_replica()
+        .web3_context("Getting database connection")?;
 
     // massage type for the db
     let login_nonce_uuid: Uuid = login_nonce.clone().into();
@@ -270,30 +272,30 @@ pub async fn admin_login_post(
         .filter(pending_login::Column::Nonce.eq(login_nonce_uuid))
         .one(db_replica.conn())
         .await
-        .context("database error while finding pending_login")?
-        .context("login nonce not found")?;
+        .web3_context("database error while finding pending_login")?
+        .web3_context("login nonce not found")?;
 
     let our_msg: siwe::Message = user_pending_login
         .message
         .parse()
-        .context("parsing siwe message")?;
+        .web3_context("parsing siwe message")?;
 
     // default options are fine. the message includes timestamp and domain and nonce
     let verify_config = VerificationOpts::default();
 
     let db_conn = app
         .db_conn()
-        .context("deleting expired pending logins requires a db")?;
+        .web3_context("deleting expired pending logins requires a db")?;
 
     if let Err(err_1) = our_msg
         .verify(&their_sig, &verify_config)
         .await
-        .context("verifying signature against our local message")
+        .web3_context("verifying signature against our local message")
     {
         // verification method 1 failed. try eip191
         if let Err(err_191) = our_msg
             .verify_eip191(&their_sig)
-            .context("verifying eip191 signature against our local message")
+            .web3_context("verifying eip191 signature against our local message")
         {
             // delete ALL expired rows.
             let now = Utc::now();
@@ -305,18 +307,16 @@ pub async fn admin_login_post(
             // TODO: emit a stat? if this is high something weird might be happening
             debug!("cleared expired pending_logins: {:?}", delete_result);
 
-            return Err(anyhow::anyhow!(
-                "both the primary and eip191 verification failed: {:#?}; {:#?}",
-                err_1,
-                err_191
-            )
-            .into());
+            return Err(Web3ProxyError::EipVerificationFailed(
+                Box::new(err_1),
+                Box::new(err_191),
+            ));
         }
     }
 
     let imitating_user_id = user_pending_login
         .imitating_user
-        .context("getting address of the imitating user")?;
+        .web3_context("getting address of the imitating user")?;
 
     // TODO: limit columns or load whole user?
     // TODO: Right now this loads the whole admin. I assume we might want to load the user though (?) figure this out as we go along...
@@ -324,13 +324,13 @@ pub async fn admin_login_post(
         .filter(user::Column::Address.eq(our_msg.address.as_ref()))
         .one(db_replica.conn())
         .await?
-        .context("getting admin address")?;
+        .web3_context("getting admin address")?;
 
     let imitating_user = user::Entity::find()
         .filter(user::Column::Id.eq(imitating_user_id))
         .one(db_replica.conn())
         .await?
-        .context("admin address was not found!")?;
+        .web3_context("admin address was not found!")?;
 
     // Add a message that the admin has logged in
     // Note that the admin is trying to log in as this user
@@ -344,7 +344,7 @@ pub async fn admin_login_post(
     trail
         .save(&db_conn)
         .await
-        .context("saving an admin trail post login")?;
+        .web3_context("saving an admin trail post login")?;
 
     // I supposed we also get the rpc_key, whatever this is used for (?).
     // I think the RPC key should still belong to the admin though in this case ...
@@ -354,7 +354,7 @@ pub async fn admin_login_post(
         .filter(rpc_key::Column::UserId.eq(admin.id))
         .all(db_replica.conn())
         .await
-        .context("failed loading user's key")?;
+        .web3_context("failed loading user's key")?;
 
     // create a bearer token for the user.
     let user_bearer_token = UserBearerToken::default();
@@ -395,7 +395,7 @@ pub async fn admin_login_post(
     user_login
         .save(&db_conn)
         .await
-        .context("saving user login")?;
+        .web3_context("saving user login")?;
 
     if let Err(err) = user_pending_login
         .into_active_model()
@@ -417,7 +417,9 @@ pub async fn admin_logout_post(
 ) -> Web3ProxyResponse {
     let user_bearer = UserBearerToken::try_from(bearer)?;
 
-    let db_conn = app.db_conn().context("database needed for user logout")?;
+    let db_conn = app
+        .db_conn()
+        .web3_context("database needed for user logout")?;
 
     if let Err(err) = login::Entity::delete_many()
         .filter(login::Column::BearerToken.eq(user_bearer.uuid()))

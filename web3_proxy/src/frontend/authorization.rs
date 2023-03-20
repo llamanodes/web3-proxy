@@ -1,11 +1,10 @@
 //! Utilities for authorization of logged in and anonymous users.
 
-use super::errors::{Web3ProxyError, Web3ProxyResult};
+use super::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{AuthorizationChecks, Web3ProxyApp, APP_USER_AGENT};
 use crate::rpcs::one::Web3Rpc;
 use crate::user_token::UserBearerToken;
-use anyhow::Context;
 use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
@@ -128,7 +127,7 @@ impl Display for RpcSecretKey {
 }
 
 impl FromStr for RpcSecretKey {
-    type Err = anyhow::Error;
+    type Err = Web3ProxyError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Ok(ulid) = s.parse::<Ulid>() {
@@ -137,7 +136,7 @@ impl FromStr for RpcSecretKey {
             Ok(uuid.into())
         } else {
             // TODO: custom error type so that this shows as a 400
-            Err(anyhow::anyhow!("UserKey was not a ULID or UUID"))
+            Err(Web3ProxyError::InvalidUserKey)
         }
     }
 }
@@ -367,7 +366,7 @@ pub async fn ip_is_authorized(
                     .await?;
             };
 
-            Ok::<_, anyhow::Error>(())
+            Ok::<_, Web3ProxyError>(())
         }
         .map_err(|err| {
             warn!("background update of recent_users:ip failed: {}", err);
@@ -430,7 +429,7 @@ pub async fn key_is_authorized(
                     .await?;
             }
 
-            Ok::<_, anyhow::Error>(())
+            Ok::<_, Web3ProxyError>(())
         }
         .map_err(|err| {
             warn!("background update of recent_users:id failed: {}", err);
@@ -474,12 +473,13 @@ impl Web3ProxyApp {
     pub async fn registered_user_semaphore(
         &self,
         authorization_checks: &AuthorizationChecks,
-    ) -> anyhow::Result<Option<OwnedSemaphorePermit>> {
+    ) -> Web3ProxyResult<Option<OwnedSemaphorePermit>> {
         if let Some(max_concurrent_requests) = authorization_checks.max_concurrent_requests {
             let user_id = authorization_checks
                 .user_id
                 .try_into()
-                .context("user ids should always be non-zero")?;
+                .or(Err(Web3ProxyError::UserIdZero))
+                .web3_context("user ids should always be non-zero")?;
 
             let semaphore = self
                 .registered_user_semaphores
@@ -527,7 +527,7 @@ impl Web3ProxyApp {
         // get the attached address from the database for the given auth_token.
         let db_replica = self
             .db_replica()
-            .context("checking if bearer token is authorized")?;
+            .web3_context("checking if bearer token is authorized")?;
 
         let user_bearer_uuid: Uuid = user_bearer_token.into();
 
@@ -536,8 +536,8 @@ impl Web3ProxyApp {
             .filter(login::Column::BearerToken.eq(user_bearer_uuid))
             .one(db_replica.conn())
             .await
-            .context("fetching user from db by bearer token")?
-            .context("unknown bearer token")?;
+            .web3_context("fetching user from db by bearer token")?
+            .web3_context("unknown bearer token")?;
 
         Ok((user, semaphore_permit))
     }
@@ -662,13 +662,15 @@ impl Web3ProxyApp {
         &self,
         proxy_mode: ProxyMode,
         rpc_secret_key: RpcSecretKey,
-    ) -> anyhow::Result<AuthorizationChecks> {
-        let authorization_checks: Result<_, Arc<anyhow::Error>> = self
+    ) -> Web3ProxyResult<AuthorizationChecks> {
+        let authorization_checks: Result<_, Arc<Web3ProxyError>> = self
             .rpc_secret_key_cache
             .try_get_with(rpc_secret_key.into(), async move {
                 // trace!(?rpc_secret_key, "user cache miss");
 
-                let db_replica = self.db_replica().context("Getting database connection")?;
+                let db_replica = self
+                    .db_replica()
+                    .web3_context("Getting database connection")?;
 
                 // TODO: join the user table to this to return the User? we don't always need it
                 // TODO: join on secondary users
@@ -724,7 +726,11 @@ impl Web3ProxyApp {
                             if let Some(allowed_referers) = rpc_key_model.allowed_referers {
                                 let x = allowed_referers
                                     .split(',')
-                                    .map(|x| x.trim().parse::<Referer>())
+                                    .map(|x| {
+                                        x.trim()
+                                            .parse::<Referer>()
+                                            .or(Err(Web3ProxyError::InvalidReferer))
+                                    })
                                     .collect::<Result<Vec<_>, _>>()?;
 
                                 Some(x)
@@ -736,7 +742,11 @@ impl Web3ProxyApp {
                             if let Some(allowed_user_agents) = rpc_key_model.allowed_user_agents {
                                 let x: Result<Vec<_>, _> = allowed_user_agents
                                     .split(',')
-                                    .map(|x| x.trim().parse::<UserAgent>())
+                                    .map(|x| {
+                                        x.trim()
+                                            .parse::<UserAgent>()
+                                            .or(Err(Web3ProxyError::InvalidUserAgent))
+                                    })
                                     .collect();
 
                                 Some(x?)
@@ -768,8 +778,7 @@ impl Web3ProxyApp {
             })
             .await;
 
-        // TODO: what's the best way to handle this arc? try_unwrap will not work
-        authorization_checks.map_err(|err| anyhow::anyhow!(err))
+        authorization_checks.map_err(Web3ProxyError::SeaRc)
     }
 
     /// Authorized the ip/origin/referer/useragent and rate limit and concurrency
