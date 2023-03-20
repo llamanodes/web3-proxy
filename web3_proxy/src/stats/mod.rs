@@ -30,23 +30,24 @@ pub enum StatType {
     Detailed,
 }
 
+// Pub is needed for migration ... I could also write a second constructor for this if needed
 /// TODO: better name?
 #[derive(Clone, Debug)]
 pub struct RpcQueryStats {
-    authorization: Arc<Authorization>,
-    method: String,
-    archive_request: bool,
-    error_response: bool,
-    request_bytes: u64,
+    pub authorization: Arc<Authorization>,
+    pub method: String,
+    pub archive_request: bool,
+    pub error_response: bool,
+    pub request_bytes: u64,
     /// if backend_requests is 0, there was a cache_hit
-    backend_requests: u64,
-    response_bytes: u64,
-    response_millis: u64,
-    response_timestamp: i64,
+    pub backend_requests: u64,
+    pub response_bytes: u64,
+    pub response_millis: u64,
+    pub response_timestamp: i64,
 }
 
 #[derive(Clone, From, Hash, PartialEq, Eq)]
-struct RpcQueryKey {
+pub struct RpcQueryKey {
     /// unix epoch time
     /// for the time series db, this is (close to) the time that the response was sent
     /// for the account database, this is rounded to the week
@@ -167,15 +168,15 @@ impl RpcQueryStats {
 
 #[derive(Default)]
 pub struct BufferedRpcQueryStats {
-    frontend_requests: u64,
-    backend_requests: u64,
-    backend_retries: u64,
-    no_servers: u64,
-    cache_misses: u64,
-    cache_hits: u64,
-    sum_request_bytes: u64,
-    sum_response_bytes: u64,
-    sum_response_millis: u64,
+    pub frontend_requests: u64,
+    pub backend_requests: u64,
+    pub backend_retries: u64,
+    pub no_servers: u64,
+    pub cache_misses: u64,
+    pub cache_hits: u64,
+    pub sum_request_bytes: u64,
+    pub sum_response_bytes: u64,
+    pub sum_response_millis: u64,
 }
 
 /// A stat that we aggregate and then store in a database.
@@ -363,7 +364,7 @@ impl RpcQueryStats {
         method: String,
         authorization: Arc<Authorization>,
         metadata: Arc<RequestMetadata>,
-        response_bytes: usize,
+        response_bytes: usize
     ) -> Self {
         // TODO: try_unwrap the metadata to be sure that all the stats for this request have been collected
         // TODO: otherwise, i think the whole thing should be in a single lock that we can "reset" when a stat is created
@@ -389,6 +390,7 @@ impl RpcQueryStats {
             response_timestamp,
         }
     }
+
 }
 
 impl StatBuffer {
