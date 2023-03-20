@@ -88,11 +88,11 @@ pub struct RequestMetadata {
 }
 
 impl RequestMetadata {
-    pub fn new(request_bytes: usize) -> anyhow::Result<Self> {
+    pub fn new(request_bytes: usize) -> Self {
         // TODO: how can we do this without turning it into a string first. this is going to slow us down!
         let request_bytes = request_bytes as u64;
 
-        let new = Self {
+        Self {
             start_instant: Instant::now(),
             request_bytes,
             archive_request: false.into(),
@@ -102,9 +102,7 @@ impl RequestMetadata {
             response_bytes: 0.into(),
             response_millis: 0.into(),
             response_from_backup_rpc: false.into(),
-        };
-
-        Ok(new)
+        }
     }
 }
 

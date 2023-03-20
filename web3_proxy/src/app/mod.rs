@@ -18,6 +18,7 @@ use crate::stats::{AppStat, RpcQueryStats, StatBuffer};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::{Origin, Referer, UserAgent};
+use axum::http::StatusCode;
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimiter;
 use derive_more::From;
@@ -1157,7 +1158,7 @@ impl Web3ProxyApp {
     ) -> Web3ProxyResult<(JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>)> {
         // trace!("Received request: {:?}", request);
 
-        let request_metadata = Arc::new(RequestMetadata::new(request.num_bytes())?);
+        let request_metadata = Arc::new(RequestMetadata::new(request.num_bytes()));
 
         let mut kafka_stuff = None;
 
@@ -1338,10 +1339,7 @@ impl Web3ProxyApp {
                     }
                     None => {
                         // TODO: what does geth do if this happens?
-                        // TODO: i think we want a 502 so that haproxy retries on another server
-                        return Err(
-                            anyhow::anyhow!("no servers synced. unknown eth_blockNumber").into(),
-                        );
+                        return Err(Web3ProxyError::UnknownBlockNumber);
                     }
                 }
             }
@@ -1429,7 +1427,7 @@ impl Web3ProxyApp {
 
                 let head_block_num = head_block_num
                     .or(self.balanced_rpcs.head_block_num())
-                    .ok_or_else(|| anyhow::anyhow!("no servers synced"))?;
+                    .ok_or_else(|| Web3ProxyError::NoServersSynced)?;
 
                 // TODO: error/wait if no head block!
 
@@ -1607,7 +1605,7 @@ impl Web3ProxyApp {
                         return Ok((
                             JsonRpcForwardedResponse::from_str(
                                 "invalid request",
-                                None,
+                                Some(StatusCode::BAD_REQUEST.as_u16().into()),
                                 Some(request_id),
                             ),
                             vec![],
@@ -1760,17 +1758,10 @@ impl Web3ProxyApp {
                                 // TODO: only cache the inner response
                                 // TODO: how are we going to stream this?
                                 // TODO: check response size. if its very large, return it in a custom Error type that bypasses caching? or will moka do that for us?
-                                Ok::<_, anyhow::Error>(response)
+                                Ok::<_, Web3ProxyError>(response)
                             })
-                            .await
-                            // TODO: what is the best way to handle an Arc here?
-                            .map_err(|err| {
-                                // TODO: emit a stat for an error
-                                anyhow::anyhow!(
-                                    "error while caching and forwarding response: {}",
-                                    err
-                                )
-                            })?
+                            // TODO: add context (error while caching and forwarding response {})
+                            .await?
                     } else {
                         self.balanced_rpcs
                             .try_proxy_connection(

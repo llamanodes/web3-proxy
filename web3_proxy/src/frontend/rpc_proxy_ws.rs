@@ -378,7 +378,7 @@ async fn handle_socket_payload(
                     // TODO: move this logic into the app?
                     let request_bytes = json_request.num_bytes();
 
-                    let request_metadata = Arc::new(RequestMetadata::new(request_bytes).unwrap());
+                    let request_metadata = Arc::new(RequestMetadata::new(request_bytes));
 
                     let subscription_id = json_request.params.unwrap().to_string();
 

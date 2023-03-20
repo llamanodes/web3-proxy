@@ -4,6 +4,7 @@ use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use super::transactions::TxStatus;
 use crate::frontend::authorization::Authorization;
+use crate::frontend::errors::Web3ProxyResult;
 use crate::{config::BlockAndRpc, jsonrpc::JsonRpcRequest};
 use anyhow::{anyhow, Context};
 use derive_more::From;
@@ -158,7 +159,7 @@ impl Web3Rpcs {
         &self,
         block: Web3ProxyBlock,
         heaviest_chain: bool,
-    ) -> anyhow::Result<Web3ProxyBlock> {
+    ) -> Web3ProxyResult<Web3ProxyBlock> {
         // TODO: i think we can rearrange this function to make it faster on the hot path
         let block_hash = block.hash();
 
@@ -196,7 +197,7 @@ impl Web3Rpcs {
         authorization: &Arc<Authorization>,
         hash: &H256,
         rpc: Option<&Arc<Web3Rpc>>,
-    ) -> anyhow::Result<Web3ProxyBlock> {
+    ) -> Web3ProxyResult<Web3ProxyBlock> {
         // first, try to get the hash from our cache
         // the cache is set last, so if its here, its everywhere
         // TODO: use try_get_with
@@ -267,7 +268,7 @@ impl Web3Rpcs {
         &self,
         authorization: &Arc<Authorization>,
         num: &U64,
-    ) -> anyhow::Result<(H256, u64)> {
+    ) -> Web3ProxyResult<(H256, u64)> {
         let (block, block_depth) = self.cannonical_block(authorization, num).await?;
 
         let hash = *block.hash();
@@ -281,7 +282,7 @@ impl Web3Rpcs {
         &self,
         authorization: &Arc<Authorization>,
         num: &U64,
-    ) -> anyhow::Result<(Web3ProxyBlock, u64)> {
+    ) -> Web3ProxyResult<(Web3ProxyBlock, u64)> {
         // we only have blocks by hash now
         // maybe save them during save_block in a blocks_by_number Cache<U64, Vec<ArcBlock>>
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)

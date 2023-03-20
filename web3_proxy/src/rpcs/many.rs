@@ -7,6 +7,7 @@ use crate::app::{flatten_handle, AnyhowJoinHandle, Web3ProxyApp};
 ///! Load balanced communication with a group of web3 providers
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::transactions::TxStatus;
@@ -462,7 +463,7 @@ impl Web3Rpcs {
         params: Option<&serde_json::Value>,
         error_level: Level,
         // TODO: remove this box once i figure out how to do the options
-    ) -> anyhow::Result<JsonRpcForwardedResponse> {
+    ) -> Web3ProxyResult<JsonRpcForwardedResponse> {
         // TODO: if only 1 active_request_handles, do self.try_send_request?
 
         let responses = active_request_handles
@@ -540,7 +541,7 @@ impl Web3Rpcs {
         // TODO: if we are checking for the consensus head, i don' think we need min_block_needed/max_block_needed
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-    ) -> anyhow::Result<OpenRequestResult> {
+    ) -> Web3ProxyResult<OpenRequestResult> {
         let usable_rpcs_by_tier_and_head_number: BTreeMap<(u64, Option<U64>), Vec<Arc<Web3Rpc>>> = {
             let synced_connections = self.watch_consensus_rpcs_sender.borrow().clone();
 
@@ -569,11 +570,10 @@ impl Web3Rpcs {
                         cmp::Ordering::Greater => {
                             // TODO: force a debug log of the original request to see if our logic is wrong?
                             // TODO: attach the rpc_key_id so we can find the user to ask if they need help
-                            return Err(anyhow::anyhow!(
-                                "Invalid blocks bounds requested. min ({}) > max ({})",
-                                min_block_needed,
-                                max_block_needed
-                            ));
+                            return Err(Web3ProxyError::InvalidBlockBounds {
+                                min: min_block_needed.as_u64(),
+                                max: max_block_needed.as_u64(),
+                            });
                         }
                     }
                 }
@@ -877,7 +877,7 @@ impl Web3Rpcs {
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-    ) -> anyhow::Result<JsonRpcForwardedResponse> {
+    ) -> Web3ProxyResult<JsonRpcForwardedResponse> {
         let mut skip_rpcs = vec![];
         let mut method_not_available_response = None;
 
@@ -1099,7 +1099,7 @@ impl Web3Rpcs {
         error_level: Level,
         max_count: Option<usize>,
         always_include_backups: bool,
-    ) -> anyhow::Result<JsonRpcForwardedResponse> {
+    ) -> Web3ProxyResult<JsonRpcForwardedResponse> {
         let mut watch_consensus_rpcs = self.watch_consensus_rpcs_sender.subscribe();
 
         loop {
@@ -1205,7 +1205,7 @@ impl Web3Rpcs {
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-    ) -> anyhow::Result<JsonRpcForwardedResponse> {
+    ) -> Web3ProxyResult<JsonRpcForwardedResponse> {
         match authorization.checks.proxy_mode {
             ProxyMode::Debug | ProxyMode::Best => {
                 self.try_send_best_consensus_head_connection(

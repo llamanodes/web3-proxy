@@ -4,6 +4,7 @@ use super::authorization::Authorization;
 use crate::jsonrpc::JsonRpcForwardedResponse;
 
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use axum::{
     headers,
@@ -33,11 +34,18 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     #[from(ignore)]
     BadRequest(String),
-    SemaphoreAcquireError(AcquireError),
     Database(DbErr),
+    EthersHttpClientError(ethers::prelude::HttpClientError),
+    EthersProviderError(ethers::prelude::ProviderError),
+    EthersWsClientError(ethers::prelude::WsClientError),
     Headers(headers::Error),
     HeaderToString(ToStrError),
     InfluxDb2RequestError(influxdb2::RequestError),
+    #[display(fmt = "{} > {}", min, max)]
+    InvalidBlockBounds {
+        min: u64,
+        max: u64,
+    },
     InvalidHeaderValue(InvalidHeaderValue),
     IpAddrParse(AddrParseError),
     #[error(ignore)]
@@ -45,6 +53,8 @@ pub enum Web3ProxyError {
     IpNotAllowed(IpAddr),
     JoinError(JoinError),
     MsgPackEncode(rmp_serde::encode::Error),
+    NoServersSynced,
+    NoHandleReady,
     NotFound,
     OriginRequired,
     #[error(ignore)]
@@ -58,16 +68,23 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     #[from(ignore)]
     RefererNotAllowed(headers::Referer),
+    SeaRc(Arc<Web3ProxyError>),
+    SemaphoreAcquireError(AcquireError),
+    SerdeJson(serde_json::Error),
     /// simple way to return an error message to the user and an anyhow to our logs
     #[display(fmt = "{}, {}, {:?}", _0, _1, _2)]
     StatusCode(StatusCode, String, Option<anyhow::Error>),
     /// TODO: what should be attached to the timout?
-    Timeout(tokio::time::error::Elapsed),
+    #[display(fmt = "{:?}", _0)]
+    #[error(ignore)]
+    Timeout(Option<tokio::time::error::Elapsed>),
     UlidDecode(ulid::DecodeError),
+    UnknownBlockNumber,
     UnknownKey,
     UserAgentRequired,
     #[error(ignore)]
     UserAgentNotAllowed(headers::UserAgent),
+    WatchRecvError(tokio::sync::watch::error::RecvError),
 }
 
 impl Web3ProxyError {
@@ -120,6 +137,39 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::EthersHttpClientError(err) => {
+                warn!("EthersHttpClientError err={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "ether http client error",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::EthersProviderError(err) => {
+                warn!("EthersProviderError err={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "ether provider error",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::EthersWsClientError(err) => {
+                warn!("EthersWsClientError err={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "ether ws client error",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             Self::Headers(err) => {
                 warn!("HeadersError {:?}", err);
                 (
@@ -139,6 +189,20 @@ impl Web3ProxyError {
                     JsonRpcForwardedResponse::from_str(
                         "influxdb2 error!",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::InvalidBlockBounds { min, max } => {
+                warn!("InvalidBlockBounds min={} max={}", min, max);
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_string(
+                        format!(
+                            "Invalid blocks bounds requested. min ({}) > max ({})",
+                            min, max
+                        ),
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
                         None,
                     ),
                 )
@@ -202,6 +266,28 @@ impl Web3ProxyError {
                     JsonRpcForwardedResponse::from_str(
                         &format!("msgpack encode error: {}", err),
                         Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::NoServersSynced => {
+                warn!("NoServersSynced");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "no servers synced",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::NoHandleReady => {
+                error!("NoHandleReady");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "unable to retry for request handle",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
                 )
@@ -305,6 +391,11 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::SeaRc(err) => match migration::SeaRc::try_unwrap(err) {
+                Ok(err) => err,
+                Err(err) => Self::Anyhow(anyhow::anyhow!("{}", err)),
+            }
+            .into_response_parts(),
             Self::SemaphoreAcquireError(err) => {
                 warn!("semaphore acquire err={:?}", err);
                 (
@@ -313,6 +404,17 @@ impl Web3ProxyError {
                         // TODO: is it safe to expose all of our anyhow strings?
                         "semaphore acquire error".to_string(),
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::SerdeJson(err) => {
+                warn!("serde json err={:?}", err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "de/serialization error!",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
                         None,
                     ),
                 )
@@ -362,6 +464,17 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::UnknownBlockNumber => {
+                error!("UnknownBlockNumber");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    JsonRpcForwardedResponse::from_str(
+                        "no servers synced. unknown eth_blockNumber",
+                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             // TODO: stat?
             Self::UnknownKey => (
                 StatusCode::UNAUTHORIZED,
@@ -393,7 +506,24 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::WatchRecvError(err) => {
+                error!("WatchRecvError err={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "watch recv error!",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
         }
+    }
+}
+
+impl From<tokio::time::error::Elapsed> for Web3ProxyError {
+    fn from(err: tokio::time::error::Elapsed) -> Self {
+        Self::Timeout(Some(err))
     }
 }
 
