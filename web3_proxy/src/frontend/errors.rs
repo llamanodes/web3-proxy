@@ -15,7 +15,7 @@ use axum::{
 use derive_more::{Display, Error, From};
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
-use log::{debug, error, trace, warn};
+use log::{debug, error, info, trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
@@ -86,6 +86,9 @@ pub enum Web3ProxyError {
     UserAgentNotAllowed(headers::UserAgent),
     WatchRecvError(tokio::sync::watch::error::RecvError),
     WebsocketOnly,
+    #[display(fmt = "{}, {}", _0, _1)]
+    #[error(ignore)]
+    WithContext(Option<Box<Web3ProxyError>>, String),
 }
 
 impl Web3ProxyError {
@@ -529,6 +532,20 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::WithContext(err, msg) => {
+                info!("in context: {}", msg);
+                match err {
+                    Some(err) => err.into_response_parts(),
+                    None => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        JsonRpcForwardedResponse::from_string(
+                            msg,
+                            Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                            None,
+                        ),
+                    ),
+                }
+            }
         }
     }
 }
@@ -551,4 +568,23 @@ impl IntoResponse for Web3ProxyError {
 
 pub async fn handler_404() -> Response {
     Web3ProxyError::NotFound.into_response()
+}
+
+pub trait Web3ProxyErrorContext<T> {
+    fn web3_context<S: Into<String>>(self, msg: S) -> Result<T, Web3ProxyError>;
+}
+
+impl<T> Web3ProxyErrorContext<T> for Option<T> {
+    fn web3_context<S: Into<String>>(self, msg: S) -> Result<T, Web3ProxyError> {
+        self.ok_or(Web3ProxyError::WithContext(None, msg.into()))
+    }
+}
+
+impl<T, E> Web3ProxyErrorContext<T> for Result<T, E>
+where
+    E: Into<Web3ProxyError>,
+{
+    fn web3_context<S: Into<String>>(self, msg: S) -> Result<T, Web3ProxyError> {
+        self.map_err(|err| Web3ProxyError::WithContext(Some(Box::new(err.into())), msg.into()))
+    }
 }
