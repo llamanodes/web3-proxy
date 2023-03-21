@@ -36,53 +36,46 @@ impl MigrateStatsToV2 {
             // Iterate through all old rows, and put them into the above objects.
             for x in old_records {
 
-                // For each of the old rows, create a (i) RpcQueryKey and a matching BufferedRpcQueryStats object
-                let key = RpcQueryKey {
-                    response_timestamp: x.period_datetime.timestamp(),
-                    archive_needed: x.archive_needed,
-                    error_response: x.error_response,
-                    period_datetime: x.period_datetime.timestamp(),
-                    rpc_secret_key_id: x.rpc_key_id,
-                    origin: x.origin,
-                    method: x.method
-                };
+                info!("Preparing for migration: {:?}", x);
 
-                // Create the corresponding BufferedRpcQueryStats object
-                let val = BufferedRpcQueryStats {
-                    frontend_requests: x.frontend_requests,
-                    backend_requests: x.backend_requests,
-                    backend_retries: x.backend_retries,
-                    no_servers: x.no_servers,
-                    cache_misses: x.cache_misses,
-                    cache_hits: x.cache_hits,
-                    sum_request_bytes: x.sum_request_bytes,
-                    sum_response_bytes: x.sum_response_bytes,
-                    sum_response_millis: x.sum_response_millis
-                };
-
-                // TODO: Create authorization, request metadata, and bytes ... but bytes we don't really keep track of!
-                // We can generate dummy bytes of the same length though, this may work as well
-
-                // TODO: Period datetime is also a question of what it is
-                // let response_stat = RpcQueryStats::new(
-                //     x.method,
-                //     authorization.clone(),
-                //     request_metadata.clone(),
-                //     response_bytes,
-                //     x.period_datetime
-                // );
-
-                // BufferedRpcQueryStats
-
-
-
-
+                // // For each of the old rows, create a (i) RpcQueryKey and a matching BufferedRpcQueryStats object
+                // let key = RpcQueryKey {
+                //     response_timestamp: x.period_datetime.timestamp(),
+                //     archive_needed: x.archive_needed,
+                //     error_response: x.error_response,
+                //     period_datetime: x.period_datetime.timestamp(),
+                //     rpc_secret_key_id: x.rpc_key_id,
+                //     origin: x.origin,
+                //     method: x.method
+                // };
+                //
+                // // Create the corresponding BufferedRpcQueryStats object
+                // let val = BufferedRpcQueryStats {
+                //     frontend_requests: x.frontend_requests,
+                //     backend_requests: x.backend_requests,
+                //     backend_retries: x.backend_retries,
+                //     no_servers: x.no_servers,
+                //     cache_misses: x.cache_misses,
+                //     cache_hits: x.cache_hits,
+                //     sum_request_bytes: x.sum_request_bytes,
+                //     sum_response_bytes: x.sum_response_bytes,
+                //     sum_response_millis: x.sum_response_millis
+                // };
+                //
+                // // TODO: Create authorization, request metadata, and bytes ... but bytes we don't really keep track of!
+                // // We can generate dummy bytes of the same length though, this may work as well
+                //
+                // // TODO: Period datetime is also a question of what it is
+                // // let response_stat = RpcQueryStats::new(
+                // //     x.method,
+                // //     authorization.clone(),
+                // //     request_metadata.clone(),
+                // //     response_bytes,
+                // //     x.period_datetime
+                // // );
+                //
+                // // BufferedRpcQueryStats
             }
-
-
-
-
-
 
         }
 
