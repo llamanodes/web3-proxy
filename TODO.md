@@ -390,6 +390,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] maybe we shouldn't route eth_getLogs to syncing nodes. serving queries slows down sync significantly
   - change the send_best function to only include servers that are at least close to fully synced
 - [-] have private transactions be enabled by a url setting rather than a setting on the key
+- [ ] eth_sendRawTransaction should only forward if the chain_id matches what we are running
 - [ ] cli for adding rpc keys to an existing user
 - [ ] rate limiting/throttling on query_user_stats 
 - [ ] web3rpc configs should have a max_concurrent_requests
@@ -425,6 +426,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] implement remaining subscriptions
     - would be nice if our subscriptions had better gaurentees than geth/erigon do, but maybe simpler to just setup a broadcast channel and proxy all the respones to a backend instead
 - [ ] tests should use `test-env-log = "0.2.8"`
+- [ ] eth_sendRawTransaction should only forward if the chain_id matches what we are running
 - [ ] weighted random choice should still prioritize non-archive servers
     - maybe shuffle randomly and then sort by (block_limit, random_index)?
     - maybe sum available_requests grouped by archive/non-archive. only limit to non-archive if they have enough?

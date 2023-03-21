@@ -232,6 +232,7 @@ pub async fn serve(port: u16, proxy_app: Arc<Web3ProxyApp>) -> anyhow::Result<()
     axum::Server::bind(&addr)
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .serve(service)
-        .await
-        .map_err(Into::into)
+        .await?;
+
+    Ok(())
 }

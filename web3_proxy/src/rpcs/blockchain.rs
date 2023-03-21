@@ -12,6 +12,7 @@ use log::{debug, trace, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use serde_json::json;
+use std::hash::Hash;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
@@ -39,6 +40,14 @@ impl PartialEq for Web3ProxyBlock {
             (None, Some(_)) => false,
             (Some(s), Some(o)) => s == o,
         }
+    }
+}
+
+impl Eq for Web3ProxyBlock {}
+
+impl Hash for Web3ProxyBlock {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.block.hash.hash(state);
     }
 }
 
@@ -393,36 +402,28 @@ impl Web3Rpcs {
             return Ok(());
         }
 
-        let new_synced_connections = consensus_finder
-            .best_consensus_connections(authorization, self)
-            .await
-            .context("no consensus head block!")
-            .map_err(|err| {
-                self.watch_consensus_rpcs_sender.send_replace(None);
+        let new_synced_connections = match consensus_finder
+            .find_consensus_connections(authorization, self)
+            .await {
+                Err(err) => {
+                    let err = err.context("error while finding consensus head block!");
 
-                err
-            })?;
-
-        // TODO: what should we do if the block number of new_synced_connections is < old_synced_connections? wait?
+                    return Err(err);
+                }
+                Ok(None) => {
+                    return Err(anyhow!("no consensus head block!"));
+                }
+                Ok(Some(x)) => x
+            };
 
         let watch_consensus_head_sender = self.watch_consensus_head_sender.as_ref().unwrap();
         let consensus_tier = new_synced_connections.tier;
-        let total_tiers = consensus_finder.len();
+        // TODO: think more about this unwrap
+        let total_tiers = consensus_finder.worst_tier().unwrap_or(10);
         let backups_needed = new_synced_connections.backups_needed;
         let consensus_head_block = new_synced_connections.head_block.clone();
         let num_consensus_rpcs = new_synced_connections.num_conns();
-        let mut num_synced_rpcs = 0;
-        let num_active_rpcs = consensus_finder
-            .all_rpcs_group()
-            .map(|x| {
-                for v in x.rpc_to_block.values() {
-                    if *v == consensus_head_block {
-                        num_synced_rpcs += 1;
-                    }
-                }
-                x.len()
-            })
-            .unwrap_or_default();
+        let num_active_rpcs = consensus_finder.len();
         let total_rpcs = self.by_name.read().len();
 
         let old_consensus_head_connections = self
@@ -474,12 +475,11 @@ impl Web3Rpcs {
                             // no change in hash. no need to use watch_consensus_head_sender
                             // TODO: trace level if rpc is backup
                             debug!(
-                                "con {}/{} {}{}/{}/{}/{} con={} rpc={}@{}",
+                                "con {}/{} {}{}/{}/{} con={} rpc={}@{}",
                                 consensus_tier,
                                 total_tiers,
                                 backups_voted_str,
                                 num_consensus_rpcs,
-                                num_synced_rpcs,
                                 num_active_rpcs,
                                 total_rpcs,
                                 consensus_head_block,
@@ -490,12 +490,11 @@ impl Web3Rpcs {
                             // hash changed
 
                             debug!(
-                                "unc {}/{} {}{}/{}/{}/{} con_head={} old={} rpc={}@{}",
+                                "unc {}/{} {}{}/{}/{} con_head={} old={} rpc={}@{}",
                                 consensus_tier,
                                 total_tiers,
                                 backups_voted_str,
                                 num_consensus_rpcs,
-                                num_synced_rpcs,
                                 num_active_rpcs,
                                 total_rpcs,
                                 consensus_head_block,
@@ -518,12 +517,11 @@ impl Web3Rpcs {
                         // this is unlikely but possible
                         // TODO: better log
                         warn!(
-                            "chain rolled back {}/{} {}{}/{}/{}/{} con={} old={} rpc={}@{}",
+                            "chain rolled back t{}/{} {}{}/{}/{} con={} old={} rpc={}@{}",
                             consensus_tier,
                             total_tiers,
                             backups_voted_str,
                             num_consensus_rpcs,
-                            num_synced_rpcs,
                             num_active_rpcs,
                             total_rpcs,
                             consensus_head_block,
@@ -549,12 +547,11 @@ impl Web3Rpcs {
                     }
                     Ordering::Greater => {
                         debug!(
-                            "new {}/{} {}{}/{}/{}/{} con={} rpc={}@{}",
+                            "new {}/{} {}{}/{}/{} con={} rpc={}@{}",
                             consensus_tier,
                             total_tiers,
                             backups_voted_str,
                             num_consensus_rpcs,
-                            num_synced_rpcs,
                             num_active_rpcs,
                             total_rpcs,
                             consensus_head_block,
