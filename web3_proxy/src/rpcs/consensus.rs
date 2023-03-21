@@ -206,6 +206,7 @@ impl ConnectionsGroup {
         // track rpcs on this heaviest chain so we can build a new ConsensusConnections
         let mut primary_consensus_rpcs = HashSet::<&str>::new();
         let mut backup_consensus_rpcs = HashSet::<&str>::new();
+        let mut skip_rpcs = HashSet::<&str>::new();
 
         // a running total of the soft limits covered by the rpcs that agree on the head block
         let mut primary_sum_soft_limit: u32 = 0;
@@ -235,10 +236,14 @@ impl ConnectionsGroup {
                     // connection is on a later block in this same chain
                     continue;
                 }
+                if skip_rpcs.contains(rpc_name) {
+                    // connection is missing or theres some other reason to skip this rpc
+                    continue;
+                }
 
                 if let Some(rpc) = web3_rpcs.by_name.read().get(rpc_name) {
                     if backup_rpcs_voted.is_some() {
-                        // backups already voted for a head block. don't change it
+                        // backups already voted for a head block on another tier. don't change it
                     } else {
                         backup_consensus_rpcs.insert(rpc_name);
                         backup_sum_soft_limit += rpc.soft_limit;
@@ -253,8 +258,9 @@ impl ConnectionsGroup {
                         warn!("connection missing: {}", rpc_name);
                         debug!("web3_rpcs.by_name: {:#?}", web3_rpcs.by_name);
                     } else {
-                        return Err(anyhow::anyhow!("not synced"));
+                        debug!("connection missing: {}", rpc_name);
                     }
+                    skip_rpcs.insert(rpc_name);
                 }
             }
 
