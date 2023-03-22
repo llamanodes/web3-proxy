@@ -5814,6 +5814,7 @@ dependencies = [
  "handlebars",
  "hashbrown 0.13.2",
  "hdrhistogram",
+ "hostname",
  "http",
  "ipnet",
  "itertools",

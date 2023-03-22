@@ -40,11 +40,13 @@ pub async fn status(
     let body = response_cache
         .get_with(FrontendResponseCaches::Status, async {
             // TODO: what else should we include? uptime, cache hit rates, cpu load, memory used
+            // TODO: the hostname is probably not going to change. only get once at the start?
             let body = json!({
                 "version": APP_USER_AGENT,
                 "chain_id": app.config.chain_id,
                 "balanced_rpcs": app.balanced_rpcs,
                 "private_rpcs": app.private_rpcs,
+                "hostname": app.hostname,
             });
 
             Arc::new(body)
