@@ -1026,7 +1026,7 @@ impl Web3Rpcs {
             drop(consensus);
 
             // TODO: remove this, or move to trace level
-            debug!("{}", serde_json::to_string(&request).unwrap());
+            // debug!("{}", serde_json::to_string(&request).unwrap());
         } else {
             // TODO: warn? debug? trace?
             warn!(
