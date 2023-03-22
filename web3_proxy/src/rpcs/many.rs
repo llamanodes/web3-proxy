@@ -506,7 +506,7 @@ impl Web3Rpcs {
             // TODO: double check the logic on this. especially if only min is set
             let needed_blocks_comparison = match (min_block_needed, max_block_needed) {
                 (None, None) => {
-                    // no required block given. treat this like the requested the consensus head block
+                    // no required block given. treat this like they requested the consensus head block
                     cmp::Ordering::Equal
                 }
                 (None, Some(max_block_needed)) => max_block_needed.cmp(head_block_num),
@@ -1013,27 +1013,27 @@ impl Web3Rpcs {
         let num_conns = self.by_name.read().len();
         let num_skipped = skip_rpcs.len();
 
+        let consensus = watch_consensus_connections.borrow();
+
+        let head_block_num = consensus.as_ref().map(|x| x.head_block.number());
+
         if num_skipped == 0 {
-            let consensus = watch_consensus_connections.borrow();
-
-            let head_block_num = consensus.as_ref().map(|x| x.head_block.number());
-
             error!(
                 "No servers synced ({:?}-{:?}, {:?}) ({} known). None skipped",
                 min_block_needed, max_block_needed, head_block_num, num_conns
             );
 
-            drop(consensus);
-
             // TODO: remove this, or move to trace level
             // debug!("{}", serde_json::to_string(&request).unwrap());
         } else {
-            // TODO: warn? debug? trace?
-            warn!(
-                "Requested data was not available on {}/{} servers",
-                num_skipped, num_conns
+            // TODO: error? warn? debug? trace?
+            error!(
+                "Requested data is not available ({:?}-{:?}, {:?}) ({} skipped, {} known)",
+                min_block_needed, max_block_needed, head_block_num, num_skipped, num_conns
             );
         }
+
+        drop(consensus);
 
         // TODO: what error code?
         // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
