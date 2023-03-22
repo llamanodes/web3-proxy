@@ -44,7 +44,6 @@ use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRa
 use serde::Serialize;
 use serde_json::json;
 use serde_json::value::to_raw_value;
-use std::ffi::OsString;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
@@ -214,7 +213,7 @@ pub struct Web3ProxyApp {
     pub config: AppConfig,
     pub db_conn: Option<sea_orm::DatabaseConnection>,
     pub db_replica: Option<DatabaseReplica>,
-    pub hostname: Option<OsString>,
+    pub hostname: Option<String>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     pub pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
@@ -696,7 +695,7 @@ impl Web3ProxyApp {
             Some(private_rpcs)
         };
 
-        let hostname = hostname::get().ok();
+        let hostname = hostname::get().ok().and_then(|x| x.to_str().map(|x| x.to_string()));
 
         let app = Self {
             config: top_config.app.clone(),
