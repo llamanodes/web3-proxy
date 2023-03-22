@@ -1016,11 +1016,11 @@ impl Web3Rpcs {
         if num_skipped == 0 {
             let consensus = watch_consensus_connections.borrow();
 
-            let head_block = consensus.as_ref().map(|x| &x.head_block);
+            let head_block_num = consensus.as_ref().map(|x| x.head_block.number());
 
             error!(
                 "No servers synced ({:?}-{:?}, {:?}) ({} known). None skipped",
-                min_block_needed, max_block_needed, head_block, num_conns
+                min_block_needed, max_block_needed, head_block_num, num_conns
             );
 
             drop(consensus);
