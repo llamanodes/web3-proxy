@@ -565,6 +565,8 @@ These are not ordered. I think some rows also accidently got deleted here. Check
   - look at average request time for getBlock? i'm not sure how good a proxy that will be for serving eth_call, but its a start
   - https://crates.io/crates/histogram-sampler
 - [ ] interval for http subscriptions should be based on block time. load from config is easy, but better to query. currently hard coded to 13 seconds
+- [ ] check code to keep us from going backwards. maybe that is causing outages
+- [ ] min_backup_rpcs seperate from min_synced_rpcs
 
 in another repo: event subscriber
   - [ ] watch for transfer events to our contract and submit them to /payment/$tx_hash

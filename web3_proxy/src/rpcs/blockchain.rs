@@ -517,7 +517,7 @@ impl Web3Rpcs {
                         // this is unlikely but possible
                         // TODO: better log
                         warn!(
-                            "chain rolled back t{}/{} {}{}/{}/{} con={} old={} rpc={}@{}",
+                            "chain rolled back {}/{} {}{}/{}/{} con={} old={} rpc={}@{}",
                             consensus_tier,
                             total_tiers,
                             backups_voted_str,

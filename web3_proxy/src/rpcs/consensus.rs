@@ -7,7 +7,7 @@ use anyhow::Context;
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use itertools::{Itertools, MinMaxResult};
-use log::{trace, warn};
+use log::{trace, warn, debug};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::Reverse;
@@ -21,8 +21,6 @@ use tokio::time::Instant;
 pub struct ConsensusWeb3Rpcs {
     pub(super) tier: u64,
     pub(super) head_block: Web3ProxyBlock,
-    // TODO: this should be able to serialize, but it isn't
-    #[serde(skip_serializing)]
     pub(super) best_rpcs: Vec<Arc<Web3Rpc>>,
     // TODO: functions like "compare_backup_vote()"
     // pub(super) backups_voted: Option<Web3ProxyBlock>,
@@ -322,6 +320,8 @@ impl ConsensusFinder {
             if rpc_names.len() < web3_rpcs.min_head_rpcs {
                 continue;
             }
+
+            trace!("rpc_names: {:#?}", rpc_names);
 
             // consensus likely found! load the rpcs to make sure they all have active connections
             let consensus_rpcs: Vec<_> = rpc_names.into_iter().filter_map(|x| web3_rpcs.get(x)).collect();
