@@ -183,7 +183,7 @@ impl Web3ProxyError {
                 )
             }
             Self::EipVerificationFailed(err_1, err_191) => {
-                warn!(
+                info!(
                     "EipVerificationFailed err_1={:#?} err2={:#?}",
                     err_1, err_191
                 );
@@ -246,10 +246,10 @@ impl Web3ProxyError {
             Self::GasEstimateNotU256 => {
                 warn!("GasEstimateNotU256");
                 (
-                    StatusCode::BAD_REQUEST,
+                    StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
                         "gas estimate result is not an U256",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
                 )
@@ -278,7 +278,7 @@ impl Web3ProxyError {
                 )
             }
             Self::InvalidBlockBounds { min, max } => {
-                warn!("InvalidBlockBounds min={} max={}", min, max);
+                debug!("InvalidBlockBounds min={} max={}", min, max);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_string(
@@ -426,7 +426,7 @@ impl Web3ProxyError {
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
                         "Blocks here must have a number or hash",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
                         None,
                     ),
                 )
@@ -445,10 +445,10 @@ impl Web3ProxyError {
             Self::NoHandleReady => {
                 error!("NoHandleReady");
                 (
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::BAD_GATEWAY,
                     JsonRpcForwardedResponse::from_str(
                         "unable to retry for request handle",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
                         None,
                     ),
                 )
@@ -456,10 +456,10 @@ impl Web3ProxyError {
             Self::NoServersSynced => {
                 warn!("NoServersSynced");
                 (
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::BAD_GATEWAY,
                     JsonRpcForwardedResponse::from_str(
                         "no servers synced",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
                         None,
                     ),
                 )
@@ -470,10 +470,10 @@ impl Web3ProxyError {
             } => {
                 error!("NotEnoughRpcs {}/{}", num_known, min_head_rpcs);
                 (
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::BAD_GATEWAY,
                     JsonRpcForwardedResponse::from_string(
                         format!("not enough rpcs connected {}/{}", num_known, min_head_rpcs),
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
                         None,
                     ),
                 )
@@ -491,7 +491,7 @@ impl Web3ProxyError {
                 )
             }
             Self::NotImplemented => {
-                warn!("NotImplemented");
+                trace!("NotImplemented");
                 (
                     StatusCode::NOT_IMPLEMENTED,
                     JsonRpcForwardedResponse::from_str(
