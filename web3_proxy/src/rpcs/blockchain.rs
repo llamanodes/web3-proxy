@@ -370,7 +370,7 @@ impl Web3Rpcs {
                         )
                         .await
                     {
-                        warn!("unable to process block from rpc {}: {:#?}", rpc_name, err);
+                        warn!("error while processing block from rpc {}: {:#?}", rpc_name, err);
                     }
                 }
                 Err(err) => {
