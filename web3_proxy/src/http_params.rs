@@ -219,7 +219,7 @@ pub fn get_query_window_seconds_from_params(
     params.get("query_window_seconds").map_or_else(
         || {
             // no page in params. set default
-            Ok(0)
+            Ok(1)
         },
         |query_window_seconds: &String| {
             // parse the given timestamp
@@ -227,6 +227,37 @@ pub fn get_query_window_seconds_from_params(
                 trace!("Unable to parse rpc_key_id: {:#?}", err);
                 Web3ProxyError::BadRequest("Unable to parse rpc_key_id".to_string())
             })
+        },
+    )
+}
+
+pub fn get_stats_column_from_params(params: &HashMap<String, String>) -> Web3ProxyResult<&str> {
+    params.get("query_stats_column").map_or_else(
+        || Ok("frontend_requests"),
+        |query_stats_column: &String| {
+            // Must be one of: Otherwise respond with an error ...
+            match query_stats_column.as_str() {
+                "frontend_requests"
+                | "backend_requests"
+                | "cache_hits"
+                | "cache_misses"
+                | "no_servers"
+                | "sum_request_bytes"
+                | "sum_response_bytes"
+                | "sum_response_millis" => Ok(query_stats_column),
+                _ => Err(Web3ProxyError::BadRequest(
+                    "Unable to parse query_stats_column. It must be one of: \
+                    frontend_requests, \
+                    backend_requests, \
+                    cache_hits, \
+                    cache_misses, \
+                    no_servers, \
+                    sum_request_bytes, \
+                    sum_response_bytes, \
+                    sum_response_millis"
+                        .to_string(),
+                )),
+            }
         },
     )
 }

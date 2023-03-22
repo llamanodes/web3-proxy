@@ -576,6 +576,7 @@ impl Web3ProxyApp {
         // stats can be saved in mysql, influxdb, both, or none
         let stat_sender = if let Some(emitter_spawn) = StatBuffer::try_spawn(
             top_config.app.chain_id,
+            top_config.app.influxdb_bucket.clone().context("No influxdb bucket was provided")?.to_owned(),
             db_conn.clone(),
             influxdb_client.clone(),
             60,

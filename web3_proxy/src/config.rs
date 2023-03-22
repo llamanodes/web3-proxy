@@ -178,6 +178,9 @@ pub struct AppConfig {
     /// influxdb token for stats
     pub influxdb_token: Option<String>,
 
+    /// influxdb bucket to use for stats
+    pub influxdb_bucket: Option<String>,
+
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,

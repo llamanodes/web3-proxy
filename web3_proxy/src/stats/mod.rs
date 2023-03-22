@@ -30,23 +30,24 @@ pub enum StatType {
     Detailed,
 }
 
+// Pub is needed for migration ... I could also write a second constructor for this if needed
 /// TODO: better name?
 #[derive(Clone, Debug)]
 pub struct RpcQueryStats {
-    authorization: Arc<Authorization>,
-    method: String,
-    archive_request: bool,
-    error_response: bool,
-    request_bytes: u64,
+    pub authorization: Arc<Authorization>,
+    pub method: String,
+    pub archive_request: bool,
+    pub error_response: bool,
+    pub request_bytes: u64,
     /// if backend_requests is 0, there was a cache_hit
-    backend_requests: u64,
-    response_bytes: u64,
-    response_millis: u64,
-    response_timestamp: i64,
+    pub backend_requests: u64,
+    pub response_bytes: u64,
+    pub response_millis: u64,
+    pub response_timestamp: i64,
 }
 
 #[derive(Clone, From, Hash, PartialEq, Eq)]
-struct RpcQueryKey {
+pub struct RpcQueryKey {
     /// unix epoch time
     /// for the time series db, this is (close to) the time that the response was sent
     /// for the account database, this is rounded to the week
@@ -167,15 +168,15 @@ impl RpcQueryStats {
 
 #[derive(Default)]
 pub struct BufferedRpcQueryStats {
-    frontend_requests: u64,
-    backend_requests: u64,
-    backend_retries: u64,
-    no_servers: u64,
-    cache_misses: u64,
-    cache_hits: u64,
-    sum_request_bytes: u64,
-    sum_response_bytes: u64,
-    sum_response_millis: u64,
+    pub frontend_requests: u64,
+    pub backend_requests: u64,
+    pub backend_retries: u64,
+    pub no_servers: u64,
+    pub cache_misses: u64,
+    pub cache_hits: u64,
+    pub sum_request_bytes: u64,
+    pub sum_response_bytes: u64,
+    pub sum_response_millis: u64,
 }
 
 /// A stat that we aggregate and then store in a database.
@@ -363,7 +364,7 @@ impl RpcQueryStats {
         method: String,
         authorization: Arc<Authorization>,
         metadata: Arc<RequestMetadata>,
-        response_bytes: usize,
+        response_bytes: usize
     ) -> Self {
         // TODO: try_unwrap the metadata to be sure that all the stats for this request have been collected
         // TODO: otherwise, i think the whole thing should be in a single lock that we can "reset" when a stat is created
@@ -389,11 +390,13 @@ impl RpcQueryStats {
             response_timestamp,
         }
     }
+
 }
 
 impl StatBuffer {
     pub fn try_spawn(
         chain_id: u64,
+        bucket: String,
         db_conn: Option<DatabaseConnection>,
         influxdb_client: Option<influxdb2::Client>,
         db_save_interval_seconds: u32,
@@ -418,7 +421,7 @@ impl StatBuffer {
 
         // any errors inside this task will cause the application to exit
         let handle = tokio::spawn(async move {
-            new.aggregate_and_save_loop(stat_receiver, shutdown_receiver)
+            new.aggregate_and_save_loop(bucket, stat_receiver, shutdown_receiver)
                 .await
         });
 
@@ -427,6 +430,7 @@ impl StatBuffer {
 
     async fn aggregate_and_save_loop(
         &mut self,
+        bucket: String,
         stat_receiver: flume::Receiver<AppStat>,
         mut shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<()> {
@@ -439,6 +443,9 @@ impl StatBuffer {
         let mut global_timeseries_buffer = HashMap::<RpcQueryKey, BufferedRpcQueryStats>::new();
         let mut opt_in_timeseries_buffer = HashMap::<RpcQueryKey, BufferedRpcQueryStats>::new();
         let mut accounting_db_buffer = HashMap::<RpcQueryKey, BufferedRpcQueryStats>::new();
+
+        // TODO: Somewhere here we should probably be updating the balance of the user
+        // And also update the credits used etc. for the referred user
 
         loop {
             tokio::select! {
@@ -486,14 +493,14 @@ impl StatBuffer {
 
                     for (key, stat) in global_timeseries_buffer.drain() {
                         // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
-                        if let Err(err) = stat.save_timeseries("dev_web3_proxy", "global_proxy", self.chain_id, influxdb_client, key).await {
+                        if let Err(err) = stat.save_timeseries(bucket.clone().as_ref(), "global_proxy", self.chain_id, influxdb_client, key).await {
                             error!("unable to save global stat! err={:?}", err);
                         };
                     }
 
                     for (key, stat) in opt_in_timeseries_buffer.drain() {
                         // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
-                        if let Err(err) = stat.save_timeseries("dev_web3_proxy", "opt_in_proxy", self.chain_id, influxdb_client, key).await {
+                        if let Err(err) = stat.save_timeseries(bucket.clone().as_ref(), "opt_in_proxy", self.chain_id, influxdb_client, key).await {
                             error!("unable to save opt-in stat! err={:?}", err);
                         };
                     }
@@ -538,7 +545,7 @@ impl StatBuffer {
             for (key, stat) in global_timeseries_buffer.drain() {
                 if let Err(err) = stat
                     .save_timeseries(
-                        "dev_web3_proxy",
+                        &bucket,
                         "global_proxy",
                         self.chain_id,
                         influxdb_client,
@@ -561,7 +568,7 @@ impl StatBuffer {
             for (key, stat) in opt_in_timeseries_buffer.drain() {
                 if let Err(err) = stat
                     .save_timeseries(
-                        "dev_web3_proxy",
+                        &bucket,
                         "opt_in_proxy",
                         self.chain_id,
                         influxdb_client,
