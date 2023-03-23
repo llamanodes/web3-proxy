@@ -881,7 +881,7 @@ impl Web3Rpcs {
                         request.id.clone(),
                     ) {
                         Ok(response) => {
-                            if let Some(error) = &response.error.as_ref() {
+                            if let Some(error) = response.error.as_ref() {
                                 // trace!(?response, "rpc error");
 
                                 if let Some(request_metadata) = request_metadata {
@@ -956,8 +956,10 @@ impl Web3Rpcs {
 
                             // TODO: emit a stat. if a server is getting skipped a lot, something is not right
 
+                            // TODO: if we get a TrySendError, reconnect. wait why do we see a trysenderror on a dual provider? shouldn't it be using reqwest
+
                             debug!(
-                                "Backend server error on {}! Retrying on another. err={:?}",
+                                "Backend server error on {}! Retrying on another. err={:#?}",
                                 rpc, err
                             );
 

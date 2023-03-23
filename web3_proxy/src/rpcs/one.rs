@@ -9,8 +9,8 @@ use crate::rpcs::request::RequestRevertHandler;
 use anyhow::{anyhow, Context};
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use ethers::types::{Address, Transaction, U256};
-use futures::future::try_join_all;
 use futures::StreamExt;
+use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
@@ -701,13 +701,15 @@ impl Web3Rpc {
         } else {
             RequestRevertHandler::ErrorLevel
         };
+        
+        let mut delay_start = false;
 
         // this does loop. just only when reconnect is enabled
         #[allow(clippy::never_loop)]
         loop {
             debug!("subscription loop started");
 
-            let mut futures = FuturesUnordered::new();
+            let mut futures = vec![];
 
             let http_interval_receiver = http_interval_sender.as_ref().map(|x| x.subscribe());
 
@@ -723,7 +725,7 @@ impl Web3Rpc {
                         block_sender.as_ref(),
                         chain_id,
                         authorization.db_conn.as_ref(),
-                        false,
+                        delay_start,
                     )
                     .await?;
 
@@ -865,48 +867,41 @@ impl Web3Rpc {
                 futures.push(flatten_handle(tokio::spawn(f)));
             }
 
-            while let Some(x) = futures.next().await {
-                match x {
-                    Ok(_) => {
-                        // future exited without error
-                        // TODO: think about this more. we never set it to false. this can't be right
-                        info!("future on {} exited successfully", self)
+            match try_join_all(futures).await {
+                Ok(_) => {
+                    // future exited without error
+                    // TODO: think about this more. we never set it to false. this can't be right
+                    break;
+                }
+                Err(err) => {
+                    let disconnect_sender = self.disconnect_watch.as_ref().unwrap();
+
+                    if self.reconnect.load(atomic::Ordering::Acquire) {
+                        warn!("{} connection ended. reconnecting. err={:?}", self, err);
+
+                        // TODO: i'm not sure if this is necessary, but telling everything to disconnect seems like a better idea than relying on timeouts and dropped futures.
+                        disconnect_sender.send_replace(true);
+                        disconnect_sender.send_replace(false);
+
+                        // we call retrying_connect here with initial_delay=true. above, initial_delay=false
+                        delay_start = true;
+
+                        continue;
                     }
-                    Err(err) => {
-                        if self.reconnect.load(atomic::Ordering::Acquire) {
-                            warn!("{} connection ended. reconnecting. err={:?}", self, err);
+                    
+                    // reconnect is not enabled.
+                    if *disconnect_receiver.borrow() {
+                        info!("{} is disconnecting", self);
+                        break;
+                    } else {
+                        error!("{} subscription exited. err={:?}", self, err);
 
-                            let disconnect_sender = self.disconnect_watch.as_ref().unwrap();
+                        disconnect_sender.send_replace(true);
 
-                            // TODO: i'm not sure if this is necessary, but telling everything to disconnect seems like a better idea than relying on timeouts and dropped futures.
-                            disconnect_sender.send_replace(true);
-                            disconnect_sender.send_replace(false);
-
-                            // we call retrying_connect here with initial_delay=true. above, initial_delay=false
-                            self.retrying_connect(
-                                block_sender.as_ref(),
-                                chain_id,
-                                authorization.db_conn.as_ref(),
-                                true,
-                            )
-                            .await?;
-
-                            continue;
-                        }
-                        
-                        // reconnect is not enabled.
-                        if *disconnect_receiver.borrow() {
-                            info!("{} is disconnecting", self);
-                            break;
-                        } else {
-                            error!("{} subscription exited. err={:?}", self, err);
-                            break;
-                        }
+                        break;
                     }
                 }
             }
-
-            break;
         }
 
         info!("all subscriptions on {} completed", self);

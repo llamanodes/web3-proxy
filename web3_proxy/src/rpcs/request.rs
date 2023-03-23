@@ -164,8 +164,9 @@ impl OpenRequestHandle {
         };
 
         let mut logged = false;
-        while provider.is_none() {
+        while provider.is_none() || provider.as_ref().map(|x| !x.ready()).unwrap() {
             // trace!("waiting on provider: locking...");
+            // TODO: i dont like this. subscribing to a channel could be better
             sleep(Duration::from_millis(100)).await;
 
             if !logged {

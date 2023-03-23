@@ -118,6 +118,10 @@ fn main() -> anyhow::Result<()> {
 
     // if RUST_LOG isn't set, configure a default
     // TODO: is there a better way to do this?
+    #[cfg(tokio_console)]
+    console_subscriber::init();
+
+    #[cfg(not(tokio_console))]
     let rust_log = match std::env::var("RUST_LOG") {
         Ok(x) => x,
         Err(_) => match std::env::var("WEB3_PROXY_TRACE").map(|x| x == "true") {
@@ -190,35 +194,38 @@ fn main() -> anyhow::Result<()> {
         (None, None)
     };
 
-    let logger = env_logger::builder().parse_filters(&rust_log).build();
+    #[cfg(not(tokio_console))]
+    {
+        let logger = env_logger::builder().parse_filters(&rust_log).build();
 
-    let max_level = logger.filter();
+        let max_level = logger.filter();
 
-    // connect to sentry for error reporting
-    // if no sentry, only log to stdout
-    let _sentry_guard = if let Some(sentry_url) = cli_config.sentry_url.clone() {
-        let logger = sentry::integrations::log::SentryLogger::with_dest(logger);
+        // connect to sentry for error reporting
+        // if no sentry, only log to stdout
+        let _sentry_guard = if let Some(sentry_url) = cli_config.sentry_url.clone() {
+            let logger = sentry::integrations::log::SentryLogger::with_dest(logger);
 
-        log::set_boxed_logger(Box::new(logger)).unwrap();
+            log::set_boxed_logger(Box::new(logger)).unwrap();
 
-        let guard = sentry::init((
-            sentry_url,
-            sentry::ClientOptions {
-                release: sentry::release_name!(),
-                // TODO: Set this a to lower value (from config) in production
-                traces_sample_rate: 1.0,
-                ..Default::default()
-            },
-        ));
+            let guard = sentry::init((
+                sentry_url,
+                sentry::ClientOptions {
+                    release: sentry::release_name!(),
+                    // TODO: Set this a to lower value (from config) in production
+                    traces_sample_rate: 1.0,
+                    ..Default::default()
+                },
+            ));
 
-        Some(guard)
-    } else {
-        log::set_boxed_logger(Box::new(logger)).unwrap();
+            Some(guard)
+        } else {
+            log::set_boxed_logger(Box::new(logger)).unwrap();
 
-        None
-    };
+            None
+        };
 
-    log::set_max_level(max_level);
+        log::set_max_level(max_level);
+    }
 
     info!("{}", APP_USER_AGENT);
 

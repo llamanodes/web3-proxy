@@ -7,8 +7,9 @@ default-run = "web3_proxy_cli"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["deadlock_detection"]
+default = ["deadlock_detection", "tokio-console"]
 deadlock_detection = ["parking_lot/deadlock_detection"]
+tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
 
 # TODO: turn tokio-console on with a feature. console-subscriber = { version = "0.1.7" }
 
@@ -31,6 +32,7 @@ axum = { version = "0.6.10", features = ["headers", "ws"] }
 axum-client-ip = "0.4.0"
 axum-macros = "0.3.5"
 chrono = "0.4.23"
+console-subscriber = { version = "*", optional = true }
 counter = "0.5.7"
 derive_more = "0.99.17"
 dotenv = "0.15.0"
@@ -69,6 +71,7 @@ serde_prometheus = "0.2.1"
 siwe = "0.5.0"
 time = "0.3.20"
 tokio = { version = "1.26.0", features = ["full"] }
+tokio-console = { version = "*", optional = true }
 tokio-stream = { version = "0.1.12", features = ["sync"] }
 toml = "0.7.2"
 tower = "0.4.13"

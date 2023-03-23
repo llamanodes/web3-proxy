@@ -279,7 +279,7 @@ impl JsonRpcForwardedResponse {
                             }
                         }
                     } else {
-                        unimplemented!();
+                        return Err(anyhow::anyhow!("unexpected ethers error!"));
                     }
                 }
             }
