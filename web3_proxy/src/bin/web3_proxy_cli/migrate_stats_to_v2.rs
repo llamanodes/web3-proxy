@@ -116,8 +116,6 @@ impl MigrateStatsToV2 {
             None
         };
 
-        info!("Background handles are: {:?}", important_background_handles);
-
         // Basically spawn the full app, look at web3_proxy CLI
 
         while true {
@@ -134,10 +132,6 @@ impl MigrateStatsToV2 {
             }
 
             // (2) Create request metadata objects to match the old data
-            let mut global_timeseries_buffer = HashMap::<RpcQueryKey, BufferedRpcQueryStats>::new();
-            let mut opt_in_timeseries_buffer = HashMap::<RpcQueryKey, BufferedRpcQueryStats>::new();
-            let mut accounting_db_buffer = HashMap::<RpcQueryKey, BufferedRpcQueryStats>::new();
-
             // Iterate through all old rows, and put them into the above objects.
             for x in old_records.iter() {
                 info!("Preparing for migration: {:?}", x);
@@ -212,6 +206,7 @@ impl MigrateStatsToV2 {
                     // (3) Send through a channel to a stat emitter
                     // Send it to the stats sender
                     if let Some(stat_sender_ref) = stat_sender.as_ref() {
+                        info!("Method is: {:?}", x.clone().method.unwrap());
                         let mut response_stat = RpcQueryStats::new(
                             x.clone().method.unwrap(),
                             authorization.clone(),
@@ -253,6 +248,8 @@ impl MigrateStatsToV2 {
             // Only after this mark all the items as processed / completed
 
             // If the items are in rpc_v2, delete the initial items from the database
+
+            // return Ok(());
 
             // (4) Update the batch in the old table with the current timestamp (Mark the batch as migrated)
             let old_record_ids = old_records.iter().map(|x| x.id);

@@ -364,7 +364,7 @@ impl RpcQueryStats {
         method: String,
         authorization: Arc<Authorization>,
         metadata: Arc<RequestMetadata>,
-        response_bytes: usize
+        response_bytes: usize,
     ) -> Self {
         // TODO: try_unwrap the metadata to be sure that all the stats for this request have been collected
         // TODO: otherwise, i think the whole thing should be in a single lock that we can "reset" when a stat is created
@@ -396,13 +396,12 @@ impl RpcQueryStats {
         &mut self,
         response_millis: u64,
         response_timestamp: i64,
-        backend_requests: u64
+        backend_requests: u64,
     ) {
         self.response_millis = response_millis;
         self.response_timestamp = response_timestamp;
         self.backend_requests = backend_requests;
     }
-
 }
 
 impl StatBuffer {
@@ -446,7 +445,6 @@ impl StatBuffer {
         stat_receiver: flume::Receiver<AppStat>,
         mut shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<()> {
-        info!("Aggregate and save loop is running");
         let mut tsdb_save_interval =
             interval(Duration::from_secs(self.tsdb_save_interval_seconds as u64));
         let mut db_save_interval =
@@ -561,13 +559,7 @@ impl StatBuffer {
 
             for (key, stat) in global_timeseries_buffer.drain() {
                 if let Err(err) = stat
-                    .save_timeseries(
-                        &bucket,
-                        "global_proxy",
-                        self.chain_id,
-                        influxdb_client,
-                        key,
-                    )
+                    .save_timeseries(&bucket, "global_proxy", self.chain_id, influxdb_client, key)
                     .await
                 {
                     error!(
@@ -584,13 +576,7 @@ impl StatBuffer {
 
             for (key, stat) in opt_in_timeseries_buffer.drain() {
                 if let Err(err) = stat
-                    .save_timeseries(
-                        &bucket,
-                        "opt_in_proxy",
-                        self.chain_id,
-                        influxdb_client,
-                        key,
-                    )
+                    .save_timeseries(&bucket, "opt_in_proxy", self.chain_id, influxdb_client, key)
                     .await
                 {
                     error!(
