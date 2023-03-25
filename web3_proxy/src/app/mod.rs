@@ -67,7 +67,7 @@ pub static APP_USER_AGENT: &str = concat!(
 );
 
 // aggregate across 1 week
-const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
+pub const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
 
 #[derive(Debug, From)]
 struct ResponseCacheKey {
@@ -575,7 +575,12 @@ impl Web3ProxyApp {
         // stats can be saved in mysql, influxdb, both, or none
         let stat_sender = if let Some(emitter_spawn) = StatBuffer::try_spawn(
             top_config.app.chain_id,
-            top_config.app.influxdb_bucket.clone().context("No influxdb bucket was provided")?.to_owned(),
+            top_config
+                .app
+                .influxdb_bucket
+                .clone()
+                .context("No influxdb bucket was provided")?
+                .to_owned(),
             db_conn.clone(),
             influxdb_client.clone(),
             60,
@@ -812,26 +817,27 @@ impl Web3ProxyApp {
 
             app_handles.push(config_handle);
         }
-// =======
-//         if important_background_handles.is_empty() {
-//             info!("no important background handles");
-//
-//             let f = tokio::spawn(async move {
-//                 let _ = background_shutdown_receiver.recv().await;
-//
-//                 Ok(())
-//             });
-//
-//             important_background_handles.push(f);
-// >>>>>>> 77df3fa (stats v2)
+        // =======
+        //         if important_background_handles.is_empty() {
+        //             info!("no important background handles");
+        //
+        //             let f = tokio::spawn(async move {
+        //                 let _ = background_shutdown_receiver.recv().await;
+        //
+        //                 Ok(())
+        //             });
+        //
+        //             important_background_handles.push(f);
+        // >>>>>>> 77df3fa (stats v2)
 
         Ok((
             app,
             app_handles,
             important_background_handles,
             new_top_config_sender,
-            consensus_connections_watcher
-        ).into())
+            consensus_connections_watcher,
+        )
+            .into())
     }
 
     pub async fn apply_top_config(&self, new_top_config: TopConfig) -> anyhow::Result<()> {

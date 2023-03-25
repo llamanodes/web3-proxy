@@ -391,6 +391,18 @@ impl RpcQueryStats {
         }
     }
 
+    /// Only used for migration from stats_v1 to stats_v2/v3
+    pub fn modify_struct(
+        &mut self,
+        response_millis: u64,
+        response_timestamp: i64,
+        backend_requests: u64
+    ) {
+        self.response_millis = response_millis;
+        self.response_timestamp = response_timestamp;
+        self.backend_requests = backend_requests;
+    }
+
 }
 
 impl StatBuffer {
@@ -434,6 +446,7 @@ impl StatBuffer {
         stat_receiver: flume::Receiver<AppStat>,
         mut shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<()> {
+        info!("Aggregate and save loop is running");
         let mut tsdb_save_interval =
             interval(Duration::from_secs(self.tsdb_save_interval_seconds as u64));
         let mut db_save_interval =
@@ -450,6 +463,7 @@ impl StatBuffer {
         loop {
             tokio::select! {
                 stat = stat_receiver.recv_async() => {
+                    info!("Received stat");
                     // save the stat to a buffer
                     match stat {
                         Ok(AppStat::RpcQuery(stat)) => {
@@ -476,6 +490,7 @@ impl StatBuffer {
                     }
                 }
                 _ = db_save_interval.tick() => {
+                    info!("DB save internal tick");
                     let db_conn = self.db_conn.as_ref().expect("db connection should always exist if there are buffered stats");
 
                     // TODO: batch saves
@@ -487,6 +502,7 @@ impl StatBuffer {
                     }
                 }
                 _ = tsdb_save_interval.tick() => {
+                    info!("TSDB save internal tick");
                     // TODO: batch saves
                     // TODO: better bucket names
                     let influxdb_client = self.influxdb_client.as_ref().expect("influxdb client should always exist if there are buffered stats");
@@ -506,6 +522,7 @@ impl StatBuffer {
                     }
                 }
                 x = shutdown_receiver.recv() => {
+                    info!("shutdown signal ---");
                     match x {
                         Ok(_) => {
                             info!("stat_loop shutting down");

@@ -374,12 +374,17 @@ fn main() -> anyhow::Result<()> {
                 x.main(&db_conn).await
             }
             SubCommand::MigrateStatsToV2(x) => {
+
+                let top_config = top_config.expect("--config is required to run the migration from stats-mysql to stats-influx");
+                // let top_config_path =
+                //     top_config_path.expect("path must be set if top_config exists");
+
                 let db_url = cli_config
                     .db_url
                     .expect("'--config' (with a db) or '--db-url' is required to run the migration from stats-mysql to stats-influx");
 
                 let db_conn = get_db(db_url, 1, 1).await?;
-                x.main(&db_conn).await
+                x.main(top_config, &db_conn).await
             }
             SubCommand::Pagerduty(x) => {
                 if cli_config.sentry_url.is_none() {
