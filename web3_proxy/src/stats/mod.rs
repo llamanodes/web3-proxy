@@ -40,6 +40,7 @@ pub struct RpcQueryStats {
     pub error_response: bool,
     pub request_bytes: u64,
     /// if backend_requests is 0, there was a cache_hit
+    // pub frontend_request: u64,
     pub backend_requests: u64,
     pub response_bytes: u64,
     pub response_millis: u64,
