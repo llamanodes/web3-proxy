@@ -34,6 +34,7 @@ use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
 use std::{cmp, fmt};
 use thread_fast_rng::rand::seq::SliceRandom;
+use tokio;
 use tokio::sync::{broadcast, watch};
 use tokio::task;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
@@ -167,7 +168,8 @@ impl Web3Rpcs {
             .max_capacity(10_000)
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
-        let (watch_consensus_rpcs_sender, consensus_connections_watcher) = watch::channel(Default::default());
+        let (watch_consensus_rpcs_sender, consensus_connections_watcher) =
+            watch::channel(Default::default());
 
         // by_name starts empty. self.apply_server_configs will add to it
         let by_name = Default::default();
@@ -318,43 +320,43 @@ impl Web3Rpcs {
             }
         }
 
-// <<<<<<< HEAD
+        // <<<<<<< HEAD
         Ok(())
     }
-// =======
-//         // TODO: max_capacity and time_to_idle from config
-//         // all block hashes are the same size, so no need for weigher
-//         let block_hashes = Cache::builder()
-//             .time_to_idle(Duration::from_secs(600))
-//             .max_capacity(10_000)
-//             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-//         // all block numbers are the same size, so no need for weigher
-//         let block_numbers = Cache::builder()
-//             .time_to_idle(Duration::from_secs(600))
-//             .max_capacity(10_000)
-//             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-//
-//         let (watch_consensus_connections_sender, consensus_connections_watcher) =
-//             watch::channel(Default::default());
-//
-//         let watch_consensus_head_receiver =
-//             watch_consensus_head_sender.as_ref().map(|x| x.subscribe());
-//
-//         let connections = Arc::new(Self {
-//             by_name: connections,
-//             watch_consensus_rpcs_sender: watch_consensus_connections_sender,
-//             watch_consensus_head_receiver,
-//             pending_transactions,
-//             block_hashes,
-//             block_numbers,
-//             min_sum_soft_limit,
-//             min_head_rpcs,
-//             max_block_age,
-//             max_block_lag,
-//         });
-//
-//         let authorization = Arc::new(Authorization::internal(db_conn.clone())?);
-// >>>>>>> 77df3fa (stats v2)
+    // =======
+    //         // TODO: max_capacity and time_to_idle from config
+    //         // all block hashes are the same size, so no need for weigher
+    //         let block_hashes = Cache::builder()
+    //             .time_to_idle(Duration::from_secs(600))
+    //             .max_capacity(10_000)
+    //             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+    //         // all block numbers are the same size, so no need for weigher
+    //         let block_numbers = Cache::builder()
+    //             .time_to_idle(Duration::from_secs(600))
+    //             .max_capacity(10_000)
+    //             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+    //
+    //         let (watch_consensus_connections_sender, consensus_connections_watcher) =
+    //             watch::channel(Default::default());
+    //
+    //         let watch_consensus_head_receiver =
+    //             watch_consensus_head_sender.as_ref().map(|x| x.subscribe());
+    //
+    //         let connections = Arc::new(Self {
+    //             by_name: connections,
+    //             watch_consensus_rpcs_sender: watch_consensus_connections_sender,
+    //             watch_consensus_head_receiver,
+    //             pending_transactions,
+    //             block_hashes,
+    //             block_numbers,
+    //             min_sum_soft_limit,
+    //             min_head_rpcs,
+    //             max_block_age,
+    //             max_block_lag,
+    //         });
+    //
+    //         let authorization = Arc::new(Authorization::internal(db_conn.clone())?);
+    // >>>>>>> 77df3fa (stats v2)
 
     pub fn get(&self, conn_name: &str) -> Option<Arc<Web3Rpc>> {
         self.by_name.read().get(conn_name).cloned()
@@ -364,12 +366,12 @@ impl Web3Rpcs {
         self.by_name.read().len()
     }
 
-// <<<<<<< HEAD
+    // <<<<<<< HEAD
     pub fn is_empty(&self) -> bool {
         self.by_name.read().is_empty()
-// =======
-//         Ok((connections, handle, consensus_connections_watcher))
-// >>>>>>> 77df3fa (stats v2)
+        // =======
+        //         Ok((connections, handle, consensus_connections_watcher))
+        // >>>>>>> 77df3fa (stats v2)
     }
 
     pub fn min_head_rpcs(&self) -> usize {
@@ -395,7 +397,7 @@ impl Web3Rpcs {
             let clone = self.clone();
             let authorization = authorization.clone();
             let pending_tx_id_receiver = self.pending_tx_id_receiver.clone();
-            let handle = task::spawn(async move {
+            let handle = tokio::task::spawn(async move {
                 // TODO: set up this future the same as the block funnel
                 while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv_async().await {
                     let f = clone.clone().process_incoming_tx_id(
@@ -418,7 +420,7 @@ impl Web3Rpcs {
             let connections = Arc::clone(&self);
             let pending_tx_sender = pending_tx_sender.clone();
 
-            let handle = task::Builder::default()
+            let handle = tokio::task::Builder::default()
                 .name("process_incoming_blocks")
                 .spawn(async move {
                     connections
@@ -432,12 +434,14 @@ impl Web3Rpcs {
         if futures.is_empty() {
             // no transaction or block subscriptions.
 
-            let handle = task::Builder::default().name("noop").spawn(async move {
-                loop {
-                    sleep(Duration::from_secs(600)).await;
-                    // TODO: "every interval, check that the provider is still connected"
-                }
-            })?;
+            let handle = tokio::task::Builder::default()
+                .name("noop")
+                .spawn(async move {
+                    loop {
+                        sleep(Duration::from_secs(600)).await;
+                        // TODO: "every interval, check that the provider is still connected"
+                    }
+                })?;
 
             futures.push(flatten_handle(handle));
         }
@@ -884,11 +888,11 @@ impl Web3Rpcs {
 
         // TODO: maximum retries? right now its the total number of servers
         loop {
-// <<<<<<< HEAD
+            // <<<<<<< HEAD
             if skip_rpcs.len() >= self.by_name.read().len() {
-// =======
-//             if skip_rpcs.len() == self.by_name.len() {
-// >>>>>>> 77df3fa (stats v2)
+                // =======
+                //             if skip_rpcs.len() == self.by_name.len() {
+                // >>>>>>> 77df3fa (stats v2)
                 break;
             }
 
@@ -1159,18 +1163,18 @@ impl Web3Rpcs {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
-// <<<<<<< HEAD
+                    // <<<<<<< HEAD
                     watch_consensus_rpcs.changed().await?;
 
                     watch_consensus_rpcs.borrow_and_update();
-// =======
+                    // =======
                     // TODO: i don't think this will ever happen
                     // TODO: return a 502? if it does?
                     // return Err(anyhow::anyhow!("no available rpcs!"));
                     // TODO: sleep how long?
                     // TODO: subscribe to something in ConsensusWeb3Rpcs instead
                     sleep(Duration::from_millis(200)).await;
-// >>>>>>> 77df3fa (stats v2)
+                    // >>>>>>> 77df3fa (stats v2)
 
                     continue;
                 }
@@ -1299,13 +1303,13 @@ mod tests {
     // TODO: why is this allow needed? does tokio::test get in the way somehow?
     #![allow(unused_imports)]
 
-    use std::time::{SystemTime, UNIX_EPOCH};
     use super::*;
     use crate::rpcs::consensus::ConsensusFinder;
     use crate::rpcs::{blockchain::Web3ProxyBlock, provider::Web3Provider};
     use ethers::types::{Block, U256};
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock as AsyncRwLock;
 
     #[tokio::test]

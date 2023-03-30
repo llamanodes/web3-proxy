@@ -35,11 +35,12 @@ pub enum StatType {
 #[derive(Clone, Debug)]
 pub struct RpcQueryStats {
     pub authorization: Arc<Authorization>,
-    pub method: String,
+    pub method: Option<String>,
     pub archive_request: bool,
     pub error_response: bool,
     pub request_bytes: u64,
     /// if backend_requests is 0, there was a cache_hit
+    // pub frontend_request: u64,
     pub backend_requests: u64,
     pub response_bytes: u64,
     pub response_millis: u64,
@@ -96,7 +97,7 @@ impl RpcQueryStats {
             TrackingLevel::Detailed => {
                 // detailed tracking keeps track of the method and origin
                 // depending on the request, the origin might still be None
-                let method = Some(self.method.clone());
+                let method = self.method.clone();
                 let origin = self.authorization.origin.clone();
 
                 (method, origin)
@@ -116,7 +117,7 @@ impl RpcQueryStats {
     /// all queries are aggregated
     /// TODO: should we store "anon" or "registered" as a key just to be able to split graphs?
     fn global_timeseries_key(&self) -> RpcQueryKey {
-        let method = Some(self.method.clone());
+        let method = self.method.clone();
         // we don't store origin in the timeseries db. its only used for optional accounting
         let origin = None;
         // everyone gets grouped together
@@ -140,7 +141,7 @@ impl RpcQueryStats {
             TrackingLevel::None => {
                 // this RPC key requested no tracking. this is the default.
                 // we still want graphs though, so we just use None as the rpc_secret_key_id
-                (Some(self.method.clone()), None)
+                (self.method.clone(), None)
             }
             TrackingLevel::Aggregated => {
                 // this RPC key requested tracking aggregated across all methods
@@ -149,7 +150,7 @@ impl RpcQueryStats {
             TrackingLevel::Detailed => {
                 // detailed tracking keeps track of the method
                 (
-                    Some(self.method.clone()),
+                    self.method.clone(),
                     self.authorization.checks.rpc_secret_key_id,
                 )
             }
@@ -361,10 +362,10 @@ impl BufferedRpcQueryStats {
 
 impl RpcQueryStats {
     pub fn new(
-        method: String,
+        method: Option<String>,
         authorization: Arc<Authorization>,
         metadata: Arc<RequestMetadata>,
-        response_bytes: usize
+        response_bytes: usize,
     ) -> Self {
         // TODO: try_unwrap the metadata to be sure that all the stats for this request have been collected
         // TODO: otherwise, i think the whole thing should be in a single lock that we can "reset" when a stat is created
@@ -391,6 +392,17 @@ impl RpcQueryStats {
         }
     }
 
+    /// Only used for migration from stats_v1 to stats_v2/v3
+    pub fn modify_struct(
+        &mut self,
+        response_millis: u64,
+        response_timestamp: i64,
+        backend_requests: u64,
+    ) {
+        self.response_millis = response_millis;
+        self.response_timestamp = response_timestamp;
+        self.backend_requests = backend_requests;
+    }
 }
 
 impl StatBuffer {
@@ -450,6 +462,7 @@ impl StatBuffer {
         loop {
             tokio::select! {
                 stat = stat_receiver.recv_async() => {
+                    // info!("Received stat");
                     // save the stat to a buffer
                     match stat {
                         Ok(AppStat::RpcQuery(stat)) => {
@@ -476,6 +489,7 @@ impl StatBuffer {
                     }
                 }
                 _ = db_save_interval.tick() => {
+                    // info!("DB save internal tick");
                     let db_conn = self.db_conn.as_ref().expect("db connection should always exist if there are buffered stats");
 
                     // TODO: batch saves
@@ -487,6 +501,7 @@ impl StatBuffer {
                     }
                 }
                 _ = tsdb_save_interval.tick() => {
+                    // info!("TSDB save internal tick");
                     // TODO: batch saves
                     // TODO: better bucket names
                     let influxdb_client = self.influxdb_client.as_ref().expect("influxdb client should always exist if there are buffered stats");
@@ -506,6 +521,7 @@ impl StatBuffer {
                     }
                 }
                 x = shutdown_receiver.recv() => {
+                    info!("shutdown signal ---");
                     match x {
                         Ok(_) => {
                             info!("stat_loop shutting down");
@@ -544,13 +560,7 @@ impl StatBuffer {
 
             for (key, stat) in global_timeseries_buffer.drain() {
                 if let Err(err) = stat
-                    .save_timeseries(
-                        &bucket,
-                        "global_proxy",
-                        self.chain_id,
-                        influxdb_client,
-                        key,
-                    )
+                    .save_timeseries(&bucket, "global_proxy", self.chain_id, influxdb_client, key)
                     .await
                 {
                     error!(
@@ -567,13 +577,7 @@ impl StatBuffer {
 
             for (key, stat) in opt_in_timeseries_buffer.drain() {
                 if let Err(err) = stat
-                    .save_timeseries(
-                        &bucket,
-                        "opt_in_proxy",
-                        self.chain_id,
-                        influxdb_client,
-                        key,
-                    )
+                    .save_timeseries(&bucket, "opt_in_proxy", self.chain_id, influxdb_client, key)
                     .await
                 {
                     error!(
