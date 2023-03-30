@@ -400,7 +400,7 @@ async fn handle_socket_payload(
 
                     if let Some(stat_sender) = app.stat_sender.as_ref() {
                         let response_stat = RpcQueryStats::new(
-                            json_request.method.clone(),
+                            Some(json_request.method.clone()),
                             authorization.clone(),
                             request_metadata,
                             response.num_bytes(),

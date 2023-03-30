@@ -1799,7 +1799,7 @@ impl Web3ProxyApp {
 
                 if let Some(stat_sender) = self.stat_sender.as_ref() {
                     let response_stat = RpcQueryStats::new(
-                        method.to_string(),
+                        Some(method.to_string()),
                         authorization.clone(),
                         request_metadata,
                         response.num_bytes(),
@@ -1822,7 +1822,7 @@ impl Web3ProxyApp {
 
         if let Some(stat_sender) = self.stat_sender.as_ref() {
             let response_stat = RpcQueryStats::new(
-                request_method,
+                Some(request_method),
                 authorization.clone(),
                 request_metadata,
                 response.num_bytes(),

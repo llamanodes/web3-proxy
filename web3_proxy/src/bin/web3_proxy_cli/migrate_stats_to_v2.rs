@@ -63,6 +63,8 @@ impl MigrateStatsToV2 {
         // let mut spawned_app =
         //     Web3ProxyApp::spawn(top_config.clone(), 2, app_shutdown_sender.clone()).await?;
 
+        let number_of_rows_to_process_at_once = 500;
+
         // we wouldn't really need this, but let's spawn this anyways
         // easier than debugging the rest I suppose
         let (app_shutdown_sender, _app_shutdown_receiver) = broadcast::channel(1);
@@ -125,7 +127,7 @@ impl MigrateStatsToV2 {
             // (1) Load a batch of rows out of the old table until no more rows are left
             let old_records = rpc_accounting::Entity::find()
                 .filter(rpc_accounting::Column::Migrated.is_null())
-                .limit(2)
+                .limit(number_of_rows_to_process_at_once)
                 .all(db_conn)
                 .await?;
             if old_records.len() == 0 {
@@ -137,7 +139,7 @@ impl MigrateStatsToV2 {
             // (2) Create request metadata objects to match the old data
             // Iterate through all old rows, and put them into the above objects.
             for x in old_records.iter() {
-                info!("Preparing for migration: {:?}", x);
+                // info!("Preparing for migration: {:?}", x);
 
                 // TODO: Split up a single request into multiple requests ...
                 // according to frontend-requests, backend-requests, etc.
@@ -232,9 +234,9 @@ impl MigrateStatsToV2 {
                     // (3) Send through a channel to a stat emitter
                     // Send it to the stats sender
                     if let Some(stat_sender_ref) = stat_sender.as_ref() {
-                        info!("Method is: {:?}", x.clone().method.unwrap());
+                        // info!("Method is: {:?}", x.clone().method);
                         let mut response_stat = RpcQueryStats::new(
-                            x.clone().method.unwrap(),
+                            x.clone().method,
                             authorization.clone(),
                             Arc::new(request_metadata),
                             (int_response_bytes)
@@ -247,13 +249,13 @@ impl MigrateStatsToV2 {
                             x.period_datetime.timestamp(), // I suppose timestamp is millis as well ... should check this in the (prod) database
                             int_backend_requests,
                         );
-                        info!("Sending stats: {:?}", response_stat);
+                        // info!("Sending stats: {:?}", response_stat);
                         stat_sender_ref
                             // .send(response_stat.into())
                             .send_async(response_stat.into())
                             .await
                             .context("stat_sender sending response_stat")?;
-                        info!("Send! {:?}", stat_sender);
+                        // info!("Send! {:?}", stat_sender);
                     } else {
                         panic!("Stat sender was not spawned!");
                     }
@@ -269,7 +271,6 @@ impl MigrateStatsToV2 {
 
             // (3) Await that all items are properly processed
             // TODO: Await all the background handles
-            info!("Waiting for a second until all is flushed");
 
             // Only after this mark all the items as processed / completed
 
@@ -294,6 +295,7 @@ impl MigrateStatsToV2 {
             info!("Update result is: {:?}", update_result);
 
             // (N-1) Mark the batch as migrated
+            // break;
         }
 
         info!(
@@ -336,7 +338,7 @@ impl MigrateStatsToV2 {
             }
         }
 
-        info!("Here (?)");
+        // info!("Here (?)");
 
         Ok(())
     }
