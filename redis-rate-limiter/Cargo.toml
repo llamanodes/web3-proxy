@@ -8,4 +8,4 @@ edition = "2021"
 anyhow = "1.0.69"
 chrono = "0.4.23"
 deadpool-redis = { version = "0.11.1", features = ["rt_tokio_1", "serde"] }
-tokio = "1.25.0"
+tokio = "1.26.0"

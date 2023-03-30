@@ -415,13 +415,13 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - change premium concurrency limit to be against ip+rpckey
   - then sites like curve.fi don't have to worry about their user count
   - it does mean we will have a harder time capacity planning from the number of keys
-- [ ] eth_getLogs is going to unsynced nodes when synced nodes are available. always prefer synced nodes
 - [ ] have the healthcheck get the block over http. if it errors, or doesn't match what the websocket says, something is wrong (likely a deadlock in the websocket code)
 - [ ] don't use new_head_provider anywhere except new head subscription
-- [ ] maybe we shouldn't route eth_getLogs to syncing nodes. serving queries slows down sync significantly
+- [x] maybe we shouldn't route eth_getLogs to syncing nodes. serving queries slows down sync significantly
   - change the send_best function to only include servers that are at least close to fully synced
-- [ ] have private transactions be enabled by a url setting rather than a setting on the key
 - [ ] enable mev protected transactions with either a /protect/ url (instead of /private/) or the database (when on /rpc/)
+- [-] have private transactions be enabled by a url setting rather than a setting on the key
+- [ ] eth_sendRawTransaction should only forward if the chain_id matches what we are running
 - [ ] cli for adding rpc keys to an existing user
 - [ ] rename "private" to "mev protected" to avoid confusion about private transactions being public once they are mined
 - [ ] allow restricting an rpc key to specific chains
@@ -463,6 +463,10 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] implement remaining subscriptions
     - would be nice if our subscriptions had better gaurentees than geth/erigon do, but maybe simpler to just setup a broadcast channel and proxy all the respones to a backend instead
 - [ ] tests should use `test-env-log = "0.2.8"`
+- [ ] eth_sendRawTransaction should only forward if the chain_id matches what we are running
+- [ ] weighted random choice should still prioritize non-archive servers
+    - maybe shuffle randomly and then sort by (block_limit, random_index)?
+    - maybe sum available_requests grouped by archive/non-archive. only limit to non-archive if they have enough?
 - [ ] some places we call it "accounting" others a "stat". be consistent
 - [ ] cli commands to search users by key
 - [ ] flamegraphs show 25% of the time to be in moka-housekeeper. tune that
@@ -603,6 +607,8 @@ These are not ordered. I think some rows also accidently got deleted here. Check
   - look at average request time for getBlock? i'm not sure how good a proxy that will be for serving eth_call, but its a start
   - https://crates.io/crates/histogram-sampler
 - [ ] interval for http subscriptions should be based on block time. load from config is easy, but better to query. currently hard coded to 13 seconds
+- [ ] check code to keep us from going backwards. maybe that is causing outages
+- [ ] min_backup_rpcs seperate from min_synced_rpcs
 
 in another repo: event subscriber
   - [ ] watch for transfer events to our contract and submit them to /payment/$tx_hash
@@ -729,13 +735,10 @@ in another repo: event subscriber
 - [ ] have an upgrade tier that queries multiple backends at once. returns on first Ok result, collects errors. if no Ok, find the most common error and then respond with that
 - [ ] give public_recent_ips_salt a better, more general, name
 - [ ] include tier in the head block logs?
-<<<<<<< HEAD
 - [ ] i think i use FuturesUnordered when a try_join_all might be better
 - [ ] since we are read-heavy on our configs, maybe we should use a cache
   - "using a thread local storage and explicit types" https://docs.rs/arc-swap/latest/arc_swap/cache/struct.Cache.html
 - [ ] tests for config reloading
 - [ ] use pin instead of arc for a bunch of things?
   - https://fasterthanli.me/articles/pin-and-suffering
-=======
 - [ ] calculate archive depth automatically based on block_data_limits 
->>>>>>> 77df3fa (stats v2)

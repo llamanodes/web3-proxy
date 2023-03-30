@@ -228,6 +228,7 @@ pub struct Web3ProxyApp {
     pub db_conn: Option<sea_orm::DatabaseConnection>,
     /// Optional read-only database for users and accounting
     pub db_replica: Option<DatabaseReplica>,
+    pub hostname: Option<String>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     /// TODO: think about this more. might be worth storing if we sent the transaction or not and using this for automatic retries
     pub pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
@@ -765,6 +766,10 @@ impl Web3ProxyApp {
             Some(private_rpcs)
         };
 
+        let hostname = hostname::get()
+            .ok()
+            .and_then(|x| x.to_str().map(|x| x.to_string()));
+
         let app = Self {
             config: top_config.app.clone(),
             balanced_rpcs,
@@ -781,6 +786,7 @@ impl Web3ProxyApp {
             db_conn,
             db_replica,
             influxdb_client,
+            hostname,
             vredis_pool,
             rpc_secret_key_cache,
             bearer_token_semaphores,
@@ -1579,7 +1585,9 @@ impl Web3ProxyApp {
                 match &request.params {
                     Some(serde_json::Value::Array(params)) => {
                         // TODO: make a struct and use serde conversion to clean this up
-                        if params.len() != 1 || !params[0].is_string() {
+                        if params.len() != 1
+                            || !params.get(0).map(|x| x.is_string()).unwrap_or(false)
+                        {
                             // TODO: what error code?
                             return Ok((
                                 JsonRpcForwardedResponse::from_str(
