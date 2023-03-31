@@ -7,6 +7,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
 use log::{debug, error, info, trace, warn};
+use migration::sea_orm::QueryOrder;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter, QuerySelect, UpdateResult,
@@ -45,13 +46,10 @@ fn datetime_utc_to_instant(datetime: DateTime<Utc>) -> anyhow::Result<Instant> {
         .context("Could not add duration since epoch for updated time")
 }
 
-/// change a user's address.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
+/// Migrate towards influxdb and rpc_accounting_v2 from rpc_accounting
 #[argh(subcommand, name = "migrate_stats_to_v2")]
 pub struct MigrateStatsToV2 {}
-
-// I mean drop(sender) and then important_background_handle.await. No need for shutdown signal here I think.
-// Don't make data lossy
 
 impl MigrateStatsToV2 {
     pub async fn main(
@@ -59,11 +57,7 @@ impl MigrateStatsToV2 {
         top_config: TopConfig,
         db_conn: &DatabaseConnection,
     ) -> anyhow::Result<()> {
-        // Also add influxdb container ...
-        // let mut spawned_app =
-        //     Web3ProxyApp::spawn(top_config.clone(), 2, app_shutdown_sender.clone()).await?;
-
-        let number_of_rows_to_process_at_once = 500;
+        let number_of_rows_to_process_at_once = 2000;
 
         // we wouldn't really need this, but let's spawn this anyways
         // easier than debugging the rest I suppose
@@ -121,31 +115,26 @@ impl MigrateStatsToV2 {
             None
         };
 
-        // Basically spawn the full app, look at web3_proxy CLI
+        let migration_timestamp = chrono::offset::Utc::now();
 
-        while true {
+        // Iterate over rows that were not market as "migrated" yet and process them
+        loop {
             // (1) Load a batch of rows out of the old table until no more rows are left
             let old_records = rpc_accounting::Entity::find()
                 .filter(rpc_accounting::Column::Migrated.is_null())
                 .limit(number_of_rows_to_process_at_once)
+                .order_by_asc(rpc_accounting::Column::Id)
                 .all(db_conn)
                 .await?;
             if old_records.len() == 0 {
                 // Break out of while loop once all records have successfully been migrated ...
-                warn!("All records seem to have been successfully migrated!");
+                info!("All records seem to have been successfully migrated!");
                 break;
             }
 
             // (2) Create request metadata objects to match the old data
             // Iterate through all old rows, and put them into the above objects.
             for x in old_records.iter() {
-                // info!("Preparing for migration: {:?}", x);
-
-                // TODO: Split up a single request into multiple requests ...
-                // according to frontend-requests, backend-requests, etc.
-
-                // Get the rpc-key from the rpc_key_id
-                // Get the user-id from the rpc_key_id
                 let authorization_checks = match x.rpc_key_id {
                     Some(rpc_key_id) => {
                         let rpc_key_obj = rpc_key::Entity::find()
@@ -166,13 +155,10 @@ impl MigrateStatsToV2 {
                             ..Default::default()
                         }
                     }
-                    None => AuthorizationChecks {
-                        ..Default::default()
-                    },
+                    None => Default::default(),
                 };
 
-                // Then overwrite rpc_key_id and user_id (?)
-                let authorization_type = AuthorizationType::Frontend;
+                let authorization_type = AuthorizationType::Internal;
                 let authorization = Arc::new(
                     Authorization::try_new(
                         authorization_checks,
@@ -246,7 +232,7 @@ impl MigrateStatsToV2 {
                         // Modify the timestamps ..
                         response_stat.modify_struct(
                             int_response_millis,
-                            x.period_datetime.timestamp(), // I suppose timestamp is millis as well ... should check this in the (prod) database
+                            x.period_datetime.timestamp(),
                             int_backend_requests,
                         );
                         // info!("Sending stats: {:?}", response_stat);
@@ -255,18 +241,10 @@ impl MigrateStatsToV2 {
                             .send_async(response_stat.into())
                             .await
                             .context("stat_sender sending response_stat")?;
-                        // info!("Send! {:?}", stat_sender);
                     } else {
                         panic!("Stat sender was not spawned!");
                     }
-
-                    // Create a new stats object
-                    // Add it to the StatBuffer
                 }
-
-                // Let the stat_sender spawn / flush ...
-                // spawned_app.app.stat_sender.aggregate_and_save_loop()
-                // Send a signal to save ...
             }
 
             // (3) Await that all items are properly processed
@@ -284,7 +262,7 @@ impl MigrateStatsToV2 {
                 .col_expr(
                     rpc_accounting::Column::Migrated,
                     Expr::value(Value::ChronoDateTimeUtc(Some(Box::new(
-                        chrono::offset::Utc::now(),
+                        migration_timestamp,
                     )))),
                 )
                 .filter(rpc_accounting::Column::Id.is_in(old_record_ids))
@@ -293,21 +271,12 @@ impl MigrateStatsToV2 {
                 .await?;
 
             info!("Update result is: {:?}", update_result);
-
-            // (N-1) Mark the batch as migrated
-            // break;
         }
 
         info!(
             "Background handles (2) are: {:?}",
             important_background_handles
         );
-
-        // Drop the handle
-        // Send the shutdown signal here (?)
-        // important_background_handles.clear();
-
-        // Finally also send a shutdown signal
 
         drop(stat_sender);
         // match app_shutdown_sender.send(()) {
@@ -316,8 +285,6 @@ impl MigrateStatsToV2 {
         //     }
         //     _ => {}
         // };
-
-        // TODO: Should we also write a short verifier if the migration was successful (?)
 
         // Drop the background handle, wait for any tasks that are on-going
         while let Some(x) = important_background_handles.next().await {
@@ -337,9 +304,6 @@ impl MigrateStatsToV2 {
                 }
             }
         }
-
-        // info!("Here (?)");
-
         Ok(())
     }
 }

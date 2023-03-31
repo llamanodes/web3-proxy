@@ -613,7 +613,7 @@ impl Web3ProxyApp {
         proxy_mode: ProxyMode,
     ) -> anyhow::Result<RateLimitResult> {
         // ip rate limits don't check referer or user agent
-        // the do check origin because we can override rate limits for some origins
+        // they do check origin because we can override rate limits for some origins
         let authorization = Authorization::external(
             allowed_origin_requests_per_period,
             self.db_conn.clone(),

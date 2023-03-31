@@ -102,8 +102,6 @@ impl Web3ProxyBlock {
 
         if block_timestamp < now {
             // this server is still syncing from too far away to serve requests
-            // u64 is safe because ew checked equality above
-            // (now - block_timestamp).as_secs()
             // u64 is safe because we checked equality above
             (now - block_timestamp) as u64
         } else {
@@ -346,9 +344,6 @@ impl Web3Rpcs {
         let request = json!({ "jsonrpc": "2.0", "id": "1", "method": "eth_getBlockByNumber", "params": (num, false) });
         let request: JsonRpcRequest = serde_json::from_value(request)?;
 
-        // TODO: if error, retry?
-        // TODO: request_metadata or authorization?
-        // we don't actually set min_block_needed here because all nodes have all blocks
         let response = self
             .try_send_best_consensus_head_connection(authorization, request, None, Some(num), None)
             .await?;
