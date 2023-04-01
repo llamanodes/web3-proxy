@@ -1,4 +1,5 @@
 # Got eth spam from here
+# https://github.com/shazow/ethspam
 
 # Got versus from here
 # https://github.com/INFURA/versus
