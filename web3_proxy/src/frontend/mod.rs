@@ -238,13 +238,18 @@ pub async fn serve(
     let server = axum::Server::bind(&addr)
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .serve(service)
-        .with_graceful_shutdown(async move {
-            let _ = shutdown_receiver.recv().await;
-        })
-        .await
-        .map_err(Into::into);
+        // <<<<<<< HEAD
+        //         .with_graceful_shutdown(async move {
+        //             let _ = shutdown_receiver.recv().await;
+        //         })
+        //         .await
+        //         .map_err(Into::into);
+        //
+        //     let _ = shutdown_complete_sender.send(());
+        //
+        //     server
+        // =======
+        .await?;
 
-    let _ = shutdown_complete_sender.send(());
-
-    server
+    Ok(())
 }

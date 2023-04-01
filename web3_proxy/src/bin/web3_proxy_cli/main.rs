@@ -1,5 +1,5 @@
+mod change_admin_status;
 mod change_user_address;
-mod change_user_admin_status;
 mod change_user_tier;
 mod change_user_tier_by_address;
 mod change_user_tier_by_key;
@@ -68,8 +68,8 @@ pub struct Web3ProxyCli {
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand)]
 enum SubCommand {
+    ChangeAdminStatus(change_admin_status::ChangeAdminStatusSubCommand),
     ChangeUserAddress(change_user_address::ChangeUserAddressSubCommand),
-    ChangeUserAdminStatus(change_user_admin_status::ChangeUserAdminStatusSubCommand),
     ChangeUserTier(change_user_tier::ChangeUserTierSubCommand),
     ChangeUserTierByAddress(change_user_tier_by_address::ChangeUserTierByAddressSubCommand),
     ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeySubCommand),
@@ -120,6 +120,10 @@ fn main() -> anyhow::Result<()> {
 
     // if RUST_LOG isn't set, configure a default
     // TODO: is there a better way to do this?
+    #[cfg(tokio_console)]
+    console_subscriber::init();
+
+    #[cfg(not(tokio_console))]
     let rust_log = match std::env::var("RUST_LOG") {
         Ok(x) => x,
         Err(_) => match std::env::var("WEB3_PROXY_TRACE").map(|x| x == "true") {
@@ -192,35 +196,38 @@ fn main() -> anyhow::Result<()> {
         (None, None)
     };
 
-    let logger = env_logger::builder().parse_filters(&rust_log).build();
+    #[cfg(not(tokio_console))]
+    {
+        let logger = env_logger::builder().parse_filters(&rust_log).build();
 
-    let max_level = logger.filter();
+        let max_level = logger.filter();
 
-    // connect to sentry for error reporting
-    // if no sentry, only log to stdout
-    let _sentry_guard = if let Some(sentry_url) = cli_config.sentry_url.clone() {
-        let logger = sentry::integrations::log::SentryLogger::with_dest(logger);
+        // connect to sentry for error reporting
+        // if no sentry, only log to stdout
+        let _sentry_guard = if let Some(sentry_url) = cli_config.sentry_url.clone() {
+            let logger = sentry::integrations::log::SentryLogger::with_dest(logger);
 
-        log::set_boxed_logger(Box::new(logger)).unwrap();
+            log::set_boxed_logger(Box::new(logger)).unwrap();
 
-        let guard = sentry::init((
-            sentry_url,
-            sentry::ClientOptions {
-                release: sentry::release_name!(),
-                // TODO: Set this a to lower value (from config) in production
-                traces_sample_rate: 1.0,
-                ..Default::default()
-            },
-        ));
+            let guard = sentry::init((
+                sentry_url,
+                sentry::ClientOptions {
+                    release: sentry::release_name!(),
+                    // TODO: Set this a to lower value (from config) in production
+                    traces_sample_rate: 1.0,
+                    ..Default::default()
+                },
+            ));
 
-        Some(guard)
-    } else {
-        log::set_boxed_logger(Box::new(logger)).unwrap();
+            Some(guard)
+        } else {
+            log::set_boxed_logger(Box::new(logger)).unwrap();
 
-        None
-    };
+            None
+        };
 
-    log::set_max_level(max_level);
+        log::set_max_level(max_level);
+    }
 
     info!("{}", APP_USER_AGENT);
 
@@ -283,19 +290,19 @@ fn main() -> anyhow::Result<()> {
 
     rt.block_on(async {
         match cli_config.sub_command {
-            SubCommand::ChangeUserAddress(x) => {
-                let db_url = cli_config
-                    .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+            SubCommand::ChangeAdminStatus(x) => {
+                let db_url = cli_config.db_url.expect(
+                    "'--config' (with a db) or '--db-url' is required to run change_admin_status",
+                );
 
                 let db_conn = get_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
-            SubCommand::ChangeUserAdminStatus(x) => {
+            SubCommand::ChangeUserAddress(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run change_user_admin_status");
+                    .expect("'--config' (with a db) or '--db-url' is required to run change_user_addres");
 
                 let db_conn = get_db(db_url, 1, 1).await?;
 
@@ -304,16 +311,16 @@ fn main() -> anyhow::Result<()> {
             SubCommand::ChangeUserTier(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+                    .expect("'--config' (with a db) or '--db-url' is required to run change_user_tier");
 
                 let db_conn = get_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
             SubCommand::ChangeUserTierByAddress(x) => {
-                let db_url = cli_config
-                    .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run change_user_admin_status");
+                let db_url = cli_config.db_url.expect(
+                    "'--config' (with a db) or '--db-url' is required to run change_user_tier_by_address",
+                );
 
                 let db_conn = get_db(db_url, 1, 1).await?;
 
@@ -322,7 +329,7 @@ fn main() -> anyhow::Result<()> {
             SubCommand::ChangeUserTierByKey(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+                    .expect("'--config' (with a db) or '--db-url' is required to run change_user_tier_by_key");
 
                 let db_conn = get_db(db_url, 1, 1).await?;
 
@@ -341,7 +348,7 @@ fn main() -> anyhow::Result<()> {
             SubCommand::CreateUser(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+                    .expect("'--config' (with a db) or '--db-url' is required to run create_user");
 
                 let db_conn = get_migrated_db(db_url, 1, 1).await?;
 
@@ -350,7 +357,7 @@ fn main() -> anyhow::Result<()> {
             SubCommand::CountUsers(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+                    .expect("'--config' (with a db) or '--db-url' is required to run count_users");
 
                 let db_conn = get_db(db_url, 1, 1).await?;
 
@@ -366,20 +373,25 @@ fn main() -> anyhow::Result<()> {
             SubCommand::DropMigrationLock(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+                    .expect("'--config' (with a db) or '--db-url' is required to run drop_migration_lock");
 
-                // very intentionally, do NOT run migrations here
+                // very intentionally, do NOT run migrations here. that would wait forever if the migration lock is abandoned
                 let db_conn = get_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
             SubCommand::MigrateStatsToV2(x) => {
+
+                let top_config = top_config.expect("--config is required to run the migration from stats-mysql to stats-influx");
+                // let top_config_path =
+                //     top_config_path.expect("path must be set if top_config exists");
+
                 let db_url = cli_config
                     .db_url
                     .expect("'--config' (with a db) or '--db-url' is required to run the migration from stats-mysql to stats-influx");
 
                 let db_conn = get_db(db_url, 1, 1).await?;
-                x.main(&db_conn).await
+                x.main(top_config, &db_conn).await
             }
             SubCommand::Pagerduty(x) => {
                 if cli_config.sentry_url.is_none() {
@@ -389,9 +401,7 @@ fn main() -> anyhow::Result<()> {
                 x.main(pagerduty_async, top_config).await
             }
             SubCommand::PopularityContest(x) => x.main().await,
-            SubCommand::SearchKafka(x) => {
-                x.main(top_config.unwrap()).await
-            },
+            SubCommand::SearchKafka(x) => x.main(top_config.unwrap()).await,
             SubCommand::Sentryd(x) => {
                 if cli_config.sentry_url.is_none() {
                     warn!("sentry_url is not set! Logs will only show in this console");
@@ -402,7 +412,7 @@ fn main() -> anyhow::Result<()> {
             SubCommand::RpcAccounting(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+                    .expect("'--config' (with a db) or '--db-url' is required to run rpc_accounting");
 
                 let db_conn = get_migrated_db(db_url, 1, 1).await?;
 
@@ -411,7 +421,7 @@ fn main() -> anyhow::Result<()> {
             SubCommand::TransferKey(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+                    .expect("'--config' (with a db) or '--db-url' is required to run transfer_key");
                 let db_conn = get_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
@@ -419,7 +429,7 @@ fn main() -> anyhow::Result<()> {
             SubCommand::UserExport(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+                    .expect("'--config' (with a db) or '--db-url' is required to run user_export");
 
                 let db_conn = get_migrated_db(db_url, 1, 1).await?;
 
@@ -428,7 +438,7 @@ fn main() -> anyhow::Result<()> {
             SubCommand::UserImport(x) => {
                 let db_url = cli_config
                     .db_url
-                    .expect("'--config' (with a db) or '--db-url' is required to run proxyd");
+                    .expect("'--config' (with a db) or '--db-url' is required to run user_import");
 
                 let db_conn = get_migrated_db(db_url, 1, 1).await?;
 

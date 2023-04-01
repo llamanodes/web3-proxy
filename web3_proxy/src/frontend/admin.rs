@@ -17,10 +17,10 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::{admin_trail, login, pending_login, rpc_key, user};
-use ethers::{abi::AbiEncode, prelude::Address, types::Bytes};
+use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use migration::sea_orm::prelude::Uuid;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -136,6 +136,8 @@ pub async fn admin_login_get(
         resources: vec![],
     };
 
+    let admin_address: Vec<u8> = admin_address.to_fixed_bytes().into();
+
     let db_conn = app.db_conn().web3_context("login requires a database")?;
     let db_replica = app
         .db_replica()
@@ -151,8 +153,11 @@ pub async fn admin_login_get(
             "Could not find user in db".to_string(),
         ))?;
 
+    // TODO: Gotta check if encoding messes up things maybe ...
+    info!("Admin address is: {:?}", admin_address);
+    info!("Encoded admin address is: {:?}", admin_address);
     let admin = user::Entity::find()
-        .filter(user::Column::Address.eq(admin_address.encode()))
+        .filter(user::Column::Address.eq(admin_address))
         .one(db_replica.conn())
         .await?
         .ok_or(Web3ProxyError::BadRequest(

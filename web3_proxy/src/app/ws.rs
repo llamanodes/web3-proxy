@@ -96,7 +96,7 @@ impl Web3ProxyApp {
 
                         if let Some(stat_sender) = stat_sender.as_ref() {
                             let response_stat = RpcQueryStats::new(
-                                "eth_subscription(newHeads)".to_string(),
+                                Some("eth_subscription(newHeads)".to_string()),
                                 authorization.clone(),
                                 request_metadata.clone(),
                                 response_bytes,
@@ -167,7 +167,7 @@ impl Web3ProxyApp {
 
                         if let Some(stat_sender) = stat_sender.as_ref() {
                             let response_stat = RpcQueryStats::new(
-                                "eth_subscription(newPendingTransactions)".to_string(),
+                                Some("eth_subscription(newPendingTransactions)".to_string()),
                                 authorization.clone(),
                                 request_metadata.clone(),
                                 response_bytes,
@@ -243,7 +243,7 @@ impl Web3ProxyApp {
 
                         if let Some(stat_sender) = stat_sender.as_ref() {
                             let response_stat = RpcQueryStats::new(
-                                "eth_subscription(newPendingFullTransactions)".to_string(),
+                                Some("eth_subscription(newPendingFullTransactions)".to_string()),
                                 authorization.clone(),
                                 request_metadata.clone(),
                                 response_bytes,
@@ -319,7 +319,7 @@ impl Web3ProxyApp {
 
                         if let Some(stat_sender) = stat_sender.as_ref() {
                             let response_stat = RpcQueryStats::new(
-                                "eth_subscription(newPendingRawTransactions)".to_string(),
+                                Some("eth_subscription(newPendingRawTransactions)".to_string()),
                                 authorization.clone(),
                                 request_metadata.clone(),
                                 response_bytes,
@@ -350,7 +350,7 @@ impl Web3ProxyApp {
 
         if let Some(stat_sender) = self.stat_sender.as_ref() {
             let response_stat = RpcQueryStats::new(
-                request_json.method.clone(),
+                Some(request_json.method.clone()),
                 authorization.clone(),
                 request_metadata,
                 response.num_bytes(),

@@ -170,8 +170,9 @@ impl OpenRequestHandle {
         };
 
         let mut logged = false;
-        while provider.is_none() {
+        while provider.is_none() || provider.as_ref().map(|x| !x.ready()).unwrap() {
             // trace!("waiting on provider: locking...");
+            // TODO: i dont like this. subscribing to a channel could be better
             sleep(Duration::from_millis(100)).await;
 
             if !logged {
@@ -197,7 +198,7 @@ impl OpenRequestHandle {
         // TODO: replace ethers-rs providers with our own that supports streaming the responses
         let response = match provider.as_ref() {
             #[cfg(test)]
-            Web3Provider::Mock => unimplemented!(),
+            Web3Provider::Mock => return Err(ProviderError::CustomError("mock provider can't respond".to_string())),
             Web3Provider::Ws(p) => p.request(method, params).await,
             Web3Provider::Http(p) | Web3Provider::Both(p, _) => {
                 // TODO: i keep hearing that http is faster. but ws has always been better for me. investigate more with actual benchmarks

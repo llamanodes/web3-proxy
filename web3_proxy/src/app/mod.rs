@@ -68,7 +68,7 @@ pub static APP_USER_AGENT: &str = concat!(
 );
 
 // aggregate across 1 week
-const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
+pub const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
 
 #[derive(Debug, From)]
 struct ResponseCacheKey {
@@ -229,6 +229,7 @@ pub struct Web3ProxyApp {
     pub db_conn: Option<sea_orm::DatabaseConnection>,
     /// Optional read-only database for users and accounting
     pub db_replica: Option<DatabaseReplica>,
+    pub hostname: Option<String>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     /// TODO: think about this more. might be worth storing if we sent the transaction or not and using this for automatic retries
     pub pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
@@ -576,7 +577,12 @@ impl Web3ProxyApp {
         // stats can be saved in mysql, influxdb, both, or none
         let stat_sender = if let Some(emitter_spawn) = StatBuffer::try_spawn(
             top_config.app.chain_id,
-            top_config.app.influxdb_bucket.clone().context("No influxdb bucket was provided")?.to_owned(),
+            top_config
+                .app
+                .influxdb_bucket
+                .clone()
+                .context("No influxdb bucket was provided")?
+                .to_owned(),
             db_conn.clone(),
             influxdb_client.clone(),
             60,
@@ -761,6 +767,10 @@ impl Web3ProxyApp {
             Some(private_rpcs)
         };
 
+        let hostname = hostname::get()
+            .ok()
+            .and_then(|x| x.to_str().map(|x| x.to_string()));
+
         let app = Self {
             config: top_config.app.clone(),
             balanced_rpcs,
@@ -777,6 +787,7 @@ impl Web3ProxyApp {
             db_conn,
             db_replica,
             influxdb_client,
+            hostname,
             vredis_pool,
             rpc_secret_key_cache,
             bearer_token_semaphores,
@@ -1571,7 +1582,9 @@ impl Web3ProxyApp {
                 match &request.params {
                     Some(serde_json::Value::Array(params)) => {
                         // TODO: make a struct and use serde conversion to clean this up
-                        if params.len() != 1 || !params[0].is_string() {
+                        if params.len() != 1
+                            || !params.get(0).map(|x| x.is_string()).unwrap_or(false)
+                        {
                             // TODO: what error code?
                             return Ok((
                                 JsonRpcForwardedResponse::from_str(
@@ -1785,7 +1798,7 @@ impl Web3ProxyApp {
 
                 if let Some(stat_sender) = self.stat_sender.as_ref() {
                     let response_stat = RpcQueryStats::new(
-                        method.to_string(),
+                        Some(method.to_string()),
                         authorization.clone(),
                         request_metadata,
                         response.num_bytes(),
@@ -1808,7 +1821,7 @@ impl Web3ProxyApp {
 
         if let Some(stat_sender) = self.stat_sender.as_ref() {
             let response_stat = RpcQueryStats::new(
-                request_method,
+                Some(request_method),
                 authorization.clone(),
                 request_metadata,
                 response.num_bytes(),

@@ -29,12 +29,13 @@ use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
-use std::cmp::min_by_key;
+use std::cmp::{min_by_key, Reverse};
 use std::collections::BTreeMap;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
 use std::{cmp, fmt};
 use thread_fast_rng::rand::seq::SliceRandom;
+use tokio;
 use tokio::sync::{broadcast, watch};
 use tokio::task;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
@@ -397,7 +398,7 @@ impl Web3Rpcs {
             let clone = self.clone();
             let authorization = authorization.clone();
             let pending_tx_id_receiver = self.pending_tx_id_receiver.clone();
-            let handle = task::spawn(async move {
+            let handle = tokio::task::spawn(async move {
                 // TODO: set up this future the same as the block funnel
                 while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv_async().await {
                     let f = clone.clone().process_incoming_tx_id(
@@ -420,7 +421,7 @@ impl Web3Rpcs {
             let connections = Arc::clone(&self);
             let pending_tx_sender = pending_tx_sender.clone();
 
-            let handle = task::Builder::default()
+            let handle = tokio::task::Builder::default()
                 .name("process_incoming_blocks")
                 .spawn(async move {
                     connections
@@ -434,12 +435,14 @@ impl Web3Rpcs {
         if futures.is_empty() {
             // no transaction or block subscriptions.
 
-            let handle = task::Builder::default().name("noop").spawn(async move {
-                loop {
-                    sleep(Duration::from_secs(600)).await;
-                    // TODO: "every interval, check that the provider is still connected"
-                }
-            })?;
+            let handle = tokio::task::Builder::default()
+                .name("noop")
+                .spawn(async move {
+                    loop {
+                        sleep(Duration::from_secs(600)).await;
+                        // TODO: "every interval, check that the provider is still connected"
+                    }
+                })?;
 
             futures.push(flatten_handle(handle));
         }
@@ -557,7 +560,7 @@ impl Web3Rpcs {
             // TODO: double check the logic on this. especially if only min is set
             let needed_blocks_comparison = match (min_block_needed, max_block_needed) {
                 (None, None) => {
-                    // no required block given. treat this like the requested the consensus head block
+                    // no required block given. treat this like they requested the consensus head block
                     cmp::Ordering::Equal
                 }
                 (None, Some(max_block_needed)) => max_block_needed.cmp(head_block_num),
@@ -661,7 +664,7 @@ impl Web3Rpcs {
                     // they are all at the same block and it is already sized to what we need
                     let key = (0, None);
 
-                    for x in synced_connections.rpcs.iter() {
+                    for x in synced_connections.best_rpcs.iter() {
                         if skip.contains(x) {
                             trace!("skipping: {}", x);
                             continue;
@@ -789,7 +792,7 @@ impl Web3Rpcs {
             let synced_rpcs = self.watch_consensus_rpcs_sender.borrow();
 
             if let Some(synced_rpcs) = synced_rpcs.as_ref() {
-                synced_rpcs.rpcs.clone()
+                synced_rpcs.best_rpcs.clone()
             } else {
                 vec![]
             }
@@ -932,7 +935,7 @@ impl Web3Rpcs {
                         request.id.clone(),
                     ) {
                         Ok(response) => {
-                            if let Some(error) = &response.error.as_ref() {
+                            if let Some(error) = response.error.as_ref() {
                                 // trace!(?response, "rpc error");
 
                                 if let Some(request_metadata) = request_metadata {
@@ -1007,8 +1010,10 @@ impl Web3Rpcs {
 
                             // TODO: emit a stat. if a server is getting skipped a lot, something is not right
 
+                            // TODO: if we get a TrySendError, reconnect. wait why do we see a trysenderror on a dual provider? shouldn't it be using reqwest
+
                             debug!(
-                                "Backend server error on {}! Retrying on another. err={:?}",
+                                "Backend server error on {}! Retrying on another. err={:#?}",
                                 rpc, err
                             );
 
@@ -1064,19 +1069,27 @@ impl Web3Rpcs {
         let num_conns = self.by_name.read().len();
         let num_skipped = skip_rpcs.len();
 
+        let consensus = watch_consensus_connections.borrow();
+
+        let head_block_num = consensus.as_ref().map(|x| x.head_block.number());
+
         if num_skipped == 0 {
             error!(
-                "No servers synced ({:?}-{:?}) ({} known). None skipped",
-                min_block_needed, max_block_needed, num_conns
+                "No servers synced ({:?}-{:?}, {:?}) ({} known). None skipped",
+                min_block_needed, max_block_needed, head_block_num, num_conns
             );
-            debug!("{}", serde_json::to_string(&request).unwrap());
+
+            // TODO: remove this, or move to trace level
+            // debug!("{}", serde_json::to_string(&request).unwrap());
         } else {
-            // TODO: warn? debug? trace?
-            warn!(
-                "Requested data was not available on {}/{} servers",
-                num_skipped, num_conns
+            // TODO: error? warn? debug? trace?
+            error!(
+                "Requested data is not available ({:?}-{:?}, {:?}) ({} skipped, {} known)",
+                min_block_needed, max_block_needed, head_block_num, num_skipped, num_conns
             );
         }
+
+        drop(consensus);
 
         // TODO: what error code?
         // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
@@ -1271,9 +1284,8 @@ impl Serialize for Web3Rpcs {
 /// TODO: should this be moved into a `impl Web3Rpc`?
 /// TODO: i think we still have sorts scattered around the code that should use this
 /// TODO: take AsRef or something like that? We don't need an Arc here
-fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (U64, u64, bool, OrderedFloat<f64>) {
-    let reversed_head_block = U64::MAX
-        - x.head_block
+fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (Reverse<U64>, u64, bool, OrderedFloat<f64>) {
+    let head_block = x.head_block
             .read()
             .as_ref()
             .map(|x| *x.number())
@@ -1293,7 +1305,7 @@ fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (U64, u64, bool, OrderedFloat<f
 
     let backup = x.backup;
 
-    (reversed_head_block, tier, backup, peak_ewma)
+    (Reverse(head_block), tier, backup, peak_ewma)
 }
 
 mod tests {

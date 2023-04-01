@@ -65,9 +65,13 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     IpNotAllowed(IpAddr),
     JoinError(JoinError),
+    #[display(fmt = "{:?}", _0)]
+    #[error(ignore)]
+    JsonRpc(crate::jsonrpc::JsonRpcErrorData),
     MsgPackEncode(rmp_serde::encode::Error),
     NoBlockNumberOrHash,
     NoBlocksKnown,
+    NoConsensusHeadBlock,
     NoHandleReady,
     NoServersSynced,
     #[display(fmt = "{}/{}", num_known, min_head_rpcs)]
@@ -409,6 +413,17 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::JsonRpc(err) => {
+                debug!("JsonRpc err={:?}", err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcForwardedResponse::from_str(
+                        "json rpc error!",
+                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             Self::MsgPackEncode(err) => {
                 debug!("MsgPackEncode Error: {}", err);
                 (
@@ -437,6 +452,17 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
                         "no blocks known",
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::NoConsensusHeadBlock => {
+                error!("NoConsensusHeadBlock");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        "no consensus head block",
                         Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),

@@ -1,15 +1,13 @@
-#
-# cargo-nextest
-# We only pay the installation cost once, 
-# it will be cached from the second build onwards
-#
-FROM rust:1.67.1-bullseye AS builder
+FROM rust:1.68.2-bullseye AS builder
 
 WORKDIR /app
 ENV CARGO_TERM_COLOR always
 
 # a next-generation test runner for Rust projects.
+# We only pay the installation cost once, 
+# it will be cached from the second build onwards
 # TODO: more mount type cache?
+# TODO: do this in a seperate FROM and COPY it in
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install cargo-nextest
 
@@ -18,7 +16,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 ENV PATH /root/.foundry/bin:$PATH
 RUN curl -L https://foundry.paradigm.xyz | bash && foundryup
 
-RUN apt-get update && apt-get install --yes librdkafka-dev && rm -rf /var/lib/apt/lists/*
+# install web3-proxy system dependencies. most things are rust-only, but not everything
+RUN apt-get update && \
+    apt-get install --yes librdkafka-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 # copy the application
 COPY . .
