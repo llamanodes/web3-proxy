@@ -2,7 +2,7 @@
 use super::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use super::consensus::ConsensusWeb3Rpcs;
 use super::one::Web3Rpc;
-use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
+use super::request::{OpenRequestHandle, OpenRequestResult, RequestRevertHandler};
 use crate::app::{flatten_handle, AnyhowJoinHandle, Web3ProxyApp};
 ///! Load balanced communication with a group of web3 providers
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
@@ -316,43 +316,8 @@ impl Web3Rpcs {
             }
         }
 
-        // <<<<<<< HEAD
         Ok(())
     }
-    // =======
-    //         // TODO: max_capacity and time_to_idle from config
-    //         // all block hashes are the same size, so no need for weigher
-    //         let block_hashes = Cache::builder()
-    //             .time_to_idle(Duration::from_secs(600))
-    //             .max_capacity(10_000)
-    //             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-    //         // all block numbers are the same size, so no need for weigher
-    //         let block_numbers = Cache::builder()
-    //             .time_to_idle(Duration::from_secs(600))
-    //             .max_capacity(10_000)
-    //             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-    //
-    //         let (watch_consensus_connections_sender, consensus_connections_watcher) =
-    //             watch::channel(Default::default());
-    //
-    //         let watch_consensus_head_receiver =
-    //             watch_consensus_head_sender.as_ref().map(|x| x.subscribe());
-    //
-    //         let connections = Arc::new(Self {
-    //             by_name: connections,
-    //             watch_consensus_rpcs_sender: watch_consensus_connections_sender,
-    //             watch_consensus_head_receiver,
-    //             pending_transactions,
-    //             block_hashes,
-    //             block_numbers,
-    //             min_sum_soft_limit,
-    //             min_head_rpcs,
-    //             max_block_age,
-    //             max_block_lag,
-    //         });
-    //
-    //         let authorization = Arc::new(Authorization::internal(db_conn.clone())?);
-    // >>>>>>> 77df3fa (stats v2)
 
     pub fn get(&self, conn_name: &str) -> Option<Arc<Web3Rpc>> {
         self.by_name.read().get(conn_name).cloned()
@@ -913,7 +878,7 @@ impl Web3Rpcs {
                         .request(
                             &request.method,
                             &json!(request.params),
-                            RequestErrorHandler::SaveRevert,
+                            RequestRevertHandler::Save,
                             None,
                         )
                         .await;

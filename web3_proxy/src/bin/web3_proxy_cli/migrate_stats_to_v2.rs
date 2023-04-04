@@ -279,14 +279,15 @@ impl MigrateStatsToV2 {
         );
 
         drop(stat_sender);
-        // match app_shutdown_sender.send(()) {
-        //     Err(x) => {
-        //         panic!("Could not send shutdown signal! {:?}", x);
-        //     }
-        //     _ => {}
-        // };
 
-        // Drop the background handle, wait for any tasks that are on-going
+        match app_shutdown_sender.send(()) {
+            Err(x) => {
+                panic!("Could not send shutdown signal! {:?}", x);
+            }
+            _ => {}
+        };
+
+        // Wait for any tasks that are on-going
         while let Some(x) = important_background_handles.next().await {
             info!("Returned item is: {:?}", x);
             match x {
