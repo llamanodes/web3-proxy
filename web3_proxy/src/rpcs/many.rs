@@ -1285,23 +1285,28 @@ impl Serialize for Web3Rpcs {
 /// TODO: i think we still have sorts scattered around the code that should use this
 /// TODO: take AsRef or something like that? We don't need an Arc here
 fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (Reverse<U64>, u64, bool, OrderedFloat<f64>) {
-    let head_block = x.head_block
-            .read()
-            .as_ref()
-            .map(|x| *x.number())
-            .unwrap_or_default();
+    let head_block = x
+        .head_block
+        .read()
+        .as_ref()
+        .map(|x| *x.number())
+        .unwrap_or_default();
 
     let tier = x.tier;
 
     // TODO: use request latency instead of head latency
     // TODO: have the latency decay automatically
-    let head_ewma = x.head_latency.read().value();
+    let peak_latency = x
+        .peak_latency
+        .as_ref()
+        .expect("peak_latency uniniialized")
+        .latency_rx
+        .borrow();
 
     let active_requests = x.active_requests.load(atomic::Ordering::Relaxed) as f64;
 
     // TODO: i'm not sure head * active is exactly right. but we'll see
-    // TODO: i don't think this actually counts as peak. investigate with atomics.rs and peak_ewma.rs
-    let peak_ewma = OrderedFloat(head_ewma * active_requests);
+    let peak_ewma = OrderedFloat(peak_latency.as_millis() as f64 * active_requests);
 
     let backup = x.backup;
 

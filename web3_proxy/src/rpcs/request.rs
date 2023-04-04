@@ -193,12 +193,16 @@ impl OpenRequestHandle {
             .active_requests
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        // let latency = Instant::now();
+        let start = Instant::now();
 
         // TODO: replace ethers-rs providers with our own that supports streaming the responses
         let response = match provider.as_ref() {
             #[cfg(test)]
-            Web3Provider::Mock => return Err(ProviderError::CustomError("mock provider can't respond".to_string())),
+            Web3Provider::Mock => {
+                return Err(ProviderError::CustomError(
+                    "mock provider can't respond".to_string(),
+                ))
+            }
             Web3Provider::Ws(p) => p.request(method, params).await,
             Web3Provider::Http(p) | Web3Provider::Both(p, _) => {
                 // TODO: i keep hearing that http is faster. but ws has always been better for me. investigate more with actual benchmarks
@@ -429,14 +433,10 @@ impl OpenRequestHandle {
                 }
             }
             // TODO: track error latency?
+        } else if let Some(peak_latency) = &self.rpc.peak_latency {
+            peak_latency.report(start.elapsed()).await;
         } else {
-            // TODO: record request latency
-            // let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-            // TODO: is this lock here a problem? should this be done through a channel? i started to code it, but it didn't seem to matter
-            // let mut latency_recording = self.rpc.request_latency.write();
-
-            // latency_recording.record(latency_ms);
+            unreachable!("peak_latency not initialized");
         }
 
         response
