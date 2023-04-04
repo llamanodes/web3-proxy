@@ -283,10 +283,6 @@ impl Web3Rpcs {
             })
             .collect();
 
-        // map of connection names to their connection
-        // let mut connections = HashMap::new();
-        // let mut handles = vec![];
-
         while let Some(x) = spawn_handles.next().await {
             match x {
                 Ok(Ok((rpc, _handle))) => {
@@ -367,12 +363,8 @@ impl Web3Rpcs {
         self.by_name.read().len()
     }
 
-    // <<<<<<< HEAD
     pub fn is_empty(&self) -> bool {
         self.by_name.read().is_empty()
-        // =======
-        //         Ok((connections, handle, consensus_connections_watcher))
-        // >>>>>>> 77df3fa (stats v2)
     }
 
     pub fn min_head_rpcs(&self) -> usize {
@@ -888,11 +880,7 @@ impl Web3Rpcs {
 
         // TODO: maximum retries? right now its the total number of servers
         loop {
-            // <<<<<<< HEAD
             if skip_rpcs.len() >= self.by_name.read().len() {
-                // =======
-                //             if skip_rpcs.len() == self.by_name.len() {
-                // >>>>>>> 77df3fa (stats v2)
                 break;
             }
 
@@ -1173,18 +1161,8 @@ impl Web3Rpcs {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
-                    // <<<<<<< HEAD
                     watch_consensus_rpcs.changed().await?;
-
                     watch_consensus_rpcs.borrow_and_update();
-                    // =======
-                    // TODO: i don't think this will ever happen
-                    // TODO: return a 502? if it does?
-                    // return Err(anyhow::anyhow!("no available rpcs!"));
-                    // TODO: sleep how long?
-                    // TODO: subscribe to something in ConsensusWeb3Rpcs instead
-                    sleep(Duration::from_millis(200)).await;
-                    // >>>>>>> 77df3fa (stats v2)
 
                     continue;
                 }

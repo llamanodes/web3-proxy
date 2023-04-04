@@ -189,12 +189,9 @@ impl Web3Rpc {
             block_data_limit,
             reconnect,
             tier: config.tier,
-            // <<<<<<< HEAD
             disconnect_watch: Some(disconnect_sender),
             created_at: Some(created_at),
-            // =======
             head_block: RwLock::new(Default::default()),
-            // >>>>>>> 77df3fa (stats v2)
             peak_latency: Some(peak_latency),
             ..Default::default()
         };
@@ -735,7 +732,6 @@ impl Web3Rpc {
                                 let head_block = rpc.head_block.read().clone();
 
                                 if let Some((block_number, txid)) = head_block.and_then(|x| {
-                                    // let block = x.block;
                                     let block = x.block.clone();
 
                                     let block_number = block.number?;
@@ -1199,14 +1195,8 @@ impl Web3Rpc {
         }
 
         if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
-            // <<<<<<< HEAD
             let hard_limit_ready = *hard_limit_until.borrow();
-            // =======
-            //             let hard_limit_ready = hard_limit_until.borrow().to_owned();
-            // >>>>>>> 77df3fa (stats v2)
-
             let now = Instant::now();
-
             if now < hard_limit_ready {
                 return Ok(OpenRequestResult::RetryAt(hard_limit_ready));
             }

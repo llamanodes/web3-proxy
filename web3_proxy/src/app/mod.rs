@@ -408,8 +408,8 @@ impl Web3ProxyApp {
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
-        let rpc_account_shutdown_recevier = shutdown_sender.subscribe();
-        let _background_shutdown_receiver = shutdown_sender.subscribe();
+        let stat_buffer_shutdown_receiver = shutdown_sender.subscribe();
+        let mut background_shutdown_receiver = shutdown_sender.subscribe();
 
         // safety checks on the config
         // while i would prefer this to be in a "apply_top_config" function, that is a larger refactor
@@ -588,7 +588,7 @@ impl Web3ProxyApp {
             60,
             1,
             BILLING_PERIOD_SECONDS,
-            rpc_account_shutdown_recevier,
+            stat_buffer_shutdown_receiver,
         )? {
             // since the database entries are used for accounting, we want to be sure everything is saved before exiting
             important_background_handles.push(emitter_spawn.background_handle);
@@ -712,9 +712,6 @@ impl Web3ProxyApp {
             .time_to_idle(Duration::from_secs(120))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
-        // prepare a Web3Rpcs to hold all our balanced connections
-        // let (balanced_rpcs, balanced_rpcs_handle) = Web3Rpcs::spawn(
-        // connect to the load balanced rpcs
         let (balanced_rpcs, balanced_handle, consensus_connections_watcher) = Web3Rpcs::spawn(
             top_config.app.chain_id,
             db_conn.clone(),
