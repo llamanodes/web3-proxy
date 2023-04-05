@@ -236,11 +236,11 @@ impl BufferedRpcQueryStats {
         // this is a lot of variables
         let accounting_entry = rpc_accounting_v2::ActiveModel {
             id: sea_orm::NotSet,
-            rpc_key_id: sea_orm::Set(key.rpc_secret_key_id.map(Into::into)),
-            origin: sea_orm::Set(key.origin.map(|x| x.to_string())),
+            rpc_key_id: sea_orm::Set(key.rpc_secret_key_id.map(Into::into).unwrap_or_default()),
+            origin: sea_orm::Set(key.origin.map(|x| x.to_string()).unwrap_or_default()),
             chain_id: sea_orm::Set(chain_id),
             period_datetime: sea_orm::Set(period_datetime),
-            method: sea_orm::Set(key.method),
+            method: sea_orm::Set(key.method.unwrap_or_default()),
             archive_needed: sea_orm::Set(key.archive_needed),
             error_response: sea_orm::Set(key.error_response),
             frontend_requests: sea_orm::Set(self.frontend_requests),
