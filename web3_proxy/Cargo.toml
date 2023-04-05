@@ -7,11 +7,9 @@ default-run = "web3_proxy_cli"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["deadlock_detection", "tokio-console"]
+default = ["deadlock_detection"]
 deadlock_detection = ["parking_lot/deadlock_detection"]
 tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
-
-# TODO: turn tokio-console on with a feature. console-subscriber = { version = "0.1.7" }
 
 [dependencies]
 deferred-rate-limiter = { path = "../deferred-rate-limiter" }
