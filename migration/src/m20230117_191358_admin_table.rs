@@ -19,10 +19,10 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(
-                ColumnDef::new(Admin::UserId)
+                        ColumnDef::new(Admin::UserId)
                             .big_unsigned()
                             .unique_key()
-                            .not_null()
+                            .not_null(),
                     )
                     .foreign_key(
                         ForeignKey::create()
@@ -47,7 +47,7 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum User {
     Table,
-    Id
+    Id,
 }
 
 #[derive(Iden)]

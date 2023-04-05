@@ -12,11 +12,8 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(RpcAccounting::Table)
                     .to_owned()
-                    .add_column(
-                        ColumnDef::new(RpcAccounting::Migrated)
-                                .timestamp()
-                    )
-                    .to_owned()
+                    .add_column(ColumnDef::new(RpcAccounting::Migrated).timestamp())
+                    .to_owned(),
             )
             .await
     }
@@ -27,7 +24,7 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(RpcAccounting::Table)
                     .drop_column(RpcAccounting::Migrated)
-                    .to_owned()
+                    .to_owned(),
             )
             .await
     }
@@ -76,6 +73,5 @@ enum RpcAccounting {
     P90ResponseBytes,
     P99ResponseBytes,
     MaxResponseBytes,
-    Migrated
+    Migrated,
 }
-

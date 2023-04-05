@@ -40,7 +40,7 @@ pub struct Model {
     pub max_response_bytes: u64,
     pub archive_request: bool,
     pub origin: Option<String>,
-    pub migrated: Option<DateTime>
+    pub migrated: Option<DateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

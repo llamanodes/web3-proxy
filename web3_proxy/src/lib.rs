@@ -1,5 +1,5 @@
-pub mod app;
 pub mod admin_queries;
+pub mod app;
 pub mod atomics;
 pub mod block_number;
 pub mod config;
