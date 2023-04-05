@@ -1,4 +1,5 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use anyhow::Context;
 use ethers::{
     prelude::{BlockNumber, U64},
@@ -126,7 +127,7 @@ pub async fn block_needed(
     params: Option<&mut serde_json::Value>,
     head_block_num: U64,
     rpcs: &Web3Rpcs,
-) -> anyhow::Result<BlockNeeded> {
+) -> Web3ProxyResult<BlockNeeded> {
     // some requests have potentially very large responses
     // TODO: only skip caching if the response actually is large
     if method.starts_with("trace_") || method == "debug_traceTransaction" {
@@ -181,7 +182,7 @@ pub async fn block_needed(
                 .get_mut(0)
                 .ok_or_else(|| anyhow::anyhow!("invalid format. no params"))?
                 .as_object_mut()
-                .ok_or_else(|| anyhow::anyhow!("invalid format"))?;
+                .ok_or_else(|| Web3ProxyError::BadRequest("invalid format".to_string()))?;
 
             if obj.contains_key("blockHash") {
                 return Ok(BlockNeeded::CacheSuccessForever);

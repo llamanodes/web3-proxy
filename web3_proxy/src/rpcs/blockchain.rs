@@ -4,8 +4,8 @@ use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use super::transactions::TxStatus;
 use crate::frontend::authorization::Authorization;
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::{config::BlockAndRpc, jsonrpc::JsonRpcRequest};
-use anyhow::{anyhow, Context};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use log::{debug, trace, warn, Level};
@@ -132,11 +132,11 @@ impl Web3ProxyBlock {
 }
 
 impl TryFrom<ArcBlock> for Web3ProxyBlock {
-    type Error = anyhow::Error;
+    type Error = Web3ProxyError;
 
     fn try_from(x: ArcBlock) -> Result<Self, Self::Error> {
         if x.number.is_none() || x.hash.is_none() {
-            return Err(anyhow!("Blocks here must have a number of hash"));
+            return Err(Web3ProxyError::NoBlockNumberOrHash);
         }
 
         let b = Web3ProxyBlock {
@@ -166,7 +166,7 @@ impl Web3Rpcs {
         &self,
         block: Web3ProxyBlock,
         heaviest_chain: bool,
-    ) -> anyhow::Result<Web3ProxyBlock> {
+    ) -> Web3ProxyResult<Web3ProxyBlock> {
         // TODO: i think we can rearrange this function to make it faster on the hot path
         let block_hash = block.hash();
 
@@ -198,13 +198,13 @@ impl Web3Rpcs {
 
     /// Get a block from caches with fallback.
     /// Will query a specific node or the best available.
-    /// TODO: return anyhow::Result<Option<ArcBlock>>?
+    /// TODO: return Web3ProxyResult<Option<ArcBlock>>?
     pub async fn block(
         &self,
         authorization: &Arc<Authorization>,
         hash: &H256,
         rpc: Option<&Arc<Web3Rpc>>,
-    ) -> anyhow::Result<Web3ProxyBlock> {
+    ) -> Web3ProxyResult<Web3ProxyBlock> {
         // first, try to get the hash from our cache
         // the cache is set last, so if its here, its everywhere
         // TODO: use try_get_with
@@ -233,7 +233,7 @@ impl Web3Rpcs {
                         x.try_into().ok()
                     }
                 })
-                .context("no block!")?,
+                .web3_context("no block!")?,
             None => {
                 // TODO: helper for method+params => JsonRpcRequest
                 // TODO: does this id matter?
@@ -253,16 +253,16 @@ impl Web3Rpcs {
                     .await?;
 
                 if let Some(err) = response.error {
-                    let err = anyhow::anyhow!("{:#?}", err);
-
-                    return Err(err.context("failed fetching block"));
+                    return Err(err).web3_context("failed fetching block");
                 }
 
-                let block = response.result.context("no error, but also no block")?;
+                let block = response
+                    .result
+                    .web3_context("no error, but also no block")?;
 
                 let block: Option<ArcBlock> = serde_json::from_str(block.get())?;
 
-                let block: ArcBlock = block.context("no block in the response")?;
+                let block: ArcBlock = block.web3_context("no block in the response")?;
 
                 // TODO: received time is going to be weird
                 Web3ProxyBlock::try_from(block)?
@@ -281,7 +281,7 @@ impl Web3Rpcs {
         &self,
         authorization: &Arc<Authorization>,
         num: &U64,
-    ) -> anyhow::Result<(H256, u64)> {
+    ) -> Web3ProxyResult<(H256, u64)> {
         let (block, block_depth) = self.cannonical_block(authorization, num).await?;
 
         let hash = *block.hash();
@@ -295,7 +295,7 @@ impl Web3Rpcs {
         &self,
         authorization: &Arc<Authorization>,
         num: &U64,
-    ) -> anyhow::Result<(Web3ProxyBlock, u64)> {
+    ) -> Web3ProxyResult<(Web3ProxyBlock, u64)> {
         // we only have blocks by hash now
         // maybe save them during save_block in a blocks_by_number Cache<U64, Vec<ArcBlock>>
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
@@ -303,7 +303,7 @@ impl Web3Rpcs {
         let mut consensus_head_receiver = self
             .watch_consensus_head_sender
             .as_ref()
-            .context("need new head subscriptions to fetch cannonical_block")?
+            .web3_context("need new head subscriptions to fetch cannonical_block")?
             .subscribe();
 
         // be sure the requested block num exists
@@ -311,7 +311,7 @@ impl Web3Rpcs {
         let mut head_block_num = *consensus_head_receiver
             .borrow_and_update()
             .as_ref()
-            .context("no consensus head block")?
+            .web3_context("no consensus head block")?
             .number();
 
         loop {
@@ -352,7 +352,7 @@ impl Web3Rpcs {
             debug!("could not find canonical block {}: {:?}", num, err);
         }
 
-        let raw_block = response.result.context("no cannonical block result")?;
+        let raw_block = response.result.web3_context("no cannonical block result")?;
 
         let block: ArcBlock = serde_json::from_str(raw_block.get())?;
 
@@ -412,13 +412,13 @@ impl Web3Rpcs {
         consensus_finder: &mut ConsensusFinder,
         new_block: Option<Web3ProxyBlock>,
         rpc: Arc<Web3Rpc>,
-        pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
-    ) -> anyhow::Result<()> {
+        _pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
+    ) -> Web3ProxyResult<()> {
         // TODO: how should we handle an error here?
         if !consensus_finder
             .update_rpc(new_block.clone(), rpc.clone(), self)
             .await
-            .context("failed to update rpc")?
+            .web3_context("failed to update rpc")?
         {
             // nothing changed. no need to scan for a new consensus head
             return Ok(());
@@ -429,12 +429,10 @@ impl Web3Rpcs {
             .await
         {
             Err(err) => {
-                let err = err.context("error while finding consensus head block!");
-
-                return Err(err);
+                return Err(err).web3_context("error while finding consensus head block!");
             }
             Ok(None) => {
-                return Err(anyhow!("no consensus head block!"));
+                return Err(Web3ProxyError::NoConsensusHeadBlock);
             }
             Ok(Some(x)) => x,
         };
@@ -479,7 +477,8 @@ impl Web3Rpcs {
 
                 watch_consensus_head_sender
                     .send(Some(consensus_head_block))
-                    .context(
+                    .or(Err(Web3ProxyError::WatchSendError))
+                    .web3_context(
                         "watch_consensus_head_sender failed sending first consensus_head_block",
                     )?;
             }
@@ -529,11 +528,12 @@ impl Web3Rpcs {
                             let consensus_head_block = self
                                 .try_cache_block(consensus_head_block, true)
                                 .await
-                                .context("save consensus_head_block as heaviest chain")?;
+                                .web3_context("save consensus_head_block as heaviest chain")?;
 
                             watch_consensus_head_sender
                                 .send(Some(consensus_head_block))
-                                .context("watch_consensus_head_sender failed sending uncled consensus_head_block")?;
+                                .or(Err(Web3ProxyError::WatchSendError))
+                                .web3_context("watch_consensus_head_sender failed sending uncled consensus_head_block")?;
                         }
                     }
                     Ordering::Less => {
@@ -562,11 +562,14 @@ impl Web3Rpcs {
                         let consensus_head_block = self
                             .try_cache_block(consensus_head_block, true)
                             .await
-                            .context("save_block sending consensus_head_block as heaviest chain")?;
+                            .web3_context(
+                                "save_block sending consensus_head_block as heaviest chain",
+                            )?;
 
                         watch_consensus_head_sender
                             .send(Some(consensus_head_block))
-                            .context("watch_consensus_head_sender failed sending rollback consensus_head_block")?;
+                            .or(Err(Web3ProxyError::WatchSendError))
+                            .web3_context("watch_consensus_head_sender failed sending rollback consensus_head_block")?;
                     }
                     Ordering::Greater => {
                         debug!(
@@ -590,7 +593,9 @@ impl Web3Rpcs {
                         let consensus_head_block =
                             self.try_cache_block(consensus_head_block, true).await?;
 
-                        watch_consensus_head_sender.send(Some(consensus_head_block)).context("watch_consensus_head_sender failed sending new consensus_head_block")?;
+                        watch_consensus_head_sender.send(Some(consensus_head_block))
+                            .or(Err(Web3ProxyError::WatchSendError))
+                            .web3_context("watch_consensus_head_sender failed sending new consensus_head_block")?;
                     }
                 }
             }

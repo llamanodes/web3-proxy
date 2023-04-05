@@ -1,8 +1,8 @@
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::FrontendErrorResponse;
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::http_params::get_user_id_from_params;
 use anyhow::Context;
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
 use axum::{
     headers::{authorization::Bearer, Authorization},
     Json, TypedHeader,
@@ -24,25 +24,21 @@ pub async fn query_admin_modify_usertier<'a>(
     app: &'a Web3ProxyApp,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &'a HashMap<String, String>,
-) -> Result<Response, FrontendErrorResponse> {
+) -> Web3ProxyResponse {
     // Quickly return if any of the input tokens are bad
     let user_address: Vec<u8> = params
         .get("user_address")
         .ok_or_else(|| {
-            FrontendErrorResponse::BadRequest(
-                "Unable to find user_address key in request".to_string(),
-            )
+            Web3ProxyError::BadRequest("Unable to find user_address key in request".to_string())
         })?
         .parse::<Address>()
         .map_err(|_| {
-            FrontendErrorResponse::BadRequest(
-                "Unable to parse user_address as an Address".to_string(),
-            )
+            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".to_string())
         })?
         .to_fixed_bytes()
         .into();
     let user_tier_title = params.get("user_tier_title").ok_or_else(|| {
-        FrontendErrorResponse::BadRequest(
+        Web3ProxyError::BadRequest(
             "Unable to get the user_tier_title key from the request".to_string(),
         )
     })?;
@@ -78,7 +74,7 @@ pub async fn query_admin_modify_usertier<'a>(
         .filter(admin::Column::UserId.eq(caller_id))
         .one(&db_conn)
         .await?
-        .ok_or(FrontendErrorResponse::AccessDenied)?;
+        .ok_or(Web3ProxyError::AccessDenied)?;
 
     // If we are here, that means an admin was found, and we can safely proceed
 
@@ -87,7 +83,7 @@ pub async fn query_admin_modify_usertier<'a>(
         .filter(user::Column::Address.eq(user_address))
         .one(&db_conn)
         .await?
-        .ok_or(FrontendErrorResponse::BadRequest(
+        .ok_or(Web3ProxyError::BadRequest(
             "No user with this id found".to_string(),
         ))?;
     // Return early if the target user_tier_id is the same as the original user_tier_id
@@ -101,7 +97,7 @@ pub async fn query_admin_modify_usertier<'a>(
         .filter(user_tier::Column::Title.eq(user_tier_title.clone()))
         .one(&db_conn)
         .await?
-        .ok_or(FrontendErrorResponse::BadRequest(
+        .ok_or(Web3ProxyError::BadRequest(
             "User Tier name was not found".to_string(),
         ))?;
 

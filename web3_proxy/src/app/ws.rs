@@ -2,11 +2,11 @@
 
 use super::Web3ProxyApp;
 use crate::frontend::authorization::{Authorization, RequestMetadata};
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::rpcs::transactions::TxStatus;
 use crate::stats::RpcQueryStats;
-use anyhow::Context;
 use axum::extract::ws::Message;
 use ethers::prelude::U64;
 use futures::future::AbortHandle;
@@ -27,13 +27,13 @@ impl Web3ProxyApp {
         subscription_count: &'a AtomicUsize,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
         response_sender: flume::Sender<Message>,
-    ) -> anyhow::Result<(AbortHandle, JsonRpcForwardedResponse)> {
+    ) -> Web3ProxyResult<(AbortHandle, JsonRpcForwardedResponse)> {
         // TODO: this is not efficient
         let request_bytes = serde_json::to_string(&request_json)
-            .context("finding request size")?
+            .web3_context("finding request size")?
             .len();
 
-        let request_metadata = Arc::new(RequestMetadata::new(request_bytes).unwrap());
+        let request_metadata = Arc::new(RequestMetadata::new(request_bytes));
 
         let (subscription_abort_handle, subscription_registration) = AbortHandle::new_pair();
 
@@ -67,7 +67,7 @@ impl Web3ProxyApp {
                         };
 
                         // TODO: what should the payload for RequestMetadata be?
-                        let request_metadata = Arc::new(RequestMetadata::new(0).unwrap());
+                        let request_metadata = Arc::new(RequestMetadata::new(0));
 
                         // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
                         let response_json = json!({
@@ -133,7 +133,7 @@ impl Web3ProxyApp {
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
-                        let request_metadata = Arc::new(RequestMetadata::new(0).unwrap());
+                        let request_metadata = Arc::new(RequestMetadata::new(0));
 
                         let new_tx = match new_tx_state {
                             TxStatus::Pending(tx) => tx,
@@ -208,7 +208,7 @@ impl Web3ProxyApp {
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
-                        let request_metadata = Arc::new(RequestMetadata::new(0).unwrap());
+                        let request_metadata = Arc::new(RequestMetadata::new(0));
 
                         let new_tx = match new_tx_state {
                             TxStatus::Pending(tx) => tx,
@@ -284,7 +284,7 @@ impl Web3ProxyApp {
                 // TODO: do something with this handle?
                 tokio::spawn(async move {
                     while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
-                        let request_metadata = Arc::new(RequestMetadata::new(0).unwrap());
+                        let request_metadata = Arc::new(RequestMetadata::new(0));
 
                         let new_tx = match new_tx_state {
                             TxStatus::Pending(tx) => tx,
@@ -341,7 +341,7 @@ impl Web3ProxyApp {
                     );
                 });
             }
-            _ => return Err(anyhow::anyhow!("unimplemented")),
+            _ => return Err(Web3ProxyError::NotImplemented),
         }
 
         // TODO: do something with subscription_join_handle?

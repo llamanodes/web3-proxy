@@ -2,7 +2,7 @@ use super::blockchain::Web3ProxyBlock;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use crate::frontend::authorization::Authorization;
-use anyhow::Context;
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use itertools::{Itertools, MinMaxResult};
@@ -156,7 +156,7 @@ impl ConsensusFinder {
         rpc: Arc<Web3Rpc>,
         // we need this so we can save the block to caches. i don't like it though. maybe we should use a lazy_static Cache wrapper that has a "save_block" method?. i generally dislike globals but i also dislike all the types having to pass eachother around
         web3_connections: &Web3Rpcs,
-    ) -> anyhow::Result<bool> {
+    ) -> Web3ProxyResult<bool> {
         // add the rpc's block to connection_heads, or remove the rpc from connection_heads
         let changed = match rpc_head_block {
             Some(mut rpc_head_block) => {
@@ -164,7 +164,7 @@ impl ConsensusFinder {
                 rpc_head_block = web3_connections
                     .try_cache_block(rpc_head_block, false)
                     .await
-                    .context("failed caching block")?;
+                    .web3_context("failed caching block")?;
 
                 // if let Some(max_block_lag) = max_block_lag {
                 //     if rpc_head_block.number() < ??? {
@@ -203,7 +203,7 @@ impl ConsensusFinder {
         &mut self,
         authorization: &Arc<Authorization>,
         web3_rpcs: &Web3Rpcs,
-    ) -> anyhow::Result<Option<ConsensusWeb3Rpcs>> {
+    ) -> Web3ProxyResult<Option<ConsensusWeb3Rpcs>> {
         let minmax_block = self.rpc_heads.values().minmax_by_key(|&x| x.number());
 
         let (lowest_block, highest_block) = match minmax_block {

@@ -1,6 +1,6 @@
 //! Handle registration, logins, and managing account data.
 use super::authorization::{login_is_authorized, RpcSecretKey};
-use super::errors::FrontendResult;
+use super::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::app::Web3ProxyApp;
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
@@ -9,7 +9,6 @@ use crate::stats::influxdb_queries::query_user_stats;
 use crate::stats::StatType;
 use crate::user_token::UserBearerToken;
 use crate::{PostLogin, PostLoginQuery};
-use anyhow::Context;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::{
     extract::{Path, Query},
@@ -65,7 +64,7 @@ pub async fn user_login_get(
     InsecureClientIp(ip): InsecureClientIp,
     // TODO: what does axum's error handling look like if the path fails to parse?
     Path(mut params): Path<HashMap<String, String>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     login_is_authorized(&app, ip).await?;
 
     // create a message and save it in redis
@@ -81,11 +80,9 @@ pub async fn user_login_get(
     // TODO: allow ENS names here?
     let user_address: Address = params
         .remove("user_address")
-        // TODO: map_err so this becomes a 500. routing must be bad
-        .context("impossible")?
+        .ok_or(Web3ProxyError::BadRouting)?
         .parse()
-        // TODO: map_err so this becomes a 401
-        .context("unable to parse address")?;
+        .or(Err(Web3ProxyError::ParseAddressError))?;
 
     let login_domain = app
         .config
@@ -113,7 +110,7 @@ pub async fn user_login_get(
         resources: vec![],
     };
 
-    let db_conn = app.db_conn().context("login requires a database")?;
+    let db_conn = app.db_conn().web3_context("login requires a database")?;
 
     // massage types to fit in the database. sea-orm does not make this very elegant
     let uuid = Uuid::from_u128(nonce.into());
@@ -135,7 +132,7 @@ pub async fn user_login_get(
     user_pending_login
         .save(&db_conn)
         .await
-        .context("saving user's pending_login")?;
+        .web3_context("saving user's pending_login")?;
 
     // there are multiple ways to sign messages and not all wallets support them
     // TODO: default message eip from config?
@@ -148,8 +145,7 @@ pub async fn user_login_get(
         "eip191_hash" => Bytes::from(&message.eip191_hash().unwrap()).to_string(),
         "eip4361" => message.to_string(),
         _ => {
-            // TODO: custom error that is handled a 401
-            return Err(anyhow::anyhow!("invalid message eip given").into());
+            return Err(Web3ProxyError::InvalidEip);
         }
     };
 
@@ -165,13 +161,13 @@ pub async fn user_login_post(
     InsecureClientIp(ip): InsecureClientIp,
     Query(query): Query<PostLoginQuery>,
     Json(payload): Json<PostLogin>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     login_is_authorized(&app, ip).await?;
 
     // TODO: this seems too verbose. how can we simply convert a String into a [u8; 65]
-    let their_sig_bytes = Bytes::from_str(&payload.sig).context("parsing sig")?;
+    let their_sig_bytes = Bytes::from_str(&payload.sig).web3_context("parsing sig")?;
     if their_sig_bytes.len() != 65 {
-        return Err(anyhow::anyhow!("checking signature length").into());
+        return Err(Web3ProxyError::InvalidSignatureLength);
     }
     let mut their_sig: [u8; 65] = [0; 65];
     for x in 0..65 {
@@ -181,17 +177,18 @@ pub async fn user_login_post(
     // we can't trust that they didn't tamper with the message in some way. like some clients return it hex encoded
     // TODO: checking 0x seems fragile, but I think it will be fine. siwe message text shouldn't ever start with 0x
     let their_msg: Message = if payload.msg.starts_with("0x") {
-        let their_msg_bytes = Bytes::from_str(&payload.msg).context("parsing payload message")?;
+        let their_msg_bytes =
+            Bytes::from_str(&payload.msg).web3_context("parsing payload message")?;
 
         // TODO: lossy or no?
         String::from_utf8_lossy(their_msg_bytes.as_ref())
             .parse::<siwe::Message>()
-            .context("parsing hex string message")?
+            .web3_context("parsing hex string message")?
     } else {
         payload
             .msg
             .parse::<siwe::Message>()
-            .context("parsing string message")?
+            .web3_context("parsing string message")?
     };
 
     // the only part of the message we will trust is their nonce
@@ -199,7 +196,9 @@ pub async fn user_login_post(
     let login_nonce = UserBearerToken::from_str(&their_msg.nonce)?;
 
     // fetch the message we gave them from our database
-    let db_replica = app.db_replica().context("Getting database connection")?;
+    let db_replica = app
+        .db_replica()
+        .web3_context("Getting database connection")?;
 
     // massage type for the db
     let login_nonce_uuid: Uuid = login_nonce.clone().into();
@@ -208,13 +207,13 @@ pub async fn user_login_post(
         .filter(pending_login::Column::Nonce.eq(login_nonce_uuid))
         .one(db_replica.conn())
         .await
-        .context("database error while finding pending_login")?
-        .context("login nonce not found")?;
+        .web3_context("database error while finding pending_login")?
+        .web3_context("login nonce not found")?;
 
     let our_msg: siwe::Message = user_pending_login
         .message
         .parse()
-        .context("parsing siwe message")?;
+        .web3_context("parsing siwe message")?;
 
     // default options are fine. the message includes timestamp and domain and nonce
     let verify_config = VerificationOpts::default();
@@ -223,16 +222,16 @@ pub async fn user_login_post(
     if let Err(err_1) = our_msg
         .verify(&their_sig, &verify_config)
         .await
-        .context("verifying signature against our local message")
+        .web3_context("verifying signature against our local message")
     {
         // verification method 1 failed. try eip191
         if let Err(err_191) = our_msg
             .verify_eip191(&their_sig)
-            .context("verifying eip191 signature against our local message")
+            .web3_context("verifying eip191 signature against our local message")
         {
             let db_conn = app
                 .db_conn()
-                .context("deleting expired pending logins requires a db")?;
+                .web3_context("deleting expired pending logins requires a db")?;
 
             // delete ALL expired rows.
             let now = Utc::now();
@@ -244,12 +243,10 @@ pub async fn user_login_post(
             // TODO: emit a stat? if this is high something weird might be happening
             debug!("cleared expired pending_logins: {:?}", delete_result);
 
-            return Err(anyhow::anyhow!(
-                "both the primary and eip191 verification failed: {:#?}; {:#?}",
-                err_1,
-                err_191
-            )
-            .into());
+            return Err(Web3ProxyError::EipVerificationFailed(
+                Box::new(err_1),
+                Box::new(err_191),
+            ));
         }
     }
 
@@ -260,7 +257,7 @@ pub async fn user_login_post(
         .await
         .unwrap();
 
-    let db_conn = app.db_conn().context("login requires a db")?;
+    let db_conn = app.db_conn().web3_context("login requires a db")?;
 
     let (u, uks, status_code) = match u {
         None => {
@@ -270,7 +267,7 @@ pub async fn user_login_post(
             // TODO: more advanced invite codes that set different request/minute and concurrency limits
             if let Some(invite_code) = &app.config.invite_code {
                 if query.invite_code.as_ref() != Some(invite_code) {
-                    return Err(anyhow::anyhow!("checking invite_code").into());
+                    return Err(Web3ProxyError::InvalidInviteCode);
                 }
             }
 
@@ -300,7 +297,7 @@ pub async fn user_login_post(
             let uk = uk
                 .insert(&txn)
                 .await
-                .context("Failed saving new user key")?;
+                .web3_context("Failed saving new user key")?;
 
             let uks = vec![uk];
 
@@ -315,7 +312,7 @@ pub async fn user_login_post(
                 .filter(rpc_key::Column::UserId.eq(u.id))
                 .all(db_replica.conn())
                 .await
-                .context("failed loading user's key")?;
+                .web3_context("failed loading user's key")?;
 
             (u, uks, StatusCode::OK)
         }
@@ -355,7 +352,7 @@ pub async fn user_login_post(
     user_login
         .save(&db_conn)
         .await
-        .context("saving user login")?;
+        .web3_context("saving user login")?;
 
     if let Err(err) = user_pending_login
         .into_active_model()
@@ -373,10 +370,12 @@ pub async fn user_login_post(
 pub async fn user_logout_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let user_bearer = UserBearerToken::try_from(bearer)?;
 
-    let db_conn = app.db_conn().context("database needed for user logout")?;
+    let db_conn = app
+        .db_conn()
+        .web3_context("database needed for user logout")?;
 
     if let Err(err) = login::Entity::delete_many()
         .filter(login::Column::BearerToken.eq(user_bearer.uuid()))
@@ -417,7 +416,7 @@ pub async fn user_logout_post(
 pub async fn user_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
 
     Ok(Json(user).into_response())
@@ -435,7 +434,7 @@ pub async fn user_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<UserPost>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
 
     let mut user: user::ActiveModel = user.into();
@@ -456,7 +455,7 @@ pub async fn user_post(
     // TODO: what else can we update here? password hash? subscription to newsletter?
 
     let user = if user.is_changed() {
-        let db_conn = app.db_conn().context("Getting database connection")?;
+        let db_conn = app.db_conn().web3_context("Getting database connection")?;
 
         user.save(&db_conn).await?
     } else {
@@ -464,7 +463,7 @@ pub async fn user_post(
         user
     };
 
-    let user: user::Model = user.try_into().context("Returning updated user")?;
+    let user: user::Model = user.try_into().web3_context("Returning updated user")?;
 
     Ok(Json(user).into_response())
 }
@@ -480,8 +479,8 @@ pub async fn user_post(
 pub async fn user_balance_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+) -> Web3ProxyResponse {
+    let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     todo!("user_balance_get");
 }
@@ -495,8 +494,8 @@ pub async fn user_balance_get(
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+) -> Web3ProxyResponse {
+    let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     todo!("user_balance_post");
 }
@@ -506,18 +505,18 @@ pub async fn user_balance_post(
 pub async fn rpc_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app
         .db_replica()
-        .context("db_replica is required to fetch a user's keys")?;
+        .web3_context("db_replica is required to fetch a user's keys")?;
 
     let uks = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(user.id))
         .all(db_replica.conn())
         .await
-        .context("failed loading user's key")?;
+        .web3_context("failed loading user's key")?;
 
     let response_json = json!({
         "user_id": user.id,
@@ -535,11 +534,11 @@ pub async fn rpc_keys_get(
 pub async fn rpc_keys_delete(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> FrontendResult {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+) -> Web3ProxyResponse {
+    let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     // TODO: think about how cascading deletes and billing should work
-    Err(anyhow::anyhow!("work in progress").into())
+    Err(Web3ProxyError::NotImplemented)
 }
 
 /// the JSON input to the `rpc_keys_management` handler.
@@ -567,12 +566,14 @@ pub async fn rpc_keys_management(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<UserKeyManagement>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // TODO: is there a way we can know if this is a PUT or POST? right now we can modify or create keys with either. though that probably doesn't matter
 
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica().context("getting db for user's keys")?;
+    let db_replica = app
+        .db_replica()
+        .web3_context("getting db for user's keys")?;
 
     let mut uk = if let Some(existing_key_id) = payload.key_id {
         // get the key and make sure it belongs to the user
@@ -581,8 +582,8 @@ pub async fn rpc_keys_management(
             .filter(rpc_key::Column::Id.eq(existing_key_id))
             .one(db_replica.conn())
             .await
-            .context("failed loading user's key")?
-            .context("key does not exist or is not controlled by this bearer token")?
+            .web3_context("failed loading user's key")?
+            .web3_context("key does not exist or is not controlled by this bearer token")?
             .into_active_model()
     } else {
         // make a new key
@@ -591,7 +592,7 @@ pub async fn rpc_keys_management(
 
         let log_level = payload
             .log_level
-            .context("log level must be 'none', 'detailed', or 'aggregated'")?;
+            .web3_context("log level must be 'none', 'detailed', or 'aggregated'")?;
 
         rpc_key::ActiveModel {
             user_id: sea_orm::Set(user.id),
@@ -720,9 +721,11 @@ pub async fn rpc_keys_management(
     }
 
     let uk = if uk.is_changed() {
-        let db_conn = app.db_conn().context("login requires a db")?;
+        let db_conn = app.db_conn().web3_context("login requires a db")?;
 
-        uk.save(&db_conn).await.context("Failed saving user key")?
+        uk.save(&db_conn)
+            .await
+            .web3_context("Failed saving user key")?
     } else {
         uk
     };
@@ -738,7 +741,7 @@ pub async fn user_revert_logs_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(params): Query<HashMap<String, String>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     let chain_id = get_chain_id_from_params(app.as_ref(), &params)?;
@@ -757,13 +760,13 @@ pub async fn user_revert_logs_get(
 
     let db_replica = app
         .db_replica()
-        .context("getting replica db for user's revert logs")?;
+        .web3_context("getting replica db for user's revert logs")?;
 
     let uks = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(user.id))
         .all(db_replica.conn())
         .await
-        .context("failed loading user's key")?;
+        .web3_context("failed loading user's key")?;
 
     // TODO: only select the ids
     let uks: Vec<_> = uks.into_iter().map(|x| x.id).collect();
@@ -808,7 +811,7 @@ pub async fn user_stats_aggregated_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let response = query_user_stats(&app, bearer, &params, StatType::Aggregated).await?;
 
     Ok(response)
@@ -828,7 +831,7 @@ pub async fn user_stats_detailed_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let response = query_user_stats(&app, bearer, &params, StatType::Detailed).await?;
 
     Ok(response)

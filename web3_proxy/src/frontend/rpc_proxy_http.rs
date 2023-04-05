@@ -1,7 +1,7 @@
 //! Take a user's HTTP JSON-RPC requests and either respond from local data or proxy the request to a backend rpc server.
 
 use super::authorization::{ip_is_authorized, key_is_authorized};
-use super::errors::FrontendResult;
+use super::errors::Web3ProxyResponse;
 use super::rpc_proxy_ws::ProxyMode;
 use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::Path;
@@ -22,7 +22,7 @@ pub async fn proxy_web3_rpc(
     ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _proxy_web3_rpc(app, ip, origin, payload, ProxyMode::Best).await
 }
 
@@ -32,7 +32,7 @@ pub async fn fastest_proxy_web3_rpc(
     ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // TODO: read the fastest number from params
     // TODO: check that the app allows this without authentication
     _proxy_web3_rpc(app, ip, origin, payload, ProxyMode::Fastest(0)).await
@@ -44,7 +44,7 @@ pub async fn versus_proxy_web3_rpc(
     ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _proxy_web3_rpc(app, ip, origin, payload, ProxyMode::Versus).await
 }
 
@@ -54,7 +54,7 @@ async fn _proxy_web3_rpc(
     origin: Option<TypedHeader<Origin>>,
     payload: JsonRpcRequestEnum,
     proxy_mode: ProxyMode,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // TODO: benchmark spawning this
     // TODO: do we care about keeping the TypedHeader wrapper?
     let origin = origin.map(|x| x.0);
@@ -115,7 +115,7 @@ pub async fn proxy_web3_rpc_with_key(
     user_agent: Option<TypedHeader<UserAgent>>,
     Path(rpc_key): Path<String>,
     Json(payload): Json<JsonRpcRequestEnum>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _proxy_web3_rpc_with_key(
         app,
         ip,
@@ -138,7 +138,7 @@ pub async fn debug_proxy_web3_rpc_with_key(
     user_agent: Option<TypedHeader<UserAgent>>,
     Path(rpc_key): Path<String>,
     Json(payload): Json<JsonRpcRequestEnum>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _proxy_web3_rpc_with_key(
         app,
         ip,
@@ -161,7 +161,7 @@ pub async fn fastest_proxy_web3_rpc_with_key(
     user_agent: Option<TypedHeader<UserAgent>>,
     Path(rpc_key): Path<String>,
     Json(payload): Json<JsonRpcRequestEnum>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _proxy_web3_rpc_with_key(
         app,
         ip,
@@ -184,7 +184,7 @@ pub async fn versus_proxy_web3_rpc_with_key(
     user_agent: Option<TypedHeader<UserAgent>>,
     Path(rpc_key): Path<String>,
     Json(payload): Json<JsonRpcRequestEnum>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _proxy_web3_rpc_with_key(
         app,
         ip,
@@ -208,7 +208,7 @@ async fn _proxy_web3_rpc_with_key(
     rpc_key: String,
     payload: JsonRpcRequestEnum,
     proxy_mode: ProxyMode,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // TODO: DRY w/ proxy_web3_rpc
     // the request can take a while, so we spawn so that we can start serving another request
     let rpc_key = rpc_key.parse()?;

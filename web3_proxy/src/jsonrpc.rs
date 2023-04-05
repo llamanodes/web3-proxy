@@ -1,3 +1,4 @@
+use crate::frontend::errors::Web3ProxyResult;
 use derive_more::From;
 use ethers::prelude::{HttpClientError, ProviderError, WsClientError};
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -240,7 +241,7 @@ impl JsonRpcForwardedResponse {
         }
     }
 
-    pub fn from_ethers_error(e: ProviderError, id: Box<RawValue>) -> anyhow::Result<Self> {
+    pub fn from_ethers_error(e: ProviderError, id: Box<RawValue>) -> Web3ProxyResult<Self> {
         // TODO: move turning ClientError into json to a helper function?
         let code;
         let message: String;
@@ -280,7 +281,7 @@ impl JsonRpcForwardedResponse {
                             }
                         }
                     } else {
-                        return Err(anyhow::anyhow!("unexpected ethers error!"));
+                        return Err(anyhow::anyhow!("unexpected ethers error!").into());
                     }
                 }
             }
@@ -302,7 +303,7 @@ impl JsonRpcForwardedResponse {
     pub fn try_from_response_result(
         result: Result<Box<RawValue>, ProviderError>,
         id: Box<RawValue>,
-    ) -> anyhow::Result<Self> {
+    ) -> Web3ProxyResult<Self> {
         match result {
             Ok(response) => Ok(Self::from_response(response, id)),
             Err(e) => Self::from_ethers_error(e, id),

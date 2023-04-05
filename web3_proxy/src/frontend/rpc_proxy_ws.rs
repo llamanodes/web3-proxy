@@ -3,10 +3,11 @@
 //! WebSockets are the preferred method of receiving requests, but not all clients have good support.
 
 use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, RequestMetadata};
-use super::errors::{FrontendErrorResponse, FrontendResult};
+use super::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::stats::RpcQueryStats;
 use crate::{
     app::Web3ProxyApp,
+    frontend::errors::Web3ProxyResult,
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
 };
 use axum::headers::{Origin, Referer, UserAgent};
@@ -26,7 +27,7 @@ use futures::{
 use handlebars::Handlebars;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{error, info, trace, warn};
+use log::{info, trace, warn};
 use serde_json::json;
 use serde_json::value::to_raw_value;
 use std::sync::Arc;
@@ -59,7 +60,7 @@ pub async fn websocket_handler(
     ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _websocket_handler(ProxyMode::Best, app, ip, origin, ws_upgrade).await
 }
 
@@ -71,7 +72,7 @@ pub async fn fastest_websocket_handler(
     ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // TODO: get the fastest number from the url params (default to 0/all)
     // TODO: config to disable this
     _websocket_handler(ProxyMode::Fastest(0), app, ip, origin, ws_upgrade).await
@@ -85,7 +86,7 @@ pub async fn versus_websocket_handler(
     ip: InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // TODO: config to disable this
     _websocket_handler(ProxyMode::Versus, app, ip, origin, ws_upgrade).await
 }
@@ -96,7 +97,7 @@ async fn _websocket_handler(
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let origin = origin.map(|x| x.0);
 
     let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode).await?;
@@ -112,11 +113,7 @@ async fn _websocket_handler(
                 // this is not a websocket. redirect to a friendly page
                 Ok(Redirect::permanent(redirect).into_response())
             } else {
-                // TODO: do not use an anyhow error. send the user a 400
-                Err(
-                    anyhow::anyhow!("redirect_public_url not set. only websockets work here")
-                        .into(),
-                )
+                Err(Web3ProxyError::WebsocketOnly)
             }
         }
     }
@@ -134,7 +131,7 @@ pub async fn websocket_handler_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _websocket_handler_with_key(
         ProxyMode::Best,
         app,
@@ -157,7 +154,7 @@ pub async fn debug_websocket_handler_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _websocket_handler_with_key(
         ProxyMode::Debug,
         app,
@@ -180,7 +177,7 @@ pub async fn fastest_websocket_handler_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     // TODO: get the fastest number from the url params (default to 0/all)
     _websocket_handler_with_key(
         ProxyMode::Fastest(0),
@@ -204,7 +201,7 @@ pub async fn versus_websocket_handler_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     _websocket_handler_with_key(
         ProxyMode::Versus,
         app,
@@ -228,7 +225,7 @@ async fn _websocket_handler_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     ws_upgrade: Option<WebSocketUpgrade>,
-) -> FrontendResult {
+) -> Web3ProxyResponse {
     let rpc_key = rpc_key.parse()?;
 
     let (authorization, _semaphore) = key_is_authorized(
@@ -260,7 +257,7 @@ async fn _websocket_handler_with_key(
                 &app.config.redirect_rpc_key_url,
                 authorization.checks.rpc_secret_key_id,
             ) {
-                (None, None, _) => Err(FrontendErrorResponse::StatusCode(
+                (None, None, _) => Err(Web3ProxyError::StatusCode(
                     StatusCode::BAD_REQUEST,
                     "this page is for rpcs".to_string(),
                     None,
@@ -273,7 +270,7 @@ async fn _websocket_handler_with_key(
 
                     if authorization.checks.rpc_secret_key_id.is_none() {
                         // i don't think this is possible
-                        Err(FrontendErrorResponse::StatusCode(
+                        Err(Web3ProxyError::StatusCode(
                             StatusCode::UNAUTHORIZED,
                             "AUTHORIZATION header required".to_string(),
                             None,
@@ -291,7 +288,7 @@ async fn _websocket_handler_with_key(
                     }
                 }
                 // any other combinations get a simple error
-                _ => Err(FrontendErrorResponse::StatusCode(
+                _ => Err(Web3ProxyError::StatusCode(
                     StatusCode::BAD_REQUEST,
                     "this page is for rpcs".to_string(),
                     None,
@@ -341,7 +338,7 @@ async fn handle_socket_payload(
         Ok(json_request) => {
             let id = json_request.id.clone();
 
-            let response: anyhow::Result<JsonRpcForwardedResponseEnum> = match &json_request.method
+            let response: Web3ProxyResult<JsonRpcForwardedResponseEnum> = match &json_request.method
                 [..]
             {
                 "eth_subscribe" => {
@@ -378,7 +375,7 @@ async fn handle_socket_payload(
                     // TODO: move this logic into the app?
                     let request_bytes = json_request.num_bytes();
 
-                    let request_metadata = Arc::new(RequestMetadata::new(request_bytes).unwrap());
+                    let request_metadata = Arc::new(RequestMetadata::new(request_bytes));
 
                     let subscription_id = json_request.params.unwrap().to_string();
 
@@ -417,16 +414,7 @@ async fn handle_socket_payload(
                 _ => app
                     .proxy_web3_rpc(authorization.clone(), json_request.into())
                     .await
-                    .map_or_else(
-                        |err| match err {
-                            FrontendErrorResponse::Anyhow(err) => Err(err),
-                            _ => {
-                                error!("handle this better! {:?}", err);
-                                Err(anyhow::anyhow!("unexpected error! {:?}", err))
-                            }
-                        },
-                        |(response, _)| Ok(response),
-                    ),
+                    .map(|(response, _)| response),
             };
 
             (id, response)
@@ -442,9 +430,8 @@ async fn handle_socket_payload(
     let response_str = match response {
         Ok(x) => serde_json::to_string(&x).expect("to_string should always work here"),
         Err(err) => {
-            // we have an anyhow error. turn it into a response
-            let response = JsonRpcForwardedResponse::from_anyhow_error(err, None, Some(id));
-
+            let (_, mut response) = err.into_response_parts();
+            response.id = id;
             serde_json::to_string(&response).expect("to_string should always work here")
         }
     };

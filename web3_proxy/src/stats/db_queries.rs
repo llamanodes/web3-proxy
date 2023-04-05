@@ -1,12 +1,12 @@
 use super::StatType;
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::FrontendErrorResponse;
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
     get_query_window_seconds_from_params, get_user_id_from_params,
 };
 use anyhow::Context;
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
 use axum::Json;
 use axum::{
     headers::{authorization::Bearer, Authorization},
@@ -28,7 +28,7 @@ pub fn filter_query_window_seconds(
     query_window_seconds: u64,
     response: &mut HashMap<&str, serde_json::Value>,
     q: Select<rpc_accounting::Entity>,
-) -> Result<Select<rpc_accounting::Entity>, FrontendErrorResponse> {
+) -> Web3ProxyResult<Select<rpc_accounting::Entity>> {
     if query_window_seconds == 0 {
         // TODO: order by more than this?
         // query_window_seconds is not set so we aggregate all records
@@ -62,7 +62,7 @@ pub async fn query_user_stats<'a>(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
-) -> Result<Response, FrontendErrorResponse> {
+) -> Web3ProxyResponse {
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
     let db_replica = app
         .db_replica()
@@ -209,7 +209,7 @@ pub async fn query_user_stats<'a>(
     // TODO: move getting the param and checking the bearer token into a helper function
     if let Some(rpc_key_id) = params.get("rpc_key_id") {
         let rpc_key_id = rpc_key_id.parse::<u64>().map_err(|e| {
-            FrontendErrorResponse::StatusCode(
+            Web3ProxyError::StatusCode(
                 StatusCode::BAD_REQUEST,
                 "Unable to parse rpc_key_id".to_string(),
                 Some(e.into()),

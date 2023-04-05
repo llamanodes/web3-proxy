@@ -2,7 +2,7 @@ use super::StatType;
 use crate::http_params::get_stats_column_from_params;
 use crate::{
     app::Web3ProxyApp,
-    frontend::errors::FrontendErrorResponse,
+    frontend::errors::{Web3ProxyError, Web3ProxyResponse},
     http_params::{
         get_chain_id_from_params, get_query_start_from_params, get_query_stop_from_params,
         get_query_window_seconds_from_params, get_user_id_from_params,
@@ -11,7 +11,7 @@ use crate::{
 use anyhow::Context;
 use axum::{
     headers::{authorization::Bearer, Authorization},
-    response::{IntoResponse, Response},
+    response::IntoResponse,
     Json, TypedHeader,
 };
 use chrono::{DateTime, FixedOffset};
@@ -60,7 +60,7 @@ pub async fn query_user_stats<'a>(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
-) -> Result<Response, FrontendErrorResponse> {
+) -> Web3ProxyResponse {
     info!("Got this far 1");
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
     let db_replica = app
@@ -96,7 +96,7 @@ pub async fn query_user_stats<'a>(
 
     // Return a bad request if query_start == query_stop, because then the query is empty basically
     if query_start == query_stop {
-        return Err(FrontendErrorResponse::BadRequest(
+        return Err(Web3ProxyError::BadRequest(
             "Start and Stop date cannot be equal. Please specify a (different) start date."
                 .to_owned(),
         ));
@@ -462,9 +462,9 @@ pub async fn query_user_stats<'a>(
 
     // Also optionally add the rpc_key_id:
     if let Some(rpc_key_id) = params.get("rpc_key_id") {
-        let rpc_key_id = rpc_key_id.parse::<u64>().map_err(|e| {
-            FrontendErrorResponse::BadRequest("Unable to parse rpc_key_id".to_string())
-        })?;
+        let rpc_key_id = rpc_key_id
+            .parse::<u64>()
+            .map_err(|e| Web3ProxyError::BadRequest("Unable to parse rpc_key_id".to_string()))?;
         response_body.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
     }
 

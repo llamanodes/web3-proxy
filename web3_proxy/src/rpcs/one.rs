@@ -5,6 +5,7 @@ use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::Authorization;
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::rpcs::request::RequestRevertHandler;
 use anyhow::{anyhow, Context};
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
@@ -1129,7 +1130,7 @@ impl Web3Rpc {
         trace!("watching pending transactions on {}", self);
         // TODO: does this keep the lock open for too long?
         match provider.as_ref() {
-            Web3Provider::Http(provider) => {
+            Web3Provider::Http(_provider) => {
                 // there is a "watch_pending_transactions" function, but a lot of public nodes do not support the necessary rpc endpoints
                 self.wait_for_disconnect().await?;
             }
@@ -1184,7 +1185,7 @@ impl Web3Rpc {
         authorization: &'a Arc<Authorization>,
         max_wait: Option<Duration>,
         unlocked_provider: Option<Arc<Web3Provider>>,
-    ) -> anyhow::Result<OpenRequestHandle> {
+    ) -> Web3ProxyResult<OpenRequestHandle> {
         let max_wait = max_wait.map(|x| Instant::now() + x);
 
         loop {
@@ -1206,8 +1207,7 @@ impl Web3Rpc {
                     if let Some(max_wait) = max_wait {
                         if retry_at > max_wait {
                             // break now since we will wait past our maximum wait time
-                            // TODO: don't use anyhow. use specific error type
-                            return Err(anyhow::anyhow!("timeout waiting for request handle"));
+                            return Err(Web3ProxyError::Timeout(None));
                         }
                     }
 
@@ -1221,7 +1221,7 @@ impl Web3Rpc {
                         let now = Instant::now();
 
                         if now > max_wait {
-                            return Err(anyhow::anyhow!("unable to retry for request handle"));
+                            return Err(Web3ProxyError::NoHandleReady);
                         }
                     }
 
@@ -1239,7 +1239,7 @@ impl Web3Rpc {
         authorization: &Arc<Authorization>,
         // TODO: borrow on this instead of needing to clone the Arc?
         unlocked_provider: Option<Arc<Web3Provider>>,
-    ) -> anyhow::Result<OpenRequestResult> {
+    ) -> Web3ProxyResult<OpenRequestResult> {
         // TODO: think more about this read block
         // TODO: this should *not* be new_head_client. this should be a separate object
         if unlocked_provider.is_some() || self.provider.read().await.is_some() {
