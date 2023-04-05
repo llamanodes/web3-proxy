@@ -525,7 +525,6 @@ impl StatBuffer {
                     match x {
                         Ok(_) => {
                             info!("stat_loop shutting down");
-                            // TODO: call aggregate_stat for all the
                         },
                         Err(err) => error!("stat_loop shutdown receiver err={:?}", err),
                     }
