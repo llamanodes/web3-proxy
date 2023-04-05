@@ -14,7 +14,6 @@ use serde::ser::SerializeStruct;
 use serde::Serialize;
 use serde_json::json;
 use std::hash::Hash;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::time::Duration;

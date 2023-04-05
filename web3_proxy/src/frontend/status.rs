@@ -7,8 +7,6 @@ use super::{FrontendHealthCache, FrontendJsonResponseCache, FrontendResponseCach
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use axum_macros::debug_handler;
-use hashbrown::HashMap;
-use http::HeaderMap;
 use serde_json::json;
 use std::sync::Arc;
 

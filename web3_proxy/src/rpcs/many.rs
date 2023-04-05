@@ -37,7 +37,6 @@ use std::{cmp, fmt};
 use thread_fast_rng::rand::seq::SliceRandom;
 use tokio;
 use tokio::sync::{broadcast, watch};
-use tokio::task;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.

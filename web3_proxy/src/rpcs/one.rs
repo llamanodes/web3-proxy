@@ -11,7 +11,6 @@ use anyhow::{anyhow, Context};
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use ethers::types::{Address, Transaction, U256};
 use futures::future::try_join_all;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
@@ -786,7 +785,7 @@ impl Web3Rpc {
                                 let head_block = rpc.head_block.read().clone();
 
                                 if let Some((block_number, txid)) = head_block.and_then(|x| {
-                                    let block = x.block.clone();
+                                    let block = x.block;
 
                                     let block_number = block.number?;
                                     let txid = block.transactions.last().cloned()?;

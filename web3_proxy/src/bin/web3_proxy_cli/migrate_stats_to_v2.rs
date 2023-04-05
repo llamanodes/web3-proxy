@@ -1,50 +1,25 @@
 use anyhow::Context;
 use argh::FromArgs;
-use chrono::{DateTime, Utc};
-use entities::{rpc_accounting, rpc_accounting_v2, rpc_key, user};
-use ethers::types::Address;
+use entities::{rpc_accounting, rpc_key};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use hashbrown::HashMap;
-use log::{debug, error, info, trace, warn};
+use log::{error, info};
 use migration::sea_orm::QueryOrder;
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
-    QueryFilter, QuerySelect, UpdateResult,
+    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, UpdateResult,
 };
 use migration::{Expr, Value};
-use std::mem::swap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::NonZeroU64;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
 use tokio::sync::broadcast;
-use tokio::time::{sleep, Instant};
-use web3_proxy::app::{AuthorizationChecks, Web3ProxyApp, BILLING_PERIOD_SECONDS};
+use tokio::time::Instant;
+use web3_proxy::app::{AuthorizationChecks, BILLING_PERIOD_SECONDS};
 use web3_proxy::config::TopConfig;
 use web3_proxy::frontend::authorization::{
     Authorization, AuthorizationType, RequestMetadata, RpcSecretKey,
 };
-use web3_proxy::stats::{BufferedRpcQueryStats, RpcQueryKey, RpcQueryStats, StatBuffer};
-
-// Helper function to go from DateTime to Instant
-fn datetime_utc_to_instant(datetime: DateTime<Utc>) -> anyhow::Result<Instant> {
-    let epoch = datetime.timestamp(); // Get the Unix timestamp
-    let nanos = datetime.timestamp_subsec_nanos();
-
-    let duration_since_epoch = Duration::new(epoch as u64, nanos);
-    // let duration_since_datetime = Duration::new(, nanos);
-    let instant_new = Instant::now();
-    warn!("Instant new is: {:?}", instant_new);
-    let unix_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    warn!("Instant since unix epoch is: {:?}", unix_epoch);
-
-    instant_new
-        .checked_sub(unix_epoch)
-        .context("Could not subtract unix epoch from instant now")?
-        .checked_add(duration_since_epoch)
-        .context("Could not add duration since epoch for updated time")
-}
+use web3_proxy::stats::{RpcQueryStats, StatBuffer};
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 /// Migrate towards influxdb and rpc_accounting_v2 from rpc_accounting
@@ -98,8 +73,7 @@ impl MigrateStatsToV2 {
                 .app
                 .influxdb_bucket
                 .clone()
-                .context("No influxdb bucket was provided")?
-                .to_owned(),
+                .context("No influxdb bucket was provided")?,
             Some(db_conn.clone()),
             influxdb_client.clone(),
             30,
@@ -126,7 +100,7 @@ impl MigrateStatsToV2 {
                 .order_by_asc(rpc_accounting::Column::Id)
                 .all(db_conn)
                 .await?;
-            if old_records.len() == 0 {
+            if old_records.is_empty() {
                 // Break out of while loop once all records have successfully been migrated ...
                 info!("All records seem to have been successfully migrated!");
                 break;
@@ -181,32 +155,32 @@ impl MigrateStatsToV2 {
                     // info!("Creating a new frontend request");
 
                     // Collect all requests here ...
-                    let mut int_request_bytes = (x.sum_request_bytes / n);
+                    let mut int_request_bytes = x.sum_request_bytes / n;
                     if i == 0 {
-                        int_request_bytes += (x.sum_request_bytes % n);
+                        int_request_bytes += x.sum_request_bytes % n;
                     }
 
-                    let mut int_response_bytes = (x.sum_response_bytes / n);
+                    let mut int_response_bytes = x.sum_response_bytes / n;
                     if i == 0 {
-                        int_response_bytes += (x.sum_response_bytes % n);
+                        int_response_bytes += x.sum_response_bytes % n;
                     }
 
-                    let mut int_response_millis = (x.sum_response_millis / n);
+                    let mut int_response_millis = x.sum_response_millis / n;
                     if i == 0 {
-                        int_response_millis += (x.sum_response_millis % n);
+                        int_response_millis += x.sum_response_millis % n;
                     }
 
-                    let mut int_backend_requests = (x.backend_requests / n);
+                    let mut int_backend_requests = x.backend_requests / n;
                     if i == 0 {
-                        int_backend_requests += (x.backend_requests % n);
+                        int_backend_requests += x.backend_requests % n;
                     }
 
                     // Add module at the last step to include for any remained that we missed ... (?)
 
                     // TODO: Create RequestMetadata
                     let request_metadata = RequestMetadata {
-                        start_instant: Instant::now(),           // This is overwritten later on
-                        request_bytes: int_request_bytes.into(), // Get the mean of all the request bytes
+                        start_instant: Instant::now(),    // This is overwritten later on
+                        request_bytes: int_request_bytes, // Get the mean of all the request bytes
                         archive_request: x.archive_request.into(),
                         backend_requests: Default::default(), // This is not used, instead we modify the field later
                         no_servers: 0.into(), // This is not relevant in the new version
@@ -280,11 +254,8 @@ impl MigrateStatsToV2 {
 
         drop(stat_sender);
 
-        match app_shutdown_sender.send(()) {
-            Err(x) => {
-                panic!("Could not send shutdown signal! {:?}", x);
-            }
-            _ => {}
+        if let Err(x) = app_shutdown_sender.send(()) {
+            panic!("Could not send shutdown signal! {:?}", x);
         };
 
         // Wait for any tasks that are on-going

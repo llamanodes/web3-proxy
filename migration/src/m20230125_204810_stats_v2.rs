@@ -136,13 +136,6 @@ impl MigrationTrait for Migration {
     }
 }
 
-/// Partial table definition
-#[derive(Iden)]
-pub enum RpcKey {
-    Table,
-    Id,
-}
-
 #[derive(Iden)]
 enum RpcAccountingV2 {
     Table,

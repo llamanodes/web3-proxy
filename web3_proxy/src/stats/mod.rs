@@ -231,7 +231,7 @@ impl BufferedRpcQueryStats {
         db_conn: &DatabaseConnection,
         key: RpcQueryKey,
     ) -> anyhow::Result<()> {
-        let period_datetime = Utc.timestamp_opt(key.response_timestamp as i64, 0).unwrap();
+        let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
         // this is a lot of variables
         let accounting_entry = rpc_accounting_v2::ActiveModel {
@@ -406,6 +406,7 @@ impl RpcQueryStats {
 }
 
 impl StatBuffer {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_spawn(
         chain_id: u64,
         bucket: String,

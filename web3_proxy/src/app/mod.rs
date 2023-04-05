@@ -581,8 +581,7 @@ impl Web3ProxyApp {
                 .app
                 .influxdb_bucket
                 .clone()
-                .context("No influxdb bucket was provided")?
-                .to_owned(),
+                .context("No influxdb bucket was provided")?,
             db_conn.clone(),
             influxdb_client.clone(),
             60,
