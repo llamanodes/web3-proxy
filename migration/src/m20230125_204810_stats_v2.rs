@@ -20,20 +20,31 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(RpcAccountingV2::RpcKeyId)
                             .big_unsigned()
-                            .null(),
+                            .not_null()
+                            .default(0),
                     )
                     .col(
                         ColumnDef::new(RpcAccountingV2::ChainId)
                             .big_unsigned()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(RpcAccountingV2::Origin).string().null())
+                    .col(
+                        ColumnDef::new(RpcAccountingV2::Origin)
+                            .string()
+                            .not_null()
+                            .default(""),
+                    )
                     .col(
                         ColumnDef::new(RpcAccountingV2::PeriodDatetime)
                             .timestamp()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(RpcAccountingV2::Method).string().null())
+                    .col(
+                        ColumnDef::new(RpcAccountingV2::Method)
+                            .string()
+                            .not_null()
+                            .default(""),
+                    )
                     .col(
                         ColumnDef::new(RpcAccountingV2::ArchiveNeeded)
                             .boolean()
