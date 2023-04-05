@@ -6,4 +6,4 @@ edition = "2021"
 
 [dependencies]
 flume = "0.10.14"
-tokio = { version = "1.26.0", features = ["time"] }
+tokio = { version = "1.27.0", features = ["time"] }
