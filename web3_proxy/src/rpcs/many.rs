@@ -2,7 +2,7 @@
 use super::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use super::consensus::ConsensusWeb3Rpcs;
 use super::one::Web3Rpc;
-use super::request::{OpenRequestHandle, OpenRequestResult, RequestRevertHandler};
+use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
 use crate::app::{flatten_handle, AnyhowJoinHandle, Web3ProxyApp};
 ///! Load balanced communication with a group of web3 providers
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
@@ -877,7 +877,7 @@ impl Web3Rpcs {
                         .request(
                             &request.method,
                             &json!(request.params),
-                            RequestRevertHandler::Save,
+                            RequestErrorHandler::Save,
                             None,
                         )
                         .await;

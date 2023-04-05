@@ -6,7 +6,7 @@ use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::Authorization;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::rpcs::request::RequestRevertHandler;
+use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use ethers::types::{Address, Transaction, U256};
@@ -716,9 +716,9 @@ impl Web3Rpc {
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<()> {
         let error_handler = if self.backup {
-            RequestRevertHandler::DebugLevel
+            RequestErrorHandler::DebugLevel
         } else {
-            RequestRevertHandler::ErrorLevel
+            RequestErrorHandler::ErrorLevel
         };
 
         let mut delay_start = false;
@@ -1331,7 +1331,7 @@ impl Web3Rpc {
         self: &Arc<Self>,
         method: &str,
         params: &P,
-        revert_handler: RequestRevertHandler,
+        revert_handler: RequestErrorHandler,
         authorization: Arc<Authorization>,
         unlocked_provider: Option<Arc<Web3Provider>>,
     ) -> anyhow::Result<R>
