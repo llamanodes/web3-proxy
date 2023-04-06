@@ -14,6 +14,7 @@ tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
 [dependencies]
 deferred-rate-limiter = { path = "../deferred-rate-limiter" }
 entities = { path = "../entities" }
+latency = { path = "../latency" }
 migration = { path = "../migration" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 thread-fast-rng = { path = "../thread-fast-rng" }
@@ -36,7 +37,6 @@ derive_more = "0.99.17"
 dotenv = "0.15.0"
 env_logger = "0.10.0"
 ethers = { version = "1.0.2", default-features = false, features = ["rustls", "ws"] }
-ewma = "0.1.1"
 fdlimit = "0.2.1"
 flume = "0.10.14"
 fstrings = "0.2"
