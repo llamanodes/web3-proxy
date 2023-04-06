@@ -1,5 +1,4 @@
-mod head;
-mod peak;
+mod ewma;
+mod peak_ewma;
 
-pub use head::HeadLatency;
-pub use peak::PeakLatency;
+pub use self::{ewma::EwmaLatency, peak_ewma::PeakEwmaLatency};

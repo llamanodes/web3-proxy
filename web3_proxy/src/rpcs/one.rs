@@ -6,7 +6,7 @@ use crate::app::{flatten_handle, AnyhowJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::Authorization;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::rpcs::latency::{HeadLatency, PeakLatency};
+use crate::rpcs::latency::{EwmaLatency, PeakEwmaLatency};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
@@ -65,11 +65,11 @@ pub struct Web3Rpc {
     /// TODO: change this to a watch channel so that http providers can subscribe and take action on change.
     pub(super) head_block: RwLock<Option<Web3ProxyBlock>>,
     /// Track head block latency
-    pub(super) head_latency: RwLock<HeadLatency>,
+    pub(super) head_latency: RwLock<EwmaLatency>,
     /// Track peak request latency
     ///
     /// This is only inside an Option so that the "Default" derive works. it will always be set.
-    pub(super) peak_latency: Option<PeakLatency>,
+    pub(super) peak_latency: Option<PeakEwmaLatency>,
     /// Track total requests served
     /// TODO: maybe move this to graphana
     pub(super) total_requests: AtomicUsize,
@@ -171,7 +171,9 @@ impl Web3Rpc {
         // TODO: is one second good for the decay here?
 
         const NANOS_PER_MILLI: f64 = 1_000_000.0;
-        let peak_latency = PeakLatency::spawn(1_000.0 * NANOS_PER_MILLI);
+        // TODO good defaults? should they be config?
+        let peak_latency =
+            PeakEwmaLatency::spawn(1_000.0 * NANOS_PER_MILLI, 4, Duration::from_secs(1));
 
         let new_connection = Self {
             name,

@@ -1242,13 +1242,12 @@ fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (Reverse<U64>, u64, bool, Order
         .peak_latency
         .as_ref()
         .expect("peak_latency uniniialized")
-        .latency_rx
-        .borrow();
+        .latency();
 
     let active_requests = x.active_requests.load(atomic::Ordering::Relaxed) as f64;
 
     // TODO: i'm not sure head * active is exactly right. but we'll see
-    let peak_ewma = OrderedFloat(peak_latency.as_millis() as f64 * active_requests);
+    let peak_ewma = OrderedFloat(peak_latency.as_millis() as f64 * (active_requests + 1.0));
 
     let backup = x.backup;
 
