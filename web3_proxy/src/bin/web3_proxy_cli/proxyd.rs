@@ -190,30 +190,7 @@ async fn run(
         prometheus_shutdown_receiver,
     ));
 
-    // wait until the app has seen its first consensus head block
-    // if backups were included, wait a little longer
-    // let _ = spawned_app.app.head_block_receiver().changed().await;
-    // if backups were included, wait a little longer
-    // for _ in 0..3 {
-    //     let _ = spawned_app.consensus_connections_watcher.changed().await;
-    //
-    //     let consensus = spawned_app
-    //         .consensus_connections_watcher
-    //         .borrow_and_update();
-    //
-    //     // Let's just do a super dirty unwrap to get things going
-    //     if consensus.unwrap().backups_needed {
-    //         info!(
-    //             "waiting longer. found consensus with backups: {}",
-    //             consensus.unwrap().head_block.as_ref().unwrap(),
-    //         );
-    //     } else {
-    //         // TODO: also check that we have at least one archive node connected?
-    //         break;
-    //     }
-    // }
     let _ = spawned_app.app.head_block_receiver().changed().await;
-
 
     // start the frontend port
     let frontend_handle = tokio::spawn(frontend::serve(
@@ -268,6 +245,7 @@ async fn run(
                 }
             }
         }
+        // TODO: This seems to have been removed on the main branch
         // TODO: how can we properly watch background handles here? this returns None immediatly and the app exits. i think the bug is somewhere else though
         x = spawned_app.background_handles.next() => {
             match x {
@@ -284,6 +262,7 @@ async fn run(
         }
     };
 
+    // TODO: This is also not there on the main branch
     // if a future above completed, make sure the frontend knows to start turning off
     if !frontend_exited {
         if let Err(err) = frontend_shutdown_sender.send(()) {
@@ -292,6 +271,7 @@ async fn run(
         };
     }
 
+    // TODO: Also not there on main branch
     // TODO: wait until the frontend completes
     if let Err(err) = frontend_shutdown_complete_receiver.recv().await {
         warn!("shutdown completition err={:?}", err);

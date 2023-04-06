@@ -7,11 +7,9 @@ default-run = "web3_proxy_cli"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["deadlock_detection", "tokio-console"]
+default = ["deadlock_detection"]
 deadlock_detection = ["parking_lot/deadlock_detection"]
 tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
-
-# TODO: turn tokio-console on with a feature. console-subscriber = { version = "0.1.7" }
 
 [dependencies]
 deferred-rate-limiter = { path = "../deferred-rate-limiter" }
@@ -26,12 +24,12 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 # TODO: import chrono from sea-orm so we always have the same version
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 
-anyhow = { version = "1.0.69", features = ["backtrace"] }
+anyhow = { version = "1.0.70", features = ["backtrace"] }
 argh = "0.1.10"
-axum = { version = "0.6.10", features = ["headers", "ws"] }
+axum = { version = "0.6.12", features = ["headers", "ws"] }
 axum-client-ip = "0.4.0"
-axum-macros = "0.3.5"
-chrono = "0.4.23"
+axum-macros = "0.3.7"
+chrono = "0.4.24"
 console-subscriber = { version = "*", optional = true }
 counter = "0.5.7"
 derive_more = "0.99.17"
@@ -42,7 +40,7 @@ ewma = "0.1.1"
 fdlimit = "0.2.1"
 flume = "0.10.14"
 fstrings = "0.2"
-futures = { version = "0.3.26", features = ["thread-pool"] }
+futures = { version = "0.3.28", features = ["thread-pool"] }
 gethostname = "0.4.1"
 glob = "0.3.1"
 handlebars = "4.3.6"
@@ -52,34 +50,34 @@ http = "0.2.9"
 influxdb2 = { version = "0.3", features = ["rustls"] }
 influxdb2-structmap = "0.2.0"
 hostname = "0.3.1"
-ipnet = "2.7.1"
+ipnet = "2.7.2"
 itertools = "0.10.5"
 log = "0.4.17"
-moka = { version = "0.10.0", default-features = false, features = ["future"] }
+moka = { version = "0.10.2", default-features = false, features = ["future"] }
 num = "0.4.0"
 num-traits = "0.2.15"
 once_cell = { version = "1.17.1" }
-ordered-float = "3.4.0"
+ordered-float = "3.6.0"
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "rustls", "sync"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 prettytable = "*"
 proctitle = "0.1.1"
 rdkafka = { version = "0.29.0" }
-regex = "1.7.1"
-reqwest = { version = "0.11.14", default-features = false, features = ["json", "tokio-rustls"] }
+regex = "1.7.3"
+reqwest = { version = "0.11.16", default-features = false, features = ["json", "tokio-rustls"] }
 rmp-serde = "1.1.1"
 rustc-hash = "1.1.0"
 sentry = { version = "0.30.0", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
-serde = { version = "1.0.154", features = [] }
-serde_json = { version = "1.0.94", default-features = false, features = ["alloc", "raw_value"] }
-serde_prometheus = "0.2.1"
+serde = { version = "1.0.159", features = [] }
+serde_json = { version = "1.0.95", default-features = false, features = ["alloc", "raw_value"] }
+serde_prometheus = "0.2.2"
 siwe = "0.5.0"
 time = "0.3.20"
-tokio = { version = "1.26.0", features = ["full"] }
+tokio = { version = "1.27.0", features = ["full"] }
 tokio-console = { version = "*", optional = true }
 tokio-stream = { version = "0.1.12", features = ["sync"] }
 tokio-uring = { version = "0.4.0", optional = true }
-toml = "0.7.2"
+toml = "0.7.3"
 tower = "0.4.13"
 tower-http = { version = "0.4.0", features = ["cors", "sensitive-headers"] }
 ulid = { version = "1.0.0", features = ["serde"] }

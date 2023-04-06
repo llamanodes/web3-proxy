@@ -39,7 +39,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --no-default-features \
     --path ./web3_proxy \
     --profile faster_release \
-    --root /opt/bin
+    --root /usr/local/bin
 
 #
 # We do not need the Rust toolchain to run the binary!
@@ -59,4 +59,4 @@ CMD [ "--config", "/web3-proxy.toml", "proxyd" ]
 # TODO: lower log level when done with prototyping
 ENV RUST_LOG "warn,web3_proxy=debug,web3_proxy_cli=debug"
 
-COPY --from=builder /opt/bin/* /usr/local/bin/
+COPY --from=builder /usr/local/bin/* /usr/local/bin/

@@ -1,3 +1,4 @@
+use super::StatType;
 use crate::app::Web3ProxyApp;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
 use crate::http_params::{
@@ -22,7 +23,6 @@ use migration::{Condition, Expr, SimpleExpr};
 use redis_rate_limiter::redis;
 use redis_rate_limiter::redis::AsyncCommands;
 use serde_json::json;
-use super::StatType;
 
 pub fn filter_query_window_seconds(
     query_window_seconds: u64,

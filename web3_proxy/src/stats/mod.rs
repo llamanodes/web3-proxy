@@ -231,16 +231,16 @@ impl BufferedRpcQueryStats {
         db_conn: &DatabaseConnection,
         key: RpcQueryKey,
     ) -> anyhow::Result<()> {
-        let period_datetime = Utc.timestamp_opt(key.response_timestamp as i64, 0).unwrap();
+        let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
         // this is a lot of variables
         let accounting_entry = rpc_accounting_v2::ActiveModel {
             id: sea_orm::NotSet,
-            rpc_key_id: sea_orm::Set(key.rpc_secret_key_id.map(Into::into)),
-            origin: sea_orm::Set(key.origin.map(|x| x.to_string())),
+            rpc_key_id: sea_orm::Set(key.rpc_secret_key_id.map(Into::into).unwrap_or_default()),
+            origin: sea_orm::Set(key.origin.map(|x| x.to_string()).unwrap_or_default()),
             chain_id: sea_orm::Set(chain_id),
             period_datetime: sea_orm::Set(period_datetime),
-            method: sea_orm::Set(key.method),
+            method: sea_orm::Set(key.method.unwrap_or_default()),
             archive_needed: sea_orm::Set(key.archive_needed),
             error_response: sea_orm::Set(key.error_response),
             frontend_requests: sea_orm::Set(self.frontend_requests),
@@ -406,6 +406,7 @@ impl RpcQueryStats {
 }
 
 impl StatBuffer {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_spawn(
         chain_id: u64,
         bucket: String,
@@ -525,7 +526,6 @@ impl StatBuffer {
                     match x {
                         Ok(_) => {
                             info!("stat_loop shutting down");
-                            // TODO: call aggregate_stat for all the
                         },
                         Err(err) => error!("stat_loop shutdown receiver err={:?}", err),
                     }

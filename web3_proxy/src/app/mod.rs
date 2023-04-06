@@ -581,8 +581,7 @@ impl Web3ProxyApp {
                 .app
                 .influxdb_bucket
                 .clone()
-                .context("No influxdb bucket was provided")?
-                .to_owned(),
+                .context("No influxdb bucket was provided")?,
             db_conn.clone(),
             influxdb_client.clone(),
             60,
@@ -821,18 +820,18 @@ impl Web3ProxyApp {
 
             app_handles.push(config_handle);
         }
-        // =======
-        //         if important_background_handles.is_empty() {
-        //             info!("no important background handles");
-        //
-        //             let f = tokio::spawn(async move {
-        //                 let _ = background_shutdown_receiver.recv().await;
-        //
-        //                 Ok(())
-        //             });
-        //
-        //             important_background_handles.push(f);
-        // >>>>>>> 77df3fa (stats v2)
+
+        if important_background_handles.is_empty() {
+            info!("no important background handles");
+
+            let f = tokio::spawn(async move {
+                let _ = background_shutdown_receiver.recv().await;
+
+                Ok(())
+            });
+
+            important_background_handles.push(f);
+        }
 
         Ok((
             app,

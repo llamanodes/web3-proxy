@@ -15,7 +15,6 @@ use axum::{
     Json, TypedHeader,
 };
 use chrono::{DateTime, FixedOffset};
-use entities::{rpc_accounting, rpc_key};
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::models::Query;
@@ -140,11 +139,8 @@ pub async fn query_user_stats<'a>(
     let mut filter_chain_id = "".to_string();
 
     // Add to group columns the method, if we want the detailed view as well
-    match stat_response_type {
-        StatType::Detailed => {
-            group_columns.push("method");
-        }
-        _ => {}
+    if let StatType::Detailed = stat_response_type {
+        group_columns.push("method");
     }
 
     if chain_id == 0 {
@@ -249,7 +245,7 @@ pub async fn query_user_stats<'a>(
 
             influx_responses
                 .into_iter()
-                .map(|x| (x._time.clone(), x))
+                .map(|x| (x._time, x))
                 .into_group_map()
                 .into_iter()
                 .map(|(group, grouped_items)| {
@@ -348,7 +344,7 @@ pub async fn query_user_stats<'a>(
             // Group by all fields together ..
             influx_responses
                 .into_iter()
-                .map(|x| ((x._time.clone(), x.method.clone()), x))
+                .map(|x| ((x._time, x.method.clone()), x))
                 .into_group_map()
                 .into_iter()
                 .map(|(group, grouped_items)| {
@@ -464,7 +460,7 @@ pub async fn query_user_stats<'a>(
     if let Some(rpc_key_id) = params.get("rpc_key_id") {
         let rpc_key_id = rpc_key_id
             .parse::<u64>()
-            .map_err(|e| Web3ProxyError::BadRequest("Unable to parse rpc_key_id".to_string()))?;
+            .map_err(|_| Web3ProxyError::BadRequest("Unable to parse rpc_key_id".to_string()))?;
         response_body.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
     }
 

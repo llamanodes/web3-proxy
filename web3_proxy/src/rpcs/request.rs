@@ -33,7 +33,7 @@ pub struct OpenRequestHandle {
     rpc: Arc<Web3Rpc>,
 }
 
-/// Depending on the context, RPC errors can require different handling.
+/// Depending on the context, RPC errors require different handling.
 #[derive(Copy, Clone)]
 pub enum RequestErrorHandler {
     /// Log at the trace level. Use when errors are expected.
@@ -45,7 +45,7 @@ pub enum RequestErrorHandler {
     /// Log at the warn level. Use when errors do not cause problems.
     WarnLevel,
     /// Potentially save the revert. Users can tune how often this happens
-    SaveRevert,
+    Save,
 }
 
 // TODO: second param could be skipped since we don't need it here
@@ -80,7 +80,7 @@ impl Authorization {
         let rpc_key_id = match self.checks.rpc_secret_key_id {
             Some(rpc_key_id) => rpc_key_id.into(),
             None => {
-                // // trace!(?self, "cannot save revert without rpc_key_id");
+                // trace!(?self, "cannot save revert without rpc_key_id");
                 return Ok(());
             }
         };
@@ -150,7 +150,7 @@ impl OpenRequestHandle {
         self,
         method: &str,
         params: &P,
-        revert_handler: RequestErrorHandler,
+        mut error_handler: RequestErrorHandler,
         unlocked_provider: Option<Arc<Web3Provider>>,
     ) -> Result<R, ProviderError>
     where
@@ -229,7 +229,7 @@ impl OpenRequestHandle {
         if let Err(err) = &response {
             // only save reverts for some types of calls
             // TODO: do something special for eth_sendRawTransaction too
-            let error_handler = if let RequestErrorHandler::SaveRevert = revert_handler {
+            error_handler = if let RequestErrorHandler::Save = error_handler {
                 // TODO: should all these be Trace or Debug or a mix?
                 if !["eth_call", "eth_estimateGas"].contains(&method) {
                     // trace!(%method, "skipping save on revert");
@@ -242,7 +242,7 @@ impl OpenRequestHandle {
                         RequestErrorHandler::TraceLevel
                     } else if log_revert_chance == 1.0 {
                         // trace!(%method, "gaurenteed chance. SAVING on revert");
-                        revert_handler
+                        error_handler
                     } else if thread_fast_rng::thread_fast_rng().gen_range(0.0f64..=1.0)
                         < log_revert_chance
                     {
@@ -251,19 +251,20 @@ impl OpenRequestHandle {
                     } else {
                         // trace!("Saving on revert");
                         // TODO: is always logging at debug level fine?
-                        revert_handler
+                        error_handler
                     }
                 } else {
                     // trace!(%method, "no database. skipping save on revert");
                     RequestErrorHandler::TraceLevel
                 }
             } else {
-                revert_handler
+                error_handler
             };
 
             // TODO: simple enum -> string derive?
+            // TODO: if ProviderError::UnsupportedRpc, we should retry on another server
             #[derive(Debug)]
-            enum ResponseErrorType {
+            enum ResponseTypes {
                 Revert,
                 RateLimit,
                 Error,
@@ -312,127 +313,88 @@ impl OpenRequestHandle {
                 if let Some(msg) = msg {
                     if msg.starts_with("execution reverted") {
                         trace!("revert from {}", self.rpc);
-                        ResponseErrorType::Revert
+                        ResponseTypes::Revert
                     } else if msg.contains("limit") || msg.contains("request") {
                         trace!("rate limit from {}", self.rpc);
-                        ResponseErrorType::RateLimit
+                        ResponseTypes::RateLimit
                     } else {
-                        ResponseErrorType::Error
+                        ResponseTypes::Error
                     }
                 } else {
-                    ResponseErrorType::Error
+                    ResponseTypes::Error
                 }
             } else {
-                ResponseErrorType::Error
+                ResponseTypes::Error
             };
 
-            match response_type {
-                ResponseErrorType::RateLimit => {
-                    if let Some(hard_limit_until) = self.rpc.hard_limit_until.as_ref() {
-                        // TODO: how long? different providers have different rate limiting periods, though most seem to be 1 second
-                        // TODO: until the next second, or wait 1 whole second?
-                        let retry_at = Instant::now() + Duration::from_secs(1);
+            if matches!(response_type, ResponseTypes::RateLimit) {
+                if let Some(hard_limit_until) = self.rpc.hard_limit_until.as_ref() {
+                    // TODO: how long should we actually wait? different providers have different times
+                    let retry_at = Instant::now() + Duration::from_secs(1);
 
-                        trace!("retry {} at: {:?}", self.rpc, retry_at);
+                    trace!("retry {} at: {:?}", self.rpc, retry_at);
 
-                        hard_limit_until.send_replace(retry_at);
-                    }
-                }
-                ResponseErrorType::Error => {
-                    // TODO: should we just have Error or RateLimit? do we need Error and Revert separate?
-
-                    match error_handler {
-                        RequestErrorHandler::DebugLevel => {
-                            // TODO: include params only if not running in release mode
-                            debug!(
-                                "error response from {}! method={} params={:?} err={:?}",
-                                self.rpc, method, params, err
-                            );
-                        }
-                        RequestErrorHandler::TraceLevel => {
-                            trace!(
-                                "error response from {}! method={} params={:?} err={:?}",
-                                self.rpc,
-                                method,
-                                params,
-                                err
-                            );
-                        }
-                        RequestErrorHandler::ErrorLevel => {
-                            // TODO: include params only if not running in release mode
-                            error!(
-                                "error response from {}! method={} err={:?}",
-                                self.rpc, method, err
-                            );
-                        }
-                        RequestErrorHandler::SaveRevert | RequestErrorHandler::WarnLevel => {
-                            // TODO: include params only if not running in release mode
-                            warn!(
-                                "error response from {}! method={} err={:?}",
-                                self.rpc, method, err
-                            );
-                        }
-                    }
-                }
-                ResponseErrorType::Revert => {
-                    match error_handler {
-                        RequestErrorHandler::DebugLevel => {
-                            // TODO: include params only if not running in release mode
-                            debug!(
-                                "revert response from {}! method={} params={:?} err={:?}",
-                                self.rpc, method, params, err
-                            );
-                        }
-                        RequestErrorHandler::TraceLevel => {
-                            trace!(
-                                "revert response from {}! method={} params={:?} err={:?}",
-                                self.rpc,
-                                method,
-                                params,
-                                err
-                            );
-                        }
-                        RequestErrorHandler::ErrorLevel => {
-                            // TODO: include params only if not running in release mode
-                            error!(
-                                "revert response from {}! method={} err={:?}",
-                                self.rpc, method, err
-                            );
-                        }
-                        RequestErrorHandler::WarnLevel => {
-                            // TODO: include params only if not running in release mode
-                            warn!(
-                                "revert response from {}! method={} err={:?}",
-                                self.rpc, method, err
-                            );
-                        }
-                        RequestErrorHandler::SaveRevert => {
-                            trace!(
-                                "revert response from {}! method={} params={:?} err={:?}",
-                                self.rpc,
-                                method,
-                                params,
-                                err
-                            );
-
-                            // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
-                            let method: Method =
-                                Method::try_from_value(&method.to_string()).unwrap();
-
-                            // TODO: DO NOT UNWRAP! But also figure out the best way to keep returning ProviderErrors here
-                            let params: EthCallParams = serde_json::from_value(json!(params))
-                                .context("parsing params to EthCallParams")
-                                .unwrap();
-
-                            // spawn saving to the database so we don't slow down the request
-                            let f = self.authorization.clone().save_revert(method, params.0 .0);
-
-                            tokio::spawn(f);
-                        }
-                    }
+                    hard_limit_until.send_replace(retry_at);
                 }
             }
-            // TODO: track error latency?
+
+            // TODO: think more about the method and param logs. those can be sensitive information
+            match error_handler {
+                RequestErrorHandler::DebugLevel => {
+                    // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
+                    if matches!(response_type, ResponseTypes::Revert) {
+                        debug!(
+                            "bad response from {}! method={} params={:?} err={:?}",
+                            self.rpc, method, params, err
+                        );
+                    }
+                }
+                RequestErrorHandler::TraceLevel => {
+                    trace!(
+                        "bad response from {}! method={} params={:?} err={:?}",
+                        self.rpc,
+                        method,
+                        params,
+                        err
+                    );
+                }
+                RequestErrorHandler::ErrorLevel => {
+                    // TODO: include params if not running in release mode
+                    error!(
+                        "bad response from {}! method={} err={:?}",
+                        self.rpc, method, err
+                    );
+                }
+                RequestErrorHandler::WarnLevel => {
+                    // TODO: include params if not running in release mode
+                    warn!(
+                        "bad response from {}! method={} err={:?}",
+                        self.rpc, method, err
+                    );
+                }
+                RequestErrorHandler::Save => {
+                    trace!(
+                        "bad response from {}! method={} params={:?} err={:?}",
+                        self.rpc,
+                        method,
+                        params,
+                        err
+                    );
+
+                    // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
+                    let method: Method = Method::try_from_value(&method.to_string()).unwrap();
+
+                    // TODO: DO NOT UNWRAP! But also figure out the best way to keep returning ProviderErrors here
+                    let params: EthCallParams = serde_json::from_value(json!(params))
+                        .context("parsing params to EthCallParams")
+                        .unwrap();
+
+                    // spawn saving to the database so we don't slow down the request
+                    let f = self.authorization.clone().save_revert(method, params.0 .0);
+
+                    tokio::spawn(f);
+                }
+            }
         } else if let Some(peak_latency) = &self.rpc.peak_latency {
             peak_latency.report(start.elapsed()).await;
         } else {

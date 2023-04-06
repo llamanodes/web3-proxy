@@ -20,20 +20,31 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(RpcAccountingV2::RpcKeyId)
                             .big_unsigned()
-                            .null(),
+                            .not_null()
+                            .default(0),
                     )
                     .col(
                         ColumnDef::new(RpcAccountingV2::ChainId)
                             .big_unsigned()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(RpcAccountingV2::Origin).string().null())
+                    .col(
+                        ColumnDef::new(RpcAccountingV2::Origin)
+                            .string()
+                            .not_null()
+                            .default(""),
+                    )
                     .col(
                         ColumnDef::new(RpcAccountingV2::PeriodDatetime)
                             .timestamp()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(RpcAccountingV2::Method).string().null())
+                    .col(
+                        ColumnDef::new(RpcAccountingV2::Method)
+                            .string()
+                            .not_null()
+                            .default(""),
+                    )
                     .col(
                         ColumnDef::new(RpcAccountingV2::ArchiveNeeded)
                             .boolean()
@@ -89,17 +100,7 @@ impl MigrationTrait for Migration {
                             .big_unsigned()
                             .not_null(),
                     )
-                    .foreign_key(
-                        sea_query::ForeignKey::create()
-                            .from(RpcAccountingV2::Table, RpcAccountingV2::RpcKeyId)
-                            .to(RpcKey::Table, RpcKey::Id),
-                    )
-                    .index(sea_query::Index::create().col(RpcAccountingV2::ChainId))
-                    .index(sea_query::Index::create().col(RpcAccountingV2::Origin))
-                    .index(sea_query::Index::create().col(RpcAccountingV2::PeriodDatetime))
-                    .index(sea_query::Index::create().col(RpcAccountingV2::Method))
-                    .index(sea_query::Index::create().col(RpcAccountingV2::ArchiveNeeded))
-                    .index(sea_query::Index::create().col(RpcAccountingV2::ErrorResponse))
+                    // cannot use NULL columns for any of these because unique indexes allow duplicates on NULL
                     .index(
                         sea_query::Index::create()
                             .col(RpcAccountingV2::RpcKeyId)
@@ -111,6 +112,14 @@ impl MigrationTrait for Migration {
                             .col(RpcAccountingV2::ErrorResponse)
                             .unique(),
                     )
+                    // cannot use a foreign key for RpcKeyId because the UNIQUE index uses 0 instead of NULL
+                    .index(sea_query::Index::create().col(RpcAccountingV2::RpcKeyId))
+                    .index(sea_query::Index::create().col(RpcAccountingV2::ChainId))
+                    .index(sea_query::Index::create().col(RpcAccountingV2::Origin))
+                    .index(sea_query::Index::create().col(RpcAccountingV2::PeriodDatetime))
+                    .index(sea_query::Index::create().col(RpcAccountingV2::Method))
+                    .index(sea_query::Index::create().col(RpcAccountingV2::ArchiveNeeded))
+                    .index(sea_query::Index::create().col(RpcAccountingV2::ErrorResponse))
                     .to_owned(),
             )
             .await?;
@@ -125,13 +134,6 @@ impl MigrationTrait for Migration {
 
         Ok(())
     }
-}
-
-/// Partial table definition
-#[derive(Iden)]
-pub enum RpcKey {
-    Table,
-    Id,
 }
 
 #[derive(Iden)]
