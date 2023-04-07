@@ -27,7 +27,7 @@ pub enum OpenRequestResult {
 
 /// Make RPC requests through this handle and drop it when you are done.
 /// Opening this handle checks rate limits. Developers, try to keep opening a handle and using it as close together as possible
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OpenRequestHandle {
     authorization: Arc<Authorization>,
     rpc: Arc<Web3Rpc>,

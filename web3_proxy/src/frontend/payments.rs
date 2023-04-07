@@ -28,9 +28,9 @@ use migration::sea_orm::EntityTrait;
 use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::QueryFilter;
 use migration::sea_orm::TransactionTrait;
+use redis_rate_limiter::redis::transaction;
 use serde_json::json;
 use serde_json::value::RawValue;
-use std::default::default;
 use std::sync::Arc;
 
 /// Implements any logic related to payments
@@ -86,86 +86,99 @@ pub async fn user_balance_post(
     // I suppose this is ok / good, so people don't spam this endpoint
 
     // First, get the transaction receipt
-    let transaction_receipt: &str = match app
-        .proxy_web3_rpc(
-            authorization.clone(),
-            JsonRpcRequestEnum::Single(JsonRpcRequest {
-                method: "eth_getTransactionReceipt".to_owned(),
-                params: Some(serde_json::Value::Array(vec![serde_json::Value::String(
-                    format!("0x{}", hex::encode(tx_hash)),
-                )])),
-                ..Default::default()
-            }),
-        )
-        .await?
-        .0
-    {
-        JsonRpcForwardedResponseEnum::Single(response) => match response.result {
-            Some(raw_result) => Ok(raw_result.get()),
-            None => Err(Web3ProxyError("Transaction Hash was not found!".to_owned())),
-        },
-        _ => Err(Web3ProxyError::BadRequest(
-            "Transaction Hash was not found!".to_owned(),
-        )),
-    }?;
+    // let transaction_receipt: TransactionReceipt = match app
+    //     .proxy_web3_rpc(
+    //         authorization.clone(),
+    //         JsonRpcRequestEnum::Single(JsonRpcRequest {
+    //             method: "eth_getTransactionReceipt".to_owned(),
+    //             params: Some(serde_json::Value::Array(vec![serde_json::Value::String(
+    //                 format!("0x{}", hex::encode(tx_hash)),
+    //             )])),
+    //             ..Default::default()
+    //         }),
+    //     )
+    //     .await?
+    //     .0
+    // {
+    //     JsonRpcForwardedResponseEnum::Single(response) => match response.result {
+    //         Some(raw_result) => Ok(raw_result.get().try_into()),
+    //         None => Err(Web3ProxyError("Transaction Hash was not found!".to_owned())),
+    //     },
+    //     _ => Err(Web3ProxyError::BadRequest(
+    //         "Transaction Hash was not found!".to_owned(),
+    //     )),
+    // }?;
+    // warn!("Accepted transactions are: {:?}", transaction_receipt);
 
-    let mut accepted_tokens_request_object: HashMap<String, serde_json::Value> = HashMap::new();
-    // We want to send a request to the contract
-    accepted_tokens_request_object.insert(
-        "to".to_owned(),
-        serde_json::Value::String(app.config.deposit_contract.clone()),
-    );
-    // We then want to include the function that we want to call
-    accepted_tokens_request_object.insert(
-        "data".to_owned(),
-        serde_json::Value::String(hex::encode(keccak256("get_approved_tokens()".as_bytes()))),
-    );
-    let accepted_token: &str = match app
-        .proxy_web3_rpc(
-            authorization.clone(),
-            JsonRpcRequestEnum::Single(JsonRpcRequest {
-                method: "eth_call".to_owned(),
-                params: Some(serde_json::Value::Object(
-                    accepted_tokens_request_object.into(),
-                )),
-                ..Default::default()
-            }),
-        )
-        .await?
-        .0
-    {
-        JsonRpcForwardedResponseEnum::Single(response) => match response.result {
-            Some(raw_result) => Ok(raw_result.get()),
-            None => Err(Web3ProxyError("Transaction Hash was not found!".to_owned())),
-        },
-        _ => Err(Web3ProxyError::BadRequest(
-            "Transaction Hash was not found!".to_owned(),
-        )),
-    }?;
-
-    // Then get the accepted tokens from the contract
-    let transaction_receipt = match app
-        .proxy_web3_rpc(
-            authorization.clone(),
-            JsonRpcRequestEnum::Single(JsonRpcRequest {
-                method: "eth_getTransactionReceipt".to_owned(),
-                params: Some(serde_json::Value::Array(vec![serde_json::Value::String(
-                    format!("0x{}", hex::encode(tx_hash)),
-                )])),
-                ..Default::default()
-            }),
-        )
-        .await?
-        .0
-    {
-        JsonRpcForwardedResponseEnum::Single(response) => match response.result {
-            Some(raw_result) => Ok(raw_result),
-            None => Err(Web3ProxyError("Transaction Hash was not found!".to_owned())),
-        },
-        _ => Err(Web3ProxyError::BadRequest(
-            "Transaction Hash was not found!",
-        )),
-    }?;
+    // let mut accepted_tokens_request_object: serde_json::Map<String, serde_json::Value> =
+    //     serde_json::Map::new();
+    // // We want to send a request to the contract
+    // accepted_tokens_request_object.insert(
+    //     "to".to_owned(),
+    //     serde_json::Value::String(app.config.deposit_contract.clone()),
+    // );
+    // // We then want to include the function that we want to call
+    // accepted_tokens_request_object.insert(
+    //     "data".to_owned(),
+    //     serde_json::Value::String(hex::encode(keccak256("get_approved_tokens()".as_bytes()))),
+    // );
+    // let accepted_token: Address = match app
+    //     .proxy_web3_rpc(
+    //         authorization.clone(),
+    //         JsonRpcRequestEnum::Single(JsonRpcRequest {
+    //             method: "eth_call".to_owned(),
+    //             params: Some(serde_json::Value::Object(accepted_tokens_request_object)),
+    //             ..Default::default()
+    //         }),
+    //     )
+    //     .await?
+    //     .0
+    // {
+    //     JsonRpcForwardedResponseEnum::Single(response) => match response.result {
+    //         Some(raw_result) => Ok(raw_result.get().parse::<Address>()?),
+    //         None => Err(Web3ProxyError("Transaction Hash was not found!".to_owned())),
+    //     },
+    //     _ => Err(Web3ProxyError::BadRequest(
+    //         "Transaction Hash was not found!".to_owned(),
+    //     )),
+    // }?;
+    // warn!("Accepted tokens are: {:?}", accepted_token);
+    //
+    // let mut token_decimals_request_object: HashMap<String, serde_json::Value> = HashMap::new();
+    // // We want to send a request to the contract
+    // token_decimals_request_object.insert(
+    //     "to".to_owned(),
+    //     serde_json::Value::String(hex::encode(accepted_token)),
+    // );
+    // // We then want to include the function that we want to call
+    // token_decimals_request_object.insert(
+    //     "data".to_owned(),
+    //     serde_json::Value::String(hex::encode(keccak256("decimals()".as_bytes()))),
+    // );
+    //
+    // let decimals = match app
+    //     .proxy_web3_rpc(
+    //         authorization.clone(),
+    //         JsonRpcRequestEnum::Single(JsonRpcRequest {
+    //             method: "eth_call".to_owned(),
+    //             params: Some(serde_json::Value::Object(
+    //                 token_decimals_request_object.into(),
+    //             )),
+    //             ..Default::default()
+    //         }),
+    //     )
+    //     .await?
+    //     .0
+    // {
+    //     JsonRpcForwardedResponseEnum::Single(response) => match response.result {
+    //         Some(raw_result) => Ok(raw_result.get().try_into()),
+    //         None => Err(Web3ProxyError("Transaction Hash was not found!".to_owned())),
+    //     },
+    //     _ => Err(Web3ProxyError::BadRequest(
+    //         "Transaction Hash was not found!".to_owned(),
+    //     )),
+    // }?;
+    // warn!("Accepted tokens are: {:?}", accepted_token);
 
     let (transaction_receipt, accepted_token, decimals): (TransactionReceipt, Address, u64) =
         match app
@@ -179,7 +192,7 @@ pub async fn user_balance_post(
                     "Params are: {:?}",
                     &vec![format!("0x{}", hex::encode(tx_hash))]
                 );
-                let tx_receipt = handle
+                let transaction_receipt: TransactionReceipt = handle
                     .clone()
                     .request(
                         "eth_getTransactionReceipt",
@@ -190,10 +203,10 @@ pub async fn user_balance_post(
                     .await
                     // TODO: What kind of error would be here
                     .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
+                warn!("Transaction receipt is: {:?}", transaction_receipt);
 
-                // TODO: While you're at it, also grab the approved tokens from the llamanodes contract,
-                let mut accepted_tokens_request_object: HashMap<String, serde_json::Value> =
-                    HashMap::new();
+                let mut accepted_tokens_request_object: serde_json::Map<String, serde_json::Value> =
+                    serde_json::Map::new();
                 // We want to send a request to the contract
                 accepted_tokens_request_object.insert(
                     "to".to_owned(),
@@ -206,7 +219,9 @@ pub async fn user_balance_post(
                         "get_approved_tokens()".as_bytes(),
                     ))),
                 );
-                let accepted_token = (&handle)
+                warn!("Params are: {:?}", &accepted_tokens_request_object);
+                let accepted_token: Address = handle
+                    .clone()
                     .request(
                         "eth_call",
                         &accepted_tokens_request_object,
@@ -216,10 +231,8 @@ pub async fn user_balance_post(
                     .await
                     // TODO: What kind of error would be here
                     .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
+                warn!("Accepted token is: {:?}", transaction_receipt);
 
-                warn!("Accepted tokens are: {:?}", accepted_token);
-
-                // and the decimals for the approved ERC20 token
                 let mut token_decimals_request_object: HashMap<String, serde_json::Value> =
                     HashMap::new();
                 // We want to send a request to the contract
@@ -232,7 +245,8 @@ pub async fn user_balance_post(
                     "data".to_owned(),
                     serde_json::Value::String(hex::encode(keccak256("decimals()".as_bytes()))),
                 );
-                let decimals = (&handle)
+                warn!("Params are: {:?}", &token_decimals_request_object);
+                let decimals: u64 = handle
                     .request(
                         "eth_call",
                         &token_decimals_request_object,
@@ -242,9 +256,9 @@ pub async fn user_balance_post(
                     .await
                     // TODO: What kind of error would be here
                     .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
+                warn!("Accepted token is: {:?}", transaction_receipt);
 
-                warn!("Decimals are: {:?}", decimals);
-                Ok((tx_receipt, accepted_token, decimals))
+                Ok((transaction_receipt, accepted_token, decimals))
             }
             // TODO: Probably skip this case (?)
             Ok(_) => {
