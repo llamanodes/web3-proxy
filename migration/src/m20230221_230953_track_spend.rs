@@ -38,22 +38,5 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum RpcAccountingV2 {
     Table,
-    Id,
-    RpcKeyId,
-    ChainId,
-    Origin,
-    PeriodDatetime,
-    Method,
-    ArchiveNeeded,
-    ErrorResponse,
-    FrontendRequests,
-    BackendRequests,
-    BackendRetries,
-    NoServers,
-    CacheMisses,
-    CacheHits,
-    SumRequestBytes,
-    SumResponseMillis,
-    SumResponseBytes,
     SumCreditsUsed,
 }

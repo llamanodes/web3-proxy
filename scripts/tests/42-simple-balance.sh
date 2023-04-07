@@ -2,7 +2,7 @@
 # Run the server
 ##################
 # Run the proxyd instance
-RUSTFLAGS="--cfg tokio_unstable" cargo run --release -- proxyd
+cargo run --release -- proxyd
 
 # Check if the instance is running
 curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"web3_clientVersion","id":1}' 127.0.0.1:8544

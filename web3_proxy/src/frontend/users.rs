@@ -2,13 +2,10 @@
 use super::authorization::{login_is_authorized, RpcSecretKey};
 use super::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::app::Web3ProxyApp;
-use crate::frontend::authorization::{Authorization as InternalAuthorization, RequestMetadata};
-use crate::frontend::errors::Web3ProxyError::NoHandleReady;
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
 };
 use crate::referral_code::ReferralCode;
-use crate::rpcs::request::OpenRequestResult;
 use crate::stats::influxdb_queries::query_user_stats;
 use crate::stats::StatType;
 use crate::user_token::UserBearerToken;
@@ -25,28 +22,16 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities;
-use entities::prelude::{Referee, Referrer, UserTier};
 use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{
-    balance, increase_balance_receipt, login, pending_login, referee, referrer, revert_log,
-    rpc_key, user, user_tier,
+    balance, login, pending_login, referee, referrer, revert_log, rpc_key, user, user_tier,
 };
-use ethers::abi::{AbiEncode, Error, ParamType, Token};
-use ethers::prelude::sourcemap::parse;
-use ethers::prelude::H256;
-use ethers::types::{Log, Transaction, TransactionReceipt, U256};
-use ethers::utils::{hex, keccak256};
-use ethers::{
-    prelude::{Address, EthEvent},
-    types::Bytes,
-};
-use futures::TryFutureExt;
+use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::{HeaderValue, StatusCode};
 use ipnet::IpNet;
 use itertools::Itertools;
-use log::{debug, trace, warn, Level};
-use migration::extension::postgres::Type;
+use log::{debug, warn};
 use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
@@ -55,10 +40,9 @@ use migration::sea_orm::{
 use serde::Deserialize;
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
-use std::ops::{Add, Div};
+use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
-use thread_fast_rng::rand;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
 
@@ -832,7 +816,7 @@ pub async fn rpc_keys_management(
 pub async fn user_referral_link_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // First get the bearer token and check if the user is logged in
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;

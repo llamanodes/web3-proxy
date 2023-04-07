@@ -6,7 +6,6 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-
         // Create one table for the referrer
         manager
             .create_table(
@@ -24,13 +23,13 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Referrer::ReferralCode)
                             .string()
                             .unique_key()
-                            .not_null()
+                            .not_null(),
                     )
                     .col(
                         ColumnDef::new(Referrer::UserId)
                             .big_unsigned()
                             .unique_key()
-                            .not_null()
+                            .not_null(),
                     )
                     .foreign_key(
                         sea_query::ForeignKey::create()
@@ -57,24 +56,24 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(Referee::CreditsAppliedForReferee)
                             .boolean()
-                            .not_null()
+                            .not_null(),
                     )
                     .col(
                         ColumnDef::new(Referee::CreditsAppliedForReferrer)
                             .decimal()
                             .not_null()
-                            .default(0)
+                            .default(0),
                     )
                     .col(
                         ColumnDef::new(Referee::ReferralStartDate)
                             .date_time()
                             .not_null()
-                            .extra("DEFAULT CURRENT_TIMESTAMP".to_string())
+                            .extra("DEFAULT CURRENT_TIMESTAMP".to_string()),
                     )
                     .col(
                         ColumnDef::new(Referee::UsedReferralCode)
                             .string()
-                            .not_null()
+                            .not_null(),
                     )
                     .foreign_key(
                         sea_query::ForeignKey::create()
@@ -85,7 +84,7 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Referee::UserId)
                             .big_unsigned()
                             .unique_key()
-                            .not_null()
+                            .not_null(),
                     )
                     .foreign_key(
                         sea_query::ForeignKey::create()
@@ -95,7 +94,6 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await
-
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -114,7 +112,7 @@ enum Referrer {
     Table,
     Id,
     UserId,
-    ReferralCode
+    ReferralCode,
 }
 
 #[derive(Iden)]
@@ -125,14 +123,11 @@ enum Referee {
     UsedReferralCode,
     CreditsAppliedForReferrer,
     CreditsAppliedForReferee,
-    ReferralStartDate
+    ReferralStartDate,
 }
 
 #[derive(Iden)]
 enum User {
     Table,
     Id,
-    Address,
-    Description,
-    Email,
 }

@@ -8,7 +8,7 @@ use axum::headers::Origin;
 use chrono::{TimeZone, Timelike, Utc};
 use derive_more::From;
 use entities::sea_orm_active_enums::TrackingLevel;
-use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key, user};
+use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key};
 use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
@@ -362,20 +362,20 @@ impl BufferedRpcQueryStats {
                 return Ok(());
             }
         };
-
-        let sender_user = match user::Entity::find()
-            .filter(user::Column::Id.eq(sender_user_id))
-            .one(db_conn)
-            .await?
-        {
-            Some(x) => x,
-            // Return early if the User is not found, because then it is an anonymous user
-            // Let's also issue a warning because obviously the RPC key should correspond to a user
-            None => {
-                warn!("No user was found for the key: {:?}", rpc_secret_key_id);
-                return Ok(());
-            }
-        };
+        //
+        // let _sender_user = match user::Entity::find()
+        //     .filter(user::Column::Id.eq(sender_user_id))
+        //     .one(db_conn)
+        //     .await?
+        // {
+        //     Some(x) => x,
+        //     // Return early if the User is not found, because then it is an anonymous user
+        //     // Let's also issue a warning because obviously the RPC key should correspond to a user
+        //     None => {
+        //         warn!("No user was found for the key: {:?}", rpc_secret_key_id);
+        //         return Ok(());
+        //     }
+        // };
 
         // TODO: I should probably generate join statements, so we don't have so much back and forths
         // Get the referee, and the referrer

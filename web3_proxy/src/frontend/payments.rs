@@ -1,13 +1,10 @@
 use crate::app::Web3ProxyApp;
-use crate::frontend::authorization::{Authorization as InternalAuthorization, RequestMetadata};
+use crate::frontend::authorization::Authorization as InternalAuthorization;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse};
-use crate::jsonrpc::{
-    JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest, JsonRpcRequestEnum,
-};
 use crate::rpcs::request::OpenRequestResult;
 use anyhow::Context;
 use axum::{
-    extract::{Path, Query},
+    extract::Path,
     headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
     Extension, Json, TypedHeader,
@@ -18,7 +15,7 @@ use ethers::abi::{AbiEncode, ParamType};
 use ethers::types::{Address, TransactionReceipt, H256, U256};
 use ethers::utils::{hex, keccak256};
 use hashbrown::HashMap;
-use http::{HeaderValue, StatusCode};
+use http::StatusCode;
 use log::{debug, warn, Level};
 use migration::sea_orm;
 use migration::sea_orm::prelude::Decimal;
@@ -28,9 +25,7 @@ use migration::sea_orm::EntityTrait;
 use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::QueryFilter;
 use migration::sea_orm::TransactionTrait;
-use redis_rate_limiter::redis::transaction;
 use serde_json::json;
-use serde_json::value::RawValue;
 use std::sync::Arc;
 
 /// Implements any logic related to payments
@@ -47,7 +42,7 @@ pub async fn user_balance_post(
     Path(mut params): Path<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // Check that the user is logged-in and authorized. We don't need a semaphore here btw
-    let (caller, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let (_, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     // Get the transaction hash, and the amount that the user wants to top up by.
     // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
@@ -357,9 +352,6 @@ pub async fn user_balance_post(
                 "The user must have signed up first. They are currently not signed up!".to_string(),
             )),
         }?;
-
-        let status_code: StatusCode;
-        let response_json: serde_json::Value;
 
         // For now we only accept stablecoins
         // And we hardcode the peg (later we would have to depeg this, for example

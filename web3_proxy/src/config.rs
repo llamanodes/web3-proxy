@@ -3,7 +3,7 @@ use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
 use ethers::prelude::TxHash;
-use ethers::types::{Address, U256, U64};
+use ethers::types::{U256, U64};
 use hashbrown::HashMap;
 use log::warn;
 use migration::sea_orm::DatabaseConnection;
@@ -99,7 +99,6 @@ pub struct AppConfig {
 
     // Accepted ERC20 tokens for the deposit contract
     // pub accepted_deposit_tokens: Vec<String>,
-
     /// minimum amount to increase eth_estimateGas results
     pub gas_increase_min: Option<U256>,
 
