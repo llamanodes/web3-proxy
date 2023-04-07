@@ -6,7 +6,6 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-
         // Adds a table which keeps track of which transactions were already added (basically to prevent double spending)
         manager
             .create_table(
@@ -24,7 +23,12 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(IncreaseBalanceReceipt::TxHash)
                             .string()
                             .unique_key()
-                            .not_null()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(IncreaseBalanceReceipt::ChainId)
+                            .string()
+                            .not_null(),
                     )
                     .to_owned(),
             )
@@ -34,7 +38,11 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // Replace the sample below with your own migration scripts
         manager
-            .drop_table(Table::drop().table(IncreaseBalanceReceipt::Table).to_owned())
+            .drop_table(
+                Table::drop()
+                    .table(IncreaseBalanceReceipt::Table)
+                    .to_owned(),
+            )
             .await
     }
 }
@@ -44,5 +52,6 @@ impl MigrationTrait for Migration {
 enum IncreaseBalanceReceipt {
     Table,
     Id,
-    TxHash
+    TxHash,
+    ChainId,
 }

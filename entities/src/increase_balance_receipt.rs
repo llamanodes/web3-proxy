@@ -9,6 +9,7 @@ pub struct Model {
     pub id: i32,
     #[sea_orm(unique)]
     pub tx_hash: String,
+    pub chain_id: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

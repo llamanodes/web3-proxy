@@ -21,6 +21,7 @@ use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::{self, DatabaseConnection, EntityTrait, QueryFilter};
 use migration::{Expr, OnConflict};
 use num_traits::ToPrimitive;
+use std::cmp::max;
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -486,6 +487,15 @@ impl BufferedRpcQueryStats {
         // In any case, add this to "spent"
         active_sender_balance.used_balance =
             sea_orm::Set(sender_balance.used_balance + Decimal::from(self.sum_credits_used));
+
+        // Also update the available balance
+        let new_available_balance = max(
+            sender_balance.available_balance - Decimal::from(self.sum_credits_used),
+            Decimal::from(0),
+        );
+        active_sender_balance.used_balance = sea_orm::Set(new_available_balance);
+
+        // TODO: Downgrade user's role to premium-free if the user ran out of credits
 
         active_sender_balance.save(db_conn).await?;
         active_referee.save(db_conn).await?;
