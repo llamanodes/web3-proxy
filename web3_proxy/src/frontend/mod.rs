@@ -6,6 +6,7 @@ pub mod admin;
 pub mod authorization;
 pub mod errors;
 // TODO: these are only public so docs are generated. What's a better way to do this?
+pub mod payments;
 pub mod rpc_proxy_http;
 pub mod rpc_proxy_ws;
 pub mod status;
@@ -176,7 +177,7 @@ pub async fn serve(
         .route("/user", get(users::user_get))
         .route("/user", post(users::user_post))
         .route("/user/balance", get(users::user_balance_get))
-        .route("/user/balance/:tx_hash", get(users::user_balance_post))
+        .route("/user/balance/:tx_hash", get(payments::user_balance_post))
         .route("/user/keys", get(users::rpc_keys_get))
         .route("/user/keys", post(users::rpc_keys_management))
         .route("/user/keys", put(users::rpc_keys_management))
