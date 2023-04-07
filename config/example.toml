@@ -17,7 +17,7 @@ kafka_urls = "127.0.0.1:19092"
 influxdb_host = "http://127.0.0.1:18086"
 influxdb_org = "dev_org"
 influxdb_token = "dev_web3_proxy_auth_token"
-influxdb_bucketname = "web3_proxy"
+influxdb_bucketname = "dev_web3_proxy"
 
 # thundering herd protection
 # only mark a block as the head block if the sum of their soft limits is greater than or equal to min_sum_soft_limit

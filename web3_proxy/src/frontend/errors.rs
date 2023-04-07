@@ -56,6 +56,7 @@ pub enum Web3ProxyError {
     InvalidHeaderValue(InvalidHeaderValue),
     InvalidEip,
     InvalidInviteCode,
+    InvalidReferralCode,
     InvalidReferer,
     InvalidSignatureLength,
     InvalidUserAgent,
@@ -345,6 +346,17 @@ impl Web3ProxyError {
                     StatusCode::UNAUTHORIZED,
                     JsonRpcForwardedResponse::from_str(
                         "invalid invite code",
+                        Some(StatusCode::UNAUTHORIZED.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::InvalidReferralCode => {
+                warn!("InvalidReferralCode");
+                (
+                    StatusCode::UNAUTHORIZED,
+                    JsonRpcForwardedResponse::from_str(
+                        "invalid referral code",
                         Some(StatusCode::UNAUTHORIZED.as_u16().into()),
                         None,
                     ),

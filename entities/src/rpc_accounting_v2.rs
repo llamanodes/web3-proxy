@@ -24,6 +24,7 @@ pub struct Model {
     pub sum_request_bytes: u64,
     pub sum_response_millis: u64,
     pub sum_response_bytes: u64,
+    pub sum_credits_used: Decimal,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

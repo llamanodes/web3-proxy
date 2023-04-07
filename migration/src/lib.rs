@@ -19,6 +19,10 @@ mod m20230130_124740_read_only_login_logic;
 mod m20230130_165144_prepare_admin_imitation_pre_login;
 mod m20230215_152254_admin_trail;
 mod m20230307_002623_migrate_rpc_accounting_to_rpc_accounting_v2;
+mod m20230205_130035_create_balance;
+mod m20230205_133755_create_referrals;
+mod m20230214_134254_increase_balance_transactions;
+mod m20230221_230953_track_spend;
 
 pub struct Migrator;
 
@@ -45,6 +49,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20230215_152254_admin_trail::Migration),
             Box::new(m20230125_204810_stats_v2::Migration),
             Box::new(m20230307_002623_migrate_rpc_accounting_to_rpc_accounting_v2::Migration),
+            Box::new(m20230205_130035_create_balance::Migration),
+            Box::new(m20230205_133755_create_referrals::Migration),
+            Box::new(m20230214_134254_increase_balance_transactions::Migration),
+            Box::new(m20230221_230953_track_spend::Migration),
         ]
     }
 }

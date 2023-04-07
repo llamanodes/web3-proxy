@@ -1,22 +1,26 @@
 //! Store "stats" in a database for billing and a different database for graphing
-//!
 //! TODO: move some of these structs/functions into their own file?
 pub mod db_queries;
 pub mod influxdb_queries;
 
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use axum::headers::Origin;
-use chrono::{TimeZone, Utc};
+use chrono::{TimeZone, Timelike, Utc};
 use derive_more::From;
-use entities::rpc_accounting_v2;
 use entities::sea_orm_active_enums::TrackingLevel;
+use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key, user};
 use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
 use influxdb2::models::DataPoint;
-use log::{error, info};
-use migration::sea_orm::{self, DatabaseConnection, EntityTrait};
+use log::{error, info, warn};
+use migration::sea_orm::prelude::Decimal;
+use migration::sea_orm::ActiveModelTrait;
+use migration::sea_orm::ColumnTrait;
+use migration::sea_orm::IntoActiveModel;
+use migration::sea_orm::{self, DatabaseConnection, EntityTrait, QueryFilter};
 use migration::{Expr, OnConflict};
+use num_traits::ToPrimitive;
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -45,6 +49,8 @@ pub struct RpcQueryStats {
     pub response_bytes: u64,
     pub response_millis: u64,
     pub response_timestamp: i64,
+    /// Credits used signifies how how much money was used up
+    pub credits_used: Decimal,
 }
 
 #[derive(Clone, From, Hash, PartialEq, Eq)]
@@ -104,6 +110,8 @@ impl RpcQueryStats {
             }
         };
 
+        // Depending on method, add some arithmetic around calculating credits_used
+        // I think balance should not go here, this looks more like a key thingy
         RpcQueryKey {
             response_timestamp,
             archive_needed: self.archive_request,
@@ -178,6 +186,7 @@ pub struct BufferedRpcQueryStats {
     pub sum_request_bytes: u64,
     pub sum_response_bytes: u64,
     pub sum_response_millis: u64,
+    pub sum_credits_used: Decimal, // TODO: This should probably be a decimal instead ...
 }
 
 /// A stat that we aggregate and then store in a database.
@@ -222,6 +231,7 @@ impl BufferedRpcQueryStats {
         self.sum_request_bytes += stat.request_bytes;
         self.sum_response_bytes += stat.response_bytes;
         self.sum_response_millis += stat.response_millis;
+        self.sum_credits_used += stat.credits_used;
     }
 
     // TODO: take a db transaction instead so that we can batch?
@@ -252,6 +262,7 @@ impl BufferedRpcQueryStats {
             sum_request_bytes: sea_orm::Set(self.sum_request_bytes),
             sum_response_millis: sea_orm::Set(self.sum_response_millis),
             sum_response_bytes: sea_orm::Set(self.sum_response_bytes),
+            sum_credits_used: sea_orm::Set(self.sum_credits_used),
         };
 
         rpc_accounting_v2::Entity::insert(accounting_entry)
@@ -301,11 +312,183 @@ impl BufferedRpcQueryStats {
                             Expr::col(rpc_accounting_v2::Column::SumResponseBytes)
                                 .add(self.sum_response_bytes),
                         ),
+                        (
+                            rpc_accounting_v2::Column::SumCreditsUsed,
+                            Expr::col(rpc_accounting_v2::Column::SumCreditsUsed)
+                                .add(self.sum_credits_used),
+                        ),
                     ])
                     .to_owned(),
             )
             .exec(db_conn)
             .await?;
+
+        // TODO: Figure out how to go around unmatching, it shouldn't return an error, but this is disgusting
+
+        // TODO: Skip most of this stuff if there is no referral logic ...
+
+        // All the referral & balance arithmetic takes place here
+        // TODO: Also update the referrer's balance
+        // TODO: Also update the referree's balance
+        // Apply bonus if possible
+        // Use db_conn for this ...
+
+        let rpc_secret_key_id: u64 = match key.rpc_secret_key_id {
+            Some(x) => x.into(),
+            // Return early if the RPC key is not found, because then it is an anonymous user
+            None => return Ok(()),
+        };
+
+        // TODO: get the referee, get the referrer
+        // TODO: Skip if the user was not registered, in that case there is no referee logic
+        // (1) Get the user with that RPC key. This is the referee
+        let sender_rpc_key = rpc_key::Entity::find()
+            // key.rpc_secret_key_id
+            .filter(rpc_key::Column::Id.eq(rpc_secret_key_id))
+            .one(db_conn)
+            .await?;
+
+        // Technicall there should always be a user ... still let's return "Ok(())" for now
+        let sender_user_id: u64 = match sender_rpc_key {
+            Some(x) => x.user_id.into(),
+            // Return early if the User is not found, because then it is an anonymous user
+            // Let's also issue a warning because obviously the RPC key should correspond to a user
+            None => {
+                warn!(
+                    "No user was found for the following rpc key: {:?}",
+                    rpc_secret_key_id
+                );
+                return Ok(());
+            }
+        };
+
+        let sender_user = match user::Entity::find()
+            .filter(user::Column::Id.eq(sender_user_id))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            // Return early if the User is not found, because then it is an anonymous user
+            // Let's also issue a warning because obviously the RPC key should correspond to a user
+            None => {
+                warn!("No user was found for the key: {:?}", rpc_secret_key_id);
+                return Ok(());
+            }
+        };
+
+        // TODO: I should probably generate join statements, so we don't have so much back and forths
+        // Get the referee, and the referrer
+        // (2) Look up the code that this user used. This is the referee table
+        let referee_object = match referee::Entity::find()
+            .filter(referee::Column::Id.eq(sender_user_id))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!(
+                    "No referral code was found for this user: {:?}",
+                    sender_user_id
+                );
+                return Ok(());
+            }
+        };
+
+        // (3) Look up the matching referrer in the referrer table
+        // Referral table -> Get the referee id
+        let user_with_that_referral_code = match referrer::Entity::find()
+            .filter(referrer::Column::ReferralCode.eq(&referee_object.used_referral_code))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!(
+                    "No referrer with that referral code was found {:?}",
+                    referee_object
+                );
+                return Ok(());
+            }
+        };
+
+        // Ok, now we add the credits to both users if applicable...
+        // (4 onwards) Add balance to the referrer,
+
+        // (5) Check if referee has used up $100.00 USD in total (Have a config item that says how many credits account to 1$)
+        // Get balance for the referrer (optionally make it into an active model ...)
+        let sender_balance = match balance::Entity::find()
+            .filter(balance::Column::UserId.eq(referee_object.user_id))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!(
+                    "This user id has no balance entry! {:?}",
+                    referee_object.user_id
+                );
+                return Ok(());
+            }
+        };
+
+        let referrer_balance = match balance::Entity::find()
+            .filter(balance::Column::UserId.eq(user_with_that_referral_code.user_id))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!(
+                    "This user id has no balance entry! {:?}",
+                    referee_object.user_id
+                );
+                return Ok(());
+            }
+        };
+
+        // I could try to circumvene the clone here, but let's skip that for now
+        let mut active_sender_balance = sender_balance.clone().into_active_model();
+        let mut active_referee = referee_object.clone().into_active_model();
+
+        // (5.1) If not, go to (7). If yes, go to (6)
+        // Hardcode this parameter also in config, so it's easier to tune
+        if !referee_object.credits_applied_for_referee
+            && (sender_balance.used_balance + self.sum_credits_used) >= Decimal::from(100)
+        {
+            // (6) If the credits have not yet been applied to the referee, apply 10M credits / $100.00 USD worth of credits.
+            // Make it into an active model, and add credits
+            // Also add credits_applied_for_referrer (maybe optionally ...)
+            active_sender_balance.available_balance =
+                sea_orm::Set(sender_balance.available_balance + Decimal::from(100));
+            // Also mark referral as "credits_applied_for_referee"
+            active_referee.credits_applied_for_referee = sea_orm::Set(true);
+        }
+
+        // (7) If the referral-start-date has not been passed, apply 10% of the credits to the referrer.
+        if referee_object
+            .referral_start_date
+            .num_seconds_from_midnight()
+            <= (365 * 24 * 60 * 60)
+        {
+            let mut active_referrer_balance = referrer_balance.clone().into_active_model();
+            // Add 10% referral fees ...
+            active_referrer_balance.available_balance = sea_orm::Set(
+                referrer_balance.available_balance
+                    + Decimal::from(self.sum_credits_used / Decimal::from(10)),
+            );
+            // Also record how much the current referrer has "provided" / "gifted" away
+            active_referee.credits_applied_for_referrer =
+                sea_orm::Set(referee_object.credits_applied_for_referrer + self.sum_credits_used);
+            active_referrer_balance.save(db_conn).await?;
+        }
+
+        // Modify the balance of the sender completely (in mysql, next to the stats)
+        // In any case, add this to "spent"
+        active_sender_balance.used_balance =
+            sea_orm::Set(sender_balance.used_balance + Decimal::from(self.sum_credits_used));
+
+        active_sender_balance.save(db_conn).await?;
+        active_referee.save(db_conn).await?;
 
         Ok(())
     }
@@ -344,7 +527,10 @@ impl BufferedRpcQueryStats {
             .field("cache_hits", self.cache_hits as i64)
             .field("sum_request_bytes", self.sum_request_bytes as i64)
             .field("sum_response_millis", self.sum_response_millis as i64)
-            .field("sum_response_bytes", self.sum_response_bytes as i64);
+            .field("sum_response_bytes", self.sum_response_bytes as i64)
+            // TODO: will this be enough of a range
+            // I guess Decimal can be a f64
+            .field("sum_credits_used", self.sum_credits_used.to_f64().unwrap());
 
         builder = builder.timestamp(key.response_timestamp);
         let timestamp_precision = TimestampPrecision::Seconds;
@@ -377,6 +563,11 @@ impl RpcQueryStats {
         let response_millis = metadata.start_instant.elapsed().as_millis() as u64;
         let response_bytes = response_bytes as u64;
 
+        // TODO: Depending on the method, metadata and response bytes, pick a different number of credits used
+        // This can be a slightly more complex function as we ll
+        // TODO: Here, let's implement the formula
+        let credits_used = Decimal::from(1);
+
         let response_timestamp = Utc::now().timestamp();
 
         Self {
@@ -389,6 +580,7 @@ impl RpcQueryStats {
             response_bytes,
             response_millis,
             response_timestamp,
+            credits_used,
         }
     }
 
@@ -435,6 +627,7 @@ impl StatBuffer {
         // any errors inside this task will cause the application to exit
         let handle = tokio::spawn(async move {
             new.aggregate_and_save_loop(bucket, stat_receiver, shutdown_receiver)
+                // new.aggregate_and_save_loop(stat_receiver, shutdown_receiver)
                 .await
         });
 
@@ -459,7 +652,6 @@ impl StatBuffer {
 
         // TODO: Somewhere here we should probably be updating the balance of the user
         // And also update the credits used etc. for the referred user
-
         loop {
             tokio::select! {
                 stat = stat_receiver.recv_async() => {
@@ -558,6 +750,7 @@ impl StatBuffer {
                 global_timeseries_buffer.len(),
             );
 
+            // TODO: Basically apply the credit-logic here, after the time-series has been writte into ...
             for (key, stat) in global_timeseries_buffer.drain() {
                 if let Err(err) = stat
                     .save_timeseries(&bucket, "global_proxy", self.chain_id, influxdb_client, key)
@@ -575,6 +768,7 @@ impl StatBuffer {
                 opt_in_timeseries_buffer.len(),
             );
 
+            // TODO: Basically apply the credit-logic here, after the time-series has been writte into ...
             for (key, stat) in opt_in_timeseries_buffer.drain() {
                 if let Err(err) = stat
                     .save_timeseries(&bucket, "opt_in_proxy", self.chain_id, influxdb_client, key)
