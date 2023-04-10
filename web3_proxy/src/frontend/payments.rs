@@ -26,7 +26,6 @@ use migration::sea_orm::EntityTrait;
 use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::QueryFilter;
 use migration::sea_orm::TransactionTrait;
-use num_traits::FromPrimitive;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -355,7 +354,7 @@ pub async fn user_balance_post(
                     .context("Could not decode amount")?,
             ),
             Err(err) => {
-                warn!("Out: Could not decode!");
+                warn!("Out: Could not decode! {:?}", err);
                 continue;
                 // Err(Web3ProxyError::BadRequest(format!(
                 //     "Log could not be decoded: {:?}",

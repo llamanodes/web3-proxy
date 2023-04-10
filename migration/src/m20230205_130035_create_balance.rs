@@ -21,15 +21,13 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(Balance::AvailableBalance)
-                            // TODO: Make this type decimal(20,8) ; instead of the default decimal(10, 0)
-                            .decimal()
+                            .decimal_len(20, 10)
                             .not_null()
                             .default(0.0),
                     )
                     .col(
                         ColumnDef::new(Balance::UsedBalance)
-                            // TODO: Make this type decimal(20,8) ; instead of the default decimal(10, 0)
-                            .decimal()
+                            .decimal_len(20, 10)
                             .not_null()
                             .default(0.0),
                     )

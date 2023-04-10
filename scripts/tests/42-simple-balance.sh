@@ -62,10 +62,21 @@ curl \
 
 # TODO: Now start using the RPC, balance should decrease
 
+# Get the RPC key
+curl \
+  -X GET "127.0.0.1:8544/user/keys" \
+  -H "Authorization: Bearer 01GXNM02TW00APX79EYFCMM2VX" \
+  --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
 
 ## Check if calling an RPC endpoint logs the stats
 ## This one does already even it seems
-curl -X POST -H "Content-Type: application/json" --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}' 127.0.0.1:8544
+for i in {1..1000}
+do
+  curl \
+  -X POST "127.0.0.1:8544/rpc/01GXNKWJ50ZT068ER38MRJSC20" \
+  -H "Content-Type: application/json" \
+  --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
+done
 
 
 # TODO: Now implement and test withdrawal

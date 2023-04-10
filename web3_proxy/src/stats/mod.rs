@@ -21,6 +21,7 @@ use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::{self, DatabaseConnection, EntityTrait, QueryFilter};
 use migration::{Expr, OnConflict};
 use num_traits::ToPrimitive;
+use std::cmp;
 use std::cmp::max;
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
@@ -362,20 +363,38 @@ impl BufferedRpcQueryStats {
                 return Ok(());
             }
         };
-        //
-        // let _sender_user = match user::Entity::find()
-        //     .filter(user::Column::Id.eq(sender_user_id))
-        //     .one(db_conn)
-        //     .await?
-        // {
-        //     Some(x) => x,
-        //     // Return early if the User is not found, because then it is an anonymous user
-        //     // Let's also issue a warning because obviously the RPC key should correspond to a user
-        //     None => {
-        //         warn!("No user was found for the key: {:?}", rpc_secret_key_id);
-        //         return Ok(());
-        //     }
-        // };
+
+        // (1) Do some general bookkeeping on the user
+        let sender_balance = match balance::Entity::find()
+            .filter(balance::Column::UserId.eq(sender_user_id))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!("This user id has no balance entry! {:?}", sender_user_id);
+                return Ok(());
+            }
+        };
+
+        let mut active_sender_balance = sender_balance.clone().into_active_model();
+
+        // Still subtract from the user in any case,
+        // Modify the balance of the sender completely (in mysql, next to the stats)
+        // In any case, add this to "spent"
+        active_sender_balance.used_balance =
+            sea_orm::Set(sender_balance.used_balance + Decimal::from(self.sum_credits_used));
+
+        // Also update the available balance
+        let new_available_balance = max(
+            sender_balance.available_balance - Decimal::from(self.sum_credits_used),
+            Decimal::from(0),
+        );
+        active_sender_balance.available_balance = sea_orm::Set(new_available_balance);
+
+        // TODO: Downgrade user's role to premium-free if the user ran out of credits
+
+        active_sender_balance.save(db_conn).await?;
 
         // TODO: I should probably generate join statements, so we don't have so much back and forths
         // Get the referee, and the referrer
@@ -432,6 +451,8 @@ impl BufferedRpcQueryStats {
             }
         };
 
+        let mut active_sender_balance = sender_balance.clone().into_active_model();
+
         let referrer_balance = match balance::Entity::find()
             .filter(balance::Column::UserId.eq(user_with_that_referral_code.user_id))
             .one(db_conn)
@@ -448,7 +469,6 @@ impl BufferedRpcQueryStats {
         };
 
         // I could try to circumvene the clone here, but let's skip that for now
-        let mut active_sender_balance = sender_balance.clone().into_active_model();
         let mut active_referee = referee_object.clone().into_active_model();
 
         // (5.1) If not, go to (7). If yes, go to (6)
@@ -482,20 +502,6 @@ impl BufferedRpcQueryStats {
                 sea_orm::Set(referee_object.credits_applied_for_referrer + self.sum_credits_used);
             active_referrer_balance.save(db_conn).await?;
         }
-
-        // Modify the balance of the sender completely (in mysql, next to the stats)
-        // In any case, add this to "spent"
-        active_sender_balance.used_balance =
-            sea_orm::Set(sender_balance.used_balance + Decimal::from(self.sum_credits_used));
-
-        // Also update the available balance
-        let new_available_balance = max(
-            sender_balance.available_balance - Decimal::from(self.sum_credits_used),
-            Decimal::from(0),
-        );
-        active_sender_balance.used_balance = sea_orm::Set(new_available_balance);
-
-        // TODO: Downgrade user's role to premium-free if the user ran out of credits
 
         active_sender_balance.save(db_conn).await?;
         active_referee.save(db_conn).await?;
@@ -573,10 +579,12 @@ impl RpcQueryStats {
         let response_millis = metadata.start_instant.elapsed().as_millis() as u64;
         let response_bytes = response_bytes as u64;
 
+        // TODO: Gotta make the arithmetic here
+
         // TODO: Depending on the method, metadata and response bytes, pick a different number of credits used
         // This can be a slightly more complex function as we ll
         // TODO: Here, let's implement the formula
-        let credits_used = Decimal::from(1);
+        let credits_used = Self::compute_cost(request_bytes, response_bytes, backend_requests == 0);
 
         let response_timestamp = Utc::now().timestamp();
 
@@ -591,6 +599,30 @@ impl RpcQueryStats {
             response_millis,
             response_timestamp,
             credits_used,
+        }
+    }
+
+    /// Compute cost per request
+    /// All methods cost the same
+    /// The number of bytes are based on input, and output bytes
+    pub fn compute_cost(request_bytes: u64, response_bytes: u64, cache_hit: bool) -> Decimal {
+        // TODO: Should make these lazy_static const?
+        // pays at least $0.000018 / credits per request
+        let cost_minimum = Decimal::new(18, 6);
+        // 1kb is included on each call
+        let cost_free_bytes = 1024;
+        // after that, we add cost per bytes, $0.000000006 / credits per byte
+        let cost_per_byte = Decimal::new(6, 9);
+
+        let total_bytes = request_bytes + response_bytes;
+        let total_chargable_bytes =
+            Decimal::from(max(0, total_bytes as i64 - cost_free_bytes as i64));
+
+        let out = (cost_minimum + cost_per_byte * total_chargable_bytes);
+        if cache_hit {
+            out * Decimal::new(5, 1)
+        } else {
+            out
         }
     }
 
