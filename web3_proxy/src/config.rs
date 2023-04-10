@@ -97,6 +97,9 @@ pub struct AppConfig {
     /// Default ERC address for out deposit contract
     pub deposit_contract: String,
 
+    /// Default ERC address for out deposit contract
+    pub deposit_topic: String,
+
     // Accepted ERC20 tokens for the deposit contract
     // pub accepted_deposit_tokens: Vec<String>,
     /// minimum amount to increase eth_estimateGas results

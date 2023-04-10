@@ -1,0 +1,4 @@
+python-dotenv
+eth-brownie
+ensurepath
+brownie-token-tester
