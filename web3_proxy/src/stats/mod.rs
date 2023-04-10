@@ -21,7 +21,6 @@ use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::{self, DatabaseConnection, EntityTrait, QueryFilter};
 use migration::{Expr, OnConflict};
 use num_traits::ToPrimitive;
-use std::cmp;
 use std::cmp::max;
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
@@ -618,7 +617,7 @@ impl RpcQueryStats {
         let total_chargable_bytes =
             Decimal::from(max(0, total_bytes as i64 - cost_free_bytes as i64));
 
-        let out = (cost_minimum + cost_per_byte * total_chargable_bytes);
+        let out = cost_minimum + cost_per_byte * total_chargable_bytes;
         if cache_hit {
             out * Decimal::new(5, 1)
         } else {

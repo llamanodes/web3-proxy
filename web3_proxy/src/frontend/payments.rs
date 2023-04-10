@@ -411,7 +411,7 @@ pub async fn user_balance_post(
         );
         let mut amount = Decimal::from(amount.as_u128());
         // 1 request is supposed to handle
-        amount.set_scale(decimals);
+        let _ = amount.set_scale(decimals);
         // amount = amount
         //     .checked_div(Decimal::from(10_u64.pow(decimals)))
         //     .unwrap();
