@@ -1,4 +1,4 @@
-from brownie import Contract, Factory, MinimalProxy, Sweeper, accounts
+from brownie import Contract, accounts
 from brownie.network import priority_fee
 
 def main():
