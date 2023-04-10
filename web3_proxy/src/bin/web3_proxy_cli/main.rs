@@ -131,6 +131,7 @@ fn main() -> anyhow::Result<()> {
                 vec![
                     "info",
                     "ethers=debug",
+                    "ethers_providers=debug",
                     "redis_rate_limit=debug",
                     "web3_proxy=trace",
                     "web3_proxy_cli=trace",
@@ -142,6 +143,7 @@ fn main() -> anyhow::Result<()> {
                 vec![
                     "info",
                     "ethers=debug",
+                    "ethers_providers=warn",
                     "redis_rate_limit=debug",
                     "web3_proxy=debug",
                     "web3_proxy_cli=debug",

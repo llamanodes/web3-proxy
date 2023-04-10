@@ -575,27 +575,28 @@ impl Web3ProxyApp {
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
         // stats can be saved in mysql, influxdb, both, or none
-        let stat_sender = if let Some(emitter_spawn) = StatBuffer::try_spawn(
-            top_config.app.chain_id,
-            top_config
-                .app
-                .influxdb_bucket
-                .clone()
-                .context("No influxdb bucket was provided")?,
-            db_conn.clone(),
-            influxdb_client.clone(),
-            60,
-            1,
-            BILLING_PERIOD_SECONDS,
-            stat_buffer_shutdown_receiver,
-        )? {
-            // since the database entries are used for accounting, we want to be sure everything is saved before exiting
-            important_background_handles.push(emitter_spawn.background_handle);
+        let mut stat_sender = None;
+        if let Some(influxdb_bucket) = top_config.app.influxdb_bucket.clone() {
+            if let Some(spawned_stat_buffer) = StatBuffer::try_spawn(
+                top_config.app.chain_id,
+                influxdb_bucket,
+                db_conn.clone(),
+                influxdb_client.clone(),
+                60,
+                1,
+                BILLING_PERIOD_SECONDS,
+                stat_buffer_shutdown_receiver,
+            )? {
+                // since the database entries are used for accounting, we want to be sure everything is saved before exiting
+                important_background_handles.push(spawned_stat_buffer.background_handle);
 
-            Some(emitter_spawn.stat_sender)
-        } else {
-            None
-        };
+                stat_sender = Some(spawned_stat_buffer.stat_sender);
+            }
+        }
+
+        if stat_sender.is_none() {
+            info!("stats will not be collected");
+        }
 
         // make a http shared client
         // TODO: can we configure the connection pool? should we?

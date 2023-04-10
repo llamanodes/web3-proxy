@@ -1001,6 +1001,7 @@ impl Web3Rpcs {
                         request_metadata.no_servers.fetch_add(1, Ordering::Release);
                     }
 
+                    // TODO: don't break. wait up to X seconds for a sever
                     break;
                 }
             }
@@ -1021,27 +1022,26 @@ impl Web3Rpcs {
         let num_conns = self.by_name.read().len();
         let num_skipped = skip_rpcs.len();
 
-        let consensus = watch_consensus_connections.borrow();
+        let head_block_num = watch_consensus_connections
+            .borrow()
+            .as_ref()
+            .map(|x| *x.head_block.number());
 
-        let head_block_num = consensus.as_ref().map(|x| x.head_block.number());
-
+        // TODO: error? warn? debug? trace?
         if num_skipped == 0 {
             error!(
-                "No servers synced ({:?}-{:?}, {:?}) ({} known). None skipped",
+                "No servers synced (min {:?}, max {:?}, head {:?}) ({} known). None skipped",
                 min_block_needed, max_block_needed, head_block_num, num_conns
             );
 
             // TODO: remove this, or move to trace level
             // debug!("{}", serde_json::to_string(&request).unwrap());
         } else {
-            // TODO: error? warn? debug? trace?
             error!(
-                "Requested data is not available ({:?}-{:?}, {:?}) ({} skipped, {} known)",
+                "Requested data is not available (min {:?}, max {:?}, head {:?}) ({} skipped, {} known)",
                 min_block_needed, max_block_needed, head_block_num, num_skipped, num_conns
             );
         }
-
-        drop(consensus);
 
         // TODO: what error code?
         // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
