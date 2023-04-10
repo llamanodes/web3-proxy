@@ -1,6 +1,6 @@
 //! `frontend` contains HTTP and websocket endpoints for use by a website or web3 wallet.
 //!
-//! Important reading about axum extractors: https://docs.rs/axum/latest/axum/extract/index.html#the-order-of-extractors
+//! Important reading about axum extractors: <https://docs.rs/axum/latest/axum/extract/index.html#the-order-of-extractors>
 
 pub mod admin;
 pub mod authorization;

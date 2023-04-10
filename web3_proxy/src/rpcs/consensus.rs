@@ -90,9 +90,9 @@ type FirstSeenCache = Cache<H256, Instant, hashbrown::hash_map::DefaultHashBuild
 /// A ConsensusConnections builder that tracks all connection heads across multiple groups of servers
 pub struct ConsensusFinder {
     /// backups for all tiers are only used if necessary
-    /// tiers[0] = only tier 0.
-    /// tiers[1] = tier 0 and tier 1
-    /// tiers[n] = tier 0..=n
+    /// `tiers[0] = only tier 0`
+    /// `tiers[1] = tier 0 and tier 1`
+    /// `tiers[n] = tier 0..=n`
     /// This is a BTreeMap and not a Vec because sometimes a tier is empty
     rpc_heads: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
     /// never serve blocks that are too old

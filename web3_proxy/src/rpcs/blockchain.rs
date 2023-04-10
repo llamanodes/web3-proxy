@@ -197,7 +197,7 @@ impl Web3Rpcs {
 
     /// Get a block from caches with fallback.
     /// Will query a specific node or the best available.
-    /// TODO: return Web3ProxyResult<Option<ArcBlock>>?
+    /// TODO: return `Web3ProxyResult<Option<ArcBlock>>`?
     pub async fn block(
         &self,
         authorization: &Arc<Authorization>,

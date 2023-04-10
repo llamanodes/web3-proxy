@@ -160,7 +160,7 @@ pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
 pub struct AuthorizationChecks {
     /// database id of the primary user. 0 if anon
     /// TODO: do we need this? its on the authorization so probably not
-    /// TODO: Option<NonZeroU64>?
+    /// TODO: `Option<NonZeroU64>`? they are actual zeroes some places in the db now
     pub user_id: u64,
     /// the key used (if any)
     pub rpc_secret_key: Option<RpcSecretKey>,

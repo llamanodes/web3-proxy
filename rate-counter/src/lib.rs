@@ -1,6 +1,4 @@
 //! A counter of events in a time period.
-//!
-//! TODO: maybe better to do something like this though: https://github.com/facebookarchive/metrics/blob/master/ewma.go
 use std::collections::VecDeque;
 use tokio::time::{Duration, Instant};
 
