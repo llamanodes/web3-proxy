@@ -1,6 +1,6 @@
-use crate::frontend::errors::Web3ProxyResult;
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use derive_more::From;
-use ethers::prelude::{HttpClientError, ProviderError, WsClientError};
+use ethers::prelude::ProviderError;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -248,41 +248,16 @@ impl JsonRpcForwardedResponse {
         let data;
 
         match e {
-            ProviderError::JsonRpcClientError(e) => {
-                // TODO: check what type the provider is rather than trying to downcast both types of errors
-                let e = e.downcast::<HttpClientError>();
-
-                if let Ok(e) = e {
-                    match *e {
-                        HttpClientError::JsonRpcError(e) => {
-                            code = e.code;
-                            message = e.message.clone();
-                            data = e.data;
-                        }
-                        e => {
-                            // this is not an rpc error. keep it as an error
-                            return Err(e.into());
-                        }
-                    }
+            ProviderError::JsonRpcClientError(err) => {
+                if let Some(err) = err.as_error_response() {
+                    code = err.code;
+                    message = err.message.clone();
+                    data = err.data.clone();
+                } else if let Some(err) = err.as_serde_error() {
+                    // this is not an rpc error. keep it as an error
+                    return Err(Web3ProxyError::BadRequest(format!("bad request: {}", err)));
                 } else {
-                    // it wasn't an HttpClientError. try WsClientError
-                    let e = e.unwrap_err().downcast::<WsClientError>();
-
-                    if let Ok(e) = e {
-                        match *e {
-                            WsClientError::JsonRpcError(e) => {
-                                code = e.code;
-                                message = e.message.clone();
-                                data = e.data;
-                            }
-                            e => {
-                                // this is not an rpc error. keep it as an error
-                                return Err(e.into());
-                            }
-                        }
-                    } else {
-                        return Err(anyhow::anyhow!("unexpected ethers error!").into());
-                    }
+                    return Err(anyhow::anyhow!("unexpected ethers error!").into());
                 }
             }
             e => return Err(e.into()),
