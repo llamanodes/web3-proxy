@@ -67,7 +67,9 @@ pub enum Web3ProxyError {
     JoinError(JoinError),
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
-    JsonRpc(crate::jsonrpc::JsonRpcErrorData),
+    JsonRpcForwardedError(JsonRpcForwardedResponse),
+    #[display(fmt = "{:?}", _0)]
+    #[error(ignore)]
     MsgPackEncode(rmp_serde::encode::Error),
     NoBlockNumberOrHash,
     NoBlocksKnown,
@@ -247,6 +249,7 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::JsonRpcForwardedError(x) => (StatusCode::OK, x),
             Self::GasEstimateNotU256 => {
                 warn!("GasEstimateNotU256");
                 (
@@ -413,24 +416,13 @@ impl Web3ProxyError {
                     ),
                 )
             }
-            Self::JsonRpc(err) => {
-                debug!("JsonRpc err={:?}", err);
-                (
-                    StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "json rpc error!",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
-                )
-            }
             Self::MsgPackEncode(err) => {
-                debug!("MsgPackEncode Error: {}", err);
+                warn!("MsgPackEncode Error: {}", err);
                 (
-                    StatusCode::BAD_REQUEST,
+                    StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
                         &format!("msgpack encode error: {}", err),
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
                 )
@@ -438,10 +430,10 @@ impl Web3ProxyError {
             Self::NoBlockNumberOrHash => {
                 warn!("NoBlockNumberOrHash");
                 (
-                    StatusCode::BAD_REQUEST,
+                    StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcForwardedResponse::from_str(
                         "Blocks here must have a number or hash",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
                 )
@@ -449,10 +441,10 @@ impl Web3ProxyError {
             Self::NoBlocksKnown => {
                 error!("NoBlocksKnown");
                 (
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::BAD_GATEWAY,
                     JsonRpcForwardedResponse::from_str(
                         "no blocks known",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
                         None,
                     ),
                 )
@@ -460,10 +452,10 @@ impl Web3ProxyError {
             Self::NoConsensusHeadBlock => {
                 error!("NoConsensusHeadBlock");
                 (
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::BAD_GATEWAY,
                     JsonRpcForwardedResponse::from_str(
                         "no consensus head block",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
+                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
                         None,
                     ),
                 )
@@ -506,7 +498,7 @@ impl Web3ProxyError {
             }
             Self::NotFound => {
                 // TODO: emit a stat?
-                // TODO: instead of an error, show a normal html page for 404
+                // TODO: instead of an error, show a normal html page for 404?
                 (
                     StatusCode::NOT_FOUND,
                     JsonRpcForwardedResponse::from_str(
@@ -528,7 +520,7 @@ impl Web3ProxyError {
                 )
             }
             Self::OriginRequired => {
-                warn!("OriginRequired");
+                trace!("OriginRequired");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -539,7 +531,7 @@ impl Web3ProxyError {
                 )
             }
             Self::OriginNotAllowed(origin) => {
-                warn!("OriginNotAllowed origin={}", origin);
+                trace!("OriginNotAllowed origin={}", origin);
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcForwardedResponse::from_string(
@@ -550,7 +542,7 @@ impl Web3ProxyError {
                 )
             }
             Self::ParseBytesError(err) => {
-                warn!("ParseBytesError err={:?}", err);
+                trace!("ParseBytesError err={:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -561,7 +553,7 @@ impl Web3ProxyError {
                 )
             }
             Self::ParseMsgError(err) => {
-                warn!("ParseMsgError err={:?}", err);
+                trace!("ParseMsgError err={:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -572,9 +564,9 @@ impl Web3ProxyError {
                 )
             }
             Self::ParseAddressError => {
-                warn!("ParseAddressError");
+                trace!("ParseAddressError");
                 (
-                    StatusCode::UNAUTHORIZED,
+                    StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
                         "unable to parse address",
                         Some(StatusCode::BAD_REQUEST.as_u16().into()),
@@ -775,6 +767,7 @@ impl Web3ProxyError {
             }
             Self::UserIdZero => {
                 warn!("UserIdZero");
+                // TODO: this might actually be an application error and not a BAD_REQUEST
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -785,7 +778,7 @@ impl Web3ProxyError {
                 )
             }
             Self::VerificationError(err) => {
-                warn!("VerificationError err={:?}", err);
+                trace!("VerificationError err={:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -818,7 +811,7 @@ impl Web3ProxyError {
                 )
             }
             Self::WebsocketOnly => {
-                warn!("WebsocketOnly");
+                trace!("WebsocketOnly");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcForwardedResponse::from_str(
@@ -828,20 +821,23 @@ impl Web3ProxyError {
                     ),
                 )
             }
-            Self::WithContext(err, msg) => {
-                info!("in context: {}", msg);
-                match err {
-                    Some(err) => err.into_response_parts(),
-                    None => (
+            Self::WithContext(err, msg) => match err {
+                Some(err) => {
+                    warn!("{:#?} w/ context {}", err, msg);
+                    err.into_response_parts()
+                }
+                None => {
+                    warn!("error w/ context {}", msg);
+                    (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         JsonRpcForwardedResponse::from_string(
                             msg,
                             Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                             None,
                         ),
-                    ),
+                    )
                 }
-            }
+            },
         }
     }
 }

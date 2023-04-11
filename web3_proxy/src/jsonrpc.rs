@@ -7,8 +7,6 @@ use serde_json::json;
 use serde_json::value::{to_raw_value, RawValue};
 use std::fmt;
 
-// this is used by serde
-#[allow(dead_code)]
 fn default_jsonrpc() -> String {
     "2.0".to_string()
 }
@@ -22,6 +20,45 @@ pub struct JsonRpcRequest {
     pub id: Box<RawValue>,
     pub method: String,
     pub params: Option<serde_json::Value>,
+}
+
+#[derive(From)]
+pub enum JsonRpcId {
+    None,
+    Number(u64),
+    String(String),
+}
+
+impl JsonRpcId {
+    pub fn to_raw_value(&self) -> Box<RawValue> {
+        // TODO: is this a good way to do this? we should probably use references
+        match self {
+            Self::None => {
+                to_raw_value(&json!(None::<Option<()>>)).expect("null id should always work")
+            }
+            Self::Number(x) => {
+                serde_json::from_value(json!(x)).expect("number id should always work")
+            }
+            Self::String(x) => serde_json::from_str(x).expect("string id should always work"),
+        }
+    }
+}
+
+impl JsonRpcRequest {
+    pub fn new(
+        id: JsonRpcId,
+        method: String,
+        params: Option<serde_json::Value>,
+    ) -> anyhow::Result<Self> {
+        let x = Self {
+            jsonrpc: default_jsonrpc(),
+            id: id.to_raw_value(),
+            method,
+            params,
+        };
+
+        Ok(x)
+    }
 }
 
 impl fmt::Debug for JsonRpcRequest {
@@ -206,9 +243,7 @@ impl JsonRpcForwardedResponse {
         // TODO: can we somehow get the initial request here? if we put that into a tracing span, will things slow down a ton?
         JsonRpcForwardedResponse {
             jsonrpc: "2.0".to_string(),
-            id: id.unwrap_or_else(|| {
-                to_raw_value(&json!(None::<Option<()>>)).expect("null id should always work")
-            }),
+            id: id.unwrap_or_else(|| JsonRpcId::None.to_raw_value()),
             result: None,
             error: Some(JsonRpcErrorData {
                 code: code.unwrap_or(-32099),
