@@ -63,6 +63,8 @@ curl -X POST http://127.0.0.1:8544/user/login \
 
 ##################
 # Now act as the referrer (Wallet 0x762390ae7a3c4D987062a398C1eA8767029AB08E)
+# We first login the referrer
+# Using the referrer code creates an entry in the table
 ##################
 # Login using the referral link. This should create the user, and also mark him as being referred
 # http://127.0.0.1:8544/user/login/0x762390ae7a3c4D987062a398C1eA8767029AB08E
@@ -81,13 +83,34 @@ curl -X POST http://127.0.0.1:8544/user/login \
 # Bearer token 01GXRFKFQXDV0MQ2RT52BCPZ23
 # RPC key 01GXRFKFPY5DDRCRVB3B3HVDYK
 
+# Make some requests, the referrer should not receive any credits for this (balance table is not created for free-tier users ...) This works fine
+for i in {1..1000}
+do
+  curl \
+    -X POST "127.0.0.1:8544/rpc/01GXRFKFPY5DDRCRVB3B3HVDYK" \
+    -H "Content-Type: application/json" \
+  --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
+done
+
+###########################################
+# Now the referred user deposits some tokens
+# They then send it to the endpoint
+###########################################
+curl \
+-H "Authorization: Bearer 01GXRFKFQXDV0MQ2RT52BCPZ23" \
+-X GET "127.0.0.1:8544/user/balance/0xda41f748106d2d1f1bf395e65d07bd9fc507c1eb4fd50c87d8ca1f34cfd536b0"
+
+curl \
+-H "Authorization: Bearer 01GXRFKFQXDV0MQ2RT52BCPZ23" \
+-X GET "127.0.0.1:8544/user/balance/0xd56dee328dfa3bea26c3762834081881e5eff62e77a2b45e72d98016daaeffba"
+
+
+# Now top up the user's balance.
+
 # Check that the new user was indeed logged in, and that a referral table entry was created (in the database)
 
 # Check that the user can make queries indeed
-curl \
-  -X POST "127.0.0.1:8544/rpc/01GXRAGS5F9VJFQRVMZGE1Q85T" \
-  -H "Content-Type: application/json" \
-  --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
+
 
 
 

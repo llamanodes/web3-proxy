@@ -363,6 +363,12 @@ pub async fn user_balance_post(
             }
         };
 
+        // return early if amount is 0
+        if amount == U256::from(0) {
+            warn!("Out: Found log has amount = 0 {:?}", amount);
+            continue;
+        }
+
         // Skip if no accepted token
         if token != accepted_token {
             warn!(
@@ -430,23 +436,40 @@ pub async fn user_balance_post(
                 let balance_plus_amount = user_balance.available_balance + amount;
                 debug!("New user balance is: {:?}", balance_plus_amount);
                 // Update the entry, adding the balance
-                let mut user_balance = user_balance.into_active_model();
-                user_balance.available_balance = sea_orm::Set(balance_plus_amount);
-                debug!("New user balance model is: {:?}", user_balance);
-                user_balance.save(&txn).await?;
+                let mut active_user_balance = user_balance.into_active_model();
+                active_user_balance.available_balance = sea_orm::Set(balance_plus_amount);
+
+                if balance_plus_amount >= Decimal::new(10, 0) {
+                    // Also make the user premium at this point ...
+                    let mut active_recipient = recipient.into_active_model();
+                    // Make the recipient premium "Effectively Unlimited"
+                    active_recipient.user_tier_id = sea_orm::Set(3);
+                    active_recipient.save(&txn).await?;
+                }
+
+                debug!("New user balance model is: {:?}", active_user_balance);
+                active_user_balance.save(&txn).await?;
                 // txn.commit().await?;
                 // user_balance
             }
             None => {
                 // Create the entry with the respective balance
-                let user_balance = balance::ActiveModel {
+                let active_user_balance = balance::ActiveModel {
                     available_balance: sea_orm::ActiveValue::Set(amount),
-                    // used_balance: sea_orm::ActiveValue::Set(0),
                     user_id: sea_orm::ActiveValue::Set(recipient.id),
                     ..Default::default()
                 };
-                debug!("New user balance model is: {:?}", user_balance);
-                user_balance.save(&txn).await?;
+
+                if amount >= Decimal::new(10, 0) {
+                    // Also make the user premium at this point ...
+                    let mut active_recipient = recipient.into_active_model();
+                    // Make the recipient premium "Effectively Unlimited"
+                    active_recipient.user_tier_id = sea_orm::Set(3);
+                    active_recipient.save(&txn).await?;
+                }
+
+                debug!("New user balance model is: {:?}", active_user_balance);
+                active_user_balance.save(&txn).await?;
                 // txn.commit().await?;
                 // user_balance // .try_into_model().unwrap()
             }
@@ -457,9 +480,13 @@ pub async fn user_balance_post(
             chain_id: sea_orm::ActiveValue::Set(app.config.chain_id.to_string()),
             ..Default::default()
         };
+
         receipt.save(&txn).await?;
         txn.commit().await?;
+
         debug!("Submitted saving");
+
+        // Also make the user premium at this point ...
 
         // Can return here
         debug!("Returning response");

@@ -8,8 +8,8 @@ def main():
     print("accounts are")
     token = Contract.from_explorer("0xC9fCFA7e28fF320C49967f4522EBc709aa1fDE7c")
     factory = Contract.from_explorer("0x4e3bc2054788de923a04936c6addb99a05b0ea36")
-    # user = accounts.load("david")
-    user = accounts.load("david-main")
+    user = accounts.load("david")
+    # user = accounts.load("david-main")
 
     print("Llama token")
     print(token)
@@ -28,7 +28,7 @@ def main():
     print(sweeper)
 
     priority_fee("auto")
-    # token._mint_for_testing(user, (10_000)*(10**18), {'from': user})
+    token._mint_for_testing(user, (10_000)*(10**18), {'from': user})
     # token.approve(sweeper, 2**256-1, {'from': user})
     sweeper.send_token(token, (5_000)*(10**18), {'from': user})
     # sweeper.send_token(token, (47)*(10**13), {'from': user})
