@@ -272,10 +272,6 @@ pub async fn user_login_post(
             // Do nothing if app config is none (then there is basically no authentication invitation, and the user can process with a free tier ...
 
             // Prematurely return if there is no invite code, and no referral code
-            // TODO: Referral code
-            if query.invite_code.is_none() && query.referral_code.is_none() {
-                return Err(Web3ProxyError::InvalidInviteCode);
-            }
             if query.invite_code.is_some() && query.invite_code != app.config.invite_code {
                 return Err(Web3ProxyError::InvalidInviteCode);
             }
@@ -320,7 +316,8 @@ pub async fn user_login_post(
 
             let txn = db_conn.begin().await?;
             // First, optionally catch a referral code from the parameters if there is any
-            if let Some(referral_code) = query.referral_code.as_ref() {
+            debug!("Refferal code is: {:?}", payload.referral_code);
+            if let Some(referral_code) = payload.referral_code.as_ref() {
                 // If it is not inside, also check in the database
                 warn!("Using register referral code:  {:?}", referral_code);
                 let user_referrer = referrer::Entity::find()
@@ -336,7 +333,8 @@ pub async fn user_login_post(
                 let used_referral = referee::ActiveModel {
                     used_referral_code: sea_orm::Set(user_referrer.referral_code),
                     user_id: sea_orm::Set(caller.id),
-                    credits_applied: sea_orm::Set(false),
+                    credits_applied_for_referee: sea_orm::Set(false),
+                    credits_applied_for_referrer: sea_orm::Set(Decimal::new(0, 10)),
                     ..Default::default()
                 };
                 used_referral.insert(&txn).await?;
@@ -350,7 +348,7 @@ pub async fn user_login_post(
             let txn = db_conn.begin().await?;
             // TODO: Move this into a common variable outside ...
             // First, optionally catch a referral code from the parameters if there is any
-            if let Some(referral_code) = query.referral_code.as_ref() {
+            if let Some(referral_code) = payload.referral_code.as_ref() {
                 // If it is not inside, also check in the database
                 warn!("Using referral code: {:?}", referral_code);
                 let user_referrer = referrer::Entity::find()
@@ -369,7 +367,8 @@ pub async fn user_login_post(
                 let used_referral = referee::ActiveModel {
                     used_referral_code: sea_orm::Set(user_referrer.referral_code),
                     user_id: sea_orm::Set(caller.id),
-                    credits_applied: sea_orm::Set(false),
+                    credits_applied_for_referee: sea_orm::Set(false),
+                    credits_applied_for_referrer: sea_orm::Set(Decimal::new(0, 10)),
                     ..Default::default()
                 };
                 used_referral.insert(&txn).await?;

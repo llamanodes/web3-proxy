@@ -6,8 +6,8 @@ pub mod frontend;
 pub mod http_params;
 pub mod jsonrpc;
 pub mod pagerduty;
-pub mod referral_code;
 pub mod prometheus;
+pub mod referral_code;
 pub mod rpcs;
 pub mod stats;
 pub mod user_token;
@@ -22,7 +22,6 @@ pub struct PostLoginQuery {
     /// The invite code (if any) is set in the application's config.
     /// This may eventually provide some sort of referral bonus.
     invite_code: Option<String>,
-    pub referral_code: Option<String>
 }
 
 /// JSON body to our `post_login` handler.
@@ -32,4 +31,5 @@ pub struct PostLoginQuery {
 pub struct PostLogin {
     sig: String,
     msg: String,
+    pub referral_code: Option<String>,
 }

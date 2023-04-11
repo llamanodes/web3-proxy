@@ -60,7 +60,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(Referee::CreditsAppliedForReferrer)
-                            .decimal()
+                            .decimal_len(20, 10)
                             .not_null()
                             .default(0),
                     )
