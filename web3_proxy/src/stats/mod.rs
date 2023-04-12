@@ -787,7 +787,6 @@ impl StatBuffer {
                 global_timeseries_buffer.len(),
             );
 
-            // TODO: Basically apply the credit-logic here, after the time-series has been writte into ...
             for (key, stat) in global_timeseries_buffer.drain() {
                 if let Err(err) = stat
                     .save_timeseries(&bucket, "global_proxy", self.chain_id, influxdb_client, key)
@@ -805,7 +804,6 @@ impl StatBuffer {
                 opt_in_timeseries_buffer.len(),
             );
 
-            // TODO: Basically apply the credit-logic here, after the time-series has been writte into ...
             for (key, stat) in opt_in_timeseries_buffer.drain() {
                 if let Err(err) = stat
                     .save_timeseries(&bucket, "opt_in_proxy", self.chain_id, influxdb_client, key)

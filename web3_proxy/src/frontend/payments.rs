@@ -86,7 +86,6 @@ pub async fn user_balance_post(
             .await
         {
             Ok(OpenRequestResult::Handle(handle)) => {
-                // TODO: Figure out how to pass the transaction hash as a parameter ...
                 debug!(
                     "Params are: {:?}",
                     &vec![format!("0x{}", hex::encode(tx_hash))]
@@ -109,15 +108,13 @@ pub async fn user_balance_post(
                 // We want to send a request to the contract
                 accepted_tokens_request_object.insert(
                     "to".to_owned(),
-                    // .split_off(2)
-                    serde_json::Value::String(app.config.deposit_contract.clone()), // TODO: Gotta remove the 0x (?)
+                    serde_json::Value::String(app.config.deposit_contract.clone()),
                 );
                 // We then want to include the function that we want to call
                 accepted_tokens_request_object.insert(
                     "data".to_owned(),
                     serde_json::Value::String(format!(
                         "0x{}",
-                        // TODO: Very hacky, I know ...
                         HexFmt(keccak256("get_approved_tokens()".to_owned().into_bytes()))
                     )),
                     // hex::encode(
@@ -174,7 +171,6 @@ pub async fn user_balance_post(
                 Err(Web3ProxyError::NoHandleReady)
             }
             Err(err) => {
-                // TODO: Just skip this part until one item responds ...
                 log::trace!(
                     "cancelled funneling transaction {} from: {:?}",
                     tx_hash,
