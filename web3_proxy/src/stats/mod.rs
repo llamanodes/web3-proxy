@@ -5,7 +5,7 @@ pub mod influxdb_queries;
 
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use axum::headers::Origin;
-use chrono::{DateTime, Months, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key};
@@ -485,7 +485,7 @@ impl BufferedRpcQueryStats {
             .checked_add_months(Months::new(12))
             .unwrap();
         warn!("Time since midnight back then: {:?} {:?}", now, valid_until);
-        if (now <= valid_until) {
+        if now <= valid_until {
             let mut active_referrer_balance = referrer_balance.clone().into_active_model();
             // Add 10% referral fees ...
             active_referrer_balance.available_balance = sea_orm::Set(

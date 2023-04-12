@@ -276,6 +276,7 @@ pub async fn user_login_post(
                 if query.invite_code.as_ref() != Some(invite_code) {
                     return Err(Web3ProxyError::InvalidInviteCode);
                 }
+            }
 
             let txn = db_conn.begin().await?;
 

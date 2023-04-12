@@ -22,7 +22,6 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(IncreaseBalanceReceipt::TxHash)
                             .string()
-                            .unique_key()
                             .not_null(),
                     )
                     .col(
@@ -30,6 +29,19 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
+                    .to_owned(),
+            )
+            .await?;
+
+        // Add a unique-constraint on chain-id and tx-hash
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx-increase_balance_receipt-unique-chain_id-tx_hash")
+                    .table(IncreaseBalanceReceipt::Table)
+                    .col(IncreaseBalanceReceipt::ChainId)
+                    .col(IncreaseBalanceReceipt::TxHash)
+                    .unique()
                     .to_owned(),
             )
             .await
