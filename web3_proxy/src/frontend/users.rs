@@ -271,10 +271,11 @@ pub async fn user_login_post(
             // TODO: more advanced invite codes that set different request/minute and concurrency limits
             // Do nothing if app config is none (then there is basically no authentication invitation, and the user can process with a free tier ...
 
-            // Prematurely return if there is no invite code, and no referral code
-            if query.invite_code.is_some() && query.invite_code != app.config.invite_code {
-                return Err(Web3ProxyError::InvalidInviteCode);
-            }
+            // Prematurely return if there is a wrong invite code
+            if let Some(invite_code) = &app.config.invite_code {
+                if query.invite_code.as_ref() != Some(invite_code) {
+                    return Err(Web3ProxyError::InvalidInviteCode);
+                }
 
             let txn = db_conn.begin().await?;
 
@@ -550,8 +551,6 @@ pub async fn user_post(
 /// - show balance in USD
 /// - show deposits history (currency, amounts, transaction id)
 ///
-/// TODO: one key per request? maybe /user/balance/:rpc_key?
-/// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
 pub async fn user_balance_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -559,7 +558,6 @@ pub async fn user_balance_get(
 ) -> Web3ProxyResponse {
     let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    // TODO: Double check this with the other endpoints again
     let db_replica = app.db_replica().context("Getting database connection")?;
 
     // Just return the balance for the user

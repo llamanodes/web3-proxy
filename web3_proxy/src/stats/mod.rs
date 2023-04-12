@@ -324,31 +324,21 @@ impl BufferedRpcQueryStats {
             .exec(db_conn)
             .await?;
 
+        // TODO: Refactor this function a bit more just so it looks and feels nicer
         // TODO: Figure out how to go around unmatching, it shouldn't return an error, but this is disgusting
 
-        // TODO: Skip most of this stuff if there is no referral logic ...
-
         // All the referral & balance arithmetic takes place here
-        // TODO: Also update the referrer's balance
-        // TODO: Also update the referree's balance
-        // Apply bonus if possible
-        // Use db_conn for this ...
-        warn!("Got here 2");
         let rpc_secret_key_id: u64 = match key.rpc_secret_key_id {
             Some(x) => x.into(),
             // Return early if the RPC key is not found, because then it is an anonymous user
             None => return Ok(()),
         };
 
-        // TODO: get the referee, get the referrer
-        // TODO: Skip if the user was not registered, in that case there is no referee logic
         // (1) Get the user with that RPC key. This is the referee
         let sender_rpc_key = rpc_key::Entity::find()
-            // key.rpc_secret_key_id
             .filter(rpc_key::Column::Id.eq(rpc_secret_key_id))
             .one(db_conn)
             .await?;
-        warn!("Got here 3");
 
         // Technicall there should always be a user ... still let's return "Ok(())" for now
         let sender_user_id: u64 = match sender_rpc_key {
@@ -363,7 +353,6 @@ impl BufferedRpcQueryStats {
                 return Ok(());
             }
         };
-        warn!("Got here 4");
 
         // (1) Do some general bookkeeping on the user
         let sender_balance = match balance::Entity::find()
@@ -397,7 +386,7 @@ impl BufferedRpcQueryStats {
 
         active_sender_balance.save(db_conn).await?;
 
-        // TODO: I should probably generate join statements, so we don't have so much back and forths
+        // TODO: I should probably generate join statements, so we don't have so much back and forths, though this may also over-complicate things
         // Get the referee, and the referrer
         // (2) Look up the code that this user used. This is the referee table
         let referee_object = match referee::Entity::find()
@@ -484,7 +473,6 @@ impl BufferedRpcQueryStats {
         {
             // (6) If the credits have not yet been applied to the referee, apply 10M credits / $100.00 USD worth of credits.
             // Make it into an active model, and add credits
-            // Also add credits_applied_for_referrer (maybe optionally ...)
             active_sender_balance.available_balance =
                 sea_orm::Set(sender_balance.available_balance + Decimal::from(100));
             // Also mark referral as "credits_applied_for_referee"
