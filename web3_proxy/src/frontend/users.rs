@@ -307,6 +307,15 @@ pub async fn user_login_post(
                 .await
                 .web3_context("Failed saving new user key")?;
 
+            // We should also create the balance entry ...
+            let user_balance = balance::ActiveModel {
+                user_id: sea_orm::Set(caller.id.clone()),
+                available_balance: sea_orm::Set(Decimal::new(0, 0)),
+                used_balance: sea_orm::Set(Decimal::new(0, 0)),
+                ..Default::default()
+            };
+            user_balance.insert(&txn).await?;
+
             let user_rpc_keys = vec![user_rpc_key];
 
             // Also add a part for the invite code, i.e. who invited this guy

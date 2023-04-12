@@ -5,7 +5,7 @@ pub mod influxdb_queries;
 
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use axum::headers::Origin;
-use chrono::{TimeZone, Timelike, Utc};
+use chrono::{DateTime, Months, TimeZone, Timelike, Utc};
 use derive_more::From;
 use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key};
@@ -333,7 +333,7 @@ impl BufferedRpcQueryStats {
         // TODO: Also update the referree's balance
         // Apply bonus if possible
         // Use db_conn for this ...
-
+        warn!("Got here 2");
         let rpc_secret_key_id: u64 = match key.rpc_secret_key_id {
             Some(x) => x.into(),
             // Return early if the RPC key is not found, because then it is an anonymous user
@@ -348,6 +348,7 @@ impl BufferedRpcQueryStats {
             .filter(rpc_key::Column::Id.eq(rpc_secret_key_id))
             .one(db_conn)
             .await?;
+        warn!("Got here 3");
 
         // Technicall there should always be a user ... still let's return "Ok(())" for now
         let sender_user_id: u64 = match sender_rpc_key {
@@ -362,6 +363,7 @@ impl BufferedRpcQueryStats {
                 return Ok(());
             }
         };
+        warn!("Got here 4");
 
         // (1) Do some general bookkeeping on the user
         let sender_balance = match balance::Entity::find()
@@ -399,7 +401,7 @@ impl BufferedRpcQueryStats {
         // Get the referee, and the referrer
         // (2) Look up the code that this user used. This is the referee table
         let referee_object = match referee::Entity::find()
-            .filter(referee::Column::Id.eq(sender_user_id))
+            .filter(referee::Column::UserId.eq(sender_user_id))
             .one(db_conn)
             .await?
         {
@@ -412,6 +414,7 @@ impl BufferedRpcQueryStats {
                 return Ok(());
             }
         };
+        warn!("Got here 5");
 
         // (3) Look up the matching referrer in the referrer table
         // Referral table -> Get the referee id
@@ -432,6 +435,7 @@ impl BufferedRpcQueryStats {
 
         // Ok, now we add the credits to both users if applicable...
         // (4 onwards) Add balance to the referrer,
+        warn!("Got here 6");
 
         // (5) Check if referee has used up $100.00 USD in total (Have a config item that says how many credits account to 1$)
         // Get balance for the referrer (optionally make it into an active model ...)
@@ -451,6 +455,7 @@ impl BufferedRpcQueryStats {
         };
 
         let mut active_sender_balance = sender_balance.clone().into_active_model();
+        warn!("Got here 7");
 
         let referrer_balance = match balance::Entity::find()
             .filter(balance::Column::UserId.eq(user_with_that_referral_code.user_id))
@@ -470,6 +475,8 @@ impl BufferedRpcQueryStats {
         // I could try to circumvene the clone here, but let's skip that for now
         let mut active_referee = referee_object.clone().into_active_model();
 
+        warn!("Got here 8");
+
         // (5.1) If not, go to (7). If yes, go to (6)
         // Hardcode this parameter also in config, so it's easier to tune
         if !referee_object.credits_applied_for_referee
@@ -485,11 +492,12 @@ impl BufferedRpcQueryStats {
         }
 
         // (7) If the referral-start-date has not been passed, apply 10% of the credits to the referrer.
-        if referee_object
-            .referral_start_date
-            .num_seconds_from_midnight()
-            <= (365 * 24 * 60 * 60)
-        {
+        let now = Utc::now();
+        let valid_until = DateTime::<Utc>::from_utc(referee_object.referral_start_date, Utc)
+            .checked_add_months(Months::new(12))
+            .unwrap();
+        warn!("Time since midnight back then: {:?} {:?}", now, valid_until);
+        if (now <= valid_until) {
             let mut active_referrer_balance = referrer_balance.clone().into_active_model();
             // Add 10% referral fees ...
             active_referrer_balance.available_balance = sea_orm::Set(

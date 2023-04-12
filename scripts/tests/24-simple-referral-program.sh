@@ -105,7 +105,17 @@ curl \
 -X GET "127.0.0.1:8544/user/balance/0xd56dee328dfa3bea26c3762834081881e5eff62e77a2b45e72d98016daaeffba"
 
 
-# Now top up the user's balance.
+###########################################
+# Now the referred user starts spending the money. Let's make requests worth $100 and see what happens ...
+# At all times, the referrer should receive 10% of the spent tokens
+###########################################
+for i in {1..10000000}
+do
+  curl \
+    -X POST "127.0.0.1:8544/rpc/01GXRFKFPY5DDRCRVB3B3HVDYK" \
+    -H "Content-Type: application/json" \
+  --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
+done
 
 # Check that the new user was indeed logged in, and that a referral table entry was created (in the database)
 
