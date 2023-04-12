@@ -17,7 +17,7 @@ use ethers::utils::{hex, keccak256};
 use hashbrown::HashMap;
 use hex_fmt::HexFmt;
 use http::StatusCode;
-use log::{debug, warn, Level};
+use log::{debug, info, warn, Level};
 use migration::sea_orm;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::ActiveModelTrait;
@@ -42,6 +42,7 @@ pub async fn user_balance_post(
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Path(mut params): Path<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
+    // I suppose this is ok / good, so people don't spam this endpoint as it is not "cheap"
     // Check that the user is logged-in and authorized. We don't need a semaphore here btw
     let (_, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
@@ -56,8 +57,6 @@ pub async fn user_balance_post(
         .parse()
         .context("unable to parse tx_hash")?;
 
-    // We don't check the trace, the transaction must be a naive, simple send transaction (for now at least...)
-    // TODO: Get the respective transaction ...
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
     let db_replica = app
         .db_replica()
@@ -74,108 +73,12 @@ pub async fn user_balance_post(
         ));
     }
     debug!("Receipt: {:?}", receipt);
-    // Just iterate through all logs, and add them to the transaction list if there is any
+
+    // Iterate through all logs, and add them to the transaction list if there is any
     // Address will be hardcoded in the config
     let authorization = Arc::new(InternalAuthorization::internal(None).unwrap());
 
     // Just make an rpc request, idk if i need to call this super extensive code
-    // I suppose this is ok / good, so people don't spam this endpoint
-
-    // First, get the transaction receipt
-    // let transaction_receipt: TransactionReceipt = match app
-    //     .proxy_web3_rpc(
-    //         authorization.clone(),
-    //         JsonRpcRequestEnum::Single(JsonRpcRequest {
-    //             method: "eth_getTransactionReceipt".to_owned(),
-    //             params: Some(serde_json::Value::Array(vec![serde_json::Value::String(
-    //                 format!("0x{}", hex::encode(tx_hash)),
-    //             )])),
-    //             ..Default::default()
-    //         }),
-    //     )
-    //     .await?
-    //     .0
-    // {
-    //     JsonRpcForwardedResponseEnum::Single(response) => match response.result {
-    //         Some(raw_result) => Ok(raw_result.get().try_into()),
-    //         None => Err(Web3ProxyError("Transaction Hash was not found!".to_owned())),
-    //     },
-    //     _ => Err(Web3ProxyError::BadRequest(
-    //         "Transaction Hash was not found!".to_owned(),
-    //     )),
-    // }?;
-    // warn!("Accepted transactions are: {:?}", transaction_receipt);
-
-    // let mut accepted_tokens_request_object: serde_json::Map<String, serde_json::Value> =
-    //     serde_json::Map::new();
-    // // We want to send a request to the contract
-    // accepted_tokens_request_object.insert(
-    //     "to".to_owned(),
-    //     serde_json::Value::String(app.config.deposit_contract.clone()),
-    // );
-    // // We then want to include the function that we want to call
-    // accepted_tokens_request_object.insert(
-    //     "data".to_owned(),
-    //     serde_json::Value::String(hex::encode(keccak256("get_approved_tokens()".as_bytes()))),
-    // );
-    // let accepted_token: Address = match app
-    //     .proxy_web3_rpc(
-    //         authorization.clone(),
-    //         JsonRpcRequestEnum::Single(JsonRpcRequest {
-    //             method: "eth_call".to_owned(),
-    //             params: Some(serde_json::Value::Object(accepted_tokens_request_object)),
-    //             ..Default::default()
-    //         }),
-    //     )
-    //     .await?
-    //     .0
-    // {
-    //     JsonRpcForwardedResponseEnum::Single(response) => match response.result {
-    //         Some(raw_result) => Ok(raw_result.get().parse::<Address>()?),
-    //         None => Err(Web3ProxyError("Transaction Hash was not found!".to_owned())),
-    //     },
-    //     _ => Err(Web3ProxyError::BadRequest(
-    //         "Transaction Hash was not found!".to_owned(),
-    //     )),
-    // }?;
-    // warn!("Accepted tokens are: {:?}", accepted_token);
-    //
-    // let mut token_decimals_request_object: HashMap<String, serde_json::Value> = HashMap::new();
-    // // We want to send a request to the contract
-    // token_decimals_request_object.insert(
-    //     "to".to_owned(),
-    //     serde_json::Value::String(hex::encode(accepted_token)),
-    // );
-    // // We then want to include the function that we want to call
-    // token_decimals_request_object.insert(
-    //     "data".to_owned(),
-    //     serde_json::Value::String(hex::encode(keccak256("decimals()".as_bytes()))),
-    // );
-    //
-    // let decimals = match app
-    //     .proxy_web3_rpc(
-    //         authorization.clone(),
-    //         JsonRpcRequestEnum::Single(JsonRpcRequest {
-    //             method: "eth_call".to_owned(),
-    //             params: Some(serde_json::Value::Object(
-    //                 token_decimals_request_object.into(),
-    //             )),
-    //             ..Default::default()
-    //         }),
-    //     )
-    //     .await?
-    //     .0
-    // {
-    //     JsonRpcForwardedResponseEnum::Single(response) => match response.result {
-    //         Some(raw_result) => Ok(raw_result.get().try_into()),
-    //         None => Err(Web3ProxyError("Transaction Hash was not found!".to_owned())),
-    //     },
-    //     _ => Err(Web3ProxyError::BadRequest(
-    //         "Transaction Hash was not found!".to_owned(),
-    //     )),
-    // }?;
-    // warn!("Accepted tokens are: {:?}", accepted_token);
-
     let (transaction_receipt, accepted_token, decimals): (TransactionReceipt, Address, u32) =
         match app
             .balanced_rpcs
@@ -184,7 +87,7 @@ pub async fn user_balance_post(
         {
             Ok(OpenRequestResult::Handle(handle)) => {
                 // TODO: Figure out how to pass the transaction hash as a parameter ...
-                warn!(
+                debug!(
                     "Params are: {:?}",
                     &vec![format!("0x{}", hex::encode(tx_hash))]
                 );
@@ -199,7 +102,7 @@ pub async fn user_balance_post(
                     .await
                     // TODO: What kind of error would be here
                     .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
-                warn!("Transaction receipt is: {:?}", transaction_receipt);
+                debug!("Transaction receipt is: {:?}", transaction_receipt);
 
                 let mut accepted_tokens_request_object: serde_json::Map<String, serde_json::Value> =
                     serde_json::Map::new();
@@ -223,7 +126,7 @@ pub async fn user_balance_post(
                     serde_json::Value::Object(accepted_tokens_request_object),
                     serde_json::Value::String("latest".to_owned()),
                 ]);
-                warn!("Params are: {:?}", &params);
+                debug!("Params are: {:?}", &params);
                 let accepted_token: String = handle
                     .clone()
                     .request("eth_call", &params, Level::Trace.into(), None)
@@ -231,29 +134,23 @@ pub async fn user_balance_post(
                     // TODO: What kind of error would be here
                     .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
                 // Read the last
-                warn!("Accepted token is: {:?}", accepted_token);
-                // warn!(
-                //     "Accepted token is: {:?}",
-                //     accepted_token[accepted_token.len() - 40..]
-                // );
+                debug!("Accepted token response is: {:?}", accepted_token);
                 let accepted_token: Address = accepted_token[accepted_token.len() - 40..]
                     .parse::<Address>()
                     .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
-                warn!("Accepted token 2 is: {:?}", accepted_token);
+                debug!("Accepted token is: {:?}", accepted_token);
 
+                // Now get decimals points of the stablecoin
                 let mut token_decimals_request_object: serde_json::Map<String, serde_json::Value> =
                     serde_json::Map::new();
-                // We want to send a request to the contract
                 token_decimals_request_object.insert(
                     "to".to_owned(),
                     serde_json::Value::String(format!("0x{}", HexFmt(accepted_token))),
                 );
-                // We then want to include the function that we want to call
                 token_decimals_request_object.insert(
                     "data".to_owned(),
                     serde_json::Value::String(format!(
                         "0x{}",
-                        // TODO: Very hacky, I know ...
                         HexFmt(keccak256("decimals()".to_owned().into_bytes()))
                     )),
                 );
@@ -261,24 +158,19 @@ pub async fn user_balance_post(
                     serde_json::Value::Object(token_decimals_request_object),
                     serde_json::Value::String("latest".to_owned()),
                 ]);
-                warn!("Params are: {:?}", &params);
+                debug!("ERC20 Decimal request params are: {:?}", &params);
                 let decimals: String = handle
                     .request("eth_call", &params, Level::Trace.into(), None)
                     .await
-                    // TODO: What kind of error would be here
                     .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
-                warn!("Decimals is: {:?}", decimals);
-                // TODO: Again hacky, ... I know
+                debug!("Decimals response is: {:?}", decimals);
                 let decimals: u32 = u32::from_str_radix(&decimals[2..], 16).unwrap();
-                // let decimals: u32 = decimals[decimals.len() - 3..].parse::<u32>().unwrap();
-                warn!("Decimals 2 is: {:?}", decimals);
+                debug!("Decimals are: {:?}", decimals);
 
                 Ok((transaction_receipt, accepted_token, decimals))
             }
-            // TODO: Probably skip this case (?)
             Ok(_) => {
-                // TODO: actually retry?
-                // TODO: Is this the right error message?
+                // TODO: @Brllan Is this the right error message?
                 Err(Web3ProxyError::NoHandleReady)
             }
             Err(err) => {
@@ -301,14 +193,8 @@ pub async fn user_balance_post(
     // I don't know how to best cover the case that there might be multiple logs inside
 
     for log in transaction_receipt.logs {
-        warn!("Should be all from the deposit contract {:?}", log.address);
-        warn!("Log topics are: {:?}", log.topics);
-        warn!("Log topics are: {:?}", log.data);
-
-        // TODO: There should be the contract address somewhere, I'm confused though,
-        // I cant seem to find it anywhere, is this properly implemented ...(?)
         if format!("{:?}", log.address) != app.config.deposit_contract {
-            warn!(
+            debug!(
                 "Out: Log is not relevant, as it is not directed to the deposit contract {:?} {:?}",
                 format!("{:?}", log.address),
                 app.config.deposit_contract
@@ -318,9 +204,8 @@ pub async fn user_balance_post(
 
         // Get the topics out
         let topic: H256 = H256::from(log.topics.get(0).unwrap().to_owned());
-
         if format!("{:?}", topic) != app.config.deposit_topic {
-            warn!(
+            debug!(
                 "Out: Topic is not relevant: {:?} {:?}",
                 topic, app.config.deposit_topic
             );
@@ -356,20 +241,19 @@ pub async fn user_balance_post(
             Err(err) => {
                 warn!("Out: Could not decode! {:?}", err);
                 continue;
-                // Err(Web3ProxyError::BadRequest(format!(
-                //     "Log could not be decoded: {:?}",
-                //     err
-                // )))
             }
         };
 
         // return early if amount is 0
         if amount == U256::from(0) {
-            warn!("Out: Found log has amount = 0 {:?}", amount);
+            warn!(
+                "Out: Found log has amount = 0 {:?}. This should never be the case according to the smart contract",
+                amount
+            );
             continue;
         }
 
-        // Skip if no accepted token
+        // Skip if no accepted token. Right now we only accept a single stablecoin as input
         if token != accepted_token {
             warn!(
                 "Out: Token is not accepted: {:?} != {:?}",
@@ -378,20 +262,10 @@ pub async fn user_balance_post(
             continue;
         }
 
-        warn!(
-            "Coded items are: {:?} {:?} {:?}",
-            hex::encode(recipient_account),
-            hex::encode(token),
-            amount
+        info!(
+            "Found deposit transaction for: {:?} {:?} {:?}",
+            recipient_account, token, amount
         );
-        // warn!("Recipient account is: ")
-
-        warn!("Recipient address is: {:?}", recipient_account);
-        warn!("Recipient address is: {:?}", recipient_account.encode());
-
-        // First, find all users ...
-        let all_users = user::Entity::find().all(db_replica.conn()).await?;
-        warn!("All users are: {:?}", all_users);
 
         // Encoding is inefficient, revisit later
         let recipient = match user::Entity::find()
@@ -408,33 +282,28 @@ pub async fn user_balance_post(
         // For now we only accept stablecoins
         // And we hardcode the peg (later we would have to depeg this, for example
         // 1$ = Decimal(1) for any stablecoin
-        // TODO: Let's assume that people don't buy too much at _once_
-        warn!("Arithmetic is: {:?} {:?}", amount, decimals);
-        warn!(
+        // TODO: Let's assume that people don't buy too much at _once_, we do support >$1M which should be fine for now
+        debug!("Arithmetic is: {:?} {:?}", amount, decimals);
+        debug!(
             "Decimals arithmetic is: {:?} {:?}",
             Decimal::from(amount.as_u128()),
             Decimal::from(10_u64.pow(decimals))
         );
         let mut amount = Decimal::from(amount.as_u128());
-        // 1 request is supposed to handle
         let _ = amount.set_scale(decimals);
-        // amount = amount
-        //     .checked_div(Decimal::from(10_u64.pow(decimals)))
-        //     .unwrap();
-        warn!("Amount is: {:?}", amount);
+        debug!("Amount is: {:?}", amount);
 
         // Check if the item is in the database. If it is not, then add it into the database
         let user_balance = balance::Entity::find()
             .filter(balance::Column::UserId.eq(recipient.id))
             .one(&db_conn)
             .await?;
-        debug!("User balance is: {:?}", user_balance);
 
         let txn = db_conn.begin().await?;
         match user_balance {
             Some(user_balance) => {
                 let balance_plus_amount = user_balance.available_balance + amount;
-                debug!("New user balance is: {:?}", balance_plus_amount);
+                info!("New user balance is: {:?}", balance_plus_amount);
                 // Update the entry, adding the balance
                 let mut active_user_balance = user_balance.into_active_model();
                 active_user_balance.available_balance = sea_orm::Set(balance_plus_amount);
@@ -468,7 +337,7 @@ pub async fn user_balance_post(
                     active_recipient.save(&txn).await?;
                 }
 
-                debug!("New user balance model is: {:?}", active_user_balance);
+                info!("New user balance model is: {:?}", active_user_balance);
                 active_user_balance.save(&txn).await?;
                 // txn.commit().await?;
                 // user_balance // .try_into_model().unwrap()
@@ -483,13 +352,8 @@ pub async fn user_balance_post(
 
         receipt.save(&txn).await?;
         txn.commit().await?;
+        debug!("Saved to db");
 
-        debug!("Submitted saving");
-
-        // Also make the user premium at this point ...
-
-        // Can return here
-        debug!("Returning response");
         let response = (
             StatusCode::CREATED,
             Json(json!({
@@ -498,7 +362,7 @@ pub async fn user_balance_post(
             })),
         )
             .into_response();
-        // Return early if the log was added
+        // Return early if the log was added, assume there is at most one valid log per transaction
         return Ok(response.into());
     }
 

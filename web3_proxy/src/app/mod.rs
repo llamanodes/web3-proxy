@@ -1891,8 +1891,6 @@ impl Web3ProxyApp {
                 let rpcs = request_metadata.backend_requests.lock().clone();
 
                 if let Some(stat_sender) = self.stat_sender.as_ref() {
-                    // TODO: Implement the referral logic here;
-                    // TODO: stat-collector
                     let response_stat = RpcQueryStats::new(
                         Some(method.to_string()),
                         authorization.clone(),
