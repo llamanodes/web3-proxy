@@ -197,7 +197,7 @@ impl Web3Rpcs {
 
     /// Get a block from caches with fallback.
     /// Will query a specific node or the best available.
-    /// TODO: return Web3ProxyResult<Option<ArcBlock>>?
+    /// TODO: return `Web3ProxyResult<Option<ArcBlock>>`?
     pub async fn block(
         &self,
         authorization: &Arc<Authorization>,
@@ -251,8 +251,8 @@ impl Web3Rpcs {
                     )
                     .await?;
 
-                if let Some(err) = response.error {
-                    return Err(err).web3_context("failed fetching block");
+                if response.error.is_some() {
+                    return Err(response.into());
                 }
 
                 let block = response
@@ -347,8 +347,8 @@ impl Web3Rpcs {
             .try_send_best_consensus_head_connection(authorization, request, None, Some(num), None)
             .await?;
 
-        if let Some(err) = response.error {
-            debug!("could not find canonical block {}: {:?}", num, err);
+        if response.error.is_some() {
+            return Err(response.into());
         }
 
         let raw_block = response.result.web3_context("no cannonical block result")?;

@@ -60,12 +60,10 @@ pub async fn query_user_stats<'a>(
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
-    info!("Got this far 1");
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
     let db_replica = app
         .db_replica()
         .context("query_user_stats needs a db replica")?;
-    info!("Got this far 2");
     let mut redis_conn = app
         .redis_conn()
         .await
@@ -73,18 +71,15 @@ pub async fn query_user_stats<'a>(
         .context("query_user_stats needs a redis")?;
 
     // TODO: have a getter for this. do we need a connection pool on it?
-    info!("Got this far 3");
     let influxdb_client = app
         .influxdb_client
         .as_ref()
         .context("query_user_stats needs an influxdb client")?;
 
-    info!("Got this far 4");
     // get the user id first. if it is 0, we should use a cache on the app
     let user_id =
         get_user_id_from_params(&mut redis_conn, &db_conn, &db_replica, bearer, params).await?;
 
-    info!("Got this far 5");
     let query_window_seconds = get_query_window_seconds_from_params(params)?;
     let query_start = get_query_start_from_params(params)?.timestamp();
     let query_stop = get_query_stop_from_params(params)?.timestamp();
@@ -101,7 +96,6 @@ pub async fn query_user_stats<'a>(
         ));
     }
 
-    info!("Got this far 6");
     let measurement = if user_id == 0 {
         "global_proxy"
     } else {
@@ -126,7 +120,6 @@ pub async fn query_user_stats<'a>(
         .context("No influxdb bucket was provided")?; // "web3_proxy";
     info!("Bucket is {:?}", bucket);
 
-    info!("Got this far 7");
     // , "archive_needed", "error_response"
     let mut group_columns = vec![
         "chain_id",
@@ -149,16 +142,13 @@ pub async fn query_user_stats<'a>(
         filter_chain_id = f!(r#"|> filter(fn: (r) => r["chain_id"] == "{chain_id}")"#);
     }
 
-    info!("Got this far 8");
     let group_columns = serde_json::to_string(&json!(group_columns)).unwrap();
 
-    info!("Got this far 9");
     let group = match stat_response_type {
         StatType::Aggregated => f!(r#"|> group(columns: {group_columns})"#),
         StatType::Detailed => "".to_string(),
     };
 
-    info!("Got this far 10");
     let filter_field = match stat_response_type {
         StatType::Aggregated => {
             f!(r#"|> filter(fn: (r) => r["_field"] == "{stats_column}")"#)
@@ -195,7 +185,6 @@ pub async fn query_user_stats<'a>(
     // "method": null,
     // "total_backend_retries": "0",
 
-    info!("Got this far 11");
     let query = f!(r#"
         from(bucket: "{bucket}")
             |> range(start: {query_start}, stop: {query_stop})
@@ -215,7 +204,6 @@ pub async fn query_user_stats<'a>(
     // TODO: StatType::Aggregated and StatType::Detailed might need different types
     // let unparsed: serde_json::Value = serde_json::Value::Array(influxdb_client.query(Some(query.clone())).await?);
     // info!("Direct response is: {:?}", unparsed);
-    info!("Got this far 12");
 
     // Return a different result based on the query
     let datapoints = match stat_response_type {
@@ -464,11 +452,8 @@ pub async fn query_user_stats<'a>(
         response_body.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
     }
 
-    info!("Got this far 13 {:?}", response_body);
     let response = Json(json!(response_body)).into_response();
     // Add the requests back into out
-
-    info!("Got this far 14 {:?}", response);
 
     // TODO: Now impplement the proper response type
 

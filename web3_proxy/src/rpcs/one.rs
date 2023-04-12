@@ -1338,7 +1338,7 @@ impl Web3Rpc {
     where
         // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
         P: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
-        R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug,
+        R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug + Send,
     {
         self.wait_for_request_handle(&authorization, None, None)
             .await?

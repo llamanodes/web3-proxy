@@ -5,7 +5,7 @@ use anyhow::Context;
 use chrono::Utc;
 use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
-use ethers::providers::{HttpClientError, ProviderError, WsClientError};
+use ethers::providers::ProviderError;
 use ethers::types::{Address, Bytes};
 use log::{debug, error, trace, warn, Level};
 use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
@@ -156,7 +156,7 @@ impl OpenRequestHandle {
     where
         // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
         P: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
-        R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug,
+        R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug + Send,
     {
         // TODO: use tracing spans
         // TODO: including params in this log is way too verbose
@@ -170,7 +170,8 @@ impl OpenRequestHandle {
         };
 
         let mut logged = false;
-        while provider.is_none() || provider.as_ref().map(|x| !x.ready()).unwrap() {
+        // TODO: instead of a lock, i guess it should be a watch?
+        while provider.is_none() {
             // trace!("waiting on provider: locking...");
             // TODO: i dont like this. subscribing to a channel could be better
             sleep(Duration::from_millis(100)).await;
@@ -277,37 +278,7 @@ impl OpenRequestHandle {
                 let msg = match &*provider {
                     #[cfg(test)]
                     Web3Provider::Mock => unimplemented!(),
-                    Web3Provider::Both(_, _) => {
-                        if let Some(HttpClientError::JsonRpcError(err)) =
-                            err.downcast_ref::<HttpClientError>()
-                        {
-                            Some(&err.message)
-                        } else if let Some(WsClientError::JsonRpcError(err)) =
-                            err.downcast_ref::<WsClientError>()
-                        {
-                            Some(&err.message)
-                        } else {
-                            None
-                        }
-                    }
-                    Web3Provider::Http(_) => {
-                        if let Some(HttpClientError::JsonRpcError(err)) =
-                            err.downcast_ref::<HttpClientError>()
-                        {
-                            Some(&err.message)
-                        } else {
-                            None
-                        }
-                    }
-                    Web3Provider::Ws(_) => {
-                        if let Some(WsClientError::JsonRpcError(err)) =
-                            err.downcast_ref::<WsClientError>()
-                        {
-                            Some(&err.message)
-                        } else {
-                            None
-                        }
-                    }
+                    _ => err.as_error_response().map(|x| x.message.clone()),
                 };
 
                 if let Some(msg) = msg {

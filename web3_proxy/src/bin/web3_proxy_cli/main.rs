@@ -131,6 +131,7 @@ fn main() -> anyhow::Result<()> {
                 vec![
                     "info",
                     "ethers=debug",
+                    "ethers_providers=debug",
                     "redis_rate_limit=debug",
                     "web3_proxy=trace",
                     "web3_proxy_cli=trace",
@@ -142,6 +143,8 @@ fn main() -> anyhow::Result<()> {
                 vec![
                     "info",
                     "ethers=debug",
+                    // TODO: even error is too verbose for our purposes. how can we turn off this logging entirely?
+                    "ethers_providers=error",
                     "redis_rate_limit=debug",
                     "web3_proxy=debug",
                     "web3_proxy_cli=debug",
@@ -227,6 +230,8 @@ fn main() -> anyhow::Result<()> {
         };
 
         log::set_max_level(max_level);
+
+        info!("RUST_LOG={}", rust_log);
     }
 
     info!("{}", APP_USER_AGENT);
