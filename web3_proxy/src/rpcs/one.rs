@@ -706,7 +706,7 @@ impl Web3Rpc {
         // this does loop. just only when reconnect is enabled
         #[allow(clippy::never_loop)]
         loop {
-            debug!("subscription loop started");
+            trace!("subscription loop started on {}", self);
 
             let mut futures = vec![];
 

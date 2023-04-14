@@ -95,6 +95,8 @@ impl Web3Rpcs {
         let expected_block_time_ms = match chain_id {
             // ethereum
             1 => 12_000,
+            // ethereum-goerli
+            5 => 12_000,
             // polygon
             137 => 2_000,
             // fantom
@@ -103,7 +105,10 @@ impl Web3Rpcs {
             42161 => 500,
             // anything else
             _ => {
-                warn!("unexpected chain_id. polling every {} seconds", 10);
+                warn!(
+                    "unexpected chain_id ({}). polling every {} seconds",
+                    chain_id, 10
+                );
                 10_000
             }
         };
