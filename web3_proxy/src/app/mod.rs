@@ -802,13 +802,15 @@ impl Web3ProxyApp {
         // connect to the backends
         self.balanced_rpcs
             .apply_server_configs(self, new_top_config.balanced_rpcs)
-            .await?;
+            .await
+            .context("updating balanced rpcs")?;
 
         if let Some(private_rpc_configs) = new_top_config.private_rpcs {
             if let Some(private_rpcs) = self.private_rpcs.as_ref() {
                 private_rpcs
                     .apply_server_configs(self, private_rpc_configs)
-                    .await?;
+                    .await
+                    .context("updating private_rpcs")?;
             } else {
                 // TODO: maybe we should have private_rpcs just be empty instead of being None
                 todo!("handle toggling private_rpcs")
@@ -819,7 +821,8 @@ impl Web3ProxyApp {
             if let Some(bundler_4337_rpcs) = self.bundler_4337_rpcs.as_ref() {
                 bundler_4337_rpcs
                     .apply_server_configs(self, bundler_4337_rpc_configs)
-                    .await?;
+                    .await
+                    .context("updating bundler_4337_rpcs")?;
             } else {
                 // TODO: maybe we should have bundler_4337_rpcs just be empty instead of being None
                 todo!("handle toggling bundler_4337_rpcs")
