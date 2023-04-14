@@ -11,6 +11,7 @@ pub struct Model {
     pub id: u64,
     pub user_id: u64,
     pub description: Option<String>,
+    pub rpc_key: u64,
     pub role: Role,
 }
 
@@ -24,6 +25,14 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     User,
+    #[sea_orm(
+        belongs_to = "super::rpc_key::Entity",
+        from = "Column::RpcKey",
+        to = "super::rpc_key::Column::Id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    RpcKey,
 }
 
 impl Related<super::user::Entity> for Entity {

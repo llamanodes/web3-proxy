@@ -23,6 +23,7 @@ mod m20230205_130035_create_balance;
 mod m20230205_133755_create_referrals;
 mod m20230214_134254_increase_balance_transactions;
 mod m20230221_230953_track_spend;
+mod m20230412_171916_modify_secondary_user_add_primary_user;
 
 pub struct Migrator;
 
@@ -44,15 +45,16 @@ impl MigratorTrait for Migrator {
             Box::new(m20221213_134158_move_login_into_database::Migration),
             Box::new(m20230117_191358_admin_table::Migration),
             Box::new(m20230119_204135_better_free_tier::Migration),
+            Box::new(m20230125_204810_stats_v2::Migration),
             Box::new(m20230130_124740_read_only_login_logic::Migration),
             Box::new(m20230130_165144_prepare_admin_imitation_pre_login::Migration),
             Box::new(m20230215_152254_admin_trail::Migration),
-            Box::new(m20230125_204810_stats_v2::Migration),
             Box::new(m20230307_002623_migrate_rpc_accounting_to_rpc_accounting_v2::Migration),
             Box::new(m20230205_130035_create_balance::Migration),
             Box::new(m20230205_133755_create_referrals::Migration),
             Box::new(m20230214_134254_increase_balance_transactions::Migration),
             Box::new(m20230221_230953_track_spend::Migration),
+            Box::new(m20230412_171916_modify_secondary_user_add_primary_user::Migration),
         ]
     }
 }
