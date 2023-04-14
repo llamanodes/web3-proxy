@@ -51,7 +51,7 @@ pub struct Web3Rpcs {
     /// TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
     /// TODO: why is watch_consensus_head_sender in an Option, but this one isn't?
     /// Geth's subscriptions have the same potential for skipping blocks.
-    pub(super) watch_consensus_rpcs_sender: watch::Sender<Option<Arc<ConsensusWeb3Rpcs>>>,
+    pub(crate) watch_consensus_rpcs_sender: watch::Sender<Option<Arc<ConsensusWeb3Rpcs>>>,
     /// this head receiver makes it easy to wait until there is a new block
     pub(super) watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     pub(super) pending_transaction_cache:
@@ -1222,11 +1222,12 @@ impl Serialize for Web3Rpcs {
 /// TODO: i think we still have sorts scattered around the code that should use this
 /// TODO: take AsRef or something like that? We don't need an Arc here
 fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (Reverse<U64>, u64, bool, OrderedFloat<f64>) {
-    let head_block = x.head_block
-            .read()
-            .as_ref()
-            .map(|x| *x.number())
-            .unwrap_or_default();
+    let head_block = x
+        .head_block
+        .read()
+        .as_ref()
+        .map(|x| *x.number())
+        .unwrap_or_default();
 
     let tier = x.tier;
 

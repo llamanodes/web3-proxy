@@ -9,9 +9,8 @@ use crate::rpcs::request::RequestRevertHandler;
 use anyhow::{anyhow, Context};
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use ethers::types::{Address, Transaction, U256};
-use futures::StreamExt;
 use futures::future::try_join_all;
-use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use ordered_float::OrderedFloat;
@@ -701,7 +700,7 @@ impl Web3Rpc {
         } else {
             RequestRevertHandler::ErrorLevel
         };
-        
+
         let mut delay_start = false;
 
         // this does loop. just only when reconnect is enabled
@@ -888,7 +887,7 @@ impl Web3Rpc {
 
                         continue;
                     }
-                    
+
                     // reconnect is not enabled.
                     if *disconnect_receiver.borrow() {
                         info!("{} is disconnecting", self);
@@ -1150,7 +1149,9 @@ impl Web3Rpc {
         if self.should_disconnect() {
             Ok(())
         } else {
-            Err(anyhow!("pending_transactions subscription exited. reconnect needed"))
+            Err(anyhow!(
+                "pending_transactions subscription exited. reconnect needed"
+            ))
         }
     }
 

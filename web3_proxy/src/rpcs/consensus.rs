@@ -7,7 +7,7 @@ use anyhow::Context;
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use itertools::{Itertools, MinMaxResult};
-use log::{trace, warn, debug};
+use log::{trace, warn};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::Reverse;
@@ -19,12 +19,12 @@ use tokio::time::Instant;
 /// Serialize is so we can print it on our debug endpoint
 #[derive(Clone, Serialize)]
 pub struct ConsensusWeb3Rpcs {
-    pub(super) tier: u64,
-    pub(super) head_block: Web3ProxyBlock,
-    pub(super) best_rpcs: Vec<Arc<Web3Rpc>>,
+    pub(crate) tier: u64,
+    pub(crate) head_block: Web3ProxyBlock,
+    pub(crate) best_rpcs: Vec<Arc<Web3Rpc>>,
     // TODO: functions like "compare_backup_vote()"
     // pub(super) backups_voted: Option<Web3ProxyBlock>,
-    pub(super) backups_needed: bool,
+    pub(crate) backups_needed: bool,
 }
 
 impl ConsensusWeb3Rpcs {
@@ -204,9 +204,7 @@ impl ConsensusFinder {
         authorization: &Arc<Authorization>,
         web3_rpcs: &Web3Rpcs,
     ) -> anyhow::Result<Option<ConsensusWeb3Rpcs>> {
-        let minmax_block = self
-            .rpc_heads
-            .values().minmax_by_key(|&x| x.number());
+        let minmax_block = self.rpc_heads.values().minmax_by_key(|&x| x.number());
 
         let (lowest_block, highest_block) = match minmax_block {
             MinMaxResult::NoElements => return Ok(None),
@@ -220,7 +218,8 @@ impl ConsensusFinder {
 
         trace!("lowest_block_number: {}", lowest_block.number());
 
-        let max_lag_block_number = highest_block_number.saturating_sub(self.max_block_lag.unwrap_or_else(|| U64::from(10)));
+        let max_lag_block_number = highest_block_number
+            .saturating_sub(self.max_block_lag.unwrap_or_else(|| U64::from(10)));
 
         trace!("max_lag_block_number: {}", max_lag_block_number);
 
@@ -245,7 +244,11 @@ impl ConsensusFinder {
         let mut rpc_heads_by_tier: Vec<_> = self.rpc_heads.iter().collect();
         rpc_heads_by_tier.sort_by_cached_key(|(rpc, _)| rpc.tier);
 
-        let current_tier = rpc_heads_by_tier.first().expect("rpc_heads_by_tier should never be empty").0.tier;
+        let current_tier = rpc_heads_by_tier
+            .first()
+            .expect("rpc_heads_by_tier should never be empty")
+            .0
+            .tier;
 
         // loop over all the rpc heads (grouped by tier) and their parents to find consensus
         // TODO: i'm sure theres a lot of shortcuts that could be taken, but this is simplest to implement
@@ -253,13 +256,13 @@ impl ConsensusFinder {
             if current_tier != rpc.tier {
                 // we finished processing a tier. check for primary results
                 if let Some(consensus) = self.count_votes(&primary_votes, web3_rpcs) {
-                    return Ok(Some(consensus))
+                    return Ok(Some(consensus));
                 }
 
                 // only set backup consensus once. we don't want it to keep checking on worse tiers if it already found consensus
                 if backup_consensus.is_none() {
                     if let Some(consensus) = self.count_votes(&backup_votes, web3_rpcs) {
-                        backup_consensus =Some(consensus)
+                        backup_consensus = Some(consensus)
                     }
                 }
             }
@@ -281,7 +284,10 @@ impl ConsensusFinder {
                 backup_entry.0.insert(&rpc.name);
                 backup_entry.1 += rpc.soft_limit;
 
-                match web3_rpcs.block(authorization, block_to_check.parent_hash(), Some(rpc)).await {
+                match web3_rpcs
+                    .block(authorization, block_to_check.parent_hash(), Some(rpc))
+                    .await
+                {
                     Ok(parent_block) => block_to_check = parent_block,
                     Err(err) => {
                         warn!("Problem fetching parent block of {:#?} during consensus finding: {:#?}", block_to_check, err);
@@ -293,7 +299,7 @@ impl ConsensusFinder {
 
         // we finished processing all tiers. check for primary results (if anything but the last tier found consensus, we already returned above)
         if let Some(consensus) = self.count_votes(&primary_votes, web3_rpcs) {
-            return Ok(Some(consensus))
+            return Ok(Some(consensus));
         }
 
         // only set backup consensus once. we don't want it to keep checking on worse tiers if it already found consensus
@@ -301,15 +307,28 @@ impl ConsensusFinder {
             return Ok(Some(consensus));
         }
 
-        // count votes one last time 
+        // count votes one last time
         Ok(self.count_votes(&backup_votes, web3_rpcs))
     }
 
     // TODO: have min_sum_soft_limit and min_head_rpcs on self instead of on Web3Rpcs
-    fn count_votes(&self, votes: &HashMap<Web3ProxyBlock, (HashSet<&str>, u32)>, web3_rpcs: &Web3Rpcs) -> Option<ConsensusWeb3Rpcs> {
+    fn count_votes(
+        &self,
+        votes: &HashMap<Web3ProxyBlock, (HashSet<&str>, u32)>,
+        web3_rpcs: &Web3Rpcs,
+    ) -> Option<ConsensusWeb3Rpcs> {
         // sort the primary votes ascending by tier and descending by block num
-        let mut votes: Vec<_> = votes.iter().map(|(block, (rpc_names, sum_soft_limit))| (block, sum_soft_limit, rpc_names)).collect();
-        votes.sort_by_cached_key(|(block, sum_soft_limit, rpc_names)| (Reverse(*block.number()), Reverse(*sum_soft_limit), Reverse(rpc_names.len())));
+        let mut votes: Vec<_> = votes
+            .iter()
+            .map(|(block, (rpc_names, sum_soft_limit))| (block, sum_soft_limit, rpc_names))
+            .collect();
+        votes.sort_by_cached_key(|(block, sum_soft_limit, rpc_names)| {
+            (
+                Reverse(*block.number()),
+                Reverse(*sum_soft_limit),
+                Reverse(rpc_names.len()),
+            )
+        });
 
         // return the first result that exceededs confgured minimums (if any)
         for (maybe_head_block, sum_soft_limit, rpc_names) in votes {
@@ -324,14 +343,21 @@ impl ConsensusFinder {
             trace!("rpc_names: {:#?}", rpc_names);
 
             // consensus likely found! load the rpcs to make sure they all have active connections
-            let consensus_rpcs: Vec<_> = rpc_names.into_iter().filter_map(|x| web3_rpcs.get(x)).collect();
+            let consensus_rpcs: Vec<_> = rpc_names
+                .into_iter()
+                .filter_map(|x| web3_rpcs.get(x))
+                .collect();
 
             if consensus_rpcs.len() < web3_rpcs.min_head_rpcs {
                 continue;
             }
             // consensus found!
 
-            let tier = consensus_rpcs.iter().map(|x| x.tier).max().expect("there should always be a max");
+            let tier = consensus_rpcs
+                .iter()
+                .map(|x| x.tier)
+                .max()
+                .expect("there should always be a max");
 
             let backups_needed = consensus_rpcs.iter().any(|x| x.backup);
 
