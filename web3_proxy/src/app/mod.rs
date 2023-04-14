@@ -715,10 +715,6 @@ impl Web3ProxyApp {
                 0,
                 pending_transactions.clone(),
                 None,
-                // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
-                // they also often have low rate limits
-                // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
-                // TODO: but maybe we could include privates in the "backup" tier
                 None,
             )
             .await
