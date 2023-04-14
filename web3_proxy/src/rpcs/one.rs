@@ -568,7 +568,7 @@ impl Web3Rpc {
 
             self.check_block_data_limit(&authorization, unlocked_provider.clone())
                 .await
-                .context(format!("unable to parse eth_chainId from {}", self))?;
+                .context(format!("unable to check_block_data_limit of {}", self))?;
 
             drop(unlocked_provider);
 
