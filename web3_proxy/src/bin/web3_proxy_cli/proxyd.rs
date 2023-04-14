@@ -316,6 +316,7 @@ mod tests {
                 ),
             ]),
             private_rpcs: None,
+            bundler_4337_rpcs: None,
             extra: Default::default(),
         };
 
