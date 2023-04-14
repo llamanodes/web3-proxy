@@ -211,11 +211,14 @@ impl Web3Rpcs {
     ) -> anyhow::Result<()> {
         // safety checks
         if rpc_configs.len() < app.config.min_synced_rpcs {
-            return Err(anyhow::anyhow!(
+            // TODO: don't count disabled servers!
+            // TODO: include if this is balanced, private, or 4337
+            warn!(
                 "Only {}/{} rpcs! Add more rpcs or reduce min_synced_rpcs.",
                 rpc_configs.len(),
                 app.config.min_synced_rpcs
-            ));
+            );
+            return Ok(());
         }
 
         // safety check on sum soft limit
