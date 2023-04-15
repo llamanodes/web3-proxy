@@ -176,6 +176,12 @@ pub async fn serve(
             get(users::authentication::user_login_get),
         )
         .route("/user/login", post(users::authentication::user_login_post))
+        .route(
+            "/user/subuser/:rpc_key/:subuser_address/:new_status/:new_role",
+            get(users::subuser::modify_subuser),
+        )
+        .route("/subuser/:rpc_key", get(users::subuser::get_subusers))
+        .route("/subuser", get(users::subuser::get_keys_as_subuser))
         .route("/user", get(users::user_get))
         .route("/user", post(users::user_post))
         .route("/user/balance", get(users::payment::user_balance_get))

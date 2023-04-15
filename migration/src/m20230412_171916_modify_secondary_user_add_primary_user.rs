@@ -28,6 +28,8 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await
+
+        // TODO: Add a unique index on RpcKey + Subuser
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
