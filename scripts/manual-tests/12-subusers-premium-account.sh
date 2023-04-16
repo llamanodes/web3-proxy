@@ -84,3 +84,9 @@ curl \
   -X GET "127.0.0.1:8544/user/subuser/?subuser_address=0x762390ae7a3c4D987062a398C1eA8767029AB08E&rpc_key=01GXRFKFPY5DDRCRVB3B3HVDYK&new_status=upsert&new_role=collaborator" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 01GXRFKFQXDV0MQ2RT52BCPZ23"
+
+# Secret key
+curl \
+  -X GET "127.0.0.1:8544/user/subuser/?subuser_address=0x762390ae7a3c4D987062a398C1eA8767029AB08E&rpc_key=01GXRFKFPY5DDRCRVB3B3HVDYK&new_status=remove&new_role=collaborator" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 01GXRFKFQXDV0MQ2RT52BCPZ23"

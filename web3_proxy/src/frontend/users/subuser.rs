@@ -347,6 +347,7 @@ pub async fn modify_subuser(
         .web3_context("failed using the db to check for a subuser")?;
 
     let txn = db_conn.begin().await?;
+    let mut action = "no action";
     let _ = match subuser_entry_secondary_user {
         Some(secondary_user) => {
             // In this case, remove the subuser
@@ -354,20 +355,23 @@ pub async fn modify_subuser(
             if !keep_subuser {
                 // Remove the user
                 active_subuser_entry_secondary_user.delete(&db_conn).await?;
+                action = "removed";
             } else {
                 // Just change the role
-                active_subuser_entry_secondary_user.role = sea_orm::Set(new_role);
+                active_subuser_entry_secondary_user.role = sea_orm::Set(new_role.clone());
                 active_subuser_entry_secondary_user.save(&db_conn).await?;
+                action = "role modified";
             }
         }
         None if keep_subuser => {
             let active_subuser_entry_secondary_user = secondary_user::ActiveModel {
                 user_id: sea_orm::Set(subuser.id),
                 rpc_key: sea_orm::Set(rpc_key_entity.id),
-                role: sea_orm::Set(new_role),
+                role: sea_orm::Set(new_role.clone()),
                 ..Default::default()
             };
             active_subuser_entry_secondary_user.insert(&txn).await?;
+            action = "added";
         }
         _ => {
             // Return if the user should be removed and if there is no entry;
@@ -380,5 +384,17 @@ pub async fn modify_subuser(
     };
     txn.commit().await?;
 
-    Ok("subuser successfully updated".into_response())
+    let response = (
+        StatusCode::OK,
+        Json(json!({
+            "rpc_key": rpc_key_to_modify,
+            "subuser_address": subuser_address,
+            "keep_user": keep_subuser,
+            "new_role": new_role,
+            "action": action
+        })),
+    )
+        .into_response();
+    // Return early if the log was added, assume there is at most one valid log per transaction
+    Ok(response.into())
 }
