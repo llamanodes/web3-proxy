@@ -76,17 +76,29 @@ curl -X POST http://127.0.0.1:8544/user/login \
 ##################
 # Get first users RPC keys
 curl \
--H "Authorization: Bearer 01GXRFKFQXDV0MQ2RT52BCPZ23" \
+-H "Authorization: Bearer 01GXRB6AHZSXFDX2S1QJPJ8X51" \
 -X GET "127.0.0.1:8544/user/keys"
 
 # Secret key
 curl \
-  -X GET "127.0.0.1:8544/user/subuser/?subuser_address=0x762390ae7a3c4D987062a398C1eA8767029AB08E&rpc_key=01GXRFKFPY5DDRCRVB3B3HVDYK&new_status=upsert&new_role=collaborator" \
+  -X GET "127.0.0.1:8544/user/subuser?subuser_address=0x762390ae7a3c4D987062a398C1eA8767029AB08E&rpc_key=01GXRAGS5F9VJFQRVMZGE1Q85T&new_status=upsert&new_role=collaborator" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 01GXRB6AHZSXFDX2S1QJPJ8X51"
+
+# The primary user can check what subusers he gave access to
+curl \
+  -X GET "127.0.0.1:8544/user/subusers?rpc_key=01GXRAGS5F9VJFQRVMZGE1Q85T" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 01GXRB6AHZSXFDX2S1QJPJ8X51"
+
+# The secondary user can see all the projects that he is associated with
+curl \
+  -X GET "127.0.0.1:8544/subuser/rpc_keys" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 01GXRFKFQXDV0MQ2RT52BCPZ23"
 
 # Secret key
 curl \
-  -X GET "127.0.0.1:8544/user/subuser/?subuser_address=0x762390ae7a3c4D987062a398C1eA8767029AB08E&rpc_key=01GXRFKFPY5DDRCRVB3B3HVDYK&new_status=remove&new_role=collaborator" \
+  -X GET "127.0.0.1:8544/user/subuser?subuser_address=0x762390ae7a3c4D987062a398C1eA8767029AB08E&rpc_key=01GXRFKFPY5DDRCRVB3B3HVDYK&new_status=remove&new_role=collaborator" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 01GXRFKFQXDV0MQ2RT52BCPZ23"

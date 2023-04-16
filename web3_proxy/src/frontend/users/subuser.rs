@@ -12,7 +12,6 @@ use axum::{
 use axum_macros::debug_handler;
 use entities::sea_orm_active_enums::Role;
 use entities::{balance, rpc_key, secondary_user, user, user_tier};
-use ethers::abi::AbiEncode;
 use ethers::types::Address;
 use hashbrown::HashMap;
 use http::StatusCode;
@@ -54,7 +53,7 @@ pub async fn get_keys_as_subuser(
         .collect::<HashMap<u64, secondary_user::Model>>();
 
     // Now return a list of all subusers (their wallets)
-    let rpc_key_entities = rpc_key::Entity::find()
+    let rpc_key_entities: Vec<(rpc_key::Model, Option<user::Model>)> = rpc_key::Entity::find()
         .filter(
             rpc_key::Column::Id.is_in(
                 secondary_user_entities
@@ -63,6 +62,7 @@ pub async fn get_keys_as_subuser(
                     .collect::<Vec<_>>(),
             ),
         )
+        .find_also_related(user::Entity)
         .all(db_replica.conn())
         .await?;
 
@@ -70,14 +70,23 @@ pub async fn get_keys_as_subuser(
 
     // Now return the list
     let response_json = json!({
-        "subuser": subuser.address,
+        "subuser": format!("{:?}", Address::from_slice(&subuser.address)),
         "rpc_keys": rpc_key_entities
             .into_iter()
-            .map(|rpc_key| {
-                let mut tmp = HashMap::new();
-                tmp.insert("address", serde_json::Value::String(subuser.address.clone().encode_hex()));
-                tmp.insert("role", serde_json::Value::String(secondary_user_entities.get(&rpc_key.id).unwrap().role.to_string()));
-                tmp
+            .flat_map(|(rpc_key, rpc_owner)| {
+                match rpc_owner {
+                    Some(inner_rpc_owner) => {
+                        let mut tmp = HashMap::new();
+                        tmp.insert("rpc-key", serde_json::Value::String(Ulid::from(rpc_key.secret_key).to_string()));
+                        tmp.insert("rpc-owner", serde_json::Value::String(format!("{:?}", Address::from_slice(&inner_rpc_owner.address))));
+                        tmp.insert("role", serde_json::Value::String(format!("{:?}", secondary_user_entities.get(&rpc_key.id).unwrap().role))); // .to_string() returns ugly "'...'"
+                        Some(tmp)
+                    },
+                    None => {
+                        // error!("Found RPC secret key with no user!".to_owned());
+                        None
+                    }
+                }
             })
             .collect::<Vec::<_>>(),
     });
@@ -114,7 +123,7 @@ pub async fn get_subusers(
         );
     }
 
-    let rpc_key: String = params
+    let rpc_key: Ulid = params
         .remove("rpc_key")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
@@ -125,7 +134,7 @@ pub async fn get_subusers(
 
     // Get the rpc key id
     let rpc_key = rpc_key::Entity::find()
-        .filter(rpc_key::Column::SecretKey.eq(rpc_key))
+        .filter(rpc_key::Column::SecretKey.eq(Uuid::from(rpc_key)))
         .one(db_replica.conn())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
@@ -154,17 +163,20 @@ pub async fn get_subusers(
         .all(db_replica.conn())
         .await?;
 
+    warn!("Subusers are: {:?}", subusers);
+
     // Now return the list
     let response_json = json!({
-        "caller": user.address,
+        "caller": format!("{:?}", Address::from_slice(&user.address)),
         "rpc_key": rpc_key,
         "subusers": subusers
             .into_iter()
             .map(|subuser| {
                 let mut tmp = HashMap::new();
-                tmp.insert("address", serde_json::Value::String(subuser.address.encode_hex()));
-                tmp.insert("role", serde_json::Value::String(secondary_user_entities.get(&subuser.id).unwrap().role.to_string()));
-                tmp
+                // .encode_hex()
+                tmp.insert("address", serde_json::Value::String(format!("{:?}", Address::from_slice(&subuser.address))));
+                tmp.insert("role", serde_json::Value::String(format!("{:?}", secondary_user_entities.get(&subuser.id).unwrap().role)));
+                json!(tmp)
             })
             .collect::<Vec::<_>>(),
     });
@@ -223,7 +235,8 @@ pub async fn modify_subuser(
         ))?
         .parse()
         .context(format!("unable to parse subuser_address {:?}", params))?;
-    // TODO: Check subuser address
+
+    // TODO: Check subuser address for eip55 checksum
 
     let keep_subuser: bool = match params
         .remove("new_status")
@@ -276,6 +289,13 @@ pub async fn modify_subuser(
             "Provided RPC key does not exist!".to_owned(),
         ))?;
 
+    // Make sure that the user owns the rpc_key_entity
+    if rpc_key_entity.user_id != user.id {
+        return Err(Web3ProxyError::BadRequest(
+            "you must own the RPC for which you are giving permissions out".to_string(),
+        ));
+    }
+
     // TODO: There is a good chunk of duplicate logic as login-post. Consider refactoring ...
     let db_conn = app.db_conn().web3_context("login requires a db")?;
     let (subuser, _subuser_rpc_keys, _status_code) = match subuser {
@@ -319,6 +339,12 @@ pub async fn modify_subuser(
             (subuser, subuser_rpc_keys, StatusCode::CREATED)
         }
         Some(subuser) => {
+            if subuser.id == user.id {
+                return Err(Web3ProxyError::BadRequest(
+                    "you cannot make a subuser out of yourself".to_string(),
+                ));
+            }
+
             // Let's say that a user that exists can actually also redeem a key in retrospect...
             // the user is already registered
             let subuser_rpc_keys = rpc_key::Entity::find()
