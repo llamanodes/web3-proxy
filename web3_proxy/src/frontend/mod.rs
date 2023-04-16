@@ -177,7 +177,8 @@ pub async fn serve(
         )
         .route("/user/login", post(users::authentication::user_login_post))
         .route(
-            "/user/subuser/:rpc_key/:subuser_address/:new_status/:new_role",
+            // /:rpc_key/:subuser_address/:new_status/:new_role
+            "/user/subuser/",
             get(users::subuser::modify_subuser),
         )
         .route("/subuser/:rpc_key", get(users::subuser::get_subusers))

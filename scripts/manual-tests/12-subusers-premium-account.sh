@@ -1,19 +1,20 @@
+### Tests subuser premium account endpoints
 ##################
 # Run the server
 ##################
-
-# Keep the proxyd instance running the background (and test that it works)
+# Run the proxyd instance
 cargo run --release -- proxyd
 
 # Check if the instance is running
 curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"web3_clientVersion","id":1}' 127.0.0.1:8544
 
+
 ##################
-# Create the referring user & log in (Wallet 0xeB3E928A2E54BE013EF8241d4C9EaF4DfAE94D5a)
+# Create the premium / primary user & log in (Wallet 0xeB3E928A2E54BE013EF8241d4C9EaF4DfAE94D5a)
 ##################
 cargo run create_user --address 0xeB3E928A2E54BE013EF8241d4C9EaF4DfAE94D5a
 
-# Make user premium, so he can create referral keys
+# Make user premium, so he can create subusers
 cargo run change_user_tier_by_address 0xeB3E928A2E54BE013EF8241d4C9EaF4DfAE94D5a "Unlimited"
 # could also use CLI to change user role
 # ULID 01GXRAGS5F9VJFQRVMZGE1Q85T
@@ -37,34 +38,21 @@ curl -X POST http://127.0.0.1:8544/user/login \
 # Bearer token is: 01GXRB6AHZSXFDX2S1QJPJ8X51
 # RPC secret key is: 01GXRAGS5F9VJFQRVMZGE1Q85T
 
+# Top up the balance of the account
+curl \
+-H "Authorization: Bearer 01GXRFKFQXDV0MQ2RT52BCPZ23" \
+-X GET "127.0.0.1:8544/user/balance/0xda41f748106d2d1f1bf395e65d07bd9fc507c1eb4fd50c87d8ca1f34cfd536b0"
+
+
 # Make an example RPC request to check if the tokens work
 curl \
   -X POST "127.0.0.1:8544/rpc/01GXRAGS5F9VJFQRVMZGE1Q85T" \
   -H "Content-Type: application/json" \
   --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
 
-# Now retrieve the referral link
-curl \
--H "Authorization: Bearer 01GXRB6AHZSXFDX2S1QJPJ8X51" \
--X GET "127.0.0.1:8544/user/referral"
-
-# This is the referral code which will be used by the redeemer
-# "llamanodes-01GXRB6RVM00MACTKABYVF8MJR"
-
-curl -X POST http://127.0.0.1:8544/user/login \
-  -H 'Content-Type: application/json' \
-  -d '{
-        "address": "0xeb3e928a2e54be013ef8241d4c9eaf4dfae94d5a",
-        "msg": "0x6c6c616d616e6f6465732e636f6d2077616e747320796f7520746f207369676e20696e207769746820796f757220457468657265756d206163636f756e743a0a3078654233453932384132453534424530313345463832343164344339456146344466414539344435610a0af09fa699f09fa699f09fa699f09fa699f09fa6990a0a5552493a2068747470733a2f2f6c6c616d616e6f6465732e636f6d2f0a56657273696f6e3a20310a436861696e2049443a20310a4e6f6e63653a2030314758524235424a584b47535845454b5a314438424857565a0a4973737565642041743a20323032332d30342d31315431343a32323a35302e3937333930365a0a45787069726174696f6e2054696d653a20323032332d30342d31315431343a34323a35302e3937333930365a",
-        "sig": "be1f9fed3f6f206c15677b7da488071b936b68daf560715b75cf9232afe4b9923c2c5d00a558847131f0f04200b4b123011f62521b7b97bab2c8b794c82b29621b",
-        "version": "3",
-        "signer": "MEW"
-      }'
-
 ##################
-# Now act as the referrer (Wallet 0x762390ae7a3c4D987062a398C1eA8767029AB08E)
-# We first login the referrer
-# Using the referrer code creates an entry in the table
+# Now act as the subuser (Wallet 0x762390ae7a3c4D987062a398C1eA8767029AB08E)
+# We first login the subuser
 ##################
 # Login using the referral link. This should create the user, and also mark him as being referred
 # http://127.0.0.1:8544/user/login/0x762390ae7a3c4D987062a398C1eA8767029AB08E
@@ -83,39 +71,16 @@ curl -X POST http://127.0.0.1:8544/user/login \
 # Bearer token 01GXRFKFQXDV0MQ2RT52BCPZ23
 # RPC key 01GXRFKFPY5DDRCRVB3B3HVDYK
 
-# Make some requests, the referrer should not receive any credits for this (balance table is not created for free-tier users ...) This works fine
-for i in {1..1000}
-do
-  curl \
-    -X POST "127.0.0.1:8544/rpc/01GXRFKFPY5DDRCRVB3B3HVDYK" \
-    -H "Content-Type: application/json" \
-  --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
-done
-
-###########################################
-# Now the referred user deposits some tokens
-# They then send it to the endpoint
-###########################################
+##################
+# Now the primary user adds the secondary user as a subuser
+##################
+# Get first users RPC keys
 curl \
 -H "Authorization: Bearer 01GXRFKFQXDV0MQ2RT52BCPZ23" \
--X GET "127.0.0.1:8544/user/balance/0xda41f748106d2d1f1bf395e65d07bd9fc507c1eb4fd50c87d8ca1f34cfd536b0"
+-X GET "127.0.0.1:8544/user/keys"
 
+# Secret key
 curl \
--H "Authorization: Bearer 01GXRFKFQXDV0MQ2RT52BCPZ23" \
--X GET "127.0.0.1:8544/user/balance/0xd56dee328dfa3bea26c3762834081881e5eff62e77a2b45e72d98016daaeffba"
-
-
-###########################################
-# Now the referred user starts spending the money. Let's make requests worth $100 and see what happens ...
-# At all times, the referrer should receive 10% of the spent tokens
-###########################################
-for i in {1..10000000}
-do
-  curl \
-    -X POST "127.0.0.1:8544/rpc/01GXRFKFPY5DDRCRVB3B3HVDYK" \
-    -H "Content-Type: application/json" \
-  --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
-done
-
-# Check that the new user was indeed logged in, and that a referral table entry was created (in the database)
-# Check that the 10% referral rate works
+  -X GET "127.0.0.1:8544/user/subuser/?subuser_address=0x762390ae7a3c4D987062a398C1eA8767029AB08E&rpc_key=01GXRFKFPY5DDRCRVB3B3HVDYK&new_status=upsert&new_role=collaborator" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 01GXRFKFQXDV0MQ2RT52BCPZ23"

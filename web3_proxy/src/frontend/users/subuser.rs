@@ -2,8 +2,6 @@
 use crate::app::Web3ProxyApp;
 use crate::frontend::authorization::RpcSecretKey;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
-use crate::frontend::users::rpc_keys;
-use crate::referral_code::ReferralCode;
 use anyhow::Context;
 use axum::{
     extract::Query,
@@ -12,9 +10,8 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::prelude::SecondaryUser;
 use entities::sea_orm_active_enums::Role;
-use entities::{balance, referrer, rpc_key, secondary_user, user, user_tier};
+use entities::{balance, rpc_key, secondary_user, user, user_tier};
 use ethers::abi::AbiEncode;
 use ethers::types::Address;
 use hashbrown::HashMap;
@@ -22,20 +19,21 @@ use http::StatusCode;
 use log::{debug, warn};
 use migration::sea_orm;
 use migration::sea_orm::prelude::Decimal;
+use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::EntityTrait;
 use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::QueryFilter;
 use migration::sea_orm::TransactionTrait;
-use migration::sea_orm::{ActiveModelTrait, ColIdx};
 use serde_json::json;
 use std::sync::Arc;
+use ulid::{self, Ulid};
 use uuid::Uuid;
 
 pub async fn get_keys_as_subuser(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-    Query(mut params): Query<HashMap<String, String>>,
+    Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // First, authenticate
     let (subuser, _semaphore) = app.bearer_is_authorized(bearer).await?;
@@ -67,6 +65,8 @@ pub async fn get_keys_as_subuser(
         )
         .all(db_replica.conn())
         .await?;
+
+    // TODO: Merge rpc-key with respective user (join is probably easiest ...)
 
     // Now return the list
     let response_json = json!({
@@ -114,14 +114,14 @@ pub async fn get_subusers(
         );
     }
 
-    let rpc_key: Uuid = params
+    let rpc_key: String = params
         .remove("rpc_key")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
             "You have not provided the 'rpc_key' whose access to modify".to_string(),
         ))?
         .parse()
-        .context("unable to parse tx_hash")?;
+        .context(format!("unable to parse rpc_key {:?}", params))?;
 
     // Get the rpc key id
     let rpc_key = rpc_key::Entity::find()
@@ -202,15 +202,18 @@ pub async fn modify_subuser(
         );
     }
 
+    warn!("Parameters are: {:?}", params);
+
     // Then, distinguish the endpoint to modify
-    let rpc_key_to_modify: Uuid = params
+    let rpc_key_to_modify: Ulid = params
         .remove("rpc_key")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
             "You have not provided the 'rpc_key' whose access to modify".to_string(),
         ))?
-        .parse()
-        .context("unable to parse tx_hash")?;
+        .parse::<Ulid>()
+        .context(format!("unable to parse rpc_key {:?}", params))?;
+    // let rpc_key_to_modify: Uuid = ulid::serde::ulid_as_uuid::deserialize(rpc_key_to_modify)?;
 
     let subuser_address: Address = params
         .remove("subuser_address")
@@ -219,7 +222,8 @@ pub async fn modify_subuser(
             "You have not provided the 'user_address' whose access to modify".to_string(),
         ))?
         .parse()
-        .context("unable to parse tx_hash")?;
+        .context(format!("unable to parse subuser_address {:?}", params))?;
+    // TODO: Check subuser address
 
     let keep_subuser: bool = match params
         .remove("new_status")
@@ -265,7 +269,7 @@ pub async fn modify_subuser(
         .await?;
 
     let rpc_key_entity = rpc_key::Entity::find()
-        .filter(rpc_key::Column::SecretKey.eq(rpc_key_to_modify))
+        .filter(rpc_key::Column::SecretKey.eq(Uuid::from(rpc_key_to_modify)))
         .one(db_replica.conn())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
@@ -274,7 +278,7 @@ pub async fn modify_subuser(
 
     // TODO: There is a good chunk of duplicate logic as login-post. Consider refactoring ...
     let db_conn = app.db_conn().web3_context("login requires a db")?;
-    let (subuser, subuser_rpc_keys, status_code) = match subuser {
+    let (subuser, _subuser_rpc_keys, _status_code) = match subuser {
         None => {
             let txn = db_conn.begin().await?;
             // First add a user; the only thing we need from them is an address
@@ -356,7 +360,7 @@ pub async fn modify_subuser(
                 active_subuser_entry_secondary_user.save(&db_conn).await?;
             }
         }
-        Some(rpc_key_entity) if keep_subuser => {
+        None if keep_subuser => {
             let active_subuser_entry_secondary_user = secondary_user::ActiveModel {
                 user_id: sea_orm::Set(subuser.id),
                 rpc_key: sea_orm::Set(rpc_key_entity.id),
