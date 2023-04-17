@@ -185,7 +185,6 @@ impl Web3Rpc {
         };
 
         let tx_id_sender = if config.subscribe_txs {
-            // TODO: warn if tx_id_sender is None?
             tx_id_sender
         } else {
             None
