@@ -209,6 +209,8 @@ impl DatabaseReplica {
 pub struct Web3ProxyApp {
     /// Send requests to the best server available
     pub balanced_rpcs: Arc<Web3Rpcs>,
+    /// Send 4337 Abstraction Bundler requests to one of these servers
+    pub bundler_4337_rpcs: Option<Arc<Web3Rpcs>>,
     pub http_client: Option<reqwest::Client>,
     /// application config
     /// TODO: this will need a large refactor to handle reloads while running. maybe use a watch::Receiver?
@@ -764,6 +766,34 @@ impl Web3ProxyApp {
             Some(private_rpcs)
         };
 
+        // prepare a Web3Rpcs to hold all our 4337 Abstraction Bundler connections
+        // only some chains have this, so this is optional
+        let bundler_4337_rpcs = if top_config.bundler_4337_rpcs.is_none() {
+            warn!("No bundler_4337_rpcs configured");
+            None
+        } else {
+            // TODO: do something with the spawn handle
+            let (bundler_4337_rpcs, bundler_4337_rpcs_handle, _) = Web3Rpcs::spawn(
+                top_config.app.chain_id,
+                db_conn.clone(),
+                http_client.clone(),
+                // bundler_4337_rpcs don't get subscriptions, so no need for max_block_age or max_block_lag
+                None,
+                None,
+                0,
+                0,
+                pending_transactions.clone(),
+                None,
+                None,
+            )
+            .await
+            .context("spawning bundler_4337_rpcs")?;
+
+            app_handles.push(bundler_4337_rpcs_handle);
+
+            Some(bundler_4337_rpcs)
+        };
+
         let hostname = hostname::get()
             .ok()
             .and_then(|x| x.to_str().map(|x| x.to_string()));
@@ -771,6 +801,7 @@ impl Web3ProxyApp {
         let app = Self {
             config: top_config.app.clone(),
             balanced_rpcs,
+            bundler_4337_rpcs,
             http_client,
             kafka_producer,
             private_rpcs,
@@ -850,16 +881,30 @@ impl Web3ProxyApp {
         // connect to the backends
         self.balanced_rpcs
             .apply_server_configs(self, new_top_config.balanced_rpcs)
-            .await?;
+            .await
+            .context("updating balanced rpcs")?;
 
         if let Some(private_rpc_configs) = new_top_config.private_rpcs {
             if let Some(private_rpcs) = self.private_rpcs.as_ref() {
                 private_rpcs
                     .apply_server_configs(self, private_rpc_configs)
-                    .await?;
+                    .await
+                    .context("updating private_rpcs")?;
             } else {
                 // TODO: maybe we should have private_rpcs just be empty instead of being None
                 todo!("handle toggling private_rpcs")
+            }
+        }
+
+        if let Some(bundler_4337_rpc_configs) = new_top_config.bundler_4337_rpcs {
+            if let Some(bundler_4337_rpcs) = self.bundler_4337_rpcs.as_ref() {
+                bundler_4337_rpcs
+                    .apply_server_configs(self, bundler_4337_rpc_configs)
+                    .await
+                    .context("updating bundler_4337_rpcs")?;
+            } else {
+                // TODO: maybe we should have bundler_4337_rpcs just be empty instead of being None
+                todo!("handle toggling bundler_4337_rpcs")
             }
         }
 
@@ -1158,6 +1203,7 @@ impl Web3ProxyApp {
         }
     }
 
+    // TODO: more robust stats and kafka logic! if we use the try operator, they aren't saved!
     async fn proxy_cached_request(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -1335,6 +1381,59 @@ impl Web3ProxyApp {
                     vec![],
                 ));
             }
+            method @ ("debug_bundler_sendBundleNow"
+            | "debug_bundler_clearState"
+            | "debug_bundler_dumpMempool") => {
+                return Ok((
+                    JsonRpcForwardedResponse::from_string(
+                        // TODO: we should probably have some escaping on this. but maybe serde will protect us enough
+                        format!("method unsupported: {}", method),
+                        None,
+                        Some(request_id),
+                    ),
+                    vec![],
+                ));
+            }
+            method @ ("eth_sendUserOperation"
+            | "eth_estimateUserOperationGas"
+            | "eth_getUserOperationByHash"
+            | "eth_getUserOperationReceipt"
+            | "eth_supportedEntryPoints") => match self.bundler_4337_rpcs.as_ref() {
+                Some(bundler_4337_rpcs) => {
+                    let response = bundler_4337_rpcs
+                        .try_proxy_connection(
+                            authorization,
+                            request,
+                            Some(&request_metadata),
+                            None,
+                            None,
+                        )
+                        .await?;
+
+                    // TODO: DRY
+                    let rpcs = request_metadata.backend_requests.lock().clone();
+
+                    if let Some(stat_sender) = self.stat_sender.as_ref() {
+                        let response_stat = RpcQueryStats::new(
+                            Some(method.to_string()),
+                            authorization.clone(),
+                            request_metadata,
+                            response.num_bytes(),
+                        );
+
+                        stat_sender
+                            .send_async(response_stat.into())
+                            .await
+                            .map_err(Web3ProxyError::SendAppStatError)?;
+                    }
+
+                    return Ok((response, rpcs));
+                }
+                None => {
+                    // TODO: stats!
+                    return Err(anyhow::anyhow!("no bundler_4337_rpcs available").into());
+                }
+            },
             // some commands can use local data or caches
             "eth_accounts" => {
                 // no stats on this. its cheap
@@ -1378,6 +1477,8 @@ impl Web3ProxyApp {
                 } else {
                     // i think this is always an error response
                     let rpcs = request_metadata.backend_requests.lock().clone();
+
+                    // TODO! save stats
 
                     return Ok((response, rpcs));
                 };
@@ -1574,7 +1675,6 @@ impl Web3ProxyApp {
                 serde_json::Value::String(APP_USER_AGENT.to_string())
             }
             "web3_sha3" => {
-                // emit stats
                 // returns Keccak-256 (not the standardized SHA3-256) of the given data.
                 match &request.params {
                     Some(serde_json::Value::Array(params)) => {
@@ -1640,8 +1740,6 @@ impl Web3ProxyApp {
                     // TODO: emit a stat? will probably just be noise
                     return Err(Web3ProxyError::AccessDenied);
                 }
-
-                // emit stats
 
                 // TODO: if no servers synced, wait for them to be synced? probably better to error and let haproxy retry another server
                 let head_block_num = head_block_num

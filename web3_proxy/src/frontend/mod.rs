@@ -164,6 +164,7 @@ pub async fn serve(
         //
         .route("/health", get(status::health))
         .route("/status", get(status::status))
+        .route("/status/backups_needed", get(status::backups_needed))
         //
         // User stuff
         //

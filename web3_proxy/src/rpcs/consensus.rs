@@ -18,12 +18,12 @@ use tokio::time::Instant;
 /// Serialize is so we can print it on our debug endpoint
 #[derive(Clone, Serialize)]
 pub struct ConsensusWeb3Rpcs {
-    pub(super) tier: u64,
-    pub(super) head_block: Web3ProxyBlock,
-    pub(super) best_rpcs: Vec<Arc<Web3Rpc>>,
+    pub(crate) tier: u64,
+    pub(crate) head_block: Web3ProxyBlock,
+    pub(crate) best_rpcs: Vec<Arc<Web3Rpc>>,
     // TODO: functions like "compare_backup_vote()"
     // pub(super) backups_voted: Option<Web3ProxyBlock>,
-    pub(super) backups_needed: bool,
+    pub(crate) backups_needed: bool,
 }
 
 impl ConsensusWeb3Rpcs {

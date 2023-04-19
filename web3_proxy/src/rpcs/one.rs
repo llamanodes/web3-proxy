@@ -187,7 +187,6 @@ impl Web3Rpc {
         };
 
         let tx_id_sender = if config.subscribe_txs {
-            // TODO: warn if tx_id_sender is None?
             tx_id_sender
         } else {
             None
@@ -557,7 +556,8 @@ impl Web3Rpc {
             // trace!("waiting on chain id for {}", self);
             let found_chain_id: Result<U64, _> = self
                 .wait_for_request_handle(&authorization, None, unlocked_provider.clone())
-                .await?
+                .await
+                .context(format!("waiting for request handle on {}", self))?
                 .request(
                     "eth_chainId",
                     &json!(Option::None::<()>),
@@ -580,18 +580,20 @@ impl Web3Rpc {
                     }
                 }
                 Err(e) => {
-                    return Err(anyhow::Error::from(e));
+                    return Err(anyhow::Error::from(e)
+                        .context(format!("unable to parse eth_chainId from {}", self)));
                 }
             }
 
             self.check_block_data_limit(&authorization, unlocked_provider.clone())
-                .await?;
+                .await
+                .context(format!("unable to check_block_data_limit of {}", self))?;
 
             drop(unlocked_provider);
 
             info!("successfully connected to {}", self);
         } else if self.provider.read().await.is_none() {
-            return Err(anyhow!("failed waiting for client"));
+            return Err(anyhow!("failed waiting for client {}", self));
         };
 
         Ok(())
@@ -726,7 +728,7 @@ impl Web3Rpc {
         // this does loop. just only when reconnect is enabled
         #[allow(clippy::never_loop)]
         loop {
-            debug!("subscription loop started");
+            trace!("subscription loop started on {}", self);
 
             let mut futures = vec![];
 

@@ -42,12 +42,12 @@ impl RpcAccountingSubCommand {
         #[derive(Serialize, FromQueryResult)]
         struct SelectResult {
             total_frontend_requests: Decimal,
-            // pub total_backend_retries: Decimal,
-            // pub total_cache_misses: Decimal,
+            total_backend_retries: Decimal,
+            // total_cache_misses: Decimal,
             total_cache_hits: Decimal,
             total_response_bytes: Decimal,
             total_error_responses: Decimal,
-            // pub total_response_millis: Decimal,
+            total_response_millis: Decimal,
             first_period_datetime: DateTimeUtc,
             last_period_datetime: DateTimeUtc,
         }
@@ -58,10 +58,10 @@ impl RpcAccountingSubCommand {
                 rpc_accounting::Column::FrontendRequests.sum(),
                 "total_frontend_requests",
             )
-            // .column_as(
-            //     rpc_accounting::Column::BackendRequests.sum(),
-            //     "total_backend_retries",
-            // )
+            .column_as(
+                rpc_accounting::Column::BackendRequests.sum(),
+                "total_backend_retries",
+            )
             // .column_as(
             //     rpc_accounting::Column::CacheMisses.sum(),
             //     "total_cache_misses",
@@ -76,10 +76,10 @@ impl RpcAccountingSubCommand {
                 rpc_accounting::Column::ErrorResponse.sum(),
                 "total_error_responses",
             )
-            // .column_as(
-            //     rpc_accounting::Column::SumResponseMillis.sum(),
-            //     "total_response_millis",
-            // )
+            .column_as(
+                rpc_accounting::Column::SumResponseMillis.sum(),
+                "total_response_millis",
+            )
             .column_as(
                 rpc_accounting::Column::PeriodDatetime.min(),
                 "first_period_datetime",
@@ -131,25 +131,42 @@ impl RpcAccountingSubCommand {
 
         q = q.filter(condition);
 
-        // TODO: make this work without into_json. i think we need to make a struct
-        let query_response = q
+        let stats = q
             .into_model::<SelectResult>()
             .one(db_conn)
             .await?
             .context("no query result")?;
 
-        info!(
-            "query_response for chain {:?}: {:#}",
-            self.chain_id,
-            json!(query_response)
-        );
+        if let Some(chain_id) = self.chain_id {
+            info!("stats for chain {}", chain_id);
+        } else {
+            info!("stats for all chains");
+        }
 
-        // let query_seconds: Decimal = query_response
-        //     .last_period_datetime
-        //     .signed_duration_since(query_response.first_period_datetime)
-        //     .num_seconds()
-        //     .into();
-        // info!("query seconds: {}", query_seconds);
+        info!("stats: {:#}", json!(&stats));
+
+        let query_seconds: Decimal = stats
+            .last_period_datetime
+            .signed_duration_since(stats.first_period_datetime)
+            .num_seconds()
+            .into();
+        dbg!(query_seconds);
+
+        let avg_request_per_second = (stats.total_frontend_requests / query_seconds).round_dp(2);
+        dbg!(avg_request_per_second);
+
+        let cache_hit_rate = (stats.total_cache_hits / stats.total_frontend_requests
+            * Decimal::from(100))
+        .round_dp(2);
+        dbg!(cache_hit_rate);
+
+        let avg_response_millis =
+            (stats.total_response_millis / stats.total_frontend_requests).round_dp(3);
+        dbg!(avg_response_millis);
+
+        let avg_response_bytes =
+            (stats.total_response_bytes / stats.total_frontend_requests).round();
+        dbg!(avg_response_bytes);
 
         Ok(())
     }
