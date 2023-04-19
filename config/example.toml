@@ -12,6 +12,7 @@ db_url = "mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy"
 db_replica_url = "mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy"
 
 kafka_urls = "127.0.0.1:19092"
+kafka_protocol = "plaintext"
 
 # thundering herd protection
 # only mark a block as the head block if the sum of their soft limits is greater than or equal to min_sum_soft_limit

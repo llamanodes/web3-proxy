@@ -59,13 +59,7 @@ impl SearchKafkaSubCommand {
 
         let mut consumer = ClientConfig::new();
 
-        let security_protocol = if kafka_brokers.starts_with("SSL:") {
-            "ssl"
-        } else if kafka_brokers.starts_with("TCP:") {
-            "plaintext"
-        } else {
-            return Err(anyhow::anyhow!("unexpected kafka protocol"));
-        };
+        let security_protocol = &top_config.app.kafka_protocol;
 
         consumer
             .set("bootstrap.servers", &kafka_brokers)

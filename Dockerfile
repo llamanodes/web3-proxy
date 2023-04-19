@@ -18,7 +18,14 @@ RUN curl -L https://foundry.paradigm.xyz | bash && foundryup
 
 # install web3-proxy system dependencies. most things are rust-only, but not everything
 RUN apt-get update && \
-    apt-get install --yes librdkafka-dev && \
+    apt-get install --yes \
+    cmake \
+    liblz4-dev \
+    libpthread-stubs0-dev \
+    libssl-dev \
+    libzstd-dev \
+    make \
+    && \
     rm -rf /var/lib/apt/lists/*
 
 # copy the application
@@ -35,6 +42,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo install \
     --locked \
+    --features rdkafka-src \
     --no-default-features \
     --profile faster_release \
     --root /opt/bin \

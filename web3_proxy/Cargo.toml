@@ -10,6 +10,7 @@ default-run = "web3_proxy_cli"
 default = ["deadlock_detection", "tokio-console"]
 deadlock_detection = ["parking_lot/deadlock_detection"]
 tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
+rdkafka-src = ["rdkafka/cmake-build", "rdkafka/libz", "rdkafka/ssl", "rdkafka/zstd-pkg-config"]
 
 # TODO: turn tokio-console on with a feature. console-subscriber = { version = "0.1.7" }
 
