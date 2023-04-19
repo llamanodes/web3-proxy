@@ -144,8 +144,8 @@ fn main() -> anyhow::Result<()> {
                 vec![
                     "info",
                     "ethers=debug",
-                    // TODO: even error is too verbose for our purposes. how can we turn off this logging entirely?
                     "ethers_providers=error",
+                    "ethers_providers::rpc=off",
                     "redis_rate_limit=debug",
                     "web3_proxy=debug",
                     "web3_proxy_cli=debug",
