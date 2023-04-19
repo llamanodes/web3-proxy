@@ -40,10 +40,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20221213_134158_move_login_into_database::Migration),
             Box::new(m20230117_191358_admin_table::Migration),
             Box::new(m20230119_204135_better_free_tier::Migration),
+            Box::new(m20230125_204810_stats_v2::Migration),
             Box::new(m20230130_124740_read_only_login_logic::Migration),
             Box::new(m20230130_165144_prepare_admin_imitation_pre_login::Migration),
             Box::new(m20230215_152254_admin_trail::Migration),
-            Box::new(m20230125_204810_stats_v2::Migration),
             Box::new(m20230307_002623_migrate_rpc_accounting_to_rpc_accounting_v2::Migration),
         ]
     }

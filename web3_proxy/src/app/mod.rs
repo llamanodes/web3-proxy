@@ -504,9 +504,14 @@ impl Web3ProxyApp {
 
         let mut kafka_producer: Option<rdkafka::producer::FutureProducer> = None;
         if let Some(kafka_brokers) = top_config.app.kafka_urls.clone() {
+            info!("Connecting to kafka");
+
+            let security_protocol = &top_config.app.kafka_protocol;
+
             match rdkafka::ClientConfig::new()
                 .set("bootstrap.servers", kafka_brokers)
                 .set("message.timeout.ms", "5000")
+                .set("security.protocol", security_protocol)
                 .create()
             {
                 Ok(k) => kafka_producer = Some(k),
