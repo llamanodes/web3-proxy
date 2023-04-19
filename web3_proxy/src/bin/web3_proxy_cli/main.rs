@@ -132,6 +132,7 @@ fn main() -> anyhow::Result<()> {
                     "info",
                     "ethers=debug",
                     "ethers_providers=debug",
+                    "ethers_providers::rpc=off",
                     "redis_rate_limit=debug",
                     "web3_proxy=trace",
                     "web3_proxy_cli=trace",
