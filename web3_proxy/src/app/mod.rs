@@ -468,9 +468,18 @@ impl Web3ProxyApp {
 
         let mut kafka_producer: Option<rdkafka::producer::FutureProducer> = None;
         if let Some(kafka_brokers) = top_config.app.kafka_urls.clone() {
+            let security_protocol = if kafka_brokers.starts_with("SSL:") {
+                "ssl"
+            } else if kafka_brokers.starts_with("TCP:") {
+                "plaintext"
+            } else {
+                return Err(anyhow::anyhow!("unexpected kafka protocol"));
+            };
+
             match rdkafka::ClientConfig::new()
                 .set("bootstrap.servers", kafka_brokers)
                 .set("message.timeout.ms", "5000")
+                .set("security.protocol", security_protocol)
                 .create()
             {
                 Ok(k) => kafka_producer = Some(k),
