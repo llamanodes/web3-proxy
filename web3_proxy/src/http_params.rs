@@ -218,8 +218,8 @@ pub fn get_query_window_seconds_from_params(
 ) -> Web3ProxyResult<u64> {
     params.get("query_window_seconds").map_or_else(
         || {
-            // no page in params. set default
-            Ok(1)
+            // no query_window_seconds in params. set default
+            Ok(60)
         },
         |query_window_seconds: &String| {
             // parse the given timestamp
