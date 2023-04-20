@@ -9,7 +9,7 @@ use axum::{
 use chrono::{NaiveDateTime, Utc};
 use entities::login;
 use hashbrown::HashMap;
-use log::{debug, trace, warn};
+use log::{debug, warn};
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use redis_rate_limiter::{redis::AsyncCommands, RedisConnection};
 
@@ -223,7 +223,7 @@ pub fn get_query_window_seconds_from_params(
         },
         |query_window_seconds: &String| {
             // parse the given timestamp
-            query_window_seconds.parse::<u64>().map_err(|err| {
+            query_window_seconds.parse::<u64>().map_err(|_| {
                 Web3ProxyError::BadRequest("Unable to parse query_window_seconds".to_string())
             })
         },
