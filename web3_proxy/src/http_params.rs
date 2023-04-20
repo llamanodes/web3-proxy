@@ -224,8 +224,7 @@ pub fn get_query_window_seconds_from_params(
         |query_window_seconds: &String| {
             // parse the given timestamp
             query_window_seconds.parse::<u64>().map_err(|err| {
-                trace!("Unable to parse rpc_key_id: {:#?}", err);
-                Web3ProxyError::BadRequest("Unable to parse rpc_key_id".to_string())
+                Web3ProxyError::BadRequest("Unable to parse query_window_seconds".to_string())
             })
         },
     )
