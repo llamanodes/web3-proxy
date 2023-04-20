@@ -22,6 +22,7 @@ RUN apt-get update && \
     cmake \
     liblz4-dev \
     libpthread-stubs0-dev \
+    libsasl2-dev \
     libssl-dev \
     libzstd-dev \
     make \
