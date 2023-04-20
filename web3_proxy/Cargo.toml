@@ -27,7 +27,7 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 
 anyhow = { version = "1.0.70", features = ["backtrace"] }
 argh = "0.1.10"
-axum = { version = "0.6.12", features = ["headers", "ws"] }
+axum = { version = "0.6.16", features = ["headers", "ws"] }
 axum-client-ip = "0.4.0"
 axum-macros = "0.3.7"
 chrono = "0.4.24"
@@ -36,13 +36,13 @@ counter = "0.5.7"
 derive_more = "0.99.17"
 dotenv = "0.15.0"
 env_logger = "0.10.0"
-ethers = { version = "2.0.2", default-features = false, features = ["rustls", "ws"] }
+ethers = { version = "2.0.3", default-features = false, features = ["rustls", "ws"] }
 ewma = "0.1.1"
 fdlimit = "0.2.1"
 flume = "0.10.14"
 fstrings = "0.2"
 futures = { version = "0.3.28", features = ["thread-pool"] }
-gethostname = "0.4.1"
+gethostname = "0.4.2"
 glob = "0.3.1"
 handlebars = "4.3.6"
 hashbrown = { version = "0.13.2", features = ["serde"] }
@@ -68,9 +68,9 @@ regex = "1.7.3"
 reqwest = { version = "0.11.16", default-features = false, features = ["json", "tokio-rustls"] }
 rmp-serde = "1.1.1"
 rustc-hash = "1.1.0"
-sentry = { version = "0.30.0", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
-serde = { version = "1.0.159", features = [] }
-serde_json = { version = "1.0.95", default-features = false, features = ["alloc", "raw_value"] }
+sentry = { version = "0.31.0", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
+serde = { version = "1.0.160", features = [] }
+serde_json = { version = "1.0.96", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.2.2"
 siwe = "0.5.0"
 time = "0.3.20"
