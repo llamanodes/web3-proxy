@@ -9,7 +9,7 @@ use axum::{
 use chrono::{NaiveDateTime, Utc};
 use entities::login;
 use hashbrown::HashMap;
-use log::{debug, trace, warn};
+use log::{debug, warn};
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use redis_rate_limiter::{redis::AsyncCommands, RedisConnection};
 
@@ -218,14 +218,13 @@ pub fn get_query_window_seconds_from_params(
 ) -> Web3ProxyResult<u64> {
     params.get("query_window_seconds").map_or_else(
         || {
-            // no page in params. set default
-            Ok(1)
+            // no query_window_seconds in params. set default
+            Ok(60)
         },
         |query_window_seconds: &String| {
             // parse the given timestamp
-            query_window_seconds.parse::<u64>().map_err(|err| {
-                trace!("Unable to parse rpc_key_id: {:#?}", err);
-                Web3ProxyError::BadRequest("Unable to parse rpc_key_id".to_string())
+            query_window_seconds.parse::<u64>().map_err(|_| {
+                Web3ProxyError::BadRequest("Unable to parse query_window_seconds".to_string())
             })
         },
     )

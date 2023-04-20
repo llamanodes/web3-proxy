@@ -4,6 +4,7 @@
 
 use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, RequestMetadata};
 use super::errors::{Web3ProxyError, Web3ProxyResponse};
+use crate::jsonrpc::JsonRpcId;
 use crate::stats::RpcQueryStats;
 use crate::{
     app::Web3ProxyApp,
@@ -29,7 +30,6 @@ use hashbrown::HashMap;
 use http::StatusCode;
 use log::{info, trace, warn};
 use serde_json::json;
-use serde_json::value::to_raw_value;
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock};
@@ -420,9 +420,7 @@ async fn handle_socket_payload(
             (id, response)
         }
         Err(err) => {
-            // TODO: move this logic somewhere else and just set id to None here
-            let id =
-                to_raw_value(&json!(None::<Option::<()>>)).expect("None can always be a RawValue");
+            let id = JsonRpcId::None.to_raw_value();
             (id, Err(err.into()))
         }
     };

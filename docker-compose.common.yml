@@ -9,7 +9,7 @@ services:
     stop_signal: SIGINT
     environment:
       #RUST_LOG: "info,web3_proxy=debug"
-      RUST_LOG: info
+      RUST_LOG: info,ethers_providers::rpc=off
 
   volatile_redis:
     image: redis:6.0-alpine

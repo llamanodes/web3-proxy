@@ -20,16 +20,6 @@ pub enum Web3Provider {
 }
 
 impl Web3Provider {
-    pub fn ready(&self) -> bool {
-        match self {
-            Self::Both(_, ws) => ws.as_ref().ready(),
-            Self::Http(_) => true,
-            Self::Ws(ws) => ws.as_ref().ready(),
-            #[cfg(test)]
-            Self::Mock => true,
-        }
-    }
-
     pub fn http(&self) -> Option<&EthersHttpProvider> {
         match self {
             Self::Http(x) => Some(x),

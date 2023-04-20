@@ -18,7 +18,14 @@ RUN curl -L https://foundry.paradigm.xyz | bash && foundryup
 
 # install web3-proxy system dependencies. most things are rust-only, but not everything
 RUN apt-get update && \
-    apt-get install --yes librdkafka-dev && \
+    apt-get install --yes \
+    cmake \
+    liblz4-dev \
+    libpthread-stubs0-dev \
+    libssl-dev \
+    libzstd-dev \
+    make \
+    && \
     rm -rf /var/lib/apt/lists/*
 
 # copy the application
@@ -36,6 +43,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install \
     --features tokio-uring \
     --locked \
+    --features rdkafka-src \
     --no-default-features \
     --path ./web3_proxy \
     --profile faster_release \
@@ -57,6 +65,6 @@ ENTRYPOINT ["web3_proxy_cli"]
 CMD [ "--config", "/web3-proxy.toml", "proxyd" ]
 
 # TODO: lower log level when done with prototyping
-ENV RUST_LOG "warn,web3_proxy=debug,web3_proxy_cli=debug"
+ENV RUST_LOG "warn,ethers_providers::rpc=off,web3_proxy=debug,web3_proxy_cli=debug"
 
 COPY --from=builder /usr/local/bin/* /usr/local/bin/

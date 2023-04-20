@@ -399,6 +399,8 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [x] improve "archive_needed" boolean. change to "block_depth"
 - [x] keep score of new_head timings for all rpcs
 - [x] having the whole block in /status is very verbose. trim it down
+- [x] maybe we shouldn't route eth_getLogs to syncing nodes. serving queries slows down sync significantly
+  - change the send_best function to only include servers that are at least close to fully synced
 - [-] proxy mode for benchmarking all backends
 - [-] proxy mode for sending to multiple backends
 - [-] let users choose a % of reverts to log (or maybe x/second). someone like curve logging all reverts will be a BIG database very quickly
@@ -416,9 +418,11 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - then sites like curve.fi don't have to worry about their user count
   - it does mean we will have a harder time capacity planning from the number of keys
 - [ ] have the healthcheck get the block over http. if it errors, or doesn't match what the websocket says, something is wrong (likely a deadlock in the websocket code)
+- [ ] has_block_data is too simple. it needs to know what kind of data is being requested
+  - all nodes have all blocks
+  - most nodes have all receipts
+  - only archives have old state
 - [ ] don't use new_head_provider anywhere except new head subscription
-- [x] maybe we shouldn't route eth_getLogs to syncing nodes. serving queries slows down sync significantly
-  - change the send_best function to only include servers that are at least close to fully synced
 - [ ] enable mev protected transactions with either a /protect/ url (instead of /private/) or the database (when on /rpc/)
 - [-] have private transactions be enabled by a url setting rather than a setting on the key
 - [ ] eth_sendRawTransaction should only forward if the chain_id matches what we are running

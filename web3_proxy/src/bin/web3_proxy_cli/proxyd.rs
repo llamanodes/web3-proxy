@@ -341,7 +341,10 @@ mod tests {
 
         // TODO: how should we handle logs in this?
         // TODO: option for super verbose logs
-        std::env::set_var("RUST_LOG", "info,web3_proxy=debug");
+        std::env::set_var(
+            "RUST_LOG",
+            "info,ethers_providers::rpc=off,web3_proxy=debug",
+        );
 
         let _ = env_logger::builder().is_test(true).try_init();
 
@@ -401,6 +404,7 @@ mod tests {
                 ),
             ]),
             private_rpcs: None,
+            bundler_4337_rpcs: None,
             extra: Default::default(),
         };
 
