@@ -1306,10 +1306,17 @@ mod tests {
     use crate::rpcs::consensus::ConsensusFinder;
     use crate::rpcs::{blockchain::Web3ProxyBlock, provider::Web3Provider};
     use ethers::types::{Block, U256};
+    use latency::PeakEwmaLatency;
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock as AsyncRwLock;
+
+    const NANOS_PER_MILLI: f64 = 1_000_000.0;
+
+    fn new_peak_latency() -> PeakEwmaLatency {
+        PeakEwmaLatency::spawn(1_000.0 * NANOS_PER_MILLI, 4, Duration::from_secs(1))
+    }
 
     #[tokio::test]
     async fn test_sort_connections_by_sync_status() {
@@ -1341,36 +1348,42 @@ mod tests {
                 name: "a".to_string(),
                 tier: 0,
                 head_block: RwLock::new(None),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "b".to_string(),
                 tier: 0,
                 head_block: RwLock::new(blocks.get(1).cloned()),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "c".to_string(),
                 tier: 0,
                 head_block: RwLock::new(blocks.get(2).cloned()),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "d".to_string(),
                 tier: 1,
                 head_block: RwLock::new(None),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "e".to_string(),
                 tier: 1,
                 head_block: RwLock::new(blocks.get(1).cloned()),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "f".to_string(),
                 tier: 1,
                 head_block: RwLock::new(blocks.get(2).cloned()),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
         ]
@@ -1428,6 +1441,7 @@ mod tests {
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 
@@ -1440,6 +1454,7 @@ mod tests {
             tier: 0,
             head_block: RwLock::new(Some(lagged_block.clone())),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 
@@ -1784,6 +1799,7 @@ mod tests {
             tier: 0,
             head_block: RwLock::new(Some(block_1.clone())),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 
@@ -1796,6 +1812,7 @@ mod tests {
             tier: 1,
             head_block: RwLock::new(Some(block_2.clone())),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 
