@@ -20,7 +20,7 @@ use hashbrown::HashMap;
 use influxdb2::models::Query;
 use influxdb2::FromDataPoint;
 use itertools::Itertools;
-use log::{info, warn};
+use log::trace;
 use serde::Serialize;
 use serde_json::{json, Number, Value};
 
@@ -118,7 +118,7 @@ pub async fn query_user_stats<'a>(
         .influxdb_bucket
         .clone()
         .context("No influxdb bucket was provided")?; // "web3_proxy";
-    info!("Bucket is {:?}", bucket);
+    trace!("Bucket is {:?}", bucket);
 
     // , "archive_needed", "error_response"
     let mut group_columns = vec![
@@ -158,15 +158,16 @@ pub async fn query_user_stats<'a>(
         StatType::Detailed => "".to_string(),
     };
 
-    info!(
+    trace!(
         "Query start and stop are: {:?} {:?}",
-        query_start, query_stop
+        query_start,
+        query_stop
     );
-    info!("Query column parameters are: {:?}", stats_column);
-    info!("Query measurement is: {:?}", measurement);
-    info!("Filters are: {:?} {:?}", filter_field, filter_chain_id);
-    info!("Group is: {:?}", group);
-    info!("window seconds are: {:?}", query_window_seconds);
+    trace!("Query column parameters are: {:?}", stats_column);
+    trace!("Query measurement is: {:?}", measurement);
+    trace!("Filters are: {:?} {:?}", filter_field, filter_chain_id);
+    trace!("Group is: {:?}", group);
+    trace!("window seconds are: {:?}", query_window_seconds);
 
     // These are taken care of probably ...
     // reg. fields, collect: backend_requests, frontend_requests, cache_hits, cache_misses, total_request_bytes, total_response_bytes, total_response_millis
@@ -196,14 +197,14 @@ pub async fn query_user_stats<'a>(
             |> group()
     "#);
 
-    info!("Raw query to db is: {:?}", query);
+    trace!("Raw query to db is: {:?}", query);
     let query = Query::new(query.to_string());
-    info!("Query to db is: {:?}", query);
+    trace!("Query to db is: {:?}", query);
 
     // TODO: do not unwrap. add this error to FrontErrorResponse
     // TODO: StatType::Aggregated and StatType::Detailed might need different types
     // let unparsed: serde_json::Value = serde_json::Value::Array(influxdb_client.query(Some(query.clone())).await?);
-    // info!("Direct response is: {:?}", unparsed);
+    // trace!("Direct response is: {:?}", unparsed);
 
     // Return a different result based on the query
     let datapoints = match stat_response_type {
@@ -211,13 +212,13 @@ pub async fn query_user_stats<'a>(
             let influx_responses: Vec<AggregatedRpcAccounting> = influxdb_client
                 .query::<AggregatedRpcAccounting>(Some(query))
                 .await?;
-            info!("Influx responses are {:?}", &influx_responses);
+            trace!("Influx responses are {:?}", &influx_responses);
             for res in &influx_responses {
-                info!("Resp is: {:?}", res);
+                trace!("Resp is: {:?}", res);
             }
 
             // let tmp = influx_responses.into_iter().group_by(|x| {x.time.timestamp()}).into_iter().collect::<Vec<_>>();
-            // info!("Printing grouped item {}", tmp);
+            // trace!("Printing grouped item {}", tmp);
 
             // Group by all fields together ..
             // let influx_responses = Vec::new();
@@ -229,7 +230,7 @@ pub async fn query_user_stats<'a>(
             //         (x.time.clone(), x)
             //     })
             //     .into_group_map();
-            // info!("Grouped items are {:?}", grouped_items);
+            // trace!("Grouped items are {:?}", grouped_items);
 
             influx_responses
                 .into_iter()
@@ -237,7 +238,7 @@ pub async fn query_user_stats<'a>(
                 .into_group_map()
                 .into_iter()
                 .map(|(group, grouped_items)| {
-                    info!("Group is: {:?}", group);
+                    trace!("Group is: {:?}", group);
 
                     // Now put all the fields next to each other
                     // (there will be exactly one field per timestamp, but we want to arrive at a new object)
@@ -250,23 +251,23 @@ pub async fn query_user_stats<'a>(
                     out.insert("method".to_owned(), json!("null"));
 
                     for x in grouped_items {
-                        info!("Iterating over grouped item {:?}", x);
+                        trace!("Iterating over grouped item {:?}", x);
 
                         let key = format!("total_{}", x._field).to_string();
-                        info!("Looking at: {:?}", key);
+                        trace!("Looking at {:?}: {:?}", key, x._value);
 
                         // Insert it once, and then fix it
                         match out.get_mut(&key) {
                             Some(existing) => {
                                 match existing {
                                     Value::Number(old_value) => {
+                                        trace!("Old value is {:?}", old_value);
                                         // unwrap will error when someone has too many credits ..
                                         let old_value = old_value.as_i64().unwrap();
-                                        warn!("Old value is {:?}", old_value);
                                         *existing = serde_json::Value::Number(Number::from(
                                             old_value + x._value,
                                         ));
-                                        warn!("New value is {:?}", old_value);
+                                        trace!("New value is {:?}", existing);
                                     }
                                     _ => {
                                         panic!("Should be nothing but a number")
@@ -274,7 +275,7 @@ pub async fn query_user_stats<'a>(
                                 };
                             }
                             None => {
-                                warn!("Does not exist yet! Insert new!");
+                                trace!("Does not exist yet! Insert new!");
                                 out.insert(key, serde_json::Value::Number(Number::from(x._value)));
                             }
                         };
@@ -324,9 +325,9 @@ pub async fn query_user_stats<'a>(
             let influx_responses: Vec<DetailedRpcAccounting> = influxdb_client
                 .query::<DetailedRpcAccounting>(Some(query))
                 .await?;
-            info!("Influx responses are {:?}", &influx_responses);
+            trace!("Influx responses are {:?}", &influx_responses);
             for res in &influx_responses {
-                info!("Resp is: {:?}", res);
+                trace!("Resp is: {:?}", res);
             }
 
             // Group by all fields together ..
@@ -349,23 +350,25 @@ pub async fn query_user_stats<'a>(
                     out.insert("method".to_owned(), json!(method));
 
                     for x in grouped_items {
-                        info!("Iterating over grouped item {:?}", x);
+                        trace!("Iterating over grouped item {:?}", x);
 
                         let key = format!("total_{}", x._field).to_string();
-                        info!("Looking at: {:?}", key);
+                        trace!("Looking at {:?}: {:?}", key, x._value);
 
                         // Insert it once, and then fix it
                         match out.get_mut(&key) {
                             Some(existing) => {
                                 match existing {
                                     Value::Number(old_value) => {
+                                        trace!("Old value is {:?}", old_value);
+
                                         // unwrap will error when someone has too many credits ..
                                         let old_value = old_value.as_i64().unwrap();
-                                        warn!("Old value is {:?}", old_value);
                                         *existing = serde_json::Value::Number(Number::from(
                                             old_value + x._value,
                                         ));
-                                        warn!("New value is {:?}", old_value);
+
+                                        trace!("New value is {:?}", existing.as_i64());
                                     }
                                     _ => {
                                         panic!("Should be nothing but a number")
@@ -373,7 +376,7 @@ pub async fn query_user_stats<'a>(
                                 };
                             }
                             None => {
-                                warn!("Does not exist yet! Insert new!");
+                                trace!("Does not exist yet! Insert new!");
                                 out.insert(key, serde_json::Value::Number(Number::from(x._value)));
                             }
                         };
