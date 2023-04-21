@@ -10,7 +10,7 @@ default-run = "web3_proxy_cli"
 default = ["deadlock_detection"]
 deadlock_detection = ["parking_lot/deadlock_detection"]
 tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
-rdkafka-src = ["rdkafka/cmake-build", "rdkafka/gssapi", "rdkafka/libz", "rdkafka/ssl", "rdkafka/zstd-pkg-config"]
+rdkafka-src = ["rdkafka/cmake-build", "rdkafka/libz", "rdkafka/ssl", "rdkafka/zstd-pkg-config"]
 
 [dependencies]
 deferred-rate-limiter = { path = "../deferred-rate-limiter" }
