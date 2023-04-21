@@ -43,7 +43,7 @@ impl Serialize for Web3ProxyBlock {
         state.serialize_field("age", &self.age())?;
 
         let block = json!({
-            "block_hash": self.block.hash,
+            "hash": self.block.hash,
             "parent_hash": self.block.parent_hash,
             "number": self.block.number,
             "timestamp": self.block.timestamp,
