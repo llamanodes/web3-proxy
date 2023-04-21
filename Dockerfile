@@ -35,20 +35,20 @@ COPY . .
 # test the application with cargo-nextest
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
-    cargo nextest run
+    cargo nextest run --features "rdkafka-src tokio-uring" --no-default-features
 
 # build the application
 # using a "release" profile (which install does) is **very** important
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo install \
-    --features tokio-uring \
+    --features "rdkafka-src tokio-uring" \
     --locked \
-    --features rdkafka-src \
     --no-default-features \
     --path ./web3_proxy \
     --profile faster_release \
-    --root /usr/local/bin
+    --root /usr/local/bin \
+    ;
 
 #
 # We do not need the Rust toolchain to run the binary!
