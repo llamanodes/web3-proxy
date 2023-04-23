@@ -3,14 +3,14 @@
 # sea-orm-cli migrate up
 
 # Use CLI to create the admin that will call the endpoint
-RUSTFLAGS="--cfg tokio_unstable" cargo run create_user --address 0xeB3E928A2E54BE013EF8241d4C9EaF4DfAE94D5a
-RUSTFLAGS="--cfg tokio_unstable" cargo run change_admin_status 0xeB3E928A2E54BE013EF8241d4C9EaF4DfAE94D5a true
+cargo run create_user --address 0xeB3E928A2E54BE013EF8241d4C9EaF4DfAE94D5a
+cargo run change_admin_status 0xeB3E928A2E54BE013EF8241d4C9EaF4DfAE94D5a true
 
 # Use CLI to create the user whose role will be changed via the endpoint
-RUSTFLAGS="--cfg tokio_unstable" cargo run create_user --address 0x077e43dcca20da9859daa3fd78b5998b81f794f7
+cargo run create_user --address 0x077e43dcca20da9859daa3fd78b5998b81f794f7
 
 # Run the proxyd instance
-RUSTFLAGS="--cfg tokio_unstable" cargo run --release -- proxyd
+cargo run --release -- proxyd
 
 # Check if the instance is running
 curl --verbose -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"web3_clientVersion","id":1}' 127.0.0.1:8544

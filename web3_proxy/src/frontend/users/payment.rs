@@ -10,7 +10,7 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::{balance, increase_balance_receipt, user};
+use entities::{balance, increase_balance_receipt, user, user_tier};
 use ethers::abi::{AbiEncode, ParamType};
 use ethers::types::{Address, TransactionReceipt, H256, U256};
 use ethers::utils::{hex, keccak256};
@@ -31,6 +31,39 @@ use std::sync::Arc;
 
 /// Implements any logic related to payments
 /// Removed this mainly from "user" as this was getting clogged
+///
+/// `GET /user/balance` -- Use a bearer token to get the user's balance and spend.
+///
+/// - show balance in USD
+/// - show deposits history (currency, amounts, transaction id)
+#[debug_handler]
+pub async fn user_balance_get(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+) -> Web3ProxyResponse {
+    let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+
+    let db_replica = app.db_replica().context("Getting database connection")?;
+
+    // Just return the balance for the user
+    let user_balance = match balance::Entity::find()
+        .filter(balance::Column::UserId.eq(_user.id))
+        .one(db_replica.conn())
+        .await?
+    {
+        Some(x) => x.available_balance,
+        None => Decimal::from(0), // That means the user has no balance as of yet
+                                  // (user exists, but balance entry does not exist)
+                                  // In that case add this guy here
+                                  // Err(FrontendErrorResponse::BadRequest("User not found!"))
+    };
+
+    let mut response = HashMap::new();
+    response.insert("balance", json!(user_balance));
+
+    // TODO: Gotta create a new table for the spend part
+    Ok(Json(response).into_response())
+}
 
 /// `POST /user/balance/:tx_hash` -- Manually process a confirmed txid to update a user's balance.
 ///
@@ -295,6 +328,13 @@ pub async fn user_balance_post(
             .one(&db_conn)
             .await?;
 
+        // Get the premium user-tier
+        let premium_user_tier = user_tier::Entity::find()
+            .filter(user_tier::Column::Title.eq("Premium"))
+            .one(&db_conn)
+            .await?
+            .context("Could not find 'Premium' Tier in user-database")?;
+
         let txn = db_conn.begin().await?;
         match user_balance {
             Some(user_balance) => {
@@ -308,7 +348,7 @@ pub async fn user_balance_post(
                     // Also make the user premium at this point ...
                     let mut active_recipient = recipient.into_active_model();
                     // Make the recipient premium "Effectively Unlimited"
-                    active_recipient.user_tier_id = sea_orm::Set(3);
+                    active_recipient.user_tier_id = sea_orm::Set(premium_user_tier.id);
                     active_recipient.save(&txn).await?;
                 }
 
@@ -329,7 +369,7 @@ pub async fn user_balance_post(
                     // Also make the user premium at this point ...
                     let mut active_recipient = recipient.into_active_model();
                     // Make the recipient premium "Effectively Unlimited"
-                    active_recipient.user_tier_id = sea_orm::Set(3);
+                    active_recipient.user_tier_id = sea_orm::Set(premium_user_tier.id);
                     active_recipient.save(&txn).await?;
                 }
 

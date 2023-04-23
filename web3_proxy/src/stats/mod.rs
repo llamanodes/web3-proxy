@@ -2,13 +2,13 @@
 //! TODO: move some of these structs/functions into their own file?
 pub mod db_queries;
 pub mod influxdb_queries;
-
 use crate::frontend::authorization::{Authorization, RequestMetadata};
+use anyhow::Context;
 use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::sea_orm_active_enums::TrackingLevel;
-use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key};
+use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key, user, user_tier};
 use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
@@ -382,11 +382,36 @@ impl BufferedRpcQueryStats {
         );
         active_sender_balance.available_balance = sea_orm::Set(new_available_balance);
 
-        // TODO: Downgrade user's role to premium-free if the user ran out of credits
-
         active_sender_balance.save(db_conn).await?;
 
-        // TODO: I should probably generate join statements, so we don't have so much back and forths, though this may also over-complicate things
+        let downgrade_user = match user::Entity::find()
+            .filter(user::Column::Id.eq(sender_user_id))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!("No user was found with this sender id!");
+                return Ok(());
+            }
+        };
+
+        let downgrade_user_role = user_tier::Entity::find()
+            .filter(user_tier::Column::Id.eq(downgrade_user.user_tier_id))
+            .one(db_conn)
+            .await?
+            .context(format!(
+                "The foreign key for the user's user_tier_id was not found! {:?}",
+                downgrade_user.user_tier_id
+            ))?;
+
+        // Downgrade a user to premium - out of funds if there's less than 10$ in the account, and if the user was premium before
+        if new_available_balance < Decimal::from(10u64) && downgrade_user_role.title == "Premium" {
+            let mut active_downgrade_user = downgrade_user.into_active_model();
+            active_downgrade_user.user_tier_id = sea_orm::Set(downgrade_user_role.id);
+            active_downgrade_user.save(db_conn).await?;
+        }
+
         // Get the referee, and the referrer
         // (2) Look up the code that this user used. This is the referee table
         let referee_object = match referee::Entity::find()
