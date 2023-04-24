@@ -1262,7 +1262,7 @@ impl Web3ProxyApp {
                         authorization,
                         request,
                         Some(request_metadata),
-                        Some(&min_block_needed),
+                        None,
                         None,
                         Level::Trace,
                         None,
@@ -1295,13 +1295,15 @@ impl Web3ProxyApp {
     }
 
     // TODO: more robust stats and kafka logic! if we use the try operator, they aren't saved!
+    // TODO: move this to another module
     async fn proxy_cached_request(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         mut request: JsonRpcRequest,
         head_block_num: Option<U64>,
     ) -> Web3ProxyResult<(JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>)> {
-        // trace!("Received request: {:?}", request);
+        // TODO: move this code to another module so that its easy to turn this trace logging on in dev
+        trace!("Received request: {:?}", request);
 
         let request_metadata = Arc::new(RequestMetadata::new(request.num_bytes()));
 
