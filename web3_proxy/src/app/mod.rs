@@ -33,6 +33,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
 use log::{debug, error, info, trace, warn, Level};
+use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ConnectionTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait,
 };
@@ -189,6 +190,7 @@ pub struct AuthorizationChecks {
     /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
     pub private_txs: bool,
     pub proxy_mode: ProxyMode,
+    pub balance: Option<Decimal>,
 }
 
 /// Simple wrapper so that we can keep track of read only connections.

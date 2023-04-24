@@ -20,6 +20,7 @@ use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::{self, DatabaseConnection, EntityTrait, QueryFilter};
 use migration::{Expr, OnConflict};
+use num_traits::real::Real;
 use num_traits::ToPrimitive;
 use std::cmp::max;
 use std::num::NonZeroU64;
@@ -187,7 +188,9 @@ pub struct BufferedRpcQueryStats {
     pub sum_request_bytes: u64,
     pub sum_response_bytes: u64,
     pub sum_response_millis: u64,
-    pub sum_credits_used: Decimal, // TODO: This should probably be a decimal instead ...
+    pub sum_credits_used: Decimal,
+    /// Balance tells us the user's balance at this point in time
+    pub latest_balance: Decimal,
 }
 
 /// A stat that we aggregate and then store in a database.
@@ -233,6 +236,13 @@ impl BufferedRpcQueryStats {
         self.sum_response_bytes += stat.response_bytes;
         self.sum_response_millis += stat.response_millis;
         self.sum_credits_used += stat.credits_used;
+
+        // Also record the latest balance for this user ..
+        self.latest_balance = stat
+            .authorization
+            .checks
+            .balance
+            .unwrap_or(Decimal::from(0));
     }
 
     // TODO: take a db transaction instead so that we can batch?
@@ -428,7 +438,6 @@ impl BufferedRpcQueryStats {
                 return Ok(());
             }
         };
-        warn!("Got here 5");
 
         // (3) Look up the matching referrer in the referrer table
         // Referral table -> Get the referee id
@@ -449,7 +458,6 @@ impl BufferedRpcQueryStats {
 
         // Ok, now we add the credits to both users if applicable...
         // (4 onwards) Add balance to the referrer,
-        warn!("Got here 6");
 
         // (5) Check if referee has used up $100.00 USD in total (Have a config item that says how many credits account to 1$)
         // Get balance for the referrer (optionally make it into an active model ...)
@@ -469,8 +477,6 @@ impl BufferedRpcQueryStats {
         };
 
         let mut active_sender_balance = sender_balance.clone().into_active_model();
-        warn!("Got here 7");
-
         let referrer_balance = match balance::Entity::find()
             .filter(balance::Column::UserId.eq(user_with_that_referral_code.user_id))
             .one(db_conn)
@@ -488,8 +494,6 @@ impl BufferedRpcQueryStats {
 
         // I could try to circumvene the clone here, but let's skip that for now
         let mut active_referee = referee_object.clone().into_active_model();
-
-        warn!("Got here 8");
 
         // (5.1) If not, go to (7). If yes, go to (6)
         // Hardcode this parameter also in config, so it's easier to tune
@@ -509,7 +513,6 @@ impl BufferedRpcQueryStats {
         let valid_until = DateTime::<Utc>::from_utc(referee_object.referral_start_date, Utc)
             .checked_add_months(Months::new(12))
             .unwrap();
-        warn!("Time since midnight back then: {:?} {:?}", now, valid_until);
         if now <= valid_until {
             let mut active_referrer_balance = referrer_balance.clone().into_active_model();
             // Add 10% referral fees ...
@@ -566,7 +569,19 @@ impl BufferedRpcQueryStats {
             .field("sum_response_bytes", self.sum_response_bytes as i64)
             // TODO: will this be enough of a range
             // I guess Decimal can be a f64
-            .field("sum_credits_used", self.sum_credits_used.to_f64().unwrap());
+            .field(
+                "sum_credits_used",
+                self.sum_credits_used
+                    .to_f64()
+                    .expect("number is really (too) large") as i64,
+            )
+            .field(
+                "balance",
+                self.latest_balance
+                    .to_f64()
+                    .expect("number is really (too) large")
+                    .round() as i64,
+            );
 
         builder = builder.timestamp(key.response_timestamp);
         let timestamp_precision = TimestampPrecision::Seconds;

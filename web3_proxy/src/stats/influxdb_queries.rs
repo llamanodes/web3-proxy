@@ -70,6 +70,7 @@ pub async fn query_user_stats<'a>(
         .context("query_user_stats had a redis connection error")?
         .context("query_user_stats needs a redis")?;
 
+    warn!("Got here: 1");
     // TODO: have a getter for this. do we need a connection pool on it?
     let influxdb_client = app
         .influxdb_client
@@ -96,6 +97,7 @@ pub async fn query_user_stats<'a>(
         ));
     }
 
+    warn!("Got here: 2");
     let measurement = if user_id == 0 {
         "global_proxy"
     } else {
@@ -110,6 +112,7 @@ pub async fn query_user_stats<'a>(
     //     |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
     // |> yield(name: "mean")
 
+    warn!("Got here: 3");
     // TODO: Should be taken from the config, not hardcoded ...
     // TODO: Turn into a 500 error if bucket is not found ..
     // Or just unwrap or so
@@ -200,6 +203,7 @@ pub async fn query_user_stats<'a>(
     let query = Query::new(query.to_string());
     info!("Query to db is: {:?}", query);
 
+    warn!("Got here: 5");
     // TODO: do not unwrap. add this error to FrontErrorResponse
     // TODO: StatType::Aggregated and StatType::Detailed might need different types
     // let unparsed: serde_json::Value = serde_json::Value::Array(influxdb_client.query(Some(query.clone())).await?);
@@ -321,6 +325,7 @@ pub async fn query_user_stats<'a>(
                 .collect::<Vec<_>>()
         }
         StatType::Detailed => {
+            warn!("Got here: 6");
             let influx_responses: Vec<DetailedRpcAccounting> = influxdb_client
                 .query::<DetailedRpcAccounting>(Some(query))
                 .await?;
@@ -328,6 +333,7 @@ pub async fn query_user_stats<'a>(
             for res in &influx_responses {
                 info!("Resp is: {:?}", res);
             }
+            warn!("Got here: 7");
 
             // Group by all fields together ..
             influx_responses
@@ -414,6 +420,8 @@ pub async fn query_user_stats<'a>(
 
                     out.insert("archive_request".to_owned(), json!(archive_requests));
                     out.insert("error_response".to_owned(), json!(error_responses));
+
+                    // TODO: Add balance here ...
 
                     json!(out)
                 })
