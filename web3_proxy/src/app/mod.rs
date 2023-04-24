@@ -1566,7 +1566,7 @@ impl Web3ProxyApp {
             "eth_mining" => {
                 JsonRpcForwardedResponse::from_value(serde_json::Value::Bool(false), request_id)
             }
-            // TODO: eth_sendBundle (flashbots command)
+            // TODO: eth_sendBundle (flashbots/eden command)
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => {
                 let num_public_rpcs = match authorization.checks.proxy_mode {

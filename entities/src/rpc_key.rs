@@ -15,7 +15,6 @@ pub struct Model {
     #[serde(serialize_with = "serialization::uuid_as_ulid")]
     pub secret_key: Uuid,
     pub description: Option<String>,
-    /// TODO: change this to default True
     pub private_txs: bool,
     pub active: bool,
     #[sea_orm(column_type = "Text", nullable)]
