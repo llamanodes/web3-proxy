@@ -58,13 +58,13 @@ moka = { version = "0.10.2", default-features = false, features = ["future"] }
 num = "0.4.0"
 num-traits = "0.2.15"
 once_cell = { version = "1.17.1" }
-ordered-float = "3.6.0"
+ordered-float = "3.7.0"
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "rustls", "sync"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 prettytable = "*"
 proctitle = "0.1.1"
 rdkafka = { version = "0.29.0" }
-regex = "1.7.3"
+regex = "1.8.1"
 reqwest = { version = "0.11.16", default-features = false, features = ["json", "tokio-rustls"] }
 rmp-serde = "1.1.1"
 rustc-hash = "1.1.0"
