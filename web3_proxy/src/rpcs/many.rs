@@ -1099,7 +1099,7 @@ impl Web3Rpcs {
     /// be sure there is a timeout on this or it might loop forever
     #[allow(clippy::too_many_arguments)]
     pub async fn try_send_all_synced_connections(
-        &self,
+        self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         request: &JsonRpcRequest,
         request_metadata: Option<Arc<RequestMetadata>>,

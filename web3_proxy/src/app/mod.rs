@@ -1208,6 +1208,91 @@ impl Web3ProxyApp {
         }
     }
 
+    /// try to send transactions to the best available rpcs with private mempools
+    /// if no private rpcs are configured, then some public rpcs are used instead
+    async fn try_send_protected(
+        self: &Arc<Self>,
+        authorization: &Arc<Authorization>,
+        request: &JsonRpcRequest,
+        request_metadata: Arc<RequestMetadata>,
+        num_public_rpcs: Option<usize>,
+        head_block_num: Option<U64>,
+    ) -> Web3ProxyResult<JsonRpcForwardedResponse> {
+        // TODO: error/wait if no head block?
+        // TODO: configurable lag
+        let min_block_needed = head_block_num
+            .or(self.balanced_rpcs.head_block_num())
+            .ok_or_else(|| Web3ProxyError::NoServersSynced)?
+            .saturating_sub(3.into());
+
+        if let Some(protected_rpcs) = self.private_rpcs.as_ref() {
+            if !protected_rpcs.is_empty() {
+                // send to protected and public rpcs at the same time
+                // TODO: send to tier 0 of private, wait a block, ..., tier N of private, wait a block, public
+                // TODO: allow premium users to choose specifically where they want transactions to go
+                let public_f = {
+                    let authorization = authorization.clone();
+                    let clone = self.clone();
+                    // TODO: should request be in an arc? inside the request metadata?
+                    let request = request.clone();
+                    let request_metadata = Some(request_metadata.clone());
+
+                    async move {
+                        clone
+                            .balanced_rpcs
+                            .try_send_all_synced_connections(
+                                &authorization,
+                                &request,
+                                request_metadata,
+                                Some(&min_block_needed),
+                                None,
+                                Level::Trace,
+                                num_public_rpcs,
+                                true,
+                            )
+                            .await
+                    }
+                };
+
+                let public_handle = tokio::spawn(public_f);
+
+                let protected_response = protected_rpcs
+                    .try_send_all_synced_connections(
+                        authorization,
+                        request,
+                        Some(request_metadata),
+                        Some(&min_block_needed),
+                        None,
+                        Level::Trace,
+                        None,
+                        true,
+                    )
+                    .await?;
+
+                // wait for sending to the public rpcs to finish
+                // TODO: let this run in the background instead?
+                public_handle.await??;
+
+                return Ok(protected_response);
+            }
+        }
+
+        // no private rpcs to send to. send to a few public rpcs
+        // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
+        self.balanced_rpcs
+            .try_send_all_synced_connections(
+                authorization,
+                request,
+                Some(request_metadata),
+                Some(&min_block_needed),
+                None,
+                Level::Trace,
+                num_public_rpcs,
+                true,
+            )
+            .await
+    }
+
     // TODO: more robust stats and kafka logic! if we use the try operator, they aren't saved!
     async fn proxy_cached_request(
         self: &Arc<Self>,
@@ -1287,7 +1372,7 @@ impl Web3ProxyApp {
 
         // TODO: if eth_chainId or net_version, serve those without querying the backend
         // TODO: don't clone?
-        let partial_response: serde_json::Value = match request_method.as_ref() {
+        let response: JsonRpcForwardedResponse = match request_method.as_ref() {
             // lots of commands are blocked
             method @ ("db_getHex"
             | "db_getString"
@@ -1357,14 +1442,11 @@ impl Web3ProxyApp {
             | "shh_version") => {
                 // i don't think we will ever support these methods
                 // TODO: what error code?
-                return Ok((
-                    JsonRpcForwardedResponse::from_string(
-                        format!("method unsupported: {}", method),
-                        None,
-                        Some(request_id),
-                    ),
-                    vec![],
-                ));
+                JsonRpcForwardedResponse::from_string(
+                    format!("method unsupported: {}", method),
+                    None,
+                    Some(request_id),
+                )
             }
             // TODO: implement these commands
             method @ ("eth_getFilterChanges"
@@ -1376,36 +1458,29 @@ impl Web3ProxyApp {
             | "eth_uninstallFilter") => {
                 // TODO: unsupported command stat. use the count to prioritize new features
                 // TODO: what error code?
-                return Ok((
-                    // TODO: what code?
-                    JsonRpcForwardedResponse::from_string(
-                        format!("not yet implemented: {}", method),
-                        None,
-                        Some(request_id),
-                    ),
-                    vec![],
-                ));
+                JsonRpcForwardedResponse::from_string(
+                    format!("not yet implemented: {}", method),
+                    None,
+                    Some(request_id),
+                )
             }
             method @ ("debug_bundler_sendBundleNow"
             | "debug_bundler_clearState"
             | "debug_bundler_dumpMempool") => {
-                return Ok((
-                    JsonRpcForwardedResponse::from_string(
-                        // TODO: we should probably have some escaping on this. but maybe serde will protect us enough
-                        format!("method unsupported: {}", method),
-                        None,
-                        Some(request_id),
-                    ),
-                    vec![],
-                ));
+                JsonRpcForwardedResponse::from_string(
+                    // TODO: we should probably have some escaping on this. but maybe serde will protect us enough
+                    format!("method unsupported: {}", method),
+                    None,
+                    Some(request_id),
+                )
             }
-            method @ ("eth_sendUserOperation"
+            _method @ ("eth_sendUserOperation"
             | "eth_estimateUserOperationGas"
             | "eth_getUserOperationByHash"
             | "eth_getUserOperationReceipt"
             | "eth_supportedEntryPoints") => match self.bundler_4337_rpcs.as_ref() {
                 Some(bundler_4337_rpcs) => {
-                    let response = bundler_4337_rpcs
+                    bundler_4337_rpcs
                         .try_proxy_connection(
                             authorization,
                             request,
@@ -1413,56 +1488,39 @@ impl Web3ProxyApp {
                             None,
                             None,
                         )
-                        .await?;
-
-                    // TODO: DRY
-                    let rpcs = request_metadata.backend_requests.lock().clone();
-
-                    if let Some(stat_sender) = self.stat_sender.as_ref() {
-                        let response_stat = RpcQueryStats::new(
-                            Some(method.to_string()),
-                            authorization.clone(),
-                            request_metadata,
-                            response.num_bytes(),
-                        );
-
-                        stat_sender
-                            .send_async(response_stat.into())
-                            .await
-                            .map_err(Web3ProxyError::SendAppStatError)?;
-                    }
-
-                    return Ok((response, rpcs));
+                        .await?
                 }
                 None => {
                     // TODO: stats!
+                    // TODO: not synced error?
                     return Err(anyhow::anyhow!("no bundler_4337_rpcs available").into());
                 }
             },
-            // some commands can use local data or caches
             "eth_accounts" => {
-                // no stats on this. its cheap
-                serde_json::Value::Array(vec![])
+                JsonRpcForwardedResponse::from_value(serde_json::Value::Array(vec![]), request_id)
             }
             "eth_blockNumber" => {
                 match head_block_num.or(self.balanced_rpcs.head_block_num()) {
                     Some(head_block_num) => {
-                        json!(head_block_num)
+                        JsonRpcForwardedResponse::from_value(json!(head_block_num), request_id)
                     }
                     None => {
                         // TODO: what does geth do if this happens?
-                        return Err(Web3ProxyError::UnknownBlockNumber);
+                        // TODO: standard not synced error
+                        return Err(Web3ProxyError::NoServersSynced);
                     }
                 }
             }
-            "eth_chainId" => json!(U64::from(self.config.chain_id)),
+            "eth_chainId" => JsonRpcForwardedResponse::from_value(
+                json!(U64::from(self.config.chain_id)),
+                request_id,
+            ),
             // TODO: eth_callBundle (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_callbundle)
             // TODO: eth_cancelPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_cancelprivatetransaction, but maybe just reject)
             // TODO: eth_sendPrivateTransaction (https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint#eth_sendprivatetransaction)
             "eth_coinbase" => {
                 // no need for serving coinbase
-                // no stats on this. its cheap
-                json!(Address::zero())
+                JsonRpcForwardedResponse::from_value(json!(Address::zero()), request_id)
             }
             "eth_estimateGas" => {
                 let mut response = self
@@ -1501,22 +1559,17 @@ impl Web3ProxyApp {
 
                 gas_estimate += gas_increase;
 
-                json!(gas_estimate)
+                JsonRpcForwardedResponse::from_value(json!(gas_estimate), request_id)
             }
             // TODO: eth_gasPrice that does awesome magic to predict the future
-            "eth_hashrate" => {
-                // no stats on this. its cheap
-                json!(U64::zero())
-            }
+            "eth_hashrate" => JsonRpcForwardedResponse::from_value(json!(U64::zero()), request_id),
             "eth_mining" => {
-                // no stats on this. its cheap
-                serde_json::Value::Bool(false)
+                JsonRpcForwardedResponse::from_value(serde_json::Value::Bool(false), request_id)
             }
             // TODO: eth_sendBundle (flashbots command)
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => {
-                // TODO: how should we handle private_mode here?
-                let default_num = match authorization.checks.proxy_mode {
+                let num_public_rpcs = match authorization.checks.proxy_mode {
                     // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
                     ProxyMode::Best | ProxyMode::Debug => Some(4),
                     ProxyMode::Fastest(0) => None,
@@ -1527,47 +1580,26 @@ impl Web3ProxyApp {
                     ProxyMode::Versus => None,
                 };
 
-                let (private_rpcs, num) = if let Some(private_rpcs) = self.private_rpcs.as_ref() {
-                    if !private_rpcs.is_empty() && authorization.checks.private_txs {
-                        // if we are sending the transaction privately, no matter the proxy_mode, we send to ALL private rpcs
-                        (private_rpcs, None)
-                    } else {
-                        // TODO: send to balanced_rpcs AND private_rpcs
-                        (&self.balanced_rpcs, default_num)
-                    }
-                } else {
-                    (&self.balanced_rpcs, default_num)
-                };
-
-                let head_block_num = head_block_num
-                    .or(self.balanced_rpcs.head_block_num())
-                    .ok_or_else(|| Web3ProxyError::NoServersSynced)?;
-
-                // TODO: error/wait if no head block!
-
-                // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
-                // TODO: what lag should we allow?
-                let mut response = private_rpcs
-                    .try_send_all_synced_connections(
+                let mut response = self
+                    .try_send_protected(
                         authorization,
                         &request,
-                        Some(request_metadata.clone()),
-                        Some(&head_block_num.saturating_sub(2.into())),
-                        None,
-                        Level::Trace,
-                        num,
-                        true,
+                        request_metadata.clone(),
+                        num_public_rpcs,
+                        head_block_num,
                     )
                     .await?;
 
                 // sometimes we get an error that the transaction is already known by our nodes,
-                // that's not really an error. Just return the hash like a successful response would.
+                // that's not really an error. Return the hash like a successful response would.
+                // TODO: move this to a helper function
                 if let Some(response_error) = response.error.as_ref() {
                     if response_error.code == -32000
                         && (response_error.message == "ALREADY_EXISTS: already known"
                             || response_error.message
                                 == "INTERNAL_ERROR: existing tx with same hash")
                     {
+                        // TODO: expect instead of web3_context?
                         let params = request
                             .params
                             .web3_context("there must be params if we got this far")?;
@@ -1598,9 +1630,7 @@ impl Web3ProxyApp {
                     }
                 }
 
-                let rpcs = request_metadata.backend_requests.lock().clone();
-
-                // emit stats
+                // emit transaction count stats
                 if let Some(salt) = self.config.public_recent_ips_salt.as_ref() {
                     if let Some(tx_hash) = response.result.clone() {
                         let now = Utc::now().timestamp();
@@ -1638,47 +1668,35 @@ impl Web3ProxyApp {
                     }
                 }
 
-                return Ok((response, rpcs));
+                response
             }
             "eth_syncing" => {
                 // no stats on this. its cheap
                 // TODO: return a real response if all backends are syncing or if no servers in sync
-                serde_json::Value::Bool(false)
+                JsonRpcForwardedResponse::from_value(serde_json::Value::Bool(false), request_id)
             }
-            "eth_subscribe" => {
-                return Ok((
-                    JsonRpcForwardedResponse::from_str(
-                        "notifications not supported. eth_subscribe is only available over a websocket",
-                        Some(-32601),
-                        Some(request_id),
-                    ),
-                    vec![],
-                ));
-            }
-            "eth_unsubscribe" => {
-                return Ok((
-                    JsonRpcForwardedResponse::from_str(
-                        "notifications not supported. eth_unsubscribe is only available over a websocket",
-                        Some(-32601),
-                        Some(request_id),
-                    ),
-                    vec![],
-                ));
-            }
+            "eth_subscribe" => JsonRpcForwardedResponse::from_str(
+                "notifications not supported. eth_subscribe is only available over a websocket",
+                Some(-32601),
+                Some(request_id),
+            ),
+            "eth_unsubscribe" => JsonRpcForwardedResponse::from_str(
+                "notifications not supported. eth_unsubscribe is only available over a websocket",
+                Some(-32601),
+                Some(request_id),
+            ),
             "net_listening" => {
-                // no stats on this. its cheap
                 // TODO: only if there are some backends on balanced_rpcs?
-                serde_json::Value::Bool(true)
+                JsonRpcForwardedResponse::from_value(serde_json::Value::Bool(true), request_id)
             }
-            "net_peerCount" => {
-                // no stats on this. its cheap
-                // TODO: do something with proxy_mode here?
-                json!(U64::from(self.balanced_rpcs.num_synced_rpcs()))
-            }
-            "web3_clientVersion" => {
-                // no stats on this. its cheap
-                serde_json::Value::String(APP_USER_AGENT.to_string())
-            }
+            "net_peerCount" => JsonRpcForwardedResponse::from_value(
+                json!(U64::from(self.balanced_rpcs.num_synced_rpcs())),
+                request_id,
+            ),
+            "web3_clientVersion" => JsonRpcForwardedResponse::from_value(
+                serde_json::Value::String(APP_USER_AGENT.to_string()),
+                request_id,
+            ),
             "web3_sha3" => {
                 // returns Keccak-256 (not the standardized SHA3-256) of the given data.
                 match &request.params {
@@ -1713,32 +1731,23 @@ impl Web3ProxyApp {
 
                         let hash = H256::from(keccak256(param));
 
-                        json!(hash)
+                        JsonRpcForwardedResponse::from_value(json!(hash), request_id)
                     }
                     _ => {
                         // TODO: this needs the correct error code in the response
-                        // TODO: emit stat?
-                        return Ok((
-                            JsonRpcForwardedResponse::from_str(
-                                "invalid request",
-                                Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                                Some(request_id),
-                            ),
-                            vec![],
-                        ));
+                        JsonRpcForwardedResponse::from_str(
+                            "invalid request",
+                            Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                            Some(request_id),
+                        )
                     }
                 }
             }
-            "test" => {
-                return Ok((
-                    JsonRpcForwardedResponse::from_str(
-                        "The method test does not exist/is not available.",
-                        Some(-32601),
-                        Some(request_id),
-                    ),
-                    vec![],
-                ));
-            }
+            "test" => JsonRpcForwardedResponse::from_str(
+                "The method test does not exist/is not available.",
+                Some(-32601),
+                Some(request_id),
+            ),
             // anything else gets sent to backend rpcs and cached
             method => {
                 if method.starts_with("admin_") {
@@ -1893,32 +1902,14 @@ impl Web3ProxyApp {
                 // replace the id with our request's id.
                 response.id = request_id;
 
-                // TODO: DRY!
-                let rpcs = request_metadata.backend_requests.lock().clone();
-
-                if let Some(stat_sender) = self.stat_sender.as_ref() {
-                    let response_stat = RpcQueryStats::new(
-                        Some(method.to_string()),
-                        authorization.clone(),
-                        request_metadata,
-                        response.num_bytes(),
-                    );
-
-                    stat_sender
-                        .send_async(response_stat.into())
-                        .await
-                        .map_err(Web3ProxyError::SendAppStatError)?;
-                }
-
-                return Ok((response, rpcs));
+                response
             }
         };
 
-        let response = JsonRpcForwardedResponse::from_value(partial_response, request_id);
-
-        // TODO: DRY
+        // save the rpcs so they can be included in a response header
         let rpcs = request_metadata.backend_requests.lock().clone();
 
+        // send stats used for accounting and graphs
         if let Some(stat_sender) = self.stat_sender.as_ref() {
             let response_stat = RpcQueryStats::new(
                 Some(request_method),
@@ -1933,6 +1924,7 @@ impl Web3ProxyApp {
                 .map_err(Web3ProxyError::SendAppStatError)?;
         }
 
+        // send debug info as a kafka log
         if let Some((kafka_topic, kafka_key, kafka_headers)) = kafka_stuff {
             let kafka_producer = self
                 .kafka_producer
