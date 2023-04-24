@@ -157,19 +157,21 @@ impl Web3Rpcs {
 
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         // TODO: how can we do the weigher better? need to know actual allocated size
+        // TODO: time_to_idle instead?
         // TODO: limits from config
         let blocks_by_hash: BlocksByHashCache = Cache::builder()
             .max_capacity(1024 * 1024 * 1024)
             .weigher(|_k, v: &Web3ProxyBlock| {
                 1 + v.block.transactions.len().try_into().unwrap_or(u32::MAX)
             })
-            .time_to_idle(Duration::from_secs(600))
+            .time_to_live(Duration::from_secs(30 * 60))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // all block numbers are the same size, so no need for weigher
         // TODO: limits from config
+        // TODO: time_to_idle instead?
         let blocks_by_number = Cache::builder()
-            .time_to_idle(Duration::from_secs(600))
+            .time_to_live(Duration::from_secs(30 * 60))
             .max_capacity(10_000)
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 

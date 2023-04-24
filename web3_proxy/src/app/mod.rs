@@ -670,12 +670,13 @@ impl Web3ProxyApp {
 
         // TODO: capacity from configs
         // all these are the same size, so no need for a weigher
-        // TODO: ttl on this? or is max_capacity fine?
+        // TODO: this used to have a time_to_idle
         let pending_transactions = Cache::builder()
             .max_capacity(10_000)
             // TODO: different chains might handle this differently
             // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
-            .time_to_idle(Duration::from_secs(300))
+            // TODO: this used to be time_to_update, but
+            .time_to_live(Duration::from_secs(300))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
@@ -695,7 +696,7 @@ impl Web3ProxyApp {
                 }
             })
             // TODO: what should we set? 10 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
-            .time_to_idle(Duration::from_secs(600))
+            .time_to_live(Duration::from_secs(600))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // all the users are the same size, so no need for a weigher
