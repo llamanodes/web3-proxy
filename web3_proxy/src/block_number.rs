@@ -177,12 +177,13 @@ pub async fn block_needed(
         "eth_getLogs" => {
             // TODO: think about this more
             // TODO: jsonrpc has a specific code for this
-            // TODO: this shouldn't be a 500. this should be a 400. 500 will make haproxy retry a bunch
             let obj = params
                 .get_mut(0)
-                .ok_or_else(|| anyhow::anyhow!("invalid format. no params"))?
+                .ok_or_else(|| Web3ProxyError::BadRequest("invalid format. no params".to_string()))?
                 .as_object_mut()
-                .ok_or_else(|| Web3ProxyError::BadRequest("invalid format".to_string()))?;
+                .ok_or_else(|| {
+                    Web3ProxyError::BadRequest("invalid format. params not object".to_string())
+                })?;
 
             if obj.contains_key("blockHash") {
                 return Ok(BlockNeeded::CacheSuccessForever);
