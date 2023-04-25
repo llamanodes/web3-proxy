@@ -20,7 +20,6 @@ use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::{self, DatabaseConnection, EntityTrait, QueryFilter};
 use migration::{Expr, OnConflict};
-use num_traits::real::Real;
 use num_traits::ToPrimitive;
 use std::cmp::max;
 use std::num::NonZeroU64;
@@ -31,6 +30,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum StatType {
     Aggregated,
     Detailed,
