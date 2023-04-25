@@ -1621,6 +1621,7 @@ impl Web3ProxyApp {
                         let rlp = Rlp::new(params.as_ref());
 
                         if let Ok(tx) = Transaction::decode(&rlp) {
+                            // TODO: decode earlier and confirm that tx.chain_id (if set) matches self.config.chain_id
                             let tx_hash = json!(tx.hash());
 
                             trace!("tx_hash: {:#?}", tx_hash);
