@@ -574,6 +574,7 @@ impl StatBuffer {
                         points.push(point);
                     }
                     Err(err) => {
+                        // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
                         error!("unable to build opt-in stat! err={:?}", err);
                     }
                 };
@@ -595,11 +596,11 @@ impl StatBuffer {
 
                     num_left -= batch_size;
 
-                    // TODO: if this errors, we throw away ALL of the pending stats! we should probably save them somewhere
                     if let Err(err) = influxdb_client
                         .write_with_precision(bucket, stream::iter(p), self.timestamp_precision)
                         .await
                     {
+                        // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
                         error!("unable to save {} tsdb stats! err={:?}", batch_size, err);
                     }
                 }
