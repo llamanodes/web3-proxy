@@ -8,7 +8,7 @@ use crate::{
         get_query_window_seconds_from_params, get_user_id_from_params,
     },
 };
-use anyhow::Context;
+use anyhow::{Context, Result};
 use axum::{
     headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
@@ -17,12 +17,18 @@ use axum::{
 use chrono::{DateTime, FixedOffset};
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
+use http::Method;
+use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
-use influxdb2::FromDataPoint;
+use influxdb2::RequestError::Serializing;
+use influxdb2::{Client, FromDataPoint};
 use itertools::Itertools;
 use log::{info, warn};
+use migration::sea_orm::ColIdx;
 use serde::Serialize;
 use serde_json::{json, Number, Value};
+use std::collections::BTreeMap;
+use url::Url;
 
 // This type-API is extremely brittle! Make sure that the types conform 1-to-1 as defined here
 // https://docs.rs/influxdb2-structmap/0.2.0/src/influxdb2_structmap/value.rs.html#1-98
@@ -35,17 +41,51 @@ pub struct AggregatedRpcAccounting {
     _time: DateTime<FixedOffset>,
     error_response: String,
     archive_needed: String,
+
+    _measurement: String,
+    backend_requests: i64,
+    balance: i64,
+    cache_hits: i64,
+    cache_misses: i64,
+    frontend_requests: i64,
+    no_servers: i64,
+    sum_credits_used: i64,
+    sum_request_bytes: i64,
+    sum_response_bytes: i64,
+    sum_response_millis: i64,
+    // backend_requests: i64,
+    // balance: i64,
+    // cache_hits: i64,
+    // cache_misses: i64,
+    // no_servers: i64,
+    // sum_credits_used: i64,
+    // sum_request_bytes: i64,
+    // sum_response_bytes: i64,
+    // sum_response_millis: i64,
 }
 
 #[derive(Debug, Default, FromDataPoint, Serialize)]
 pub struct DetailedRpcAccounting {
     chain_id: String,
-    _field: String,
-    _value: i64,
+    // _field: String,
+    // _value: i64,
     _time: DateTime<FixedOffset>,
+    _stop: DateTime<FixedOffset>,
     error_response: String,
     archive_needed: String,
     method: String,
+
+    // _measurement: String,
+    backend_requests: i64,
+    balance: i64,
+    cache_hits: i64,
+    cache_misses: i64,
+    frontend_requests: i64,
+    no_servers: i64,
+    sum_credits_used: i64,
+    sum_request_bytes: i64,
+    sum_response_bytes: i64,
+    sum_response_millis: i64,
 }
 
 // pub struct AggregatedRpcAccountingErrors {
@@ -85,7 +125,7 @@ pub async fn query_user_stats<'a>(
     let query_start = get_query_start_from_params(params)?.timestamp();
     let query_stop = get_query_stop_from_params(params)?.timestamp();
     let chain_id = get_chain_id_from_params(app, params)?;
-    let stats_column = get_stats_column_from_params(params)?;
+    // let stats_column = get_stats_column_from_params(params)?;
 
     // query_window_seconds must be provided, and should be not 1s (?) by default ..
 
@@ -123,118 +163,207 @@ pub async fn query_user_stats<'a>(
         .context("No influxdb bucket was provided")?; // "web3_proxy";
     info!("Bucket is {:?}", bucket);
 
-    // , "archive_needed", "error_response"
-    let mut group_columns = vec![
-        "chain_id",
-        "_measurement",
-        "_field",
-        "_measurement",
-        "error_response",
-        "archive_needed",
-    ];
+
     let mut filter_chain_id = "".to_string();
-
-    // Add to group columns the method, if we want the detailed view as well
-    if let StatType::Detailed = stat_response_type {
-        group_columns.push("method");
-    }
-
-    if chain_id == 0 {
-        group_columns.push("chain_id");
-    } else {
+    if chain_id != 0 {
         filter_chain_id = f!(r#"|> filter(fn: (r) => r["chain_id"] == "{chain_id}")"#);
     }
-
-    let group_columns = serde_json::to_string(&json!(group_columns)).unwrap();
-
-    let group = match stat_response_type {
-        StatType::Aggregated => f!(r#"|> group(columns: {group_columns})"#),
-        StatType::Detailed => "".to_string(),
-    };
-
-    let filter_field = match stat_response_type {
-        StatType::Aggregated => {
-            f!(r#"|> filter(fn: (r) => r["_field"] == "{stats_column}")"#)
-        }
-        // TODO: Detailed should still filter it, but just "group-by" method (call it once per each method ...
-        // Or maybe it shouldn't filter it ...
-        StatType::Detailed => "".to_string(),
-    };
 
     info!(
         "Query start and stop are: {:?} {:?}",
         query_start, query_stop
     );
-    info!("Query column parameters are: {:?}", stats_column);
+    // info!("Query column parameters are: {:?}", stats_column);
     info!("Query measurement is: {:?}", measurement);
-    info!("Filters are: {:?} {:?}", filter_field, filter_chain_id);
+    info!("Filters are: {:?}", filter_chain_id); // filter_field
     info!("Group is: {:?}", group);
     info!("window seconds are: {:?}", query_window_seconds);
 
-    // These are taken care of probably ...
-    // reg. fields, collect: backend_requests, frontend_requests, cache_hits, cache_misses, total_request_bytes, total_response_bytes, total_response_millis
-    // "total_frontend_requests": "6",
-    // "total_response_bytes": "235",
-    // "total_response_millis": "0"
-    // "total_cache_hits": "6",
-    // "total_cache_misses": "0",
 
-    // Perhaps gotta run a second query to get all error responses
-    // "total_error_responses": "0",
-    // Same with archive requests
-    // "archive_request": 0,
-
-    // Group by method if detailed, else just keep all methods as "null". i think influxdb takes care of that
-    // "method": null,
-    // "total_backend_retries": "0",
+    let drop_method = match stat_response_type {
+        StatType::Aggregated => {"|> drop(columns: ["method"])".to_string()}
+        StatType::Detailed => {"".to_string()}
+    };
 
     let query = f!(r#"
-        from(bucket: "{bucket}")
-            |> range(start: {query_start}, stop: {query_stop})
-            |> filter(fn: (r) => r["_measurement"] == "{measurement}")
-            {filter_field}
-            {filter_chain_id}
-            {group}
-            |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
-            |> group()
-    "#);
+     from(bucket: "{bucket}")
+        |> range(start: {query_start}, stop: {query_stop})
+        |> filter(fn: (r) => r["_measurement"] == "{measurement}")
+        {filter_chain_id}
+        {drop_method}
+        |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
+        |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+        |> map(fn: (r) => ({ r with "archive_needed": if r.archive_needed == "true" then r.frontend_requests else 0}))
+        |> map(fn: (r) => ({ r with "error_response": if r.error_response == "true" then r.frontend_requests else 0}))
+        |> group(columns: ["_time", "_measurement", "chain_id", "method"])
+        |> sort(columns: ["frontend_requests"])
+        |> cumulativeSum(columns: ["archive_needed", "error_response", "backend_requests", "cache_hits", "cache_misses", "frontend_requests", "sum_credits_used", "sum_request_bytes", "sum_response_bytes", "sum_response_millis"])
+        |> sort(columns: ["frontend_requests"], desc: true)
+        |> limit(n: 1)
+        |> sort(columns: ["_time"], desc: true)
+        |> group()
+    "#
+    );
 
     info!("Raw query to db is: {:?}", query);
     let query = Query::new(query.to_string());
     info!("Query to db is: {:?}", query);
 
-    warn!("Got here: 5");
-    // TODO: do not unwrap. add this error to FrontErrorResponse
-    // TODO: StatType::Aggregated and StatType::Detailed might need different types
-    // let unparsed: serde_json::Value = serde_json::Value::Array(influxdb_client.query(Some(query.clone())).await?);
-    // info!("Direct response is: {:?}", unparsed);
+    // Make the query and collect all data
+    let raw_influx_responses: Vec<FluxRecord> =
+        influxdb_client.query_raw(Some(query.clone())).await?;
+
+    // Basically rename all items to be "total",
+    // calculate number of "archive_needed" and "error_responses" through their boolean representations ...
+    let influx_response: Vec<HashMap<String, serde_json::Value>> = influx_responses
+        .into_iter()
+        .map(|x| x.values.into_values())
+        .flatten()
+        .map(|x| {
+            // Unwrap all relevant numbers
+            // BTreeMap<String, value::Value>
+            let mut out: HashMap<String, serde_json::Value> = HashMap::new();
+
+            // Strings
+            match x.get(&"_measurement") {
+                &"global_proxy" => {
+                    out.insert(
+                        "collection".to_owned(),
+                        serde_json::Value::String("global".to_owned()),
+                    );
+                }
+                &"opt_in_proxy" => {
+                    out.insert(
+                        "collection".to_owned(),
+                        serde_json::Value::String("opt-in".to_owned()),
+                    );
+                }
+                _ => {
+                    warn!("Some datapoints are not part of any _measurement!");
+                    out.insert(
+                        "collection".to_owned(),
+                        serde_json::Value::String("unkown".to_owned()),
+                    );
+                }
+            };
+            match x.get("_stop") {
+                Some(influxdb2::Value::TimeRFC(inner)) => out.insert(
+                    "stop_time".to_owned(),
+                    serde_json::Value::String(inner.to_string()),
+                ),
+                _ => {}
+            };
+            match x.get("_time") {
+                Some(influxdb2::Value::TimeRFC(inner)) => out.insert(
+                    "time".to_owned(),
+                    serde_json::Value::String(inner.to_string()),
+                ),
+                _ => {}
+            };
+            match x.get("backend_requests") {
+                Some(influxdb2::Value::Long(inner)) => out.insert(
+                    "total_backend_requests".to_owned(),
+                    serde_json::Value::Number(inner),
+                ),
+                _ => {}
+            };
+            match x.get("balance") {
+                Some(influxdb2::Value::Long(inner)) => {
+                    out.insert("balance".to_owned(), serde_json::Value::Number(inner))
+                }
+                _ => {}
+            };
+            match x.get("cache_hits") {
+                Some(influxdb2::Value::Long(inner)) => out.insert(
+                    "total_cache_hits".to_owned(),
+                    serde_json::Value::Number(inner),
+                ),
+                _ => {}
+            };
+            match x.get("cache_misses") {
+                Some(influxdb2::Value::Long(inner)) => out.insert(
+                    "total_cache_misses".to_owned(),
+                    serde_json::Value::Number(inner),
+                ),
+                _ => {}
+            };
+            match x.get("frontend_requests") {
+                Some(influxdb2::Value::Long(inner)) => out.insert(
+                    "total_frontend_requests".to_owned(),
+                    serde_json::Value::Number(inner),
+                ),
+                _ => {}
+            };
+            match x.get("no_servers") {
+                Some(influxdb2::Value::Long(inner)) => {
+                    out.insert("no_servers".to_owned(), serde_json::Value::Number(inner))
+                }
+                _ => {}
+            };
+            match x.get("sum_credits_used") {
+                Some(influxdb2::Value::Long(inner)) => out.insert(
+                    "total_credits_used".to_owned(),
+                    serde_json::Value::Number(inner),
+                ),
+                _ => {}
+            };
+            match x.get("sum_request_bytes") {
+                Some(influxdb2::Value::Long(inner)) => out.insert(
+                    "total_request_bytes".to_owned(),
+                    serde_json::Value::Number(inner),
+                ),
+                _ => {}
+            };
+            match x.get("sum_response_bytes") {
+                Some(influxdb2::Value::Long(inner)) => out.insert(
+                    "total_response_bytes".to_owned(),
+                    serde_json::Value::Number(inner),
+                ),
+                _ => {}
+            };
+            match x.get("sum_response_millis") {
+                Some(influxdb2::Value::Long(inner)) => out.insert(
+                    "total_response_millis".to_owned(),
+                    serde_json::Value::Number(inner),
+                ),
+                _ => {}
+            };
+            // Make this if detailed ...
+            match (stat_response_type, x.get("method")) {
+                (StatType::Detailed, Some(influxdb2::Value::String(inner))) => {
+                    out.insert("method".to_owned(), serde_json::Value::String(inner))
+                }
+                _ => {}
+            };
+            match x.get("chain_id") {
+                Some(influxdb2::Value::String(inner)) => {
+                    out.insert("chain_id".to_owned(), serde_json::Value::String(inner))
+                }
+                _ => {}
+            };
+
+            // The corresponding arithmetic (to turn this into number of successful + archive requests) will be done in a subsequent step
+            match x.get("archive_needed") {
+                Some(influxdb2::Value::Bool(inner)) => {
+                    out.insert("archive_needed".to_owned(), serde_json::Value::Bool(inner))
+                }
+                _ => {}
+            };
+
+            match x.get("archive_needed") {
+                Some(influxdb2::Value::Bool(inner)) => {
+                    out.insert("archive_needed".to_owned(), serde_json::Value::Bool(inner))
+                }
+                _ => {}
+            };
+        })
+        .collect::<Vec<HashMap<String, serde_json::Value>>>();
+
+    // Now group by timestamp, to apply proper arithmetic to calculate archive_needed and error_response arithmetic ...
 
     // Return a different result based on the query
     let datapoints = match stat_response_type {
         StatType::Aggregated => {
-            let influx_responses: Vec<AggregatedRpcAccounting> = influxdb_client
-                .query::<AggregatedRpcAccounting>(Some(query))
-                .await?;
-            info!("Influx responses are {:?}", &influx_responses);
-            for res in &influx_responses {
-                info!("Resp is: {:?}", res);
-            }
-
-            // let tmp = influx_responses.into_iter().group_by(|x| {x.time.timestamp()}).into_iter().collect::<Vec<_>>();
-            // info!("Printing grouped item {}", tmp);
-
-            // Group by all fields together ..
-            // let influx_responses = Vec::new();
-            // let grouped_items = Vec::new();
-
-            // let mut grouped_items = influx_responses
-            //     .into_iter()
-            //     .map(|x| {
-            //         (x.time.clone(), x)
-            //     })
-            //     .into_group_map();
-            // info!("Grouped items are {:?}", grouped_items);
-
             influx_responses
                 .into_iter()
                 .map(|x| (x._time, x))
@@ -242,14 +371,6 @@ pub async fn query_user_stats<'a>(
                 .into_iter()
                 .map(|(group, grouped_items)| {
                     info!("Group is: {:?}", group);
-
-                    // Now put all the fields next to each other
-                    // (there will be exactly one field per timestamp, but we want to arrive at a new object)
-                    let mut out = HashMap::new();
-                    // Could also add a timestamp
-
-                    let mut archive_requests = 0;
-                    let mut error_responses = 0;
 
                     out.insert("method".to_owned(), json!("null"));
 
@@ -322,110 +443,119 @@ pub async fn query_user_stats<'a>(
 
                     json!(out)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+
+            let out: HashMap<String, i64> = HashMap::new();
+            vec![json!(out)]
         }
         StatType::Detailed => {
-            warn!("Got here: 6");
-            let influx_responses: Vec<DetailedRpcAccounting> = influxdb_client
-                .query::<DetailedRpcAccounting>(Some(query))
-                .await?;
+            // TODO: I should probably here merge the items again ...
+
             info!("Influx responses are {:?}", &influx_responses);
             for res in &influx_responses {
-                info!("Resp is: {:?}", res);
+                // info!("Resp is: {:?}", res);
+                info!("Resp is: {:?}", res.values);
             }
             warn!("Got here: 7");
 
-            // Group by all fields together ..
-            influx_responses
-                .into_iter()
-                .map(|x| ((x._time, x.method.clone()), x))
-                .into_group_map()
-                .into_iter()
-                .map(|(group, grouped_items)| {
-                    // Now put all the fields next to each other
-                    // (there will be exactly one field per timestamp, but we want to arrive at a new object)
-                    let mut out = HashMap::new();
-                    // Could also add a timestamp
+            // I can just return the response directly, just gotta calculate error_responses and archive_requests
+            let out: HashMap<String, i64> = HashMap::new();
+            vec![json!(out)]
 
-                    let mut archive_requests = 0;
-                    let mut error_responses = 0;
-
-                    // Should probably move this outside ... (?)
-                    let method = group.1;
-                    out.insert("method".to_owned(), json!(method));
-
-                    for x in grouped_items {
-                        info!("Iterating over grouped item {:?}", x);
-
-                        let key = format!("total_{}", x._field).to_string();
-                        info!("Looking at: {:?}", key);
-
-                        // Insert it once, and then fix it
-                        match out.get_mut(&key) {
-                            Some(existing) => {
-                                match existing {
-                                    Value::Number(old_value) => {
-                                        // unwrap will error when someone has too many credits ..
-                                        let old_value = old_value.as_i64().unwrap();
-                                        warn!("Old value is {:?}", old_value);
-                                        *existing = serde_json::Value::Number(Number::from(
-                                            old_value + x._value,
-                                        ));
-                                        warn!("New value is {:?}", old_value);
-                                    }
-                                    _ => {
-                                        panic!("Should be nothing but a number")
-                                    }
-                                };
-                            }
-                            None => {
-                                warn!("Does not exist yet! Insert new!");
-                                out.insert(key, serde_json::Value::Number(Number::from(x._value)));
-                            }
-                        };
-
-                        if !out.contains_key("query_window_timestamp") {
-                            out.insert(
-                                "query_window_timestamp".to_owned(),
-                                // serde_json::Value::Number(x.time.timestamp().into())
-                                json!(x._time.timestamp()),
-                            );
-                        }
-
-                        // Interpret archive needed as a boolean
-                        let archive_needed = match x.archive_needed.as_str() {
-                            "true" => true,
-                            "false" => false,
-                            _ => {
-                                panic!("This should never be!")
-                            }
-                        };
-                        let error_response = match x.error_response.as_str() {
-                            "true" => true,
-                            "false" => false,
-                            _ => {
-                                panic!("This should never be!")
-                            }
-                        };
-
-                        // Add up to archive requests and error responses
-                        // TODO: Gotta double check if errors & archive is based on frontend requests, or other metrics
-                        if x._field == "frontend_requests" && archive_needed {
-                            archive_requests += x._value as i32 // This is the number of requests
-                        }
-                        if x._field == "frontend_requests" && error_response {
-                            error_responses += x._value as i32
-                        }
-                    }
-
-                    out.insert("archive_request".to_owned(), json!(archive_requests));
-                    out.insert("error_response".to_owned(), json!(error_responses));
-
-                    // TODO: Add balance here ...
-
-                    json!(out)
-                })
-                .collect::<Vec<_>>()
+            // // Group by all fields together ..
+            // influx_responses
+            //     .into_iter()
+            //     .map(|x| ((x._time, x.method.clone()), x))
+            //     .into_group_map()
+            //     .into_iter()
+            //     .map(|(group, grouped_items)| {
+            //         // Now put all the fields next to each other
+            //         // (there will be exactly one field per timestamp, but we want to arrive at a new object)
+            //         let mut out = HashMap::new();
+            //         // Could also add a timestamp
+            //
+            //         let mut archive_requests = 0;
+            //         let mut error_responses = 0;
+            //
+            //         // Should probably move this outside ... (?)
+            //         let method = group.1;
+            //         out.insert("method".to_owned(), json!(method));
+            //
+            //         // We don't need this inner loop anymore ...
+            //
+            //
+            //         for x in grouped_items {
+            //             info!("Iterating over grouped item {:?}", x);
+            //
+            //             let key = format!("total_{}", x._field).to_string();
+            //             info!("Looking at: {:?}", key);
+            //
+            //             // Insert it once, and then fix it
+            //             match out.get_mut(&key) {
+            //                 Some(existing) => {
+            //                     match existing {
+            //                         Value::Number(old_value) => {
+            //                             // unwrap will error when someone has too many credits ..
+            //                             let old_value = old_value.as_i64().unwrap();
+            //                             warn!("Old value is {:?}", old_value);
+            //                             *existing = serde_json::Value::Number(Number::from(
+            //                                 old_value + x._value,
+            //                             ));
+            //                             warn!("New value is {:?}", old_value);
+            //                         }
+            //                         _ => {
+            //                             panic!("Should be nothing but a number")
+            //                         }
+            //                     };
+            //                 }
+            //                 None => {
+            //                     warn!("Does not exist yet! Insert new!");
+            //                     out.insert(key, serde_json::Value::Number(Number::from(x._value)));
+            //                 }
+            //             };
+            //
+            //             if !out.contains_key("query_window_timestamp") {
+            //                 out.insert(
+            //                     "query_window_timestamp".to_owned(),
+            //                     // serde_json::Value::Number(x.time.timestamp().into())
+            //                     json!(x._time.timestamp()),
+            //                 );
+            //             }
+            //
+            //             // Interpret archive needed as a boolean
+            //             let archive_needed = match x.archive_needed.as_str() {
+            //                 "true" => true,
+            //                 "false" => false,
+            //                 _ => {
+            //                     panic!("This should never be!")
+            //                 }
+            //             };
+            //             let error_response = match x.error_response.as_str() {
+            //                 "true" => true,
+            //                 "false" => false,
+            //                 _ => {
+            //                     panic!("This should never be!")
+            //                 }
+            //             };
+            //
+            //             // Add up to archive requests and error responses
+            //             // TODO: Gotta double check if errors & archive is based on frontend requests, or other metrics
+            //             if x._field == "frontend_requests" && archive_needed {
+            //                 archive_requests += x._value as i32 // This is the number of requests
+            //             }
+            //             if x._field == "frontend_requests" && error_response {
+            //                 error_responses += x._value as i32
+            //             }
+            //         }
+            //
+            //         out.insert("archive_request".to_owned(), json!(archive_requests));
+            //         out.insert("error_response".to_owned(), json!(error_responses));
+            //
+            //         // TODO: Add balance here ...
+            //
+            //         json!(out)
+            //     })
+            //     .collect::<Vec<_>>()
         }
     };
 
