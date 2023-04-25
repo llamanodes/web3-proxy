@@ -1603,17 +1603,31 @@ impl Web3ProxyApp {
                                 == "INTERNAL_ERROR: existing tx with same hash")
                     {
                         // TODO: expect instead of web3_context?
-                        let params = request
-                            .params
-                            .web3_context("there must be params if we got this far")?;
+                        let params = request.params.ok_or_else(|| {
+                            Web3ProxyError::BadRequest(
+                                "Unable to get params from request".to_string(),
+                            )
+                        })?;
 
                         let params = params
                             .as_array()
-                            .web3_context("there must be an array if we got this far")?
+                            .ok_or_else(|| {
+                                Web3ProxyError::BadRequest(
+                                    "Unable to get array from params".to_string(),
+                                )
+                            })?
                             .get(0)
-                            .web3_context("there must be an item if we got this far")?
+                            .ok_or_else(|| {
+                                Web3ProxyError::BadRequest(
+                                    "Unable to get item 0 from params".to_string(),
+                                )
+                            })?
                             .as_str()
-                            .web3_context("there must be a string if we got this far")?;
+                            .ok_or_else(|| {
+                                Web3ProxyError::BadRequest(
+                                    "Unable to get string from params item 0".to_string(),
+                                )
+                            })?;
 
                         let params = Bytes::from_str(params)
                             .expect("there must be Bytes if we got this far");
