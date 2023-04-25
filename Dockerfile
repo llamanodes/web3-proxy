@@ -1,4 +1,4 @@
-FROM rust:1.68.2-bullseye AS builder
+FROM rust:1.69.0-bullseye AS builder
 
 WORKDIR /app
 ENV CARGO_TERM_COLOR always
