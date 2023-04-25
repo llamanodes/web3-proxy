@@ -1209,8 +1209,8 @@ impl Web3ProxyApp {
         }
     }
 
-    /// try to send transactions to the best available rpcs with private mempools
-    /// if no private rpcs are configured, then some public rpcs are used instead
+    /// try to send transactions to the best available rpcs with protected/private mempools
+    /// if no protected rpcs are configured, then some public rpcs are used instead
     async fn try_send_protected(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
@@ -1294,7 +1294,7 @@ impl Web3ProxyApp {
             .await
     }
 
-    // TODO: more robust stats and kafka logic! if we use the try operator, they aren't saved!
+    // TODO: more robust stats and kafka logic! if we use the try operator, they aren't saved! maybe do NOT return a Web3ProxyResult
     // TODO: move this to another module
     async fn proxy_cached_request(
         self: &Arc<Self>,
@@ -1307,6 +1307,7 @@ impl Web3ProxyApp {
 
         let request_metadata = Arc::new(RequestMetadata::new(request.num_bytes()));
 
+        // TODO: attach kafka_stuff to request_metadata. then make a `impl Drop for RequestMetadata` that sends the stat
         let mut kafka_stuff = None;
 
         if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
@@ -1494,8 +1495,8 @@ impl Web3ProxyApp {
                         .await?
                 }
                 None => {
-                    // TODO: stats!
-                    // TODO: not synced error?
+                    // TODO: stats even when we error!
+                    // TODO: use Web3ProxyError? dedicated error for no 4337 bundlers
                     return Err(anyhow::anyhow!("no bundler_4337_rpcs available").into());
                 }
             },
@@ -1704,7 +1705,7 @@ impl Web3ProxyApp {
                 Some(request_id),
             ),
             "net_listening" => {
-                // TODO: only if there are some backends on balanced_rpcs?
+                // TODO: only true if there are some backends on balanced_rpcs?
                 JsonRpcForwardedResponse::from_value(serde_json::Value::Bool(true), request_id)
             }
             "net_peerCount" => JsonRpcForwardedResponse::from_value(
@@ -1724,35 +1725,35 @@ impl Web3ProxyApp {
                             || !params.get(0).map(|x| x.is_string()).unwrap_or(false)
                         {
                             // TODO: what error code?
-                            return Ok((
-                                JsonRpcForwardedResponse::from_str(
-                                    "Invalid request",
-                                    Some(-32600),
-                                    Some(request_id),
-                                ),
-                                vec![],
-                            ));
-                        }
-
-                        let param = Bytes::from_str(
-                            params[0]
-                                .as_str()
-                                .ok_or(Web3ProxyError::ParseBytesError(None))
-                                .web3_context("parsing params 0 into str then bytes")?,
-                        )
-                        .map_err(|x| {
-                            trace!("bad request: {:?}", x);
-                            Web3ProxyError::BadRequest(
-                                "param 0 could not be read as H256".to_string(),
+                            // TODO: use Web3ProxyError::BadRequest
+                            JsonRpcForwardedResponse::from_str(
+                                "Invalid request",
+                                Some(-32600),
+                                Some(request_id),
                             )
-                        })?;
+                        } else {
+                            // TODO: BadRequest instead of web3_context
+                            let param = Bytes::from_str(
+                                params[0]
+                                    .as_str()
+                                    .ok_or(Web3ProxyError::ParseBytesError(None))
+                                    .web3_context("parsing params 0 into str then bytes")?,
+                            )
+                            .map_err(|x| {
+                                trace!("bad request: {:?}", x);
+                                Web3ProxyError::BadRequest(
+                                    "param 0 could not be read as H256".to_string(),
+                                )
+                            })?;
 
-                        let hash = H256::from(keccak256(param));
+                            let hash = H256::from(keccak256(param));
 
-                        JsonRpcForwardedResponse::from_value(json!(hash), request_id)
+                            JsonRpcForwardedResponse::from_value(json!(hash), request_id)
+                        }
                     }
                     _ => {
                         // TODO: this needs the correct error code in the response
+                        // TODO: Web3ProxyError::BadRequest instead?
                         JsonRpcForwardedResponse::from_str(
                             "invalid request",
                             Some(StatusCode::BAD_REQUEST.as_u16().into()),
@@ -1769,7 +1770,7 @@ impl Web3ProxyApp {
             // anything else gets sent to backend rpcs and cached
             method => {
                 if method.starts_with("admin_") {
-                    // TODO: emit a stat? will probably just be noise
+                    // TODO: emit a stat for billing
                     return Err(Web3ProxyError::AccessDenied);
                 }
 
@@ -1924,9 +1925,11 @@ impl Web3ProxyApp {
             }
         };
 
+        // TODO: move this to a helper function so that error handling can use this
         // save the rpcs so they can be included in a response header
         let rpcs = request_metadata.backend_requests.lock().clone();
 
+        // TODO: move this to a helper function so that error handling can use this
         // send stats used for accounting and graphs
         if let Some(stat_sender) = self.stat_sender.as_ref() {
             let response_stat = RpcQueryStats::new(
@@ -1942,6 +1945,7 @@ impl Web3ProxyApp {
                 .map_err(Web3ProxyError::SendAppStatError)?;
         }
 
+        // TODO: move this to a helper function so that error handling can use this
         // send debug info as a kafka log
         if let Some((kafka_topic, kafka_key, kafka_headers)) = kafka_stuff {
             let kafka_producer = self
