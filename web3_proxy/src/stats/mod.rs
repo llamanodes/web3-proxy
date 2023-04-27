@@ -139,21 +139,19 @@ impl RpcQueryStats {
         // we don't store origin in the timeseries db. its only optionaly used for accounting
         let origin = None;
 
-        let (method, rpc_secret_key_id) = match self.authorization.checks.tracking_level {
+        // depending on tracking level, we either skip opt-in stats, track without method, or track with method
+        let method = match self.authorization.checks.tracking_level {
             TrackingLevel::None => {
                 // this RPC key requested no tracking. this is the default.
                 return None;
             }
             TrackingLevel::Aggregated => {
                 // this RPC key requested tracking aggregated across all methods
-                (None, self.authorization.checks.rpc_secret_key_id)
+                None
             }
             TrackingLevel::Detailed => {
                 // detailed tracking keeps track of the method
-                (
-                    self.method.clone(),
-                    self.authorization.checks.rpc_secret_key_id,
-                )
+                self.method.clone()
             }
         };
 
@@ -162,7 +160,7 @@ impl RpcQueryStats {
             archive_needed: self.archive_request,
             error_response: self.error_response,
             method,
-            rpc_secret_key_id,
+            rpc_secret_key_id: self.authorization.checks.rpc_secret_key_id,
             origin,
         };
 
