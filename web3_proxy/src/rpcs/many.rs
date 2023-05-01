@@ -1247,7 +1247,7 @@ impl Serialize for Web3Rpcs {
         }
 
         {
-            let consensus_rpcs = self.watch_consensus_rpcs_sender.borrow();
+            let consensus_rpcs = self.watch_consensus_rpcs_sender.borrow().clone();
             // TODO: rename synced_connections to consensus_rpcs
 
             if let Some(consensus_rpcs) = consensus_rpcs.as_ref() {
