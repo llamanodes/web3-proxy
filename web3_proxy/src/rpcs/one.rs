@@ -982,15 +982,23 @@ impl Web3Rpc {
                                 }
                                 Ok(Some(block)) => {
                                     // don't send repeat blocks
-                                    let new_hash =
-                                        block.hash.expect("blocks here should always have hashes");
+                                    if let Some(new_hash) = block.hash {
+                                        if new_hash != last_hash {
+                                            // new hash!
+                                            last_hash = new_hash;
 
-                                    if new_hash != last_hash {
-                                        // new hash!
-                                        last_hash = new_hash;
+                                            self.send_head_block_result(
+                                                Ok(Some(block)),
+                                                &block_sender,
+                                                block_map.clone(),
+                                            )
+                                            .await?;
+                                        }
+                                    } else {
+                                        warn!("empty head block on {}", self);
 
                                         self.send_head_block_result(
-                                            Ok(Some(block)),
+                                            Ok(None),
                                             &block_sender,
                                             block_map.clone(),
                                         )
