@@ -26,6 +26,11 @@ use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
+#[cfg(not(tokio_uring))]
+use tokio::net::TcpListener;
+#[cfg(tokio_uring)]
+use tokio_uring::net::TcpListener;
+
 /// simple keys for caching responses
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub enum FrontendResponseCaches {
@@ -235,8 +240,20 @@ pub async fn serve(
     */
     let service = app.into_make_service_with_connect_info::<SocketAddr>();
 
+    // TODO: listenfd
+
+    #[cfg(not(tokio_uring))]
+    let tcp_listener = TcpListener::bind(&addr).await?;
+
+    #[cfg(tokio_uring)]
+    let tcp_listener = TcpListener::bind(&addr).await?;
+
+    // let (tcp_listener, listen_addr) = tcp_listener.accept().await?;
+
+    let tcp_listener = tcp_listener.into_std()?;
+
     // `axum::Server` is a re-export of `hyper::Server`
-    let server = axum::Server::bind(&addr)
+    let server = axum::Server::from_tcp(tcp_listener)?
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .serve(service)
         .with_graceful_shutdown(async move {
