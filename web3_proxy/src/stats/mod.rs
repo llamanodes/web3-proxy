@@ -604,7 +604,12 @@ impl RpcQueryStats {
         // TODO: Depending on the method, metadata and response bytes, pick a different number of credits used
         // This can be a slightly more complex function as we ll
         // TODO: Here, let's implement the formula
-        let credits_used = Self::compute_cost(request_bytes, response_bytes, backend_requests == 0);
+        let credits_used = Self::compute_cost(
+            request_bytes,
+            response_bytes,
+            backend_requests == 0,
+            &method,
+        );
 
         let response_timestamp = Utc::now().timestamp();
 
@@ -625,7 +630,12 @@ impl RpcQueryStats {
     /// Compute cost per request
     /// All methods cost the same
     /// The number of bytes are based on input, and output bytes
-    pub fn compute_cost(request_bytes: u64, response_bytes: u64, cache_hit: bool) -> Decimal {
+    pub fn compute_cost(
+        request_bytes: u64,
+        response_bytes: u64,
+        cache_hit: bool,
+        _method: &Option<String>,
+    ) -> Decimal {
         // TODO: Should make these lazy_static const?
         // pays at least $0.000018 / credits per request
         let cost_minimum = Decimal::new(18, 6);
@@ -689,7 +699,6 @@ impl StatBuffer {
         // any errors inside this task will cause the application to exit
         let handle = tokio::spawn(async move {
             new.aggregate_and_save_loop(bucket, stat_receiver, shutdown_receiver)
-                // new.aggregate_and_save_loop(stat_receiver, shutdown_receiver)
                 .await
         });
 
