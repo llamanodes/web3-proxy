@@ -112,106 +112,142 @@ pub async fn user_balance_post(
     let authorization = Arc::new(InternalAuthorization::internal(None).unwrap());
 
     // Just make an rpc request, idk if i need to call this super extensive code
-    let (transaction_receipt, accepted_token, decimals): (TransactionReceipt, Address, u32) =
-        match app
-            .balanced_rpcs
-            .best_available_rpc(&authorization, None, &[], None, None)
-            .await
-        {
-            Ok(OpenRequestResult::Handle(handle)) => {
-                debug!(
-                    "Params are: {:?}",
-                    &vec![format!("0x{}", hex::encode(tx_hash))]
-                );
-                let transaction_receipt: TransactionReceipt = handle
-                    .clone()
-                    .request(
-                        "eth_getTransactionReceipt",
-                        &vec![format!("0x{}", hex::encode(tx_hash))],
-                        Level::Trace.into(),
-                        None,
-                    )
-                    .await
-                    // TODO: What kind of error would be here
-                    .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
-                debug!("Transaction receipt is: {:?}", transaction_receipt);
-
-                let mut accepted_tokens_request_object: serde_json::Map<String, serde_json::Value> =
-                    serde_json::Map::new();
-                // We want to send a request to the contract
-                accepted_tokens_request_object.insert(
-                    "to".to_owned(),
-                    serde_json::Value::String(app.config.deposit_contract.clone()),
-                );
-                // We then want to include the function that we want to call
-                accepted_tokens_request_object.insert(
-                    "data".to_owned(),
-                    serde_json::Value::String(format!(
-                        "0x{}",
-                        HexFmt(keccak256("get_approved_tokens()".to_owned().into_bytes()))
-                    )),
-                    // hex::encode(
-                );
-                let params = serde_json::Value::Array(vec![
-                    serde_json::Value::Object(accepted_tokens_request_object),
-                    serde_json::Value::String("latest".to_owned()),
-                ]);
-                debug!("Params are: {:?}", &params);
-                let accepted_token: String = handle
-                    .clone()
-                    .request("eth_call", &params, Level::Trace.into(), None)
-                    .await
-                    // TODO: What kind of error would be here
-                    .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
-                // Read the last
-                debug!("Accepted token response is: {:?}", accepted_token);
-                let accepted_token: Address = accepted_token[accepted_token.len() - 40..]
-                    .parse::<Address>()
-                    .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
-                debug!("Accepted token is: {:?}", accepted_token);
-
-                // Now get decimals points of the stablecoin
-                let mut token_decimals_request_object: serde_json::Map<String, serde_json::Value> =
-                    serde_json::Map::new();
-                token_decimals_request_object.insert(
-                    "to".to_owned(),
-                    serde_json::Value::String(format!("0x{}", HexFmt(accepted_token))),
-                );
-                token_decimals_request_object.insert(
-                    "data".to_owned(),
-                    serde_json::Value::String(format!(
-                        "0x{}",
-                        HexFmt(keccak256("decimals()".to_owned().into_bytes()))
-                    )),
-                );
-                let params = serde_json::Value::Array(vec![
-                    serde_json::Value::Object(token_decimals_request_object),
-                    serde_json::Value::String("latest".to_owned()),
-                ]);
-                debug!("ERC20 Decimal request params are: {:?}", &params);
-                let decimals: String = handle
-                    .request("eth_call", &params, Level::Trace.into(), None)
-                    .await
-                    .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
-                debug!("Decimals response is: {:?}", decimals);
-                let decimals: u32 = u32::from_str_radix(&decimals[2..], 16).unwrap();
-                debug!("Decimals are: {:?}", decimals);
-
-                Ok((transaction_receipt, accepted_token, decimals))
-            }
-            Ok(_) => {
-                // TODO: @Brllan Is this the right error message?
-                Err(Web3ProxyError::NoHandleReady)
-            }
-            Err(err) => {
-                log::trace!(
-                    "cancelled funneling transaction {} from: {:?}",
-                    tx_hash,
-                    err,
-                );
-                Err(err)
-            }
-        }?;
+    let transaction_receipt: TransactionReceipt = match app
+        .balanced_rpcs
+        .best_available_rpc(&authorization, None, &[], None, None)
+        .await
+    {
+        Ok(OpenRequestResult::Handle(handle)) => {
+            debug!(
+                "Params are: {:?}",
+                &vec![format!("0x{}", hex::encode(tx_hash))]
+            );
+            handle
+                .clone()
+                .request(
+                    "eth_getTransactionReceipt",
+                    &vec![format!("0x{}", hex::encode(tx_hash))],
+                    Level::Trace.into(),
+                    None,
+                )
+                .await
+                // TODO: What kind of error would be here
+                .map_err(|err| Web3ProxyError::Anyhow(err.into()))
+        }
+        Ok(_) => {
+            // TODO: @Brllan Is this the right error message?
+            Err(Web3ProxyError::NoHandleReady)
+        }
+        Err(err) => {
+            log::trace!(
+                "cancelled funneling transaction {} from: {:?}",
+                tx_hash,
+                err,
+            );
+            Err(err)
+        }
+    }?;
+    debug!("Transaction receipt is: {:?}", transaction_receipt);
+    let accepted_token: Address = match app
+        .balanced_rpcs
+        .best_available_rpc(&authorization, None, &[], None, None)
+        .await
+    {
+        Ok(OpenRequestResult::Handle(handle)) => {
+            let mut accepted_tokens_request_object: serde_json::Map<String, serde_json::Value> =
+                serde_json::Map::new();
+            // We want to send a request to the contract
+            accepted_tokens_request_object.insert(
+                "to".to_owned(),
+                serde_json::Value::String(app.config.deposit_contract.clone()),
+            );
+            // We then want to include the function that we want to call
+            accepted_tokens_request_object.insert(
+                "data".to_owned(),
+                serde_json::Value::String(format!(
+                    "0x{}",
+                    HexFmt(keccak256("get_approved_tokens()".to_owned().into_bytes()))
+                )),
+                // hex::encode(
+            );
+            let params = serde_json::Value::Array(vec![
+                serde_json::Value::Object(accepted_tokens_request_object),
+                serde_json::Value::String("latest".to_owned()),
+            ]);
+            debug!("Params are: {:?}", &params);
+            let accepted_token: String = handle
+                .clone()
+                .request("eth_call", &params, Level::Trace.into(), None)
+                .await
+                // TODO: What kind of error would be here
+                .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
+            // Read the last
+            debug!("Accepted token response is: {:?}", accepted_token);
+            accepted_token[accepted_token.len() - 40..]
+                .parse::<Address>()
+                .map_err(|err| Web3ProxyError::Anyhow(err.into()))
+        }
+        Ok(_) => {
+            // TODO: @Brllan Is this the right error message?
+            Err(Web3ProxyError::NoHandleReady)
+        }
+        Err(err) => {
+            log::trace!(
+                "cancelled funneling transaction {} from: {:?}",
+                tx_hash,
+                err,
+            );
+            Err(err)
+        }
+    }?;
+    debug!("Accepted token is: {:?}", accepted_token);
+    let decimals: u32 = match app
+        .balanced_rpcs
+        .best_available_rpc(&authorization, None, &[], None, None)
+        .await
+    {
+        Ok(OpenRequestResult::Handle(handle)) => {
+            // Now get decimals points of the stablecoin
+            let mut token_decimals_request_object: serde_json::Map<String, serde_json::Value> =
+                serde_json::Map::new();
+            token_decimals_request_object.insert(
+                "to".to_owned(),
+                serde_json::Value::String(format!("0x{}", HexFmt(accepted_token))),
+            );
+            token_decimals_request_object.insert(
+                "data".to_owned(),
+                serde_json::Value::String(format!(
+                    "0x{}",
+                    HexFmt(keccak256("decimals()".to_owned().into_bytes()))
+                )),
+            );
+            let params = serde_json::Value::Array(vec![
+                serde_json::Value::Object(token_decimals_request_object),
+                serde_json::Value::String("latest".to_owned()),
+            ]);
+            debug!("ERC20 Decimal request params are: {:?}", &params);
+            let decimals: String = handle
+                .request("eth_call", &params, Level::Trace.into(), None)
+                .await
+                .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
+            debug!("Decimals response is: {:?}", decimals);
+            u32::from_str_radix(&decimals[2..], 16)
+                .map_err(|err| Web3ProxyError::Anyhow(err.into()))
+        }
+        Ok(_) => {
+            // TODO: @Brllan Is this the right error message?
+            Err(Web3ProxyError::NoHandleReady)
+        }
+        Err(err) => {
+            log::trace!(
+                "cancelled funneling transaction {} from: {:?}",
+                tx_hash,
+                err,
+            );
+            Err(err)
+        }
+    }?;
+    debug!("Decimals are: {:?}", decimals);
     debug!("Tx receipt: {:?}", transaction_receipt);
 
     // Go through all logs, this should prob capture it,
