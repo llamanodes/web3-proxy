@@ -6,5 +6,6 @@
 curl -X GET \
 "http://localhost:8544/user/stats/aggregate?query_start=1678780033&query_window_seconds=1000"
 
-#curl -X GET \
-#"http://localhost:8544/user/stats/detailed?query_start=1678780033&query_window_seconds=1000"
+curl -X GET \
+-H "Authorization: Bearer 01GZGGDBMV0GM6MFBBHPDE78BW" \
+"http://localhost:8544/user/stats/detailed?query_start=1678780033&query_window_seconds=1000"

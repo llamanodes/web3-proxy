@@ -550,6 +550,7 @@ impl BufferedRpcQueryStats {
 
         builder = builder.tag("chain_id", chain_id.to_string());
 
+        info!("RPC secret key id is: {:?}", key.rpc_secret_key_id);
         if let Some(rpc_secret_key_id) = key.rpc_secret_key_id {
             builder = builder.tag("rpc_secret_key_id", rpc_secret_key_id.to_string());
         }
