@@ -29,6 +29,26 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
+                    .col(
+                        ColumnDef::new(IncreaseBalanceReceipt::Amount)
+                            .decimal_len(20, 10)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(IncreaseBalanceReceipt::DepositToUserId)
+                            .big_unsigned()
+                            .unique_key()
+                            .not_null(),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk-deposit_to_user_id")
+                            .from(
+                                IncreaseBalanceReceipt::Table,
+                                IncreaseBalanceReceipt::DepositToUserId,
+                            )
+                            .to(User::Table, User::Id),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -66,4 +86,12 @@ enum IncreaseBalanceReceipt {
     Id,
     TxHash,
     ChainId,
+    Amount,
+    DepositToUserId,
+}
+
+#[derive(Iden)]
+enum User {
+    Table,
+    Id,
 }

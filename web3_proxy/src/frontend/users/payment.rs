@@ -65,6 +65,45 @@ pub async fn user_balance_get(
     Ok(Json(response).into_response())
 }
 
+/// `GET /user/deposits` -- Use a bearer token to get the user's balance and spend.
+///
+/// - shows a list of all deposits, including their chain-id, amount and tx-hash
+#[debug_handler]
+pub async fn user_deposits_get(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+) -> Web3ProxyResponse {
+    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+
+    let db_replica = app.db_replica().context("Getting database connection")?;
+
+    // Filter by user ...
+    let receipts = increase_balance_receipt::Entity::find()
+        .filter(increase_balance_receipt::Column::DepositToUserId.eq(user.id))
+        .all(db_replica.conn())
+        .await?;
+
+    // Return the response, all except the user ...
+    let mut response = HashMap::new();
+    let receipts = receipts
+        .into_iter()
+        .map(|x| json!(x))
+        // TODO: Remove the following two items
+        // .map(|x| {
+        //     x.remove("deposit_to_user_id");
+        //     x.remove("id")
+        // })
+        .collect::<Vec<_>>();
+    response.insert(
+        "user",
+        json!(format!("{:?}", Address::from_slice(&user.address))),
+    );
+    response.insert("deposits", json!(receipts));
+
+    // TODO: Gotta create a new table for the spend part
+    Ok(Json(response).into_response())
+}
+
 /// `POST /user/balance/:tx_hash` -- Manually process a confirmed txid to update a user's balance.
 ///
 /// We will subscribe to events to watch for any user deposits, but sometimes events can be missed.
@@ -382,7 +421,7 @@ pub async fn user_balance_post(
 
                 if balance_plus_amount >= Decimal::new(10, 0) {
                     // Also make the user premium at this point ...
-                    let mut active_recipient = recipient.into_active_model();
+                    let mut active_recipient = recipient.clone().into_active_model();
                     // Make the recipient premium "Effectively Unlimited"
                     active_recipient.user_tier_id = sea_orm::Set(premium_user_tier.id);
                     active_recipient.save(&txn).await?;
@@ -403,7 +442,7 @@ pub async fn user_balance_post(
 
                 if amount >= Decimal::new(10, 0) {
                     // Also make the user premium at this point ...
-                    let mut active_recipient = recipient.into_active_model();
+                    let mut active_recipient = recipient.clone().into_active_model();
                     // Make the recipient premium "Effectively Unlimited"
                     active_recipient.user_tier_id = sea_orm::Set(premium_user_tier.id);
                     active_recipient.save(&txn).await?;
@@ -419,6 +458,8 @@ pub async fn user_balance_post(
         let receipt = increase_balance_receipt::ActiveModel {
             tx_hash: sea_orm::ActiveValue::Set(hex::encode(tx_hash)),
             chain_id: sea_orm::ActiveValue::Set(app.config.chain_id.to_string()),
+            amount: sea_orm::ActiveValue::Set(amount),
+            deposit_to_user_id: sea_orm::ActiveValue::Set(recipient.id),
             ..Default::default()
         };
 
