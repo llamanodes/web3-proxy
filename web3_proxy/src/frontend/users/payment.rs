@@ -101,7 +101,6 @@ pub async fn user_deposits_get(
     );
     response.insert("deposits", json!(receipts));
 
-    // TODO: Gotta create a new table for the spend part
     Ok(Json(response).into_response())
 }
 

@@ -70,7 +70,7 @@ curl \
 for i in {1..100000}
 do
   curl \
-  -X POST "127.0.0.1:8544/rpc/01GYQ4FMNX9EMFBT43XEFGZV1K" \
+  -X POST "127.0.0.1:8544/rpc/01GZHMCXGXT5Z4M8SCKCMKDAZ6" \
   -H "Content-Type: application/json" \
   --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
 done
