@@ -189,6 +189,7 @@ pub async fn serve(
         .route("/user", get(users::user_get))
         .route("/user", post(users::user_post))
         .route("/user/balance", get(users::payment::user_balance_get))
+        .route("/user/deposits", get(users::payment::user_deposits_get))
         .route(
             "/user/balance/:tx_hash",
             get(users::payment::user_balance_post),

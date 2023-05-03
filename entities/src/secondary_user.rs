@@ -41,4 +41,10 @@ impl Related<super::user::Entity> for Entity {
     }
 }
 
+impl Related<super::rpc_key::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::RpcKey.def()
+    }
+}
+
 impl ActiveModelBehavior for ActiveModel {}

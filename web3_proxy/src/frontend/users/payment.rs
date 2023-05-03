@@ -87,12 +87,13 @@ pub async fn user_deposits_get(
     let mut response = HashMap::new();
     let receipts = receipts
         .into_iter()
-        .map(|x| json!(x))
-        // TODO: Remove the following two items
-        // .map(|x| {
-        //     x.remove("deposit_to_user_id");
-        //     x.remove("id")
-        // })
+        .map(|x| {
+            let mut out = HashMap::new();
+            out.insert("amount", serde_json::Value::String(x.amount.to_string()));
+            out.insert("chain_id", serde_json::Value::String(x.chain_id));
+            out.insert("tx_hash", serde_json::Value::String(x.tx_hash));
+            out
+        })
         .collect::<Vec<_>>();
     response.insert(
         "user",

@@ -5,7 +5,7 @@ use crate::{
     frontend::errors::{Web3ProxyError, Web3ProxyResponse},
     http_params::{
         get_chain_id_from_params, get_query_start_from_params, get_query_stop_from_params,
-        get_query_window_seconds_from_params, get_user_id_from_params,
+        get_query_window_seconds_from_params,
     },
 };
 use anyhow::Context;
@@ -14,19 +14,18 @@ use axum::{
     response::IntoResponse,
     Json, TypedHeader,
 };
-use chrono::{DateTime, FixedOffset};
-use entities::rpc_key;
+use entities::{rpc_key, secondary_user};
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
-use influxdb2::FromDataPoint;
 use log::{error, info, warn};
 use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::EntityTrait;
 use migration::sea_orm::QueryFilter;
-use serde::Serialize;
 use serde_json::json;
+use ulid::Ulid;
+use entities::sea_orm_active_enums::Role;
 
 pub async fn query_user_stats<'a>(
     app: &'a Web3ProxyApp,
@@ -82,18 +81,55 @@ pub async fn query_user_stats<'a>(
         "opt_in_proxy"
     };
 
+    // Include a hashmap to go from rpc_secret_key_id to the rpc_secret_key
+    let mut rpc_key_id_to_key = HashMap::new();
+
     let rpc_key_filter = if user_id == 0 {
         "".to_string()
     } else {
         // Fetch all rpc_secret_key_ids, and filter for these
-        let user_rpc_keys = rpc_key::Entity::find()
+        let mut user_rpc_keys = rpc_key::Entity::find()
             .filter(rpc_key::Column::UserId.eq(user_id))
             .all(db_replica.conn())
             .await
             .web3_context("failed loading user's key")?
             .into_iter()
-            .map(|x| x.id.to_string())
+            .map(|x| {
+                let key = x.id.to_string();
+                let val = Ulid::from(x.secret_key);
+                rpc_key_id_to_key.insert(key.clone(), val);
+                key
+            })
             .collect::<Vec<_>>();
+
+        // Fetch all rpc_keys where we are the subuser
+        let mut subuser_rpc_keys = secondary_user::Entity::find()
+            .filter(secondary_user::Column::UserId.eq(user_id))
+            .find_also_related(rpc_key::Entity)
+            .all(db_replica.conn())
+            // TODO: Do a join with rpc-keys
+            .await
+            .web3_context("failed loading subuser keys")?
+            .into_iter()
+            .flat_map(|(subuser, wrapped_shared_rpc_key)| {
+                match wrapped_shared_rpc_key {
+                    Some(shared_rpc_key) => {
+                        if subuser.role == Role::Admin || subuser.role == Role::Owner {
+                            let key = shared_rpc_key.id.to_string();
+                            let val = Ulid::from(shared_rpc_key.secret_key);
+                            rpc_key_id_to_key.insert(key.clone(), val);
+                            Some(key)
+                        } else {
+                            None
+                        }
+                    },
+                    None => {None}
+                }
+            })
+            .collect::<Vec<_>>();
+
+        user_rpc_keys.append(&mut subuser_rpc_keys);
+
         if user_rpc_keys.len() == 0 {
             return Err(Web3ProxyError::BadRequest(
                 "User has no secret RPC keys yet".to_string(),
@@ -101,7 +137,6 @@ pub async fn query_user_stats<'a>(
         }
 
         // Iterate, pop and add to string
-        let user_rpc_key = user_rpc_keys.get(0).unwrap();
         f!(
             r#"|> filter(fn: (r) => contains(value: r["rpc_secret_key_id"], set: {:?}))"#,
             user_rpc_keys
@@ -151,7 +186,7 @@ pub async fn query_user_stats<'a>(
         |> map(fn: (r) => ({{ r with "archive_needed": if r.archive_needed == "true" then r.frontend_requests else 0}}))
         |> map(fn: (r) => ({{ r with "error_response": if r.error_response == "true" then r.frontend_requests else 0}}))
         
-        |> group(columns: ["_time", "_measurement", "chain_id", "method"])
+        |> group(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"])
         |> sort(columns: ["frontend_requests"])
         |> cumulativeSum(columns: ["archive_needed", "error_response", "backend_requests", "cache_hits", "cache_misses", "frontend_requests", "sum_credits_used", "sum_request_bytes", "sum_response_bytes", "sum_response_millis"])
         |> sort(columns: ["frontend_requests"], desc: true)
@@ -338,6 +373,18 @@ pub async fn query_user_stats<'a>(
                             }
                             _ => {
                                 error!("sum_response_bytes should always be a Long!");
+                            }
+                        }
+                    } else if key == "rpc_secret_key_id" {
+                        match value {
+                            influxdb2_structmap::value::Value::String(inner) => {
+                                out.insert(
+                                    "rpc_key".to_owned(),
+                                    serde_json::Value::String(rpc_key_id_to_key.get(&inner).unwrap().to_string())
+                                );
+                            }
+                            _ => {
+                                error!("rpc_secret_key_id should always be a String!");
                             }
                         }
                     } else if key == "sum_response_millis" {
