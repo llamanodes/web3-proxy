@@ -299,12 +299,14 @@ impl Web3Rpcs {
                     let old_rpc = self.by_name.write().insert(rpc.name.clone(), rpc.clone());
 
                     if let Some(old_rpc) = old_rpc {
-                        if old_rpc.head_block.read().is_some() {
+                        if old_rpc.head_block.as_ref().unwrap().borrow().is_some() {
+                            let mut new_head_receiver =
+                                rpc.head_block.as_ref().unwrap().subscribe();
                             debug!("waiting for new {} to sync", rpc);
-                            // TODO: wait for connection to have a block by watching a channel instead of looping
+
                             // TODO: maximum wait time or this could block things for too long
-                            while rpc.head_block.read().is_none() {
-                                sleep(Duration::from_millis(100)).await;
+                            while new_head_receiver.borrow_and_update().is_none() {
+                                new_head_receiver.changed().await?;
                             }
                         }
 
@@ -612,7 +614,7 @@ impl Web3Rpcs {
                             })
                             .cloned()
                         {
-                            let x_head_block = x.head_block.read().clone();
+                            let x_head_block = x.head_block.as_ref().unwrap().borrow().clone();
 
                             if let Some(x_head) = x_head_block {
                                 // TODO: should nodes that are ahead of the consensus block have priority? seems better to spread the load
@@ -1274,9 +1276,8 @@ impl Serialize for Web3Rpcs {
 fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (Reverse<U64>, u64, bool, OrderedFloat<f64>) {
     let head_block = x
         .head_block
-        .read()
         .as_ref()
-        .map(|x| *x.number())
+        .and_then(|x| x.borrow().as_ref().map(|x| *x.number()))
         .unwrap_or_default();
 
     let tier = x.tier;
@@ -1334,41 +1335,48 @@ mod tests {
             .map(|x| Web3ProxyBlock::try_new(Arc::new(x)).unwrap())
             .collect();
 
+        let (tx_a, _) = watch::channel(None);
+        let (tx_b, _) = watch::channel(blocks.get(1).cloned());
+        let (tx_c, _) = watch::channel(blocks.get(2).cloned());
+        let (tx_d, _) = watch::channel(None);
+        let (tx_e, _) = watch::channel(blocks.get(1).cloned());
+        let (tx_f, _) = watch::channel(blocks.get(2).cloned());
+
         let mut rpcs: Vec<_> = [
             Web3Rpc {
                 name: "a".to_string(),
                 tier: 0,
-                head_block: RwLock::new(None),
+                head_block: Some(tx_a),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "b".to_string(),
                 tier: 0,
-                head_block: RwLock::new(blocks.get(1).cloned()),
+                head_block: Some(tx_b),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "c".to_string(),
                 tier: 0,
-                head_block: RwLock::new(blocks.get(2).cloned()),
+                head_block: Some(tx_c),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "d".to_string(),
                 tier: 1,
-                head_block: RwLock::new(None),
+                head_block: Some(tx_d),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "e".to_string(),
                 tier: 1,
-                head_block: RwLock::new(blocks.get(1).cloned()),
+                head_block: Some(tx_e),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "f".to_string(),
                 tier: 1,
-                head_block: RwLock::new(blocks.get(2).cloned()),
+                head_block: Some(tx_f),
                 ..Default::default()
             },
         ]
@@ -1417,6 +1425,8 @@ mod tests {
 
         let block_data_limit = u64::MAX;
 
+        let (tx_synced, _) = watch::channel(Some(head_block.clone()));
+
         let head_rpc = Web3Rpc {
             name: "synced".to_string(),
             soft_limit: 1_000,
@@ -1424,10 +1434,12 @@ mod tests {
             backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
-            head_block: RwLock::new(Some(head_block.clone())),
+            head_block: Some(tx_synced),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
+
+        let (tx_lagged, _) = watch::channel(Some(lagged_block.clone()));
 
         let lagged_rpc = Web3Rpc {
             name: "lagged".to_string(),
@@ -1436,7 +1448,7 @@ mod tests {
             backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
-            head_block: RwLock::new(Some(lagged_block.clone())),
+            head_block: Some(tx_lagged),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
@@ -1616,6 +1628,8 @@ mod tests {
 
         let head_block: Web3ProxyBlock = Arc::new(head_block).try_into().unwrap();
 
+        let (tx_pruned, _) = watch::channel(Some(head_block.clone()));
+
         let pruned_rpc = Web3Rpc {
             name: "pruned".to_string(),
             soft_limit: 3_000,
@@ -1623,10 +1637,12 @@ mod tests {
             backup: false,
             block_data_limit: 64.into(),
             tier: 1,
-            head_block: RwLock::new(Some(head_block.clone())),
+            head_block: Some(tx_pruned),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
+
+        let (tx_archive, _) = watch::channel(Some(head_block.clone()));
 
         let archive_rpc = Web3Rpc {
             name: "archive".to_string(),
@@ -1635,7 +1651,7 @@ mod tests {
             backup: false,
             block_data_limit: u64::MAX.into(),
             tier: 2,
-            head_block: RwLock::new(Some(head_block.clone())),
+            head_block: Some(tx_archive),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
@@ -1655,9 +1671,8 @@ mod tests {
 
         let (block_sender, _) = flume::unbounded();
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
-        let (watch_consensus_rpcs_sender, _) = watch::channel(Default::default());
-        let (watch_consensus_head_sender, _watch_consensus_head_receiver) =
-            watch::channel(Default::default());
+        let (watch_consensus_rpcs_sender, _) = watch::channel(None);
+        let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
@@ -1773,6 +1788,9 @@ mod tests {
         let block_1: Web3ProxyBlock = Arc::new(block_1).try_into().unwrap();
         let block_2: Web3ProxyBlock = Arc::new(block_2).try_into().unwrap();
 
+        let (tx_mock_geth, _) = watch::channel(Some(block_1.clone()));
+        let (tx_mock_erigon_archive, _) = watch::channel(Some(block_2.clone()));
+
         let mock_geth = Web3Rpc {
             name: "mock_geth".to_string(),
             soft_limit: 1_000,
@@ -1780,7 +1798,7 @@ mod tests {
             backup: false,
             block_data_limit: 64.into(),
             tier: 0,
-            head_block: RwLock::new(Some(block_1.clone())),
+            head_block: Some(tx_mock_geth),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
@@ -1792,7 +1810,7 @@ mod tests {
             backup: false,
             block_data_limit: u64::MAX.into(),
             tier: 1,
-            head_block: RwLock::new(Some(block_2.clone())),
+            head_block: Some(tx_mock_erigon_archive),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
@@ -1815,9 +1833,8 @@ mod tests {
 
         let (block_sender, _) = flume::unbounded();
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
-        let (watch_consensus_rpcs_sender, _) = watch::channel(Default::default());
-        let (watch_consensus_head_sender, _watch_consensus_head_receiver) =
-            watch::channel(Default::default());
+        let (watch_consensus_rpcs_sender, _) = watch::channel(None);
+        let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {

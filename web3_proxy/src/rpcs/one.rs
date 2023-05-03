@@ -125,7 +125,8 @@ pub struct Web3Rpc {
     /// Lower tiers are higher priority when sending requests
     pub(super) tier: u64,
     /// TODO: change this to a watch channel so that http providers can subscribe and take action on change.
-    pub(super) head_block: RwLock<Option<Web3ProxyBlock>>,
+    /// this is only inside an Option so that the "Default" derive works. it will always be set.
+    pub(super) head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// Track head block latency
     pub(super) head_latency: RwLock<Latency>,
     // /// Track request latency
@@ -155,8 +156,6 @@ impl Web3Rpc {
         // TODO: rename to http_new_head_interval_sender?
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         redis_pool: Option<RedisPool>,
-        // TODO: think more about soft limit. watching ewma of requests is probably better. but what should the random sort be on? maybe group on tier is enough
-        // soft_limit: u32,
         block_map: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
@@ -227,6 +226,8 @@ impl Web3Rpc {
         let (disconnect_sender, disconnect_receiver) = watch::channel(false);
         let reconnect = reconnect.into();
 
+        let (head_block, _) = watch::channel(None);
+
         let new_connection = Self {
             name,
             db_conn: db_conn.clone(),
@@ -244,7 +245,7 @@ impl Web3Rpc {
             tier: config.tier,
             disconnect_watch: Some(disconnect_sender),
             created_at: Some(created_at),
-            head_block: RwLock::new(Default::default()),
+            head_block: Some(head_block),
             ..Default::default()
         };
 
@@ -387,7 +388,7 @@ impl Web3Rpc {
     }
 
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
-        let head_block_num = match self.head_block.read().as_ref() {
+        let head_block_num = match self.head_block.as_ref().unwrap().borrow().as_ref() {
             None => return false,
             Some(x) => *x.number(),
         };
@@ -517,8 +518,10 @@ impl Web3Rpc {
                         }
 
                         // reset sync status
-                        let mut head_block = self.head_block.write();
-                        *head_block = None;
+                        self.head_block
+                            .as_ref()
+                            .expect("head_block should always be set")
+                            .send_replace(None);
 
                         // disconnect the current provider
                         // TODO: what until the block_sender's receiver finishes updating this item?
@@ -630,9 +633,9 @@ impl Web3Rpc {
         let new_head_block = match new_head_block {
             Ok(None) => {
                 {
-                    let mut head_block = self.head_block.write();
+                    let head_block_tx = self.head_block.as_ref().unwrap();
 
-                    if head_block.is_none() {
+                    if head_block_tx.borrow().is_none() {
                         // we previously sent a None. return early
                         return Ok(());
                     }
@@ -641,7 +644,7 @@ impl Web3Rpc {
 
                     debug!("clearing head block on {} ({}ms old)!", self, age);
 
-                    *head_block = None;
+                    head_block_tx.send_replace(None);
                 }
 
                 None
@@ -659,11 +662,10 @@ impl Web3Rpc {
 
                 // save the block so we don't send the same one multiple times
                 // also save so that archive checks can know how far back to query
-                {
-                    let mut head_block = self.head_block.write();
-
-                    let _ = head_block.insert(new_head_block.clone());
-                }
+                self.head_block
+                    .as_ref()
+                    .unwrap()
+                    .send_replace(Some(new_head_block.clone()));
 
                 if self.block_data_limit() == U64::zero() {
                     let authorization = Arc::new(Authorization::internal(self.db_conn.clone())?);
@@ -680,11 +682,7 @@ impl Web3Rpc {
             Err(err) => {
                 warn!("unable to get block from {}. err={:?}", self, err);
 
-                {
-                    let mut head_block = self.head_block.write();
-
-                    *head_block = None;
-                }
+                self.head_block.as_ref().unwrap().send_replace(None);
 
                 None
             }
@@ -784,7 +782,7 @@ impl Web3Rpc {
                             if new_total_requests - old_total_requests < 10 {
                                 // TODO: if this fails too many times, reset the connection
                                 // TODO: move this into a function and the chaining should be easier
-                                let head_block = rpc.head_block.read().clone();
+                                let head_block = rpc.head_block.as_ref().unwrap().borrow().clone();
 
                                 if let Some((block_number, txid)) = head_block.and_then(|x| {
                                     let block = x.block;
@@ -1429,7 +1427,12 @@ impl Serialize for Web3Rpc {
         state.serialize_field("soft_limit", &self.soft_limit)?;
 
         // TODO: maybe this is too much data. serialize less?
-        state.serialize_field("head_block", &*self.head_block.read())?;
+        {
+            let head_block = self.head_block.as_ref().unwrap();
+            let head_block = head_block.borrow();
+            let head_block = head_block.as_ref();
+            state.serialize_field("head_block", &head_block)?;
+        }
 
         state.serialize_field("head_latency", &self.head_latency.read().value())?;
 
@@ -1487,6 +1490,8 @@ mod tests {
         let head_block = Web3ProxyBlock::try_new(random_block).unwrap();
         let block_data_limit = u64::MAX;
 
+        let (tx, _) = watch::channel(Some(head_block.clone()));
+
         let x = Web3Rpc {
             name: "name".to_string(),
             ws_url: Some("ws://example.com".to_string()),
@@ -1495,7 +1500,7 @@ mod tests {
             backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
-            head_block: RwLock::new(Some(head_block.clone())),
+            head_block: Some(tx),
             ..Default::default()
         };
 
@@ -1521,6 +1526,8 @@ mod tests {
 
         let block_data_limit = 64;
 
+        let (tx, _rx) = watch::channel(Some(head_block.clone()));
+
         let x = Web3Rpc {
             name: "name".to_string(),
             soft_limit: 1_000,
@@ -1528,7 +1535,7 @@ mod tests {
             backup: false,
             block_data_limit: block_data_limit.into(),
             tier: 0,
-            head_block: RwLock::new(Some(head_block.clone())),
+            head_block: Some(tx),
             ..Default::default()
         };
 
