@@ -24,14 +24,14 @@ curl -X POST http://127.0.0.1:8544/user/login \
   -H 'Content-Type: application/json' \
   -d '{
         "address": "0x762390ae7a3c4d987062a398c1ea8767029ab08e",
-        "msg": "0x6c6c616d616e6f6465732e636f6d2077616e747320796f7520746f207369676e20696e207769746820796f757220457468657265756d206163636f756e743a0a3078373632333930616537613363344439383730363261333938433165413837363730323941423038450a0af09fa699f09fa699f09fa699f09fa699f09fa6990a0a5552493a2068747470733a2f2f6c6c616d616e6f6465732e636f6d2f0a56657273696f6e3a20310a436861696e2049443a20310a4e6f6e63653a20303147584e4b57573636523852433135334e38594d4b353736520a4973737565642041743a20323032332d30342d31305431323a35373a34362e3935303939335a0a45787069726174696f6e2054696d653a20323032332d30342d31305431333a31373a34362e3935303939335a",
-        "sig": "38521f41f6e0b01679181267d9ff3f6682e070623c1496f1cb62923bfb8df5c01584fc3323a4cdca2d651e96103d7b665f650eca52c5bb96bdbc80d2ce99ead21c",
+        "msg": "0x6c6c616d616e6f6465732e636f6d2077616e747320796f7520746f207369676e20696e207769746820796f757220457468657265756d206163636f756e743a0a3078373632333930616537613363344439383730363261333938433165413837363730323941423038450a0af09fa699f09fa699f09fa699f09fa699f09fa6990a0a5552493a2068747470733a2f2f6c6c616d616e6f6465732e636f6d2f0a56657273696f6e3a20310a436861696e2049443a20310a4e6f6e63653a203031475a4747433532454356313031393746385a5a3350504b580a4973737565642041743a20323032332d30352d30335430393a35313a32342e3735303933345a0a45787069726174696f6e2054696d653a20323032332d30352d30335431303a31313a32342e3735303933345a",
+        "sig": "57e0d720e2ad726f5c8b70a3591af3b2a4b0c3fbddb71a43a37731642f9c488a3b5e0b016eda5463707abdd3af50ddd82e682e28a150e63aad57d964ad5868191b",
         "version": "3",
         "signer": "MEW"
       }'
 
-# bearer token is: 01GXNM02TW00APX79EYFCMM2VX
-# scret key is: 01GXNKWJ50ZT068ER38MRJSC20
+# bearer token is: 01GZGGDBMV0GM6MFBBHPDE78BW
+# scret key is: 01GZGGDBKBVTQDFPGRJ753VSHX
 
 ###########################################
 # Initially check balance, it should be 0
@@ -39,7 +39,7 @@ curl -X POST http://127.0.0.1:8544/user/login \
 # Check the balance of the user
 # Balance seems to be returning properly (0, in this test case)
 curl \
--H "Authorization: Bearer 01GXNM02TW00APX79EYFCMM2VX" \
+-H "Authorization: Bearer 01GZGGDBMV0GM6MFBBHPDE78BW" \
 -X GET "127.0.0.1:8544/user/balance"
 
 
@@ -48,7 +48,7 @@ curl \
 # and submits it on the endpoint
 ###########################################
 curl \
--H "Authorization: Bearer 01GXNM02TW00APX79EYFCMM2VX" \
+-H "Authorization: Bearer 01GZGGDBMV0GM6MFBBHPDE78BW" \
 -X GET "127.0.0.1:8544/user/balance/0xda41f748106d2d1f1bf395e65d07bd9fc507c1eb4fd50c87d8ca1f34cfd536b0"
 
 ###########################################
@@ -57,7 +57,7 @@ curl \
 # Check the balance of the user
 # Balance seems to be returning properly (0, in this test case)
 curl \
--H "Authorization: Bearer 01GXNM02TW00APX79EYFCMM2VX" \
+-H "Authorization: Bearer 01GZGGDBMV0GM6MFBBHPDE78BW" \
 -X GET "127.0.0.1:8544/user/balance"
 
 # TODO: Now start using the RPC, balance should decrease
@@ -65,7 +65,7 @@ curl \
 # Get the RPC key
 curl \
   -X GET "127.0.0.1:8544/user/keys" \
-  -H "Authorization: Bearer 01GXNM02TW00APX79EYFCMM2VX" \
+  -H "Authorization: Bearer 01GZGGDBMV0GM6MFBBHPDE78BW" \
   --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
 
 ## Check if calling an RPC endpoint logs the stats
@@ -73,7 +73,7 @@ curl \
 for i in {1..1000}
 do
   curl \
-  -X POST "127.0.0.1:8544/rpc/01GXNKWJ50ZT068ER38MRJSC20" \
+  -X POST "127.0.0.1:8544/rpc/01GZGGDBKBVTQDFPGRJ753VSHX" \
   -H "Content-Type: application/json" \
   --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
 done

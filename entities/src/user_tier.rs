@@ -11,7 +11,7 @@ pub struct Model {
     pub title: String,
     pub max_requests_per_period: Option<u64>,
     pub max_concurrent_requests: Option<u32>,
-    pub downgrade_tier_id: u64,
+    pub downgrade_tier_id: Option<u64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

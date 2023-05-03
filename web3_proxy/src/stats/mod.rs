@@ -406,6 +406,7 @@ impl BufferedRpcQueryStats {
             }
         };
 
+        info!("Downgrade 1");
         let downgrade_user_role = user_tier::Entity::find()
             .filter(user_tier::Column::Id.eq(downgrade_user.user_tier_id))
             .one(db_conn)
@@ -414,6 +415,7 @@ impl BufferedRpcQueryStats {
                 "The foreign key for the user's user_tier_id was not found! {:?}",
                 downgrade_user.user_tier_id
             ))?;
+        info!("Downgrade 2");
 
         // Downgrade a user to premium - out of funds if there's less than 10$ in the account, and if the user was premium before
         if new_available_balance < Decimal::from(10u64) && downgrade_user_role.title == "Premium" {
