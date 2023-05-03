@@ -1,4 +1,5 @@
 use super::StatType;
+use crate::frontend::errors::Web3ProxyErrorContext;
 use crate::{
     app::Web3ProxyApp,
     frontend::errors::{Web3ProxyError, Web3ProxyResponse},
@@ -14,12 +15,16 @@ use axum::{
     Json, TypedHeader,
 };
 use chrono::{DateTime, FixedOffset};
+use entities::rpc_key;
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
 use influxdb2::FromDataPoint;
 use log::{error, info, warn};
+use migration::sea_orm::ColumnTrait;
+use migration::sea_orm::EntityTrait;
+use migration::sea_orm::QueryFilter;
 use serde::Serialize;
 use serde_json::json;
 
@@ -29,6 +34,14 @@ pub async fn query_user_stats<'a>(
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
+    let user_id = match bearer {
+        Some(inner_bearer) => {
+            let (user, _semaphore) = app.bearer_is_authorized(inner_bearer.0 .0).await?;
+            user.id
+        }
+        None => 0,
+    };
+
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
     let db_replica = app
         .db_replica()
@@ -47,8 +60,8 @@ pub async fn query_user_stats<'a>(
         .context("query_user_stats needs an influxdb client")?;
 
     // get the user id first. if it is 0, we should use a cache on the app
-    let user_id =
-        get_user_id_from_params(&mut redis_conn, &db_conn, &db_replica, bearer, params).await?;
+    // let user_id =
+    //     get_user_id_from_params(&mut redis_conn, &db_conn, &db_replica, bearer, params).await?;
 
     let query_window_seconds = get_query_window_seconds_from_params(params)?;
     let query_start = get_query_start_from_params(params)?.timestamp();
@@ -69,6 +82,32 @@ pub async fn query_user_stats<'a>(
         "opt_in_proxy"
     };
 
+    let rpc_key_filter = if user_id == 0 {
+        "".to_string()
+    } else {
+        // Fetch all rpc_secret_key_ids, and filter for these
+        let user_rpc_keys = rpc_key::Entity::find()
+            .filter(rpc_key::Column::UserId.eq(user_id))
+            .all(db_replica.conn())
+            .await
+            .web3_context("failed loading user's key")?
+            .into_iter()
+            .map(|x| x.id.to_string())
+            .collect::<Vec<_>>();
+        if user_rpc_keys.len() == 0 {
+            return Err(Web3ProxyError::BadRequest(
+                "User has no secret RPC keys yet".to_string(),
+            ));
+        }
+
+        // Iterate, pop and add to string
+        let user_rpc_key = user_rpc_keys.get(0).unwrap();
+        f!(
+            r#"|> filter(fn: (r) => contains(value: r["rpc_secret_key_id"], set: {:?}))"#,
+            user_rpc_keys
+        )
+    };
+
     // TODO: Turn into a 500 error if bucket is not found ..
     // Or just unwrap or so
     let bucket = &app
@@ -82,6 +121,8 @@ pub async fn query_user_stats<'a>(
     if chain_id != 0 {
         filter_chain_id = f!(r#"|> filter(fn: (r) => r["chain_id"] == "{chain_id}")"#);
     }
+
+    // Fetch and request for balance
 
     info!(
         "Query start and stop are: {:?} {:?}",
@@ -100,6 +141,7 @@ pub async fn query_user_stats<'a>(
     let query = f!(r#"
         from(bucket: "{bucket}")
         |> range(start: {query_start}, stop: {query_stop})
+        {rpc_key_filter}
         |> filter(fn: (r) => r["_measurement"] == "{measurement}")
         {filter_chain_id}
         {drop_method}
