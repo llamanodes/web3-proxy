@@ -131,21 +131,24 @@ fn main() -> anyhow::Result<()> {
                 vec![
                     "info",
                     "ethers=debug",
+                    "ethers_providers::rpc=off",
                     "ethers_providers=debug",
                     "redis_rate_limit=debug",
-                    "web3_proxy=trace",
-                    "web3_proxy_cli=trace",
                     "web3_proxy::rpcs::blockchain=info",
                     "web3_proxy::rpcs::request=debug",
+                    // "web3_proxy::stats::influxdb_queries=trace",
+                    "web3_proxy=trace",
+                    "web3_proxy_cli=trace",
                 ]
             }
             _ => {
                 vec![
                     "info",
                     "ethers=debug",
-                    // TODO: even error is too verbose for our purposes. how can we turn off this logging entirely?
+                    "ethers_providers::rpc=off",
                     "ethers_providers=error",
                     "redis_rate_limit=debug",
+                    // "web3_proxy::stats::influxdb_queries=trace",
                     "web3_proxy=debug",
                     "web3_proxy_cli=debug",
                 ]

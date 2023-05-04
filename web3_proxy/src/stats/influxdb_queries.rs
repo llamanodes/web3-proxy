@@ -59,7 +59,7 @@ pub async fn query_user_stats<'a>(
     // Return a bad request if query_start == query_stop, because then the query is empty basically
     if query_start == query_stop {
         return Err(Web3ProxyError::BadRequest(
-            "Start and Stop date cannot be equal. Please specify a (different) start date."
+            "query_start and query_stop date cannot be equal. Please specify a different range"
                 .to_owned(),
         ));
     }
@@ -163,6 +163,13 @@ pub async fn query_user_stats<'a>(
     info!("Filters are: {:?}", filter_chain_id); // filter_field
     info!("window seconds are: {:?}", query_window_seconds);
 
+    let filter_field = match stat_response_type {
+        StatType::Aggregated => {
+            f!(r#"|> filter(fn: (r) => r["_field"] == "{stats_column}")"#)
+        }
+        // TODO: Detailed should still filter it, but just "group-by" method (call it once per each method ...
+        // Or maybe it shouldn't filter it ...
+        StatType::Detailed => "".to_string(),
     let drop_method = match stat_response_type {
         StatType::Aggregated => f!(r#"|> drop(columns: ["method"])"#),
         StatType::Detailed => {
@@ -171,6 +178,7 @@ pub async fn query_user_stats<'a>(
             "".to_string()
         },
     };
+
     let join_candidates = f!(r#"{:?}"#, join_candidates);
 
     let query = f!(r#"
@@ -211,7 +219,7 @@ pub async fn query_user_stats<'a>(
     )
     "#);
 
-    info!("Raw query to db is: {:?}", query);
+    trace!("Raw query to db is: {:?}", query);
     let query = Query::new(query.to_string());
     info!("Query to db is: {:?}", query);
 

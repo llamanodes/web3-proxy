@@ -139,7 +139,7 @@ Be sure to use `--no-inline` or perf will be VERY slow
 
 Developers can run the proxy under gdb for advanced debugging:
 
-    cargo build --release && RUST_LOG=web3_proxy=debug rust-gdb --args target/debug/web3_proxy --listen-port 7503 --rpc-config-path ./config/production-eth.toml
+    cargo build --release && RUST_LOG=info,web3_proxy=debug,ethers_providers::rpc=off rust-gdb --args target/debug/web3_proxy --listen-port 7503 --rpc-config-path ./config/production-eth.toml
 
 TODO: also enable debug symbols in the release build by modifying the root Cargo.toml
 

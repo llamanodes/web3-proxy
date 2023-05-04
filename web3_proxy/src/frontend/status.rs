@@ -27,6 +27,30 @@ pub async fn health(
     }
 }
 
+/// Easy alerting if backup servers are in use.
+pub async fn backups_needed(Extension(app): Extension<Arc<Web3ProxyApp>>) -> impl IntoResponse {
+    let code = {
+        let consensus_rpcs = app.balanced_rpcs.watch_consensus_rpcs_sender.borrow();
+
+        if let Some(consensus_rpcs) = consensus_rpcs.as_ref() {
+            if consensus_rpcs.backups_needed {
+                StatusCode::INTERNAL_SERVER_ERROR
+            } else {
+                StatusCode::OK
+            }
+        } else {
+            // if no consensus, we still "need backups". we just don't have any. which is worse
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    };
+
+    if matches!(code, StatusCode::OK) {
+        (code, "no backups needed. :)")
+    } else {
+        (code, "backups needed! :(")
+    }
+}
+
 /// Very basic status page.
 ///
 /// TODO: replace this with proper stats and monitoring

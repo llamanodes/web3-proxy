@@ -42,8 +42,8 @@ pub struct CliConfig {
 pub struct TopConfig {
     pub app: AppConfig,
     pub balanced_rpcs: HashMap<String, Web3RpcConfig>,
-    // TODO: instead of an option, give it a default
     pub private_rpcs: Option<HashMap<String, Web3RpcConfig>>,
+    pub bundler_4337_rpcs: Option<HashMap<String, Web3RpcConfig>>,
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
@@ -115,6 +115,9 @@ pub struct AppConfig {
     /// Optional kafka brokers
     /// Used by /debug/:rpc_key urls for logging requests and responses. No other endpoints log request/response data.
     pub kafka_urls: Option<String>,
+
+    #[serde(default = "default_kafka_protocol")]
+    pub kafka_protocol: String,
 
     /// domain in sign-in-with-ethereum messages
     pub login_domain: Option<String>,
@@ -220,6 +223,10 @@ fn default_bearer_token_max_concurrent_requests() -> u64 {
 /// Having a low amount of requests per period (usually minute) for login is safest.
 fn default_login_rate_limit_per_period() -> u64 {
     10
+}
+
+fn default_kafka_protocol() -> String {
+    "ssl".to_string()
 }
 
 fn default_response_cache_max_bytes() -> u64 {
