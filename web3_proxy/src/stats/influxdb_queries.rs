@@ -14,6 +14,7 @@ use axum::{
     response::IntoResponse,
     Json, TypedHeader,
 };
+use entities::sea_orm_active_enums::Role;
 use entities::{rpc_key, secondary_user};
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
@@ -25,7 +26,6 @@ use migration::sea_orm::EntityTrait;
 use migration::sea_orm::QueryFilter;
 use serde_json::json;
 use ulid::Ulid;
-use entities::sea_orm_active_enums::Role;
 
 pub async fn query_user_stats<'a>(
     app: &'a Web3ProxyApp,
@@ -59,7 +59,7 @@ pub async fn query_user_stats<'a>(
     // Return a bad request if query_start == query_stop, because then the query is empty basically
     if query_start == query_stop {
         return Err(Web3ProxyError::BadRequest(
-            "query_start and query_stop date cannot be equal. Please specify a different range"
+            "Start and Stop date cannot be equal. Please specify a (different) start date."
                 .to_owned(),
         ));
     }
@@ -70,7 +70,11 @@ pub async fn query_user_stats<'a>(
         "opt_in_proxy"
     };
 
-    let mut join_candidates: Vec<String> = vec!["_time".to_string(), "_measurement".to_string(), "chain_id".to_string()];
+    let mut join_candidates: Vec<String> = vec![
+        "_time".to_string(),
+        "_measurement".to_string(),
+        "chain_id".to_string(),
+    ];
 
     // Include a hashmap to go from rpc_secret_key_id to the rpc_secret_key
     let mut rpc_key_id_to_key = HashMap::new();
@@ -102,8 +106,8 @@ pub async fn query_user_stats<'a>(
             .await
             .web3_context("failed loading subuser keys")?
             .into_iter()
-            .flat_map(|(subuser, wrapped_shared_rpc_key)| {
-                match wrapped_shared_rpc_key {
+            .flat_map(
+                |(subuser, wrapped_shared_rpc_key)| match wrapped_shared_rpc_key {
                     Some(shared_rpc_key) => {
                         if subuser.role == Role::Admin || subuser.role == Role::Owner {
                             let key = shared_rpc_key.id.to_string();
@@ -113,10 +117,10 @@ pub async fn query_user_stats<'a>(
                         } else {
                             None
                         }
-                    },
-                    None => {None}
-                }
-            })
+                    }
+                    None => None,
+                },
+            )
             .collect::<Vec<_>>();
 
         user_rpc_keys.append(&mut subuser_rpc_keys);
@@ -136,7 +140,6 @@ pub async fn query_user_stats<'a>(
             user_rpc_keys
         )
     };
-
 
     // TODO: Turn into a 500 error if bucket is not found ..
     // Or just unwrap or so
@@ -163,22 +166,14 @@ pub async fn query_user_stats<'a>(
     info!("Filters are: {:?}", filter_chain_id); // filter_field
     info!("window seconds are: {:?}", query_window_seconds);
 
-    let filter_field = match stat_response_type {
-        StatType::Aggregated => {
-            f!(r#"|> filter(fn: (r) => r["_field"] == "{stats_column}")"#)
-        }
-        // TODO: Detailed should still filter it, but just "group-by" method (call it once per each method ...
-        // Or maybe it shouldn't filter it ...
-        StatType::Detailed => "".to_string(),
     let drop_method = match stat_response_type {
         StatType::Aggregated => f!(r#"|> drop(columns: ["method"])"#),
         StatType::Detailed => {
             // Make the tables join on the method column as well
             join_candidates.push("method".to_string());
             "".to_string()
-        },
+        }
     };
-
     let join_candidates = f!(r#"{:?}"#, join_candidates);
 
     let query = f!(r#"
@@ -219,7 +214,7 @@ pub async fn query_user_stats<'a>(
     )
     "#);
 
-    trace!("Raw query to db is: {:?}", query);
+    info!("Raw query to db is: {:?}", query);
     let query = Query::new(query.to_string());
     info!("Query to db is: {:?}", query);
 
@@ -240,242 +235,235 @@ pub async fn query_user_stats<'a>(
             // Unwrap all relevant numbers
             // BTreeMap<String, value::Value>
             let mut out: HashMap<String, serde_json::Value> = HashMap::new();
-            value_map
-                .into_iter()
-                .for_each(|(key, value)| {
-                    if key == "_measurement" {
-                        match value {
-                            influxdb2_structmap::value::Value::String(inner) => {
-                                if inner == "opt_in_proxy" {
-                                    out.insert(
-                                        "collection".to_owned(),
-                                        serde_json::Value::String("opt-in".to_owned()),
-                                    );
-                                } else if inner == "global_proxy" {
-                                    out.insert(
-                                        "collection".to_owned(),
-                                        serde_json::Value::String("global".to_owned()),
-                                    );
-                                } else {
-                                    warn!("Some datapoints are not part of any _measurement!");
-                                    out.insert(
-                                        "collection".to_owned(),
-                                        serde_json::Value::String("unknown".to_owned()),
-                                    );
-                                }
-                            }
-                            _ => {
-                                error!("_measurement should always be a String!");
+            value_map.into_iter().for_each(|(key, value)| {
+                if key == "_measurement" {
+                    match value {
+                        influxdb2_structmap::value::Value::String(inner) => {
+                            if inner == "opt_in_proxy" {
+                                out.insert(
+                                    "collection".to_owned(),
+                                    serde_json::Value::String("opt-in".to_owned()),
+                                );
+                            } else if inner == "global_proxy" {
+                                out.insert(
+                                    "collection".to_owned(),
+                                    serde_json::Value::String("global".to_owned()),
+                                );
+                            } else {
+                                warn!("Some datapoints are not part of any _measurement!");
+                                out.insert(
+                                    "collection".to_owned(),
+                                    serde_json::Value::String("unknown".to_owned()),
+                                );
                             }
                         }
-                    } else if key == "_stop" {
-                        match value {
-                            influxdb2_structmap::value::Value::TimeRFC(inner) => {
-                                out.insert(
-                                    "stop_time".to_owned(),
-                                    serde_json::Value::String(inner.to_string()),
-                                );
-                            }
-                            _ => {
-                                error!("_stop should always be a TimeRFC!");
-                            }
-                        };
-                    } else if key == "_time" {
-                        match value {
-                            influxdb2_structmap::value::Value::TimeRFC(inner) => {
-                                out.insert(
-                                    "time".to_owned(),
-                                    serde_json::Value::String(inner.to_string()),
-                                );
-                            }
-                            _ => {
-                                error!("_stop should always be a TimeRFC!");
-                            }
-                        }
-                    } else if key == "backend_requests" {
-                        match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
-                                out.insert(
-                                    "total_backend_requests".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
-                                );
-                            }
-                            _ => {
-                                error!("backend_requests should always be a Long!");
-                            }
-                        }
-                    } else if key == "balance" {
-                        match value {
-                            influxdb2_structmap::value::Value::Double(inner) => {
-                                out.insert(
-                                    "balance".to_owned(),
-                                    json!(f64::from(inner)),
-                                );
-                            }
-                            _ => {
-                                error!("balance should always be a Double!");
-                            }
-                        }
-                    } else if key == "cache_hits" {
-                        match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
-                                out.insert(
-                                    "total_cache_hits".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
-                                );
-                            }
-                            _ => {
-                                error!("cache_hits should always be a Long!");
-                            }
-                        }
-                    } else if key == "cache_misses" {
-                        match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
-                                out.insert(
-                                    "total_cache_misses".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
-                                );
-                            }
-                            _ => {
-                                error!("cache_misses should always be a Long!");
-                            }
-                        }
-                    } else if key == "frontend_requests" {
-                        match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
-                                out.insert(
-                                    "total_frontend_requests".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
-                                );
-                            }
-                            _ => {
-                                error!("frontend_requests should always be a Long!");
-                            }
-                        }
-                    } else if key == "no_servers" {
-                        match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
-                                out.insert(
-                                    "no_servers".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
-                                );
-                            }
-                            _ => {
-                                error!("no_servers should always be a Long!");
-                            }
-                        }
-                    } else if key == "sum_credits_used" {
-                        match value {
-                            influxdb2_structmap::value::Value::Double(inner) => {
-                                out.insert(
-                                    "total_credits_used".to_owned(),
-                                    json!(f64::from(inner)),
-                                );
-                            }
-                            _ => {
-                                error!("sum_credits_used should always be a Double!");
-                            }
-                        }
-                    } else if key == "sum_request_bytes" {
-                        match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
-                                out.insert(
-                                    "total_request_bytes".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
-                                );
-                            }
-                            _ => {
-                                error!("sum_request_bytes should always be a Long!");
-                            }
-                        }
-                    } else if key == "sum_response_bytes" {
-                        match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
-                                out.insert(
-                                    "total_response_bytes".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
-                                );
-                            }
-                            _ => {
-                                error!("sum_response_bytes should always be a Long!");
-                            }
-                        }
-                    } else if key == "rpc_secret_key_id" {
-                        match value {
-                            influxdb2_structmap::value::Value::String(inner) => {
-                                out.insert(
-                                    "rpc_key".to_owned(),
-                                    serde_json::Value::String(rpc_key_id_to_key.get(&inner).unwrap().to_string())
-                                );
-                            }
-                            _ => {
-                                error!("rpc_secret_key_id should always be a String!");
-                            }
-                        }
-                    } else if key == "sum_response_millis" {
-                        match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
-                                out.insert(
-                                    "total_response_millis".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
-                                );
-                            }
-                            _ => {
-                                error!("sum_response_millis should always be a Long!");
-                            }
+                        _ => {
+                            error!("_measurement should always be a String!");
                         }
                     }
-                    // Make this if detailed ...
-                    else if stat_response_type == StatType::Detailed && key == "method" {
-                        match value {
-                            influxdb2_structmap::value::Value::String(inner) => {
-                                out.insert("method".to_owned(), serde_json::Value::String(inner));
-                            }
-                            _ => {
-                                error!("method should always be a String!");
-                            }
+                } else if key == "_stop" {
+                    match value {
+                        influxdb2_structmap::value::Value::TimeRFC(inner) => {
+                            out.insert(
+                                "stop_time".to_owned(),
+                                serde_json::Value::String(inner.to_string()),
+                            );
                         }
-                    } else if key == "chain_id" {
-                        match value {
-                            influxdb2_structmap::value::Value::String(inner) => {
-                                out.insert("chain_id".to_owned(), serde_json::Value::String(inner));
-                            }
-                            _ => {
-                                error!("chain_id should always be a String!");
-                            }
+                        _ => {
+                            error!("_stop should always be a TimeRFC!");
                         }
-                    } else if key == "archive_needed" {
-                        match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
-                                out.insert(
-                                    "archive_needed".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
-                                );
-                            }
-                            _ => {
-                                error!("archive_needed should always be a Long!");
-                            }
+                    };
+                } else if key == "_time" {
+                    match value {
+                        influxdb2_structmap::value::Value::TimeRFC(inner) => {
+                            out.insert(
+                                "time".to_owned(),
+                                serde_json::Value::String(inner.to_string()),
+                            );
                         }
-                    } else if key == "error_response" {
-                        match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
-                                out.insert(
-                                    "error_response".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
-                                );
-                            }
-                            _ => {
-                                error!("error_response should always be a Long!");
-                            }
+                        _ => {
+                            error!("_stop should always be a TimeRFC!");
                         }
                     }
-                });
+                } else if key == "backend_requests" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_backend_requests".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("backend_requests should always be a Long!");
+                        }
+                    }
+                } else if key == "balance" {
+                    match value {
+                        influxdb2_structmap::value::Value::Double(inner) => {
+                            out.insert("balance".to_owned(), json!(f64::from(inner)));
+                        }
+                        _ => {
+                            error!("balance should always be a Double!");
+                        }
+                    }
+                } else if key == "cache_hits" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_cache_hits".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("cache_hits should always be a Long!");
+                        }
+                    }
+                } else if key == "cache_misses" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_cache_misses".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("cache_misses should always be a Long!");
+                        }
+                    }
+                } else if key == "frontend_requests" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_frontend_requests".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("frontend_requests should always be a Long!");
+                        }
+                    }
+                } else if key == "no_servers" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "no_servers".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("no_servers should always be a Long!");
+                        }
+                    }
+                } else if key == "sum_credits_used" {
+                    match value {
+                        influxdb2_structmap::value::Value::Double(inner) => {
+                            out.insert("total_credits_used".to_owned(), json!(f64::from(inner)));
+                        }
+                        _ => {
+                            error!("sum_credits_used should always be a Double!");
+                        }
+                    }
+                } else if key == "sum_request_bytes" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_request_bytes".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("sum_request_bytes should always be a Long!");
+                        }
+                    }
+                } else if key == "sum_response_bytes" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_response_bytes".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("sum_response_bytes should always be a Long!");
+                        }
+                    }
+                } else if key == "rpc_secret_key_id" {
+                    match value {
+                        influxdb2_structmap::value::Value::String(inner) => {
+                            out.insert(
+                                "rpc_key".to_owned(),
+                                serde_json::Value::String(
+                                    rpc_key_id_to_key.get(&inner).unwrap().to_string(),
+                                ),
+                            );
+                        }
+                        _ => {
+                            error!("rpc_secret_key_id should always be a String!");
+                        }
+                    }
+                } else if key == "sum_response_millis" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_response_millis".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("sum_response_millis should always be a Long!");
+                        }
+                    }
+                }
+                // Make this if detailed ...
+                else if stat_response_type == StatType::Detailed && key == "method" {
+                    match value {
+                        influxdb2_structmap::value::Value::String(inner) => {
+                            out.insert("method".to_owned(), serde_json::Value::String(inner));
+                        }
+                        _ => {
+                            error!("method should always be a String!");
+                        }
+                    }
+                } else if key == "chain_id" {
+                    match value {
+                        influxdb2_structmap::value::Value::String(inner) => {
+                            out.insert("chain_id".to_owned(), serde_json::Value::String(inner));
+                        }
+                        _ => {
+                            error!("chain_id should always be a String!");
+                        }
+                    }
+                } else if key == "archive_needed" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "archive_needed".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("archive_needed should always be a Long!");
+                        }
+                    }
+                } else if key == "error_response" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "error_response".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("error_response should always be a Long!");
+                        }
+                    }
+                }
+            });
 
             // datapoints.insert(out.get("time"), out);
             json!(out)
         })
         .collect::<Vec<_>>();
-
 
     // I suppose archive requests could be either gathered by default (then summed up), or retrieved on a second go.
     // Same with error responses ..
