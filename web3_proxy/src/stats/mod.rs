@@ -406,7 +406,6 @@ impl BufferedRpcQueryStats {
             }
         };
 
-        info!("Downgrade 1");
         let downgrade_user_role = user_tier::Entity::find()
             .filter(user_tier::Column::Id.eq(downgrade_user.user_tier_id))
             .one(db_conn)
@@ -415,7 +414,6 @@ impl BufferedRpcQueryStats {
                 "The foreign key for the user's user_tier_id was not found! {:?}",
                 downgrade_user.user_tier_id
             ))?;
-        info!("Downgrade 2");
 
         // Downgrade a user to premium - out of funds if there's less than 10$ in the account, and if the user was premium before
         if new_available_balance < Decimal::from(10u64) && downgrade_user_role.title == "Premium" {
@@ -550,7 +548,6 @@ impl BufferedRpcQueryStats {
 
         builder = builder.tag("chain_id", chain_id.to_string());
 
-        info!("RPC secret key id is: {:?}", key.rpc_secret_key_id);
         if let Some(rpc_secret_key_id) = key.rpc_secret_key_id {
             builder = builder.tag("rpc_secret_key_id", rpc_secret_key_id.to_string());
         }
@@ -572,19 +569,21 @@ impl BufferedRpcQueryStats {
             .field("sum_response_bytes", self.sum_response_bytes as i64)
             // TODO: will this be enough of a range
             // I guess Decimal can be a f64
+            // TODO: This should prob be a float, i should change the query if we want float-precision for this (which would be important...)
             .field(
                 "sum_credits_used",
                 self.sum_credits_used
                     .to_f64()
-                    .expect("number is really (too) large") as i64,
+                    .expect("number is really (too) large"),
             )
             .field(
                 "balance",
                 self.latest_balance
                     .to_f64()
-                    .expect("number is really (too) large")
-                    .round() as i64,
+                    .expect("number is really (too) large"),
             );
+
+        // .round() as i64
 
         builder = builder.timestamp(key.response_timestamp);
         let timestamp_precision = TimestampPrecision::Seconds;

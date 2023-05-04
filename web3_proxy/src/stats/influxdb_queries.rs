@@ -41,26 +41,15 @@ pub async fn query_user_stats<'a>(
         None => 0,
     };
 
-    let db_conn = app.db_conn().context("query_user_stats needs a db")?;
     let db_replica = app
         .db_replica()
         .context("query_user_stats needs a db replica")?;
-    let mut redis_conn = app
-        .redis_conn()
-        .await
-        .context("query_user_stats had a redis connection error")?
-        .context("query_user_stats needs a redis")?;
 
-    warn!("Got here: 1");
     // TODO: have a getter for this. do we need a connection pool on it?
     let influxdb_client = app
         .influxdb_client
         .as_ref()
         .context("query_user_stats needs an influxdb client")?;
-
-    // get the user id first. if it is 0, we should use a cache on the app
-    // let user_id =
-    //     get_user_id_from_params(&mut redis_conn, &db_conn, &db_replica, bearer, params).await?;
 
     let query_window_seconds = get_query_window_seconds_from_params(params)?;
     let query_start = get_query_start_from_params(params)?.timestamp();
@@ -80,6 +69,8 @@ pub async fn query_user_stats<'a>(
     } else {
         "opt_in_proxy"
     };
+
+    let mut join_candidates: Vec<String> = vec!["_time".to_string(), "_measurement".to_string(), "chain_id".to_string()];
 
     // Include a hashmap to go from rpc_secret_key_id to the rpc_secret_key
     let mut rpc_key_id_to_key = HashMap::new();
@@ -136,12 +127,16 @@ pub async fn query_user_stats<'a>(
             ));
         }
 
+        // Make the tables join on the rpc_key_id as well:
+        join_candidates.push("rpc_secret_key_id".to_string());
+
         // Iterate, pop and add to string
         f!(
             r#"|> filter(fn: (r) => contains(value: r["rpc_secret_key_id"], set: {:?}))"#,
             user_rpc_keys
         )
     };
+
 
     // TODO: Turn into a 500 error if bucket is not found ..
     // Or just unwrap or so
@@ -170,29 +165,50 @@ pub async fn query_user_stats<'a>(
 
     let drop_method = match stat_response_type {
         StatType::Aggregated => f!(r#"|> drop(columns: ["method"])"#),
-        StatType::Detailed => "".to_string(),
+        StatType::Detailed => {
+            // Make the tables join on the method column as well
+            join_candidates.push("method".to_string());
+            "".to_string()
+        },
     };
+    let join_candidates = f!(r#"{:?}"#, join_candidates);
 
     let query = f!(r#"
-        from(bucket: "{bucket}")
+    base = from(bucket: "{bucket}")
         |> range(start: {query_start}, stop: {query_stop})
         {rpc_key_filter}
         |> filter(fn: (r) => r["_measurement"] == "{measurement}")
         {filter_chain_id}
         {drop_method}
+
+    cumsum = base
         |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
         |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
-        
+        |> drop(columns: ["balance"])
         |> map(fn: (r) => ({{ r with "archive_needed": if r.archive_needed == "true" then r.frontend_requests else 0}}))
         |> map(fn: (r) => ({{ r with "error_response": if r.error_response == "true" then r.frontend_requests else 0}}))
-        
         |> group(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"])
         |> sort(columns: ["frontend_requests"])
+        |> map(fn:(r) => ({{ r with "sum_credits_used": float(v: r["sum_credits_used"]) }}))
         |> cumulativeSum(columns: ["archive_needed", "error_response", "backend_requests", "cache_hits", "cache_misses", "frontend_requests", "sum_credits_used", "sum_request_bytes", "sum_response_bytes", "sum_response_millis"])
         |> sort(columns: ["frontend_requests"], desc: true)
         |> limit(n: 1)
-        |> sort(columns: ["_time"], desc: true)
         |> group()
+        |> sort(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"], desc: true)
+
+    balance = base
+        |> toFloat()
+        |> aggregateWindow(every: {query_window_seconds}s, fn: mean, createEmpty: false)
+        |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+        |> group(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"])
+        |> mean(column: "balance")
+        |> group()
+        |> sort(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"], desc: true)
+
+    join(
+        tables: {{cumsum, balance}},
+        on: {join_candidates}
+    )
     "#);
 
     info!("Raw query to db is: {:?}", query);
@@ -206,7 +222,9 @@ pub async fn query_user_stats<'a>(
     // Basically rename all items to be "total",
     // calculate number of "archive_needed" and "error_responses" through their boolean representations ...
     // HashMap<String, serde_json::Value>
-    let datapoints: Vec<_> = raw_influx_responses
+    // let mut datapoints = HashMap::new();
+    // TODO: I must be able to probably zip the balance query...
+    let datapoints = raw_influx_responses
         .into_iter()
         // .into_values()
         .map(|x| x.values)
@@ -214,10 +232,9 @@ pub async fn query_user_stats<'a>(
             // Unwrap all relevant numbers
             // BTreeMap<String, value::Value>
             let mut out: HashMap<String, serde_json::Value> = HashMap::new();
-
             value_map
                 .into_iter()
-                .map(|(key, value)| {
+                .for_each(|(key, value)| {
                     if key == "_measurement" {
                         match value {
                             influxdb2_structmap::value::Value::String(inner) => {
@@ -281,14 +298,14 @@ pub async fn query_user_stats<'a>(
                         }
                     } else if key == "balance" {
                         match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
+                            influxdb2_structmap::value::Value::Double(inner) => {
                                 out.insert(
                                     "balance".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
+                                    json!(f64::from(inner)),
                                 );
                             }
                             _ => {
-                                error!("balance should always be a Long!");
+                                error!("balance should always be a Double!");
                             }
                         }
                     } else if key == "cache_hits" {
@@ -341,14 +358,14 @@ pub async fn query_user_stats<'a>(
                         }
                     } else if key == "sum_credits_used" {
                         match value {
-                            influxdb2_structmap::value::Value::Long(inner) => {
+                            influxdb2_structmap::value::Value::Double(inner) => {
                                 out.insert(
                                     "total_credits_used".to_owned(),
-                                    serde_json::Value::Number(inner.into()),
+                                    json!(f64::from(inner)),
                                 );
                             }
                             _ => {
-                                error!("sum_credits_used should always be a Long!");
+                                error!("sum_credits_used should always be a Double!");
                             }
                         }
                     } else if key == "sum_request_bytes" {
@@ -444,13 +461,13 @@ pub async fn query_user_stats<'a>(
                             }
                         }
                     }
-                    ()
-                })
-                .collect::<Vec<()>>();
+                });
 
+            // datapoints.insert(out.get("time"), out);
             json!(out)
         })
         .collect::<Vec<_>>();
+
 
     // I suppose archive requests could be either gathered by default (then summed up), or retrieved on a second go.
     // Same with error responses ..
