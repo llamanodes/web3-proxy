@@ -46,6 +46,7 @@ pub async fn serve(
 ) -> anyhow::Result<()> {
     // setup caches for whatever the frontend needs
     // no need for max items since it is limited by the enum key
+    // TODO: latest moka allows for different ttls for different
     let json_response_cache: FrontendJsonResponseCache = Cache::builder()
         .time_to_live(Duration::from_secs(2))
         .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
@@ -198,16 +199,6 @@ pub async fn serve(
         // 404 for any unknown routes
         .fallback(errors::handler_404);
 
-    // TODO: into_make_service is enough if we always run behind a proxy. make into_make_service_with_connect_info optional?
-    /*
-    It sequentially looks for an IP in:
-      - x-forwarded-for header (de-facto standard)
-      - x-real-ip header
-      - forwarded header (new standard)
-      - axum::extract::ConnectInfo (if not behind proxy)
-    */
-    let service = app.into_make_service_with_connect_info::<SocketAddr>();
-
     let server_builder = if let Some(listener) = ListenFd::from_env().take_tcp_listener(0)? {
         // use systemd socket magic for no downtime deploys
         let addr = listener.local_addr()?;
@@ -223,8 +214,22 @@ pub async fn serve(
         axum::Server::try_bind(&addr)?
     };
 
+    // into_make_service is enough if we always run behind a proxy
+    /*
+    It sequentially looks for an IP in:
+      - x-forwarded-for header (de-facto standard)
+      - x-real-ip header
+      - forwarded header (new standard)
+      - axum::extract::ConnectInfo (if not behind proxy)
+    */
+    #[cfg(connectinfo)]
+    let make_service = app.into_make_service_with_connect_info::<SocketAddr>();
+
+    #[cfg(not(connectinfo))]
+    let make_service = app.into_make_service();
+
     let server = server_builder
-        .serve(service)
+        .serve(make_service)
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .with_graceful_shutdown(async move {
             let _ = shutdown_receiver.recv().await;

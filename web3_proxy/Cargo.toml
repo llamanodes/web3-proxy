@@ -7,10 +7,11 @@ default-run = "web3_proxy_cli"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["deadlock_detection"]
+default = ["connectinfo", "deadlock_detection"]
 deadlock_detection = ["parking_lot/deadlock_detection"]
 tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
 rdkafka-src = ["rdkafka/cmake-build", "rdkafka/libz", "rdkafka/ssl", "rdkafka/zstd-pkg-config"]
+connectinfo = []
 
 [dependencies]
 deferred-rate-limiter = { path = "../deferred-rate-limiter" }
