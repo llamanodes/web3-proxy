@@ -26,6 +26,7 @@ thread-fast-rng = { path = "../thread-fast-rng" }
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 
 anyhow = { version = "1.0.71", features = ["backtrace"] }
+arc-swap = "1.6.0"
 argh = "0.1.10"
 axum = { version = "0.6.18", features = ["headers", "ws"] }
 axum-client-ip = "0.4.1"
@@ -47,8 +48,8 @@ glob = "0.3.1"
 handlebars = "4.3.6"
 hashbrown = { version = "0.13.2", features = ["serde"] }
 hdrhistogram = "7.5.2"
-http = "0.2.9"
 hostname = "0.3.1"
+http = "0.2.9"
 influxdb2 = { version = "0.4", features = ["rustls"] }
 influxdb2-structmap = "0.2.0"
 ipnet = "2.7.2"
@@ -82,5 +83,4 @@ tower = "0.4.13"
 tower-http = { version = "0.4.0", features = ["cors", "sensitive-headers"] }
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.3.1"
-uuid = "1.3.2"
-arc-swap = "1.6.0"
+uuid = { version = "1.3.2", features = ["fast-rng", "v4"] }
