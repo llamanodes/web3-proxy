@@ -1155,14 +1155,9 @@ impl Web3ProxyApp {
             .head_block_num()
             .ok_or(Web3ProxyError::NoServersSynced)?;
 
-        let responses = join_all(
-            requests
-                .into_iter()
-                .map(|request| {
-                    self.proxy_cached_request(authorization, request, Some(head_block_num))
-                })
-                .collect::<Vec<_>>(),
-        )
+        let responses = join_all(requests.into_iter().map(|request| {
+            self.proxy_cached_request(authorization, request, Some(head_block_num))
+        }))
         .await;
 
         // TODO: i'm sure this could be done better with iterators

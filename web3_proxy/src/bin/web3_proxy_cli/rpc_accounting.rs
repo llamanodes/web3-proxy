@@ -112,7 +112,7 @@ impl RpcAccountingSubCommand {
                 return Err(anyhow::anyhow!("no user keys"));
             }
 
-            let u_key_ids: Vec<_> = u_keys.iter().map(|x| x.id).collect();
+            let u_key_ids: Vec<_> = u_keys.into_iter().map(|x| x.id).collect();
 
             condition = condition.add(rpc_accounting::Column::RpcKeyId.is_in(u_key_ids));
         }

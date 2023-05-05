@@ -319,7 +319,7 @@ impl ConsensusFinder {
     ) -> Option<ConsensusWeb3Rpcs> {
         // sort the primary votes ascending by tier and descending by block num
         let mut votes: Vec<_> = votes
-            .iter()
+            .into_iter()
             .map(|(block, (rpc_names, sum_soft_limit))| (block, sum_soft_limit, rpc_names))
             .collect();
         votes.sort_by_cached_key(|(block, sum_soft_limit, rpc_names)| {

@@ -1477,6 +1477,7 @@ mod tests {
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
             block_sender,
+            // TODO: ArcSwap?
             by_name: RwLock::new(rpcs_by_name),
             http_interval_sender: None,
             watch_consensus_head_sender: Some(watch_consensus_head_sender),

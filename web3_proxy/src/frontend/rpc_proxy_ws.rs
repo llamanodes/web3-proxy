@@ -443,7 +443,7 @@ async fn read_web3_socket(
     mut ws_rx: SplitStream<WebSocket>,
     response_sender: flume::Sender<Message>,
 ) {
-    // TODO: need a concurrent hashmap
+    // RwLock should be fine here. a user isn't going to be opening tons of subscriptions
     let subscriptions = Arc::new(RwLock::new(HashMap::new()));
     let subscription_count = Arc::new(AtomicUsize::new(1));
 
