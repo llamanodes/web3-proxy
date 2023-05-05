@@ -17,6 +17,7 @@ use axum::{
     Extension, Router,
 };
 use http::header::AUTHORIZATION;
+use listenfd::ListenFd;
 use log::info;
 use moka::future::Cache;
 use std::net::SocketAddr;
@@ -197,11 +198,6 @@ pub async fn serve(
         // 404 for any unknown routes
         .fallback(errors::handler_404);
 
-    // run our app with hyper
-    // TODO: allow only listening on localhost? top_config.app.host.parse()?
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    info!("listening on port {}", port);
-
     // TODO: into_make_service is enough if we always run behind a proxy. make into_make_service_with_connect_info optional?
     /*
     It sequentially looks for an IP in:
@@ -212,12 +208,22 @@ pub async fn serve(
     */
     let service = app.into_make_service_with_connect_info::<SocketAddr>();
 
-    // TODO: listenfd
+    let server_builder = if let Some(listener) = ListenFd::from_env().take_tcp_listener(0)? {
+        // use systemd socket magic for no downtime deploys
+        let addr = listener.local_addr()?;
 
-    // let (tcp_listener, listen_addr) = tcp_listener.accept().await?;
+        info!("listening with fd at {}", addr);
 
-    // `axum::Server` is a re-export of `hyper::Server`
-    let server = axum::Server::bind(&addr)
+        axum::Server::from_tcp(listener)?
+    } else {
+        info!("listening on port {}", port);
+        // TODO: allow only listening on localhost? top_config.app.host.parse()?
+        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+        axum::Server::try_bind(&addr)?
+    };
+
+    let server = server_builder
         .serve(service)
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .with_graceful_shutdown(async move {
