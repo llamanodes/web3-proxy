@@ -1212,46 +1212,9 @@ impl Web3ProxyApp {
         request: &JsonRpcRequest,
         request_metadata: Arc<RequestMetadata>,
         num_public_rpcs: Option<usize>,
-        head_block_num: Option<U64>,
     ) -> Web3ProxyResult<JsonRpcForwardedResponse> {
-        // TODO: error/wait if no head block?
-        // TODO: configurable lag
-        let min_block_needed = head_block_num
-            .or(self.balanced_rpcs.head_block_num())
-            .ok_or_else(|| Web3ProxyError::NoServersSynced)?
-            .saturating_sub(3.into());
-
         if let Some(protected_rpcs) = self.private_rpcs.as_ref() {
             if !protected_rpcs.is_empty() {
-                // send to protected and public rpcs at the same time
-                // TODO: send to tier 0 of private, wait a block, ..., tier N of private, wait a block, public
-                // TODO: allow premium users to choose specifically where they want transactions to go
-                let public_f = {
-                    let authorization = authorization.clone();
-                    let clone = self.clone();
-                    // TODO: should request be in an arc? inside the request metadata?
-                    let request = request.clone();
-                    let request_metadata = Some(request_metadata.clone());
-
-                    async move {
-                        clone
-                            .balanced_rpcs
-                            .try_send_all_synced_connections(
-                                &authorization,
-                                &request,
-                                request_metadata,
-                                Some(&min_block_needed),
-                                None,
-                                Level::Trace,
-                                num_public_rpcs,
-                                true,
-                            )
-                            .await
-                    }
-                };
-
-                let public_handle = tokio::spawn(public_f);
-
                 let protected_response = protected_rpcs
                     .try_send_all_synced_connections(
                         authorization,
@@ -1265,10 +1228,6 @@ impl Web3ProxyApp {
                     )
                     .await?;
 
-                // wait for sending to the public rpcs to finish
-                // TODO: let this run in the background instead?
-                public_handle.await??;
-
                 return Ok(protected_response);
             }
         }
@@ -1280,7 +1239,7 @@ impl Web3ProxyApp {
                 authorization,
                 request,
                 Some(request_metadata),
-                Some(&min_block_needed),
+                None,
                 None,
                 Level::Trace,
                 num_public_rpcs,
@@ -1585,7 +1544,6 @@ impl Web3ProxyApp {
                         &request,
                         request_metadata.clone(),
                         num_public_rpcs,
-                        head_block_num,
                     )
                     .await?;
 
