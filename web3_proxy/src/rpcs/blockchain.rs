@@ -444,7 +444,7 @@ impl Web3Rpcs {
         let consensus_head_block = new_synced_connections.head_block.clone();
         let num_consensus_rpcs = new_synced_connections.num_conns();
         let num_active_rpcs = consensus_finder.len();
-        let total_rpcs = self.by_name.read().len();
+        let total_rpcs = self.by_name.load().len();
 
         let old_consensus_head_connections = self
             .watch_consensus_rpcs_sender
