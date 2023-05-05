@@ -13,7 +13,7 @@ pub mod users;
 
 use crate::app::Web3ProxyApp;
 use axum::{
-    routing::{get, post, put},
+    routing::{get, post},
     Extension, Router,
 };
 use http::header::AUTHORIZATION;
@@ -25,11 +25,6 @@ use std::{iter::once, time::Duration};
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
-
-#[cfg(not(tokio_uring))]
-use tokio::net::TcpListener;
-#[cfg(tokio_uring)]
-use tokio_uring::net::TcpListener;
 
 /// simple keys for caching responses
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -67,102 +62,77 @@ pub async fn serve(
         //
         // HTTP RPC (POST)
         //
+        // Websocket RPC (GET)
+        // If not an RPC, GET will redirect to urls in the config
+        //
         // public
-        .route("/", post(rpc_proxy_http::proxy_web3_rpc))
+        .route(
+            "/",
+            post(rpc_proxy_http::proxy_web3_rpc).get(rpc_proxy_ws::websocket_handler),
+        )
         // authenticated with and without trailing slash
         .route(
             "/rpc/:rpc_key/",
-            post(rpc_proxy_http::proxy_web3_rpc_with_key),
+            post(rpc_proxy_http::proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::websocket_handler_with_key),
         )
         .route(
             "/rpc/:rpc_key",
-            post(rpc_proxy_http::proxy_web3_rpc_with_key),
+            post(rpc_proxy_http::proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::websocket_handler_with_key),
         )
         // authenticated debug route with and without trailing slash
         .route(
             "/debug/:rpc_key/",
-            post(rpc_proxy_http::debug_proxy_web3_rpc_with_key),
+            post(rpc_proxy_http::debug_proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::debug_websocket_handler_with_key),
         )
         .route(
             "/debug/:rpc_key",
-            post(rpc_proxy_http::debug_proxy_web3_rpc_with_key),
+            post(rpc_proxy_http::debug_proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::debug_websocket_handler_with_key),
         )
         // public fastest with and without trailing slash
-        .route("/fastest/", post(rpc_proxy_http::fastest_proxy_web3_rpc))
-        .route("/fastest", post(rpc_proxy_http::fastest_proxy_web3_rpc))
+        .route(
+            "/fastest/",
+            post(rpc_proxy_http::fastest_proxy_web3_rpc)
+                .get(rpc_proxy_ws::fastest_websocket_handler),
+        )
+        .route(
+            "/fastest",
+            post(rpc_proxy_http::fastest_proxy_web3_rpc)
+                .get(rpc_proxy_ws::fastest_websocket_handler),
+        )
         // authenticated fastest with and without trailing slash
         .route(
             "/fastest/:rpc_key/",
-            post(rpc_proxy_http::fastest_proxy_web3_rpc_with_key),
+            post(rpc_proxy_http::fastest_proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::fastest_websocket_handler_with_key),
         )
         .route(
             "/fastest/:rpc_key",
-            post(rpc_proxy_http::fastest_proxy_web3_rpc_with_key),
-        )
-        // public versus
-        .route("/versus/", post(rpc_proxy_http::versus_proxy_web3_rpc))
-        .route("/versus", post(rpc_proxy_http::versus_proxy_web3_rpc))
-        // authenticated versus with and without trailing slash
-        .route(
-            "/versus/:rpc_key/",
-            post(rpc_proxy_http::versus_proxy_web3_rpc_with_key),
-        )
-        .route(
-            "/versus/:rpc_key",
-            post(rpc_proxy_http::versus_proxy_web3_rpc_with_key),
-        )
-        //
-        // Websocket RPC (GET)
-        // If not an RPC, this will redirect to configurable urls
-        //
-        // public
-        .route("/", get(rpc_proxy_ws::websocket_handler))
-        // authenticated with and without trailing slash
-        .route(
-            "/rpc/:rpc_key/",
-            get(rpc_proxy_ws::websocket_handler_with_key),
-        )
-        .route(
-            "/rpc/:rpc_key",
-            get(rpc_proxy_ws::websocket_handler_with_key),
-        )
-        // debug with and without trailing slash
-        .route(
-            "/debug/:rpc_key/",
-            get(rpc_proxy_ws::websocket_handler_with_key),
-        )
-        .route(
-            "/debug/:rpc_key",
-            get(rpc_proxy_ws::websocket_handler_with_key),
-        ) // public fastest with and without trailing slash
-        .route("/fastest/", get(rpc_proxy_ws::fastest_websocket_handler))
-        .route("/fastest", get(rpc_proxy_ws::fastest_websocket_handler))
-        // authenticated fastest with and without trailing slash
-        .route(
-            "/fastest/:rpc_key/",
-            get(rpc_proxy_ws::fastest_websocket_handler_with_key),
-        )
-        .route(
-            "/fastest/:rpc_key",
-            get(rpc_proxy_ws::fastest_websocket_handler_with_key),
+            post(rpc_proxy_http::fastest_proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::fastest_websocket_handler_with_key),
         )
         // public versus
         .route(
             "/versus/",
-            get(rpc_proxy_ws::versus_websocket_handler_with_key),
+            post(rpc_proxy_http::versus_proxy_web3_rpc).get(rpc_proxy_ws::versus_websocket_handler),
         )
         .route(
             "/versus",
-            get(rpc_proxy_ws::versus_websocket_handler_with_key),
+            post(rpc_proxy_http::versus_proxy_web3_rpc).get(rpc_proxy_ws::versus_websocket_handler),
         )
         // authenticated versus with and without trailing slash
         .route(
             "/versus/:rpc_key/",
-            get(rpc_proxy_ws::versus_websocket_handler_with_key),
+            post(rpc_proxy_http::versus_proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::versus_websocket_handler_with_key),
         )
         .route(
             "/versus/:rpc_key",
-            get(rpc_proxy_ws::versus_websocket_handler_with_key),
+            post(rpc_proxy_http::versus_proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::versus_websocket_handler_with_key),
         )
         //
         // System things
@@ -179,13 +149,15 @@ pub async fn serve(
             get(users::user_login_get),
         )
         .route("/user/login", post(users::user_login_post))
-        .route("/user", get(users::user_get))
-        .route("/user", post(users::user_post))
+        .route("/user", get(users::user_get).post(users::user_post))
         .route("/user/balance", get(users::user_balance_get))
         .route("/user/balance/:txid", post(users::user_balance_post))
-        .route("/user/keys", get(users::rpc_keys_get))
-        .route("/user/keys", post(users::rpc_keys_management))
-        .route("/user/keys", put(users::rpc_keys_management))
+        .route(
+            "/user/keys",
+            get(users::rpc_keys_get)
+                .post(users::rpc_keys_management)
+                .put(users::rpc_keys_management),
+        )
         .route("/user/revert_logs", get(users::user_revert_logs_get))
         .route(
             "/user/stats/aggregate",
@@ -218,7 +190,7 @@ pub async fn serve(
         // handle cors
         .layer(CorsLayer::very_permissive())
         // application state
-        .layer(Extension(proxy_app.clone()))
+        .layer(Extension(proxy_app))
         // frontend caches
         .layer(Extension(json_response_cache))
         .layer(Extension(health_cache))
@@ -242,20 +214,12 @@ pub async fn serve(
 
     // TODO: listenfd
 
-    #[cfg(not(tokio_uring))]
-    let tcp_listener = TcpListener::bind(&addr).await?;
-
-    #[cfg(tokio_uring)]
-    let tcp_listener = TcpListener::bind(&addr).await?;
-
     // let (tcp_listener, listen_addr) = tcp_listener.accept().await?;
 
-    let tcp_listener = tcp_listener.into_std()?;
-
     // `axum::Server` is a re-export of `hyper::Server`
-    let server = axum::Server::from_tcp(tcp_listener)?
-        // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
+    let server = axum::Server::bind(&addr)
         .serve(service)
+        // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .with_graceful_shutdown(async move {
             let _ = shutdown_receiver.recv().await;
         })

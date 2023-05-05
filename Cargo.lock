@@ -2881,16 +2881,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "io-uring"
-version = "0.5.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41c85eff7f7c8d3ab8c7ec87313c0c194bbaf4371bb7d40f80293ba01bce8264"
-dependencies = [
- "bitflags",
- "libc",
-]
-
-[[package]]
 name = "ipnet"
 version = "2.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4759,12 +4749,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scoped-tls"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
-
-[[package]]
 name = "scopeguard"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6018,20 +6002,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-uring"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d5e02bb137e030b3a547c65a3bd2f1836d66a97369fdcc69034002b10e155ef"
-dependencies = [
- "io-uring",
- "libc",
- "scoped-tls",
- "slab",
- "socket2",
- "tokio",
-]
-
-[[package]]
 name = "tokio-util"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6711,7 +6681,6 @@ dependencies = [
  "tokio",
  "tokio-console",
  "tokio-stream",
- "tokio-uring",
  "toml 0.7.3",
  "tower",
  "tower-http",
