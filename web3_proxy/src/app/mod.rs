@@ -1834,7 +1834,7 @@ impl Web3ProxyApp {
                         let to_block_num = cache_key.to_block.as_ref().map(|x| *x.number());
 
                         self.response_cache
-                            .try_get_with(cache_key, async move {
+                            .try_get_with_by_ref(&cache_key, async move {
                                 // TODO: put the hash here instead of the block number? its in the request already.
                                 let mut response = self
                                     .balanced_rpcs
