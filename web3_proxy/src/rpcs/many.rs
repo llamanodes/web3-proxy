@@ -234,14 +234,13 @@ impl Web3Rpcs {
         // TODO: will need to think about this more once sum_soft_limit is dynamic
         let sum_soft_limit = rpc_configs.values().fold(0, |acc, x| acc + x.soft_limit);
 
-        // TODO: < is a bit dangerous, we should require a buffer
-        if sum_soft_limit < self.min_sum_soft_limit {
-            return Err(anyhow::anyhow!(
-                "Only {}/{} soft limit! Add more rpcs, increase soft limits, or reduce min_sum_soft_limit.",
-                sum_soft_limit,
-                self.min_sum_soft_limit
-            ));
-        }
+        // TODO: require a buffer?
+        anyhow::ensure!(
+            sum_soft_limit >= self.min_sum_soft_limit,
+            "Only {}/{} soft limit! Add more rpcs, increase soft limits, or reduce min_sum_soft_limit.",
+            sum_soft_limit,
+            self.min_sum_soft_limit,
+        );
 
         // turn configs into connections (in parallel)
         // TODO: move this into a helper function. then we can use it when configs change (will need a remove function too)

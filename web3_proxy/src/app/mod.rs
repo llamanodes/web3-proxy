@@ -77,7 +77,6 @@ struct ResponseCacheKey {
     // to_block is only set when ranges of blocks are requested (like with eth_getLogs)
     to_block: Option<Web3ProxyBlock>,
     method: String,
-    // TODO: better type for this
     params: Option<serde_json::Value>,
     cache_errors: bool,
 }
@@ -491,11 +490,10 @@ impl Web3ProxyApp {
                 db_conn.clone().map(DatabaseReplica)
             };
         } else {
-            if top_config.app.db_replica_url.is_some() {
-                return Err(anyhow::anyhow!(
-                    "if there is a db_replica_url, there must be a db_url"
-                ));
-            }
+            anyhow::ensure!(
+                top_config.app.db_replica_url.is_none(),
+                "if there is a db_replica_url, there must be a db_url"
+            );
 
             warn!("no database. some features will be disabled");
         };
@@ -1834,7 +1832,7 @@ impl Web3ProxyApp {
                         let to_block_num = cache_key.to_block.as_ref().map(|x| *x.number());
 
                         self.response_cache
-                            .try_get_with_by_ref(&cache_key, async move {
+                            .try_get_with(cache_key, async move {
                                 // TODO: put the hash here instead of the block number? its in the request already.
                                 let mut response = self
                                     .balanced_rpcs

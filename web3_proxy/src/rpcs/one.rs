@@ -106,7 +106,7 @@ pub struct Web3Rpc {
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
     /// this provider is only used for new heads subscriptions
-    /// TODO: watch channel instead of a lock
+    /// TODO: watch channel instead of a lock?
     /// TODO: is this only used for new heads subscriptions? if so, rename
     pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// keep track of hard limits. Optional because we skip this code for our own servers.

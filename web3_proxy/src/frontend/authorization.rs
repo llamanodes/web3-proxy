@@ -665,7 +665,7 @@ impl Web3ProxyApp {
     ) -> Web3ProxyResult<AuthorizationChecks> {
         let authorization_checks: Result<_, Arc<Web3ProxyError>> = self
             .rpc_secret_key_cache
-            .try_get_with_by_ref(&rpc_secret_key.into(), async move {
+            .try_get_with(rpc_secret_key.into(), async move {
                 // trace!(?rpc_secret_key, "user cache miss");
 
                 let db_replica = self

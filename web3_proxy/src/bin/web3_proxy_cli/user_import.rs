@@ -32,12 +32,11 @@ impl UserImportSubCommand {
     pub async fn main(self, db_conn: &DatabaseConnection) -> anyhow::Result<()> {
         let import_dir = Path::new(&self.input_dir);
 
-        if !import_dir.exists() {
-            return Err(anyhow::anyhow!(
-                "import dir ({}) does not exist!",
-                import_dir.to_string_lossy()
-            ));
-        }
+        anyhow::ensure!(
+            import_dir.exists(),
+            "import dir ({}) does not exist!",
+            import_dir.to_string_lossy()
+        );
 
         let user_glob_path = import_dir.join(format!("{}-users-*.json", self.export_timestamp));
 
@@ -180,10 +179,7 @@ impl UserImportSubCommand {
                 .await?
             {
                 // make sure it belongs to the mapped user
-                if existing_rk.user_id != mapped_id {
-                    // TODO: error or import the rest?
-                    return Err(anyhow::anyhow!("unexpected user id"));
-                }
+                anyhow::ensure!(existing_rk.user_id == mapped_id, "unexpected user id");
 
                 // the key exists under the expected user. we are good to continue
             } else {

@@ -108,9 +108,7 @@ impl RpcAccountingSubCommand {
                 .all(db_conn)
                 .await?;
 
-            if u_keys.is_empty() {
-                return Err(anyhow::anyhow!("no user keys"));
-            }
+            anyhow::ensure!(!u_keys.is_empty(), "no user keys");
 
             let u_key_ids: Vec<_> = u_keys.into_iter().map(|x| x.id).collect();
 
