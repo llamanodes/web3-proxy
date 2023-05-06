@@ -222,11 +222,17 @@ pub async fn serve(
       - forwarded header (new standard)
       - axum::extract::ConnectInfo (if not behind proxy)
     */
-    #[cfg(connectinfo)]
-    let make_service = app.into_make_service_with_connect_info::<SocketAddr>();
+    #[cfg(feature = "connectinfo")]
+    let make_service = {
+        info!("connectinfo feature enabled");
+        app.into_make_service_with_connect_info::<SocketAddr>()
+    };
 
-    #[cfg(not(connectinfo))]
-    let make_service = app.into_make_service();
+    #[cfg(not(feature = "connectinfo"))]
+    let make_service = {
+        info!("connectinfo feature disabled");
+        app.into_make_service()
+    };
 
     let server = server_builder
         .serve(make_service)

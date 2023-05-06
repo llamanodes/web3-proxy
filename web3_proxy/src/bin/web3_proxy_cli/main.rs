@@ -120,10 +120,10 @@ fn main() -> anyhow::Result<()> {
 
     // if RUST_LOG isn't set, configure a default
     // TODO: is there a better way to do this?
-    #[cfg(tokio_console)]
+    #[cfg(feature = "tokio_console")]
     console_subscriber::init();
 
-    #[cfg(not(tokio_console))]
+    #[cfg(not(feature = "tokio_console"))]
     let rust_log = match std::env::var("RUST_LOG") {
         Ok(x) => x,
         Err(_) => match std::env::var("WEB3_PROXY_TRACE").map(|x| x == "true") {

@@ -497,7 +497,6 @@ impl StatBuffer {
                     }
                 }
                 x = shutdown_receiver.recv() => {
-                    info!("shutdown signal ---");
                     match x {
                         Ok(_) => {
                             info!("stat_loop shutting down");
