@@ -865,7 +865,7 @@ impl Web3Rpcs {
     pub async fn try_send_best_consensus_head_connection(
         &self,
         authorization: &Arc<Authorization>,
-        request: JsonRpcRequest,
+        request: &JsonRpcRequest,
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
@@ -1097,7 +1097,7 @@ impl Web3Rpcs {
         Ok(JsonRpcForwardedResponse::from_str(
             "Requested data is not available",
             Some(-32043),
-            Some(request.id),
+            Some(request.id.clone()),
         ))
     }
 
@@ -1205,7 +1205,7 @@ impl Web3Rpcs {
     pub async fn try_proxy_connection(
         &self,
         authorization: &Arc<Authorization>,
-        request: JsonRpcRequest,
+        request: &JsonRpcRequest,
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,

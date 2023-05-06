@@ -72,7 +72,7 @@ rmp-serde = "1.1.1"
 rustc-hash = "1.1.0"
 sentry = { version = "0.31.0", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
 serde = { version = "1.0.162", features = [] }
-serde_json = { version = "1.0.96", default-features = false, features = ["alloc", "raw_value"] }
+serde_json = { version = "1.0.96", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.2"
 siwe = "0.5.0"
 time = "0.3.20"

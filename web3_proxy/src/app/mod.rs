@@ -1110,10 +1110,10 @@ impl Web3ProxyApp {
         let max_time = Duration::from_secs(120);
 
         let response = match request {
-            JsonRpcRequestEnum::Single(request) => {
+            JsonRpcRequestEnum::Single(mut request) => {
                 let (response, rpcs) = timeout(
                     max_time,
-                    self.proxy_cached_request(&authorization, request, None),
+                    self.proxy_cached_request(&authorization, &mut request, None),
                 )
                 .await??;
 
@@ -1138,7 +1138,7 @@ impl Web3ProxyApp {
     async fn proxy_web3_rpc_requests(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
-        requests: Vec<JsonRpcRequest>,
+        mut requests: Vec<JsonRpcRequest>,
     ) -> Web3ProxyResult<(Vec<JsonRpcForwardedResponse>, Vec<Arc<Web3Rpc>>)> {
         // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
@@ -1153,7 +1153,7 @@ impl Web3ProxyApp {
             .head_block_num()
             .ok_or(Web3ProxyError::NoServersSynced)?;
 
-        let responses = join_all(requests.into_iter().map(|request| {
+        let responses = join_all(requests.iter_mut().map(|request| {
             self.proxy_cached_request(authorization, request, Some(head_block_num))
         }))
         .await;
@@ -1251,7 +1251,7 @@ impl Web3ProxyApp {
     async fn proxy_cached_request(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
-        mut request: JsonRpcRequest,
+        request: &mut JsonRpcRequest,
         head_block_num: Option<U64>,
     ) -> Web3ProxyResult<(JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>)> {
         // TODO: move this code to another module so that its easy to turn this trace logging on in dev
@@ -1490,20 +1490,13 @@ impl Web3ProxyApp {
                     )
                     .await?;
 
-                let mut gas_estimate: U256 = if let Some(gas_estimate) = response.result.take() {
-                    serde_json::from_str(gas_estimate.get())
-                        .or(Err(Web3ProxyError::GasEstimateNotU256))?
-                } else {
-                    // i think this is always an error response
-                    let rpcs = request_metadata.backend_requests.lock().clone();
+                if let Some(gas_estimate) = response.result.take() {
+                    let mut gas_estimate: U256 = serde_json::from_str(gas_estimate.get())
+                        .or(Err(Web3ProxyError::GasEstimateNotU256))?;
 
-                    // TODO! save stats
-
-                    return Ok((response, rpcs));
-                };
-
-                let gas_increase =
-                    if let Some(gas_increase_percent) = self.config.gas_increase_percent {
+                    let gas_increase = if let Some(gas_increase_percent) =
+                        self.config.gas_increase_percent
+                    {
                         let gas_increase = gas_estimate * gas_increase_percent / U256::from(100);
 
                         let min_gas_increase = self.config.gas_increase_min.unwrap_or_default();
@@ -1513,9 +1506,12 @@ impl Web3ProxyApp {
                         self.config.gas_increase_min.unwrap_or_default()
                     };
 
-                gas_estimate += gas_increase;
+                    gas_estimate += gas_increase;
 
-                JsonRpcForwardedResponse::from_value(json!(gas_estimate), request_id)
+                    JsonRpcForwardedResponse::from_value(json!(gas_estimate), request_id)
+                } else {
+                    response
+                }
             }
             // TODO: eth_gasPrice that does awesome magic to predict the future
             "eth_hashrate" => JsonRpcForwardedResponse::from_value(json!(U64::zero()), request_id),
@@ -1539,7 +1535,7 @@ impl Web3ProxyApp {
                 let mut response = self
                     .try_send_protected(
                         authorization,
-                        &request,
+                        request,
                         request_metadata.clone(),
                         num_public_rpcs,
                     )
@@ -1555,7 +1551,7 @@ impl Web3ProxyApp {
                                 == "INTERNAL_ERROR: existing tx with same hash")
                     {
                         // TODO: expect instead of web3_context?
-                        let params = request.params.ok_or_else(|| {
+                        let params = request.params.as_ref().ok_or_else(|| {
                             Web3ProxyError::BadRequest(
                                 "Unable to get params from request".to_string(),
                             )
@@ -1721,7 +1717,6 @@ impl Web3ProxyApp {
             // anything else gets sent to backend rpcs and cached
             method => {
                 if method.starts_with("admin_") {
-                    // TODO: emit a stat for billing
                     return Err(Web3ProxyError::AccessDenied);
                 }
 
@@ -1729,6 +1724,9 @@ impl Web3ProxyApp {
                 let head_block_num = head_block_num
                     .or(self.balanced_rpcs.head_block_num())
                     .ok_or(Web3ProxyError::NoServersSynced)?;
+
+                // TODO: don't clone. this happens way too much. maybe &mut?
+                let mut request = request.clone();
 
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
@@ -1838,7 +1836,7 @@ impl Web3ProxyApp {
                                     .balanced_rpcs
                                     .try_proxy_connection(
                                         &authorization,
-                                        request,
+                                        &request,
                                         Some(&request_metadata),
                                         from_block_num.as_ref(),
                                         to_block_num.as_ref(),
@@ -1859,7 +1857,7 @@ impl Web3ProxyApp {
                         self.balanced_rpcs
                             .try_proxy_connection(
                                 &authorization,
-                                request,
+                                &request,
                                 Some(&request_metadata),
                                 None,
                                 None,

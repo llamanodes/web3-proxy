@@ -236,7 +236,7 @@ impl Web3Rpcs {
             None => {
                 // TODO: helper for method+params => JsonRpcRequest
                 // TODO: does this id matter?
-                let request = json!({ "id": "1", "method": "eth_getBlockByHash", "params": get_block_params });
+                let request = json!({ "jsonrpc": "2.0", "id": "1", "method": "eth_getBlockByHash", "params": get_block_params });
                 let request: JsonRpcRequest = serde_json::from_value(request)?;
 
                 // TODO: request_metadata? maybe we should put it in the authorization?
@@ -244,7 +244,7 @@ impl Web3Rpcs {
                 let response = self
                     .try_send_best_consensus_head_connection(
                         authorization,
-                        request,
+                        &request,
                         None,
                         None,
                         None,
@@ -344,7 +344,7 @@ impl Web3Rpcs {
         let request: JsonRpcRequest = serde_json::from_value(request)?;
 
         let response = self
-            .try_send_best_consensus_head_connection(authorization, request, None, Some(num), None)
+            .try_send_best_consensus_head_connection(authorization, &request, None, Some(num), None)
             .await?;
 
         if response.error.is_some() {
