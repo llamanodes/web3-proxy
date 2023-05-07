@@ -548,8 +548,8 @@ impl Web3Rpcs {
 
                     m.entry(offset_ranking).or_insert_with(Vec::new).extend(v);
                 }
-            } else {
-                // this Web3Rpcs is not tracking head blocks. pick any server
+            } else if self.watch_consensus_head_sender.is_none() {
+                trace!("this Web3Rpcs is not tracking head blocks. pick any server");
 
                 for x in self.by_name.load().values() {
                     if skip.contains(x) {
@@ -1333,12 +1333,9 @@ mod tests {
         let lagged_block = Arc::new(lagged_block);
         let head_block = Arc::new(head_block);
 
-        let mut lagged_block: Web3ProxyBlock = lagged_block.try_into().unwrap();
-        let mut head_block: Web3ProxyBlock = head_block.try_into().unwrap();
-
         let block_data_limit = u64::MAX;
 
-        let (tx_synced, _) = watch::channel(Some(head_block.clone()));
+        let (tx_synced, _) = watch::channel(None);
 
         let head_rpc = Web3Rpc {
             name: "synced".to_string(),
@@ -1352,7 +1349,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (tx_lagged, _) = watch::channel(Some(lagged_block.clone()));
+        let (tx_lagged, _) = watch::channel(None);
 
         let lagged_rpc = Web3Rpc {
             name: "lagged".to_string(),
@@ -1366,11 +1363,11 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(head_rpc.has_block_data(lagged_block.number()));
-        assert!(head_rpc.has_block_data(head_block.number()));
+        assert!(!head_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
+        assert!(!head_rpc.has_block_data(head_block.number.as_ref().unwrap()));
 
-        assert!(lagged_rpc.has_block_data(lagged_block.number()));
-        assert!(!lagged_rpc.has_block_data(head_block.number()));
+        assert!(!lagged_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
+        assert!(!lagged_rpc.has_block_data(head_block.number.as_ref().unwrap()));
 
         let head_rpc = Arc::new(head_rpc);
         let lagged_rpc = Arc::new(lagged_rpc);
@@ -1382,14 +1379,12 @@ mod tests {
 
         let (block_sender, _block_receiver) = flume::unbounded();
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
-        let (watch_consensus_rpcs_sender, _watch_consensus_rpcs_receiver) =
-            watch::channel(Default::default());
-        let (watch_consensus_head_sender, _watch_consensus_head_receiver) =
-            watch::channel(Default::default());
+        let (watch_consensus_rpcs_sender, _watch_consensus_rpcs_receiver) = watch::channel(None);
+        let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
-            block_sender,
+            block_sender: block_sender.clone(),
             by_name: ArcSwap::from_pointee(rpcs_by_name),
             http_interval_sender: None,
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
@@ -1446,9 +1441,15 @@ mod tests {
             2
         );
 
-        // best_synced_backend_connection requires servers to be synced with the head block
+        // best_synced_backend_connection which servers to be synced with the head block should not find any nodes
         let x = rpcs
-            .best_available_rpc(&authorization, None, &[], None, None)
+            .best_available_rpc(
+                &authorization,
+                None,
+                &[],
+                Some(head_block.number.as_ref().unwrap()),
+                None,
+            )
             .await
             .unwrap();
 
@@ -1457,37 +1458,74 @@ mod tests {
         assert!(matches!(x, OpenRequestResult::NotReady));
 
         // add lagged blocks to the rpcs. both servers should be allowed
-        lagged_block = rpcs.try_cache_block(lagged_block, true).await.unwrap();
+        lagged_rpc
+            .send_head_block_result(
+                Ok(Some(lagged_block.clone())),
+                &block_sender,
+                rpcs.blocks_by_hash.clone(),
+            )
+            .await
+            .unwrap();
 
+        // TODO: this is fragile
         rpcs.process_block_from_rpc(
             &authorization,
             &mut consensus_finder,
-            Some(lagged_block.clone()),
-            lagged_rpc,
+            Some(lagged_block.clone().try_into().unwrap()),
+            lagged_rpc.clone(),
             &None,
         )
         .await
         .unwrap();
+
+        head_rpc
+            .send_head_block_result(
+                Ok(Some(lagged_block.clone())),
+                &block_sender,
+                rpcs.blocks_by_hash.clone(),
+            )
+            .await
+            .unwrap();
+
+        // TODO: this is fragile
         rpcs.process_block_from_rpc(
             &authorization,
             &mut consensus_finder,
-            Some(lagged_block.clone()),
+            Some(lagged_block.clone().try_into().unwrap()),
             head_rpc.clone(),
             &None,
         )
         .await
         .unwrap();
 
+        // TODO: how do we spawn this and wait for it to process things? subscribe and watch consensus connections?
+        // rpcs.process_incoming_blocks(&authorization, block_receiver, pending_tx_sender)
+
+        assert!(head_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
+        assert!(!head_rpc.has_block_data(head_block.number.as_ref().unwrap()));
+
+        assert!(lagged_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
+        assert!(!lagged_rpc.has_block_data(head_block.number.as_ref().unwrap()));
+
+        // todo!("this doesn't work anymore. send_head_block_result doesn't do anything when rpcs isn't watching the block_receiver")
         assert_eq!(rpcs.num_synced_rpcs(), 2);
 
         // add head block to the rpcs. lagged_rpc should not be available
-        head_block = rpcs.try_cache_block(head_block, true).await.unwrap();
+        head_rpc
+            .send_head_block_result(
+                Ok(Some(head_block.clone())),
+                &block_sender,
+                rpcs.blocks_by_hash.clone(),
+            )
+            .await
+            .unwrap();
 
+        // TODO: this is fragile
         rpcs.process_block_from_rpc(
             &authorization,
             &mut consensus_finder,
-            Some(head_block.clone()),
-            head_rpc,
+            Some(head_block.clone().try_into().unwrap()),
+            head_rpc.clone(),
             &None,
         )
         .await
@@ -1495,18 +1533,27 @@ mod tests {
 
         assert_eq!(rpcs.num_synced_rpcs(), 1);
 
+        assert!(head_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
+        assert!(head_rpc.has_block_data(head_block.number.as_ref().unwrap()));
+
+        assert!(lagged_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
+        assert!(!lagged_rpc.has_block_data(head_block.number.as_ref().unwrap()));
+
+        // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
             rpcs.best_available_rpc(&authorization, None, &[], None, None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
+        // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
             rpcs.best_available_rpc(&authorization, None, &[], Some(&0.into()), None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
+        // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
             rpcs.best_available_rpc(&authorization, None, &[], Some(&1.into()), None)
                 .await,

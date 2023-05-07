@@ -619,7 +619,7 @@ impl Web3Rpc {
         Ok(())
     }
 
-    async fn send_head_block_result(
+    pub(crate) async fn send_head_block_result(
         self: &Arc<Self>,
         new_head_block: Result<Option<ArcBlock>, ProviderError>,
         block_sender: &flume::Sender<BlockAndRpc>,
