@@ -1526,9 +1526,13 @@ impl Web3ProxyApp {
                     )
                     .await?;
 
-                // if we got "null", it is probably because the tx is old. retry requiring nodes with old block data
+                // if we got "null", it is probably because the tx is old. retry on nodes with old block data
                 if let Some(ref result) = response.result {
                     if result.get() == "null" {
+                        request_metadata
+                            .archive_request
+                            .store(true, atomic::Ordering::Release);
+
                         response = self
                             .balanced_rpcs
                             .try_proxy_connection(
