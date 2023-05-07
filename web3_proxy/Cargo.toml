@@ -76,7 +76,7 @@ serde = { version = "1.0.162", features = [] }
 serde_json = { version = "1.0.96", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.2"
 siwe = "0.5.0"
-time = "0.3.20"
+time = "0.3.21"
 tokio = { version = "1.28.0", features = ["full"] }
 tokio-console = { version = "*", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
