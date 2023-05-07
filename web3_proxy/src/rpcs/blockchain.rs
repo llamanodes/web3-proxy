@@ -188,7 +188,7 @@ impl Web3Rpcs {
         // TODO: use their get_with
         let block = self
             .blocks_by_hash
-            .get_with(*block_hash, async move { block.clone() })
+            .get_with(*block_hash, async move { block })
             .await;
 
         Ok(block)

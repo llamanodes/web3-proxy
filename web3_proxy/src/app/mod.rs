@@ -1577,16 +1577,15 @@ impl Web3ProxyApp {
 
                 // emit transaction count stats
                 if let Some(ref salt) = self.config.public_recent_ips_salt {
-                    if let Some(tx_hash) = response.result.clone() {
+                    if let Some(ref tx_hash) = response.result {
                         let now = Utc::now().timestamp();
-                        let salt = salt.clone();
                         let app = self.clone();
+
+                        let salted_tx_hash = format!("{}:{}", salt, tx_hash);
 
                         let f = async move {
                             match app.redis_conn().await {
                                 Ok(Some(mut redis_conn)) => {
-                                    let salted_tx_hash = format!("{}:{}", salt, tx_hash);
-
                                     let hashed_tx_hash =
                                         Bytes::from(keccak256(salted_tx_hash.as_bytes()));
 

@@ -108,8 +108,8 @@ pub async fn admin_login_get(
     let login_domain = app
         .config
         .login_domain
-        .clone()
-        .unwrap_or_else(|| "llamanodes.com".to_string());
+        .as_deref()
+        .unwrap_or("llamanodes.com");
 
     // Also there must basically be a token, that says that one admin logins _as a user_.
     // I'm not yet fully sure how to handle with that logic specifically ...

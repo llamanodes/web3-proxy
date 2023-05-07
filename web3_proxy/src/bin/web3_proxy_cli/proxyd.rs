@@ -195,7 +195,7 @@ async fn run(
     // start the frontend port
     let frontend_handle = tokio::spawn(frontend::serve(
         app_frontend_port,
-        spawned_app.app.clone(),
+        spawned_app.app,
         frontend_shutdown_receiver,
         frontend_shutdown_complete_sender,
     ));
