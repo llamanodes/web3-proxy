@@ -6645,7 +6645,6 @@ dependencies = [
  "moka",
  "num",
  "num-traits",
- "once_cell",
  "ordered-float",
  "pagerduty-rs",
  "parking_lot 0.12.1",

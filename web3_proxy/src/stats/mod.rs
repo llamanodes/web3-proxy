@@ -3,35 +3,35 @@
 //! TODO: move some of these structs/functions into their own file?
 pub mod db_queries;
 pub mod influxdb_queries;
+mod stat_buffer;
 
 use crate::frontend::authorization::{Authorization, RequestMetadata};
+use crate::rpcs::one::Web3Rpc;
 use axum::headers::Origin;
 use chrono::{TimeZone, Utc};
 use derive_more::From;
 use entities::rpc_accounting_v2;
 use entities::sea_orm_active_enums::TrackingLevel;
-use futures::stream;
-use hashbrown::HashMap;
-use influxdb2::api::write::TimestampPrecision;
 use influxdb2::models::DataPoint;
-use log::{error, info, trace};
+use log::trace;
 use migration::sea_orm::{self, DatabaseConnection, EntityTrait};
 use migration::{Expr, OnConflict};
+use parking_lot::Mutex;
+use stat_buffer::BufferedRpcQueryStats;
+pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 use std::num::NonZeroU64;
-use std::sync::atomic::Ordering;
+use std::sync::atomic;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
-use tokio::time::interval;
 
 pub enum StatType {
     Aggregated,
     Detailed,
+    DoNotTrack,
 }
 
-// Pub is needed for migration ... I could also write a second constructor for this if needed
-/// TODO: better name?
+pub type BackendRequests = Mutex<Vec<Arc<Web3Rpc>>>;
+
+/// TODO: better name? RpcQueryStatBuilder?
 #[derive(Clone, Debug)]
 pub struct RpcQueryStats {
     pub authorization: Arc<Authorization>,
@@ -40,14 +40,14 @@ pub struct RpcQueryStats {
     pub error_response: bool,
     pub request_bytes: u64,
     /// if backend_requests is 0, there was a cache_hit
-    // pub frontend_request: u64,
-    pub backend_requests: u64,
+    /// no need to track frontend_request on this. a RpcQueryStats always represents one frontend request
+    pub backend_rpcs_used: Vec<Arc<Web3Rpc>>,
     pub response_bytes: u64,
     pub response_millis: u64,
     pub response_timestamp: i64,
 }
 
-#[derive(Clone, From, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
 pub struct RpcQueryKey {
     /// unix epoch time
     /// for the time series db, this is (close to) the time that the response was sent
@@ -168,19 +168,6 @@ impl RpcQueryStats {
     }
 }
 
-#[derive(Default)]
-pub struct BufferedRpcQueryStats {
-    pub frontend_requests: u64,
-    pub backend_requests: u64,
-    pub backend_retries: u64,
-    pub no_servers: u64,
-    pub cache_misses: u64,
-    pub cache_hits: u64,
-    pub sum_request_bytes: u64,
-    pub sum_response_bytes: u64,
-    pub sum_response_millis: u64,
-}
-
 /// A stat that we aggregate and then store in a database.
 /// For now there is just one, but I think there might be others later
 #[derive(Debug, From)]
@@ -188,32 +175,15 @@ pub enum AppStat {
     RpcQuery(RpcQueryStats),
 }
 
-#[derive(From)]
-pub struct SpawnedStatBuffer {
-    pub stat_sender: flume::Sender<AppStat>,
-    /// these handles are important and must be allowed to finish
-    pub background_handle: JoinHandle<anyhow::Result<()>>,
-}
-
-pub struct StatBuffer {
-    chain_id: u64,
-    db_conn: Option<DatabaseConnection>,
-    influxdb_client: Option<influxdb2::Client>,
-    tsdb_save_interval_seconds: u32,
-    db_save_interval_seconds: u32,
-    billing_period_seconds: i64,
-    global_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
-    opt_in_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
-    accounting_db_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
-    timestamp_precision: TimestampPrecision,
-}
-
 impl BufferedRpcQueryStats {
     fn add(&mut self, stat: RpcQueryStats) {
         // a stat always come from just 1 frontend request
         self.frontend_requests += 1;
 
-        if stat.backend_requests == 0 {
+        // TODO: is this always okay? is it true that each backend rpc will only be queried once per request? i think so
+        let num_backend_rpcs_used = stat.backend_rpcs_used.len() as u64;
+
+        if num_backend_rpcs_used == 0 {
             // no backend request. cache hit!
             self.cache_hits += 1;
         } else {
@@ -221,7 +191,7 @@ impl BufferedRpcQueryStats {
             self.cache_misses += 1;
 
             // a single frontend request might have multiple backend requests
-            self.backend_requests += stat.backend_requests;
+            self.backend_requests += num_backend_rpcs_used;
         }
 
         self.sum_request_bytes += stat.request_bytes;
@@ -236,6 +206,10 @@ impl BufferedRpcQueryStats {
         db_conn: &DatabaseConnection,
         key: RpcQueryKey,
     ) -> anyhow::Result<()> {
+        if key.response_timestamp == 0 {
+            panic!("no response_timestamp: {:?} {:?}", key, self);
+        }
+
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
         // this is a lot of variables
@@ -353,257 +327,45 @@ impl BufferedRpcQueryStats {
     }
 }
 
-impl RpcQueryStats {
-    pub fn new(
-        method: Option<String>,
-        authorization: Arc<Authorization>,
-        metadata: Arc<RequestMetadata>,
-        response_bytes: usize,
-    ) -> Self {
-        // TODO: try_unwrap the metadata to be sure that all the stats for this request have been collected
-        // TODO: otherwise, i think the whole thing should be in a single lock that we can "reset" when a stat is created
+impl From<RequestMetadata> for RpcQueryStats {
+    fn from(mut value: RequestMetadata) -> Self {
+        // error responses might need some special handling
+        let mut error_response = value.error_response.load(atomic::Ordering::Acquire);
+        let mut response_millis = value.response_millis.load(atomic::Ordering::Acquire);
+        let response_timestamp = match value.response_timestamp.load(atomic::Ordering::Acquire) {
+            0 => {
+                // no response timestamp!
+                if !error_response {
+                    // force error_response to true
+                    // TODO: i think this happens when a try operator escapes
+                    trace!(
+                        "no response known, but no errors logged. investigate. {:?}",
+                        value
+                    );
+                    error_response = true;
+                }
 
-        let archive_request = metadata.archive_request.load(Ordering::Acquire);
-        let backend_requests = metadata.backend_requests.lock().len() as u64;
-        let request_bytes = metadata.request_bytes;
-        let error_response = metadata.error_response.load(Ordering::Acquire);
-        let response_millis = metadata.start_instant.elapsed().as_millis() as u64;
-        let response_bytes = response_bytes as u64;
+                if response_millis == 0 {
+                    // get something for millis even if it is a bit late
+                    response_millis = value.start_instant.elapsed().as_millis() as u64
+                }
 
-        let response_timestamp = Utc::now().timestamp();
+                // no timestamp given. likely handling an error. set it to the current time
+                Utc::now().timestamp()
+            }
+            x => x,
+        };
 
-        Self {
-            authorization,
-            archive_request,
-            method,
-            backend_requests,
-            request_bytes,
+        RpcQueryStats {
+            authorization: value.authorization.take().unwrap(),
+            method: value.opt_in_method(),
+            archive_request: value.archive_request.load(atomic::Ordering::Acquire),
             error_response,
-            response_bytes,
+            request_bytes: value.request_bytes as u64,
+            backend_rpcs_used: value.backend_rpcs_used(),
+            response_bytes: value.response_bytes.load(atomic::Ordering::Acquire),
             response_millis,
             response_timestamp,
         }
-    }
-
-    /// Only used for migration from stats_v1 to stats_v2/v3
-    pub fn modify_struct(
-        &mut self,
-        response_millis: u64,
-        response_timestamp: i64,
-        backend_requests: u64,
-    ) {
-        self.response_millis = response_millis;
-        self.response_timestamp = response_timestamp;
-        self.backend_requests = backend_requests;
-    }
-}
-
-impl StatBuffer {
-    #[allow(clippy::too_many_arguments)]
-    pub fn try_spawn(
-        chain_id: u64,
-        bucket: String,
-        db_conn: Option<DatabaseConnection>,
-        influxdb_client: Option<influxdb2::Client>,
-        db_save_interval_seconds: u32,
-        tsdb_save_interval_seconds: u32,
-        billing_period_seconds: i64,
-        shutdown_receiver: broadcast::Receiver<()>,
-    ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
-        if db_conn.is_none() && influxdb_client.is_none() {
-            return Ok(None);
-        }
-
-        let (stat_sender, stat_receiver) = flume::unbounded();
-
-        let timestamp_precision = TimestampPrecision::Seconds;
-        let mut new = Self {
-            chain_id,
-            db_conn,
-            influxdb_client,
-            db_save_interval_seconds,
-            tsdb_save_interval_seconds,
-            billing_period_seconds,
-            global_timeseries_buffer: Default::default(),
-            opt_in_timeseries_buffer: Default::default(),
-            accounting_db_buffer: Default::default(),
-            timestamp_precision,
-        };
-
-        // any errors inside this task will cause the application to exit
-        let handle = tokio::spawn(async move {
-            new.aggregate_and_save_loop(bucket, stat_receiver, shutdown_receiver)
-                .await
-        });
-
-        Ok(Some((stat_sender, handle).into()))
-    }
-
-    async fn aggregate_and_save_loop(
-        &mut self,
-        bucket: String,
-        stat_receiver: flume::Receiver<AppStat>,
-        mut shutdown_receiver: broadcast::Receiver<()>,
-    ) -> anyhow::Result<()> {
-        let mut tsdb_save_interval =
-            interval(Duration::from_secs(self.tsdb_save_interval_seconds as u64));
-        let mut db_save_interval =
-            interval(Duration::from_secs(self.db_save_interval_seconds as u64));
-
-        // TODO: Somewhere here we should probably be updating the balance of the user
-        // And also update the credits used etc. for the referred user
-
-        loop {
-            tokio::select! {
-                stat = stat_receiver.recv_async() => {
-                    // info!("Received stat");
-                    // save the stat to a buffer
-                    match stat {
-                        Ok(AppStat::RpcQuery(stat)) => {
-                            if self.influxdb_client.is_some() {
-                                // TODO: round the timestamp at all?
-
-                                let global_timeseries_key = stat.global_timeseries_key();
-
-                                self.global_timeseries_buffer.entry(global_timeseries_key).or_default().add(stat.clone());
-
-                                if let Some(opt_in_timeseries_key) = stat.opt_in_timeseries_key() {
-                                    self.opt_in_timeseries_buffer.entry(opt_in_timeseries_key).or_default().add(stat.clone());
-                                }
-                            }
-
-                            if self.db_conn.is_some() {
-                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat);
-                            }
-                        }
-                        Err(err) => {
-                            error!("error receiving stat: {:?}", err);
-                            break;
-                        }
-                    }
-                }
-                _ = db_save_interval.tick() => {
-                    // info!("DB save internal tick");
-                    let count = self.save_relational_stats().await;
-                    if count > 0 {
-                        trace!("Saved {} stats to the relational db", count);
-                    }
-                }
-                _ = tsdb_save_interval.tick() => {
-                    // info!("TSDB save internal tick");
-                    let count = self.save_tsdb_stats(&bucket).await;
-                    if count > 0 {
-                        trace!("Saved {} stats to the tsdb", count);
-                    }
-                }
-                x = shutdown_receiver.recv() => {
-                    match x {
-                        Ok(_) => {
-                            info!("stat_loop shutting down");
-                        },
-                        Err(err) => error!("stat_loop shutdown receiver err={:?}", err),
-                    }
-                    break;
-                }
-            }
-        }
-
-        let saved_relational = self.save_relational_stats().await;
-
-        info!("saved {} pending relational stats", saved_relational);
-
-        let saved_tsdb = self.save_tsdb_stats(&bucket).await;
-
-        info!("saved {} pending tsdb stats", saved_tsdb);
-
-        info!("accounting and stat save loop complete");
-
-        Ok(())
-    }
-
-    async fn save_relational_stats(&mut self) -> usize {
-        let mut count = 0;
-
-        if let Some(db_conn) = self.db_conn.as_ref() {
-            count = self.accounting_db_buffer.len();
-            for (key, stat) in self.accounting_db_buffer.drain() {
-                // TODO: batch saves
-                // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
-                if let Err(err) = stat.save_db(self.chain_id, db_conn, key).await {
-                    error!("unable to save accounting entry! err={:?}", err);
-                };
-            }
-        }
-
-        count
-    }
-
-    // TODO: bucket should be an enum so that we don't risk typos
-    async fn save_tsdb_stats(&mut self, bucket: &str) -> usize {
-        let mut count = 0;
-
-        if let Some(influxdb_client) = self.influxdb_client.as_ref() {
-            // TODO: use stream::iter properly to avoid allocating this Vec
-            let mut points = vec![];
-
-            for (key, stat) in self.global_timeseries_buffer.drain() {
-                // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
-                match stat
-                    .build_timeseries_point("global_proxy", self.chain_id, key)
-                    .await
-                {
-                    Ok(point) => {
-                        points.push(point);
-                    }
-                    Err(err) => {
-                        error!("unable to build global stat! err={:?}", err);
-                    }
-                };
-            }
-
-            for (key, stat) in self.opt_in_timeseries_buffer.drain() {
-                // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
-                match stat
-                    .build_timeseries_point("opt_in_proxy", self.chain_id, key)
-                    .await
-                {
-                    Ok(point) => {
-                        points.push(point);
-                    }
-                    Err(err) => {
-                        // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
-                        error!("unable to build opt-in stat! err={:?}", err);
-                    }
-                };
-            }
-
-            count = points.len();
-
-            if count > 0 {
-                // TODO: put max_batch_size in config?
-                // TODO: i think the real limit is the byte size of the http request. so, a simple line count won't work very well
-                let max_batch_size = 100;
-
-                let mut num_left = count;
-
-                while num_left > 0 {
-                    let batch_size = num_left.min(max_batch_size);
-
-                    let p = points.split_off(batch_size);
-
-                    num_left -= batch_size;
-
-                    if let Err(err) = influxdb_client
-                        .write_with_precision(bucket, stream::iter(p), self.timestamp_precision)
-                        .await
-                    {
-                        // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
-                        error!("unable to save {} tsdb stats! err={:?}", batch_size, err);
-                    }
-                }
-            }
-        }
-
-        count
     }
 }

@@ -417,17 +417,14 @@ mod tests {
             let prometheus_port = 0;
             let shutdown_sender = shutdown_sender.clone();
 
-            tokio::spawn(async move {
-                run(
-                    top_config,
-                    None,
-                    frontend_port,
-                    prometheus_port,
-                    2,
-                    shutdown_sender,
-                )
-                .await
-            })
+            tokio::spawn(run(
+                top_config,
+                None,
+                frontend_port,
+                prometheus_port,
+                2,
+                shutdown_sender,
+            ))
         };
 
         // TODO: do something to the node. query latest block, mine another block, query again

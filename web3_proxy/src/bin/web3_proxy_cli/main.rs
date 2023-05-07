@@ -274,7 +274,7 @@ fn main() -> anyhow::Result<()> {
         rt_builder.worker_threads(cli_config.workers);
     }
 
-    if let Some(top_config) = top_config.as_ref() {
+    if let Some(ref top_config) = top_config {
         let chain_id = top_config.app.chain_id;
 
         rt_builder.thread_name_fn(move || {

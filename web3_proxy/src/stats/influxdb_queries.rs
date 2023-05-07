@@ -126,6 +126,11 @@ pub async fn query_user_stats<'a>(
     let group_columns = serde_json::to_string(&json!(group_columns)).unwrap();
 
     let group = match stat_response_type {
+        StatType::DoNotTrack => {
+            return Err(Web3ProxyError::BadRequest(
+                "You can't get graphs without tracking enabled.".to_string(),
+            ))
+        }
         StatType::Aggregated => f!(r#"|> group(columns: {group_columns})"#),
         StatType::Detailed => "".to_string(),
     };
@@ -137,6 +142,7 @@ pub async fn query_user_stats<'a>(
         // TODO: Detailed should still filter it, but just "group-by" method (call it once per each method ...
         // Or maybe it shouldn't filter it ...
         StatType::Detailed => "".to_string(),
+        StatType::DoNotTrack => unimplemented!(),
     };
 
     trace!("query time range: {:?} - {:?}", query_start, query_stop);
@@ -163,6 +169,7 @@ pub async fn query_user_stats<'a>(
 
     // Return a different result based on the query
     let datapoints = match stat_response_type {
+        StatType::DoNotTrack => unimplemented!(),
         StatType::Aggregated => {
             let influx_responses: Vec<AggregatedRpcAccounting> = influxdb_client
                 .query::<AggregatedRpcAccounting>(Some(query))
@@ -232,16 +239,12 @@ pub async fn query_user_stats<'a>(
                         let archive_needed = match x.archive_needed.as_str() {
                             "true" => true,
                             "false" => false,
-                            _ => {
-                                panic!("This should never be!")
-                            }
+                            _ => unreachable!(),
                         };
                         let error_response = match x.error_response.as_str() {
                             "true" => true,
                             "false" => false,
-                            _ => {
-                                panic!("This should never be!")
-                            }
+                            _ => unreachable!(),
                         };
 
                         // Add up to archive requests and error responses

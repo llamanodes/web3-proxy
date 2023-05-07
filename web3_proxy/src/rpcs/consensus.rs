@@ -3,6 +3,7 @@ use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use crate::frontend::authorization::Authorization;
 use crate::frontend::errors::{Web3ProxyErrorContext, Web3ProxyResult};
+use derive_more::Constructor;
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use itertools::{Itertools, MinMaxResult};
@@ -10,26 +11,143 @@ use log::{trace, warn};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use tokio::time::Instant;
+
+#[derive(Clone, Serialize)]
+struct RpcData {
+    head_block_num: U64,
+    // TODO: this is too simple. erigon has 4 prune levels (hrct)
+    oldest_block_num: U64,
+}
+
+impl RpcData {
+    fn new(rpc: &Web3Rpc, head: &Web3ProxyBlock) -> Self {
+        let head_block_num = *head.number();
+
+        let block_data_limit = rpc.block_data_limit();
+
+        let oldest_block_num = head_block_num.saturating_sub(block_data_limit);
+
+        Self {
+            head_block_num,
+            oldest_block_num,
+        }
+    }
+
+    // TODO: take an enum for the type of data (hrtc)
+    fn data_available(&self, block_num: &U64) -> bool {
+        *block_num >= self.oldest_block_num && *block_num <= self.head_block_num
+    }
+}
+
+#[derive(Constructor, Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct RpcRanking {
+    tier: u64,
+    backup: bool,
+    head_num: Option<U64>,
+}
+
+impl RpcRanking {
+    pub fn add_offset(&self, offset: u64) -> Self {
+        Self {
+            tier: self.tier + offset,
+            backup: self.backup,
+            head_num: self.head_num,
+        }
+    }
+
+    pub fn default_with_backup(backup: bool) -> Self {
+        Self {
+            backup,
+            ..Default::default()
+        }
+    }
+
+    fn sort_key(&self) -> (u64, bool, Reverse<Option<U64>>) {
+        (self.tier, !self.backup, Reverse(self.head_num))
+    }
+}
+
+impl Ord for RpcRanking {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.sort_key().cmp(&other.sort_key())
+    }
+}
+
+impl PartialOrd for RpcRanking {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+pub type RankedRpcMap = BTreeMap<RpcRanking, Vec<Arc<Web3Rpc>>>;
 
 /// A collection of Web3Rpcs that are on the same block.
 /// Serialize is so we can print it on our debug endpoint
 #[derive(Clone, Serialize)]
 pub struct ConsensusWeb3Rpcs {
     pub(crate) tier: u64,
+    pub(crate) backups_needed: bool,
     pub(crate) head_block: Web3ProxyBlock,
     pub(crate) best_rpcs: Vec<Arc<Web3Rpc>>,
-    // TODO: functions like "compare_backup_vote()"
-    // pub(super) backups_voted: Option<Web3ProxyBlock>,
-    pub(crate) backups_needed: bool,
+    pub(crate) other_rpcs: RankedRpcMap,
+
+    rpc_data: HashMap<Arc<Web3Rpc>, RpcData>,
 }
 
 impl ConsensusWeb3Rpcs {
-    #[inline(always)]
+    #[inline]
     pub fn num_conns(&self) -> usize {
         self.best_rpcs.len()
+    }
+
+    pub fn has_block_data(&self, rpc: &Web3Rpc, block_num: &U64) -> bool {
+        self.rpc_data
+            .get(rpc)
+            .map(|x| x.data_available(block_num))
+            .unwrap_or(false)
+    }
+
+    pub fn filter(
+        &self,
+        skip: &[Arc<Web3Rpc>],
+        min_block_needed: Option<&U64>,
+        max_block_needed: Option<&U64>,
+        rpc: &Arc<Web3Rpc>,
+    ) -> bool {
+        if skip.contains(rpc) {
+            trace!("skipping {}", rpc);
+            return false;
+        }
+
+        if let Some(min_block_needed) = min_block_needed {
+            if !self.has_block_data(rpc, min_block_needed) {
+                trace!(
+                    "{} is missing min_block_needed ({}). skipping",
+                    rpc,
+                    min_block_needed,
+                );
+                return false;
+            }
+        }
+
+        if let Some(max_block_needed) = max_block_needed {
+            if !self.has_block_data(rpc, max_block_needed) {
+                trace!(
+                    "{} is missing max_block_needed ({}). skipping",
+                    rpc,
+                    max_block_needed,
+                );
+                return false;
+            }
+        }
+
+        // we could check hard rate limits here, but i think it is faster to do later
+
+        true
     }
 
     // TODO: sum_hard_limit?
@@ -46,6 +164,7 @@ impl fmt::Debug for ConsensusWeb3Rpcs {
     }
 }
 
+// TODO: refs for all of these. borrow on a Sender is cheap enough
 impl Web3Rpcs {
     // TODO: return a ref?
     pub fn head_block(&self) -> Option<Web3ProxyBlock> {
@@ -93,7 +212,6 @@ pub struct ConsensusFinder {
     /// `tiers[0] = only tier 0`
     /// `tiers[1] = tier 0 and tier 1`
     /// `tiers[n] = tier 0..=n`
-    /// This is a BTreeMap and not a Vec because sometimes a tier is empty
     rpc_heads: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
     /// never serve blocks that are too old
     max_block_age: Option<u64>,
@@ -165,13 +283,6 @@ impl ConsensusFinder {
                     .try_cache_block(rpc_head_block, false)
                     .await
                     .web3_context("failed caching block")?;
-
-                // if let Some(max_block_lag) = max_block_lag {
-                //     if rpc_head_block.number() < ??? {
-                //         trace!("rpc_head_block from {} is too far behind! {}", rpc, rpc_head_block);
-                //         return Ok(self.remove(&rpc).is_some());
-                //      }
-                // }
 
                 if let Some(max_age) = self.max_block_age {
                     if rpc_head_block.age() > max_age {
@@ -361,11 +472,39 @@ impl ConsensusFinder {
 
             let backups_needed = consensus_rpcs.iter().any(|x| x.backup);
 
+            let mut other_rpcs = BTreeMap::new();
+
+            for (x, x_head) in self
+                .rpc_heads
+                .iter()
+                .filter(|(k, _)| !consensus_rpcs.contains(k))
+            {
+                let x_head_num = *x_head.number();
+
+                let key: RpcRanking = RpcRanking::new(x.tier, x.backup, Some(x_head_num));
+
+                other_rpcs
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .push(x.clone());
+            }
+
+            // TODO: how should we populate this?
+            let mut rpc_data = HashMap::with_capacity(self.rpc_heads.len());
+
+            for (x, x_head) in self.rpc_heads.iter() {
+                let y = RpcData::new(x, x_head);
+
+                rpc_data.insert(x.clone(), y);
+            }
+
             let consensus = ConsensusWeb3Rpcs {
                 tier,
                 head_block: maybe_head_block.clone(),
                 best_rpcs: consensus_rpcs,
+                other_rpcs,
                 backups_needed,
+                rpc_data,
             };
 
             return Some(consensus);

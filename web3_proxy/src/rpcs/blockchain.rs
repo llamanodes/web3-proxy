@@ -169,7 +169,6 @@ impl Web3Rpcs {
         // TODO: i think we can rearrange this function to make it faster on the hot path
         let block_hash = block.hash();
 
-        // skip Block::default()
         if block_hash.is_zero() {
             debug!("Skipping block without hash!");
             return Ok(block);

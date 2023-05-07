@@ -110,7 +110,7 @@ where
                             count
                         }
                         Ok(RedisRateLimitResult::RetryNever) => {
-                            panic!("RetryNever shouldn't happen")
+                            unreachable!();
                         }
                         Err(err) => {
                             let _ = deferred_rate_limit_result

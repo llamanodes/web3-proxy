@@ -107,10 +107,9 @@ pub struct Web3Rpc {
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
     /// this provider is only used for new heads subscriptions
-    /// TODO: watch channel instead of a lock?
-    /// TODO: is this only used for new heads subscriptions? if so, rename
     pub(super) provider: ArcSwapOption<Web3Provider>,
-    /// keep track of hard limits. Optional because we skip this code for our own servers.
+    /// keep track of hard limits
+    /// this is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) hard_limit_until: Option<watch::Sender<Instant>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     /// We do not use the deferred rate limiter because going over limits would cause errors
@@ -198,15 +197,9 @@ impl Web3Rpc {
         let automatic_block_limit =
             (block_data_limit.load(atomic::Ordering::Acquire) == 0) && block_sender.is_some();
 
-        // track hard limit until on backup servers (which might surprise us with rate limit changes)
+        // have a sender for tracking hard limit anywhere. we use this in case we
         // and track on servers that have a configured hard limit
-        let hard_limit_until = if backup || hard_limit.is_some() {
-            let (sender, _) = watch::channel(Instant::now());
-
-            Some(sender)
-        } else {
-            None
-        };
+        let (hard_limit_until, _) = watch::channel(Instant::now());
 
         if config.ws_url.is_none() && config.http_url.is_none() {
             if let Some(url) = config.url {
@@ -237,7 +230,7 @@ impl Web3Rpc {
             ws_url: config.ws_url,
             http_url: config.http_url,
             hard_limit,
-            hard_limit_until,
+            hard_limit_until: Some(hard_limit_until),
             soft_limit: config.soft_limit,
             automatic_block_limit,
             backup,
@@ -388,6 +381,7 @@ impl Web3Rpc {
         self.block_data_limit.load(atomic::Ordering::Acquire).into()
     }
 
+    /// TODO: get rid of this now that consensus rpcs does it
     pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
         let head_block_num = match self.head_block.as_ref().unwrap().borrow().as_ref() {
             None => return false,
@@ -979,8 +973,8 @@ impl Web3Rpc {
                                     .await?;
                                 }
                                 Ok(Some(block)) => {
-                                    // don't send repeat blocks
                                     if let Some(new_hash) = block.hash {
+                                        // don't send repeat blocks
                                         if new_hash != last_hash {
                                             // new hash!
                                             last_hash = new_hash;
@@ -993,6 +987,7 @@ impl Web3Rpc {
                                             .await?;
                                         }
                                     } else {
+                                        // TODO: why is this happening?
                                         warn!("empty head block on {}", self);
 
                                         self.send_head_block_result(
@@ -1331,8 +1326,8 @@ impl Web3Rpc {
                     logged = true;
                 }
 
-                hard_limit_until.changed().await?;
-                hard_limit_until.borrow_and_update();
+                // hard_limit_until.changed().await?;
+                // hard_limit_until.borrow_and_update();
 
                 provider = self.provider.load_full();
             }
