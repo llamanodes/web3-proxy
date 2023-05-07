@@ -1308,7 +1308,7 @@ impl Web3ProxyApp {
         // TODO: don't clone
         let request_method = request.method.clone();
 
-        // TODO: if eth_chainId or net_version, serve those without querying the backend
+        // TODO: serve net_version without querying the backend
         let response: JsonRpcForwardedResponse = match request_method.as_ref() {
             // lots of commands are blocked
             method @ ("db_getHex"

@@ -106,6 +106,7 @@ pub struct Web3Rpc {
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
     /// this provider is only used for new heads subscriptions
+    /// TODO: benchmark ArcSwapOption and a watch::Sender
     pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// keep track of hard limits
     /// this is only inside an Option so that the "Default" derive works. it will always be set.
@@ -113,7 +114,7 @@ pub struct Web3Rpc {
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     /// We do not use the deferred rate limiter because going over limits would cause errors
     pub(super) hard_limit: Option<RedisRateLimiter>,
-    /// used for load balancing to the least loaded server
+    /// used for ensuring enough requests are available before advancing the head block
     pub(super) soft_limit: u32,
     /// use web3 queries to find the block data limit for archive/pruned nodes
     pub(super) automatic_block_limit: bool,
