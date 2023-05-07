@@ -38,6 +38,13 @@ use web3_proxy::{
     config::TopConfig,
 };
 
+#[cfg(feature = "mimalloc")]
+use mimalloc::MiMalloc;
+
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 #[cfg(feature = "deadlock")]
 use {parking_lot::deadlock, std::thread, tokio::time::Duration};
 
