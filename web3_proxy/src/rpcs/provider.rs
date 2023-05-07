@@ -13,7 +13,7 @@ type EthersWsProvider = ethers::providers::Provider<ethers::providers::Ws>;
 pub enum Web3Provider {
     Both(EthersHttpProvider, EthersWsProvider),
     Http(EthersHttpProvider),
-    // TODO: deadpool? custom tokio-tungstenite?
+    // TODO: deadpool? custom tokio-tungstenite
     Ws(EthersWsProvider),
     #[cfg(test)]
     Mock,

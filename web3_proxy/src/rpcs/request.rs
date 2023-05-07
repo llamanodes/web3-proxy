@@ -14,7 +14,7 @@ use std::fmt;
 use std::sync::atomic;
 use std::sync::Arc;
 use thread_fast_rng::rand::Rng;
-use tokio::time::{Duration, Instant};
+use tokio::time::{sleep, Duration, Instant};
 
 #[derive(Debug)]
 pub enum OpenRequestResult {
@@ -163,12 +163,28 @@ impl OpenRequestHandle {
         // trace!(rpc=%self.rpc, %method, "request");
         trace!("requesting from {}", self.rpc);
 
-        let provider = if unlocked_provider.is_some() {
-            unlocked_provider.unwrap()
+        let mut provider = if unlocked_provider.is_some() {
+            unlocked_provider
         } else {
-            // TODO: do NOT unwrap here
-            self.rpc.wait_for_provider().await.unwrap()
+            self.rpc.provider.read().await.clone()
         };
+
+        let mut logged = false;
+        // TODO: instead of a lock, i guess it should be a watch?
+        while provider.is_none() {
+            // trace!("waiting on provider: locking...");
+            // TODO: i dont like this. subscribing to a channel could be better
+            sleep(Duration::from_millis(100)).await;
+
+            if !logged {
+                debug!("no provider for open handle on {}", self.rpc);
+                logged = true;
+            }
+
+            provider = self.rpc.provider.read().await.clone();
+        }
+
+        let provider = provider.expect("provider was checked already");
 
         self.rpc
             .total_requests
@@ -205,10 +221,7 @@ impl OpenRequestHandle {
         // TODO: i think ethers already has trace logging (and does it much more fancy)
         trace!(
             "response from {} for {} {:?}: {:?}",
-            self.rpc,
-            method,
-            params,
-            response,
+            self.rpc, method, params, response,
         );
 
         if let Err(err) = &response {

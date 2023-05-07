@@ -230,12 +230,29 @@ pub async fn block_needed(
             }
         }
         "eth_getStorageAt" => 2,
+        "eth_getTransactionByHash" => {
+            // TODO: not sure how best to look these up
+            // try full nodes first. retry will use archive
+            return Ok(BlockNeeded::Cache {
+                block_num: head_block_num,
+                cache_errors: true,
+            });
+        }
         "eth_getTransactionByBlockHashAndIndex" => {
-            // TODO: check a Cache of recent hashes to know if this needs archive
+            // TODO: check a Cache of recent hashes
+            // try full nodes first. retry will use archive
             return Ok(BlockNeeded::CacheSuccessForever);
         }
         "eth_getTransactionByBlockNumberAndIndex" => 0,
         "eth_getTransactionCount" => 1,
+        "eth_getTransactionReceipt" => {
+            // TODO: not sure how best to look these up
+            // try full nodes first. retry will use archive
+            return Ok(BlockNeeded::Cache {
+                block_num: head_block_num,
+                cache_errors: true,
+            });
+        }
         "eth_getUncleByBlockHashAndIndex" => {
             // TODO: check a Cache of recent hashes
             // try full nodes first. retry will use archive

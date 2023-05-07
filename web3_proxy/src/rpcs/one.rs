@@ -8,7 +8,6 @@ use crate::frontend::authorization::Authorization;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
-use arc_swap::ArcSwapOption;
 use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use ethers::types::{Address, Transaction, U256};
 use futures::future::try_join_all;
@@ -28,7 +27,7 @@ use std::sync::atomic::{self, AtomicBool, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use thread_fast_rng::rand::Rng;
 use thread_fast_rng::thread_fast_rng;
-use tokio::sync::{broadcast, oneshot, watch};
+use tokio::sync::{broadcast, oneshot, watch, RwLock as AsyncRwLock};
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
 
 pub struct Latency {
@@ -107,7 +106,7 @@ pub struct Web3Rpc {
     /// provider is in a RwLock so that we can replace it if re-connecting
     /// it is an async lock because we hold it open across awaits
     /// this provider is only used for new heads subscriptions
-    pub(super) provider: ArcSwapOption<Web3Provider>,
+    pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// keep track of hard limits
     /// this is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) hard_limit_until: Option<watch::Sender<Instant>>,
@@ -489,113 +488,110 @@ impl Web3Rpc {
         chain_id: u64,
         db_conn: Option<&DatabaseConnection>,
     ) -> anyhow::Result<()> {
-        // load_full because we are going to replace it and changing self
-        let old_provider = self.provider.load_full();
-
-        let old_provider = old_provider.as_deref();
-
-        #[cfg(test)]
-        if let Some(Web3Provider::Mock) = old_provider {
-            // mock provider doesn't actually connect
-            return Ok(());
-        }
-
-        let new_provider = if let Some(ws_url) = self.ws_url.as_ref() {
-            // set up ws client
-            if old_provider.is_some() {
-                debug!("reconnecting to {}", self);
-
-                // tell the block subscriber that this rpc doesn't have any blocks
-                if let Some(block_sender) = block_sender {
-                    block_sender
-                        .send_async((None, self.clone()))
-                        .await
-                        .context("block_sender during connect")?;
-                }
-
-                // reset sync status
-                self.head_block
-                    .as_ref()
-                    .expect("head_block should always be set")
-                    .send_replace(None);
-
-                // disconnect the current provider
-                // TODO: what until the block_sender's receiver finishes updating this item?
-                self.provider.store(None);
-            } else {
-                // old_provider wasn't set, so this must be first connection
-                info!("connecting to {}", self);
+        if let Ok(mut unlocked_provider) = self.provider.try_write() {
+            #[cfg(test)]
+            if let Some(Web3Provider::Mock) = unlocked_provider.as_deref() {
+                return Ok(());
             }
 
-            let p = Web3Provider::from_str(ws_url.as_str(), None)
-                .await
-                .context(format!("failed connecting to {}", ws_url))?;
+            *unlocked_provider = if let Some(ws_url) = self.ws_url.as_ref() {
+                // set up ws client
+                match &*unlocked_provider {
+                    None => {
+                        info!("connecting to {}", self);
+                    }
+                    Some(_) => {
+                        debug!("reconnecting to {}", self);
 
-            assert!(p.ws().is_some());
+                        // tell the block subscriber that this rpc doesn't have any blocks
+                        if let Some(block_sender) = block_sender {
+                            block_sender
+                                .send_async((None, self.clone()))
+                                .await
+                                .context("block_sender during connect")?;
+                        }
 
-            Some(Arc::new(p))
-        } else {
-            // http client
-            if let Some(url) = &self.http_url {
-                let p = Web3Provider::from_str(url, self.http_client.clone())
+                        // reset sync status
+                        self.head_block
+                            .as_ref()
+                            .expect("head_block should always be set")
+                            .send_replace(None);
+
+                        // disconnect the current provider
+                        // TODO: what until the block_sender's receiver finishes updating this item?
+                        *unlocked_provider = None;
+                    }
+                }
+
+                let p = Web3Provider::from_str(ws_url.as_str(), None)
                     .await
-                    .context(format!("failed connecting to {}", url))?;
+                    .context(format!("failed connecting to {}", ws_url))?;
 
-                assert!(p.http().is_some());
+                assert!(p.ws().is_some());
 
                 Some(Arc::new(p))
             } else {
-                None
-            }
-        };
+                // http client
+                if let Some(url) = &self.http_url {
+                    let p = Web3Provider::from_str(url, self.http_client.clone())
+                        .await
+                        .context(format!("failed connecting to {}", url))?;
 
-        let authorization = Arc::new(Authorization::internal(db_conn.cloned())?);
+                    assert!(p.http().is_some());
 
-        // check the server's chain_id here
-        // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
-        // TODO: what should the timeout be? should there be a request timeout?
-        // trace!("waiting on chain id for {}", self);
-        let found_chain_id: Result<U64, _> = self
-            .wait_for_request_handle(&authorization, None, new_provider.clone())
-            .await
-            .context(format!("waiting for request handle on {}", self))?
-            .request(
-                "eth_chainId",
-                &json!(Vec::<()>::new()),
-                Level::Trace.into(),
-                new_provider.clone(),
-            )
-            .await;
-        trace!("found_chain_id: {:#?}", found_chain_id);
+                    Some(Arc::new(p))
+                } else {
+                    None
+                }
+            };
 
-        match found_chain_id {
-            Ok(found_chain_id) => {
-                // TODO: there has to be a cleaner way to do this
-                if chain_id != found_chain_id.as_u64() {
-                    return Err(anyhow::anyhow!(
-                        "incorrect chain id! Config has {}, but RPC has {}",
-                        chain_id,
-                        found_chain_id
-                    )
-                    .context(format!("failed @ {}", self)));
+            let authorization = Arc::new(Authorization::internal(db_conn.cloned())?);
+
+            // check the server's chain_id here
+            // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
+            // TODO: what should the timeout be? should there be a request timeout?
+            // trace!("waiting on chain id for {}", self);
+            let found_chain_id: Result<U64, _> = self
+                .wait_for_request_handle(&authorization, None, unlocked_provider.clone())
+                .await
+                .context(format!("waiting for request handle on {}", self))?
+                .request(
+                    "eth_chainId",
+                    &json!(Vec::<()>::new()),
+                    Level::Trace.into(),
+                    unlocked_provider.clone(),
+                )
+                .await;
+            trace!("found_chain_id: {:#?}", found_chain_id);
+
+            match found_chain_id {
+                Ok(found_chain_id) => {
+                    // TODO: there has to be a cleaner way to do this
+                    if chain_id != found_chain_id.as_u64() {
+                        return Err(anyhow::anyhow!(
+                            "incorrect chain id! Config has {}, but RPC has {}",
+                            chain_id,
+                            found_chain_id
+                        )
+                        .context(format!("failed @ {}", self)));
+                    }
+                }
+                Err(e) => {
+                    return Err(anyhow::Error::from(e)
+                        .context(format!("unable to parse eth_chainId from {}", self)));
                 }
             }
-            Err(e) => {
-                return Err(anyhow::Error::from(e)
-                    .context(format!("unable to parse eth_chainId from {}", self)));
-            }
-        }
 
-        self.check_block_data_limit(&authorization, new_provider)
-            .await
-            .context(format!("unable to check_block_data_limit of {}", self))?;
+            self.check_block_data_limit(&authorization, unlocked_provider.clone())
+                .await
+                .context(format!("unable to check_block_data_limit of {}", self))?;
 
-        info!("successfully connected to {}", self);
+            drop(unlocked_provider);
 
-        // reset hard_limit_until. we do this because `wait_for_provider` watches this
-        let now = Instant::now();
-
-        self.hard_limit_until.as_ref().unwrap().send_replace(now);
+            info!("successfully connected to {}", self);
+        } else if self.provider.read().await.is_none() {
+            return Err(anyhow!("failed waiting for client {}", self));
+        };
 
         Ok(())
     }
@@ -611,9 +607,13 @@ impl Web3Rpc {
             warn!("failed sending disconnect watch: {:?}", err);
         };
 
+        trace!("disconnecting (locking) {} ({}s old)", self, age);
+
+        let mut provider = self.provider.write().await;
+
         trace!("disconnecting (clearing provider) {} ({}s old)", self, age);
 
-        self.provider.store(None);
+        *provider = None;
 
         Ok(())
     }
@@ -766,7 +766,7 @@ impl Web3Rpc {
 
                         // TODO: what if we just happened to have this check line up with another restart?
                         // TODO: think more about this
-                        if let Some(client) = rpc.provider.load_full() {
+                        if let Some(client) = rpc.provider.read().await.clone() {
                             // health check as a way of keeping this rpc's request_ewma accurate
                             // TODO: do something different if this is a backup server?
 
@@ -933,7 +933,7 @@ impl Web3Rpc {
     ) -> anyhow::Result<()> {
         trace!("watching new heads on {}", self);
 
-        let provider = self.wait_for_provider().await?;
+        let provider = self.wait_for_provider().await;
 
         match provider.as_ref() {
             Web3Provider::Http(_client) => {
@@ -1127,7 +1127,7 @@ impl Web3Rpc {
     ) -> anyhow::Result<()> {
         // TODO: give this a separate client. don't use new_head_client for everything. especially a firehose this big
         // TODO: timeout
-        let provider = self.wait_for_provider().await?;
+        let provider = self.wait_for_provider().await;
 
         trace!("watching pending transactions on {}", self);
         // TODO: does this keep the lock open for too long?
@@ -1244,7 +1244,7 @@ impl Web3Rpc {
     ) -> Web3ProxyResult<OpenRequestResult> {
         // TODO: think more about this read block
         // TODO: this should *not* be new_head_client. this should be a separate object
-        if unlocked_provider.is_some() || self.provider.load().is_some() {
+        if unlocked_provider.is_some() || self.provider.read().await.is_some() {
             // we already have an unlocked provider. no need to lock
         } else {
             return Ok(OpenRequestResult::NotReady);
@@ -1311,29 +1311,23 @@ impl Web3Rpc {
         }
     }
 
-    pub async fn wait_for_provider(&self) -> anyhow::Result<Arc<Web3Provider>> {
-        // TODO: a watch would make this function cleaner, but i think it would be slower for the common case. hard_limit_until should be fine. benchmark
-        // TODO: return a Ref so that we don't load_full every single time? maybe have a function for both?
-        let mut provider = self.provider.load_full();
+    async fn wait_for_provider(&self) -> Arc<Web3Provider> {
+        let mut provider = self.provider.read().await.clone();
 
-        if provider.is_none() {
-            let mut hard_limit_until = self.hard_limit_until.as_ref().unwrap().subscribe();
+        let mut logged = false;
+        while provider.is_none() {
+            // trace!("waiting on unlocked_provider: locking...");
+            sleep(Duration::from_millis(100)).await;
 
-            let mut logged = false;
-            while provider.is_none() {
-                if !logged {
-                    debug!("waiting for provider on {}", self);
-                    logged = true;
-                }
-
-                // hard_limit_until.changed().await?;
-                // hard_limit_until.borrow_and_update();
-
-                provider = self.provider.load_full();
+            if !logged {
+                debug!("waiting for provider on {}", self);
+                logged = true;
             }
+
+            provider = self.provider.read().await.clone();
         }
 
-        Ok(provider.expect("provider should always be set here because of the is_none above"))
+        provider.unwrap()
     }
 
     pub async fn wait_for_query<P, R>(

@@ -1216,7 +1216,7 @@ mod tests {
     use super::*;
     use crate::rpcs::consensus::ConsensusFinder;
     use crate::rpcs::{blockchain::Web3ProxyBlock, provider::Web3Provider};
-    use arc_swap::{ArcSwap, ArcSwapOption};
+    use arc_swap::ArcSwap;
     use ethers::types::{Block, U256};
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
@@ -1348,7 +1348,7 @@ mod tests {
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: Some(tx_synced),
-            provider: ArcSwapOption::from_pointee(Web3Provider::Mock),
+            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
 
@@ -1362,7 +1362,7 @@ mod tests {
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: Some(tx_lagged),
-            provider: ArcSwapOption::from_pointee(Web3Provider::Mock),
+            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
 
@@ -1551,7 +1551,7 @@ mod tests {
             block_data_limit: 64.into(),
             tier: 1,
             head_block: Some(tx_pruned),
-            provider: ArcSwapOption::from_pointee(Web3Provider::Mock),
+            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
 
@@ -1565,7 +1565,7 @@ mod tests {
             block_data_limit: u64::MAX.into(),
             tier: 2,
             head_block: Some(tx_archive),
-            provider: ArcSwapOption::from_pointee(Web3Provider::Mock),
+            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
 
@@ -1712,7 +1712,7 @@ mod tests {
             block_data_limit: 64.into(),
             tier: 0,
             head_block: Some(tx_mock_geth),
-            provider: ArcSwapOption::from_pointee(Web3Provider::Mock),
+            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
 
@@ -1724,7 +1724,7 @@ mod tests {
             block_data_limit: u64::MAX.into(),
             tier: 1,
             head_block: Some(tx_mock_erigon_archive),
-            provider: ArcSwapOption::from_pointee(Web3Provider::Mock),
+            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
 
