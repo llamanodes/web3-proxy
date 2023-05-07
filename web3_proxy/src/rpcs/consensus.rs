@@ -255,7 +255,7 @@ impl ConsensusFinder {
     async fn insert(&mut self, rpc: Arc<Web3Rpc>, block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
         let first_seen = self
             .first_seen
-            .get_with(*block.hash(), async move { Instant::now() })
+            .get_with_by_ref(block.hash(), async move { Instant::now() })
             .await;
 
         // TODO: this should be 0 if we are first seen, but i think it will be slightly non-zero.

@@ -857,11 +857,11 @@ pub async fn key_is_authorized(
 
 impl Web3ProxyApp {
     /// Limit the number of concurrent requests from the given ip address.
-    pub async fn ip_semaphore(&self, ip: IpAddr) -> Web3ProxyResult<Option<OwnedSemaphorePermit>> {
+    pub async fn ip_semaphore(&self, ip: &IpAddr) -> Web3ProxyResult<Option<OwnedSemaphorePermit>> {
         if let Some(max_concurrent_requests) = self.config.public_max_concurrent_requests {
             let semaphore = self
                 .ip_semaphores
-                .get_with(ip, async move {
+                .get_with_by_ref(ip, async move {
                     // TODO: set max_concurrent_requests dynamically based on load?
                     let s = Semaphore::new(max_concurrent_requests);
                     Arc::new(s)
@@ -928,7 +928,7 @@ impl Web3ProxyApp {
         // limit concurrent requests
         let semaphore = self
             .bearer_token_semaphores
-            .get_with(user_bearer_token.clone(), async move {
+            .get_with_by_ref(&user_bearer_token, async move {
                 let s = Semaphore::new(self.config.bearer_token_max_concurrent_requests as usize);
                 Arc::new(s)
             })
@@ -1035,7 +1035,7 @@ impl Web3ProxyApp {
             {
                 Ok(DeferredRateLimitResult::Allowed) => {
                     // rate limit allowed us. check concurrent request limits
-                    let semaphore = self.ip_semaphore(ip).await?;
+                    let semaphore = self.ip_semaphore(&ip).await?;
 
                     Ok(RateLimitResult::Allowed(authorization, semaphore))
                 }
@@ -1055,14 +1055,14 @@ impl Web3ProxyApp {
                     error!("rate limiter is unhappy. allowing ip. err={:?}", err);
 
                     // at least we can still check the semaphore
-                    let semaphore = self.ip_semaphore(ip).await?;
+                    let semaphore = self.ip_semaphore(&ip).await?;
 
                     Ok(RateLimitResult::Allowed(authorization, semaphore))
                 }
             }
         } else {
             // no redis, but we can still check the ip semaphore
-            let semaphore = self.ip_semaphore(ip).await?;
+            let semaphore = self.ip_semaphore(&ip).await?;
 
             // TODO: if no redis, rate limit with a local cache? "warn!" probably isn't right
             Ok(RateLimitResult::Allowed(authorization, semaphore))
