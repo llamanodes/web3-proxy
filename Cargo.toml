@@ -2,7 +2,6 @@
 members = [
   "deferred-rate-limiter",
   "entities",
-  "influxdb2",
   "migration",
   "rate-counter",
   "redis-rate-limiter",
