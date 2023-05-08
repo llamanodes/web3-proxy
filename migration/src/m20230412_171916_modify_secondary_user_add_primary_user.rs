@@ -11,7 +11,7 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(SecondaryUser::Table)
                     .add_column(
-                        ColumnDef::new(SecondaryUser::RpcKey)
+                        ColumnDef::new(SecondaryUser::RpcSecretKeyId)
                             .big_unsigned()
                             .not_null(), // add foreign key to user table ...,
                     )
@@ -19,7 +19,7 @@ impl MigrationTrait for Migration {
                         TableForeignKey::new()
                             .name("FK_secondary_user-rpc_key")
                             .from_tbl(SecondaryUser::Table)
-                            .from_col(SecondaryUser::RpcKey)
+                            .from_col(SecondaryUser::RpcSecretKeyId)
                             .to_tbl(RpcKey::Table)
                             .to_col(RpcKey::Id)
                             .on_delete(ForeignKeyAction::NoAction)
@@ -37,7 +37,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 sea_query::Table::alter()
                     .table(SecondaryUser::Table)
-                    .drop_column(SecondaryUser::RpcKey)
+                    .drop_column(SecondaryUser::RpcSecretKeyId)
                     .to_owned(),
             )
             .await
@@ -48,7 +48,7 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum SecondaryUser {
     Table,
-    RpcKey,
+    RpcSecretKeyId,
 }
 
 #[derive(Iden)]

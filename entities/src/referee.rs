@@ -7,12 +7,13 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
+    pub credits_applied_for_referee: bool,
+    #[sea_orm(column_type = "Decimal(Some((20, 10)))")]
+    pub credits_applied_for_referrer: Decimal,
+    pub referral_start_date: DateTime,
     pub used_referral_code: String,
     #[sea_orm(unique)]
     pub user_id: u64,
-    pub credits_applied_for_referee: bool,
-    pub credits_applied_for_referrer: Decimal,
-    pub referral_start_date: DateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

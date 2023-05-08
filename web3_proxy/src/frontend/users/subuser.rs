@@ -49,7 +49,7 @@ pub async fn get_keys_as_subuser(
         .all(db_replica.conn())
         .await?
         .into_iter()
-        .map(|x| (x.rpc_key.clone(), x))
+        .map(|x| (x.rpc_secret_key_id.clone(), x))
         .collect::<HashMap<u64, secondary_user::Model>>();
 
     // Now return a list of all subusers (their wallets)
@@ -143,7 +143,7 @@ pub async fn get_subusers(
 
     // Get all secondary users that have access to this rpc key
     let secondary_user_entities = secondary_user::Entity::find()
-        .filter(secondary_user::Column::RpcKey.eq(rpc_key.id))
+        .filter(secondary_user::Column::RpcSecretKeyId.eq(rpc_key.id))
         .all(db_replica.conn())
         .await?
         .into_iter()
@@ -367,7 +367,7 @@ pub async fn modify_subuser(
     // There should be a unique-constraint on user-id + rpc_key
     let subuser_entry_secondary_user = secondary_user::Entity::find()
         .filter(secondary_user::Column::UserId.eq(subuser.id))
-        .filter(secondary_user::Column::RpcKey.eq(rpc_key_entity.id))
+        .filter(secondary_user::Column::RpcSecretKeyId.eq(rpc_key_entity.id))
         .one(db_replica.conn())
         .await
         .web3_context("failed using the db to check for a subuser")?;
@@ -392,7 +392,7 @@ pub async fn modify_subuser(
         None if keep_subuser => {
             let active_subuser_entry_secondary_user = secondary_user::ActiveModel {
                 user_id: sea_orm::Set(subuser.id),
-                rpc_key: sea_orm::Set(rpc_key_entity.id),
+                rpc_secret_key_id: sea_orm::Set(rpc_key_entity.id),
                 role: sea_orm::Set(new_role.clone()),
                 ..Default::default()
             };

@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
+    #[sea_orm(column_type = "Decimal(Some((20, 10)))")]
     pub available_balance: Decimal,
+    #[sea_orm(column_type = "Decimal(Some((20, 10)))")]
     pub used_balance: Decimal,
     #[sea_orm(unique)]
     pub user_id: u64,

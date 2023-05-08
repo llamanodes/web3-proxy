@@ -10,9 +10,9 @@ pub struct Model {
     pub id: u64,
     pub rpc_key_id: u64,
     pub chain_id: u64,
+    pub origin: String,
     pub period_datetime: DateTimeUtc,
     pub method: String,
-    pub origin: String,
     pub archive_needed: bool,
     pub error_response: bool,
     pub frontend_requests: u64,
@@ -24,6 +24,7 @@ pub struct Model {
     pub sum_request_bytes: u64,
     pub sum_response_millis: u64,
     pub sum_response_bytes: u64,
+    #[sea_orm(column_type = "Decimal(Some((20, 10)))")]
     pub sum_credits_used: Decimal,
 }
 
