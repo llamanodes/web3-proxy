@@ -49,9 +49,7 @@ pub async fn user_referral_link_get(
     warn!("User tier is: {:?}", user_tier);
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
     if user_tier.id != 6 {
-        return Err(
-            anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into(),
-        );
+        return Err(Web3ProxyError::PaymentRequired.into());
     }
 
     // Then get the referral token
