@@ -162,7 +162,6 @@ pub async fn user_balance_post(
                 &vec![format!("0x{}", hex::encode(tx_hash))]
             );
             handle
-                .clone()
                 .request(
                     "eth_getTransactionReceipt",
                     &vec![format!("0x{}", hex::encode(tx_hash))],
@@ -215,7 +214,6 @@ pub async fn user_balance_post(
             ]);
             debug!("Params are: {:?}", &params);
             let accepted_token: String = handle
-                .clone()
                 .request("eth_call", &params, Level::Trace.into(), None)
                 .await
                 // TODO: What kind of error would be here
