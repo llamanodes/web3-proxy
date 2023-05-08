@@ -26,7 +26,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(IncreaseBalanceReceipt::ChainId)
-                            .string()
+                            .big_integer()
                             .not_null(),
                     )
                     .col(

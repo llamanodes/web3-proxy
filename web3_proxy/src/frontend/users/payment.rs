@@ -90,7 +90,7 @@ pub async fn user_deposits_get(
         .map(|x| {
             let mut out = HashMap::new();
             out.insert("amount", serde_json::Value::String(x.amount.to_string()));
-            out.insert("chain_id", serde_json::Value::String(x.chain_id));
+            out.insert("chain_id", serde_json::Value::Number(x.chain_id.into()));
             out.insert("tx_hash", serde_json::Value::String(x.tx_hash));
             out
         })
@@ -471,7 +471,7 @@ pub async fn user_balance_post(
         debug!("Setting tx_hash: {:?}", tx_hash);
         let receipt = increase_balance_receipt::ActiveModel {
             tx_hash: sea_orm::ActiveValue::Set(hex::encode(tx_hash)),
-            chain_id: sea_orm::ActiveValue::Set(app.config.chain_id.to_string()),
+            chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
             amount: sea_orm::ActiveValue::Set(amount),
             deposit_to_user_id: sea_orm::ActiveValue::Set(recipient.id),
             ..Default::default()

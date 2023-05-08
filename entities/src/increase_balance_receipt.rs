@@ -10,7 +10,7 @@ pub struct Model {
     pub id: i32,
     #[sea_orm(unique)]
     pub tx_hash: String,
-    pub chain_id: String,
+    pub chain_id: u64,
     #[sea_orm(column_type = "Decimal(Some((20, 10)))")]
     pub amount: Decimal,
     pub deposit_to_user_id: u64,
