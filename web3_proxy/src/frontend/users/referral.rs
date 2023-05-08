@@ -44,9 +44,7 @@ pub async fn user_referral_link_get(
         .filter(user_tier::Column::Id.eq(user.user_tier_id))
         .one(db_replica.conn())
         .await?
-        .ok_or(Web3ProxyError::BadRequest(
-            "Could not find user in db although bearer token is there!".to_string(),
-        ))?;
+        .ok_or(Web3ProxyError::UnknownKey)?;
 
     warn!("User tier is: {:?}", user_tier);
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...

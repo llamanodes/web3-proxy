@@ -18,6 +18,14 @@ pub struct Model {
 pub enum Relation {
     #[sea_orm(has_many = "super::user::Entity")]
     User,
+    #[sea_orm(
+        belongs_to = "Entity",
+        from = "Column::DowngradeTierId",
+        to = "Column::Id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    SelfRef,
 }
 
 impl Related<super::user::Entity> for Entity {
