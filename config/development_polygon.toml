@@ -8,9 +8,7 @@ db_max_connections = 20
 # production runs inside docker and so uses "mysql://root:web3_proxy@db:3306/web3_proxy" for db_url
 db_url = "mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy"
 
-# deposit_contract = "0xc9fcfa7e28ff320c49967f4522ebc709aa1fde7c"
 deposit_contract = "0x4e3bc2054788de923a04936c6addb99a05b0ea36"
-
 
 # a timeseries database is optional. it is used for making pretty graphs
 influxdb_host = "http://127.0.0.1:18086"
@@ -93,7 +91,6 @@ tier = 1
 
 [balanced_rpcs.chainstack]
 disabled = false
-display_name = "Chainstack"
 http_url = "https://matic-mainnet.chainstacklabs.com"
 soft_limit = 10
 tier = 2
@@ -128,7 +125,7 @@ tier = 2
 
 [balanced_rpcs.fastrpc]
 disabled = false
-display_name = "1RPC"
+display_name = "FastRPC"
 http_url = "https://polygon-mainnet.rpcfast.com?api_key=xbhWBI1Wkguk8SNMu1bvvLurPGLXmgwYeC4S6g2H7WdwFigZSmPWVZRxrskEQwIf"
 soft_limit = 10
 tier = 2
@@ -202,14 +199,12 @@ tier = 2
 
 [balanced_rpcs.bor]
 disabled = true
-display_name = "bor"
 http_url = "https://polygon-bor.publicnode.com"
 soft_limit = 10
 tier = 2
 
 [balanced_rpcs.blxr]
 disabled = false
-display_name = "blxr"
 http_url = "https://polygon.rpc.blxrbdn.com"
 soft_limit = 10
 tier = 2
