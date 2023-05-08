@@ -1529,7 +1529,7 @@ impl Web3ProxyApp {
                     .balanced_rpcs
                     .try_proxy_connection(
                         authorization,
-                        request,
+                        request.clone(),
                         Some(&request_metadata),
                         None,
                         None,
