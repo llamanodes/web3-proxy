@@ -95,7 +95,7 @@ pub struct AppConfig {
     pub default_user_max_requests_per_period: Option<u64>,
 
     /// Default ERC address for out deposit contract
-    pub deposit_contract: Option<Address>,
+    pub deposit_factory_contract: Option<Address>,
 
     /// Default ERC address for out deposit contract
     pub deposit_topic: Option<H256>,

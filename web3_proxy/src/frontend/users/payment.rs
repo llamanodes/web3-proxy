@@ -197,7 +197,10 @@ pub async fn user_balance_post(
             // We want to send a request to the contract
             accepted_tokens_request_object.insert(
                 "to".to_owned(),
-                serde_json::Value::String(format!("{:?}", app.config.deposit_contract.clone())),
+                serde_json::Value::String(format!(
+                    "{:?}",
+                    app.config.deposit_factory_contract.clone()
+                )),
             );
             // We then want to include the function that we want to call
             accepted_tokens_request_object.insert(
@@ -291,7 +294,7 @@ pub async fn user_balance_post(
     // At least according to this SE logs are just concatenations of the underlying types (like a struct..)
     // https://ethereum.stackexchange.com/questions/87653/how-to-decode-log-event-of-my-transaction-log
 
-    let deposit_contract = match app.config.deposit_contract {
+    let deposit_contract = match app.config.deposit_factory_contract {
         Some(x) => Ok(x),
         None => Err(Web3ProxyError::Anyhow(anyhow!(
             "A deposit_contract must be provided in the config to parse payments"
