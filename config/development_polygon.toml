@@ -9,6 +9,7 @@ db_max_connections = 20
 db_url = "mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy"
 
 deposit_contract = "0x4e3bc2054788de923a04936c6addb99a05b0ea36"
+deposit_topic = "0x45fdc265dc29885b9a485766b03e70978440d38c7c328ee0a14fa40c76c6af54"
 
 # a timeseries database is optional. it is used for making pretty graphs
 influxdb_host = "http://127.0.0.1:18086"
