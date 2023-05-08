@@ -2,7 +2,7 @@ use crate::app::Web3ProxyApp;
 use crate::frontend::authorization::Authorization as InternalAuthorization;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::rpcs::request::OpenRequestResult;
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use axum::{
     extract::Path,
     headers::{authorization::Bearer, Authorization},
@@ -197,7 +197,7 @@ pub async fn user_balance_post(
             // We want to send a request to the contract
             accepted_tokens_request_object.insert(
                 "to".to_owned(),
-                serde_json::Value::String(app.config.deposit_contract.clone()),
+                serde_json::Value::String(format!("{:?}", app.config.deposit_contract.clone())),
             );
             // We then want to include the function that we want to call
             accepted_tokens_request_object.insert(
@@ -291,25 +291,38 @@ pub async fn user_balance_post(
     // At least according to this SE logs are just concatenations of the underlying types (like a struct..)
     // https://ethereum.stackexchange.com/questions/87653/how-to-decode-log-event-of-my-transaction-log
 
+    let deposit_contract = match app.config.deposit_contract {
+        Some(x) => Ok(x),
+        None => Err(Web3ProxyError::Anyhow(anyhow!(
+            "A deposit_contract must be provided in the config to parse payments"
+        ))),
+    }?;
+    let deposit_topic = match app.config.deposit_topic {
+        Some(x) => Ok(x),
+        None => Err(Web3ProxyError::Anyhow(anyhow!(
+            "A deposit_topic must be provided in the config to parse payments"
+        ))),
+    }?;
+
     // Make sure there is only a single log within that transaction ...
     // I don't know how to best cover the case that there might be multiple logs inside
 
     for log in transaction_receipt.logs {
-        if format!("{:?}", log.address) != app.config.deposit_contract {
+        if log.address != deposit_contract {
             debug!(
                 "Out: Log is not relevant, as it is not directed to the deposit contract {:?} {:?}",
                 format!("{:?}", log.address),
-                app.config.deposit_contract
+                deposit_contract
             );
             continue;
         }
 
         // Get the topics out
         let topic: H256 = H256::from(log.topics.get(0).unwrap().to_owned());
-        if format!("{:?}", topic) != app.config.deposit_topic {
+        if topic != deposit_topic {
             debug!(
                 "Out: Topic is not relevant: {:?} {:?}",
-                topic, app.config.deposit_topic
+                topic, deposit_topic
             );
             continue;
         }

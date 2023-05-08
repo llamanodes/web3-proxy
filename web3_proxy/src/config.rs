@@ -2,7 +2,7 @@ use crate::app::AnyhowJoinHandle;
 use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
-use ethers::prelude::TxHash;
+use ethers::prelude::{Address, TxHash, H256};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
 use log::warn;
@@ -95,13 +95,11 @@ pub struct AppConfig {
     pub default_user_max_requests_per_period: Option<u64>,
 
     /// Default ERC address for out deposit contract
-    pub deposit_contract: String,
+    pub deposit_contract: Option<Address>,
 
     /// Default ERC address for out deposit contract
-    pub deposit_topic: String,
+    pub deposit_topic: Option<H256>,
 
-    // Accepted ERC20 tokens for the deposit contract
-    // pub accepted_deposit_tokens: Vec<String>,
     /// minimum amount to increase eth_estimateGas results
     pub gas_increase_min: Option<U256>,
 
