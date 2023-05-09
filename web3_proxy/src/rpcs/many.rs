@@ -1312,9 +1312,9 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock as AsyncRwLock;
 
-    const NANOS_PER_MILLI: f64 = 1_000_000.0;
-
+    #[cfg(test)]
     fn new_peak_latency() -> PeakEwmaLatency {
+        const NANOS_PER_MILLI: f64 = 1_000_000.0;
         PeakEwmaLatency::spawn(1_000.0 * NANOS_PER_MILLI, 4, Duration::from_secs(1))
     }
 

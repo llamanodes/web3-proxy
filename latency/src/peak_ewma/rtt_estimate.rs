@@ -1,8 +1,10 @@
 use std::sync::atomic::Ordering;
 
+use log::trace;
 use tokio::time::{Duration, Instant};
 
 use crate::util::atomic_f32_pair::AtomicF32Pair;
+use crate::util::nanos::{nanos, NANOS_PER_MILLI};
 
 /// Holds the current RTT estimate and the last time this value was updated.
 #[derive(Debug)]
@@ -12,6 +14,40 @@ pub struct RttEstimate {
 }
 
 impl RttEstimate {
+    /// Update the estimate with a new rtt value. Use rtt=0.0 for simply
+    /// decaying the current value.
+    pub fn update(&mut self, rtt: f64, decay_ns: f64, now: Instant) -> Duration {
+        let ewma = nanos(self.rtt);
+        self.rtt = if ewma < rtt {
+            // For Peak-EWMA, always use the worst-case (peak) value as the estimate for
+            // subsequent requests.
+            trace!(
+                "update peak rtt={}ms prior={}ms",
+                rtt / NANOS_PER_MILLI,
+                ewma / NANOS_PER_MILLI,
+            );
+            Duration::from_nanos(rtt as u64)
+        } else {
+            // When a latency is observed that is less than the estimated latency, we decay the
+            // prior estimate according to how much time has elapsed since the last
+            // update. The inverse of the decay is used to scale the estimate towards the
+            // observed latency value.
+            let elapsed = nanos(now.saturating_duration_since(self.update_at));
+            let decay = (-elapsed / decay_ns).exp();
+            let recency = 1.0 - decay;
+            let next_estimate = (ewma * decay) + (rtt * recency);
+            trace!(
+                "update duration={:03.0}ms decay={:06.0}ns; next={:03.0}ms",
+                rtt / NANOS_PER_MILLI,
+                ewma - next_estimate,
+                next_estimate / NANOS_PER_MILLI,
+            );
+            Duration::from_nanos(next_estimate as u64)
+        };
+        self.rtt
+    }
+
+    /// Build a new estimate object using current time.
     fn new(start_duration: Duration) -> Self {
         Self {
             update_at: Instant::now(),
@@ -75,11 +111,14 @@ impl AtomicRttEstimate {
     where
         F: FnMut(RttEstimate) -> Duration,
     {
-        let update_at = Instant::now();
+        let mut update_at = Instant::now();
         let mut rtt = Duration::ZERO;
         self.pair
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |pair| {
                 rtt = f(RttEstimate::from_pair(pair, self.start_time));
+                // Save the new update_at inside the function in case it
+                // is run multiple times
+                update_at = Instant::now();
                 Some(RttEstimate { rtt, update_at }.as_pair(self.start_time))
             })
             .expect("Should never Err");
