@@ -110,3 +110,28 @@ impl PeakEwmaLatencyTask {
             .fetch_update(|mut rtt_estimate| rtt_estimate.update(rtt, self.decay_ns, now));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tokio::time::{self, Duration};
+
+    use crate::util::nanos::NANOS_PER_MILLI;
+
+    /// The default RTT estimate decays, so that new nodes are considered if the
+    /// default RTT is too high.
+    #[tokio::test(start_paused = true)]
+    async fn default_decay() {
+        let estimate =
+            super::PeakEwmaLatency::spawn(NANOS_PER_MILLI * 1_000.0, 8, Duration::from_millis(10));
+        let load = estimate.latency();
+        assert_eq!(load, Duration::from_millis(10));
+
+        time::advance(Duration::from_millis(100)).await;
+        let load = estimate.latency();
+        assert!(Duration::from_millis(9) < load && load < Duration::from_millis(10));
+
+        time::advance(Duration::from_millis(100)).await;
+        let load = estimate.latency();
+        assert!(Duration::from_millis(8) < load && load < Duration::from_millis(9));
+    }
+}

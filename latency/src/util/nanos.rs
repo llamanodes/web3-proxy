@@ -12,3 +12,19 @@ pub fn nanos(d: Duration) -> f64 {
     let s = d.as_secs().saturating_mul(NANOS_PER_SEC) as f64;
     n + s
 }
+
+#[cfg(test)]
+mod tests {
+    use tokio::time::Duration;
+
+    #[test]
+    fn nanos() {
+        assert_eq!(super::nanos(Duration::new(0, 0)), 0.0);
+        assert_eq!(super::nanos(Duration::new(0, 123)), 123.0);
+        assert_eq!(super::nanos(Duration::new(1, 23)), 1_000_000_023.0);
+        assert_eq!(
+            super::nanos(Duration::new(::std::u64::MAX, 999_999_999)),
+            18446744074709553000.0
+        );
+    }
+}
