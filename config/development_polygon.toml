@@ -65,7 +65,7 @@ response_cache_max_bytes = 1_000_000_000
 disabled = false
 display_name = "LlamaNodes"
 http_url = "https://polygon.llamarpc.com"
-#ws_url = "wss://polygon.llamarpc.com/"
+ws_url = "wss://polygon.llamarpc.com"
 soft_limit = 1_000
 tier = 0
 

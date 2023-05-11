@@ -65,7 +65,6 @@ pub async fn user_referral_link_get(
             let db_conn = app.db_conn().context("getting db_conn")?;
 
             let referral_code = ReferralCode::default().0;
-            let txn = db_conn.begin().await?;
             // Log that this guy was referred by another guy
             // Do not automatically create a new
             let referrer_entry = referrer::ActiveModel {
@@ -73,8 +72,7 @@ pub async fn user_referral_link_get(
                 referral_code: sea_orm::ActiveValue::Set(referral_code.clone()),
                 ..Default::default()
             };
-            referrer_entry.insert(&txn).await?;
-            txn.commit().await?;
+            referrer_entry.save(&db_conn).await?;
             (referral_code, StatusCode::CREATED)
         }
     };
