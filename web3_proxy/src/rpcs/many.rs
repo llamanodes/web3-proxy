@@ -1299,17 +1299,18 @@ fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (Reverse<U64>, u64, bool, Order
 }
 
 mod tests {
-    // TODO: why is this allow needed? does tokio::test get in the way somehow?
     #![allow(unused_imports)]
+
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
     use crate::rpcs::consensus::ConsensusFinder;
     use crate::rpcs::{blockchain::Web3ProxyBlock, provider::Web3Provider};
+
     use ethers::types::{Block, U256};
     use latency::PeakEwmaLatency;
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock as AsyncRwLock;
 
     #[cfg(test)]

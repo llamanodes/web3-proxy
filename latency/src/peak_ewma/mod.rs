@@ -62,6 +62,7 @@ impl PeakEwmaLatency {
             estimate.update_at,
         );
 
+        // Update the RTT estimate to account for decay since the last update.
         estimate.update(0.0, self.decay_ns, now)
     }
 
@@ -69,13 +70,11 @@ impl PeakEwmaLatency {
     ///
     /// Should only be called from the Web3Rpc that owns it.
     pub fn report(&self, duration: Duration) {
-        match self
-            .request_tx
-            // TODO try_send
-            .try_send(duration)
-        {
+        match self.request_tx.try_send(duration) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
+                // We don't want to block if the channel is full, just
+                // report the error
                 error!("Latency report channel full");
                 // TODO: could we spawn a new tokio task to report tthis later?
             }

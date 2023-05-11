@@ -167,13 +167,14 @@ impl Web3Rpc {
         let reconnect = reconnect.into();
 
         // Spawn the task for calculting average peak latency
-        // TODO: is one second good for the decay here?
-
-        const NANOS_PER_MILLI: f64 = 1_000_000.0;
-        // TODO good defaults? should they be config?
+        // TODO Should these defaults be in config
         let peak_latency = PeakEwmaLatency::spawn(
+            // Decay over 15s
             Duration::from_secs(15).as_millis() as f64,
+            // Peak requests so far around 5k, we will use an order of magnitude
+            // more to be safe. Should only use about 50mb RAM
             50_000,
+            // Start latency at 1 second
             Duration::from_secs(1),
         );
 
