@@ -929,7 +929,7 @@ impl Web3Rpcs {
 
                                 // different providers do different codes. check all of them
                                 // TODO: there's probably more strings to add here
-                                let rate_limit_substrings = ["limit", "exceeded"];
+                                let rate_limit_substrings = ["limit", "exceeded", "quota usage"];
                                 for rate_limit_substr in rate_limit_substrings {
                                     if error_msg.contains(rate_limit_substr) {
                                         warn!("rate limited by {}", skip_rpcs.last().unwrap());
