@@ -12,6 +12,7 @@ use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use ethers::types::{Address, Transaction, U256};
 use futures::future::try_join_all;
 use futures::StreamExt;
+use latency::{EwmaLatency, PeakEwmaLatency};
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use ordered_float::OrderedFloat;
@@ -29,69 +30,6 @@ use thread_fast_rng::rand::Rng;
 use thread_fast_rng::thread_fast_rng;
 use tokio::sync::{broadcast, oneshot, watch, RwLock as AsyncRwLock};
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
-
-pub struct Latency {
-    /// exponentially weighted moving average of how many milliseconds behind the fastest node we are
-    ewma: ewma::EWMA,
-}
-
-impl Serialize for Latency {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_f64(self.ewma.value())
-    }
-}
-
-impl Latency {
-    #[inline(always)]
-    pub fn record(&mut self, duration: Duration) {
-        self.record_ms(duration.as_secs_f64() * 1000.0);
-    }
-
-    #[inline(always)]
-    pub fn record_ms(&mut self, milliseconds: f64) {
-        self.ewma.add(milliseconds);
-    }
-
-    #[inline(always)]
-    pub fn value(&self) -> f64 {
-        self.ewma.value()
-    }
-}
-
-impl Default for Latency {
-    fn default() -> Self {
-        // TODO: what should the default span be? 25 requests? have a "new"
-        let span = 25.0;
-
-        let start = 1000.0;
-
-        Self::new(span, start)
-    }
-}
-
-impl Latency {
-    // depending on the span, start might not be perfect
-    pub fn new(span: f64, start: f64) -> Self {
-        let alpha = Self::span_to_alpha(span);
-
-        let mut ewma = ewma::EWMA::new(alpha);
-
-        if start > 0.0 {
-            for _ in 0..(span as u64) {
-                ewma.add(start);
-            }
-        }
-
-        Self { ewma }
-    }
-
-    fn span_to_alpha(span: f64) -> f64 {
-        2.0 / (span + 1.0)
-    }
-}
 
 /// An active connection to a Web3 RPC server like geth or erigon.
 #[derive(Default)]
@@ -127,10 +65,11 @@ pub struct Web3Rpc {
     /// TODO: change this to a watch channel so that http providers can subscribe and take action on change.
     pub(super) head_block: RwLock<Option<Web3ProxyBlock>>,
     /// Track head block latency
-    pub(super) head_latency: RwLock<Latency>,
-    // /// Track request latency
-    // /// TODO: refactor this. this lock kills perf. for now just use head_latency
-    // pub(super) request_latency: RwLock<Latency>,
+    pub(super) head_latency: RwLock<EwmaLatency>,
+    /// Track peak request latency
+    ///
+    /// This is only inside an Option so that the "Default" derive works. it will always be set.
+    pub(super) peak_latency: Option<PeakEwmaLatency>,
     /// Track total requests served
     /// TODO: maybe move this to graphana
     pub(super) total_requests: AtomicUsize,
@@ -227,6 +166,18 @@ impl Web3Rpc {
         let (disconnect_sender, disconnect_receiver) = watch::channel(false);
         let reconnect = reconnect.into();
 
+        // Spawn the task for calculting average peak latency
+        // TODO Should these defaults be in config
+        let peak_latency = PeakEwmaLatency::spawn(
+            // Decay over 15s
+            Duration::from_secs(15).as_millis() as f64,
+            // Peak requests so far around 5k, we will use an order of magnitude
+            // more to be safe. Should only use about 50mb RAM
+            50_000,
+            // Start latency at 1 second
+            Duration::from_secs(1),
+        );
+
         let new_connection = Self {
             name,
             db_conn: db_conn.clone(),
@@ -245,6 +196,7 @@ impl Web3Rpc {
             disconnect_watch: Some(disconnect_sender),
             created_at: Some(created_at),
             head_block: RwLock::new(Default::default()),
+            peak_latency: Some(peak_latency),
             ..Default::default()
         };
 

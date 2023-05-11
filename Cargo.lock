@@ -3021,6 +3021,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "latency"
+version = "0.1.0"
+dependencies = [
+ "ewma",
+ "log",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6657,7 +6667,6 @@ dependencies = [
  "entities",
  "env_logger",
  "ethers",
- "ewma",
  "fdlimit",
  "flume",
  "fstrings",
@@ -6673,6 +6682,7 @@ dependencies = [
  "influxdb2-structmap",
  "ipnet",
  "itertools",
+ "latency",
  "log",
  "migration",
  "moka",
