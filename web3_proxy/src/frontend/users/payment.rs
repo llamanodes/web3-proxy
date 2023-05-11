@@ -10,7 +10,7 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::{balance, increase_balance_receipt, user, user_tier};
+use entities::{balance, increase_on_chain_balance_receipt, user, user_tier};
 use ethers::abi::{AbiEncode, ParamType};
 use ethers::types::{Address, TransactionReceipt, H256, U256};
 use ethers::utils::{hex, keccak256};
@@ -78,8 +78,8 @@ pub async fn user_deposits_get(
     let db_replica = app.db_replica().context("Getting database connection")?;
 
     // Filter by user ...
-    let receipts = increase_balance_receipt::Entity::find()
-        .filter(increase_balance_receipt::Column::DepositToUserId.eq(user.id))
+    let receipts = increase_on_chain_balance_receipt::Entity::find()
+        .filter(increase_on_chain_balance_receipt::Column::DepositToUserId.eq(user.id))
         .all(db_replica.conn())
         .await?;
 
@@ -135,8 +135,8 @@ pub async fn user_balance_post(
         .context("query_user_stats needs a db replica")?;
 
     // Return straight false if the tx was already added ...
-    let receipt = increase_balance_receipt::Entity::find()
-        .filter(increase_balance_receipt::Column::TxHash.eq(hex::encode(tx_hash)))
+    let receipt = increase_on_chain_balance_receipt::Entity::find()
+        .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(hex::encode(tx_hash)))
         .one(&db_conn)
         .await?;
     if receipt.is_some() {
@@ -469,7 +469,7 @@ pub async fn user_balance_post(
             }
         };
         debug!("Setting tx_hash: {:?}", tx_hash);
-        let receipt = increase_balance_receipt::ActiveModel {
+        let receipt = increase_on_chain_balance_receipt::ActiveModel {
             tx_hash: sea_orm::ActiveValue::Set(hex::encode(tx_hash)),
             chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
             amount: sea_orm::ActiveValue::Set(amount),

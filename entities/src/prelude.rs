@@ -3,7 +3,7 @@
 pub use super::admin::Entity as Admin;
 pub use super::admin_trail::Entity as AdminTrail;
 pub use super::balance::Entity as Balance;
-pub use super::increase_balance_receipt::Entity as IncreaseBalanceReceipt;
+pub use super::increase_on_chain_balance_receipt::Entity as IncreaseOnChainBalanceReceipt;
 pub use super::login::Entity as Login;
 pub use super::pending_login::Entity as PendingLogin;
 pub use super::referee::Entity as Referee;

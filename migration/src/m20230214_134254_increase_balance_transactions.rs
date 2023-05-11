@@ -10,32 +10,32 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(IncreaseBalanceReceipt::Table)
+                    .table(IncreaseOnChainBalanceReceipt::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(IncreaseBalanceReceipt::Id)
+                        ColumnDef::new(IncreaseOnChainBalanceReceipt::Id)
                             .integer()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(IncreaseBalanceReceipt::TxHash)
+                        ColumnDef::new(IncreaseOnChainBalanceReceipt::TxHash)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(IncreaseBalanceReceipt::ChainId)
+                        ColumnDef::new(IncreaseOnChainBalanceReceipt::ChainId)
                             .big_integer()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(IncreaseBalanceReceipt::Amount)
+                        ColumnDef::new(IncreaseOnChainBalanceReceipt::Amount)
                             .decimal_len(20, 10)
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(IncreaseBalanceReceipt::DepositToUserId)
+                        ColumnDef::new(IncreaseOnChainBalanceReceipt::DepositToUserId)
                             .big_unsigned()
                             .unique_key()
                             .not_null(),
@@ -44,8 +44,8 @@ impl MigrationTrait for Migration {
                         ForeignKey::create()
                             .name("fk-deposit_to_user_id")
                             .from(
-                                IncreaseBalanceReceipt::Table,
-                                IncreaseBalanceReceipt::DepositToUserId,
+                                IncreaseOnChainBalanceReceipt::Table,
+                                IncreaseOnChainBalanceReceipt::DepositToUserId,
                             )
                             .to(User::Table, User::Id),
                     )
@@ -57,10 +57,10 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx-increase_balance_receipt-unique-chain_id-tx_hash")
-                    .table(IncreaseBalanceReceipt::Table)
-                    .col(IncreaseBalanceReceipt::ChainId)
-                    .col(IncreaseBalanceReceipt::TxHash)
+                    .name("idx-increase_on_chain_balance_receipt-unique-chain_id-tx_hash")
+                    .table(IncreaseOnChainBalanceReceipt::Table)
+                    .col(IncreaseOnChainBalanceReceipt::ChainId)
+                    .col(IncreaseOnChainBalanceReceipt::TxHash)
                     .unique()
                     .to_owned(),
             )
@@ -72,7 +72,7 @@ impl MigrationTrait for Migration {
         manager
             .drop_table(
                 Table::drop()
-                    .table(IncreaseBalanceReceipt::Table)
+                    .table(IncreaseOnChainBalanceReceipt::Table)
                     .to_owned(),
             )
             .await
@@ -81,7 +81,7 @@ impl MigrationTrait for Migration {
 
 /// Learn more at https://docs.rs/sea-query#iden
 #[derive(Iden)]
-enum IncreaseBalanceReceipt {
+enum IncreaseOnChainBalanceReceipt {
     Table,
     Id,
     TxHash,
