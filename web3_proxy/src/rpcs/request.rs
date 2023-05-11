@@ -194,7 +194,7 @@ impl OpenRequestHandle {
             .active_requests
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        // let latency = Instant::now();
+        let start = Instant::now();
 
         // TODO: replace ethers-rs providers with our own that supports streaming the responses
         let response = match provider.as_ref() {
@@ -366,14 +366,10 @@ impl OpenRequestHandle {
                     tokio::spawn(f);
                 }
             }
+        } else if let Some(peak_latency) = &self.rpc.peak_latency {
+            peak_latency.report(start.elapsed());
         } else {
-            // TODO: record request latency
-            // let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-            // TODO: is this lock here a problem? should this be done through a channel? i started to code it, but it didn't seem to matter
-            // let mut latency_recording = self.rpc.request_latency.write();
-
-            // latency_recording.record(latency_ms);
+            unreachable!("peak_latency not initialized");
         }
 
         response

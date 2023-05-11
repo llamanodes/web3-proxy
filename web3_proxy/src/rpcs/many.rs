@@ -928,7 +928,7 @@ impl Web3Rpcs {
 
                                 // different providers do different codes. check all of them
                                 // TODO: there's probably more strings to add here
-                                let rate_limit_substrings = ["limit", "exceeded"];
+                                let rate_limit_substrings = ["limit", "exceeded", "quota usage"];
                                 for rate_limit_substr in rate_limit_substrings {
                                     if error_msg.contains(rate_limit_substr) {
                                         warn!("rate limited by {}", skip_rpcs.last().unwrap());
@@ -1281,13 +1281,16 @@ fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (Reverse<U64>, u64, bool, Order
 
     // TODO: use request latency instead of head latency
     // TODO: have the latency decay automatically
-    let head_ewma = x.head_latency.read().value();
+    let peak_latency = x
+        .peak_latency
+        .as_ref()
+        .expect("peak_latency uniniialized")
+        .latency();
 
     let active_requests = x.active_requests.load(atomic::Ordering::Relaxed) as f64;
 
     // TODO: i'm not sure head * active is exactly right. but we'll see
-    // TODO: i don't think this actually counts as peak. investigate with atomics.rs and peak_ewma.rs
-    let peak_ewma = OrderedFloat(head_ewma * active_requests);
+    let peak_ewma = OrderedFloat(peak_latency.as_millis() as f64 * (active_requests + 1.0));
 
     let backup = x.backup;
 
@@ -1295,17 +1298,25 @@ fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (Reverse<U64>, u64, bool, Order
 }
 
 mod tests {
-    // TODO: why is this allow needed? does tokio::test get in the way somehow?
     #![allow(unused_imports)]
+
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
     use crate::rpcs::consensus::ConsensusFinder;
     use crate::rpcs::{blockchain::Web3ProxyBlock, provider::Web3Provider};
+
     use ethers::types::{Block, U256};
+    use latency::PeakEwmaLatency;
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock as AsyncRwLock;
+
+    #[cfg(test)]
+    fn new_peak_latency() -> PeakEwmaLatency {
+        const NANOS_PER_MILLI: f64 = 1_000_000.0;
+        PeakEwmaLatency::spawn(1_000.0 * NANOS_PER_MILLI, 4, Duration::from_secs(1))
+    }
 
     #[tokio::test]
     async fn test_sort_connections_by_sync_status() {
@@ -1337,36 +1348,42 @@ mod tests {
                 name: "a".to_string(),
                 tier: 0,
                 head_block: RwLock::new(None),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "b".to_string(),
                 tier: 0,
                 head_block: RwLock::new(blocks.get(1).cloned()),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "c".to_string(),
                 tier: 0,
                 head_block: RwLock::new(blocks.get(2).cloned()),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "d".to_string(),
                 tier: 1,
                 head_block: RwLock::new(None),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "e".to_string(),
                 tier: 1,
                 head_block: RwLock::new(blocks.get(1).cloned()),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "f".to_string(),
                 tier: 1,
                 head_block: RwLock::new(blocks.get(2).cloned()),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
         ]
@@ -1424,6 +1441,7 @@ mod tests {
             tier: 0,
             head_block: RwLock::new(Some(head_block.clone())),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 
@@ -1436,6 +1454,7 @@ mod tests {
             tier: 0,
             head_block: RwLock::new(Some(lagged_block.clone())),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 
@@ -1780,6 +1799,7 @@ mod tests {
             tier: 0,
             head_block: RwLock::new(Some(block_1.clone())),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 
@@ -1792,6 +1812,7 @@ mod tests {
             tier: 1,
             head_block: RwLock::new(Some(block_2.clone())),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 
