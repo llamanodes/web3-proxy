@@ -171,8 +171,11 @@ impl Web3Rpc {
 
         const NANOS_PER_MILLI: f64 = 1_000_000.0;
         // TODO good defaults? should they be config?
-        let peak_latency =
-            PeakEwmaLatency::spawn(1_000.0 * NANOS_PER_MILLI, 4, Duration::from_secs(1));
+        let peak_latency = PeakEwmaLatency::spawn(
+            Duration::from_secs(15).as_millis() as f64,
+            50_000,
+            Duration::from_secs(1),
+        );
 
         let new_connection = Self {
             name,

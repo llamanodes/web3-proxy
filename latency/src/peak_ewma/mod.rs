@@ -2,7 +2,9 @@ mod rtt_estimate;
 
 use std::sync::Arc;
 
+use log::error;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
@@ -66,11 +68,22 @@ impl PeakEwmaLatency {
     /// Report latency from a single request
     ///
     /// Should only be called from the Web3Rpc that owns it.
-    pub async fn report(&self, duration: Duration) {
-        self.request_tx
-            .send(duration)
-            .await
-            .expect("Owner should keep channel open");
+    pub fn report(&self, duration: Duration) {
+        match self
+            .request_tx
+            // TODO try_send
+            .try_send(duration)
+        {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                error!("Latency report channel full");
+                // TODO: could we spawn a new tokio task to report tthis later?
+            }
+            Err(TrySendError::Closed(_)) => {
+                unreachable!("Owner should keep channel open");
+            }
+        };
+        //.expect("Owner should keep channel open");
     }
 }
 

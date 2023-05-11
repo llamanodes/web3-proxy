@@ -367,7 +367,7 @@ impl OpenRequestHandle {
                 }
             }
         } else if let Some(peak_latency) = &self.rpc.peak_latency {
-            peak_latency.report(start.elapsed()).await;
+            peak_latency.report(start.elapsed());
         } else {
             unreachable!("peak_latency not initialized");
         }
