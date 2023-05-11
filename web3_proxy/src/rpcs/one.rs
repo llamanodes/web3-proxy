@@ -20,6 +20,7 @@ use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
+use std::borrow::Cow;
 use std::cmp::min;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -29,6 +30,7 @@ use thread_fast_rng::rand::Rng;
 use thread_fast_rng::thread_fast_rng;
 use tokio::sync::{broadcast, oneshot, watch, RwLock as AsyncRwLock};
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
+use url::Url;
 
 pub struct Latency {
     /// exponentially weighted moving average of how many milliseconds behind the fastest node we are
@@ -99,8 +101,8 @@ pub struct Web3Rpc {
     pub name: String,
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
-    pub(super) ws_url: Option<String>,
-    pub(super) http_url: Option<String>,
+    pub(super) ws_url: Option<Url>,
+    pub(super) http_url: Option<Url>,
     /// Some connections use an http_client. we keep a clone for reconnecting
     pub(super) http_client: Option<reqwest::Client>,
     /// provider is in a RwLock so that we can replace it if re-connecting
@@ -227,13 +229,25 @@ impl Web3Rpc {
         let (disconnect_sender, disconnect_receiver) = watch::channel(false);
         let reconnect = reconnect.into();
 
+        let http_url = if let Some(http_url) = config.http_url {
+            Some(http_url.parse()?)
+        } else {
+            None
+        };
+
+        let ws_url = if let Some(ws_url) = config.ws_url {
+            Some(ws_url.parse()?)
+        } else {
+            None
+        };
+
         let new_connection = Self {
             name,
             db_conn: db_conn.clone(),
             display_name: config.display_name,
             http_client,
-            ws_url: config.ws_url,
-            http_url: config.http_url,
+            ws_url,
+            http_url,
             hard_limit,
             hard_limit_until,
             soft_limit: config.soft_limit,
@@ -526,7 +540,7 @@ impl Web3Rpc {
                     }
                 }
 
-                let p = Web3Provider::from_str(ws_url.as_str(), None)
+                let p = Web3Provider::new(Cow::Borrowed(ws_url), None)
                     .await
                     .context(format!("failed connecting to {}", ws_url))?;
 
@@ -536,7 +550,7 @@ impl Web3Rpc {
             } else {
                 // http client
                 if let Some(url) = &self.http_url {
-                    let p = Web3Provider::from_str(url, self.http_client.clone())
+                    let p = Web3Provider::new(Cow::Borrowed(url), self.http_client.clone())
                         .await
                         .context(format!("failed connecting to {}", url))?;
 
@@ -1481,7 +1495,7 @@ mod tests {
 
         let x = Web3Rpc {
             name: "name".to_string(),
-            ws_url: Some("ws://example.com".to_string()),
+            ws_url: Some("ws://example.com".parse::<Url>().unwrap()),
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,

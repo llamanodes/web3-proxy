@@ -410,9 +410,9 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [-] add configurable size limits to all the Caches
   - instead of configuring each cache with MB sizes, have one value for total memory footprint and then percentages for each cache
   - https://github.com/moka-rs/moka/issues/201
-- [ ] all anyhow::Results need to be replaced with FrontendErrorResponse. 
-    - [ ] rename FrontendErrorResponse to Web3ProxyError
-    - [ ] almost all the anyhows should be Web3ProxyError::BadRequest
+- [x] all anyhow::Results need to be replaced with FrontendErrorResponse. 
+    - [x] rename FrontendErrorResponse to Web3ProxyError
+    - [x] almost all the anyhows should be Web3ProxyError::BadRequest
     - as is, these errors are seen as 500 errors and so haproxy keeps retrying them
 - change premium concurrency limit to be against ip+rpckey
   - then sites like curve.fi don't have to worry about their user count
@@ -422,18 +422,18 @@ These are not yet ordered. There might be duplicates. We might not actually need
   - all nodes have all blocks
   - most nodes have all receipts
   - only archives have old state
-- [ ] don't use new_head_provider anywhere except new head subscription
-- [ ] enable mev protected transactions with either a /protect/ url (instead of /private/) or the database (when on /rpc/)
-- [-] have private transactions be enabled by a url setting rather than a setting on the key
+- [x] don't use new_head_provider anywhere except new head subscription
+- [x] add support for http basic auth
+- [-] enable mev protected transactions with either a /protect/ url (instead of /private/) or the database (when on /rpc/)
+- [ ] a **lot** got done that wasn't included in this todo list. go through commits and update this
 - [ ] eth_sendRawTransaction should only forward if the chain_id matches what we are running
 - [ ] cli for adding rpc keys to an existing user
 - [ ] rename "private" to "mev protected" to avoid confusion about private transactions being public once they are mined
 - [ ] allow restricting an rpc key to specific chains
-- [ ] writes to request_latency should be handled by a background task so they don't slow down the request
-  - maybe we can use https://docs.rs/hdrhistogram/latest/hdrhistogram/sync/struct.SyncHistogram.html
+- [-] writes to request_latency should be handled by a background task so they don't slow down the request
 - [ ] keep re-broadcasting transactions until they are confirmed
 - [ ] if mev protection is disabled, we should send to *both* balanced_rpcs *and* private_rps
-- [ ] if mev protection is enabled, we should sent to *only* private_rpcs
+- [x] if mev protection is enabled, we should sent to *only* private_rpcs
 - [ ] rate limiting/throttling on query_user_stats 
 - [ ] web3rpc configs should have a max_concurrent_requests
     - will probably want a tool for calculating a safe value for this. too low and we could kill our performance
