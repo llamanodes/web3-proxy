@@ -2,9 +2,8 @@ mod rtt_estimate;
 
 use std::sync::Arc;
 
+use kanal::SendError;
 use log::error;
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
@@ -20,7 +19,7 @@ pub struct PeakEwmaLatency {
     /// Join handle for the latency calculation task
     pub join_handle: JoinHandle<()>,
     /// Send to update with each request duration
-    request_tx: mpsc::Sender<Duration>,
+    request_tx: kanal::AsyncSender<Duration>,
     /// Latency average and last update time
     rtt_estimate: Arc<AtomicRttEstimate>,
     /// Decay time
@@ -34,7 +33,7 @@ impl PeakEwmaLatency {
     /// average latency.
     pub fn spawn(decay_ns: f64, buf_size: usize, start_latency: Duration) -> Self {
         debug_assert!(decay_ns > 0.0, "decay_ns must be positive");
-        let (request_tx, request_rx) = mpsc::channel(buf_size);
+        let (request_tx, request_rx) = kanal::bounded_async(buf_size);
         let rtt_estimate = Arc::new(AtomicRttEstimate::new(start_latency));
         let task = PeakEwmaLatencyTask {
             request_rx,
@@ -71,15 +70,18 @@ impl PeakEwmaLatency {
     /// Should only be called from the Web3Rpc that owns it.
     pub fn report(&self, duration: Duration) {
         match self.request_tx.try_send(duration) {
-            Ok(()) => {}
-            Err(TrySendError::Full(_)) => {
+            Ok(true) => {}
+            Ok(false) => {
                 // We don't want to block if the channel is full, just
                 // report the error
                 error!("Latency report channel full");
                 // TODO: could we spawn a new tokio task to report tthis later?
             }
-            Err(TrySendError::Closed(_)) => {
+            Err(SendError::Closed) => {
                 unreachable!("Owner should keep channel open");
+            }
+            Err(SendError::ReceiveClosed) => {
+                unreachable!("Receiver should keep channel open");
             }
         };
         //.expect("Owner should keep channel open");
@@ -90,7 +92,7 @@ impl PeakEwmaLatency {
 #[derive(Debug)]
 struct PeakEwmaLatencyTask {
     /// Receive new request timings for update
-    request_rx: mpsc::Receiver<Duration>,
+    request_rx: kanal::AsyncReceiver<Duration>,
     /// Current estimate and update time
     rtt_estimate: Arc<AtomicRttEstimate>,
     /// Last update time, used for decay calculation
@@ -102,7 +104,7 @@ struct PeakEwmaLatencyTask {
 impl PeakEwmaLatencyTask {
     /// Run the loop for updating latency
     async fn run(mut self) {
-        while let Some(rtt) = self.request_rx.recv().await {
+        while let Ok(rtt) = self.request_rx.recv().await {
             self.update(rtt);
         }
     }

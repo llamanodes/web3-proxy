@@ -285,8 +285,8 @@ impl Web3RpcConfig {
         http_client: Option<reqwest::Client>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         blocks_by_hash_cache: BlocksByHashCache,
-        block_sender: Option<flume::Sender<BlockAndRpc>>,
-        tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
+        block_sender: Option<kanal::AsyncSender<BlockAndRpc>>,
+        tx_id_sender: Option<kanal::AsyncSender<TxHashAndRpc>>,
         reconnect: bool,
     ) -> anyhow::Result<(Arc<Web3Rpc>, AnyhowJoinHandle<()>)> {
         if !self.extra.is_empty() {

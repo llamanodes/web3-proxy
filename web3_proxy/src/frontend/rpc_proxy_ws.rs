@@ -311,7 +311,7 @@ async fn proxy_web3_socket(
     let (ws_tx, ws_rx) = socket.split();
 
     // create a channel for our reader and writer can communicate. todo: benchmark different channels
-    let (response_sender, response_receiver) = flume::unbounded::<Message>();
+    let (response_sender, response_receiver) = kanal::unbounded_async::<Message>();
 
     tokio::spawn(write_web3_socket(response_receiver, ws_tx));
     tokio::spawn(read_web3_socket(app, authorization, ws_rx, response_sender));
@@ -323,7 +323,7 @@ async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
     authorization: &Arc<Authorization>,
     payload: &str,
-    response_sender: &flume::Sender<Message>,
+    response_sender: &kanal::AsyncSender<Message>,
     subscription_count: &AtomicUsize,
     subscriptions: Arc<RwLock<HashMap<Bytes, AbortHandle>>>,
 ) -> Web3ProxyResult<(Message, Option<OwnedSemaphorePermit>)> {
@@ -452,7 +452,7 @@ async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
     authorization: Arc<Authorization>,
     mut ws_rx: SplitStream<WebSocket>,
-    response_sender: flume::Sender<Message>,
+    response_sender: kanal::AsyncSender<Message>,
 ) {
     // RwLock should be fine here. a user isn't going to be opening tons of subscriptions
     let subscriptions = Arc::new(RwLock::new(HashMap::new()));
@@ -528,7 +528,7 @@ async fn read_web3_socket(
                             }
                         };
 
-                        if response_sender.send_async(response_msg).await.is_err() {
+                        if response_sender.send(response_msg).await.is_err() {
                             let _ = close_sender.send(true);
                             return;
                         };
@@ -549,13 +549,13 @@ async fn read_web3_socket(
 }
 
 async fn write_web3_socket(
-    response_rx: flume::Receiver<Message>,
+    response_rx: kanal::AsyncReceiver<Message>,
     mut ws_tx: SplitSink<WebSocket, Message>,
 ) {
     // TODO: increment counter for open websockets
 
     // TODO: is there any way to make this stream receive.
-    while let Ok(msg) = response_rx.recv_async().await {
+    while let Ok(msg) = response_rx.recv().await {
         // a response is ready
 
         // TODO: poke rate limits for this user?

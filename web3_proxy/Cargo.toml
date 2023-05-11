@@ -43,7 +43,6 @@ env_logger = "0.10.0"
 ethers = { version = "2.0.4", default-features = false, features = ["rustls", "ws"] }
 ewma = "0.1.1"
 fdlimit = "0.2.1"
-flume = "0.10.14"
 fstrings = "0.2"
 futures = { version = "0.3.28", features = ["thread-pool"] }
 gethostname = "0.4.2"
@@ -58,6 +57,7 @@ influxdb2 = { git = "https://github.com/llamanodes/influxdb2", features = ["rust
 influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/"}
 ipnet = "2.7.2"
 itertools = "0.10.5"
+kanal = "0.1.0-pre8"
 listenfd = "1.0.1"
 log = "0.4.17"
 mimalloc = { version = "0.1.37", optional = true}

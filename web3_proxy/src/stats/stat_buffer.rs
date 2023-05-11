@@ -30,7 +30,7 @@ pub struct BufferedRpcQueryStats {
 
 #[derive(From)]
 pub struct SpawnedStatBuffer {
-    pub stat_sender: flume::Sender<AppStat>,
+    pub stat_sender: kanal::AsyncSender<AppStat>,
     /// these handles are important and must be allowed to finish
     pub background_handle: JoinHandle<anyhow::Result<()>>,
 }
@@ -65,7 +65,7 @@ impl StatBuffer {
             return Ok(None);
         }
 
-        let (stat_sender, stat_receiver) = flume::unbounded();
+        let (stat_sender, stat_receiver) = kanal::unbounded_async();
 
         let timestamp_precision = TimestampPrecision::Seconds;
         let mut new = Self {
@@ -94,7 +94,7 @@ impl StatBuffer {
     async fn aggregate_and_save_loop(
         &mut self,
         bucket: String,
-        stat_receiver: flume::Receiver<AppStat>,
+        stat_receiver: kanal::AsyncReceiver<AppStat>,
         mut shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<()> {
         let mut tsdb_save_interval =
@@ -107,7 +107,7 @@ impl StatBuffer {
 
         loop {
             tokio::select! {
-                stat = stat_receiver.recv_async() => {
+                stat = stat_receiver.recv() => {
                     // info!("Received stat");
                     // save the stat to a buffer
                     match stat {

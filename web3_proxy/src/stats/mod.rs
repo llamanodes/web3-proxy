@@ -672,7 +672,6 @@ impl RpcQueryStats {
         method: Option<&str>,
     ) -> Decimal {
         // some methods should be free. there might be cases where method isn't set (though they should be uncommon)
-        // TODO: get this list from config (and add more to it)
         if let Some(method) = method.as_ref() {
             if ["eth_chainId"].contains(method) {
                 return 0.into();
