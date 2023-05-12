@@ -230,9 +230,12 @@ impl BufferedRpcQueryStats {
         key: RpcQueryKey,
         rpc_secret_key_cache: Option<&RpcSecretKeyCache>,
     ) -> anyhow::Result<()> {
-        if key.response_timestamp == 0 {
-            panic!("no response_timestamp: {:?} {:?}", key, self);
-        }
+        anyhow::ensure!(
+            key.response_timestamp > 0,
+            "no response_timestamp: {:?} {:?}",
+            key,
+            self
+        );
 
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
