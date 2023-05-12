@@ -43,7 +43,7 @@ impl Serialize for Web3ProxyBlock {
         state.serialize_field("age", &self.age())?;
 
         let block = json!({
-            "block_hash": self.block.hash,
+            "hash": self.block.hash,
             "parent_hash": self.block.parent_hash,
             "number": self.block.number,
             "timestamp": self.block.timestamp,
@@ -435,6 +435,8 @@ impl Web3Rpcs {
             }
             Ok(Some(x)) => x,
         };
+
+        trace!("new_synced_connections: {:?}", new_synced_connections);
 
         let watch_consensus_head_sender = self.watch_consensus_head_sender.as_ref().unwrap();
         let consensus_tier = new_synced_connections.tier;

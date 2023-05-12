@@ -526,12 +526,12 @@ impl Web3Rpc {
                 .context(format!("waiting for request handle on {}", self))?
                 .request(
                     "eth_chainId",
-                    &json!(Option::None::<()>),
+                    &json!(Vec::<()>::new()),
                     Level::Trace.into(),
                     unlocked_provider.clone(),
                 )
                 .await;
-            // trace!("found_chain_id: {:?}", found_chain_id);
+            trace!("found_chain_id: {:#?}", found_chain_id);
 
             match found_chain_id {
                 Ok(found_chain_id) => {

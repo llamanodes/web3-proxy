@@ -1,4 +1,4 @@
-FROM rust:1.68.2-bullseye AS builder
+FROM rust:1.69.0-bullseye AS builder
 
 WORKDIR /app
 ENV CARGO_TERM_COLOR always
@@ -22,6 +22,7 @@ RUN apt-get update && \
     cmake \
     liblz4-dev \
     libpthread-stubs0-dev \
+    libsasl2-dev \
     libssl-dev \
     libzstd-dev \
     make \
@@ -34,20 +35,20 @@ COPY . .
 # test the application with cargo-nextest
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
-    cargo nextest run
+    cargo nextest run --features "rdkafka-src tokio-uring" --no-default-features
 
 # build the application
 # using a "release" profile (which install does) is **very** important
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo install \
-    --features tokio-uring \
+    --features "rdkafka-src tokio-uring" \
     --locked \
-    --features rdkafka-src \
     --no-default-features \
     --path ./web3_proxy \
     --profile faster_release \
-    --root /usr/local/bin
+    --root /usr/local/bin \
+    ;
 
 #
 # We do not need the Rust toolchain to run the binary!
