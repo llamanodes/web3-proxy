@@ -218,14 +218,11 @@ impl OpenRequestHandle {
             .active_requests
             .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
-        // // TODO: i think ethers already has trace logging (and does it much more fancy)
-        // trace!(
-        //     "response from {} for {} {:?}: {:?}",
-        //     self.rpc,
-        //     method,
-        //     params,
-        //     response,
-        // );
+        // TODO: i think ethers already has trace logging (and does it much more fancy)
+        trace!(
+            "response from {} for {} {:?}: {:?}",
+            self.rpc, method, params, response,
+        );
 
         if let Err(err) = &response {
             // only save reverts for some types of calls

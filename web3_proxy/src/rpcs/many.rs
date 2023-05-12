@@ -157,19 +157,21 @@ impl Web3Rpcs {
 
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         // TODO: how can we do the weigher better? need to know actual allocated size
+        // TODO: time_to_idle instead?
         // TODO: limits from config
         let blocks_by_hash: BlocksByHashCache = Cache::builder()
             .max_capacity(1024 * 1024 * 1024)
             .weigher(|_k, v: &Web3ProxyBlock| {
                 1 + v.block.transactions.len().try_into().unwrap_or(u32::MAX)
             })
-            .time_to_idle(Duration::from_secs(600))
+            .time_to_live(Duration::from_secs(30 * 60))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // all block numbers are the same size, so no need for weigher
         // TODO: limits from config
+        // TODO: time_to_idle instead?
         let blocks_by_number = Cache::builder()
-            .time_to_idle(Duration::from_secs(600))
+            .time_to_live(Duration::from_secs(30 * 60))
             .max_capacity(10_000)
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
@@ -509,12 +511,16 @@ impl Web3Rpcs {
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
     ) -> Web3ProxyResult<OpenRequestResult> {
-        let usable_rpcs_by_tier_and_head_number: BTreeMap<(u64, Option<U64>), Vec<Arc<Web3Rpc>>> = {
+        let usable_rpcs_by_tier_and_head_number: BTreeMap<
+            (u64, Reverse<Option<U64>>),
+            Vec<Arc<Web3Rpc>>,
+        > = {
+            let mut m = BTreeMap::new();
+
             if self.watch_consensus_head_sender.is_none() {
                 // pick any server
-                let mut m = BTreeMap::new();
 
-                let key = (0, None);
+                let key = (0, Reverse(None));
 
                 for x in self.by_name.read().values() {
                     if skip.contains(x) {
@@ -525,8 +531,6 @@ impl Web3Rpcs {
 
                     m.entry(key).or_insert_with(Vec::new).push(x.clone());
                 }
-
-                m
             } else {
                 let synced_connections = self.watch_consensus_rpcs_sender.borrow().clone();
 
@@ -567,9 +571,6 @@ impl Web3Rpcs {
                 trace!("needed_blocks_comparison: {:?}", needed_blocks_comparison);
 
                 // collect "usable_rpcs_by_head_num_and_weight"
-                // TODO: MAKE SURE None SORTS LAST?
-                let mut m = BTreeMap::new();
-
                 match needed_blocks_comparison {
                     cmp::Ordering::Less => {
                         // need an old block. check all the rpcs. ignore rpcs that are still syncing
@@ -632,7 +633,7 @@ impl Web3Rpcs {
                                     }
                                 }
 
-                                let key = (x.tier, Some(*x_head_num));
+                                let key = (x.tier, Reverse(Some(*x_head_num)));
 
                                 m.entry(key).or_insert_with(Vec::new).push(x);
                             }
@@ -645,7 +646,7 @@ impl Web3Rpcs {
 
                         // the key doesn't matter if we are checking synced connections
                         // they are all at the same block and it is already sized to what we need
-                        let key = (0, None);
+                        let key = (0, Reverse(None));
 
                         for x in synced_connections.best_rpcs.iter() {
                             if skip.contains(x) {
@@ -662,9 +663,9 @@ impl Web3Rpcs {
                         return Ok(OpenRequestResult::NotReady);
                     }
                 }
-
-                m
             }
+
+            m
         };
 
         trace!(
@@ -1099,7 +1100,7 @@ impl Web3Rpcs {
     /// be sure there is a timeout on this or it might loop forever
     #[allow(clippy::too_many_arguments)]
     pub async fn try_send_all_synced_connections(
-        &self,
+        self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         request: &JsonRpcRequest,
         request_metadata: Option<Arc<RequestMetadata>>,

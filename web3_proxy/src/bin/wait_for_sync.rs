@@ -131,10 +131,12 @@ struct JsonRpcChainIdResult {
 }
 
 async fn get_chain_id(rpc: &str, client: &reqwest::Client) -> anyhow::Result<u64> {
+    // empty params aren't required by the spec, but some rpc providers require them
     let get_chain_id_request = json!({
         "id": "1",
         "jsonrpc": "2.0",
         "method": "eth_chainId",
+        "params": [],
     });
 
     // TODO: loop until chain id is found?
