@@ -265,7 +265,7 @@ pub struct Web3ProxyApp {
         Cache<UserBearerToken, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
     /// channel for sending stats in a background task
-    pub stat_sender: Option<flume::Sender<AppStat>>,
+    pub stat_sender: Option<kanal::AsyncSender<AppStat>>,
 }
 
 /// flatten a JoinError into an anyhow error

@@ -365,7 +365,7 @@ impl Web3Rpcs {
     pub(super) async fn process_incoming_blocks(
         &self,
         authorization: &Arc<Authorization>,
-        block_receiver: flume::Receiver<BlockAndRpc>,
+        block_receiver: kanal::AsyncReceiver<BlockAndRpc>,
         // TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
         // Geth's subscriptions have the same potential for skipping blocks.
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
@@ -373,7 +373,7 @@ impl Web3Rpcs {
         let mut connection_heads = ConsensusFinder::new(self.max_block_age, self.max_block_lag);
 
         loop {
-            match block_receiver.recv_async().await {
+            match block_receiver.recv().await {
                 Ok((new_block, rpc)) => {
                     let rpc_name = rpc.name.clone();
 

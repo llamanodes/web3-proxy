@@ -267,7 +267,7 @@ pub struct RequestMetadata {
     pub kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
 
     /// Channel to send stats to
-    pub stat_sender: Option<flume::Sender<AppStat>>,
+    pub stat_sender: Option<kanal::AsyncSender<AppStat>>,
 }
 
 impl Default for RequestMetadata {
@@ -457,8 +457,11 @@ impl RequestMetadata {
 
             let stat: AppStat = stat.into();
 
+            // can't use async because a Drop can call this
+            let stat_sender = stat_sender.to_sync();
+
             if let Err(err) = stat_sender.send(stat) {
-                error!("failed sending stats for {:?}: {:?}", err.0, err);
+                error!("failed sending stat: {:?}", err);
                 // TODO: return it? that seems like it might cause an infinite loop
             };
 
