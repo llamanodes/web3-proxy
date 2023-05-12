@@ -59,8 +59,8 @@ ipnet = "2.7.2"
 itertools = "0.10.5"
 listenfd = "1.0.1"
 log = "0.4.17"
-mimalloc = { version = "*", optional = true}
-moka = { version = "0.10.2", default-features = false, features = ["future"] }
+mimalloc = { version = "0.1.37", optional = true}
+moka = { version = "0.11.0", default-features = false, features = ["future"] }
 num = "0.4.0"
 num-traits = "0.2.15"
 once_cell = { version = "1.17.1" }

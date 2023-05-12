@@ -1494,6 +1494,41 @@ impl Web3ProxyApp {
                     response
                 }
             }
+            "eth_getTransactionReceipt" | "eth_getTransactionByHash" => {
+                // try to get the transaction without specifying a min_block_height
+                let mut response = self
+                    .balanced_rpcs
+                    .try_proxy_connection(
+                        authorization,
+                        request,
+                        Some(&request_metadata),
+                        None,
+                        None,
+                    )
+                    .await?;
+
+                // if we got "null", it is probably because the tx is old. retry on nodes with old block data
+                if let Some(ref result) = response.result {
+                    if result.get() == "null" {
+                        request_metadata
+                            .archive_request
+                            .store(true, atomic::Ordering::Release);
+
+                        response = self
+                            .balanced_rpcs
+                            .try_proxy_connection(
+                                authorization,
+                                request,
+                                Some(&request_metadata),
+                                Some(&U64::one()),
+                                None,
+                            )
+                            .await?;
+                    }
+                }
+
+                response
+            }
             // TODO: eth_gasPrice that does awesome magic to predict the future
             "eth_hashrate" => JsonRpcForwardedResponse::from_value(json!(U64::zero()), request_id),
             "eth_mining" => {
