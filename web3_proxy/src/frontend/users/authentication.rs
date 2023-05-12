@@ -284,7 +284,7 @@ pub async fn user_login_post(
             let rpc_secret_key = RpcSecretKey::new();
 
             let user_rpc_key = rpc_key::ActiveModel {
-                user_id: sea_orm::Set(caller.id.clone()),
+                user_id: sea_orm::Set(caller.id),
                 secret_key: sea_orm::Set(rpc_secret_key.into()),
                 description: sea_orm::Set(None),
                 ..Default::default()
@@ -297,7 +297,7 @@ pub async fn user_login_post(
 
             // We should also create the balance entry ...
             let user_balance = balance::ActiveModel {
-                user_id: sea_orm::Set(caller.id.clone()),
+                user_id: sea_orm::Set(caller.id),
                 available_balance: sea_orm::Set(Decimal::new(0, 0)),
                 used_balance: sea_orm::Set(Decimal::new(0, 0)),
                 ..Default::default()

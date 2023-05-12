@@ -25,6 +25,12 @@ pub type Web3ProxyResult<T> = Result<T, Web3ProxyError>;
 // TODO: take "IntoResponse" instead of Response?
 pub type Web3ProxyResponse = Web3ProxyResult<Response>;
 
+impl From<Web3ProxyError> for Web3ProxyResult<()> {
+    fn from(value: Web3ProxyError) -> Self {
+        Err(value)
+    }
+}
+
 // TODO:
 #[derive(Debug, Display, Error, From)]
 pub enum Web3ProxyError {
@@ -35,6 +41,9 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     #[from(ignore)]
     BadRequest(String),
+    #[error(ignore)]
+    #[from(ignore)]
+    BadResponse(String),
     BadRouting,
     Database(DbErr),
     #[display(fmt = "{:#?}, {:#?}", _0, _1)]
@@ -164,6 +173,18 @@ impl Web3ProxyError {
                     JsonRpcForwardedResponse::from_str(
                         &format!("bad request: {}", err),
                         Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::BadResponse(err) => {
+                // TODO: think about this one more. ankr gives us this because ethers fails to parse responses without an id
+                debug!("BAD_RESPONSE: {}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcForwardedResponse::from_str(
+                        &format!("bad response: {}", err),
+                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
                         None,
                     ),
                 )

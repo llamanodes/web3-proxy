@@ -92,7 +92,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // rename column rpc_key to            rpc_secret_key
         Ok(())
     }
 

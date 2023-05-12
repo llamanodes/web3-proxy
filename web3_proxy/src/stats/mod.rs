@@ -2,36 +2,36 @@
 //! TODO: move some of these structs/functions into their own file?
 pub mod db_queries;
 pub mod influxdb_queries;
-use crate::app::AuthorizationChecks;
+mod stat_buffer;
+
+pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
+
+use crate::app::RpcSecretKeyCache;
 use crate::frontend::authorization::{Authorization, RequestMetadata};
+use crate::frontend::errors::Web3ProxyError;
+use crate::rpcs::one::Web3Rpc;
 use anyhow::Context;
 use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key, user, user_tier};
-use futures::stream;
-use hashbrown::HashMap;
-use influxdb2::api::write::TimestampPrecision;
 use influxdb2::models::DataPoint;
-use log::{error, info, trace, warn};
+use log::{trace, warn};
 use migration::sea_orm::prelude::Decimal;
-use migration::sea_orm::ActiveModelTrait;
-use migration::sea_orm::ColumnTrait;
-use migration::sea_orm::IntoActiveModel;
-use migration::sea_orm::{self, DatabaseConnection, EntityTrait, QueryFilter};
+use migration::sea_orm::{
+    self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
+    QueryFilter,
+};
 use migration::{Expr, OnConflict};
-use moka::future::Cache;
 use num_traits::ToPrimitive;
+use parking_lot::Mutex;
 use std::cmp::max;
 use std::num::NonZeroU64;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
-use tokio::time::interval;
-use ulid::Ulid;
+
+use self::stat_buffer::BufferedRpcQueryStats;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum StatType {
@@ -39,8 +39,9 @@ pub enum StatType {
     Detailed,
 }
 
-// Pub is needed for migration ... I could also write a second constructor for this if needed
-/// TODO: better name?
+pub type BackendRequests = Mutex<Vec<Arc<Web3Rpc>>>;
+
+/// TODO: better name? RpcQueryStatBuilder?
 #[derive(Clone, Debug)]
 pub struct RpcQueryStats {
     pub authorization: Arc<Authorization>,
@@ -49,8 +50,8 @@ pub struct RpcQueryStats {
     pub error_response: bool,
     pub request_bytes: u64,
     /// if backend_requests is 0, there was a cache_hit
-    // pub frontend_request: u64,
-    pub backend_requests: u64,
+    /// no need to track frontend_request on this. a RpcQueryStats always represents one frontend request
+    pub backend_rpcs_used: Vec<Arc<Web3Rpc>>,
     pub response_bytes: u64,
     pub response_millis: u64,
     pub response_timestamp: i64,
@@ -58,7 +59,7 @@ pub struct RpcQueryStats {
     pub credits_used: Decimal,
 }
 
-#[derive(Clone, From, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
 pub struct RpcQueryKey {
     /// unix epoch time
     /// for the time series db, this is (close to) the time that the response was sent
@@ -181,22 +182,6 @@ impl RpcQueryStats {
     }
 }
 
-#[derive(Default)]
-pub struct BufferedRpcQueryStats {
-    pub frontend_requests: u64,
-    pub backend_requests: u64,
-    pub backend_retries: u64,
-    pub no_servers: u64,
-    pub cache_misses: u64,
-    pub cache_hits: u64,
-    pub sum_request_bytes: u64,
-    pub sum_response_bytes: u64,
-    pub sum_response_millis: u64,
-    pub sum_credits_used: Decimal,
-    /// Balance tells us the user's balance at this point in time
-    pub latest_balance: Decimal,
-}
-
 /// A stat that we aggregate and then store in a database.
 /// For now there is just one, but I think there might be others later
 #[derive(Debug, From)]
@@ -204,34 +189,16 @@ pub enum AppStat {
     RpcQuery(RpcQueryStats),
 }
 
-#[derive(From)]
-pub struct SpawnedStatBuffer {
-    pub stat_sender: flume::Sender<AppStat>,
-    /// these handles are important and must be allowed to finish
-    pub background_handle: JoinHandle<anyhow::Result<()>>,
-}
-
-pub struct StatBuffer {
-    chain_id: u64,
-    db_conn: Option<DatabaseConnection>,
-    influxdb_client: Option<influxdb2::Client>,
-    tsdb_save_interval_seconds: u32,
-    rpc_secret_key_cache:
-        Option<Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>>,
-    db_save_interval_seconds: u32,
-    billing_period_seconds: i64,
-    global_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
-    opt_in_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
-    accounting_db_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
-    timestamp_precision: TimestampPrecision,
-}
-
+// TODO: move to stat_buffer.rs?
 impl BufferedRpcQueryStats {
     fn add(&mut self, stat: RpcQueryStats) {
         // a stat always come from just 1 frontend request
         self.frontend_requests += 1;
 
-        if stat.backend_requests == 0 {
+        // TODO: is this always okay? is it true that each backend rpc will only be queried once per request? i think so
+        let num_backend_rpcs_used = stat.backend_rpcs_used.len() as u64;
+
+        if num_backend_rpcs_used == 0 {
             // no backend request. cache hit!
             self.cache_hits += 1;
         } else {
@@ -239,7 +206,7 @@ impl BufferedRpcQueryStats {
             self.cache_misses += 1;
 
             // a single frontend request might have multiple backend requests
-            self.backend_requests += stat.backend_requests;
+            self.backend_requests += num_backend_rpcs_used;
         }
 
         self.sum_request_bytes += stat.request_bytes;
@@ -261,13 +228,21 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         db_conn: &DatabaseConnection,
         key: RpcQueryKey,
+        rpc_secret_key_cache: Option<&RpcSecretKeyCache>,
     ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            key.response_timestamp > 0,
+            "no response_timestamp! This is a bug! {:?} {:?}",
+            key,
+            self
+        );
+
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
         // this is a lot of variables
         let accounting_entry = rpc_accounting_v2::ActiveModel {
             id: sea_orm::NotSet,
-            rpc_key_id: sea_orm::Set(key.rpc_secret_key_id.map(Into::into).unwrap_or_default()),
+            rpc_key_id: sea_orm::Set(key.rpc_secret_key_id.map(Into::into)),
             chain_id: sea_orm::Set(chain_id),
             period_datetime: sea_orm::Set(period_datetime),
             archive_needed: sea_orm::Set(key.archive_needed),
@@ -360,7 +335,7 @@ impl BufferedRpcQueryStats {
 
         // Technicall there should always be a user ... still let's return "Ok(())" for now
         let sender_user_id: u64 = match sender_rpc_key {
-            Some(x) => x.user_id.into(),
+            Some(x) => x.user_id,
             // Return early if the User is not found, because then it is an anonymous user
             // Let's also issue a warning because obviously the RPC key should correspond to a user
             None => {
@@ -390,12 +365,14 @@ impl BufferedRpcQueryStats {
         // Still subtract from the user in any case,
         // Modify the balance of the sender completely (in mysql, next to the stats)
         // In any case, add this to "spent"
+        // TODO! we need to do the math in mysql (like with `Expr::col` above). if we do the addition here, there is a race condition
         active_sender_balance.used_balance =
-            sea_orm::Set(sender_balance.used_balance + Decimal::from(self.sum_credits_used));
+            sea_orm::Set(sender_balance.used_balance + self.sum_credits_used);
 
         // Also update the available balance
+        // TODO! this needs to be queried from the database
         let new_available_balance = max(
-            sender_balance.available_balance - Decimal::from(self.sum_credits_used),
+            sender_balance.available_balance - self.sum_credits_used,
             Decimal::from(0),
         );
         active_sender_balance.available_balance = sea_orm::Set(new_available_balance);
@@ -424,14 +401,25 @@ impl BufferedRpcQueryStats {
             ))?;
 
         // Downgrade a user to premium - out of funds if there's less than 10$ in the account, and if the user was premium before
+        // TODO: lets let them get under $1
+        // TODO: instead of checking for a specific title, downgrade if the downgrade id is set to anything
         if new_available_balance < Decimal::from(10u64) && downgrade_user_role.title == "Premium" {
+            // TODO: we could do this outside the balance low block, but I think its fine. or better, update the cache if <$10 and downgrade if <$1
+            if let Some(rpc_secret_key_cache) = rpc_secret_key_cache {
+                todo!("expire (or probably better to update) the user cache now that the balance is low");
+                // actually i think we need to have 2 caches. otherwise users with 2 keys are going to have seperate caches
+                // 1. rpc_secret_key_id -> AuthorizationChecks (cuz we don't want to hit the db every time)
+                // 2. user_id -> Balance
+            }
+
             // Only downgrade the user in local process memory, not elsewhere
-            // app.rpc_secret_key_cache-
 
             // let mut active_downgrade_user = downgrade_user.into_active_model();
             // active_downgrade_user.user_tier_id = sea_orm::Set(downgrade_user_role.id);
             // active_downgrade_user.save(db_conn).await?;
         }
+
+        // TODO:
 
         // Get the referee, and the referrer
         // (2) Look up the code that this user used. This is the referee table
@@ -459,6 +447,7 @@ impl BufferedRpcQueryStats {
         {
             Some(x) => x,
             None => {
+                // TODO: warn seems too verbose for this. it should be fine for a user to not have a referall code, right?
                 warn!(
                     "No referrer with that referral code was found {:?}",
                     referee_object
@@ -487,6 +476,7 @@ impl BufferedRpcQueryStats {
             }
         };
 
+        // TODO: don't clone on this. use the active_model later
         let mut active_sender_balance = sender_balance.clone().into_active_model();
         let referrer_balance = match balance::Entity::find()
             .filter(balance::Column::UserId.eq(user_with_that_referral_code.user_id))
@@ -513,6 +503,7 @@ impl BufferedRpcQueryStats {
         {
             // (6) If the credits have not yet been applied to the referee, apply 10M credits / $100.00 USD worth of credits.
             // Make it into an active model, and add credits
+            // TODO! race condition here! we can't set. need to let the db do the math
             active_sender_balance.available_balance =
                 sea_orm::Set(sender_balance.available_balance + Decimal::from(100));
             // Also mark referral as "credits_applied_for_referee"
@@ -528,8 +519,7 @@ impl BufferedRpcQueryStats {
             let mut active_referrer_balance = referrer_balance.clone().into_active_model();
             // Add 10% referral fees ...
             active_referrer_balance.available_balance = sea_orm::Set(
-                referrer_balance.available_balance
-                    + Decimal::from(self.sum_credits_used / Decimal::from(10)),
+                referrer_balance.available_balance + self.sum_credits_used / Decimal::from(10),
             );
             // Also record how much the current referrer has "provided" / "gifted" away
             active_referee.credits_applied_for_referrer =
@@ -598,51 +588,80 @@ impl BufferedRpcQueryStats {
     }
 }
 
-impl RpcQueryStats {
-    pub fn new(
-        method: Option<String>,
-        authorization: Arc<Authorization>,
-        metadata: Arc<RequestMetadata>,
-        response_bytes: usize,
-    ) -> Self {
-        // TODO: try_unwrap the metadata to be sure that all the stats for this request have been collected
-        // TODO: otherwise, i think the whole thing should be in a single lock that we can "reset" when a stat is created
+impl TryFrom<RequestMetadata> for RpcQueryStats {
+    type Error = Web3ProxyError;
+
+    fn try_from(mut metadata: RequestMetadata) -> Result<Self, Self::Error> {
+        let mut authorization = metadata.authorization.take();
+
+        if authorization.is_none() {
+            authorization = Some(Arc::new(Authorization::internal(None)?));
+        }
+
+        let authorization = authorization.expect("Authorization will always be set");
 
         let archive_request = metadata.archive_request.load(Ordering::Acquire);
-        let backend_requests = metadata.backend_requests.lock().len() as u64;
-        let request_bytes = metadata.request_bytes;
-        let error_response = metadata.error_response.load(Ordering::Acquire);
-        let response_millis = metadata.start_instant.elapsed().as_millis() as u64;
-        let response_bytes = response_bytes as u64;
 
-        // TODO: Gotta make the arithmetic here
+        // TODO: do this without cloning. we can take their vec
+        let backend_rpcs_used = metadata.backend_rpcs_used();
 
-        // TODO: Depending on the method, metadata and response bytes, pick a different number of credits used
-        // This can be a slightly more complex function as we ll
-        // TODO: Here, let's implement the formula
+        let request_bytes = metadata.request_bytes as u64;
+        let response_bytes = metadata.response_bytes.load(Ordering::Acquire);
+
+        let mut error_response = metadata.error_response.load(Ordering::Acquire);
+        let mut response_millis = metadata.response_millis.load(atomic::Ordering::Acquire);
+
+        let response_timestamp = match metadata.response_timestamp.load(atomic::Ordering::Acquire) {
+            0 => {
+                // no response timestamp!
+                if !error_response {
+                    // force error_response to true
+                    // this can happen when a try operator escapes and metadata.add_response() isn't called
+                    trace!(
+                        "no response known, but no errors logged. investigate. {:?}",
+                        metadata
+                    );
+                    error_response = true;
+                }
+
+                if response_millis == 0 {
+                    // get something for millis even if it is a bit late
+                    response_millis = metadata.start_instant.elapsed().as_millis() as u64
+                }
+
+                // no timestamp given. likely handling an error. set it to the current time
+                Utc::now().timestamp()
+            }
+            x => x,
+        };
+
+        let method = metadata.method.take();
+
         let credits_used = Self::compute_cost(
             request_bytes,
             response_bytes,
-            backend_requests == 0,
-            &method,
+            backend_rpcs_used.is_empty(),
+            method.as_deref(),
         );
 
-        let response_timestamp = Utc::now().timestamp();
-
-        Self {
+        let x = Self {
             authorization,
             archive_request,
             method,
-            backend_requests,
+            backend_rpcs_used,
             request_bytes,
             error_response,
             response_bytes,
             response_millis,
             response_timestamp,
             credits_used,
-        }
-    }
+        };
 
+        Ok(x)
+    }
+}
+
+impl RpcQueryStats {
     /// Compute cost per request
     /// All methods cost the same
     /// The number of bytes are based on input, and output bytes
@@ -650,251 +669,39 @@ impl RpcQueryStats {
         request_bytes: u64,
         response_bytes: u64,
         cache_hit: bool,
-        _method: &Option<String>,
+        method: Option<&str>,
     ) -> Decimal {
-        // TODO: Should make these lazy_static const?
+        // some methods should be free. there might be cases where method isn't set (though they should be uncommon)
+        // TODO: get this list from config (and add more to it)
+        if let Some(method) = method.as_ref() {
+            if ["eth_chainId"].contains(method) {
+                return 0.into();
+            }
+        }
+
+        // TODO: get cost_minimum, cost_free_bytes, cost_per_byte, cache_hit_divisor from config. each chain will be different
         // pays at least $0.000018 / credits per request
         let cost_minimum = Decimal::new(18, 6);
+
         // 1kb is included on each call
         let cost_free_bytes = 1024;
+
         // after that, we add cost per bytes, $0.000000006 / credits per byte
+        // amazon charges $.09/GB outbound
+        // but we also have to cover our RAM and expensive nics on the servers (haproxy/web3-proxy/blockchains)
         let cost_per_byte = Decimal::new(6, 9);
 
         let total_bytes = request_bytes + response_bytes;
-        let total_chargable_bytes =
-            Decimal::from(max(0, total_bytes as i64 - cost_free_bytes as i64));
 
-        let out = cost_minimum + cost_per_byte * total_chargable_bytes;
+        let total_chargable_bytes = Decimal::from(total_bytes.saturating_sub(cost_free_bytes));
+
+        let mut cost = cost_minimum + cost_per_byte * total_chargable_bytes;
+
+        // cache hits get a 50% discount
         if cache_hit {
-            out * Decimal::new(5, 1)
-        } else {
-            out
-        }
-    }
-
-    /// Only used for migration from stats_v1 to stats_v2/v3
-    pub fn modify_struct(
-        &mut self,
-        response_millis: u64,
-        response_timestamp: i64,
-        backend_requests: u64,
-    ) {
-        self.response_millis = response_millis;
-        self.response_timestamp = response_timestamp;
-        self.backend_requests = backend_requests;
-    }
-}
-
-impl StatBuffer {
-    #[allow(clippy::too_many_arguments)]
-    pub fn try_spawn(
-        chain_id: u64,
-        bucket: String,
-        db_conn: Option<DatabaseConnection>,
-        influxdb_client: Option<influxdb2::Client>,
-        rpc_secret_key_cache: Option<
-            Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>,
-        >,
-        db_save_interval_seconds: u32,
-        tsdb_save_interval_seconds: u32,
-        billing_period_seconds: i64,
-        shutdown_receiver: broadcast::Receiver<()>,
-    ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
-        if db_conn.is_none() && influxdb_client.is_none() {
-            return Ok(None);
+            cost /= Decimal::from(2)
         }
 
-        let (stat_sender, stat_receiver) = flume::unbounded();
-
-        let timestamp_precision = TimestampPrecision::Seconds;
-        let mut new = Self {
-            chain_id,
-            db_conn,
-            influxdb_client,
-            db_save_interval_seconds,
-            tsdb_save_interval_seconds,
-            rpc_secret_key_cache,
-            billing_period_seconds,
-            global_timeseries_buffer: Default::default(),
-            opt_in_timeseries_buffer: Default::default(),
-            accounting_db_buffer: Default::default(),
-            timestamp_precision,
-        };
-
-        // any errors inside this task will cause the application to exit
-        let handle = tokio::spawn(async move {
-            new.aggregate_and_save_loop(bucket, stat_receiver, shutdown_receiver)
-                .await
-        });
-
-        Ok(Some((stat_sender, handle).into()))
-    }
-
-    async fn aggregate_and_save_loop(
-        &mut self,
-        bucket: String,
-        stat_receiver: flume::Receiver<AppStat>,
-        mut shutdown_receiver: broadcast::Receiver<()>,
-    ) -> anyhow::Result<()> {
-        let mut tsdb_save_interval =
-            interval(Duration::from_secs(self.tsdb_save_interval_seconds as u64));
-        let mut db_save_interval =
-            interval(Duration::from_secs(self.db_save_interval_seconds as u64));
-
-        // TODO: Somewhere here we should probably be updating the balance of the user
-        // And also update the credits used etc. for the referred user
-        loop {
-            tokio::select! {
-                stat = stat_receiver.recv_async() => {
-                    // info!("Received stat");
-                    // save the stat to a buffer
-                    match stat {
-                        Ok(AppStat::RpcQuery(stat)) => {
-                            if self.influxdb_client.is_some() {
-                                // TODO: round the timestamp at all?
-
-                                let global_timeseries_key = stat.global_timeseries_key();
-
-                                self.global_timeseries_buffer.entry(global_timeseries_key).or_default().add(stat.clone());
-
-                                if let Some(opt_in_timeseries_key) = stat.opt_in_timeseries_key() {
-                                    self.opt_in_timeseries_buffer.entry(opt_in_timeseries_key).or_default().add(stat.clone());
-                                }
-                            }
-
-                            if self.db_conn.is_some() {
-                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat);
-                            }
-                        }
-                        Err(err) => {
-                            error!("error receiving stat: {:?}", err);
-                            break;
-                        }
-                    }
-                }
-                _ = db_save_interval.tick() => {
-                    // info!("DB save internal tick");
-                    let count = self.save_relational_stats().await;
-                    if count > 0 {
-                        trace!("Saved {} stats to the relational db", count);
-                    }
-                }
-                _ = tsdb_save_interval.tick() => {
-                    // info!("TSDB save internal tick");
-                    let count = self.save_tsdb_stats(&bucket).await;
-                    if count > 0 {
-                        trace!("Saved {} stats to the tsdb", count);
-                    }
-                }
-                x = shutdown_receiver.recv() => {
-                    info!("shutdown signal ---");
-                    match x {
-                        Ok(_) => {
-                            info!("stat_loop shutting down");
-                        },
-                        Err(err) => error!("stat_loop shutdown receiver err={:?}", err),
-                    }
-                    break;
-                }
-            }
-        }
-
-        let saved_relational = self.save_relational_stats().await;
-
-        info!("saved {} pending relational stats", saved_relational);
-
-        let saved_tsdb = self.save_tsdb_stats(&bucket).await;
-
-        info!("saved {} pending tsdb stats", saved_tsdb);
-
-        info!("accounting and stat save loop complete");
-
-        Ok(())
-    }
-
-    async fn save_relational_stats(&mut self) -> usize {
-        let mut count = 0;
-
-        if let Some(db_conn) = self.db_conn.as_ref() {
-            count = self.accounting_db_buffer.len();
-            for (key, stat) in self.accounting_db_buffer.drain() {
-                // TODO: batch saves
-                // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
-                if let Err(err) = stat.save_db(self.chain_id, db_conn, key).await {
-                    error!("unable to save accounting entry! err={:?}", err);
-                };
-            }
-        }
-
-        count
-    }
-
-    // TODO: bucket should be an enum so that we don't risk typos
-    async fn save_tsdb_stats(&mut self, bucket: &str) -> usize {
-        let mut count = 0;
-
-        if let Some(influxdb_client) = self.influxdb_client.as_ref() {
-            // TODO: use stream::iter properly to avoid allocating this Vec
-            let mut points = vec![];
-
-            for (key, stat) in self.global_timeseries_buffer.drain() {
-                // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
-                match stat
-                    .build_timeseries_point("global_proxy", self.chain_id, key)
-                    .await
-                {
-                    Ok(point) => {
-                        points.push(point);
-                    }
-                    Err(err) => {
-                        error!("unable to build global stat! err={:?}", err);
-                    }
-                };
-            }
-
-            for (key, stat) in self.opt_in_timeseries_buffer.drain() {
-                // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
-                match stat
-                    .build_timeseries_point("opt_in_proxy", self.chain_id, key)
-                    .await
-                {
-                    Ok(point) => {
-                        points.push(point);
-                    }
-                    Err(err) => {
-                        // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
-                        error!("unable to build opt-in stat! err={:?}", err);
-                    }
-                };
-            }
-
-            count = points.len();
-
-            if count > 0 {
-                // TODO: put max_batch_size in config?
-                // TODO: i think the real limit is the byte size of the http request. so, a simple line count won't work very well
-                let max_batch_size = 100;
-
-                let mut num_left = count;
-
-                while num_left > 0 {
-                    let batch_size = num_left.min(max_batch_size);
-
-                    let p = points.split_off(batch_size);
-
-                    num_left -= batch_size;
-
-                    if let Err(err) = influxdb_client
-                        .write_with_precision(bucket, stream::iter(p), self.timestamp_precision)
-                        .await
-                    {
-                        // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
-                        error!("unable to save {} tsdb stats! err={:?}", batch_size, err);
-                    }
-                }
-            }
-        }
-
-        count
+        cost
     }
 }

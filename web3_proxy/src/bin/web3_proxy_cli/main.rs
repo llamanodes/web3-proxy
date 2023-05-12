@@ -38,6 +38,13 @@ use web3_proxy::{
     config::TopConfig,
 };
 
+#[cfg(feature = "mimalloc")]
+use mimalloc::MiMalloc;
+
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 #[cfg(feature = "deadlock")]
 use {parking_lot::deadlock, std::thread, tokio::time::Duration};
 
@@ -120,10 +127,10 @@ fn main() -> anyhow::Result<()> {
 
     // if RUST_LOG isn't set, configure a default
     // TODO: is there a better way to do this?
-    #[cfg(tokio_console)]
+    #[cfg(feature = "tokio_console")]
     console_subscriber::init();
 
-    #[cfg(not(tokio_console))]
+    #[cfg(not(feature = "tokio_console"))]
     let rust_log = match std::env::var("RUST_LOG") {
         Ok(x) => x,
         Err(_) => match std::env::var("WEB3_PROXY_TRACE").map(|x| x == "true") {
@@ -202,7 +209,6 @@ fn main() -> anyhow::Result<()> {
         (None, None)
     };
 
-    #[cfg(not(tokio_console))]
     {
         let logger = env_logger::builder().parse_filters(&rust_log).build();
 
@@ -267,9 +273,6 @@ fn main() -> anyhow::Result<()> {
     }
 
     // set up tokio's async runtime
-    #[cfg(tokio_uring)]
-    let mut rt_builder = tokio_uring::Builder::new_multi_thread();
-    #[cfg(not(tokio_uring))]
     let mut rt_builder = runtime::Builder::new_multi_thread();
 
     rt_builder.enable_all();
@@ -278,7 +281,7 @@ fn main() -> anyhow::Result<()> {
         rt_builder.worker_threads(cli_config.workers);
     }
 
-    if let Some(top_config) = top_config.as_ref() {
+    if let Some(ref top_config) = top_config {
         let chain_id = top_config.app.chain_id;
 
         rt_builder.thread_name_fn(move || {

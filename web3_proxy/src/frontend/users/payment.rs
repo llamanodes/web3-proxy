@@ -321,7 +321,7 @@ pub async fn user_balance_post(
         }
 
         // Get the topics out
-        let topic: H256 = H256::from(log.topics.get(0).unwrap().to_owned());
+        let topic: H256 = log.topics.get(0).unwrap().to_owned();
         if topic != deposit_topic {
             debug!(
                 "Out: Topic is not relevant: {:?} {:?}",
@@ -489,8 +489,9 @@ pub async fn user_balance_post(
             })),
         )
             .into_response();
+
         // Return early if the log was added, assume there is at most one valid log per transaction
-        return Ok(response.into());
+        return Ok(response);
     }
 
     Err(Web3ProxyError::BadRequest(

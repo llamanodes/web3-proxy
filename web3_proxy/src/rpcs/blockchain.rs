@@ -169,7 +169,6 @@ impl Web3Rpcs {
         // TODO: i think we can rearrange this function to make it faster on the hot path
         let block_hash = block.hash();
 
-        // skip Block::default()
         if block_hash.is_zero() {
             debug!("Skipping block without hash!");
             return Ok(block);
@@ -189,7 +188,7 @@ impl Web3Rpcs {
         // TODO: use their get_with
         let block = self
             .blocks_by_hash
-            .get_with(*block_hash, async move { block.clone() })
+            .get_with(*block_hash, async move { block })
             .await;
 
         Ok(block)
@@ -236,7 +235,7 @@ impl Web3Rpcs {
             None => {
                 // TODO: helper for method+params => JsonRpcRequest
                 // TODO: does this id matter?
-                let request = json!({ "id": "1", "method": "eth_getBlockByHash", "params": get_block_params });
+                let request = json!({ "jsonrpc": "2.0", "id": "1", "method": "eth_getBlockByHash", "params": get_block_params });
                 let request: JsonRpcRequest = serde_json::from_value(request)?;
 
                 // TODO: request_metadata? maybe we should put it in the authorization?
@@ -244,7 +243,7 @@ impl Web3Rpcs {
                 let response = self
                     .try_send_best_consensus_head_connection(
                         authorization,
-                        request,
+                        &request,
                         None,
                         None,
                         None,
@@ -344,7 +343,7 @@ impl Web3Rpcs {
         let request: JsonRpcRequest = serde_json::from_value(request)?;
 
         let response = self
-            .try_send_best_consensus_head_connection(authorization, request, None, Some(num), None)
+            .try_send_best_consensus_head_connection(authorization, &request, None, Some(num), None)
             .await?;
 
         if response.error.is_some() {
@@ -446,7 +445,7 @@ impl Web3Rpcs {
         let consensus_head_block = new_synced_connections.head_block.clone();
         let num_consensus_rpcs = new_synced_connections.num_conns();
         let num_active_rpcs = consensus_finder.len();
-        let total_rpcs = self.by_name.read().len();
+        let total_rpcs = self.by_name.load().len();
 
         let old_consensus_head_connections = self
             .watch_consensus_rpcs_sender

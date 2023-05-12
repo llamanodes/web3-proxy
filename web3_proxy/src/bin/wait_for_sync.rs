@@ -60,13 +60,12 @@ async fn main() -> anyhow::Result<()> {
         .context("unknown chain id for check_url")?;
 
     if let Some(chain_id) = cli_config.chain_id {
-        if chain_id != check_id {
-            return Err(anyhow::anyhow!(
-                "chain_id of check_url is wrong! Need {}. Found {}",
-                chain_id,
-                check_id,
-            ));
-        }
+        anyhow::ensure!(
+            chain_id == check_id,
+            "chain_id of check_url is wrong! Need {}. Found {}",
+            chain_id,
+            check_id,
+        );
     }
 
     let compare_url: String = match cli_config.compare_url {
@@ -93,13 +92,12 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("unknown chain id for compare_url")?;
 
-    if check_id != compare_id {
-        return Err(anyhow::anyhow!(
-            "chain_id does not match! Need {}. Found {}",
-            check_id,
-            compare_id,
-        ));
-    }
+    anyhow::ensure!(
+        check_id == compare_id,
+        "chain_id does not match! Need {}. Found {}",
+        check_id,
+        compare_id,
+    );
 
     // start ids at 2 because id 1 was checking the chain id
     let counter = AtomicU32::new(2);

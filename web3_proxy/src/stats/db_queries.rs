@@ -273,6 +273,7 @@ pub async fn query_user_stats<'a>(
                 .expect("max-age should always parse"),
         );
 
+        // TODO: get this from `response` isntead of json serializing twice
         let cache_body = json!(response_body).to_string();
 
         if let Err(err) = redis_conn

@@ -195,7 +195,7 @@ async fn run(
     // start the frontend port
     let frontend_handle = tokio::spawn(frontend::serve(
         app_frontend_port,
-        spawned_app.app.clone(),
+        spawned_app.app,
         frontend_shutdown_receiver,
         frontend_shutdown_complete_sender,
     ));
@@ -417,17 +417,14 @@ mod tests {
             let prometheus_port = 0;
             let shutdown_sender = shutdown_sender.clone();
 
-            tokio::spawn(async move {
-                run(
-                    top_config,
-                    None,
-                    frontend_port,
-                    prometheus_port,
-                    2,
-                    shutdown_sender,
-                )
-                .await
-            })
+            tokio::spawn(run(
+                top_config,
+                None,
+                frontend_port,
+                prometheus_port,
+                2,
+                shutdown_sender,
+            ))
         };
 
         // TODO: do something to the node. query latest block, mine another block, query again

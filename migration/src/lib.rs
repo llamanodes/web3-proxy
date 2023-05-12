@@ -26,6 +26,7 @@ mod m20230221_230953_track_spend;
 mod m20230412_171916_modify_secondary_user_add_primary_user;
 mod m20230422_172555_premium_downgrade_logic;
 mod m20230511_161214_remove_columns_statsv2_origin_and_method;
+mod m20230512_220213_allow_null_rpc_key_id_in_stats_v2;
 
 pub struct Migrator;
 
@@ -59,6 +60,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20230412_171916_modify_secondary_user_add_primary_user::Migration),
             Box::new(m20230422_172555_premium_downgrade_logic::Migration),
             Box::new(m20230511_161214_remove_columns_statsv2_origin_and_method::Migration),
+            Box::new(m20230512_220213_allow_null_rpc_key_id_in_stats_v2::Migration),
         ]
     }
 }

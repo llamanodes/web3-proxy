@@ -19,7 +19,6 @@ use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::EntityTrait;
 use migration::sea_orm::QueryFilter;
-use migration::sea_orm::TransactionTrait;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -49,7 +48,7 @@ pub async fn user_referral_link_get(
     warn!("User tier is: {:?}", user_tier);
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
     if user_tier.id != 6 {
-        return Err(Web3ProxyError::PaymentRequired.into());
+        return Err(Web3ProxyError::PaymentRequired);
     }
 
     // Then get the referral token

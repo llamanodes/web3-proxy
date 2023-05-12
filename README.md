@@ -79,7 +79,9 @@ web3_proxy_cli health_compass https://eth.llamarpc.com https://eth-ski.llamarpc.
 
 ### Run migrations
 
-This is only really useful during development. The migrations run on application start.
+Generally it is simplest to just run the app to run migrations. It runs migrations on start.
+
+But if you want to run them manually (generally only useful in development):
 
 ```
 cd migration

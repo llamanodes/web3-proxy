@@ -125,7 +125,7 @@ pub async fn query_user_stats<'a>(
 
         user_rpc_keys.append(&mut subuser_rpc_keys);
 
-        if user_rpc_keys.len() == 0 {
+        if user_rpc_keys.is_empty() {
             return Err(Web3ProxyError::BadRequest(
                 "User has no secret RPC keys yet".to_string(),
             ));

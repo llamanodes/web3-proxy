@@ -290,9 +290,12 @@ impl JsonRpcForwardedResponse {
                     data = err.data.clone();
                 } else if let Some(err) = err.as_serde_error() {
                     // this is not an rpc error. keep it as an error
-                    return Err(Web3ProxyError::BadRequest(format!("bad request: {}", err)));
+                    return Err(Web3ProxyError::BadResponse(format!(
+                        "bad response: {}",
+                        err
+                    )));
                 } else {
-                    return Err(anyhow::anyhow!("unexpected ethers error!").into());
+                    return Err(anyhow::anyhow!("unexpected ethers error! {:?}", err).into());
                 }
             }
             e => return Err(e.into()),

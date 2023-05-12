@@ -49,7 +49,7 @@ pub async fn get_keys_as_subuser(
         .all(db_replica.conn())
         .await?
         .into_iter()
-        .map(|x| (x.rpc_secret_key_id.clone(), x))
+        .map(|x| (x.rpc_secret_key_id, x))
         .collect::<HashMap<u64, secondary_user::Model>>();
 
     // Now return a list of all subusers (their wallets)
@@ -147,7 +147,7 @@ pub async fn get_subusers(
         .all(db_replica.conn())
         .await?
         .into_iter()
-        .map(|x| (x.user_id.clone(), x))
+        .map(|x| (x.user_id, x))
         .collect::<HashMap<u64, secondary_user::Model>>();
 
     // Now return a list of all subusers (their wallets)
@@ -314,7 +314,7 @@ pub async fn modify_subuser(
             let rpc_secret_key = RpcSecretKey::new();
 
             let subuser_rpc_key = rpc_key::ActiveModel {
-                user_id: sea_orm::Set(subuser.id.clone()),
+                user_id: sea_orm::Set(subuser.id),
                 secret_key: sea_orm::Set(rpc_secret_key.into()),
                 description: sea_orm::Set(None),
                 ..Default::default()
@@ -327,7 +327,7 @@ pub async fn modify_subuser(
 
             // We should also create the balance entry ...
             let subuser_balance = balance::ActiveModel {
-                user_id: sea_orm::Set(subuser.id.clone()),
+                user_id: sea_orm::Set(subuser.id),
                 available_balance: sea_orm::Set(Decimal::new(0, 0)),
                 used_balance: sea_orm::Set(Decimal::new(0, 0)),
                 ..Default::default()
@@ -374,7 +374,8 @@ pub async fn modify_subuser(
 
     let txn = db_conn.begin().await?;
     let mut action = "no action";
-    let _ = match subuser_entry_secondary_user {
+
+    match subuser_entry_secondary_user {
         Some(secondary_user) => {
             // In this case, remove the subuser
             let mut active_subuser_entry_secondary_user = secondary_user.into_active_model();
@@ -421,6 +422,7 @@ pub async fn modify_subuser(
         })),
     )
         .into_response();
+
     // Return early if the log was added, assume there is at most one valid log per transaction
-    Ok(response.into())
+    Ok(response)
 }

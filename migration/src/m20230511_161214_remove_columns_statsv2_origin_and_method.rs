@@ -44,7 +44,6 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum RpcAccountingV2 {
     Table,
-    Id,
     Origin,
     Method,
 }
