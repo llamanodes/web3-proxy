@@ -67,6 +67,7 @@ impl RpcRanking {
     }
 
     fn sort_key(&self) -> (u64, bool, Reverse<Option<U64>>) {
+        // TODO: add soft_limit here? add peak_ewma here?
         (self.tier, !self.backup, Reverse(self.head_num))
     }
 }
