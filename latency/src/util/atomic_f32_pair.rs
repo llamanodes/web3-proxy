@@ -54,26 +54,27 @@ fn from_bits(bits: u64) -> [f32; 2] {
 
 #[cfg(test)]
 mod tests {
+    use std::f32;
     use std::sync::atomic::Ordering;
 
     use super::{from_bits, to_bits, AtomicF32Pair};
 
     #[test]
     fn test_f32_pair_bit_conversions() {
-        let pair = [3.14159, 2.71828];
+        let pair = [f32::consts::PI, f32::consts::E];
         assert_eq!(pair, from_bits(to_bits(pair)));
     }
 
     #[test]
     fn test_atomic_f32_pair_load() {
-        let pair = [3.14159, 2.71828];
+        let pair = [f32::consts::PI, f32::consts::E];
         let atomic = AtomicF32Pair::new(pair);
         assert_eq!(pair, atomic.load(Ordering::Relaxed));
     }
 
     #[test]
     fn test_atomic_f32_pair_fetch_update() {
-        let pair = [3.14159, 2.71828];
+        let pair = [f32::consts::PI, f32::consts::E];
         let atomic = AtomicF32Pair::new(pair);
         atomic
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |[f1, f2]| {
