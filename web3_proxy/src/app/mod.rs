@@ -54,7 +54,7 @@ use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::sync::{broadcast, watch, Semaphore};
+use tokio::sync::{broadcast, mpsc, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
 use ulid::Ulid;
@@ -265,7 +265,7 @@ pub struct Web3ProxyApp {
         Cache<UserBearerToken, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
     pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
     /// channel for sending stats in a background task
-    pub stat_sender: Option<kanal::AsyncSender<AppStat>>,
+    pub stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
 }
 
 /// flatten a JoinError into an anyhow error

@@ -8,7 +8,7 @@ use log::{error, info, trace};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 
@@ -30,7 +30,7 @@ pub struct BufferedRpcQueryStats {
 
 #[derive(From)]
 pub struct SpawnedStatBuffer {
-    pub stat_sender: kanal::AsyncSender<AppStat>,
+    pub stat_sender: mpsc::UnboundedSender<AppStat>,
     /// these handles are important and must be allowed to finish
     pub background_handle: JoinHandle<anyhow::Result<()>>,
 }
@@ -65,7 +65,7 @@ impl StatBuffer {
             return Ok(None);
         }
 
-        let (stat_sender, stat_receiver) = kanal::unbounded_async();
+        let (stat_sender, stat_receiver) = mpsc::unbounded_channel();
 
         let timestamp_precision = TimestampPrecision::Seconds;
         let mut new = Self {
@@ -94,7 +94,7 @@ impl StatBuffer {
     async fn aggregate_and_save_loop(
         &mut self,
         bucket: String,
-        stat_receiver: kanal::AsyncReceiver<AppStat>,
+        mut stat_receiver: mpsc::UnboundedReceiver<AppStat>,
         mut shutdown_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<()> {
         let mut tsdb_save_interval =
@@ -111,7 +111,7 @@ impl StatBuffer {
                     // info!("Received stat");
                     // save the stat to a buffer
                     match stat {
-                        Ok(AppStat::RpcQuery(stat)) => {
+                        Some(AppStat::RpcQuery(stat)) => {
                             if self.influxdb_client.is_some() {
                                 // TODO: round the timestamp at all?
 
@@ -128,8 +128,8 @@ impl StatBuffer {
                                 self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat);
                             }
                         }
-                        Err(err) => {
-                            error!("error receiving stat: {:?}", err);
+                        None => {
+                            info!("done receiving stats");
                             break;
                         }
                     }

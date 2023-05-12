@@ -33,7 +33,7 @@ use std::mem;
 use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64, AtomicUsize};
 use std::time::Duration;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use ulid::Ulid;
@@ -266,8 +266,8 @@ pub struct RequestMetadata {
     /// TODO: maybe this shouldn't be determined by ProxyMode. A request param should probably enable this
     pub kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
 
-    /// Channel to send stats to
-    pub stat_sender: Option<kanal::AsyncSender<AppStat>>,
+    /// Cancel-safe channel to send stats to
+    pub stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
 }
 
 impl Default for RequestMetadata {
@@ -457,12 +457,10 @@ impl RequestMetadata {
 
             let stat: AppStat = stat.into();
 
-            // can't use async because a Drop can call this
-            let stat_sender = stat_sender.to_sync();
-
             if let Err(err) = stat_sender.send(stat) {
-                error!("failed sending stat: {:?}", err);
+                error!("failed sending stat {:?}: {:?}", err.0, err);
                 // TODO: return it? that seems like it might cause an infinite loop
+                // TODO: but dropping stats is bad... hmm... i guess better to undercharge customers than overcharge
             };
 
             Ok(None)
