@@ -14,17 +14,12 @@ use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
 use influxdb2::models::DataPoint;
-<<<<<<< HEAD
-use log::{error, info, warn};
+use log::{error, info, trace, warn};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::{self, DatabaseConnection, EntityTrait, QueryFilter};
-=======
-use log::{error, info, trace};
-use migration::sea_orm::{self, DatabaseConnection, EntityTrait};
->>>>>>> upstream/devel
 use migration::{Expr, OnConflict};
 use moka::future::Cache;
 use num_traits::ToPrimitive;
