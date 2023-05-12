@@ -444,6 +444,7 @@ impl BufferedRpcQueryStats {
         {
             Some(x) => x,
             None => {
+                // TODO: warn seems too verbose for this. it should be fine for a user to not have a referall code, right?
                 warn!(
                     "No referrer with that referral code was found {:?}",
                     referee_object
