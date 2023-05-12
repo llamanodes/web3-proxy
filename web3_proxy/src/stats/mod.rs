@@ -232,7 +232,7 @@ impl BufferedRpcQueryStats {
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             key.response_timestamp > 0,
-            "no response_timestamp: {:?} {:?}",
+            "no response_timestamp! This is a bug! {:?} {:?}",
             key,
             self
         );
@@ -242,7 +242,7 @@ impl BufferedRpcQueryStats {
         // this is a lot of variables
         let accounting_entry = rpc_accounting_v2::ActiveModel {
             id: sea_orm::NotSet,
-            rpc_key_id: sea_orm::Set(key.rpc_secret_key_id.map(Into::into).unwrap_or_default()),
+            rpc_key_id: sea_orm::Set(key.rpc_secret_key_id.map(Into::into)),
             chain_id: sea_orm::Set(chain_id),
             period_datetime: sea_orm::Set(period_datetime),
             archive_needed: sea_orm::Set(key.archive_needed),

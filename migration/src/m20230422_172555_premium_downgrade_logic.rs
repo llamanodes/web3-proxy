@@ -7,8 +7,6 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
-
         // Add a column "downgrade_tier_id"
         // It is a "foreign key" that references other items in this table
         manager
@@ -82,8 +80,6 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
-
         // Remove the two tiers that you just added
         // And remove the column you just added
         let db_conn = manager.get_connection();

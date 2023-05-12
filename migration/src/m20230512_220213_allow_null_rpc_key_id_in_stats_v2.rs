@@ -6,15 +6,16 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Track spend inside the RPC accounting v2 table
         manager
             .alter_table(
-                Table::alter()
+                sea_query::Table::alter()
                     .table(RpcAccountingV2::Table)
-                    .add_column(
-                        ColumnDef::new(RpcAccountingV2::SumCreditsUsed)
-                            .decimal_len(20, 10)
-                            .not_null(),
+                    .to_owned()
+                    // allow rpc_key_id to be null. Needed for public rpc stat tracking
+                    .modify_column(
+                        ColumnDef::new(RpcAccountingV2::RpcKeyId)
+                            .big_unsigned()
+                            .null(),
                     )
                     .to_owned(),
             )
@@ -26,7 +27,13 @@ impl MigrationTrait for Migration {
             .alter_table(
                 sea_query::Table::alter()
                     .table(RpcAccountingV2::Table)
-                    .drop_column(RpcAccountingV2::SumCreditsUsed)
+                    .to_owned()
+                    .modify_column(
+                        ColumnDef::new(RpcAccountingV2::RpcKeyId)
+                            .big_unsigned()
+                            .not_null()
+                            .default(0),
+                    )
                     .to_owned(),
             )
             .await
@@ -37,5 +44,5 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum RpcAccountingV2 {
     Table,
-    SumCreditsUsed,
+    RpcKeyId,
 }
