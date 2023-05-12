@@ -2,6 +2,7 @@
 //! TODO: move some of these structs/functions into their own file?
 pub mod db_queries;
 pub mod influxdb_queries;
+use crate::app::AuthorizationChecks;
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use anyhow::Context;
 use axum::headers::Origin;
@@ -20,6 +21,7 @@ use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::{self, DatabaseConnection, EntityTrait, QueryFilter};
 use migration::{Expr, OnConflict};
+use moka::future::Cache;
 use num_traits::ToPrimitive;
 use std::cmp::max;
 use std::num::NonZeroU64;
@@ -29,6 +31,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
+use ulid::Ulid;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum StatType {
@@ -212,6 +215,8 @@ pub struct StatBuffer {
     db_conn: Option<DatabaseConnection>,
     influxdb_client: Option<influxdb2::Client>,
     tsdb_save_interval_seconds: u32,
+    rpc_secret_key_cache:
+        Option<Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>>,
     db_save_interval_seconds: u32,
     billing_period_seconds: i64,
 }
@@ -415,9 +420,12 @@ impl BufferedRpcQueryStats {
 
         // Downgrade a user to premium - out of funds if there's less than 10$ in the account, and if the user was premium before
         if new_available_balance < Decimal::from(10u64) && downgrade_user_role.title == "Premium" {
-            let mut active_downgrade_user = downgrade_user.into_active_model();
-            active_downgrade_user.user_tier_id = sea_orm::Set(downgrade_user_role.id);
-            active_downgrade_user.save(db_conn).await?;
+            // Only downgrade the user in local process memory, not elsewhere
+            // app.rpc_secret_key_cache-
+
+            // let mut active_downgrade_user = downgrade_user.into_active_model();
+            // active_downgrade_user.user_tier_id = sea_orm::Set(downgrade_user_role.id);
+            // active_downgrade_user.save(db_conn).await?;
         }
 
         // Get the referee, and the referrer
@@ -691,6 +699,9 @@ impl StatBuffer {
         bucket: String,
         db_conn: Option<DatabaseConnection>,
         influxdb_client: Option<influxdb2::Client>,
+        rpc_secret_key_cache: Option<
+            Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>,
+        >,
         db_save_interval_seconds: u32,
         tsdb_save_interval_seconds: u32,
         billing_period_seconds: i64,
@@ -708,6 +719,7 @@ impl StatBuffer {
             influxdb_client,
             db_save_interval_seconds,
             tsdb_save_interval_seconds,
+            rpc_secret_key_cache,
             billing_period_seconds,
         };
 

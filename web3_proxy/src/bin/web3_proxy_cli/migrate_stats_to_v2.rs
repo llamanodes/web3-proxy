@@ -76,6 +76,7 @@ impl MigrateStatsToV2 {
                 .context("No influxdb bucket was provided")?,
             Some(db_conn.clone()),
             influxdb_client.clone(),
+            None,
             30,
             1,
             BILLING_PERIOD_SECONDS,

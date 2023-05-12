@@ -581,6 +581,15 @@ impl Web3ProxyApp {
             None => None,
         };
 
+        // all the users are the same size, so no need for a weigher
+        // if there is no database of users, there will be no keys and so this will be empty
+        // TODO: max_capacity from config
+        // TODO: ttl from config
+        let rpc_secret_key_cache = Cache::builder()
+            .max_capacity(10_000)
+            .time_to_live(Duration::from_secs(600))
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
         // stats can be saved in mysql, influxdb, both, or none
@@ -591,6 +600,7 @@ impl Web3ProxyApp {
                 influxdb_bucket,
                 db_conn.clone(),
                 influxdb_client.clone(),
+                Some(rpc_secret_key_cache.clone()),
                 60,
                 1,
                 BILLING_PERIOD_SECONDS,
@@ -698,15 +708,6 @@ impl Web3ProxyApp {
             })
             // TODO: what should we set? 10 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
             .time_to_idle(Duration::from_secs(600))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-
-        // all the users are the same size, so no need for a weigher
-        // if there is no database of users, there will be no keys and so this will be empty
-        // TODO: max_capacity from config
-        // TODO: ttl from config
-        let rpc_secret_key_cache = Cache::builder()
-            .max_capacity(10_000)
-            .time_to_live(Duration::from_secs(600))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // create semaphores for concurrent connection limits
