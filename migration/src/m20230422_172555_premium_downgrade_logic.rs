@@ -19,7 +19,6 @@ impl MigrationTrait for Migration {
                     .add_foreign_key(
                         TableForeignKey::new()
                             .to_tbl(UserTier::Table)
-                            .to_tbl(UserTier::Table)
                             .from_col(UserTier::DowngradeTierId)
                             .to_col(UserTier::Id),
                     )
