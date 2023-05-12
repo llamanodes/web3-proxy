@@ -68,18 +68,19 @@ impl MigrateStatsToV2 {
 
         // Spawn the stat-sender
         let emitter_spawn = StatBuffer::try_spawn(
-            top_config.app.chain_id,
+            BILLING_PERIOD_SECONDS,
             top_config
                 .app
                 .influxdb_bucket
                 .clone()
                 .context("No influxdb bucket was provided")?,
+            top_config.app.chain_id,
             Some(db_conn.clone()),
-            influxdb_client.clone(),
             30,
-            1,
-            BILLING_PERIOD_SECONDS,
+            influxdb_client.clone(),
+            None,
             rpc_account_shutdown_recevier,
+            1,
         )
         .context("Error spawning stat buffer")?
         .context("No stat buffer spawned. Maybe missing influx or db credentials?")?;

@@ -14,7 +14,7 @@ use core::fmt;
 use deferred_rate_limiter::DeferredRateLimitResult;
 use derive_more::From;
 use entities::sea_orm_active_enums::TrackingLevel;
-use entities::{login, rpc_key, user, user_tier};
+use entities::{balance, login, rpc_key, user, user_tier};
 use ethers::types::{Bytes, U64};
 use ethers::utils::keccak256;
 use futures::TryFutureExt;
@@ -237,6 +237,7 @@ pub struct RequestMetadata {
     pub request_bytes: usize,
 
     /// users can opt out of method tracking for their personal dashboads
+    /// but we still have to store the method at least temporarily for cost calculations
     pub method: Option<String>,
 
     /// Instant that the request was received (or at least close to it)
@@ -296,7 +297,7 @@ pub enum RequestOrMethod<'a> {
     Request(&'a JsonRpcRequest),
     /// jsonrpc method (or similar label) and the size that the request should count as (sometimes 0)
     Method(&'a str, usize),
-    None(usize),
+    RequestSize(usize),
 }
 
 impl<'a> RequestOrMethod<'a> {
@@ -319,7 +320,7 @@ impl<'a> RequestOrMethod<'a> {
         match self {
             RequestOrMethod::Method(_, num_bytes) => *num_bytes,
             RequestOrMethod::Request(x) => x.num_bytes(),
-            RequestOrMethod::None(num_bytes) => *num_bytes,
+            RequestOrMethod::RequestSize(num_bytes) => *num_bytes,
         }
     }
 }
@@ -327,7 +328,7 @@ impl<'a> RequestOrMethod<'a> {
 impl<'a> From<&'a str> for RequestOrMethod<'a> {
     fn from(value: &'a str) -> Self {
         if value.is_empty() {
-            Self::None(0)
+            Self::RequestSize(0)
         } else {
             Self::Method(value, 0)
         }
@@ -441,11 +442,18 @@ impl RequestMetadata {
         }
     }
 
-    pub fn try_send_stat(mut self) -> anyhow::Result<Option<Self>> {
+    pub fn take_opt_in_method(&mut self) -> Option<String> {
+        match self.tracking_level() {
+            TrackingLevel::None | TrackingLevel::Aggregated => None,
+            TrackingLevel::Detailed => self.method.take(),
+        }
+    }
+
+    pub fn try_send_stat(mut self) -> Web3ProxyResult<Option<Self>> {
         if let Some(stat_sender) = self.stat_sender.take() {
             trace!("sending stat! {:?}", self);
 
-            let stat: RpcQueryStats = self.into();
+            let stat: RpcQueryStats = self.try_into()?;
 
             let stat: AppStat = stat.into();
 
@@ -1101,6 +1109,13 @@ impl Web3ProxyApp {
                             .await?
                             .expect("related user");
 
+                        let balance = balance::Entity::find()
+                            .filter(balance::Column::UserId.eq(user_model.id))
+                            .one(db_replica.conn())
+                            .await?
+                            .expect("related balance")
+                            .available_balance;
+
                         let user_tier_model =
                             user_tier::Entity::find_by_id(user_model.user_tier_id)
                                 .one(db_replica.conn())
@@ -1183,6 +1198,7 @@ impl Web3ProxyApp {
                             max_requests_per_period: user_tier_model.max_requests_per_period,
                             private_txs: rpc_key_model.private_txs,
                             proxy_mode,
+                            balance: Some(balance),
                         })
                     }
                     None => Ok(AuthorizationChecks::default()),

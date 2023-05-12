@@ -4,7 +4,6 @@ use super::consensus::ConsensusWeb3Rpcs;
 use super::one::Web3Rpc;
 use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
 use crate::app::{flatten_handle, AnyhowJoinHandle, Web3ProxyApp};
-///! Load balanced communication with a group of web3 providers
 use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};

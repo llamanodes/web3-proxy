@@ -1,9 +1,11 @@
 use super::{AppStat, RpcQueryKey};
+use crate::app::RpcSecretKeyCache;
 use derive_more::From;
 use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
 use log::{error, info, trace};
+use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -21,6 +23,9 @@ pub struct BufferedRpcQueryStats {
     pub sum_request_bytes: u64,
     pub sum_response_bytes: u64,
     pub sum_response_millis: u64,
+    pub sum_credits_used: Decimal,
+    /// Balance tells us the user's balance at this point in time
+    pub latest_balance: Decimal,
 }
 
 #[derive(From)]
@@ -29,31 +34,32 @@ pub struct SpawnedStatBuffer {
     /// these handles are important and must be allowed to finish
     pub background_handle: JoinHandle<anyhow::Result<()>>,
 }
-
 pub struct StatBuffer {
+    accounting_db_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
+    billing_period_seconds: i64,
     chain_id: u64,
     db_conn: Option<DatabaseConnection>,
-    influxdb_client: Option<influxdb2::Client>,
-    tsdb_save_interval_seconds: u32,
     db_save_interval_seconds: u32,
-    billing_period_seconds: i64,
     global_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
+    influxdb_client: Option<influxdb2::Client>,
     opt_in_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
-    accounting_db_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
+    rpc_secret_key_cache: Option<RpcSecretKeyCache>,
     timestamp_precision: TimestampPrecision,
+    tsdb_save_interval_seconds: u32,
 }
 
 impl StatBuffer {
     #[allow(clippy::too_many_arguments)]
     pub fn try_spawn(
-        chain_id: u64,
-        bucket: String,
-        db_conn: Option<DatabaseConnection>,
-        influxdb_client: Option<influxdb2::Client>,
-        db_save_interval_seconds: u32,
-        tsdb_save_interval_seconds: u32,
         billing_period_seconds: i64,
+        bucket: String,
+        chain_id: u64,
+        db_conn: Option<DatabaseConnection>,
+        db_save_interval_seconds: u32,
+        influxdb_client: Option<influxdb2::Client>,
+        rpc_secret_key_cache: Option<RpcSecretKeyCache>,
         shutdown_receiver: broadcast::Receiver<()>,
+        tsdb_save_interval_seconds: u32,
     ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
         if db_conn.is_none() && influxdb_client.is_none() {
             return Ok(None);
@@ -63,16 +69,17 @@ impl StatBuffer {
 
         let timestamp_precision = TimestampPrecision::Seconds;
         let mut new = Self {
+            accounting_db_buffer: Default::default(),
+            billing_period_seconds,
             chain_id,
             db_conn,
-            influxdb_client,
             db_save_interval_seconds,
-            tsdb_save_interval_seconds,
-            billing_period_seconds,
             global_timeseries_buffer: Default::default(),
+            influxdb_client,
             opt_in_timeseries_buffer: Default::default(),
-            accounting_db_buffer: Default::default(),
+            rpc_secret_key_cache,
             timestamp_precision,
+            tsdb_save_interval_seconds,
         };
 
         // any errors inside this task will cause the application to exit
@@ -174,7 +181,15 @@ impl StatBuffer {
             for (key, stat) in self.accounting_db_buffer.drain() {
                 // TODO: batch saves
                 // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
-                if let Err(err) = stat.save_db(self.chain_id, db_conn, key).await {
+                if let Err(err) = stat
+                    .save_db(
+                        self.chain_id,
+                        db_conn,
+                        key,
+                        self.rpc_secret_key_cache.as_ref(),
+                    )
+                    .await
+                {
                     error!("unable to save accounting entry! err={:?}", err);
                 };
             }

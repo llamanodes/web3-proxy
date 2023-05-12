@@ -35,6 +35,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
 use log::{debug, error, info, trace, warn, Level};
+use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ConnectionTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait,
 };
@@ -188,6 +189,7 @@ pub struct AuthorizationChecks {
     /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
     pub private_txs: bool,
     pub proxy_mode: ProxyMode,
+    pub balance: Option<Decimal>,
 }
 
 /// Simple wrapper so that we can keep track of read only connections.
@@ -202,6 +204,10 @@ impl DatabaseReplica {
         &self.0
     }
 }
+
+// TODO: this should be a the secret key id, not the key itself!
+pub type RpcSecretKeyCache =
+    Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>;
 
 /// The application
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
@@ -248,8 +254,7 @@ pub struct Web3ProxyApp {
     pub vredis_pool: Option<RedisPool>,
     /// cache authenticated users so that we don't have to query the database on the hot path
     // TODO: should the key be our RpcSecretKey class instead of Ulid?
-    pub rpc_secret_key_cache:
-        Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>,
+    pub rpc_secret_key_cache: RpcSecretKeyCache,
     /// concurrent/parallel RPC request limits for authenticated users
     pub registered_user_semaphores:
         Cache<NonZeroU64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
@@ -579,20 +584,30 @@ impl Web3ProxyApp {
             None => None,
         };
 
+        // all the users are the same size, so no need for a weigher
+        // if there is no database of users, there will be no keys and so this will be empty
+        // TODO: max_capacity from config
+        // TODO: ttl from config
+        let rpc_secret_key_cache = Cache::builder()
+            .max_capacity(10_000)
+            .time_to_live(Duration::from_secs(600))
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
         // stats can be saved in mysql, influxdb, both, or none
         let mut stat_sender = None;
         if let Some(influxdb_bucket) = top_config.app.influxdb_bucket.clone() {
             if let Some(spawned_stat_buffer) = StatBuffer::try_spawn(
-                top_config.app.chain_id,
-                influxdb_bucket,
-                db_conn.clone(),
-                influxdb_client.clone(),
-                60,
-                1,
                 BILLING_PERIOD_SECONDS,
+                influxdb_bucket,
+                top_config.app.chain_id,
+                db_conn.clone(),
+                60,
+                influxdb_client.clone(),
+                Some(rpc_secret_key_cache.clone()),
                 stat_buffer_shutdown_receiver,
+                1,
             )? {
                 // since the database entries are used for accounting, we want to be sure everything is saved before exiting
                 important_background_handles.push(spawned_stat_buffer.background_handle);
@@ -695,15 +710,6 @@ impl Web3ProxyApp {
                 }
             })
             // TODO: what should we set? 10 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
-            .time_to_live(Duration::from_secs(600))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-
-        // all the users are the same size, so no need for a weigher
-        // if there is no database of users, there will be no keys and so this will be empty
-        // TODO: max_capacity from config
-        // TODO: ttl from config
-        let rpc_secret_key_cache = Cache::builder()
-            .max_capacity(10_000)
             .time_to_live(Duration::from_secs(600))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
@@ -1501,7 +1507,7 @@ impl Web3ProxyApp {
                     .try_proxy_connection(
                         authorization,
                         request,
-                        Some(&request_metadata),
+                        Some(request_metadata),
                         None,
                         None,
                     )
@@ -1519,7 +1525,7 @@ impl Web3ProxyApp {
                             .try_proxy_connection(
                                 authorization,
                                 request,
-                                Some(&request_metadata),
+                                Some(request_metadata),
                                 Some(&U64::one()),
                                 None,
                             )

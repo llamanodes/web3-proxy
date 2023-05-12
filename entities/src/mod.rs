@@ -4,8 +4,12 @@ pub mod prelude;
 
 pub mod admin;
 pub mod admin_trail;
+pub mod balance;
+pub mod increase_on_chain_balance_receipt;
 pub mod login;
 pub mod pending_login;
+pub mod referee;
+pub mod referrer;
 pub mod revert_log;
 pub mod rpc_accounting;
 pub mod rpc_accounting_v2;
