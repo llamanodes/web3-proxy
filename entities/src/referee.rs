@@ -21,7 +21,7 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::referrer::Entity",
         from = "Column::UsedReferralCode",
-        to = "super::referrer::Column::ReferralCode",
+        to = "super::referrer::Column::Id",
         on_update = "NoAction",
         on_delete = "NoAction"
     )]

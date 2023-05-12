@@ -78,7 +78,7 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         sea_query::ForeignKey::create()
                             .from(Referee::Table, Referee::UsedReferralCode)
-                            .to(Referrer::Table, Referrer::ReferralCode),
+                            .to(Referrer::Table, Referrer::Id),
                     )
                     .col(
                         ColumnDef::new(Referee::UserId)
