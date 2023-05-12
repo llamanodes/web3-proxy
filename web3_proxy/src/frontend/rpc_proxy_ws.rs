@@ -332,16 +332,18 @@ async fn handle_socket_payload(
         Err(err) => {
             let (_, err) = err.into_response_parts();
 
-            let err = serde_json::to_string(&err).expect("to_string should always work here");
+            let err = JsonRpcForwardedResponse::from_response_data(err, Default::default());
+
+            let err = serde_json::to_string(&err)?;
 
             return Ok((Message::Text(err), None));
         }
     };
 
     // TODO: do any clients send batches over websockets?
-    let (id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
+    let (response_id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
         Ok(json_request) => {
-            let id = json_request.id.clone();
+            let response_id = json_request.id.clone();
 
             // TODO: move this to a seperate function so we can use the try operator
             let response: Web3ProxyResult<JsonRpcForwardedResponseEnum> =
@@ -405,7 +407,7 @@ async fn handle_socket_payload(
 
                                     let response = JsonRpcForwardedResponse::from_value(
                                         json!(partial_response),
-                                        id.clone(),
+                                        response_id.clone(),
                                     );
 
                                     request_metadata.add_response(&response);
@@ -428,7 +430,7 @@ async fn handle_socket_payload(
                         .map(|(status_code, response, _)| response),
                 };
 
-            (id, response)
+            (response_id, response)
         }
         Err(err) => {
             let id = JsonRpcId::None.to_raw_value();
@@ -439,8 +441,10 @@ async fn handle_socket_payload(
     let response_str = match response {
         Ok(x) => serde_json::to_string(&x).expect("to_string should always work here"),
         Err(err) => {
-            let (_, mut response) = err.into_response_parts();
-            response.id = id;
+            let (_, response_data) = err.into_response_parts();
+
+            let response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
+
             serde_json::to_string(&response).expect("to_string should always work here")
         }
     };

@@ -321,7 +321,7 @@ pub async fn user_login_post(
                     .filter(referrer::Column::ReferralCode.eq(referral_code))
                     .one(db_replica.conn())
                     .await?
-                    .ok_or(Web3ProxyError::InvalidReferralCode)?;
+                    .ok_or(Web3ProxyError::UnknownReferralCode)?;
 
                 // Create a new item in the database,
                 // marking this guy as the referrer (and ignoring a duplicate insert, if there is any...)

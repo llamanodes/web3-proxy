@@ -355,7 +355,9 @@ impl ResponseOrBytes<'_> {
             Self::Json(x) => serde_json::to_string(x)
                 .expect("this should always serialize")
                 .len(),
-            Self::Response(x) => x.num_bytes(),
+            Self::Response(x) => serde_json::to_string(x)
+                .expect("this should always serialize")
+                .len(),
             Self::Bytes(num_bytes) => *num_bytes,
         }
     }

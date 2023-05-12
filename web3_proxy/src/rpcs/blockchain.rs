@@ -5,6 +5,7 @@ use super::one::Web3Rpc;
 use super::transactions::TxStatus;
 use crate::frontend::authorization::Authorization;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
+use crate::response_cache::JsonRpcResponseData;
 use crate::{config::BlockAndRpc, jsonrpc::JsonRpcRequest};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
@@ -250,15 +251,14 @@ impl Web3Rpcs {
                     )
                     .await?;
 
-                if response.error.is_some() {
-                    return Err(response.into());
-                }
+                let value = match response {
+                    JsonRpcResponseData::Error { .. } => {
+                        return Err(anyhow::anyhow!("failed fetching block").into());
+                    }
+                    JsonRpcResponseData::Result { value, .. } => value,
+                };
 
-                let block = response
-                    .result
-                    .web3_context("no error, but also no block")?;
-
-                let block: Option<ArcBlock> = serde_json::from_str(block.get())?;
+                let block: Option<ArcBlock> = serde_json::from_str(value.get())?;
 
                 let block: ArcBlock = block.web3_context("no block in the response")?;
 
@@ -346,13 +346,14 @@ impl Web3Rpcs {
             .try_send_best_consensus_head_connection(authorization, &request, None, Some(num), None)
             .await?;
 
-        if response.error.is_some() {
-            return Err(response.into());
-        }
+        let value = match response {
+            JsonRpcResponseData::Error { .. } => {
+                return Err(anyhow::anyhow!("failed fetching block").into());
+            }
+            JsonRpcResponseData::Result { value, .. } => value,
+        };
 
-        let raw_block = response.result.web3_context("no cannonical block result")?;
-
-        let block: ArcBlock = serde_json::from_str(raw_block.get())?;
+        let block: ArcBlock = serde_json::from_str(value.get())?;
 
         let block = Web3ProxyBlock::try_from(block)?;
 

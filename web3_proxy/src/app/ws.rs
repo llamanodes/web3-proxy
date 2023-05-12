@@ -5,6 +5,7 @@ use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMe
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcRequest;
+use crate::response_cache::JsonRpcResponseData;
 use crate::rpcs::transactions::TxStatus;
 use axum::extract::ws::Message;
 use ethers::prelude::U64;
@@ -304,8 +305,11 @@ impl Web3ProxyApp {
 
         // TODO: do something with subscription_join_handle?
 
-        let response = JsonRpcForwardedResponse::from_value(json!(subscription_id), id);
+        let response_data = JsonRpcResponseData::from(json!(subscription_id));
 
+        let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
+
+        // TODO: this serializes twice
         request_metadata.add_response(&response);
 
         // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?
