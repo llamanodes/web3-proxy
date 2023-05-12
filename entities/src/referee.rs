@@ -11,7 +11,7 @@ pub struct Model {
     #[sea_orm(column_type = "Decimal(Some((20, 10)))")]
     pub credits_applied_for_referrer: Decimal,
     pub referral_start_date: DateTime,
-    pub used_referral_code: String,
+    pub used_referral_code: i32,
     #[sea_orm(unique)]
     pub user_id: u64,
 }

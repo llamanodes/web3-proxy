@@ -328,7 +328,7 @@ pub async fn user_login_post(
                 // First person to make the referral gets all credits
                 // Generate a random referral code ...
                 let used_referral = referee::ActiveModel {
-                    used_referral_code: sea_orm::Set(user_referrer.referral_code),
+                    used_referral_code: sea_orm::Set(user_referrer.id),
                     user_id: sea_orm::Set(caller.id),
                     credits_applied_for_referee: sea_orm::Set(false),
                     credits_applied_for_referrer: sea_orm::Set(Decimal::new(0, 10)),
@@ -362,7 +362,7 @@ pub async fn user_login_post(
                 // First person to make the referral gets all credits
                 // Generate a random referral code ...
                 let used_referral = referee::ActiveModel {
-                    used_referral_code: sea_orm::Set(user_referrer.referral_code),
+                    used_referral_code: sea_orm::Set(user_referrer.id),
                     user_id: sea_orm::Set(caller.id),
                     credits_applied_for_referee: sea_orm::Set(false),
                     credits_applied_for_referrer: sea_orm::Set(Decimal::new(0, 10)),

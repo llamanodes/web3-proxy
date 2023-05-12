@@ -72,7 +72,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(Referee::UsedReferralCode)
-                            .string()
+                            .integer()
                             .not_null(),
                     )
                     .foreign_key(

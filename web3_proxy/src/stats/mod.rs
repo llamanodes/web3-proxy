@@ -440,7 +440,7 @@ impl BufferedRpcQueryStats {
         // (3) Look up the matching referrer in the referrer table
         // Referral table -> Get the referee id
         let user_with_that_referral_code = match referrer::Entity::find()
-            .filter(referrer::Column::ReferralCode.eq(&referee_object.used_referral_code))
+            .filter(referrer::Column::ReferralCode.eq(referee_object.used_referral_code))
             .one(db_conn)
             .await?
         {
