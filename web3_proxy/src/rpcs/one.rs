@@ -12,6 +12,7 @@ use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
 use ethers::types::{Address, Transaction, U256};
 use futures::future::try_join_all;
 use futures::StreamExt;
+use latency::{EwmaLatency, PeakEwmaLatency};
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use ordered_float::OrderedFloat;
@@ -20,6 +21,7 @@ use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
+use std::borrow::Cow;
 use std::cmp::min;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -29,69 +31,7 @@ use thread_fast_rng::rand::Rng;
 use thread_fast_rng::thread_fast_rng;
 use tokio::sync::{broadcast, oneshot, watch, RwLock as AsyncRwLock};
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
-
-pub struct Latency {
-    /// exponentially weighted moving average of how many milliseconds behind the fastest node we are
-    ewma: ewma::EWMA,
-}
-
-impl Serialize for Latency {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_f64(self.ewma.value())
-    }
-}
-
-impl Latency {
-    #[inline(always)]
-    pub fn record(&mut self, duration: Duration) {
-        self.record_ms(duration.as_secs_f64() * 1000.0);
-    }
-
-    #[inline(always)]
-    pub fn record_ms(&mut self, milliseconds: f64) {
-        self.ewma.add(milliseconds);
-    }
-
-    #[inline(always)]
-    pub fn value(&self) -> f64 {
-        self.ewma.value()
-    }
-}
-
-impl Default for Latency {
-    fn default() -> Self {
-        // TODO: what should the default span be? 25 requests? have a "new"
-        let span = 25.0;
-
-        let start = 1000.0;
-
-        Self::new(span, start)
-    }
-}
-
-impl Latency {
-    // depending on the span, start might not be perfect
-    pub fn new(span: f64, start: f64) -> Self {
-        let alpha = Self::span_to_alpha(span);
-
-        let mut ewma = ewma::EWMA::new(alpha);
-
-        if start > 0.0 {
-            for _ in 0..(span as u64) {
-                ewma.add(start);
-            }
-        }
-
-        Self { ewma }
-    }
-
-    fn span_to_alpha(span: f64) -> f64 {
-        2.0 / (span + 1.0)
-    }
-}
+use url::Url;
 
 /// An active connection to a Web3 RPC server like geth or erigon.
 #[derive(Default)]
@@ -99,8 +39,8 @@ pub struct Web3Rpc {
     pub name: String,
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
-    pub(super) ws_url: Option<String>,
-    pub(super) http_url: Option<String>,
+    pub(super) ws_url: Option<Url>,
+    pub(super) http_url: Option<Url>,
     /// Some connections use an http_client. we keep a clone for reconnecting
     pub(super) http_client: Option<reqwest::Client>,
     /// provider is in a RwLock so that we can replace it if re-connecting
@@ -128,10 +68,11 @@ pub struct Web3Rpc {
     /// this is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// Track head block latency
-    pub(super) head_latency: RwLock<Latency>,
-    // /// Track request latency
-    // /// TODO: refactor this. this lock kills perf. for now just use head_latency
-    // pub(super) request_latency: RwLock<Latency>,
+    pub(super) head_latency: RwLock<EwmaLatency>,
+    /// Track peak request latency
+    ///
+    /// This is only inside an Option so that the "Default" derive works. it will always be set.
+    pub(super) peak_latency: Option<PeakEwmaLatency>,
     /// Track total requests served
     /// TODO: maybe move this to graphana
     pub(super) total_requests: AtomicUsize,
@@ -222,13 +163,37 @@ impl Web3Rpc {
 
         let (head_block, _) = watch::channel(None);
 
+        // Spawn the task for calculting average peak latency
+        // TODO Should these defaults be in config
+        let peak_latency = PeakEwmaLatency::spawn(
+            // Decay over 15s
+            Duration::from_secs(15).as_millis() as f64,
+            // Peak requests so far around 5k, we will use an order of magnitude
+            // more to be safe. Should only use about 50mb RAM
+            50_000,
+            // Start latency at 1 second
+            Duration::from_secs(1),
+        );
+
+        let http_url = if let Some(http_url) = config.http_url {
+            Some(http_url.parse()?)
+        } else {
+            None
+        };
+
+        let ws_url = if let Some(ws_url) = config.ws_url {
+            Some(ws_url.parse()?)
+        } else {
+            None
+        };
+
         let new_connection = Self {
             name,
             db_conn: db_conn.clone(),
             display_name: config.display_name,
             http_client,
-            ws_url: config.ws_url,
-            http_url: config.http_url,
+            ws_url,
+            http_url,
             hard_limit,
             hard_limit_until: Some(hard_limit_until),
             soft_limit: config.soft_limit,
@@ -240,6 +205,7 @@ impl Web3Rpc {
             disconnect_watch: Some(disconnect_sender),
             created_at: Some(created_at),
             head_block: Some(head_block),
+            peak_latency: Some(peak_latency),
             ..Default::default()
         };
 
@@ -524,7 +490,7 @@ impl Web3Rpc {
                     }
                 }
 
-                let p = Web3Provider::from_str(ws_url.as_str(), None)
+                let p = Web3Provider::new(Cow::Borrowed(ws_url), None)
                     .await
                     .context(format!("failed connecting to {}", ws_url))?;
 
@@ -534,7 +500,7 @@ impl Web3Rpc {
             } else {
                 // http client
                 if let Some(url) = &self.http_url {
-                    let p = Web3Provider::from_str(url, self.http_client.clone())
+                    let p = Web3Provider::new(Cow::Borrowed(url), self.http_client.clone())
                         .await
                         .context(format!("failed connecting to {}", url))?;
 
@@ -1490,7 +1456,7 @@ mod tests {
 
         let x = Web3Rpc {
             name: "name".to_string(),
-            ws_url: Some("ws://example.com".to_string()),
+            ws_url: Some("ws://example.com".parse::<Url>().unwrap()),
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,

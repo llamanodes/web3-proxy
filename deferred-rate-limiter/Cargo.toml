@@ -11,4 +11,4 @@ anyhow = "1.0.71"
 hashbrown = "0.13.2"
 log = "0.4.17"
 moka = { version = "0.11.0", default-features = false, features = ["future"] }
-tokio = "1.28.0"
+tokio = "1.28.1"

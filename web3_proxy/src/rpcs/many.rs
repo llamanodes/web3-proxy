@@ -839,7 +839,7 @@ impl Web3Rpcs {
 
                                 // different providers do different codes. check all of them
                                 // TODO: there's probably more strings to add here
-                                let rate_limit_substrings = ["limit", "exceeded"];
+                                let rate_limit_substrings = ["limit", "exceeded", "quota usage"];
                                 for rate_limit_substr in rate_limit_substrings {
                                     if error_msg.contains(rate_limit_substr) {
                                         warn!("rate limited by {}", skip_rpcs.last().unwrap());
@@ -1210,18 +1210,25 @@ fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (Reverse<U64>, u64, bool, Order
 }
 
 mod tests {
-    // TODO: why is this allow needed? does tokio::test get in the way somehow?
     #![allow(unused_imports)]
+
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
     use crate::rpcs::consensus::ConsensusFinder;
     use crate::rpcs::{blockchain::Web3ProxyBlock, provider::Web3Provider};
     use arc_swap::ArcSwap;
     use ethers::types::{Block, U256};
+    use latency::PeakEwmaLatency;
     use log::{trace, LevelFilter};
     use parking_lot::RwLock;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock as AsyncRwLock;
+
+    #[cfg(test)]
+    fn new_peak_latency() -> PeakEwmaLatency {
+        const NANOS_PER_MILLI: f64 = 1_000_000.0;
+        PeakEwmaLatency::spawn(1_000.0 * NANOS_PER_MILLI, 4, Duration::from_secs(1))
+    }
 
     #[tokio::test]
     async fn test_sort_connections_by_sync_status() {
@@ -1260,36 +1267,42 @@ mod tests {
                 name: "a".to_string(),
                 tier: 0,
                 head_block: Some(tx_a),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "b".to_string(),
                 tier: 0,
                 head_block: Some(tx_b),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "c".to_string(),
                 tier: 0,
                 head_block: Some(tx_c),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "d".to_string(),
                 tier: 1,
                 head_block: Some(tx_d),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "e".to_string(),
                 tier: 1,
                 head_block: Some(tx_e),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "f".to_string(),
                 tier: 1,
                 head_block: Some(tx_f),
+                peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
         ]
@@ -1346,6 +1359,7 @@ mod tests {
             tier: 0,
             head_block: Some(tx_synced),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 
@@ -1360,6 +1374,7 @@ mod tests {
             tier: 0,
             head_block: Some(tx_lagged),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 
@@ -1760,6 +1775,7 @@ mod tests {
             tier: 0,
             head_block: Some(tx_mock_geth),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 
@@ -1772,6 +1788,7 @@ mod tests {
             tier: 1,
             head_block: Some(tx_mock_erigon_archive),
             provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
+            peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
 

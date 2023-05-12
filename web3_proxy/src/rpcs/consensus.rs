@@ -329,8 +329,8 @@ impl ConsensusFinder {
 
         trace!("lowest_block_number: {}", lowest_block.number());
 
-        let max_lag_block_number = highest_block_number
-            .saturating_sub(self.max_block_lag.unwrap_or_else(|| U64::from(10)));
+        let max_lag_block_number =
+            highest_block_number.saturating_sub(self.max_block_lag.unwrap_or_else(|| U64::from(5)));
 
         trace!("max_lag_block_number: {}", max_lag_block_number);
 
@@ -342,6 +342,7 @@ impl ConsensusFinder {
 
         if num_known < web3_rpcs.min_head_rpcs {
             // this keeps us from serving requests when the proxy first starts
+            trace!("not enough servers known");
             return Ok(None);
         }
 
@@ -361,18 +362,22 @@ impl ConsensusFinder {
             .0
             .tier;
 
+        trace!("first_tier: {}", current_tier);
+
         // loop over all the rpc heads (grouped by tier) and their parents to find consensus
         // TODO: i'm sure theres a lot of shortcuts that could be taken, but this is simplest to implement
         for (rpc, rpc_head) in self.rpc_heads.iter() {
             if current_tier != rpc.tier {
                 // we finished processing a tier. check for primary results
                 if let Some(consensus) = self.count_votes(&primary_votes, web3_rpcs) {
+                    trace!("found enough votes on tier {}", current_tier);
                     return Ok(Some(consensus));
                 }
 
                 // only set backup consensus once. we don't want it to keep checking on worse tiers if it already found consensus
                 if backup_consensus.is_none() {
                     if let Some(consensus) = self.count_votes(&backup_votes, web3_rpcs) {
+                        trace!("found backup votes on tier {}", current_tier);
                         backup_consensus = Some(consensus)
                     }
                 }
