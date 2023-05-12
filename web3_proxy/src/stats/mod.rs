@@ -1,22 +1,29 @@
 //! Store "stats" in a database for billing and a different database for graphing
-//!
 //! TODO: move some of these structs/functions into their own file?
 pub mod db_queries;
 pub mod influxdb_queries;
-
+use crate::app::AuthorizationChecks;
 use crate::frontend::authorization::{Authorization, RequestMetadata};
+use anyhow::Context;
 use axum::headers::Origin;
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
-use entities::rpc_accounting_v2;
 use entities::sea_orm_active_enums::TrackingLevel;
+use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key, user, user_tier};
 use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
 use influxdb2::models::DataPoint;
-use log::{error, info, trace};
-use migration::sea_orm::{self, DatabaseConnection, EntityTrait};
+use log::{error, info, trace, warn};
+use migration::sea_orm::prelude::Decimal;
+use migration::sea_orm::ActiveModelTrait;
+use migration::sea_orm::ColumnTrait;
+use migration::sea_orm::IntoActiveModel;
+use migration::sea_orm::{self, DatabaseConnection, EntityTrait, QueryFilter};
 use migration::{Expr, OnConflict};
+use moka::future::Cache;
+use num_traits::ToPrimitive;
+use std::cmp::max;
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -24,7 +31,9 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
+use ulid::Ulid;
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum StatType {
     Aggregated,
     Detailed,
@@ -45,6 +54,8 @@ pub struct RpcQueryStats {
     pub response_bytes: u64,
     pub response_millis: u64,
     pub response_timestamp: i64,
+    /// Credits used signifies how how much money was used up
+    pub credits_used: Decimal,
 }
 
 #[derive(Clone, From, Hash, PartialEq, Eq)]
@@ -104,6 +115,8 @@ impl RpcQueryStats {
             }
         };
 
+        // Depending on method, add some arithmetic around calculating credits_used
+        // I think balance should not go here, this looks more like a key thingy
         RpcQueryKey {
             response_timestamp,
             archive_needed: self.archive_request,
@@ -179,6 +192,9 @@ pub struct BufferedRpcQueryStats {
     pub sum_request_bytes: u64,
     pub sum_response_bytes: u64,
     pub sum_response_millis: u64,
+    pub sum_credits_used: Decimal,
+    /// Balance tells us the user's balance at this point in time
+    pub latest_balance: Decimal,
 }
 
 /// A stat that we aggregate and then store in a database.
@@ -200,6 +216,8 @@ pub struct StatBuffer {
     db_conn: Option<DatabaseConnection>,
     influxdb_client: Option<influxdb2::Client>,
     tsdb_save_interval_seconds: u32,
+    rpc_secret_key_cache:
+        Option<Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>>,
     db_save_interval_seconds: u32,
     billing_period_seconds: i64,
     global_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
@@ -227,6 +245,14 @@ impl BufferedRpcQueryStats {
         self.sum_request_bytes += stat.request_bytes;
         self.sum_response_bytes += stat.response_bytes;
         self.sum_response_millis += stat.response_millis;
+        self.sum_credits_used += stat.credits_used;
+
+        // Also record the latest balance for this user ..
+        self.latest_balance = stat
+            .authorization
+            .checks
+            .balance
+            .unwrap_or(Decimal::from(0));
     }
 
     // TODO: take a db transaction instead so that we can batch?
@@ -242,10 +268,8 @@ impl BufferedRpcQueryStats {
         let accounting_entry = rpc_accounting_v2::ActiveModel {
             id: sea_orm::NotSet,
             rpc_key_id: sea_orm::Set(key.rpc_secret_key_id.map(Into::into).unwrap_or_default()),
-            origin: sea_orm::Set(key.origin.map(|x| x.to_string()).unwrap_or_default()),
             chain_id: sea_orm::Set(chain_id),
             period_datetime: sea_orm::Set(period_datetime),
-            method: sea_orm::Set(key.method.unwrap_or_default()),
             archive_needed: sea_orm::Set(key.archive_needed),
             error_response: sea_orm::Set(key.error_response),
             frontend_requests: sea_orm::Set(self.frontend_requests),
@@ -257,6 +281,7 @@ impl BufferedRpcQueryStats {
             sum_request_bytes: sea_orm::Set(self.sum_request_bytes),
             sum_response_millis: sea_orm::Set(self.sum_response_millis),
             sum_response_bytes: sea_orm::Set(self.sum_response_bytes),
+            sum_credits_used: sea_orm::Set(self.sum_credits_used),
         };
 
         rpc_accounting_v2::Entity::insert(accounting_entry)
@@ -306,11 +331,214 @@ impl BufferedRpcQueryStats {
                             Expr::col(rpc_accounting_v2::Column::SumResponseBytes)
                                 .add(self.sum_response_bytes),
                         ),
+                        (
+                            rpc_accounting_v2::Column::SumCreditsUsed,
+                            Expr::col(rpc_accounting_v2::Column::SumCreditsUsed)
+                                .add(self.sum_credits_used),
+                        ),
                     ])
                     .to_owned(),
             )
             .exec(db_conn)
             .await?;
+
+        // TODO: Refactor this function a bit more just so it looks and feels nicer
+        // TODO: Figure out how to go around unmatching, it shouldn't return an error, but this is disgusting
+
+        // All the referral & balance arithmetic takes place here
+        let rpc_secret_key_id: u64 = match key.rpc_secret_key_id {
+            Some(x) => x.into(),
+            // Return early if the RPC key is not found, because then it is an anonymous user
+            None => return Ok(()),
+        };
+
+        // (1) Get the user with that RPC key. This is the referee
+        let sender_rpc_key = rpc_key::Entity::find()
+            .filter(rpc_key::Column::Id.eq(rpc_secret_key_id))
+            .one(db_conn)
+            .await?;
+
+        // Technicall there should always be a user ... still let's return "Ok(())" for now
+        let sender_user_id: u64 = match sender_rpc_key {
+            Some(x) => x.user_id.into(),
+            // Return early if the User is not found, because then it is an anonymous user
+            // Let's also issue a warning because obviously the RPC key should correspond to a user
+            None => {
+                warn!(
+                    "No user was found for the following rpc key: {:?}",
+                    rpc_secret_key_id
+                );
+                return Ok(());
+            }
+        };
+
+        // (1) Do some general bookkeeping on the user
+        let sender_balance = match balance::Entity::find()
+            .filter(balance::Column::UserId.eq(sender_user_id))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!("This user id has no balance entry! {:?}", sender_user_id);
+                return Ok(());
+            }
+        };
+
+        let mut active_sender_balance = sender_balance.clone().into_active_model();
+
+        // Still subtract from the user in any case,
+        // Modify the balance of the sender completely (in mysql, next to the stats)
+        // In any case, add this to "spent"
+        active_sender_balance.used_balance =
+            sea_orm::Set(sender_balance.used_balance + Decimal::from(self.sum_credits_used));
+
+        // Also update the available balance
+        let new_available_balance = max(
+            sender_balance.available_balance - Decimal::from(self.sum_credits_used),
+            Decimal::from(0),
+        );
+        active_sender_balance.available_balance = sea_orm::Set(new_available_balance);
+
+        active_sender_balance.save(db_conn).await?;
+
+        let downgrade_user = match user::Entity::find()
+            .filter(user::Column::Id.eq(sender_user_id))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!("No user was found with this sender id!");
+                return Ok(());
+            }
+        };
+
+        let downgrade_user_role = user_tier::Entity::find()
+            .filter(user_tier::Column::Id.eq(downgrade_user.user_tier_id))
+            .one(db_conn)
+            .await?
+            .context(format!(
+                "The foreign key for the user's user_tier_id was not found! {:?}",
+                downgrade_user.user_tier_id
+            ))?;
+
+        // Downgrade a user to premium - out of funds if there's less than 10$ in the account, and if the user was premium before
+        if new_available_balance < Decimal::from(10u64) && downgrade_user_role.title == "Premium" {
+            // Only downgrade the user in local process memory, not elsewhere
+            // app.rpc_secret_key_cache-
+
+            // let mut active_downgrade_user = downgrade_user.into_active_model();
+            // active_downgrade_user.user_tier_id = sea_orm::Set(downgrade_user_role.id);
+            // active_downgrade_user.save(db_conn).await?;
+        }
+
+        // Get the referee, and the referrer
+        // (2) Look up the code that this user used. This is the referee table
+        let referee_object = match referee::Entity::find()
+            .filter(referee::Column::UserId.eq(sender_user_id))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!(
+                    "No referral code was found for this user: {:?}",
+                    sender_user_id
+                );
+                return Ok(());
+            }
+        };
+
+        // (3) Look up the matching referrer in the referrer table
+        // Referral table -> Get the referee id
+        let user_with_that_referral_code = match referrer::Entity::find()
+            .filter(referrer::Column::ReferralCode.eq(referee_object.used_referral_code))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!(
+                    "No referrer with that referral code was found {:?}",
+                    referee_object
+                );
+                return Ok(());
+            }
+        };
+
+        // Ok, now we add the credits to both users if applicable...
+        // (4 onwards) Add balance to the referrer,
+
+        // (5) Check if referee has used up $100.00 USD in total (Have a config item that says how many credits account to 1$)
+        // Get balance for the referrer (optionally make it into an active model ...)
+        let sender_balance = match balance::Entity::find()
+            .filter(balance::Column::UserId.eq(referee_object.user_id))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!(
+                    "This user id has no balance entry! {:?}",
+                    referee_object.user_id
+                );
+                return Ok(());
+            }
+        };
+
+        let mut active_sender_balance = sender_balance.clone().into_active_model();
+        let referrer_balance = match balance::Entity::find()
+            .filter(balance::Column::UserId.eq(user_with_that_referral_code.user_id))
+            .one(db_conn)
+            .await?
+        {
+            Some(x) => x,
+            None => {
+                warn!(
+                    "This user id has no balance entry! {:?}",
+                    referee_object.user_id
+                );
+                return Ok(());
+            }
+        };
+
+        // I could try to circumvene the clone here, but let's skip that for now
+        let mut active_referee = referee_object.clone().into_active_model();
+
+        // (5.1) If not, go to (7). If yes, go to (6)
+        // Hardcode this parameter also in config, so it's easier to tune
+        if !referee_object.credits_applied_for_referee
+            && (sender_balance.used_balance + self.sum_credits_used) >= Decimal::from(100)
+        {
+            // (6) If the credits have not yet been applied to the referee, apply 10M credits / $100.00 USD worth of credits.
+            // Make it into an active model, and add credits
+            active_sender_balance.available_balance =
+                sea_orm::Set(sender_balance.available_balance + Decimal::from(100));
+            // Also mark referral as "credits_applied_for_referee"
+            active_referee.credits_applied_for_referee = sea_orm::Set(true);
+        }
+
+        // (7) If the referral-start-date has not been passed, apply 10% of the credits to the referrer.
+        let now = Utc::now();
+        let valid_until = DateTime::<Utc>::from_utc(referee_object.referral_start_date, Utc)
+            .checked_add_months(Months::new(12))
+            .unwrap();
+        if now <= valid_until {
+            let mut active_referrer_balance = referrer_balance.clone().into_active_model();
+            // Add 10% referral fees ...
+            active_referrer_balance.available_balance = sea_orm::Set(
+                referrer_balance.available_balance
+                    + Decimal::from(self.sum_credits_used / Decimal::from(10)),
+            );
+            // Also record how much the current referrer has "provided" / "gifted" away
+            active_referee.credits_applied_for_referrer =
+                sea_orm::Set(referee_object.credits_applied_for_referrer + self.sum_credits_used);
+            active_referrer_balance.save(db_conn).await?;
+        }
+
+        active_sender_balance.save(db_conn).await?;
+        active_referee.save(db_conn).await?;
 
         Ok(())
     }
@@ -343,7 +571,24 @@ impl BufferedRpcQueryStats {
             .field("cache_hits", self.cache_hits as i64)
             .field("sum_request_bytes", self.sum_request_bytes as i64)
             .field("sum_response_millis", self.sum_response_millis as i64)
-            .field("sum_response_bytes", self.sum_response_bytes as i64);
+            .field("sum_response_bytes", self.sum_response_bytes as i64)
+            // TODO: will this be enough of a range
+            // I guess Decimal can be a f64
+            // TODO: This should prob be a float, i should change the query if we want float-precision for this (which would be important...)
+            .field(
+                "sum_credits_used",
+                self.sum_credits_used
+                    .to_f64()
+                    .expect("number is really (too) large"),
+            )
+            .field(
+                "balance",
+                self.latest_balance
+                    .to_f64()
+                    .expect("number is really (too) large"),
+            );
+
+        // .round() as i64
 
         builder = builder.timestamp(key.response_timestamp);
 
@@ -370,6 +615,18 @@ impl RpcQueryStats {
         let response_millis = metadata.start_instant.elapsed().as_millis() as u64;
         let response_bytes = response_bytes as u64;
 
+        // TODO: Gotta make the arithmetic here
+
+        // TODO: Depending on the method, metadata and response bytes, pick a different number of credits used
+        // This can be a slightly more complex function as we ll
+        // TODO: Here, let's implement the formula
+        let credits_used = Self::compute_cost(
+            request_bytes,
+            response_bytes,
+            backend_requests == 0,
+            &method,
+        );
+
         let response_timestamp = Utc::now().timestamp();
 
         Self {
@@ -382,6 +639,36 @@ impl RpcQueryStats {
             response_bytes,
             response_millis,
             response_timestamp,
+            credits_used,
+        }
+    }
+
+    /// Compute cost per request
+    /// All methods cost the same
+    /// The number of bytes are based on input, and output bytes
+    pub fn compute_cost(
+        request_bytes: u64,
+        response_bytes: u64,
+        cache_hit: bool,
+        _method: &Option<String>,
+    ) -> Decimal {
+        // TODO: Should make these lazy_static const?
+        // pays at least $0.000018 / credits per request
+        let cost_minimum = Decimal::new(18, 6);
+        // 1kb is included on each call
+        let cost_free_bytes = 1024;
+        // after that, we add cost per bytes, $0.000000006 / credits per byte
+        let cost_per_byte = Decimal::new(6, 9);
+
+        let total_bytes = request_bytes + response_bytes;
+        let total_chargable_bytes =
+            Decimal::from(max(0, total_bytes as i64 - cost_free_bytes as i64));
+
+        let out = cost_minimum + cost_per_byte * total_chargable_bytes;
+        if cache_hit {
+            out * Decimal::new(5, 1)
+        } else {
+            out
         }
     }
 
@@ -405,6 +692,9 @@ impl StatBuffer {
         bucket: String,
         db_conn: Option<DatabaseConnection>,
         influxdb_client: Option<influxdb2::Client>,
+        rpc_secret_key_cache: Option<
+            Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>,
+        >,
         db_save_interval_seconds: u32,
         tsdb_save_interval_seconds: u32,
         billing_period_seconds: i64,
@@ -423,6 +713,7 @@ impl StatBuffer {
             influxdb_client,
             db_save_interval_seconds,
             tsdb_save_interval_seconds,
+            rpc_secret_key_cache,
             billing_period_seconds,
             global_timeseries_buffer: Default::default(),
             opt_in_timeseries_buffer: Default::default(),
@@ -452,7 +743,6 @@ impl StatBuffer {
 
         // TODO: Somewhere here we should probably be updating the balance of the user
         // And also update the credits used etc. for the referred user
-
         loop {
             tokio::select! {
                 stat = stat_receiver.recv_async() => {

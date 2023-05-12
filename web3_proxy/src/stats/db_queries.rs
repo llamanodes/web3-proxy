@@ -14,7 +14,6 @@ use axum::{
 };
 use entities::{rpc_accounting, rpc_key};
 use hashbrown::HashMap;
-use http::StatusCode;
 use log::warn;
 use migration::sea_orm::{
     ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Select,
@@ -209,11 +208,7 @@ pub async fn query_user_stats<'a>(
     // TODO: move getting the param and checking the bearer token into a helper function
     if let Some(rpc_key_id) = params.get("rpc_key_id") {
         let rpc_key_id = rpc_key_id.parse::<u64>().map_err(|e| {
-            Web3ProxyError::StatusCode(
-                StatusCode::BAD_REQUEST,
-                "Unable to parse rpc_key_id".to_string(),
-                Some(e.into()),
-            )
+            Web3ProxyError::BadRequest(format!("Unable to parse rpc_key_id. {:?}", e))
         })?;
 
         response_body.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));

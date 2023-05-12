@@ -56,6 +56,7 @@ pub enum Web3ProxyError {
     InvalidHeaderValue(InvalidHeaderValue),
     InvalidEip,
     InvalidInviteCode,
+    InvalidReferralCode,
     InvalidReferer,
     InvalidSignatureLength,
     InvalidUserAgent,
@@ -118,6 +119,7 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     UserAgentNotAllowed(headers::UserAgent),
     UserIdZero,
+    PaymentRequired,
     VerificationError(siwe::VerificationError),
     WatchRecvError(tokio::sync::watch::error::RecvError),
     WatchSendError,
@@ -353,6 +355,17 @@ impl Web3ProxyError {
                     ),
                 )
             }
+            Self::InvalidReferralCode => {
+                warn!("InvalidReferralCode");
+                (
+                    StatusCode::UNAUTHORIZED,
+                    JsonRpcForwardedResponse::from_str(
+                        "invalid referral code",
+                        Some(StatusCode::UNAUTHORIZED.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
             Self::InvalidReferer => {
                 warn!("InvalidReferer");
                 (
@@ -570,6 +583,17 @@ impl Web3ProxyError {
                     JsonRpcForwardedResponse::from_str(
                         "unable to parse address",
                         Some(StatusCode::BAD_REQUEST.as_u16().into()),
+                        None,
+                    ),
+                )
+            }
+            Self::PaymentRequired => {
+                trace!("PaymentRequiredError");
+                (
+                    StatusCode::PAYMENT_REQUIRED,
+                    JsonRpcForwardedResponse::from_str(
+                        "Payment is required and user is not premium.",
+                        Some(StatusCode::PAYMENT_REQUIRED.as_u16().into()),
                         None,
                     ),
                 )

@@ -7,6 +7,7 @@ pub mod http_params;
 pub mod jsonrpc;
 pub mod pagerduty;
 pub mod prometheus;
+pub mod referral_code;
 pub mod rpcs;
 pub mod stats;
 pub mod user_token;
@@ -30,4 +31,5 @@ pub struct PostLoginQuery {
 pub struct PostLogin {
     sig: String,
     msg: String,
+    pub referral_code: Option<String>,
 }

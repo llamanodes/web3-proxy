@@ -1,8 +1,0 @@
-sudo apt install bison flex
-wget https://eighty-twenty.org/files/0001-tools-perf-Use-long-running-addr2line-per-dso.patch
-git clone https://github.com/torvalds/linux.git
-cd linux
-git checkout v5.15
-git apply ../0001-tools-perf-Use-long-running-addr2line-per-dso.patch
-cd tools/perf
-make prefix=$HOME/.local VERSION=5.15 install-bin

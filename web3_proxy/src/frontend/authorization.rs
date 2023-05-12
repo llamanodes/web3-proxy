@@ -10,7 +10,7 @@ use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimitResult;
 use entities::sea_orm_active_enums::TrackingLevel;
-use entities::{login, rpc_key, user, user_tier};
+use entities::{balance, login, rpc_key, user, user_tier};
 use ethers::types::Bytes;
 use ethers::utils::keccak256;
 use futures::TryFutureExt;
@@ -689,6 +689,13 @@ impl Web3ProxyApp {
                             .await?
                             .expect("related user");
 
+                        let balance = balance::Entity::find()
+                            .filter(balance::Column::UserId.eq(user_model.id))
+                            .one(db_replica.conn())
+                            .await?
+                            .expect("related balance")
+                            .available_balance;
+
                         let user_tier_model =
                             user_tier::Entity::find_by_id(user_model.user_tier_id)
                                 .one(db_replica.conn())
@@ -771,6 +778,7 @@ impl Web3ProxyApp {
                             max_requests_per_period: user_tier_model.max_requests_per_period,
                             private_txs: rpc_key_model.private_txs,
                             proxy_mode,
+                            balance: Some(balance),
                         })
                     }
                     None => Ok(AuthorizationChecks::default()),

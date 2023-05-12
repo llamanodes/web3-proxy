@@ -33,6 +33,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
 use log::{debug, error, info, trace, warn, Level};
+use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ConnectionTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait,
 };
@@ -189,6 +190,7 @@ pub struct AuthorizationChecks {
     /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
     pub private_txs: bool,
     pub proxy_mode: ProxyMode,
+    pub balance: Option<Decimal>,
 }
 
 /// Simple wrapper so that we can keep track of read only connections.
@@ -579,6 +581,15 @@ impl Web3ProxyApp {
             None => None,
         };
 
+        // all the users are the same size, so no need for a weigher
+        // if there is no database of users, there will be no keys and so this will be empty
+        // TODO: max_capacity from config
+        // TODO: ttl from config
+        let rpc_secret_key_cache = Cache::builder()
+            .max_capacity(10_000)
+            .time_to_live(Duration::from_secs(600))
+            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
         // stats can be saved in mysql, influxdb, both, or none
@@ -589,6 +600,7 @@ impl Web3ProxyApp {
                 influxdb_bucket,
                 db_conn.clone(),
                 influxdb_client.clone(),
+                Some(rpc_secret_key_cache.clone()),
                 60,
                 1,
                 BILLING_PERIOD_SECONDS,
@@ -696,15 +708,6 @@ impl Web3ProxyApp {
                 }
             })
             // TODO: what should we set? 10 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
-            .time_to_live(Duration::from_secs(600))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-
-        // all the users are the same size, so no need for a weigher
-        // if there is no database of users, there will be no keys and so this will be empty
-        // TODO: max_capacity from config
-        // TODO: ttl from config
-        let rpc_secret_key_cache = Cache::builder()
-            .max_capacity(10_000)
             .time_to_live(Duration::from_secs(600))
             .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 

@@ -11,6 +11,9 @@ db_url = "mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy"
 # read-only replica useful when running the proxy in multiple regions
 db_replica_url = "mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy"
 
+deposit_factory_contract = "0x4e3bc2054788de923a04936c6addb99a05b0ea36"
+deposit_topic = "0x45fdc265dc29885b9a485766b03e70978440d38c7c328ee0a14fa40c76c6af54"
+
 kafka_urls = "127.0.0.1:19092"
 kafka_protocol = "plaintext"
 
@@ -18,7 +21,7 @@ kafka_protocol = "plaintext"
 influxdb_host = "http://127.0.0.1:18086"
 influxdb_org = "dev_org"
 influxdb_token = "dev_web3_proxy_auth_token"
-influxdb_bucketname = "web3_proxy"
+influxdb_bucketname = "dev_web3_proxy"
 
 # thundering herd protection
 # only mark a block as the head block if the sum of their soft limits is greater than or equal to min_sum_soft_limit

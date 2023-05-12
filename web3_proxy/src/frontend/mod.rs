@@ -168,30 +168,58 @@ pub async fn serve(
         //
         // User stuff
         //
-        .route("/user/login/:user_address", get(users::user_login_get))
+        .route(
+            "/user/login/:user_address",
+            get(users::authentication::user_login_get),
+        )
         .route(
             "/user/login/:user_address/:message_eip",
-            get(users::user_login_get),
+            get(users::authentication::user_login_get),
         )
-        .route("/user/login", post(users::user_login_post))
+        .route("/user/login", post(users::authentication::user_login_post))
+        .route(
+            // /:rpc_key/:subuser_address/:new_status/:new_role
+            "/user/subuser",
+            get(users::subuser::modify_subuser),
+        )
+        .route("/user/subusers", get(users::subuser::get_subusers))
+        .route(
+            "/subuser/rpc_keys",
+            get(users::subuser::get_keys_as_subuser),
+        )
         .route("/user", get(users::user_get))
         .route("/user", post(users::user_post))
-        .route("/user/balance", get(users::user_balance_get))
-        .route("/user/balance/:txid", post(users::user_balance_post))
-        .route("/user/keys", get(users::rpc_keys_get))
-        .route("/user/keys", post(users::rpc_keys_management))
-        .route("/user/keys", put(users::rpc_keys_management))
-        .route("/user/revert_logs", get(users::user_revert_logs_get))
+        .route("/user/balance", get(users::payment::user_balance_get))
+        .route("/user/deposits", get(users::payment::user_deposits_get))
+        .route(
+            "/user/balance/:tx_hash",
+            get(users::payment::user_balance_post),
+        )
+        .route("/user/keys", get(users::rpc_keys::rpc_keys_get))
+        .route("/user/keys", post(users::rpc_keys::rpc_keys_management))
+        .route("/user/keys", put(users::rpc_keys::rpc_keys_management))
+        // .route("/user/referral/:referral_link", get(users::user_referral_link_get))
+        .route(
+            "/user/referral",
+            get(users::referral::user_referral_link_get),
+        )
+        .route("/user/revert_logs", get(users::stats::user_revert_logs_get))
         .route(
             "/user/stats/aggregate",
-            get(users::user_stats_aggregated_get),
+            get(users::stats::user_stats_aggregated_get),
         )
         .route(
             "/user/stats/aggregated",
-            get(users::user_stats_aggregated_get),
+            get(users::stats::user_stats_aggregated_get),
         )
-        .route("/user/stats/detailed", get(users::user_stats_detailed_get))
-        .route("/user/logout", post(users::user_logout_post))
+        .route(
+            "/user/stats/detailed",
+            get(users::stats::user_stats_detailed_get),
+        )
+        .route(
+            "/user/logout",
+            post(users::authentication::user_logout_post),
+        )
         .route("/admin/modify_role", get(admin::admin_change_user_roles))
         .route(
             "/admin/imitate-login/:admin_address/:user_address",

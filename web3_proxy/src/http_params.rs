@@ -232,20 +232,23 @@ pub fn get_query_window_seconds_from_params(
 
 pub fn get_stats_column_from_params(params: &HashMap<String, String>) -> Web3ProxyResult<&str> {
     params.get("query_stats_column").map_or_else(
-        || Ok("frontend_requests"),
+        || Ok(""),
         |query_stats_column: &String| {
             // Must be one of: Otherwise respond with an error ...
             match query_stats_column.as_str() {
-                "frontend_requests"
+                ""
+                | "frontend_requests"
                 | "backend_requests"
                 | "cache_hits"
                 | "cache_misses"
                 | "no_servers"
                 | "sum_request_bytes"
                 | "sum_response_bytes"
-                | "sum_response_millis" => Ok(query_stats_column),
+                | "sum_response_millis"
+                | "sum_credits_used"
+                | "balance" => Ok(query_stats_column),
                 _ => Err(Web3ProxyError::BadRequest(
-                    "Unable to parse query_stats_column. It must be one of: \
+                    "Unable to parse query_stats_column. It must be empty, or one of: \
                     frontend_requests, \
                     backend_requests, \
                     cache_hits, \
@@ -253,7 +256,9 @@ pub fn get_stats_column_from_params(params: &HashMap<String, String>) -> Web3Pro
                     no_servers, \
                     sum_request_bytes, \
                     sum_response_bytes, \
-                    sum_response_millis"
+                    sum_response_millis, \
+                    sum_credits_used, \
+                    balance"
                         .to_string(),
                 )),
             }
