@@ -1135,7 +1135,6 @@ impl Web3ProxyApp {
         authorization: &Arc<Authorization>,
         request: &JsonRpcRequest,
         request_metadata: Arc<RequestMetadata>,
-        num_public_rpcs: Option<usize>,
     ) -> Web3ProxyResult<JsonRpcResponseData> {
         if let Some(protected_rpcs) = self.private_rpcs.as_ref() {
             if !protected_rpcs.is_empty() {
@@ -1155,6 +1154,17 @@ impl Web3ProxyApp {
                 return Ok(protected_response);
             }
         }
+
+        let num_public_rpcs = match authorization.checks.proxy_mode {
+            // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
+            ProxyMode::Best | ProxyMode::Debug => Some(4),
+            ProxyMode::Fastest(0) => None,
+            // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
+            // TODO: what if we do 2 per tier? we want to blast the third party rpcs
+            // TODO: maybe having the third party rpcs in their own Web3Rpcs would be good for this
+            ProxyMode::Fastest(x) => Some(x * 4),
+            ProxyMode::Versus => None,
+        };
 
         // no private rpcs to send to. send to a few public rpcs
         // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
@@ -1438,23 +1448,21 @@ impl Web3ProxyApp {
             // TODO: eth_sendBundle (flashbots/eden command)
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => {
-                let num_public_rpcs = match authorization.checks.proxy_mode {
-                    // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
-                    ProxyMode::Best | ProxyMode::Debug => Some(4),
-                    ProxyMode::Fastest(0) => None,
-                    // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
-                    // TODO: what if we do 2 per tier? we want to blast the third party rpcs
-                    // TODO: maybe having the third party rpcs in their own Web3Rpcs would be good for this
-                    ProxyMode::Fastest(x) => Some(x * 4),
-                    ProxyMode::Versus => None,
-                };
+                // TODO: decode the transaction
+
+                // TODO: error if the chain_id is incorrect
+
+                // TODO: check the cache to see if we have sent this transaction recently
+                // TODO: if so, use a cached response.
+                // TODO: if not,
+                // TODO: - cache successes for up to 1 minute
+                // TODO: - cache failures for 1 block (we see transactions skipped because out of funds. but that can change block to block)
 
                 let mut response_data = self
                     .try_send_protected(
                         authorization,
                         request,
                         request_metadata.clone(),
-                        num_public_rpcs,
                     )
                     .await?;
 
@@ -1508,6 +1516,7 @@ impl Web3ProxyApp {
                 }
 
                 // emit transaction count stats
+                // TODO: use this cache to avoid sending duplicate transactions?
                 if let Some(ref salt) = self.config.public_recent_ips_salt {
                     if let JsonRpcResponseData::Result { value, .. } = &response_data {
                         let now = Utc::now().timestamp();
