@@ -2,7 +2,7 @@ mod rtt_estimate;
 
 use std::sync::Arc;
 
-use log::error;
+use log::{error, info};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinHandle;
@@ -104,6 +104,7 @@ impl PeakEwmaLatencyTask {
         while let Some(rtt) = self.request_rx.recv().await {
             self.update(rtt);
         }
+        info!("latency loop exited");
     }
 
     /// Update the estimate object atomically.
