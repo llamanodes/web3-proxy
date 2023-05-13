@@ -69,7 +69,7 @@ mod tests {
     fn test_atomic_f32_pair_load() {
         let pair = [f32::consts::PI, f32::consts::E];
         let atomic = AtomicF32Pair::new(pair);
-        assert_eq!(pair, atomic.load(Ordering::Relaxed));
+        assert_eq!(pair, atomic.load(Ordering::Acquire));
     }
 
     #[test]
@@ -77,13 +77,13 @@ mod tests {
         let pair = [f32::consts::PI, f32::consts::E];
         let atomic = AtomicF32Pair::new(pair);
         atomic
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |[f1, f2]| {
+            .fetch_update(Ordering::Release, Ordering::Acquire, |[f1, f2]| {
                 Some([f1 + 1.0, f2 + 1.0])
             })
             .unwrap();
         assert_eq!(
             [pair[0] + 1.0, pair[1] + 1.0],
-            atomic.load(Ordering::Relaxed)
+            atomic.load(Ordering::Acquire)
         );
     }
 }

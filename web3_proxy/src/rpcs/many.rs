@@ -620,7 +620,7 @@ impl Web3Rpcs {
         }
 
         if let Some(request_metadata) = request_metadata {
-            request_metadata.no_servers.fetch_add(1, Ordering::Release);
+            request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
         }
 
         match earliest_retry_at {
@@ -929,7 +929,7 @@ impl Web3Rpcs {
 
                     // TODO: have a separate column for rate limited?
                     if let Some(request_metadata) = request_metadata {
-                        request_metadata.no_servers.fetch_add(1, Ordering::Release);
+                        request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
                     }
 
                     tokio::select! {
@@ -943,7 +943,7 @@ impl Web3Rpcs {
                 }
                 OpenRequestResult::NotReady => {
                     if let Some(request_metadata) = request_metadata {
-                        request_metadata.no_servers.fetch_add(1, Ordering::Release);
+                        request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
                     }
 
                     let waiting_for = min_block_needed.max(max_block_needed);
@@ -1086,7 +1086,7 @@ impl Web3Rpcs {
 
                     if let Some(request_metadata) = &request_metadata {
                         // TODO: if this times out, i think we drop this
-                        request_metadata.no_servers.fetch_add(1, Ordering::Release);
+                        request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
                     }
 
                     watch_consensus_rpcs.changed().await?;
@@ -1101,7 +1101,7 @@ impl Web3Rpcs {
                     warn!("All rate limits exceeded. Sleeping");
 
                     if let Some(request_metadata) = &request_metadata {
-                        request_metadata.no_servers.fetch_add(1, Ordering::Release);
+                        request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
                     }
 
                     tokio::select! {

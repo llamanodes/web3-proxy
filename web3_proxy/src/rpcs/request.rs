@@ -7,7 +7,7 @@ use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::ProviderError;
 use ethers::types::{Address, Bytes};
-use log::{debug, error, trace, warn, Level};
+use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
 use serde_json::json;
 use std::fmt;
@@ -121,14 +121,22 @@ impl Authorization {
     }
 }
 
+impl Drop for OpenRequestHandle {
+    fn drop(&mut self) {
+        let x = self
+            .rpc
+            .active_requests
+            .fetch_sub(1, atomic::Ordering::AcqRel);
+    }
+}
+
 impl OpenRequestHandle {
     pub async fn new(authorization: Arc<Authorization>, rpc: Arc<Web3Rpc>) -> Self {
         // TODO: take request_id as an argument?
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
-        // TODO: should we be using metered, or not? i think not because we want stats for each handle
-        // TODO: these should maybe be sent to an influxdb instance?
-        rpc.active_requests.fetch_add(1, atomic::Ordering::Relaxed);
+        rpc.active_requests
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
 
         Self { authorization, rpc }
     }
@@ -188,11 +196,9 @@ impl OpenRequestHandle {
 
         self.rpc
             .total_requests
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
 
-        self.rpc
-            .active_requests
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // we used to fetch_add the active_request count here, but sometimes a request is made without going through this function (like with subscriptions)
 
         let start = Instant::now();
 
@@ -212,16 +218,16 @@ impl OpenRequestHandle {
         };
 
         // note. we intentionally do not record this latency now. we do NOT want to measure errors
-        // let latency = latency.elapsed();
+        let latency = start.elapsed();
 
-        self.rpc
-            .active_requests
-            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        // we used to fetch_sub the active_request count here, but sometimes the handle is dropped without request being called!
 
-        // TODO: i think ethers already has trace logging (and does it much more fancy)
         trace!(
             "response from {} for {} {:?}: {:?}",
-            self.rpc, method, params, response,
+            self.rpc,
+            method,
+            params,
+            response,
         );
 
         if let Err(err) = &response {
@@ -352,19 +358,21 @@ impl OpenRequestHandle {
                     // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
                     let method: Method = Method::try_from_value(&method.to_string()).unwrap();
 
-                    // TODO: DO NOT UNWRAP! But also figure out the best way to keep returning ProviderErrors here
-                    let params: EthCallParams = serde_json::from_value(json!(params))
-                        .context("parsing params to EthCallParams")
-                        .unwrap();
+                    match serde_json::from_value::<EthCallParams>(json!(params)) {
+                        Ok(params) => {
+                            // spawn saving to the database so we don't slow down the request
+                            let f = self.authorization.clone().save_revert(method, params.0 .0);
 
-                    // spawn saving to the database so we don't slow down the request
-                    let f = self.authorization.clone().save_revert(method, params.0 .0);
-
-                    tokio::spawn(f);
+                            tokio::spawn(f);
+                        }
+                        Err(err) => {
+                            warn!("failed parsing eth_call params. unable to save revert");
+                        }
+                    }
                 }
             }
         } else if let Some(peak_latency) = &self.rpc.peak_latency {
-            peak_latency.report(start.elapsed());
+            peak_latency.report(latency);
         } else {
             unreachable!("peak_latency not initialized");
         }
