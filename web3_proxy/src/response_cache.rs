@@ -33,8 +33,9 @@ impl Hash for JsonRpcQueryCacheKey {
     }
 }
 
-pub type JsonRpcQueryCache =
-    QuickCache<JsonRpcQueryCacheKey, JsonRpcResponseData, JsonRpcQueryWeigher>;
+pub type JsonRpcQueryCache = QuickCache<JsonRpcQueryCacheKey, JsonRpcResponseData>;
+// pub type JsonRpcQueryCache =
+//     QuickCache<JsonRpcQueryCacheKey, JsonRpcResponseData, JsonRpcQueryWeigher>;
 
 #[derive(Clone)]
 pub struct JsonRpcQueryWeigher;

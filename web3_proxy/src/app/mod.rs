@@ -617,7 +617,14 @@ impl Web3ProxyApp {
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
         // TODO: don't allow any response to be bigger than X% of the cache
         // TODO: we should emit stats to calculate a more accurate expected cache size
-        let response_cache = JsonRpcQueryCache::with_weighter(100, 100_000, JsonRpcQueryWeigher);
+        // let response_cache = JsonRpcQueryCache::with_weighter(
+        //     (top_config.app.response_cache_max_bytes / 2048) as usize,
+        //     top_config.app.response_cache_max_bytes,
+        //     JsonRpcQueryWeigher,
+        // );
+
+        // TODO: efficient weigher!
+        let response_cache = JsonRpcQueryCache::new(top_config.app.response_cache_max_bytes);
 
         // create semaphores for concurrent connection limits
         // TODO: what should tti be for semaphores?
@@ -1746,34 +1753,34 @@ impl Web3ProxyApp {
 
                 let authorization = authorization.clone();
 
-                // if let Some(cache_key) = cache_key {
-                //     let from_block_num = cache_key.from_block.as_ref().map(|x| x.number.unwrap());
-                //     let to_block_num = cache_key.to_block.as_ref().map(|x| x.number.unwrap());
+                if let Some(cache_key) = cache_key {
+                    let from_block_num = cache_key.from_block.as_ref().map(|x| x.number.unwrap());
+                    let to_block_num = cache_key.to_block.as_ref().map(|x| x.number.unwrap());
 
-                //     match self
-                //         .jsonrpc_query_cache
-                //         .get_value_or_guard(&cache_key, None)
-                //     {
-                //         quick_cache::GuardResult::Guard(x) => {
-                //             let response_data = self.balanced_rpcs
-                //                 .try_proxy_connection(
-                //                     &authorization,
-                //                     request,
-                //                     Some(request_metadata),
-                //                     from_block_num.as_ref(),
-                //                     to_block_num.as_ref(),
-                //                 )
-                //                 .await?;
+                    match self
+                        .jsonrpc_query_cache
+                        .get_value_or_guard(&cache_key, None)
+                    {
+                        quick_cache::GuardResult::Guard(x) => {
+                            let response_data = self.balanced_rpcs
+                                .try_proxy_connection(
+                                    &authorization,
+                                    request,
+                                    Some(request_metadata),
+                                    from_block_num.as_ref(),
+                                    to_block_num.as_ref(),
+                                )
+                                .await?;
 
-                //             // TODO: should we put it in an arc?
-                //             x.insert(response_data.clone());
+                            // TODO: should we put it in an arc?
+                            x.insert(response_data.clone());
 
-                //             response_data
-                //         }
-                //         quick_cache::GuardResult::Value(x) => x,
-                //         quick_cache::GuardResult::Timeout => unreachable!(),
-                //     }
-                // } else {
+                            response_data
+                        }
+                        quick_cache::GuardResult::Value(x) => x,
+                        quick_cache::GuardResult::Timeout => unreachable!(),
+                    }
+                } else {
                 self.balanced_rpcs
                     .try_proxy_connection(
                         &authorization,
@@ -1783,7 +1790,7 @@ impl Web3ProxyApp {
                         None,
                     )
                     .await?
-                // }
+                }
             }
         };
 
