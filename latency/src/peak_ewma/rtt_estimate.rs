@@ -97,7 +97,7 @@ impl AtomicRttEstimate {
     /// This method omits the ordering argument since loads may use
     /// slightly stale data to avoid adding additional latency.
     pub fn load(&self) -> RttEstimate {
-        RttEstimate::from_pair(self.pair.load(Ordering::Acquire), self.start_time)
+        RttEstimate::from_pair(self.pair.load(Ordering::Relaxed), self.start_time)
     }
 
     /// Fetches the value, and applies a function to it that returns an
@@ -114,7 +114,7 @@ impl AtomicRttEstimate {
         let mut update_at = Instant::now();
         let mut rtt = Duration::ZERO;
         self.pair
-            .fetch_update(Ordering::Release, Ordering::Acquire, |pair| {
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |pair| {
                 rtt = f(RttEstimate::from_pair(pair, self.start_time));
                 // Save the new update_at inside the function in case it
                 // is run multiple times
