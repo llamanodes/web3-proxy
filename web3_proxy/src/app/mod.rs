@@ -1770,7 +1770,7 @@ impl Web3ProxyApp {
                                 )
                                 .await?;
 
-                            // TODO: should we put it in an arc?
+                            // TODO: convert the Box<RawValue> to an Arc<RawValue>
                             x.insert(response_data.clone());
 
                             response_data
