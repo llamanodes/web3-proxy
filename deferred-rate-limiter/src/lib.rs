@@ -139,7 +139,7 @@ where
             Ok(deferred_rate_limit_result)
         } else {
             // we have a cached amount here
-            let cached_key_count = local_key_count.fetch_add(count, Ordering::Acquire);
+            let cached_key_count = local_key_count.fetch_add(count, Ordering::AcqRel);
 
             // assuming no other parallel futures incremented this key, this is the count that redis has
             let expected_key_count = cached_key_count + count;

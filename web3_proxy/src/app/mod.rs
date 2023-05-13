@@ -1674,7 +1674,7 @@ impl Web3ProxyApp {
                         if block_depth < self.config.archive_depth {
                             request_metadata
                                 .archive_request
-                                .store(true, atomic::Ordering::Relaxed);
+                                .store(true, atomic::Ordering::Release);
                         }
 
                         let request_block = self
@@ -1705,7 +1705,7 @@ impl Web3ProxyApp {
                         if block_depth < self.config.archive_depth {
                             request_metadata
                                 .archive_request
-                                .store(true, atomic::Ordering::Relaxed);
+                                .store(true, atomic::Ordering::Release);
                         }
 
                         let from_block = self

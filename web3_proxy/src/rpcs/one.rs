@@ -239,7 +239,7 @@ impl Web3Rpc {
         let peak_latency = self.peak_latency.as_ref().unwrap().latency().as_secs_f64();
 
         // TODO: what ordering?
-        let active_requests = self.active_requests.load(atomic::Ordering::Relaxed) as f64 + 1.0;
+        let active_requests = self.active_requests.load(atomic::Ordering::Acquire) as f64 + 1.0;
 
         OrderedFloat(peak_latency * active_requests)
     }
@@ -734,7 +734,7 @@ impl Web3Rpc {
                             // health check as a way of keeping this rpc's request_ewma accurate
                             // TODO: do something different if this is a backup server?
 
-                            new_total_requests = rpc.total_requests.load(atomic::Ordering::Relaxed);
+                            new_total_requests = rpc.total_requests.load(atomic::Ordering::Acquire);
 
                             // TODO: how many requests should we require in order to skip a health check?
                             if new_total_requests - old_total_requests < 10 {
@@ -1363,7 +1363,7 @@ impl Serialize for Web3Rpc {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Rpc", 13)?;
+        let mut state = serializer.serialize_struct("Web3Rpc", 12)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
@@ -1372,7 +1372,7 @@ impl Serialize for Web3Rpc {
 
         state.serialize_field("backup", &self.backup)?;
 
-        match self.block_data_limit.load(atomic::Ordering::Relaxed) {
+        match self.block_data_limit.load(atomic::Ordering::Acquire) {
             u64::MAX => {
                 state.serialize_field("block_data_limit", &None::<()>)?;
             }
@@ -1393,23 +1393,24 @@ impl Serialize for Web3Rpc {
             state.serialize_field("head_block", &head_block)?;
         }
 
-        state.serialize_field("head_latency", &self.head_latency.read().value())?;
         state.serialize_field(
-            "peak_latency",
-            &self.peak_latency.as_ref().unwrap().latency(),
+            "total_requests",
+            &self.total_requests.load(atomic::Ordering::Acquire),
         )?;
-
-        state.serialize_field("peak_ewma", self.peak_ewma().as_ref())?;
 
         state.serialize_field(
             "active_requests",
             &self.active_requests.load(atomic::Ordering::Relaxed),
         )?;
 
+        state.serialize_field("head_latency", &self.head_latency.read().value())?;
+
         state.serialize_field(
-            "total_requests",
-            &self.total_requests.load(atomic::Ordering::Relaxed),
+            "peak_latency",
+            &self.peak_latency.as_ref().unwrap().latency(),
         )?;
+
+        state.serialize_field("peak_ewma", self.peak_ewma().as_ref())?;
 
         state.end()
     }
@@ -1421,7 +1422,7 @@ impl fmt::Debug for Web3Rpc {
 
         f.field("name", &self.name);
 
-        let block_data_limit = self.block_data_limit.load(atomic::Ordering::Relaxed);
+        let block_data_limit = self.block_data_limit.load(atomic::Ordering::Acquire);
         if block_data_limit == u64::MAX {
             f.field("blocks", &"all");
         } else {
