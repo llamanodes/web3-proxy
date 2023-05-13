@@ -58,8 +58,8 @@ impl PeakEwmaLatency {
         let now = Instant::now();
         assert!(
             estimate.update_at <= now,
-            "update_at is {} in the future",
-            estimate.update_at.duration_since(now).as_secs_f32(),
+            "update_at is {}ns in the future",
+            estimate.update_at.duration_since(now).as_nanos(),
         );
 
         // Update the RTT estimate to account for decay since the last update.
@@ -114,8 +114,8 @@ impl PeakEwmaLatencyTask {
         let now = Instant::now();
         assert!(
             self.update_at <= now,
-            "update_at is {}s in the future",
-            self.update_at.duration_since(now).as_secs_f32(),
+            "update_at is {}ns in the future",
+            self.update_at.duration_since(now).as_nanos(),
         );
 
         self.rtt_estimate
