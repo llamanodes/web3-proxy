@@ -56,7 +56,7 @@ impl JsonRpcResponseData {
         // TODO: dry this somehow
         match self {
             JsonRpcResponseData::Result { value, size } => size.unwrap_or_else(|| {
-                let size = serde_json::to_string(value).unwrap().len();
+                let size = value.get().len();
 
                 NonZeroU32::new(size.clamp(1, u32::MAX as usize) as u32).unwrap()
             }),
