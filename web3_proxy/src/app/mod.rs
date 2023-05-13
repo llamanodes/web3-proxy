@@ -624,7 +624,8 @@ impl Web3ProxyApp {
         // );
 
         // TODO: efficient weigher!
-        let response_cache = JsonRpcQueryCache::new(top_config.app.response_cache_max_bytes);
+        let response_cache =
+            JsonRpcQueryCache::new((top_config.app.response_cache_max_bytes / 2048) as usize);
 
         // create semaphores for concurrent connection limits
         // TODO: what should tti be for semaphores?
