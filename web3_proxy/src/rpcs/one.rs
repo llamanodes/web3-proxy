@@ -237,14 +237,14 @@ impl Web3Rpc {
 
     pub fn peak_ewma(&self) -> OrderedFloat<f64> {
         // TODO: use request instead of head latency? that was killing perf though
-        let head_ewma = self.head_latency.read().value();
+        let peak_latency = self.peak_latency.as_ref().unwrap().latency().as_secs_f64();
 
         // TODO: what ordering?
-        let active_requests = self.active_requests.load(atomic::Ordering::Relaxed) as f64;
+        let active_requests = self.active_requests.load(atomic::Ordering::Relaxed) as f64 + 1.0;
 
         // TODO: i'm not sure head * active is exactly right. but we'll see
         // TODO: i don't think this actually counts as peak. investigate with atomics.rs and peak_ewma.rs
-        OrderedFloat(head_ewma * active_requests)
+        OrderedFloat(peak_latency * active_requests)
     }
 
     // TODO: would be great if rpcs exposed this. see https://github.com/ledgerwatch/erigon/issues/6391
