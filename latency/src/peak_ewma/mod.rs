@@ -3,7 +3,7 @@ mod rtt_estimate;
 use std::sync::Arc;
 
 use kanal::SendError;
-use log::error;
+use log::{error, info, trace};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
@@ -70,7 +70,9 @@ impl PeakEwmaLatency {
     /// Should only be called from the Web3Rpc that owns it.
     pub fn report(&self, duration: Duration) {
         match self.request_tx.try_send(duration) {
-            Ok(true) => {}
+            Ok(true) => {
+                trace!("success");
+            }
             Ok(false) => {
                 // We don't want to block if the channel is full, just
                 // report the error
@@ -120,8 +122,11 @@ impl PeakEwmaLatencyTask {
             self.update_at,
         );
 
-        self.rtt_estimate
+        let x = self
+            .rtt_estimate
             .fetch_update(|mut rtt_estimate| rtt_estimate.update(rtt, self.decay_ns, now));
+
+        info!("x: {:?}", x);
     }
 }
 

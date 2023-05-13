@@ -436,7 +436,7 @@ impl Web3Rpcs {
             Ok(Some(x)) => x,
         };
 
-        trace!("new_synced_connections: {:?}", new_synced_connections);
+        trace!("new_synced_connections: {:#?}", new_synced_connections);
 
         let watch_consensus_head_sender = self.watch_consensus_head_sender.as_ref().unwrap();
         let consensus_tier = new_synced_connections.tier;

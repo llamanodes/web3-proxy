@@ -236,7 +236,11 @@ impl Web3Rpc {
     }
 
     pub fn peak_ewma(&self) -> OrderedFloat<f64> {
-        let peak_latency = self.peak_latency.as_ref().unwrap().latency().as_secs_f64();
+        let peak_latency = if let Some(peak_latency) = self.peak_latency.as_ref() {
+            peak_latency.latency().as_secs_f64()
+        } else {
+            0.0
+        };
 
         // TODO: what ordering?
         let active_requests = self.active_requests.load(atomic::Ordering::Acquire) as f64 + 1.0;

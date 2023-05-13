@@ -375,9 +375,11 @@ impl ConsensusFinder {
 
         trace!("first_tier: {}", current_tier);
 
+        trace!("rpc_heads_by_tier: {:#?}", rpc_heads_by_tier);
+
         // loop over all the rpc heads (grouped by tier) and their parents to find consensus
         // TODO: i'm sure theres a lot of shortcuts that could be taken, but this is simplest to implement
-        for (rpc, rpc_head) in self.rpc_heads.iter() {
+        for (rpc, rpc_head) in rpc_heads_by_tier.into_iter() {
             if current_tier != rpc.tier {
                 // we finished processing a tier. check for primary results
                 if let Some(consensus) = self.count_votes(&primary_votes, web3_rpcs) {
@@ -417,7 +419,11 @@ impl ConsensusFinder {
                 {
                     Ok(parent_block) => block_to_check = parent_block,
                     Err(err) => {
-                        warn!("Problem fetching parent block of {:#?} during consensus finding: {:#?}", block_to_check, err);
+                        warn!(
+                            "Problem fetching parent block of {:?} during consensus finding: {:#?}",
+                            block_to_check.hash(),
+                            err
+                        );
                         break;
                     }
                 }
