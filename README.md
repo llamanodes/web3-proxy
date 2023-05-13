@@ -149,6 +149,8 @@ TODO: also enable debug symbols in the release build by modifying the root Cargo
 
 Test the proxy:
 
+    wrk -t12 -c400 -d30s --latency http://127.0.0.1:8544/health
+    wrk -t12 -c400 -d30s --latency http://127.0.0.1:8544/status
     wrk -s ./wrk/getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8544/u/$API_KEY
     wrk -s ./wrk/getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8544/u/$API_KEY
 
