@@ -92,10 +92,20 @@ pub type RankedRpcMap = BTreeMap<RpcRanking, Vec<Arc<Web3Rpc>>>;
 pub struct ConsensusWeb3Rpcs {
     pub(crate) tier: u64,
     pub(crate) backups_needed: bool,
+
+    // TODO: this is already inside best_rpcs. give that a shorter serialize here and then include this again
+    #[serde(skip_serializing)]
     pub(crate) head_block: Web3ProxyBlock,
+
+    // TODO: smaller serialize
     pub(crate) best_rpcs: Vec<Arc<Web3Rpc>>,
+
+    // TODO: make this work. the key needs to be a string
+    #[serde(skip_serializing)]
     pub(crate) other_rpcs: RankedRpcMap,
 
+    // TODO: make this work. the key needs to be a string
+    #[serde(skip_serializing)]
     rpc_data: HashMap<Arc<Web3Rpc>, RpcData>,
 }
 
