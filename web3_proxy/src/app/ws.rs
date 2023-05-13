@@ -5,9 +5,10 @@ use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMe
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcRequest;
+use crate::response_cache::JsonRpcResponseData;
 use crate::rpcs::transactions::TxStatus;
 use axum::extract::ws::Message;
-use ethers::prelude::U64;
+use ethers::types::U64;
 use futures::future::AbortHandle;
 use futures::future::Abortable;
 use futures::stream::StreamExt;
@@ -24,7 +25,7 @@ impl Web3ProxyApp {
         jsonrpc_request: JsonRpcRequest,
         subscription_count: &'a AtomicUsize,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
-        response_sender: kanal::AsyncSender<Message>,
+        response_sender: flume::Sender<Message>,
     ) -> Web3ProxyResult<(AbortHandle, JsonRpcForwardedResponse)> {
         let request_metadata = RequestMetadata::new(
             self,
@@ -39,7 +40,7 @@ impl Web3ProxyApp {
         // TODO: this only needs to be unique per connection. we don't need it globably unique
         // TODO: have a max number of subscriptions per key/ip. have a global max number of subscriptions? how should this be calculated?
         let subscription_id = subscription_count.fetch_add(1, atomic::Ordering::SeqCst);
-        let subscription_id = U64::from(subscription_id);
+        let subscription_id = U64::from(subscription_id as u64);
 
         // save the id so we can use it in the response
         let id = jsonrpc_request.id.clone();
@@ -94,7 +95,7 @@ impl Web3ProxyApp {
                         // TODO: can we check a content type header?
                         let response_msg = Message::Text(response_str);
 
-                        if response_sender.send(response_msg).await.is_err() {
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
@@ -158,7 +159,7 @@ impl Web3ProxyApp {
                         // TODO: do clients support binary messages?
                         let response_msg = Message::Text(response_str);
 
-                        if response_sender.send(response_msg).await.is_err() {
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
@@ -221,7 +222,7 @@ impl Web3ProxyApp {
                         // TODO: do clients support binary messages?
                         let response_msg = Message::Text(response_str);
 
-                        if response_sender.send(response_msg).await.is_err() {
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
@@ -285,7 +286,7 @@ impl Web3ProxyApp {
                         // TODO: do clients support binary messages?
                         let response_msg = Message::Text(response_str);
 
-                        if response_sender.send(response_msg).await.is_err() {
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
@@ -304,8 +305,11 @@ impl Web3ProxyApp {
 
         // TODO: do something with subscription_join_handle?
 
-        let response = JsonRpcForwardedResponse::from_value(json!(subscription_id), id);
+        let response_data = JsonRpcResponseData::from(json!(subscription_id));
 
+        let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
+
+        // TODO: this serializes twice
         request_metadata.add_response(&response);
 
         // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?

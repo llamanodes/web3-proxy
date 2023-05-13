@@ -98,8 +98,8 @@ impl Web3Rpc {
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         redis_pool: Option<RedisPool>,
         block_map: BlocksByHashCache,
-        block_sender: Option<kanal::AsyncSender<BlockAndRpc>>,
-        tx_id_sender: Option<kanal::AsyncSender<(TxHash, Arc<Self>)>>,
+        block_sender: Option<flume::Sender<BlockAndRpc>>,
+        tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
         reconnect: bool,
     ) -> anyhow::Result<(Arc<Web3Rpc>, AnyhowJoinHandle<()>)> {
         let created_at = Instant::now();
@@ -389,7 +389,7 @@ impl Web3Rpc {
     /// TODO: maybe it would be better to use "Full Jitter". The "Full Jitter" approach uses less work, but slightly more time.
     pub async fn retrying_connect(
         self: &Arc<Self>,
-        block_sender: Option<&kanal::AsyncSender<BlockAndRpc>>,
+        block_sender: Option<&flume::Sender<BlockAndRpc>>,
         chain_id: u64,
         db_conn: Option<&DatabaseConnection>,
         delay_start: bool,
@@ -452,7 +452,7 @@ impl Web3Rpc {
     /// connect to the web3 provider
     async fn connect(
         self: &Arc<Self>,
-        block_sender: Option<&kanal::AsyncSender<BlockAndRpc>>,
+        block_sender: Option<&flume::Sender<BlockAndRpc>>,
         chain_id: u64,
         db_conn: Option<&DatabaseConnection>,
     ) -> anyhow::Result<()> {
@@ -474,7 +474,7 @@ impl Web3Rpc {
                         // tell the block subscriber that this rpc doesn't have any blocks
                         if let Some(block_sender) = block_sender {
                             block_sender
-                                .send((None, self.clone()))
+                                .send_async((None, self.clone()))
                                 .await
                                 .context("block_sender during connect")?;
                         }
@@ -589,7 +589,7 @@ impl Web3Rpc {
     pub(crate) async fn send_head_block_result(
         self: &Arc<Self>,
         new_head_block: Result<Option<ArcBlock>, ProviderError>,
-        block_sender: &kanal::AsyncSender<BlockAndRpc>,
+        block_sender: &flume::Sender<BlockAndRpc>,
         block_map: BlocksByHashCache,
     ) -> anyhow::Result<()> {
         let new_head_block = match new_head_block {
@@ -652,7 +652,7 @@ impl Web3Rpc {
 
         // send an empty block to take this server out of rotation
         block_sender
-            .send((new_head_block, self.clone()))
+            .send_async((new_head_block, self.clone()))
             .await
             .context("block_sender")?;
 
@@ -671,11 +671,11 @@ impl Web3Rpc {
         self: Arc<Self>,
         authorization: &Arc<Authorization>,
         block_map: BlocksByHashCache,
-        block_sender: Option<kanal::AsyncSender<BlockAndRpc>>,
+        block_sender: Option<flume::Sender<BlockAndRpc>>,
         chain_id: u64,
         disconnect_receiver: watch::Receiver<bool>,
         http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
-        tx_id_sender: Option<kanal::AsyncSender<(TxHash, Arc<Self>)>>,
+        tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<()> {
         let error_handler = if self.backup {
             RequestErrorHandler::DebugLevel
@@ -896,7 +896,7 @@ impl Web3Rpc {
         self: Arc<Self>,
         authorization: Arc<Authorization>,
         http_interval_receiver: Option<broadcast::Receiver<()>>,
-        block_sender: kanal::AsyncSender<BlockAndRpc>,
+        block_sender: flume::Sender<BlockAndRpc>,
         block_map: BlocksByHashCache,
     ) -> anyhow::Result<()> {
         trace!("watching new heads on {}", self);
@@ -1091,7 +1091,7 @@ impl Web3Rpc {
     async fn subscribe_pending_transactions(
         self: Arc<Self>,
         authorization: Arc<Authorization>,
-        tx_id_sender: kanal::AsyncSender<(TxHash, Arc<Self>)>,
+        tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
     ) -> anyhow::Result<()> {
         // TODO: give this a separate client. don't use new_head_client for everything. especially a firehose this big
         // TODO: timeout
@@ -1116,7 +1116,7 @@ impl Web3Rpc {
 
                 while let Some(pending_tx_id) = stream.next().await {
                     tx_id_sender
-                        .send((pending_tx_id, self.clone()))
+                        .send_async((pending_tx_id, self.clone()))
                         .await
                         .context("tx_id_sender")?;
 
@@ -1397,6 +1397,16 @@ impl Serialize for Web3Rpc {
             state.serialize_field("head_block", &head_block)?;
         }
 
+        state.serialize_field(
+            "total_requests",
+            &self.total_requests.load(atomic::Ordering::Acquire),
+        )?;
+
+        state.serialize_field(
+            "active_requests",
+            &self.active_requests.load(atomic::Ordering::Relaxed),
+        )?;
+
         state.serialize_field("head_latency", &self.head_latency.read().value())?;
 
         state.serialize_field(
@@ -1405,16 +1415,6 @@ impl Serialize for Web3Rpc {
         )?;
 
         state.serialize_field("peak_ewma", self.peak_ewma().as_ref())?;
-
-        state.serialize_field(
-            "active_requests",
-            &self.active_requests.load(atomic::Ordering::Acquire),
-        )?;
-
-        state.serialize_field(
-            "total_requests",
-            &self.total_requests.load(atomic::Ordering::Acquire),
-        )?;
 
         state.end()
     }

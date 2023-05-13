@@ -373,9 +373,9 @@ impl ConsensusFinder {
             .0
             .tier;
 
-        trace!("first_tier: {}", current_tier);
+        // trace!("first_tier: {}", current_tier);
 
-        trace!("rpc_heads_by_tier: {:#?}", rpc_heads_by_tier);
+        // trace!("rpc_heads_by_tier: {:#?}", rpc_heads_by_tier);
 
         // loop over all the rpc heads (grouped by tier) and their parents to find consensus
         // TODO: i'm sure theres a lot of shortcuts that could be taken, but this is simplest to implement

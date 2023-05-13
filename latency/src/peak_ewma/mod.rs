@@ -2,8 +2,9 @@ mod rtt_estimate;
 
 use std::sync::Arc;
 
-use kanal::SendError;
-use log::{error, info, trace};
+use log::{error, info};
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
@@ -19,7 +20,7 @@ pub struct PeakEwmaLatency {
     /// Join handle for the latency calculation task
     pub join_handle: JoinHandle<()>,
     /// Send to update with each request duration
-    request_tx: kanal::AsyncSender<Duration>,
+    request_tx: mpsc::Sender<Duration>,
     /// Latency average and last update time
     rtt_estimate: Arc<AtomicRttEstimate>,
     /// Decay time
@@ -33,7 +34,7 @@ impl PeakEwmaLatency {
     /// average latency.
     pub fn spawn(decay_ns: f64, buf_size: usize, start_latency: Duration) -> Self {
         debug_assert!(decay_ns > 0.0, "decay_ns must be positive");
-        let (request_tx, request_rx) = kanal::bounded_async(buf_size);
+        let (request_tx, request_rx) = mpsc::channel(buf_size);
         let rtt_estimate = Arc::new(AtomicRttEstimate::new(start_latency));
         let task = PeakEwmaLatencyTask {
             request_rx,
@@ -55,10 +56,10 @@ impl PeakEwmaLatency {
         let mut estimate = self.rtt_estimate.load();
 
         let now = Instant::now();
-        debug_assert!(
+        assert!(
             estimate.update_at <= now,
-            "update_at={:?} in the future",
-            estimate.update_at,
+            "update_at is {}ns in the future",
+            estimate.update_at.duration_since(now).as_nanos(),
         );
 
         // Update the RTT estimate to account for decay since the last update.
@@ -67,26 +68,20 @@ impl PeakEwmaLatency {
 
     /// Report latency from a single request
     ///
-    /// Should only be called from the Web3Rpc that owns it.
+    /// Should only be called with a duration from the Web3Rpc that owns it.
     pub fn report(&self, duration: Duration) {
         match self.request_tx.try_send(duration) {
-            Ok(true) => {
-                trace!("success");
-            }
-            Ok(false) => {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
                 // We don't want to block if the channel is full, just
                 // report the error
                 error!("Latency report channel full");
                 // TODO: could we spawn a new tokio task to report tthis later?
             }
-            Err(SendError::Closed) => {
+            Err(TrySendError::Closed(_)) => {
                 unreachable!("Owner should keep channel open");
             }
-            Err(SendError::ReceiveClosed) => {
-                unreachable!("Receiver should keep channel open");
-            }
         };
-        //.expect("Owner should keep channel open");
     }
 }
 
@@ -94,7 +89,7 @@ impl PeakEwmaLatency {
 #[derive(Debug)]
 struct PeakEwmaLatencyTask {
     /// Receive new request timings for update
-    request_rx: kanal::AsyncReceiver<Duration>,
+    request_rx: mpsc::Receiver<Duration>,
     /// Current estimate and update time
     rtt_estimate: Arc<AtomicRttEstimate>,
     /// Last update time, used for decay calculation
@@ -106,27 +101,25 @@ struct PeakEwmaLatencyTask {
 impl PeakEwmaLatencyTask {
     /// Run the loop for updating latency
     async fn run(mut self) {
-        while let Ok(rtt) = self.request_rx.recv().await {
+        while let Some(rtt) = self.request_rx.recv().await {
             self.update(rtt);
         }
+        info!("latency loop exited");
     }
 
     /// Update the estimate object atomically.
-    fn update(&mut self, rtt: Duration) {
+    fn update(&self, rtt: Duration) {
         let rtt = nanos(rtt);
 
         let now = Instant::now();
-        debug_assert!(
+        assert!(
             self.update_at <= now,
-            "update_at={:?} in the future",
-            self.update_at,
+            "update_at is {}ns in the future",
+            self.update_at.duration_since(now).as_nanos(),
         );
 
-        let x = self
-            .rtt_estimate
+        self.rtt_estimate
             .fetch_update(|mut rtt_estimate| rtt_estimate.update(rtt, self.decay_ns, now));
-
-        info!("x: {:?}", x);
     }
 }
 

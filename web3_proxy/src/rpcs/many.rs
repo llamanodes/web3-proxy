@@ -8,7 +8,8 @@ use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
-use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
+use crate::jsonrpc::{JsonRpcErrorData, JsonRpcRequest};
+use crate::response_cache::JsonRpcResponseData;
 use crate::rpcs::consensus::{RankedRpcMap, RpcRanking};
 use crate::rpcs::transactions::TxStatus;
 use anyhow::Context;
@@ -23,12 +24,13 @@ use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
-use moka::future::{Cache, ConcurrentCacheExt};
+use moka::future::Cache;
 use ordered_float::OrderedFloat;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::cmp::{min_by_key, Reverse};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -43,7 +45,7 @@ use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBeh
 #[derive(From)]
 pub struct Web3Rpcs {
     /// if watch_consensus_head_sender is some, Web3Rpc inside self will send blocks here when they get them
-    pub(crate) block_sender: kanal::AsyncSender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
+    pub(crate) block_sender: flume::Sender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
     /// any requests will be forwarded to one (or more) of these connections
     pub(crate) by_name: ArcSwap<HashMap<String, Arc<Web3Rpc>>>,
     /// notify all http providers to check their blocks at the same time
@@ -55,10 +57,11 @@ pub struct Web3Rpcs {
     pub(crate) watch_consensus_rpcs_sender: watch::Sender<Option<Arc<ConsensusWeb3Rpcs>>>,
     /// this head receiver makes it easy to wait until there is a new block
     pub(super) watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
+    /// keep track of transactions that we have sent through subscriptions
     pub(super) pending_transaction_cache:
         Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
-    pub(super) pending_tx_id_receiver: kanal::AsyncReceiver<TxHashAndRpc>,
-    pub(super) pending_tx_id_sender: kanal::AsyncSender<TxHashAndRpc>,
+    pub(super) pending_tx_id_receiver: flume::Receiver<TxHashAndRpc>,
+    pub(super) pending_tx_id_sender: flume::Sender<TxHashAndRpc>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
     pub(super) blocks_by_hash: BlocksByHashCache,
@@ -94,8 +97,8 @@ impl Web3Rpcs {
         watch::Receiver<Option<Arc<ConsensusWeb3Rpcs>>>,
         // watch::Receiver<Arc<ConsensusWeb3Rpcs>>,
     )> {
-        let (pending_tx_id_sender, pending_tx_id_receiver) = kanal::unbounded_async();
-        let (block_sender, block_receiver) = kanal::unbounded_async::<BlockAndRpc>();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
+        let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
 
         // TODO: query the rpc to get the actual expected block time, or get from config? maybe have this be part of a health check?
         let expected_block_time_ms = match chain_id {
@@ -347,7 +350,7 @@ impl Web3Rpcs {
     async fn subscribe(
         self: Arc<Self>,
         authorization: Arc<Authorization>,
-        block_receiver: kanal::AsyncReceiver<BlockAndRpc>,
+        block_receiver: flume::Receiver<BlockAndRpc>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         let mut futures = vec![];
@@ -362,7 +365,7 @@ impl Web3Rpcs {
             let pending_tx_id_receiver = self.pending_tx_id_receiver.clone();
             let handle = tokio::task::spawn(async move {
                 // TODO: set up this future the same as the block funnel
-                while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv().await {
+                while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv_async().await {
                     let f = clone.clone().process_incoming_tx_id(
                         authorization.clone(),
                         rpc,
@@ -423,12 +426,11 @@ impl Web3Rpcs {
     pub async fn try_send_parallel_requests(
         &self,
         active_request_handles: Vec<OpenRequestHandle>,
-        id: Box<RawValue>,
         method: &str,
         params: Option<&serde_json::Value>,
         error_level: Level,
         // TODO: remove this box once i figure out how to do the options
-    ) -> Web3ProxyResult<JsonRpcForwardedResponse> {
+    ) -> Web3ProxyResult<JsonRpcResponseData> {
         // TODO: if only 1 active_request_handles, do self.try_send_request?
 
         let responses = active_request_handles
@@ -447,24 +449,16 @@ impl Web3Rpcs {
         let mut count_map: HashMap<String, _> = HashMap::new();
         let mut counts: Counter<String> = Counter::new();
         let mut any_ok_with_json_result = false;
-        let mut any_ok_but_maybe_json_error = false;
         for partial_response in responses {
             if partial_response.is_ok() {
                 any_ok_with_json_result = true;
             }
 
-            let response =
-                JsonRpcForwardedResponse::try_from_response_result(partial_response, id.clone());
-
-            // TODO: better key?
-            let s = format!("{:?}", response);
+            // TODO: better key!
+            let s = format!("{:?}", partial_response);
 
             if count_map.get(&s).is_none() {
-                if response.is_ok() {
-                    any_ok_but_maybe_json_error = true;
-                }
-
-                count_map.insert(s.clone(), response);
+                count_map.insert(s.clone(), partial_response);
             }
 
             counts.update([s].into_iter());
@@ -477,19 +471,18 @@ impl Web3Rpcs {
 
             match most_common {
                 Ok(x) => {
-                    if any_ok_with_json_result && x.error.is_some() {
-                        // this one may be an "Ok", but the json has an error inside it
-                        continue;
-                    }
                     // return the most common success
-                    return Ok(x);
+                    return Ok(x.into());
                 }
                 Err(err) => {
-                    if any_ok_but_maybe_json_error {
+                    if any_ok_with_json_result {
                         // the most common is an error, but there is an Ok in here somewhere. loop to find it
                         continue;
                     }
-                    return Err(err);
+
+                    let err: JsonRpcErrorData = err.try_into()?;
+
+                    return Ok(err.into());
                 }
             }
         }
@@ -601,7 +594,18 @@ impl Web3Rpcs {
                         return Ok(OpenRequestResult::Handle(handle));
                     }
                     Ok(OpenRequestResult::RetryAt(retry_at)) => {
-                        earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                        trace!(
+                            "{:?} - retry on {} @ {}",
+                            request_ulid,
+                            best_rpc,
+                            retry_at.duration_since(Instant::now()).as_secs_f32()
+                        );
+
+                        if earliest_retry_at.is_none() {
+                            earliest_retry_at = Some(retry_at);
+                        } else {
+                            earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                        }
                     }
                     Ok(OpenRequestResult::NotReady) => {
                         // TODO: log a warning? emit a stat?
@@ -641,7 +645,16 @@ impl Web3Rpcs {
                 Ok(OpenRequestResult::NotReady)
             }
             Some(earliest_retry_at) => {
-                warn!("no servers on {:?}! {:?}", self, earliest_retry_at);
+                // TODO: log the server that retry_at came from
+                // TODO: `self` doesn't log well. get a pretty name for this group of servers
+                warn!(
+                    "{:?} - no servers on {:?}! retry in {:?}s",
+                    request_ulid,
+                    self,
+                    earliest_retry_at
+                        .duration_since(Instant::now())
+                        .as_secs_f32()
+                );
 
                 Ok(OpenRequestResult::RetryAt(earliest_retry_at))
             }
@@ -733,7 +746,7 @@ impl Web3Rpcs {
             match rpc.try_request_handle(authorization, None).await {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
-                    warn!("{} is rate limited. skipping", rpc);
+                    trace!("{} is rate limited. skipping", rpc);
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                 }
                 Ok(OpenRequestResult::Handle(handle)) => {
@@ -767,7 +780,7 @@ impl Web3Rpcs {
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-    ) -> Web3ProxyResult<JsonRpcForwardedResponse> {
+    ) -> Web3ProxyResult<JsonRpcResponseData> {
         let mut skip_rpcs = vec![];
         let mut method_not_available_response = None;
 
@@ -783,7 +796,7 @@ impl Web3Rpcs {
                 .best_available_rpc(
                     authorization,
                     request_metadata,
-                    &[],
+                    &skip_rpcs,
                     min_block_needed,
                     max_block_needed,
                 )
@@ -800,10 +813,11 @@ impl Web3Rpcs {
 
                     let is_backup_response = rpc.backup;
 
+                    // TODO: instead of entirely skipping, maybe demote a tier?
                     skip_rpcs.push(rpc);
 
                     // TODO: get the log percent from the user data
-                    let response_result = active_request_handle
+                    let response_result: Result<Box<RawValue>, _> = active_request_handle
                         .request(
                             &request.method,
                             &json!(request.params),
@@ -812,10 +826,7 @@ impl Web3Rpcs {
                         )
                         .await;
 
-                    match JsonRpcForwardedResponse::try_from_response_result(
-                        response_result,
-                        request.id.clone(),
-                    ) {
+                    match response_result {
                         Ok(response) => {
                             // TODO: if there are multiple responses being aggregated, this will only use the last server's backup type
                             if let Some(request_metadata) = request_metadata {
@@ -824,97 +835,98 @@ impl Web3Rpcs {
                                     .store(is_backup_response, Ordering::Release);
                             }
 
-                            if let Some(error) = response.error.as_ref() {
-                                // trace!(?response, "rpc error");
+                            return Ok(response.into());
+                        }
+                        Err(error) => {
+                            // trace!(?response, "rpc error");
 
-                                if let Some(request_metadata) = request_metadata {
-                                    request_metadata
-                                        .error_response
-                                        .store(true, Ordering::Release);
+                            // TODO: separate jsonrpc error and web3 proxy error!
+                            if let Some(request_metadata) = request_metadata {
+                                request_metadata
+                                    .error_response
+                                    .store(true, Ordering::Release);
+                            }
+
+                            let error: JsonRpcErrorData = error.try_into()?;
+
+                            // some errors should be retried on other nodes
+                            let error_msg = error.message.as_ref();
+
+                            // different providers do different codes. check all of them
+                            // TODO: there's probably more strings to add here
+                            let rate_limit_substrings = ["limit", "exceeded", "quota usage"];
+                            for rate_limit_substr in rate_limit_substrings {
+                                if error_msg.contains(rate_limit_substr) {
+                                    warn!("rate limited by {}", skip_rpcs.last().unwrap());
+                                    continue;
                                 }
+                            }
 
-                                // some errors should be retried on other nodes
-                                let error_msg = error.message.as_str();
+                            match error.code {
+                                -32000 => {
+                                    // TODO: regex?
+                                    let retry_prefixes = [
+                                        "header not found",
+                                        "header for hash not found",
+                                        "missing trie node",
+                                        "node not started",
+                                        "RPC timeout",
+                                    ];
+                                    for retry_prefix in retry_prefixes {
+                                        if error_msg.starts_with(retry_prefix) {
+                                            // TODO: too verbose
+                                            debug!("retrying on another server");
+                                            continue;
+                                        }
+                                    }
+                                }
+                                -32601 => {
+                                    let error_msg = error.message.as_ref();
 
-                                // different providers do different codes. check all of them
-                                // TODO: there's probably more strings to add here
-                                let rate_limit_substrings = ["limit", "exceeded", "quota usage"];
-                                for rate_limit_substr in rate_limit_substrings {
-                                    if error_msg.contains(rate_limit_substr) {
-                                        warn!("rate limited by {}", skip_rpcs.last().unwrap());
+                                    // sometimes a provider does not support all rpc methods
+                                    // we check other connections rather than returning the error
+                                    // but sometimes the method is something that is actually unsupported,
+                                    // so we save the response here to return it later
+
+                                    // some providers look like this
+                                    if error_msg.starts_with("the method")
+                                        && error_msg.ends_with("is not available")
+                                    {
+                                        method_not_available_response = Some(error);
+                                        continue;
+                                    }
+
+                                    // others look like this (this is the example in the official spec)
+                                    if error_msg == "Method not found" {
+                                        method_not_available_response = Some(error);
                                         continue;
                                     }
                                 }
-
-                                match error.code {
-                                    -32000 => {
-                                        // TODO: regex?
-                                        let retry_prefixes = [
-                                            "header not found",
-                                            "header for hash not found",
-                                            "missing trie node",
-                                            "node not started",
-                                            "RPC timeout",
-                                        ];
-                                        for retry_prefix in retry_prefixes {
-                                            if error_msg.starts_with(retry_prefix) {
-                                                continue;
-                                            }
-                                        }
-                                    }
-                                    -32601 => {
-                                        let error_msg = error.message.as_str();
-
-                                        // sometimes a provider does not support all rpc methods
-                                        // we check other connections rather than returning the error
-                                        // but sometimes the method is something that is actually unsupported,
-                                        // so we save the response here to return it later
-
-                                        // some providers look like this
-                                        if error_msg.starts_with("the method")
-                                            && error_msg.ends_with("is not available")
-                                        {
-                                            method_not_available_response = Some(response);
-                                            continue;
-                                        }
-
-                                        // others look like this (this is the example in the official spec)
-                                        if error_msg == "Method not found" {
-                                            method_not_available_response = Some(response);
-                                            continue;
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            } else {
-                                // trace!(?response, "rpc success");
+                                _ => {}
                             }
 
-                            return Ok(response);
-                        }
-                        Err(err) => {
-                            let rpc = skip_rpcs
-                                .last()
-                                .expect("there must have been a provider if we got an error");
+                            // let rpc = skip_rpcs
+                            //     .last()
+                            //     .expect("there must have been a provider if we got an error");
 
                             // TODO: emit a stat. if a server is getting skipped a lot, something is not right
 
                             // TODO: if we get a TrySendError, reconnect. wait why do we see a trysenderror on a dual provider? shouldn't it be using reqwest
 
-                            trace!(
-                                "Backend server error on {}! Retrying {:?} on another. err={:?}",
-                                rpc,
-                                request,
-                                err
-                            );
+                            // TODO! WRONG! ONLY SET RETRY_AT IF THIS IS A SERVER/CONNECTION ERROR. JSONRPC "error" is FINE
+                            // trace!(
+                            //     "Backend server error on {}! Retrying {:?} on another. err={:?}",
+                            //     rpc,
+                            //     request,
+                            //     error,
+                            // );
+                            // if let Some(ref hard_limit_until) = rpc.hard_limit_until {
+                            //     let retry_at = Instant::now() + Duration::from_secs(1);
 
-                            if let Some(ref hard_limit_until) = rpc.hard_limit_until {
-                                let retry_at = Instant::now() + Duration::from_secs(1);
+                            //     hard_limit_until.send_replace(retry_at);
+                            // }
 
-                                hard_limit_until.send_replace(retry_at);
-                            }
-
-                            continue;
+                            return Ok(error.into());
                         }
                     }
                 }
@@ -923,8 +935,8 @@ impl Web3Rpcs {
                     // sleep (TODO: with a lock?) until our rate limits should be available
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
                     warn!(
-                        "All rate limits exceeded. waiting for change in synced servers or {:?}",
-                        retry_at
+                        "All rate limits exceeded. waiting for change in synced servers or {:?}s",
+                        retry_at.duration_since(Instant::now()).as_secs_f32()
                     );
 
                     // TODO: have a separate column for rate limited?
@@ -934,6 +946,7 @@ impl Web3Rpcs {
 
                     tokio::select! {
                         _ = sleep_until(retry_at) => {
+                            trace!("slept!");
                             skip_rpcs.pop();
                         }
                         _ = watch_consensus_connections.changed() => {
@@ -947,6 +960,8 @@ impl Web3Rpcs {
                     }
 
                     let waiting_for = min_block_needed.max(max_block_needed);
+
+                    info!("waiting for {:?}", waiting_for);
 
                     if watch_for_block(waiting_for, &mut watch_consensus_connections).await? {
                         // block found! continue so we can check for another rpc
@@ -966,10 +981,12 @@ impl Web3Rpcs {
                 .store(true, Ordering::Release);
         }
 
-        if let Some(r) = method_not_available_response {
+        if let Some(err) = method_not_available_response {
             // TODO: this error response is likely the user's fault. do we actually want it marked as an error? maybe keep user and server error bools?
             // TODO: emit a stat for unsupported methods? it would be best to block them at the proxy instead of at the backend
-            return Ok(r);
+            // TODO: this is too verbose!
+            debug!("{}", serde_json::to_string(&err)?);
+            return Ok(err.into());
         }
 
         let num_conns = self.by_name.load().len();
@@ -995,8 +1012,6 @@ impl Web3Rpcs {
                 "No archive servers synced (min {:?}, max {:?}, head {:?}) ({} known)",
                 min_block_needed, max_block_needed, head_block_num, num_conns
             );
-        } else if num_skipped == 0 {
-            // TODO: what should we log?
         } else {
             error!(
                 "Requested data is not available (min {:?}, max {:?}, head {:?}) ({} skipped, {} known)",
@@ -1008,11 +1023,12 @@ impl Web3Rpcs {
 
         // TODO: what error code?
         // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
-        Ok(JsonRpcForwardedResponse::from_str(
-            "Requested data is not available",
-            Some(-32043),
-            Some(request.id.clone()),
-        ))
+        Ok(JsonRpcErrorData {
+            message: Cow::Borrowed("Requested data is not available"),
+            code: -32043,
+            data: None,
+        }
+        .into())
     }
 
     /// be sure there is a timeout on this or it might loop forever
@@ -1027,7 +1043,7 @@ impl Web3Rpcs {
         error_level: Level,
         max_count: Option<usize>,
         always_include_backups: bool,
-    ) -> Web3ProxyResult<JsonRpcForwardedResponse> {
+    ) -> Web3ProxyResult<JsonRpcResponseData> {
         let mut watch_consensus_rpcs = self.watch_consensus_rpcs_sender.subscribe();
 
         let start = Instant::now();
@@ -1071,7 +1087,6 @@ impl Web3Rpcs {
                     return self
                         .try_send_parallel_requests(
                             active_request_handles,
-                            request.id.clone(),
                             request.method.as_ref(),
                             request.params.as_ref(),
                             error_level,
@@ -1126,7 +1141,7 @@ impl Web3Rpcs {
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-    ) -> Web3ProxyResult<JsonRpcForwardedResponse> {
+    ) -> Web3ProxyResult<JsonRpcResponseData> {
         match authorization.checks.proxy_mode {
             ProxyMode::Debug | ProxyMode::Best => {
                 self.try_send_best_consensus_head_connection(
@@ -1158,7 +1173,7 @@ impl Serialize for Web3Rpcs {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Web3Rpcs", 6)?;
+        let mut state = serializer.serialize_struct("Web3Rpcs", 1)?;
 
         {
             let by_name = self.by_name.load();
@@ -1178,12 +1193,12 @@ impl Serialize for Web3Rpcs {
             }
         }
 
-        self.blocks_by_hash.sync();
-        self.blocks_by_number.sync();
-        state.serialize_field("block_hashes_count", &self.blocks_by_hash.entry_count())?;
-        state.serialize_field("block_hashes_size", &self.blocks_by_hash.weighted_size())?;
-        state.serialize_field("block_numbers_count", &self.blocks_by_number.entry_count())?;
-        state.serialize_field("block_numbers_size", &self.blocks_by_number.weighted_size())?;
+        // self.blocks_by_hash.sync();
+        // self.blocks_by_number.sync();
+        // state.serialize_field("block_hashes_count", &self.blocks_by_hash.entry_count())?;
+        // state.serialize_field("block_hashes_size", &self.blocks_by_hash.weighted_size())?;
+        // state.serialize_field("block_numbers_count", &self.blocks_by_number.entry_count())?;
+        // state.serialize_field("block_numbers_size", &self.blocks_by_number.weighted_size())?;
         state.end()
     }
 }
@@ -1391,8 +1406,8 @@ mod tests {
             (lagged_rpc.name.clone(), lagged_rpc.clone()),
         ]);
 
-        let (block_sender, _block_receiver) = kanal::unbounded_async();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = kanal::unbounded_async();
+        let (block_sender, _block_receiver) = flume::unbounded();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (watch_consensus_rpcs_sender, _watch_consensus_rpcs_receiver) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
@@ -1643,8 +1658,8 @@ mod tests {
             (archive_rpc.name.clone(), archive_rpc.clone()),
         ]);
 
-        let (block_sender, _) = kanal::unbounded_async();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = kanal::unbounded_async();
+        let (block_sender, _) = flume::unbounded();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (watch_consensus_rpcs_sender, _) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
@@ -1807,8 +1822,8 @@ mod tests {
             ),
         ]);
 
-        let (block_sender, _) = kanal::unbounded_async();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = kanal::unbounded_async();
+        let (block_sender, _) = flume::unbounded();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (watch_consensus_rpcs_sender, _) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 

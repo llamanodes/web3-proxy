@@ -63,6 +63,8 @@ async fn _proxy_web3_rpc(
 
     let authorization = Arc::new(authorization);
 
+    // TODO: calculate payload bytes here (before turning into serde_json::Value). that will save serializing later
+
     let (status_code, response, rpcs, _semaphore) = app
         .proxy_web3_rpc(authorization, payload)
         .await

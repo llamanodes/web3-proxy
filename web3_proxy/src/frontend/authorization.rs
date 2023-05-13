@@ -33,7 +33,7 @@ use std::mem;
 use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64, AtomicUsize};
 use std::time::Duration;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
-use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use ulid::Ulid;
@@ -266,8 +266,8 @@ pub struct RequestMetadata {
     /// TODO: maybe this shouldn't be determined by ProxyMode. A request param should probably enable this
     pub kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
 
-    /// Cancel-safe channel to send stats to
-    pub stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
+    /// Cancel-safe channel for sending stats to the buffer
+    pub stat_sender: Option<flume::Sender<AppStat>>,
 }
 
 impl Default for RequestMetadata {
@@ -355,7 +355,9 @@ impl ResponseOrBytes<'_> {
             Self::Json(x) => serde_json::to_string(x)
                 .expect("this should always serialize")
                 .len(),
-            Self::Response(x) => x.num_bytes(),
+            Self::Response(x) => serde_json::to_string(x)
+                .expect("this should always serialize")
+                .len(),
             Self::Bytes(num_bytes) => *num_bytes,
         }
     }

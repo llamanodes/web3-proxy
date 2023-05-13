@@ -20,7 +20,7 @@ use axum::{
 };
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
-use ethers::types::Bytes;
+use ethers::types::U64;
 use fstrings::{f, format_args_f};
 use futures::SinkExt;
 use futures::{
@@ -311,7 +311,7 @@ async fn proxy_web3_socket(
     let (ws_tx, ws_rx) = socket.split();
 
     // create a channel for our reader and writer can communicate. todo: benchmark different channels
-    let (response_sender, response_receiver) = kanal::unbounded_async::<Message>();
+    let (response_sender, response_receiver) = flume::unbounded::<Message>();
 
     tokio::spawn(write_web3_socket(response_receiver, ws_tx));
     tokio::spawn(read_web3_socket(app, authorization, ws_rx, response_sender));
@@ -323,25 +323,28 @@ async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
     authorization: &Arc<Authorization>,
     payload: &str,
-    response_sender: &kanal::AsyncSender<Message>,
+    response_sender: &flume::Sender<Message>,
     subscription_count: &AtomicUsize,
-    subscriptions: Arc<RwLock<HashMap<Bytes, AbortHandle>>>,
+    subscriptions: Arc<RwLock<HashMap<U64, AbortHandle>>>,
 ) -> Web3ProxyResult<(Message, Option<OwnedSemaphorePermit>)> {
     let (authorization, semaphore) = match authorization.check_again(&app).await {
         Ok((a, s)) => (a, s),
         Err(err) => {
             let (_, err) = err.into_response_parts();
 
-            let err = serde_json::to_string(&err).expect("to_string should always work here");
+            let err = JsonRpcForwardedResponse::from_response_data(err, Default::default());
+
+            let err = serde_json::to_string(&err)?;
 
             return Ok((Message::Text(err), None));
         }
     };
 
     // TODO: do any clients send batches over websockets?
-    let (id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
+    // TODO: change response into response_data
+    let (response_id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
         Ok(json_request) => {
-            let id = json_request.id.clone();
+            let response_id = json_request.id.clone();
 
             // TODO: move this to a seperate function so we can use the try operator
             let response: Web3ProxyResult<JsonRpcForwardedResponseEnum> =
@@ -366,9 +369,9 @@ async fn handle_socket_payload(
                                         .as_ref()
                                         .context("there should be a result here")?;
 
-                                    // TODO: there must be a better way to do this
-                                    let k: Bytes = serde_json::from_str(result.get())
-                                        .context("subscription ids must be bytes")?;
+                                    // TODO: there must be a better way to turn a RawValue
+                                    let k: U64 = serde_json::from_str(result.get())
+                                        .context("subscription ids must be U64s")?;
 
                                     x.insert(k, handle);
                                 };
@@ -384,7 +387,7 @@ async fn handle_socket_payload(
                                 .await;
 
                         #[derive(serde::Deserialize)]
-                        struct EthUnsubscribeParams([Bytes; 1]);
+                        struct EthUnsubscribeParams([U64; 1]);
 
                         if let Some(params) = json_request.params {
                             match serde_json::from_value(params) {
@@ -403,9 +406,10 @@ async fn handle_socket_payload(
                                         }
                                     };
 
+                                    // TODO: don't create the response here. use a JsonRpcResponseData instead
                                     let response = JsonRpcForwardedResponse::from_value(
                                         json!(partial_response),
-                                        id.clone(),
+                                        response_id.clone(),
                                     );
 
                                     request_metadata.add_response(&response);
@@ -428,7 +432,7 @@ async fn handle_socket_payload(
                         .map(|(status_code, response, _)| response),
                 };
 
-            (id, response)
+            (response_id, response)
         }
         Err(err) => {
             let id = JsonRpcId::None.to_raw_value();
@@ -439,8 +443,10 @@ async fn handle_socket_payload(
     let response_str = match response {
         Ok(x) => serde_json::to_string(&x).expect("to_string should always work here"),
         Err(err) => {
-            let (_, mut response) = err.into_response_parts();
-            response.id = id;
+            let (_, response_data) = err.into_response_parts();
+
+            let response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
+
             serde_json::to_string(&response).expect("to_string should always work here")
         }
     };
@@ -452,7 +458,7 @@ async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
     authorization: Arc<Authorization>,
     mut ws_rx: SplitStream<WebSocket>,
-    response_sender: kanal::AsyncSender<Message>,
+    response_sender: flume::Sender<Message>,
 ) {
     // RwLock should be fine here. a user isn't going to be opening tons of subscriptions
     let subscriptions = Arc::new(RwLock::new(HashMap::new()));
@@ -528,7 +534,7 @@ async fn read_web3_socket(
                             }
                         };
 
-                        if response_sender.send(response_msg).await.is_err() {
+                        if response_sender.send_async(response_msg).await.is_err() {
                             let _ = close_sender.send(true);
                             return;
                         };
@@ -549,13 +555,13 @@ async fn read_web3_socket(
 }
 
 async fn write_web3_socket(
-    response_rx: kanal::AsyncReceiver<Message>,
+    response_rx: flume::Receiver<Message>,
     mut ws_tx: SplitSink<WebSocket, Message>,
 ) {
     // TODO: increment counter for open websockets
 
     // TODO: is there any way to make this stream receive.
-    while let Ok(msg) = response_rx.recv().await {
+    while let Ok(msg) = response_rx.recv_async().await {
         // a response is ready
 
         // TODO: poke rate limits for this user?

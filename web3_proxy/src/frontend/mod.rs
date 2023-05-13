@@ -16,26 +16,27 @@ use axum::{
     routing::{get, post, put},
     Extension, Router,
 };
-use http::header::AUTHORIZATION;
+use http::{header::AUTHORIZATION, StatusCode};
 use listenfd::ListenFd;
 use log::info;
-use moka::future::Cache;
+use std::iter::once;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::{iter::once, time::Duration};
-use tokio::sync::broadcast;
+use strum::{EnumCount, EnumIter};
+use tokio::{sync::broadcast, time::Instant};
 use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
 /// simple keys for caching responses
-#[derive(Clone, Hash, PartialEq, Eq)]
-pub enum FrontendResponseCaches {
+#[derive(Copy, Clone, Hash, PartialEq, Eq, EnumCount, EnumIter)]
+pub enum FrontendResponseCacheKey {
+    BackupsNeeded,
+    Health,
     Status,
 }
 
 pub type FrontendJsonResponseCache =
-    Cache<FrontendResponseCaches, Arc<serde_json::Value>, hashbrown::hash_map::DefaultHashBuilder>;
-pub type FrontendHealthCache = Cache<(), bool, hashbrown::hash_map::DefaultHashBuilder>;
+    quick_cache::sync::Cache<FrontendResponseCacheKey, ((StatusCode, axum::body::Bytes), Instant)>;
 
 /// Start the frontend server.
 pub async fn serve(
@@ -47,14 +48,9 @@ pub async fn serve(
     // setup caches for whatever the frontend needs
     // no need for max items since it is limited by the enum key
     // TODO: latest moka allows for different ttls for different
-    let json_response_cache: FrontendJsonResponseCache = Cache::builder()
-        .time_to_live(Duration::from_secs(2))
-        .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+    let response_cache_size = FrontendResponseCacheKey::COUNT;
 
-    // /health gets a cache with a shorter lifetime
-    let health_cache: FrontendHealthCache = Cache::builder()
-        .time_to_live(Duration::from_millis(100))
-        .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+    let json_response_cache = FrontendJsonResponseCache::new(response_cache_size);
 
     // TODO: read config for if fastest/versus should be available publicly. default off
 
@@ -220,8 +216,7 @@ pub async fn serve(
         // application state
         .layer(Extension(proxy_app))
         // frontend caches
-        .layer(Extension(json_response_cache))
-        .layer(Extension(health_cache))
+        .layer(Extension(Arc::new(json_response_cache)))
         // 404 for any unknown routes
         .fallback(errors::handler_404);
 
