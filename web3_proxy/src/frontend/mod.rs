@@ -16,28 +16,27 @@ use axum::{
     routing::{get, post, put},
     Extension, Router,
 };
-use http::header::AUTHORIZATION;
+use http::{header::AUTHORIZATION, StatusCode};
 use listenfd::ListenFd;
 use log::info;
-use moka::future::Cache;
+use std::iter::once;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::{iter::once, time::Duration};
 use strum::{EnumCount, EnumIter};
 use tokio::{sync::broadcast, time::Instant};
 use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
 /// simple keys for caching responses
-#[derive(Clone, Hash, PartialEq, Eq, EnumCount, EnumIter)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, EnumCount, EnumIter)]
 pub enum FrontendResponseCacheKey {
+    BackupsNeeded,
+    Health,
     Status,
-    BackupNeeded,
 }
 
 pub type FrontendJsonResponseCache =
-    quick_cache::sync::Cache<FrontendResponseCacheKey, (axum::body::Bytes, Instant)>;
-pub type FrontendHealthCache = Cache<(), bool, hashbrown::hash_map::DefaultHashBuilder>;
+    quick_cache::sync::Cache<FrontendResponseCacheKey, ((StatusCode, axum::body::Bytes), Instant)>;
 
 /// Start the frontend server.
 pub async fn serve(
@@ -52,11 +51,6 @@ pub async fn serve(
     let response_cache_size = FrontendResponseCacheKey::COUNT;
 
     let json_response_cache = FrontendJsonResponseCache::new(response_cache_size);
-
-    // /health gets a cache with a shorter lifetime
-    let health_cache: FrontendHealthCache = Cache::builder()
-        .time_to_live(Duration::from_millis(100))
-        .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
     // TODO: read config for if fastest/versus should be available publicly. default off
 
@@ -223,7 +217,6 @@ pub async fn serve(
         .layer(Extension(proxy_app))
         // frontend caches
         .layer(Extension(Arc::new(json_response_cache)))
-        .layer(Extension(health_cache))
         // 404 for any unknown routes
         .fallback(errors::handler_404);
 

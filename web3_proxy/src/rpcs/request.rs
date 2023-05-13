@@ -7,7 +7,7 @@ use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::ProviderError;
 use ethers::types::{Address, Bytes};
-use log::{debug, error, info, trace, warn, Level};
+use log::{debug, error, trace, warn, Level};
 use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
 use serde_json::json;
 use std::fmt;

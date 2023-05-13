@@ -24,7 +24,7 @@ use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
-use moka::future::{Cache, ConcurrentCacheExt};
+use moka::future::Cache;
 use ordered_float::OrderedFloat;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
@@ -57,6 +57,7 @@ pub struct Web3Rpcs {
     pub(crate) watch_consensus_rpcs_sender: watch::Sender<Option<Arc<ConsensusWeb3Rpcs>>>,
     /// this head receiver makes it easy to wait until there is a new block
     pub(super) watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
+    /// keep track of transactions that we have sent through subscriptions
     pub(super) pending_transaction_cache:
         Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
     pub(super) pending_tx_id_receiver: kanal::AsyncReceiver<TxHashAndRpc>,
