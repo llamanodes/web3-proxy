@@ -4,6 +4,7 @@ use super::authorization::Authorization;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
 use crate::response_cache::JsonRpcResponseData;
 
+use std::error::Error;
 use std::sync::Arc;
 use std::{borrow::Cow, net::IpAddr};
 
@@ -715,11 +716,11 @@ impl Web3ProxyError {
                 )
             }
             Self::SerdeJson(err) => {
-                warn!("serde json err={:?}", err);
+                warn!("serde json err={:?} source={:?}", err, err.source());
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("de/serialization error!"),
+                        message: Cow::Owned(format!("de/serialization error! {}", err)),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },

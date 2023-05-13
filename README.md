@@ -60,13 +60,13 @@ Check that the websocket is working:
 ```
 $ websocat ws://127.0.0.1:8544
 
-{"id": 1, "method": "eth_subscribe", "params": ["newHeads"]}
+{"jsonrpc": "2.0", "id": 1, "method": "eth_subscribe", "params": ["newHeads"]}
 
-{"id": 2, "method": "eth_subscribe", "params": ["newPendingTransactions"]}
+{"jsonrpc": "2.0", "id": 2, "method": "eth_subscribe", "params": ["newPendingTransactions"]}
 
-{"id": 3, "method": "eth_subscribe", "params": ["newPendingFullTransactions"]}
+{"jsonrpc": "2.0", "id": 3, "method": "eth_subscribe", "params": ["newPendingFullTransactions"]}
 
-{"id": 4, "method": "eth_subscribe", "params": ["newPendingRawTransactions"]}
+{"jsonrpc": "2.0", "id": 4, "method": "eth_subscribe", "params": ["newPendingRawTransactions"]}
 ```
 
 You can copy `config/example.toml` to `config/production-$CHAINNAME.toml` and then run `docker-compose up --build -d` start proxies for many chains.

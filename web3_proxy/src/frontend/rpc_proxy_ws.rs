@@ -20,7 +20,7 @@ use axum::{
 };
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
-use ethers::types::Bytes;
+use ethers::types::U64;
 use fstrings::{f, format_args_f};
 use futures::SinkExt;
 use futures::{
@@ -325,7 +325,7 @@ async fn handle_socket_payload(
     payload: &str,
     response_sender: &kanal::AsyncSender<Message>,
     subscription_count: &AtomicUsize,
-    subscriptions: Arc<RwLock<HashMap<Bytes, AbortHandle>>>,
+    subscriptions: Arc<RwLock<HashMap<U64, AbortHandle>>>,
 ) -> Web3ProxyResult<(Message, Option<OwnedSemaphorePermit>)> {
     let (authorization, semaphore) = match authorization.check_again(&app).await {
         Ok((a, s)) => (a, s),
@@ -341,6 +341,7 @@ async fn handle_socket_payload(
     };
 
     // TODO: do any clients send batches over websockets?
+    // TODO: change response into response_data
     let (response_id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
         Ok(json_request) => {
             let response_id = json_request.id.clone();
@@ -368,9 +369,9 @@ async fn handle_socket_payload(
                                         .as_ref()
                                         .context("there should be a result here")?;
 
-                                    // TODO: there must be a better way to do this
-                                    let k: Bytes = serde_json::from_str(result.get())
-                                        .context("subscription ids must be bytes")?;
+                                    // TODO: there must be a better way to turn a RawValue
+                                    let k: U64 = serde_json::from_str(result.get())
+                                        .context("subscription ids must be U64s")?;
 
                                     x.insert(k, handle);
                                 };
@@ -386,7 +387,7 @@ async fn handle_socket_payload(
                                 .await;
 
                         #[derive(serde::Deserialize)]
-                        struct EthUnsubscribeParams([Bytes; 1]);
+                        struct EthUnsubscribeParams([U64; 1]);
 
                         if let Some(params) = json_request.params {
                             match serde_json::from_value(params) {

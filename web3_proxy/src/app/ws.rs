@@ -8,7 +8,7 @@ use crate::jsonrpc::JsonRpcRequest;
 use crate::response_cache::JsonRpcResponseData;
 use crate::rpcs::transactions::TxStatus;
 use axum::extract::ws::Message;
-use ethers::prelude::U64;
+use ethers::types::U64;
 use futures::future::AbortHandle;
 use futures::future::Abortable;
 use futures::stream::StreamExt;
@@ -40,7 +40,7 @@ impl Web3ProxyApp {
         // TODO: this only needs to be unique per connection. we don't need it globably unique
         // TODO: have a max number of subscriptions per key/ip. have a global max number of subscriptions? how should this be calculated?
         let subscription_id = subscription_count.fetch_add(1, atomic::Ordering::SeqCst);
-        let subscription_id = U64::from(subscription_id);
+        let subscription_id = U64::from(subscription_id as u64);
 
         // save the id so we can use it in the response
         let id = jsonrpc_request.id.clone();
