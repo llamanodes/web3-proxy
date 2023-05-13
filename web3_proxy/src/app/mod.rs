@@ -1743,9 +1743,9 @@ impl Web3ProxyApp {
                         })
                     }
                 };
-                trace!("cache_key: {:#?}", cache_key);
 
-                let request_metadata = request_metadata.clone();
+                // TODO: this is too verbose
+                // trace!("cache_key: {:#?}", cache_key);
 
                 let authorization = authorization.clone();
 
@@ -1762,7 +1762,7 @@ impl Web3ProxyApp {
                                 .try_proxy_connection(
                                     &authorization,
                                     request,
-                                    Some(&request_metadata),
+                                    Some(request_metadata),
                                     from_block_num.as_ref(),
                                     to_block_num.as_ref(),
                                 )
@@ -1781,7 +1781,7 @@ impl Web3ProxyApp {
                         .try_proxy_connection(
                             &authorization,
                             request,
-                            Some(&request_metadata),
+                            Some(request_metadata),
                             None,
                             None,
                         )

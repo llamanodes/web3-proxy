@@ -594,7 +594,18 @@ impl Web3Rpcs {
                         return Ok(OpenRequestResult::Handle(handle));
                     }
                     Ok(OpenRequestResult::RetryAt(retry_at)) => {
-                        earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                        trace!(
+                            "{:?} - retry on {} @ {}",
+                            request_ulid,
+                            best_rpc,
+                            retry_at.duration_since(Instant::now()).as_secs_f32()
+                        );
+
+                        if earliest_retry_at.is_none() {
+                            earliest_retry_at = Some(retry_at);
+                        } else {
+                            earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                        }
                     }
                     Ok(OpenRequestResult::NotReady) => {
                         // TODO: log a warning? emit a stat?
@@ -634,7 +645,14 @@ impl Web3Rpcs {
                 Ok(OpenRequestResult::NotReady)
             }
             Some(earliest_retry_at) => {
-                warn!("no servers on {:?}! {:?}", self, earliest_retry_at);
+                warn!(
+                    "{:?} - no servers on {:?}! retry in {:?}s",
+                    request_ulid,
+                    self,
+                    earliest_retry_at
+                        .duration_since(Instant::now())
+                        .as_secs_f32()
+                );
 
                 Ok(OpenRequestResult::RetryAt(earliest_retry_at))
             }
@@ -793,6 +811,7 @@ impl Web3Rpcs {
 
                     let is_backup_response = rpc.backup;
 
+                    // TODO: instead of entirely skipping, maybe demote a tier?
                     skip_rpcs.push(rpc);
 
                     // TODO: get the log percent from the user data
