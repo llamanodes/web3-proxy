@@ -645,6 +645,8 @@ impl Web3Rpcs {
                 Ok(OpenRequestResult::NotReady)
             }
             Some(earliest_retry_at) => {
+                // TODO: log the server that retry_at came from
+                // TODO: `self` doesn't log well. get a pretty name for this group of servers
                 warn!(
                     "{:?} - no servers on {:?}! retry in {:?}s",
                     request_ulid,
@@ -744,7 +746,7 @@ impl Web3Rpcs {
             match rpc.try_request_handle(authorization, None).await {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
-                    warn!("{} is rate limited. skipping", rpc);
+                    trace!("{} is rate limited. skipping", rpc);
                     earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                 }
                 Ok(OpenRequestResult::Handle(handle)) => {
@@ -794,7 +796,7 @@ impl Web3Rpcs {
                 .best_available_rpc(
                     authorization,
                     request_metadata,
-                    &[],
+                    &skip_rpcs,
                     min_block_needed,
                     max_block_needed,
                 )
@@ -872,6 +874,8 @@ impl Web3Rpcs {
                                     ];
                                     for retry_prefix in retry_prefixes {
                                         if error_msg.starts_with(retry_prefix) {
+                                            // TODO: too verbose
+                                            debug!("retrying on another server");
                                             continue;
                                         }
                                     }
@@ -901,28 +905,28 @@ impl Web3Rpcs {
                                 _ => {}
                             }
 
-                            let rpc = skip_rpcs
-                                .last()
-                                .expect("there must have been a provider if we got an error");
+                            // let rpc = skip_rpcs
+                            //     .last()
+                            //     .expect("there must have been a provider if we got an error");
 
                             // TODO: emit a stat. if a server is getting skipped a lot, something is not right
 
                             // TODO: if we get a TrySendError, reconnect. wait why do we see a trysenderror on a dual provider? shouldn't it be using reqwest
 
-                            trace!(
-                                "Backend server error on {}! Retrying {:?} on another. err={:?}",
-                                rpc,
-                                request,
-                                error,
-                            );
+                            // TODO! WRONG! ONLY SET RETRY_AT IF THIS IS A SERVER/CONNECTION ERROR. JSONRPC "error" is FINE
+                            // trace!(
+                            //     "Backend server error on {}! Retrying {:?} on another. err={:?}",
+                            //     rpc,
+                            //     request,
+                            //     error,
+                            // );
+                            // if let Some(ref hard_limit_until) = rpc.hard_limit_until {
+                            //     let retry_at = Instant::now() + Duration::from_secs(1);
 
-                            if let Some(ref hard_limit_until) = rpc.hard_limit_until {
-                                let retry_at = Instant::now() + Duration::from_secs(1);
+                            //     hard_limit_until.send_replace(retry_at);
+                            // }
 
-                                hard_limit_until.send_replace(retry_at);
-                            }
-
-                            continue;
+                            return Ok(error.into());
                         }
                     }
                 }
@@ -931,8 +935,8 @@ impl Web3Rpcs {
                     // sleep (TODO: with a lock?) until our rate limits should be available
                     // TODO: if a server catches up sync while we are waiting, we could stop waiting
                     warn!(
-                        "All rate limits exceeded. waiting for change in synced servers or {:?}",
-                        retry_at
+                        "All rate limits exceeded. waiting for change in synced servers or {:?}s",
+                        retry_at.duration_since(Instant::now()).as_secs_f32()
                     );
 
                     // TODO: have a separate column for rate limited?
@@ -942,6 +946,7 @@ impl Web3Rpcs {
 
                     tokio::select! {
                         _ = sleep_until(retry_at) => {
+                            trace!("slept!");
                             skip_rpcs.pop();
                         }
                         _ = watch_consensus_connections.changed() => {
@@ -955,6 +960,8 @@ impl Web3Rpcs {
                     }
 
                     let waiting_for = min_block_needed.max(max_block_needed);
+
+                    info!("waiting for {:?}", waiting_for);
 
                     if watch_for_block(waiting_for, &mut watch_consensus_connections).await? {
                         // block found! continue so we can check for another rpc
@@ -974,10 +981,12 @@ impl Web3Rpcs {
                 .store(true, Ordering::Release);
         }
 
-        if let Some(r) = method_not_available_response {
+        if let Some(err) = method_not_available_response {
             // TODO: this error response is likely the user's fault. do we actually want it marked as an error? maybe keep user and server error bools?
             // TODO: emit a stat for unsupported methods? it would be best to block them at the proxy instead of at the backend
-            return Ok(r.into());
+            // TODO: this is too verbose!
+            debug!("{}", serde_json::to_string(&err)?);
+            return Ok(err.into());
         }
 
         let num_conns = self.by_name.load().len();
@@ -1003,8 +1012,6 @@ impl Web3Rpcs {
                 "No archive servers synced (min {:?}, max {:?}, head {:?}) ({} known)",
                 min_block_needed, max_block_needed, head_block_num, num_conns
             );
-        } else if num_skipped == 0 {
-            // TODO: what should we log?
         } else {
             error!(
                 "Requested data is not available (min {:?}, max {:?}, head {:?}) ({} skipped, {} known)",
