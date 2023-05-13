@@ -259,7 +259,7 @@ impl JsonRpcForwardedResponse {
         // TODO: can we somehow get the initial request here? if we put that into a tracing span, will things slow down a ton?
         JsonRpcForwardedResponse {
             jsonrpc: "2.0",
-            id: id.unwrap_or_else(|| JsonRpcId::None.to_raw_value()),
+            id: id.unwrap_or_default(),
             result: None,
             error: Some(JsonRpcErrorData {
                 code: code.unwrap_or(-32099),
