@@ -3,7 +3,7 @@ mod rtt_estimate;
 use std::sync::Arc;
 
 use kanal::SendError;
-use log::{error, info, trace};
+use log::{error, trace};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
@@ -105,14 +105,14 @@ struct PeakEwmaLatencyTask {
 
 impl PeakEwmaLatencyTask {
     /// Run the loop for updating latency
-    async fn run(mut self) {
+    async fn run(self) {
         while let Ok(rtt) = self.request_rx.recv().await {
             self.update(rtt);
         }
     }
 
     /// Update the estimate object atomically.
-    fn update(&mut self, rtt: Duration) {
+    fn update(&self, rtt: Duration) {
         let rtt = nanos(rtt);
 
         let now = Instant::now();
@@ -122,11 +122,8 @@ impl PeakEwmaLatencyTask {
             self.update_at,
         );
 
-        let x = self
-            .rtt_estimate
+        self.rtt_estimate
             .fetch_update(|mut rtt_estimate| rtt_estimate.update(rtt, self.decay_ns, now));
-
-        info!("x: {:?}", x);
     }
 }
 
