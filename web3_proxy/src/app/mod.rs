@@ -617,15 +617,11 @@ impl Web3ProxyApp {
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
         // TODO: don't allow any response to be bigger than X% of the cache
         // TODO: we should emit stats to calculate a more accurate expected cache size
-        // let response_cache = JsonRpcQueryCache::with_weighter(
-        //     (top_config.app.response_cache_max_bytes / 2048) as usize,
-        //     top_config.app.response_cache_max_bytes,
-        //     JsonRpcQueryWeigher,
-        // );
-
-        // TODO: efficient weigher!
-        let response_cache =
-            JsonRpcQueryCache::new((top_config.app.response_cache_max_bytes / 2048) as usize);
+        let response_cache = JsonRpcQueryCache::with_weighter(
+            (top_config.app.response_cache_max_bytes / 2048) as usize,
+            top_config.app.response_cache_max_bytes,
+            JsonRpcQueryWeigher,
+        );
 
         // create semaphores for concurrent connection limits
         // TODO: what should tti be for semaphores?
@@ -1760,9 +1756,10 @@ impl Web3ProxyApp {
 
                     match self
                         .jsonrpc_query_cache
-                        .get_value_or_guard(&cache_key, None)
+                        .get_value_or_guard_async(&cache_key).await
                     {
-                        quick_cache::GuardResult::Guard(x) => {
+                        Ok(x) => x,
+                        Err(x) => {
                             let response_data = self.balanced_rpcs
                                 .try_proxy_connection(
                                     &authorization,
@@ -1778,8 +1775,6 @@ impl Web3ProxyApp {
 
                             response_data
                         }
-                        quick_cache::GuardResult::Value(x) => x,
-                        quick_cache::GuardResult::Timeout => unreachable!(),
                     }
                 } else {
                 self.balanced_rpcs
