@@ -46,7 +46,7 @@ fdlimit = "0.2.1"
 flume = "0.10.14"
 fstrings = "0.2"
 futures = { version = "0.3.28", features = ["thread-pool"] }
-gethostname = "0.4.2"
+gethostname = "0.4.3"
 glob = "0.3.1"
 handlebars = "4.3.7"
 hashbrown = { version = "0.13.2", features = ["serde"] }
@@ -71,7 +71,7 @@ parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 prettytable = "*"
 proctitle = "0.1.1"
 quick_cache = "0.3.0"
-rdkafka = { version = "0.29.0" }
+rdkafka = { version = "0.30.0" }
 regex = "1.8.1"
 reqwest = { version = "0.11.17", default-features = false, features = ["json", "tokio-rustls"] }
 rmp-serde = "1.1.1"
