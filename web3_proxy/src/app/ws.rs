@@ -25,7 +25,7 @@ impl Web3ProxyApp {
         jsonrpc_request: JsonRpcRequest,
         subscription_count: &'a AtomicUsize,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
-        response_sender: kanal::AsyncSender<Message>,
+        response_sender: flume::Sender<Message>,
     ) -> Web3ProxyResult<(AbortHandle, JsonRpcForwardedResponse)> {
         let request_metadata = RequestMetadata::new(
             self,
@@ -95,7 +95,7 @@ impl Web3ProxyApp {
                         // TODO: can we check a content type header?
                         let response_msg = Message::Text(response_str);
 
-                        if response_sender.send(response_msg).await.is_err() {
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
@@ -159,7 +159,7 @@ impl Web3ProxyApp {
                         // TODO: do clients support binary messages?
                         let response_msg = Message::Text(response_str);
 
-                        if response_sender.send(response_msg).await.is_err() {
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
@@ -222,7 +222,7 @@ impl Web3ProxyApp {
                         // TODO: do clients support binary messages?
                         let response_msg = Message::Text(response_str);
 
-                        if response_sender.send(response_msg).await.is_err() {
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };
@@ -286,7 +286,7 @@ impl Web3ProxyApp {
                         // TODO: do clients support binary messages?
                         let response_msg = Message::Text(response_str);
 
-                        if response_sender.send(response_msg).await.is_err() {
+                        if response_sender.send_async(response_msg).await.is_err() {
                             // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
                             break;
                         };

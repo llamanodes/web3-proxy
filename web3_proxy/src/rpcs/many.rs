@@ -45,7 +45,7 @@ use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBeh
 #[derive(From)]
 pub struct Web3Rpcs {
     /// if watch_consensus_head_sender is some, Web3Rpc inside self will send blocks here when they get them
-    pub(crate) block_sender: kanal::AsyncSender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
+    pub(crate) block_sender: flume::Sender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
     /// any requests will be forwarded to one (or more) of these connections
     pub(crate) by_name: ArcSwap<HashMap<String, Arc<Web3Rpc>>>,
     /// notify all http providers to check their blocks at the same time
@@ -60,8 +60,8 @@ pub struct Web3Rpcs {
     /// keep track of transactions that we have sent through subscriptions
     pub(super) pending_transaction_cache:
         Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
-    pub(super) pending_tx_id_receiver: kanal::AsyncReceiver<TxHashAndRpc>,
-    pub(super) pending_tx_id_sender: kanal::AsyncSender<TxHashAndRpc>,
+    pub(super) pending_tx_id_receiver: flume::Receiver<TxHashAndRpc>,
+    pub(super) pending_tx_id_sender: flume::Sender<TxHashAndRpc>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
     pub(super) blocks_by_hash: BlocksByHashCache,
@@ -97,8 +97,8 @@ impl Web3Rpcs {
         watch::Receiver<Option<Arc<ConsensusWeb3Rpcs>>>,
         // watch::Receiver<Arc<ConsensusWeb3Rpcs>>,
     )> {
-        let (pending_tx_id_sender, pending_tx_id_receiver) = kanal::unbounded_async();
-        let (block_sender, block_receiver) = kanal::unbounded_async::<BlockAndRpc>();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
+        let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
 
         // TODO: query the rpc to get the actual expected block time, or get from config? maybe have this be part of a health check?
         let expected_block_time_ms = match chain_id {
@@ -350,7 +350,7 @@ impl Web3Rpcs {
     async fn subscribe(
         self: Arc<Self>,
         authorization: Arc<Authorization>,
-        block_receiver: kanal::AsyncReceiver<BlockAndRpc>,
+        block_receiver: flume::Receiver<BlockAndRpc>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> anyhow::Result<()> {
         let mut futures = vec![];
@@ -365,7 +365,7 @@ impl Web3Rpcs {
             let pending_tx_id_receiver = self.pending_tx_id_receiver.clone();
             let handle = tokio::task::spawn(async move {
                 // TODO: set up this future the same as the block funnel
-                while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv().await {
+                while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv_async().await {
                     let f = clone.clone().process_incoming_tx_id(
                         authorization.clone(),
                         rpc,
@@ -1399,8 +1399,8 @@ mod tests {
             (lagged_rpc.name.clone(), lagged_rpc.clone()),
         ]);
 
-        let (block_sender, _block_receiver) = kanal::unbounded_async();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = kanal::unbounded_async();
+        let (block_sender, _block_receiver) = flume::unbounded();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (watch_consensus_rpcs_sender, _watch_consensus_rpcs_receiver) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
@@ -1651,8 +1651,8 @@ mod tests {
             (archive_rpc.name.clone(), archive_rpc.clone()),
         ]);
 
-        let (block_sender, _) = kanal::unbounded_async();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = kanal::unbounded_async();
+        let (block_sender, _) = flume::unbounded();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (watch_consensus_rpcs_sender, _) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
@@ -1815,8 +1815,8 @@ mod tests {
             ),
         ]);
 
-        let (block_sender, _) = kanal::unbounded_async();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = kanal::unbounded_async();
+        let (block_sender, _) = flume::unbounded();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (watch_consensus_rpcs_sender, _) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 

@@ -53,6 +53,7 @@ pub enum Web3ProxyError {
     EthersHttpClientError(ethers::prelude::HttpClientError),
     EthersProviderError(ethers::prelude::ProviderError),
     EthersWsClientError(ethers::prelude::WsClientError),
+    FlumeRecvError(flume::RecvError),
     GasEstimateNotU256,
     Headers(headers::Error),
     HeaderToString(ToStrError),
@@ -76,8 +77,6 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     IpNotAllowed(IpAddr),
     JoinError(JoinError),
-    KanalReceiveError(kanal::ReceiveError),
-    KanalSendError(kanal::SendError),
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
     MsgPackEncode(rmp_serde::encode::Error),
@@ -112,6 +111,7 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     RefererNotAllowed(headers::Referer),
     SemaphoreAcquireError(AcquireError),
+    SendAppStatError(flume::SendError<crate::stats::AppStat>),
     SerdeJson(serde_json::Error),
     /// simple way to return an error message to the user and an anyhow to our logs
     #[display(fmt = "{}, {}, {:?}", _0, _1, _2)]
@@ -259,8 +259,8 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::KanalReceiveError(err) => {
-                warn!("KanalRecvError err={:#?}", err);
+            Self::FlumeRecvError(err) => {
+                warn!("FlumeRecvError err={:#?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
@@ -704,7 +704,7 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::KanalSendError(err) => {
+            Self::SendAppStatError(err) => {
                 error!("SendAppStatError err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,

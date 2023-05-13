@@ -11,6 +11,7 @@ use log::{error, info};
 use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
 use serde_json::json;
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tokio::time::{interval, MissedTickBehavior};
 use web3_proxy::{config::TopConfig, pagerduty::pagerduty_alert};
 
@@ -115,7 +116,7 @@ impl SentrydSubCommand {
         let mut handles = FuturesUnordered::new();
 
         // channels and a task for sending errors to logs/pagerduty
-        let (error_sender, error_receiver) = kanal::bounded_async::<SentrydError>(10);
+        let (error_sender, mut error_receiver) = mpsc::channel::<SentrydError>(10);
 
         {
             let error_handler_f = async move {
@@ -123,7 +124,7 @@ impl SentrydSubCommand {
                     info!("set PAGERDUTY_INTEGRATION_KEY to send create alerts for errors");
                 }
 
-                while let Ok(err) = error_receiver.recv().await {
+                while let Some(err) = error_receiver.recv().await {
                     log::log!(err.level, "check failed: {:#?}", err);
 
                     if matches!(err.level, log::Level::Error) {
@@ -257,7 +258,7 @@ async fn a_loop<T>(
     class: &str,
     seconds: u64,
     error_level: log::Level,
-    error_sender: kanal::AsyncSender<SentrydError>,
+    error_sender: mpsc::Sender<SentrydError>,
     f: impl Fn(SentrydErrorBuilder) -> T,
 ) -> anyhow::Result<()>
 where
