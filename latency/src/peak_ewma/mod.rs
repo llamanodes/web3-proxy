@@ -115,8 +115,6 @@ impl PeakEwmaLatencyTask {
     fn update(&mut self, rtt: Duration) {
         let rtt = nanos(rtt);
 
-        info!("updating rtt: {}ns", rtt);
-
         let now = Instant::now();
         debug_assert!(
             self.update_at <= now,
