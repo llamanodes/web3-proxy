@@ -7,7 +7,7 @@ use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::ProviderError;
 use ethers::types::{Address, Bytes};
-use log::{debug, error, info, trace, warn, Level};
+use log::{debug, error, trace, warn, Level};
 use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
 use serde_json::json;
 use std::fmt;
@@ -123,8 +123,7 @@ impl Authorization {
 
 impl Drop for OpenRequestHandle {
     fn drop(&mut self) {
-        let x = self
-            .rpc
+        self.rpc
             .active_requests
             .fetch_sub(1, atomic::Ordering::AcqRel);
     }
@@ -366,7 +365,10 @@ impl OpenRequestHandle {
                             tokio::spawn(f);
                         }
                         Err(err) => {
-                            warn!("failed parsing eth_call params. unable to save revert");
+                            warn!(
+                                "failed parsing eth_call params. unable to save revert. {}",
+                                err
+                            );
                         }
                     }
                 }
