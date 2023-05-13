@@ -122,8 +122,11 @@ impl PeakEwmaLatencyTask {
             self.update_at,
         );
 
-        self.rtt_estimate
+        let x = self
+            .rtt_estimate
             .fetch_update(|mut rtt_estimate| rtt_estimate.update(rtt, self.decay_ns, now));
+
+        info!("x: {:?}", x);
     }
 }
 
