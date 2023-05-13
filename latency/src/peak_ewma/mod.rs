@@ -68,7 +68,7 @@ impl PeakEwmaLatency {
 
     /// Report latency from a single request
     ///
-    /// Should only be called from the Web3Rpc that owns it.
+    /// Should only be called with a duration from the Web3Rpc that owns it.
     pub fn report(&self, duration: Duration) {
         match self.request_tx.try_send(duration) {
             Ok(()) => {}
@@ -82,7 +82,6 @@ impl PeakEwmaLatency {
                 unreachable!("Owner should keep channel open");
             }
         };
-        //.expect("Owner should keep channel open");
     }
 }
 
