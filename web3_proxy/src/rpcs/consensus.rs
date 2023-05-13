@@ -407,7 +407,11 @@ impl ConsensusFinder {
                 {
                     Ok(parent_block) => block_to_check = parent_block,
                     Err(err) => {
-                        warn!("Problem fetching parent block of {:#?} during consensus finding: {:#?}", block_to_check, err);
+                        warn!(
+                            "Problem fetching parent block of {:?} during consensus finding: {:#?}",
+                            block_to_check.hash(),
+                            err
+                        );
                         break;
                     }
                 }
