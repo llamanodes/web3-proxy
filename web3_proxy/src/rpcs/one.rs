@@ -237,14 +237,14 @@ impl Web3Rpc {
 
     pub fn peak_ewma(&self) -> OrderedFloat<f64> {
         // TODO: use request instead of head latency? that was killing perf though
-        let head_ewma = self.head_latency.read().value();
+        let peak_latency = self.peak_latency.read().value();
 
         // TODO: what ordering?
-        let active_requests = self.active_requests.load(atomic::Ordering::Relaxed) as f64;
+        let active_requests = self.active_requests.load(atomic::Ordering::Relaxed) as f64 + 1.0;
 
         // TODO: i'm not sure head * active is exactly right. but we'll see
         // TODO: i don't think this actually counts as peak. investigate with atomics.rs and peak_ewma.rs
-        OrderedFloat(head_ewma * active_requests)
+        OrderedFloat(peak_latency * active_requests)
     }
 
     // TODO: would be great if rpcs exposed this. see https://github.com/ledgerwatch/erigon/issues/6391
@@ -1366,7 +1366,7 @@ impl Serialize for Web3Rpc {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Rpc", 9)?;
+        let mut state = serializer.serialize_struct("Web3Rpc", 13)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
@@ -1397,6 +1397,17 @@ impl Serialize for Web3Rpc {
         }
 
         state.serialize_field("head_latency", &self.head_latency.read().value())?;
+        state.serialize_field(
+            "peak_latency",
+            &self.peak_latency.as_ref().unwrap().latency(),
+        )?;
+
+        state.serialize_field("peak_ewma", self.peak_ewma().as_ref())?;
+
+        state.serialize_field(
+            "active_requests",
+            &self.active_requests.load(atomic::Ordering::Relaxed),
+        )?;
 
         state.serialize_field(
             "total_requests",

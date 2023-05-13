@@ -405,6 +405,7 @@ async fn handle_socket_payload(
                                         }
                                     };
 
+                                    // TODO: don't create the response here. use a JsonRpcResponseData instead
                                     let response = JsonRpcForwardedResponse::from_value(
                                         json!(partial_response),
                                         response_id.clone(),

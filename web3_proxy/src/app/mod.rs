@@ -145,7 +145,7 @@ pub struct Web3ProxyApp {
     /// TODO: include another type so that we can use private miner relays that do not use JSONRPC requests
     pub private_rpcs: Option<Arc<Web3Rpcs>>,
     /// track JSONRPC responses
-    jsonrpc_query_cache: JsonRpcQueryCache,
+    pub jsonrpc_query_cache: JsonRpcQueryCache,
     /// rpc clients that subscribe to newHeads use this channel
     /// don't drop this or the sender will stop working
     /// TODO: broadcast channel instead?

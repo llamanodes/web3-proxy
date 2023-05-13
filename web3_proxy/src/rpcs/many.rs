@@ -1146,7 +1146,7 @@ impl Serialize for Web3Rpcs {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Web3Rpcs", 6)?;
+        let mut state = serializer.serialize_struct("Web3Rpcs", 1)?;
 
         {
             let by_name = self.by_name.load();
@@ -1166,12 +1166,12 @@ impl Serialize for Web3Rpcs {
             }
         }
 
-        self.blocks_by_hash.sync();
-        self.blocks_by_number.sync();
-        state.serialize_field("block_hashes_count", &self.blocks_by_hash.entry_count())?;
-        state.serialize_field("block_hashes_size", &self.blocks_by_hash.weighted_size())?;
-        state.serialize_field("block_numbers_count", &self.blocks_by_number.entry_count())?;
-        state.serialize_field("block_numbers_size", &self.blocks_by_number.weighted_size())?;
+        // self.blocks_by_hash.sync();
+        // self.blocks_by_number.sync();
+        // state.serialize_field("block_hashes_count", &self.blocks_by_hash.entry_count())?;
+        // state.serialize_field("block_hashes_size", &self.blocks_by_hash.weighted_size())?;
+        // state.serialize_field("block_numbers_count", &self.blocks_by_number.entry_count())?;
+        // state.serialize_field("block_numbers_size", &self.blocks_by_number.weighted_size())?;
         state.end()
     }
 }

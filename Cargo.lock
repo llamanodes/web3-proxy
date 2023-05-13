@@ -6629,6 +6629,7 @@ dependencies = [
  "serde_json",
  "serde_prometheus",
  "siwe",
+ "strum",
  "thread-fast-rng",
  "time 0.3.21",
  "tokio",
