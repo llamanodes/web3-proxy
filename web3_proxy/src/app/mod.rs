@@ -1744,49 +1744,46 @@ impl Web3ProxyApp {
                     }
                 };
 
-                // TODO: this is too verbose
-                // trace!("cache_key: {:#?}", cache_key);
-
                 let authorization = authorization.clone();
 
-                if let Some(cache_key) = cache_key {
-                    let from_block_num = cache_key.from_block.as_ref().map(|x| x.number.unwrap());
-                    let to_block_num = cache_key.to_block.as_ref().map(|x| x.number.unwrap());
+                // if let Some(cache_key) = cache_key {
+                //     let from_block_num = cache_key.from_block.as_ref().map(|x| x.number.unwrap());
+                //     let to_block_num = cache_key.to_block.as_ref().map(|x| x.number.unwrap());
 
-                    match self
-                        .jsonrpc_query_cache
-                        .get_value_or_guard(&cache_key, None)
-                    {
-                        quick_cache::GuardResult::Guard(x) => {
-                            let response_data = self.balanced_rpcs
-                                .try_proxy_connection(
-                                    &authorization,
-                                    request,
-                                    Some(request_metadata),
-                                    from_block_num.as_ref(),
-                                    to_block_num.as_ref(),
-                                )
-                                .await?;
+                //     match self
+                //         .jsonrpc_query_cache
+                //         .get_value_or_guard(&cache_key, None)
+                //     {
+                //         quick_cache::GuardResult::Guard(x) => {
+                //             let response_data = self.balanced_rpcs
+                //                 .try_proxy_connection(
+                //                     &authorization,
+                //                     request,
+                //                     Some(request_metadata),
+                //                     from_block_num.as_ref(),
+                //                     to_block_num.as_ref(),
+                //                 )
+                //                 .await?;
 
-                            // TODO: should we put it in an arc?
-                            x.insert(response_data.clone());
+                //             // TODO: should we put it in an arc?
+                //             x.insert(response_data.clone());
 
-                            response_data
-                        }
-                        quick_cache::GuardResult::Value(x) => x,
-                        quick_cache::GuardResult::Timeout => unreachable!(),
-                    }
-                } else {
-                    self.balanced_rpcs
-                        .try_proxy_connection(
-                            &authorization,
-                            request,
-                            Some(request_metadata),
-                            None,
-                            None,
-                        )
-                        .await?
-                }
+                //             response_data
+                //         }
+                //         quick_cache::GuardResult::Value(x) => x,
+                //         quick_cache::GuardResult::Timeout => unreachable!(),
+                //     }
+                // } else {
+                self.balanced_rpcs
+                    .try_proxy_connection(
+                        &authorization,
+                        request,
+                        Some(request_metadata),
+                        None,
+                        None,
+                    )
+                    .await?
+                // }
             }
         };
 
