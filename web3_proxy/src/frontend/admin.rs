@@ -5,8 +5,10 @@ use super::errors::Web3ProxyResponse;
 use crate::admin_queries::query_admin_modify_usertier;
 use crate::app::Web3ProxyApp;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext};
+use crate::http_params::get_user_id_from_params;
 use crate::user_token::UserBearerToken;
 use crate::PostLogin;
+use anyhow::Context;
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -16,14 +18,18 @@ use axum::{
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
-use entities::{admin_trail, login, pending_login, rpc_key, user};
+use entities::{
+    admin, admin_increase_balance_receipt, admin_trail, balance, login, pending_login, rpc_key,
+    user, user_tier,
+};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;
 use log::{debug, info, warn};
-use migration::sea_orm::prelude::Uuid;
+use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    TransactionTrait,
 };
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
@@ -32,6 +38,117 @@ use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
+
+/// `GET /admin/increase_balance` -- As an admin, modify a user's user-tier
+///
+/// - user_address that is to credited balance
+/// - user_role_tier that is supposed to be adapted
+#[debug_handler]
+pub async fn admin_increase_balance(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Web3ProxyResponse {
+    println!("Got here 1 {:?}", bearer);
+    let (caller, _) = app.bearer_is_authorized(bearer).await?;
+    let caller_id = caller.id;
+
+    println!("Got here 2, {:?}", caller_id);
+    // Establish connections
+    let db_conn = app
+        .db_conn()
+        .context("query_admin_modify_user needs a db")?;
+
+    // Check if the caller is an admin (if not, return early)
+    let admin_entry: admin::Model = admin::Entity::find()
+        .filter(admin::Column::UserId.eq(caller_id))
+        .one(&db_conn)
+        .await?
+        .ok_or(Web3ProxyError::AccessDenied)?;
+
+    // println!("Got here 2, {:?}", caller_id);
+    // Get the user from params
+    let user_address: Address = params
+        .get("user_address")
+        .ok_or_else(|| {
+            Web3ProxyError::BadRequest("Unable to find user_address key in request".to_string())
+        })?
+        .parse::<Address>()
+        .map_err(|_| {
+            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".to_string())
+        })?;
+    let user_address_bytes: Vec<u8> = user_address.clone().to_fixed_bytes().into();
+    // Get the amount from params
+    let amount: Decimal = Decimal::from_str(params.get("amount").ok_or_else(|| {
+        Web3ProxyError::BadRequest("Unable to get the amount key from the request".to_string())
+    })?)
+    .or_else(|err| {
+        Err(Web3ProxyError::BadRequest(format!(
+            "Unable to parse amount from the request {:?}",
+            err
+        )))
+    })?;
+
+    // TODO: Gotta check if this reference is ok
+    let user_entry: user::Model = user::Entity::find()
+        .filter(user::Column::Address.eq(user_address_bytes.clone()))
+        .one(&db_conn)
+        .await?
+        .ok_or(Web3ProxyError::BadRequest(
+            "No user with this id found".to_string(),
+        ))?;
+
+    let increase_balance_receipt = admin_increase_balance_receipt::ActiveModel {
+        amount: sea_orm::Set(amount),
+        admin_id: sea_orm::Set(admin_entry.id),
+        deposit_to_user_id: sea_orm::Set(user_entry.id),
+        ..Default::default()
+    };
+    increase_balance_receipt.save(&db_conn).await?;
+
+    let mut out = HashMap::new();
+    out.insert(
+        "user",
+        serde_json::Value::String(format!("{:?}", user_address)),
+    );
+    out.insert("amount", serde_json::Value::String(amount.to_string()));
+
+    let txn = db_conn.begin().await?;
+
+    // Get the balance row
+    let balance_entry: balance::Model = balance::Entity::find()
+        .filter(balance::Column::UserId.eq(user_entry.id))
+        .one(&txn)
+        .await?
+        .context("User does not have a balance row")?;
+
+    let new_amount = balance_entry.available_balance + amount;
+    let mut balance_entry = balance_entry.into_active_model();
+    balance_entry.available_balance = sea_orm::Set(new_amount);
+
+    println!("New amount: {:?}", new_amount);
+
+    // Finally make the user premium if balance is above 10$
+    let premium_user_tier = user_tier::Entity::find()
+        .filter(user_tier::Column::Title.eq("Premium"))
+        .one(&txn)
+        .await?
+        .context("Premium tier was not found!")?;
+    if new_amount >= Decimal::new(10, 0) && user_entry.user_tier_id != premium_user_tier.id {
+        let mut user_entry = user_entry.into_active_model();
+        user_entry.user_tier_id = sea_orm::Set(premium_user_tier.id);
+        user_entry.save(&txn).await?;
+    }
+    // TODO: Downgrade otherwise, right now not functioning properly
+
+    balance_entry.save(&txn).await?;
+    txn.commit().await?;
+
+    // Then read and save in one transaction
+    let response = (StatusCode::OK, Json(out)).into_response();
+
+    Ok(response)
+}
 
 /// `GET /admin/modify_role` -- As an admin, modify a user's user-tier
 ///

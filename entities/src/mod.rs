@@ -3,6 +3,7 @@
 pub mod prelude;
 
 pub mod admin;
+pub mod admin_increase_balance_receipt;
 pub mod admin_trail;
 pub mod balance;
 pub mod increase_on_chain_balance_receipt;
