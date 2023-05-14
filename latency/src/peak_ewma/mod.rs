@@ -63,6 +63,7 @@ impl PeakEwmaLatency {
         );
 
         // Update the RTT estimate to account for decay since the last update.
+        // TODO: having an update here means we don't actually write from just one thread!! Thats how we get partially written stuff i think
         estimate.update(0.0, self.decay_ns, now)
     }
 
