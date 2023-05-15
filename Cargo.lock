@@ -6708,7 +6708,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "prettytable",
  "proctitle",
- "quick_cache",
+ "quick_cache_ttl",
  "rdkafka",
  "redis-rate-limiter",
  "regex",

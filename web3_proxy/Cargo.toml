@@ -19,6 +19,7 @@ deferred-rate-limiter = { path = "../deferred-rate-limiter" }
 entities = { path = "../entities" }
 latency = { path = "../latency" }
 migration = { path = "../migration" }
+quick_cache_ttl = { path = "../quick_cache_ttl" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 thread-fast-rng = { path = "../thread-fast-rng" }
 
@@ -70,7 +71,6 @@ pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 prettytable = "*"
 proctitle = "0.1.1"
-quick_cache = "0.3.0"
 rdkafka = { version = "0.30.0" }
 regex = "1.8.1"
 reqwest = { version = "0.11.17", default-features = false, features = ["json", "tokio-rustls"] }
