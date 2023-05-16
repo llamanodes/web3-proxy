@@ -38,7 +38,7 @@ pub enum ResponseCacheKey {
 
 pub type ResponseCache = quick_cache_ttl::CacheWithTTL<
     ResponseCacheKey,
-    (StatusCode, axum::body::Bytes),
+    (StatusCode, &'static str, axum::body::Bytes),
     UnitWeighter,
     quick_cache_ttl::DefaultHashBuilder,
 >;
