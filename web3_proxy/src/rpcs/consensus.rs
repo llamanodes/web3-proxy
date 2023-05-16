@@ -7,7 +7,7 @@ use derive_more::Constructor;
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use itertools::{Itertools, MinMaxResult};
-use log::{trace, warn};
+use log::{debug, info, trace, warn};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::Reverse;
@@ -266,15 +266,16 @@ impl ConsensusFinder {
     async fn insert(&mut self, rpc: Arc<Web3Rpc>, block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
         let first_seen = self
             .first_seen
-            .get_with_by_ref(block.hash(), async move { Instant::now() })
+            .get_with_by_ref(block.hash(), async { Instant::now() })
             .await;
 
-        // TODO: this should be 0 if we are first seen, but i think it will be slightly non-zero.
-        // calculate elapsed time before trying to lock.
+        // calculate elapsed time before trying to lock
         let latency = first_seen.elapsed();
 
+        // record the time behind the fastest node
         rpc.head_latency.write().record(latency);
 
+        // update the local mapping of rpc -> block
         self.rpc_heads.insert(rpc, block)
     }
 

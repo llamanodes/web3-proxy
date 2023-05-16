@@ -17,18 +17,19 @@ impl Serialize for EwmaLatency {
 }
 
 impl EwmaLatency {
-    #[inline(always)]
+    #[inline]
     pub fn record(&mut self, duration: Duration) {
         self.record_ms(duration.as_secs_f64() * 1000.0);
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn record_ms(&mut self, milliseconds: f64) {
-        self.ewma.add(milliseconds);
+        // don't let it go under 0.1ms
+        self.ewma.add(milliseconds.max(0.1));
     }
 
     /// Current EWMA value in milliseconds
-    #[inline(always)]
+    #[inline]
     pub fn value(&self) -> f64 {
         self.ewma.value()
     }
@@ -36,10 +37,11 @@ impl EwmaLatency {
 
 impl Default for EwmaLatency {
     fn default() -> Self {
-        // TODO: what should the default span be? 25 requests?
-        let span = 25.0;
+        // TODO: what should the default span be? 10 requests?
+        let span = 10.0;
 
-        let start = 1000.0;
+        // TODO: what should the defautt start be?
+        let start = 1.0;
 
         Self::new(span, start)
     }
