@@ -111,8 +111,29 @@ pub struct ConsensusWeb3Rpcs {
 
 impl ConsensusWeb3Rpcs {
     #[inline]
-    pub fn num_conns(&self) -> usize {
+    pub fn num_consensus_rpcs(&self) -> usize {
         self.best_rpcs.len()
+    }
+
+    pub fn best_block_num(&self, skip_rpcs: &[Arc<Web3Rpc>]) -> Option<&U64> {
+        if self.best_rpcs.iter().all(|rpc| skip_rpcs.contains(rpc)) {
+            // all of the consensus rpcs are skipped
+            // iterate the other rpc tiers to find the next best block
+            let mut best_block = None;
+            for (next_ranking, next_rpcs) in self.other_rpcs.iter() {
+                if next_rpcs.iter().all(|rpc| skip_rpcs.contains(rpc)) {
+                    // everything in this ranking is skipped
+                    continue;
+                }
+
+                best_block = best_block.max(next_ranking.head_num.as_ref());
+            }
+
+            best_block
+        } else {
+            // not all the best synced rpcs are skipped yet. use the best head block
+            Some(self.head_block.number())
+        }
     }
 
     pub fn has_block_data(&self, rpc: &Web3Rpc, block_num: &U64) -> bool {
@@ -266,15 +287,16 @@ impl ConsensusFinder {
     async fn insert(&mut self, rpc: Arc<Web3Rpc>, block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
         let first_seen = self
             .first_seen
-            .get_with_by_ref(block.hash(), async move { Instant::now() })
+            .get_with_by_ref(block.hash(), async { Instant::now() })
             .await;
 
-        // TODO: this should be 0 if we are first seen, but i think it will be slightly non-zero.
-        // calculate elapsed time before trying to lock.
+        // calculate elapsed time before trying to lock
         let latency = first_seen.elapsed();
 
+        // record the time behind the fastest node
         rpc.head_latency.write().record(latency);
 
+        // update the local mapping of rpc -> block
         self.rpc_heads.insert(rpc, block)
     }
 

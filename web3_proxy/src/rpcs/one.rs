@@ -70,7 +70,6 @@ pub struct Web3Rpc {
     /// Track head block latency
     pub(super) head_latency: RwLock<EwmaLatency>,
     /// Track peak request latency
-    ///
     /// This is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) peak_latency: Option<PeakEwmaLatency>,
     /// Track total requests served
@@ -236,16 +235,18 @@ impl Web3Rpc {
     }
 
     pub fn peak_ewma(&self) -> OrderedFloat<f64> {
-        let peak_latency = if let Some(peak_latency) = self.peak_latency.as_ref() {
-            peak_latency.latency().as_secs_f64()
-        } else {
-            0.0
-        };
+        // TODO: bug inside peak ewma somewhere. possible with atomics being relaxed or the conversion to pair and back
+        // let peak_latency = if let Some(peak_latency) = self.peak_latency.as_ref() {
+        //     peak_latency.latency().as_secs_f64()
+        // } else {
+        //     0.0
+        // };
+        let head_latency = self.head_latency.read().value();
 
         // TODO: what ordering?
         let active_requests = self.active_requests.load(atomic::Ordering::Acquire) as f64 + 1.0;
 
-        OrderedFloat(peak_latency * active_requests)
+        OrderedFloat(head_latency * active_requests)
     }
 
     // TODO: would be great if rpcs exposed this. see https://github.com/ledgerwatch/erigon/issues/6391

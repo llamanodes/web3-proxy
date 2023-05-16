@@ -17,7 +17,7 @@ use derive_more::From;
 use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key, user, user_tier};
 use influxdb2::models::DataPoint;
-use log::{trace, warn};
+use log::{error, trace, warn};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
@@ -406,7 +406,7 @@ impl BufferedRpcQueryStats {
         if new_available_balance < Decimal::from(10u64) && downgrade_user_role.title == "Premium" {
             // TODO: we could do this outside the balance low block, but I think its fine. or better, update the cache if <$10 and downgrade if <$1
             if let Some(rpc_secret_key_cache) = rpc_secret_key_cache {
-                todo!("expire (or probably better to update) the user cache now that the balance is low");
+                error!("expire (or probably better to update) the user cache now that the balance is low");
                 // actually i think we need to have 2 caches. otherwise users with 2 keys are going to have seperate caches
                 // 1. rpc_secret_key_id -> AuthorizationChecks (cuz we don't want to hit the db every time)
                 // 2. user_id -> Balance
@@ -418,8 +418,6 @@ impl BufferedRpcQueryStats {
             // active_downgrade_user.user_tier_id = sea_orm::Set(downgrade_user_role.id);
             // active_downgrade_user.save(db_conn).await?;
         }
-
-        // TODO:
 
         // Get the referee, and the referrer
         // (2) Look up the code that this user used. This is the referee table

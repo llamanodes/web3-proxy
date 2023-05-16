@@ -444,7 +444,7 @@ impl Web3Rpcs {
         let total_tiers = consensus_finder.worst_tier().unwrap_or(10);
         let backups_needed = new_synced_connections.backups_needed;
         let consensus_head_block = new_synced_connections.head_block.clone();
-        let num_consensus_rpcs = new_synced_connections.num_conns();
+        let num_consensus_rpcs = new_synced_connections.num_consensus_rpcs();
         let num_active_rpcs = consensus_finder.len();
         let total_rpcs = self.by_name.load().len();
 
