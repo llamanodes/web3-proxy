@@ -633,7 +633,7 @@ impl Web3Rpcs {
             None => {
                 // none of the servers gave us a time to retry at
                 debug!(
-                    "{:?} - no servers on {:?} gave a retry time! Skipped {:?}",
+                    "{:?} - no servers in {} gave a retry time! Skipped {:?}",
                     request_ulid, self, skip
                 );
 
