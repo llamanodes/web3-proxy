@@ -7,7 +7,7 @@ use derive_more::Constructor;
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use itertools::{Itertools, MinMaxResult};
-use log::{debug, info, trace, warn};
+use log::{trace, warn};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::Reverse;
@@ -111,8 +111,29 @@ pub struct ConsensusWeb3Rpcs {
 
 impl ConsensusWeb3Rpcs {
     #[inline]
-    pub fn num_conns(&self) -> usize {
+    pub fn num_consensus_rpcs(&self) -> usize {
         self.best_rpcs.len()
+    }
+
+    pub fn best_block_num(&self, skip_rpcs: &[Arc<Web3Rpc>]) -> Option<&U64> {
+        if self.best_rpcs.iter().all(|rpc| skip_rpcs.contains(rpc)) {
+            // all of the consensus rpcs are skipped
+            // iterate the other rpc tiers to find the next best block
+            let mut best_block = None;
+            for (next_ranking, next_rpcs) in self.other_rpcs.iter() {
+                if next_rpcs.iter().all(|rpc| skip_rpcs.contains(rpc)) {
+                    // everything in this ranking is skipped
+                    continue;
+                }
+
+                best_block = best_block.max(next_ranking.head_num.as_ref());
+            }
+
+            best_block
+        } else {
+            // not all the best synced rpcs are skipped yet. use the best head block
+            Some(self.head_block.number())
+        }
     }
 
     pub fn has_block_data(&self, rpc: &Web3Rpc, block_num: &U64) -> bool {
