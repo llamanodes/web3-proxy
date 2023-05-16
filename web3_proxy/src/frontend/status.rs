@@ -3,7 +3,7 @@
 //! For ease of development, users can currently access these endponts.
 //! They will eventually move to another port.
 
-use super::{FrontendJsonResponseCache, FrontendResponseCacheKey};
+use super::{ResponseCache, ResponseCacheKey};
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse, Extension};
 use axum_macros::debug_handler;
@@ -21,10 +21,10 @@ static BACKUPS_NEEDED_FALSE: Lazy<Bytes> = Lazy::new(|| Bytes::from("false\n"));
 #[debug_handler]
 pub async fn health(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    Extension(cache): Extension<Arc<FrontendJsonResponseCache>>,
+    Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     cache
-        .get_or_insert_async::<Infallible, _>(&FrontendResponseCacheKey::Health, async move {
+        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::Health, async move {
             Ok(_health(app).await)
         })
         .await
@@ -44,13 +44,12 @@ async fn _health(app: Arc<Web3ProxyApp>) -> (StatusCode, Bytes) {
 #[debug_handler]
 pub async fn backups_needed(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    Extension(cache): Extension<Arc<FrontendJsonResponseCache>>,
+    Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     cache
-        .get_or_insert_async::<Infallible, _>(
-            &FrontendResponseCacheKey::BackupsNeeded,
-            async move { Ok(_backups_needed(app).await) },
-        )
+        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::BackupsNeeded, async move {
+            Ok(_backups_needed(app).await)
+        })
         .await
 }
 
@@ -88,10 +87,10 @@ async fn _backups_needed(app: Arc<Web3ProxyApp>) -> (StatusCode, Bytes) {
 #[debug_handler]
 pub async fn status(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    Extension(cache): Extension<Arc<FrontendJsonResponseCache>>,
+    Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     cache
-        .get_or_insert_async::<Infallible, _>(&FrontendResponseCacheKey::Status, async move {
+        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::Status, async move {
             Ok(_status(app).await)
         })
         .await

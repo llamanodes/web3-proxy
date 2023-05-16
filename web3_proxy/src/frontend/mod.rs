@@ -30,14 +30,14 @@ use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
 /// simple keys for caching responses
 #[derive(Copy, Clone, Hash, PartialEq, Eq, EnumCount, EnumIter)]
-pub enum FrontendResponseCacheKey {
+pub enum ResponseCacheKey {
     BackupsNeeded,
     Health,
     Status,
 }
 
-pub type FrontendJsonResponseCache = quick_cache_ttl::CacheWithTTL<
-    FrontendResponseCacheKey,
+pub type ResponseCache = quick_cache_ttl::CacheWithTTL<
+    ResponseCacheKey,
     (StatusCode, axum::body::Bytes),
     UnitWeighter,
     quick_cache_ttl::DefaultHashBuilder,
@@ -53,13 +53,10 @@ pub async fn serve(
     // setup caches for whatever the frontend needs
     // no need for max items since it is limited by the enum key
     // TODO: latest moka allows for different ttls for different
-    let response_cache_size = FrontendResponseCacheKey::COUNT;
+    let response_cache_size = ResponseCacheKey::COUNT;
 
-    let json_response_cache = FrontendJsonResponseCache::new_with_unit_weights(
-        response_cache_size,
-        Duration::from_secs(1),
-    )
-    .await;
+    let response_cache =
+        ResponseCache::new_with_unit_weights(response_cache_size, Duration::from_secs(1)).await;
 
     // TODO: read config for if fastest/versus should be available publicly. default off
 
@@ -225,7 +222,7 @@ pub async fn serve(
         // application state
         .layer(Extension(proxy_app))
         // frontend caches
-        .layer(Extension(Arc::new(json_response_cache)))
+        .layer(Extension(Arc::new(response_cache)))
         // 404 for any unknown routes
         .fallback(errors::handler_404);
 
