@@ -648,6 +648,7 @@ impl Web3ProxyApp {
             top_config.app.max_block_lag,
             top_config.app.min_synced_rpcs,
             top_config.app.min_sum_soft_limit,
+            "balanced".to_string(),
             pending_transactions.clone(),
             Some(pending_tx_sender.clone()),
             Some(watch_consensus_head_sender),
@@ -675,6 +676,7 @@ impl Web3ProxyApp {
                 None,
                 0,
                 0,
+                "protected".to_string(),
                 pending_transactions.clone(),
                 // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits, but they should have
                 None,
@@ -708,6 +710,7 @@ impl Web3ProxyApp {
                 None,
                 0,
                 0,
+                "eip4337".to_string(),
                 pending_transactions.clone(),
                 None,
                 None,

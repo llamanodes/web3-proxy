@@ -2,7 +2,7 @@ mod rtt_estimate;
 
 use std::sync::Arc;
 
-use log::{error, info};
+use log::{error, trace};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinHandle;
