@@ -19,24 +19,29 @@ use axum::{
 use http::{header::AUTHORIZATION, StatusCode};
 use listenfd::ListenFd;
 use log::info;
-use std::iter::once;
+use quick_cache_ttl::UnitWeighter;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::{iter::once, time::Duration};
 use strum::{EnumCount, EnumIter};
-use tokio::{sync::broadcast, time::Instant};
+use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
 /// simple keys for caching responses
 #[derive(Copy, Clone, Hash, PartialEq, Eq, EnumCount, EnumIter)]
-pub enum FrontendResponseCacheKey {
+pub enum ResponseCacheKey {
     BackupsNeeded,
     Health,
     Status,
 }
 
-pub type FrontendJsonResponseCache =
-    quick_cache::sync::Cache<FrontendResponseCacheKey, ((StatusCode, axum::body::Bytes), Instant)>;
+pub type ResponseCache = quick_cache_ttl::CacheWithTTL<
+    ResponseCacheKey,
+    (StatusCode, &'static str, axum::body::Bytes),
+    UnitWeighter,
+    quick_cache_ttl::DefaultHashBuilder,
+>;
 
 /// Start the frontend server.
 pub async fn serve(
@@ -48,9 +53,10 @@ pub async fn serve(
     // setup caches for whatever the frontend needs
     // no need for max items since it is limited by the enum key
     // TODO: latest moka allows for different ttls for different
-    let response_cache_size = FrontendResponseCacheKey::COUNT;
+    let response_cache_size = ResponseCacheKey::COUNT;
 
-    let json_response_cache = FrontendJsonResponseCache::new(response_cache_size);
+    let response_cache =
+        ResponseCache::new_with_unit_weights(response_cache_size, Duration::from_secs(1)).await;
 
     // TODO: read config for if fastest/versus should be available publicly. default off
 
@@ -216,7 +222,7 @@ pub async fn serve(
         // application state
         .layer(Extension(proxy_app))
         // frontend caches
-        .layer(Extension(Arc::new(json_response_cache)))
+        .layer(Extension(Arc::new(response_cache)))
         // 404 for any unknown routes
         .fallback(errors::handler_404);
 

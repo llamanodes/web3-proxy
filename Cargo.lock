@@ -4226,6 +4226,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick_cache_ttl"
+version = "0.1.0"
+dependencies = [
+ "flume",
+ "quick_cache",
+ "tokio",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6699,7 +6708,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "prettytable",
  "proctitle",
- "quick_cache",
+ "quick_cache_ttl",
  "rdkafka",
  "redis-rate-limiter",
  "regex",

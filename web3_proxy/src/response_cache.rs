@@ -3,7 +3,8 @@ use crate::{
 };
 use derive_more::From;
 use ethers::providers::ProviderError;
-use quick_cache::{sync::Cache as QuickCache, Weighter};
+use hashbrown::hash_map::DefaultHashBuilder;
+use quick_cache_ttl::{CacheWithTTL, Weighter};
 use serde_json::value::RawValue;
 use std::{
     borrow::Cow,
@@ -33,8 +34,12 @@ impl Hash for JsonRpcQueryCacheKey {
     }
 }
 
-pub type JsonRpcQueryCache =
-    QuickCache<JsonRpcQueryCacheKey, JsonRpcResponseData, JsonRpcQueryWeigher>;
+pub type JsonRpcQueryCache = CacheWithTTL<
+    JsonRpcQueryCacheKey,
+    JsonRpcResponseData,
+    JsonRpcQueryWeigher,
+    DefaultHashBuilder,
+>;
 
 #[derive(Clone)]
 pub struct JsonRpcQueryWeigher;

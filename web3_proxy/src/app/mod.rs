@@ -36,6 +36,7 @@ use ethers::types::U256;
 use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
+use hashbrown::hash_map::DefaultHashBuilder;
 use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
 use log::{debug, error, info, trace, warn, Level};
@@ -617,11 +618,15 @@ impl Web3ProxyApp {
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
         // TODO: don't allow any response to be bigger than X% of the cache
         // TODO: we should emit stats to calculate a more accurate expected cache size
-        let response_cache = JsonRpcQueryCache::with_weighter(
+        // TODO: do we actually want a TTL on this?
+        let response_cache = JsonRpcQueryCache::new(
             (top_config.app.response_cache_max_bytes / 2048) as usize,
             top_config.app.response_cache_max_bytes,
             JsonRpcQueryWeigher,
-        );
+            DefaultHashBuilder::default(),
+            Duration::from_secs(3600),
+        )
+        .await;
 
         // create semaphores for concurrent connection limits
         // TODO: what should tti be for semaphores?
@@ -1756,7 +1761,7 @@ impl Web3ProxyApp {
 
                     match self
                         .jsonrpc_query_cache
-                        .get_value_or_guard_async(&cache_key).await
+                        .get_value_or_guard_async(cache_key).await
                     {
                         Ok(x) => x,
                         Err(x) => {
