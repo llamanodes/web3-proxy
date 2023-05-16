@@ -104,7 +104,7 @@ impl PeakEwmaLatencyTask {
         while let Some(rtt) = self.request_rx.recv().await {
             self.update(rtt);
         }
-        info!("latency loop exited");
+        trace!("latency loop exited");
     }
 
     /// Update the estimate object atomically.
