@@ -633,8 +633,8 @@ impl Web3Rpcs {
             None => {
                 // none of the servers gave us a time to retry at
                 debug!(
-                    "{:?} - no servers in {} gave a retry time! Skipped {:?}",
-                    request_ulid, self, skip
+                    "{:?} - no servers in {} gave a retry time! Skipped {:?}. {:#?}",
+                    request_ulid, self, skip, usable_rpcs_by_tier_and_head_number
                 );
 
                 // TODO: bring this back? need to think about how to do this with `allow_backups`
@@ -1933,12 +1933,15 @@ async fn watch_for_block(
     skip_rpcs: &[Arc<Web3Rpc>],
     watch_consensus_rpcs: &mut watch::Receiver<Option<Arc<ConsensusWeb3Rpcs>>>,
 ) -> Web3ProxyResult<bool> {
-    debug!("waiting for {:?}", needed_block_num);
-
     let mut best_block_num: Option<U64> = watch_consensus_rpcs
         .borrow_and_update()
         .as_ref()
         .and_then(|x| x.best_block_num(needed_block_num, skip_rpcs).copied());
+
+    debug!(
+        "waiting for {:?}. best {:?}",
+        needed_block_num, best_block_num
+    );
 
     match (needed_block_num, best_block_num.as_ref()) {
         (Some(x), Some(best)) => {
@@ -1947,6 +1950,7 @@ async fn watch_for_block(
                 // this happens if the block is old and all archive servers are offline
                 // there is no chance we will get this block without adding an archive server to the config
                 // TODO: i think this can also happen if we are being rate limited! but then waiting might work. need skip_rpcs to be smarter
+                warn!("watching for block {} will never succeed. best {}", x, best);
                 return Ok(false);
             }
         }
