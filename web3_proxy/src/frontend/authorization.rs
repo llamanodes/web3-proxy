@@ -1116,8 +1116,8 @@ impl Web3ProxyApp {
                             .filter(balance::Column::UserId.eq(user_model.id))
                             .one(db_replica.conn())
                             .await?
-                            .expect("related balance")
-                            .available_balance;
+                            .map(|x| x.available_balance)
+                            .unwrap_or_default();
 
                         let user_tier_model =
                             user_tier::Entity::find_by_id(user_model.user_tier_id)
