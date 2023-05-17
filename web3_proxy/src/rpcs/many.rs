@@ -1933,12 +1933,12 @@ async fn watch_for_block(
     skip_rpcs: &[Arc<Web3Rpc>],
     watch_consensus_rpcs: &mut watch::Receiver<Option<Arc<ConsensusWeb3Rpcs>>>,
 ) -> Web3ProxyResult<bool> {
-    info!("waiting for {:?}", needed_block_num);
+    debug!("waiting for {:?}", needed_block_num);
 
     let mut best_block_num: Option<U64> = watch_consensus_rpcs
         .borrow_and_update()
         .as_ref()
-        .and_then(|x| x.best_block_num(skip_rpcs).copied());
+        .and_then(|x| x.best_block_num(needed_block_num, skip_rpcs).copied());
 
     match (needed_block_num, best_block_num.as_ref()) {
         (Some(x), Some(best)) => {
@@ -1977,7 +1977,7 @@ async fn watch_for_block(
 
         best_block_num = consensus_rpcs
             .as_ref()
-            .and_then(|x| x.best_block_num(skip_rpcs).copied());
+            .and_then(|x| x.best_block_num(needed_block_num, skip_rpcs).copied());
     }
 
     Ok(true)
