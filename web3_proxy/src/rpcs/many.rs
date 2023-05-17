@@ -980,7 +980,7 @@ impl Web3Rpcs {
                             ShouldWaitForBlock::Wait { .. } => {}
                         }
                     }
-                    watch_consensus_rpcs.changed().await;
+                    watch_consensus_rpcs.changed().await?;
                 }
             }
         }
