@@ -504,7 +504,7 @@ impl Web3Rpcs {
         // TODO: use tracing and add this so logs are easy
         let request_ulid = request_metadata.map(|x| &x.request_ulid);
 
-        let usable_rpcs_by_tier_and_head_number = {
+        let mut usable_rpcs_by_tier_and_head_number = {
             let mut m: RankedRpcMap = BTreeMap::new();
 
             if let Some(consensus_rpcs) = self.watch_consensus_rpcs_sender.borrow().as_ref() {
@@ -568,7 +568,7 @@ impl Web3Rpcs {
 
         let mut earliest_retry_at = None;
 
-        for mut usable_rpcs in usable_rpcs_by_tier_and_head_number.into_values() {
+        for usable_rpcs in usable_rpcs_by_tier_and_head_number.values_mut() {
             // sort the tier randomly
             if usable_rpcs.len() == 1 {
                 // TODO: include an rpc from the next tier?
@@ -582,7 +582,7 @@ impl Web3Rpcs {
             // now that the rpcs are shuffled, try to get an active request handle for one of them
             // pick the first two and try the one with the lower rpc.latency.ewma
             // TODO: chunks or tuple windows?
-            for (rpc_a, rpc_b) in usable_rpcs.into_iter().circular_tuple_windows() {
+            for (rpc_a, rpc_b) in usable_rpcs.iter().circular_tuple_windows() {
                 trace!("{:?} - {} vs {}", request_ulid, rpc_a, rpc_b);
                 // TODO: cached key to save a read lock
                 // TODO: ties to the server with the smallest block_data_limit
