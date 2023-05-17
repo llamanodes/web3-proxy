@@ -669,6 +669,9 @@ impl RpcQueryStats {
         cache_hit: bool,
         method: Option<&str>,
     ) -> Decimal {
+        // for now, always return 0 for cost
+        return 0.into();
+
         // some methods should be free. there might be cases where method isn't set (though they should be uncommon)
         // TODO: get this list from config (and add more to it)
         if let Some(method) = method.as_ref() {
