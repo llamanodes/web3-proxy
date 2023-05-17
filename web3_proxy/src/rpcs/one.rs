@@ -47,6 +47,8 @@ pub struct Web3Rpc {
     /// it is an async lock because we hold it open across awaits
     /// this provider is only used for new heads subscriptions
     /// TODO: benchmark ArcSwapOption and a watch::Sender
+    /// TODO: only the websocket provider needs to be behind an asyncrwlock!
+    /// TODO: the http provider is just an http_client
     pub(super) provider: AsyncRwLock<Option<Arc<Web3Provider>>>,
     /// keep track of hard limits
     /// this is only inside an Option so that the "Default" derive works. it will always be set.
@@ -1216,6 +1218,7 @@ impl Web3Rpc {
         if unlocked_provider.is_some() || self.provider.read().await.is_some() {
             // we already have an unlocked provider. no need to lock
         } else {
+            warn!("no provider on {}", self);
             return Ok(OpenRequestResult::NotReady);
         }
 

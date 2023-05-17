@@ -1,6 +1,6 @@
 ///! Load balanced communication with a group of web3 rpc providers
 use super::blockchain::{BlocksByHashCache, Web3ProxyBlock};
-use super::consensus::ConsensusWeb3Rpcs;
+use super::consensus::{ConsensusWeb3Rpcs, ShouldWaitForBlock};
 use super::one::Web3Rpc;
 use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
 use crate::app::{flatten_handle, AnyhowJoinHandle, Web3ProxyApp};
@@ -521,8 +521,8 @@ impl Web3Rpcs {
                 );
 
                 // todo: for now, build the map m here. once that works, do as much of it as possible while building ConsensusWeb3Rpcs
-                for x in consensus_rpcs.best_rpcs.iter().filter(|rpc| {
-                    consensus_rpcs.filter(skip, min_block_needed, max_block_needed, rpc)
+                for x in consensus_rpcs.head_rpcs.iter().filter(|rpc| {
+                    consensus_rpcs.rpc_will_work_now(skip, min_block_needed, max_block_needed, rpc)
                 }) {
                     m.entry(best_key).or_insert_with(Vec::new).push(x.clone());
                 }
@@ -533,7 +533,12 @@ impl Web3Rpcs {
                     let v: Vec<_> = v
                         .iter()
                         .filter(|rpc| {
-                            consensus_rpcs.filter(skip, min_block_needed, max_block_needed, rpc)
+                            consensus_rpcs.rpc_will_work_now(
+                                skip,
+                                min_block_needed,
+                                max_block_needed,
+                                rpc,
+                            )
                         })
                         .cloned()
                         .collect();
@@ -698,7 +703,7 @@ impl Web3Rpcs {
             let synced_rpcs = self.watch_consensus_rpcs_sender.borrow();
 
             if let Some(synced_rpcs) = synced_rpcs.as_ref() {
-                synced_rpcs.best_rpcs.clone()
+                synced_rpcs.head_rpcs.clone()
             } else {
                 vec![]
             }
@@ -967,13 +972,15 @@ impl Web3Rpcs {
 
                     let waiting_for = min_block_needed.max(max_block_needed);
 
-                    if watch_for_block(waiting_for, &skip_rpcs, &mut watch_consensus_rpcs).await? {
-                        // block found! continue so we can check for another rpc
-                    } else {
-                        // rate limits are likely keeping us from serving the head block
-                        watch_consensus_rpcs.changed().await?;
-                        watch_consensus_rpcs.borrow_and_update();
+                    if let Some(consensus_rpcs) = watch_consensus_rpcs.borrow_and_update().as_ref()
+                    {
+                        match consensus_rpcs.should_wait_for_block(waiting_for, &skip_rpcs) {
+                            ShouldWaitForBlock::NeverReady => break,
+                            ShouldWaitForBlock::Ready => continue,
+                            ShouldWaitForBlock::Wait { .. } => {}
+                        }
                     }
+                    watch_consensus_rpcs.changed().await;
                 }
             }
         }
@@ -1924,67 +1931,6 @@ mod tests {
             "wrong number of connections"
         )
     }
-}
-
-/// returns `true` when the desired block number is available
-/// TODO: max wait time? max number of blocks to wait for? time is probably best
-async fn watch_for_block(
-    needed_block_num: Option<&U64>,
-    skip_rpcs: &[Arc<Web3Rpc>],
-    watch_consensus_rpcs: &mut watch::Receiver<Option<Arc<ConsensusWeb3Rpcs>>>,
-) -> Web3ProxyResult<bool> {
-    let mut best_block_num: Option<U64> = watch_consensus_rpcs
-        .borrow_and_update()
-        .as_ref()
-        .and_then(|x| x.best_block_num(needed_block_num, skip_rpcs).copied());
-
-    debug!(
-        "waiting for {:?}. best {:?}",
-        needed_block_num, best_block_num
-    );
-
-    match (needed_block_num, best_block_num.as_ref()) {
-        (Some(x), Some(best)) => {
-            if x <= best {
-                // the best block is past the needed block and no servers have the needed data
-                // this happens if the block is old and all archive servers are offline
-                // there is no chance we will get this block without adding an archive server to the config
-                // TODO: i think this can also happen if we are being rate limited! but then waiting might work. need skip_rpcs to be smarter
-                warn!("watching for block {} will never succeed. best {}", x, best);
-                return Ok(false);
-            }
-        }
-        (None, None) => {
-            // i don't think this is possible
-            // maybe if we internally make a request for the latest block and all our servers are disconnected?
-            warn!("how'd this None/None happen?");
-            return Ok(false);
-        }
-        (Some(_), None) => {
-            // block requested but no servers synced. we will wait
-            // TODO: if the web3rpcs connected to this consensus isn't watching head blocks, exit with an erorr (waiting for blocks won't ever work)
-        }
-        (None, Some(head)) => {
-            // i don't think this is possible
-            // maybe if we internally make a request for the latest block and all our servers are disconnected?
-            warn!("how'd this None/Some({}) happen?", head);
-            return Ok(false);
-        }
-    };
-
-    // future block is requested
-    // wait for the block to arrive
-    while best_block_num.as_ref() < needed_block_num {
-        watch_consensus_rpcs.changed().await?;
-
-        let consensus_rpcs = watch_consensus_rpcs.borrow_and_update();
-
-        best_block_num = consensus_rpcs
-            .as_ref()
-            .and_then(|x| x.best_block_num(needed_block_num, skip_rpcs).copied());
-    }
-
-    Ok(true)
 }
 
 #[cfg(test)]

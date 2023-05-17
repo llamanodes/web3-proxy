@@ -86,25 +86,31 @@ impl PartialOrd for RpcRanking {
 
 pub type RankedRpcMap = BTreeMap<RpcRanking, Vec<Arc<Web3Rpc>>>;
 
+pub enum ShouldWaitForBlock {
+    Ready,
+    Wait { current: Option<U64> },
+    NeverReady,
+}
+
 /// A collection of Web3Rpcs that are on the same block.
-/// Serialize is so we can print it on our debug endpoint
+/// Serialize is so we can print it on our /status endpoint
 #[derive(Clone, Serialize)]
 pub struct ConsensusWeb3Rpcs {
     pub(crate) tier: u64,
     pub(crate) backups_needed: bool,
 
-    // TODO: this is already inside best_rpcs. give that a shorter serialize here and then include this again
+    // TODO: this is already inside best_rpcs. Don't skip, instead make a shorter serialize
     #[serde(skip_serializing)]
     pub(crate) head_block: Web3ProxyBlock,
 
     // TODO: smaller serialize
-    pub(crate) best_rpcs: Vec<Arc<Web3Rpc>>,
+    pub(crate) head_rpcs: Vec<Arc<Web3Rpc>>,
 
-    // TODO: make this work. the key needs to be a string
+    // TODO: make this work. the key needs to be a string. I think we need `serialize_with`
     #[serde(skip_serializing)]
     pub(crate) other_rpcs: RankedRpcMap,
 
-    // TODO: make this work. the key needs to be a string
+    // TODO: make this work. the key needs to be a string. I think we need `serialize_with`
     #[serde(skip_serializing)]
     rpc_data: HashMap<Arc<Web3Rpc>, RpcData>,
 }
@@ -112,79 +118,65 @@ pub struct ConsensusWeb3Rpcs {
 impl ConsensusWeb3Rpcs {
     #[inline]
     pub fn num_consensus_rpcs(&self) -> usize {
-        self.best_rpcs.len()
+        self.head_rpcs.len()
     }
 
-    pub fn best_block_num(
+    /// will tell you if you should wait for a block
+    /// TODO: also include method (or maybe an enum representing the different prune types)
+    pub fn should_wait_for_block(
         &self,
         needed_block_num: Option<&U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
-    ) -> Option<&U64> {
-        // TODO: dry this up with `filter`?
-        fn _best_block_num_filter(
-            x: &ConsensusWeb3Rpcs,
-            rpc: &Arc<Web3Rpc>,
-            needed_block_num: Option<&U64>,
-            skip_rpcs: &[Arc<Web3Rpc>],
-        ) -> bool {
-            // return true if this rpc will never work for us. "false" is good
-            if skip_rpcs.contains(rpc) {
-                // if rpc is skipped, it must have already been determined it is unable to serve the request
-                true
-            } else if let Some(needed_block_num) = needed_block_num {
-                if let Some(rpc_data) = x.rpc_data.get(rpc).as_ref() {
-                    match rpc_data.head_block_num.cmp(needed_block_num) {
-                        Ordering::Less => {
-                            // rpc is not synced. let it catch up
-                            false
-                        }
-                        Ordering::Greater | Ordering::Equal => {
-                            // rpc is synced past the needed block. make sure the block isn't too old for it
-                            !x.has_block_data(rpc, needed_block_num)
-                        }
-                    }
-                } else {
-                    // no rpc data for this rpc. thats not promising
-                    true
-                }
-            } else {
-                false
+    ) -> ShouldWaitForBlock {
+        if self
+            .head_rpcs
+            .iter()
+            .any(|rpc| self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs))
+        {
+            let head_num = self.head_block.number();
+
+            if Some(head_num) >= needed_block_num {
+                debug!("best (head) block: {}", head_num);
+                return ShouldWaitForBlock::Ready;
             }
         }
 
-        if self
-            .best_rpcs
-            .iter()
-            .all(|rpc| _best_block_num_filter(self, rpc, needed_block_num, skip_rpcs))
-        {
-            // all of the consensus rpcs are skipped
-            // iterate the other rpc tiers to find the next best block
-            let mut best_num = None;
-            for (next_ranking, next_rpcs) in self.other_rpcs.iter() {
-                if next_rpcs
-                    .iter()
-                    .all(|rpc| _best_block_num_filter(self, rpc, needed_block_num, skip_rpcs))
-                {
-                    // TODO: too verbose
-                    debug!("everything in this ranking ({:?}) is skipped", next_ranking);
-                    continue;
-                }
+        // all of the head rpcs are skipped
 
-                best_num = best_num.max(next_ranking.head_num.as_ref());
+        let mut best_num = None;
+
+        // iterate the other rpc tiers to find the next best block
+        for (next_ranking, next_rpcs) in self.other_rpcs.iter() {
+            if !next_rpcs
+                .iter()
+                .any(|rpc| self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs))
+            {
+                // TODO: too verbose
+                debug!("everything in this ranking ({:?}) is skipped", next_ranking);
+                continue;
             }
 
+            let next_head_num = next_ranking.head_num.as_ref();
+
+            if next_head_num >= needed_block_num {
+                debug!("best (head) block: {:?}", next_head_num);
+                return ShouldWaitForBlock::Ready;
+            }
+
+            best_num = next_head_num;
+        }
+
+        // TODO: this seems wrong
+        if best_num.is_some() {
             // TODO: too verbose
             debug!("best (old) block: {:?}", best_num);
-
-            best_num
+            ShouldWaitForBlock::Wait {
+                current: best_num.copied(),
+            }
         } else {
-            // not all the best synced rpcs are skipped yet. use the best head block
-            let best_num = self.head_block.number();
-
             // TODO: too verbose
-            debug!("best (head) block: {}", best_num);
-
-            Some(best_num)
+            debug!("never ready");
+            ShouldWaitForBlock::NeverReady
         }
     }
 
@@ -195,8 +187,48 @@ impl ConsensusWeb3Rpcs {
             .unwrap_or(false)
     }
 
+    // TODO: take method as a param, too. mark nodes with supported methods (maybe do it optimistically? on)
+    fn rpc_will_work_eventually(
+        &self,
+        rpc: &Arc<Web3Rpc>,
+        needed_block_num: Option<&U64>,
+        skip_rpcs: &[Arc<Web3Rpc>],
+    ) -> bool {
+        // return true if this rpc will never work for us. "false" is good
+        if skip_rpcs.contains(rpc) {
+            // if rpc is skipped, it must have already been determined it is unable to serve the request
+            return false;
+        }
+
+        if let Some(needed_block_num) = needed_block_num {
+            if let Some(rpc_data) = self.rpc_data.get(rpc) {
+                match rpc_data.head_block_num.cmp(needed_block_num) {
+                    Ordering::Less => {
+                        debug!("{} is behind. let it catch up", rpc);
+                        return true;
+                    }
+                    Ordering::Greater | Ordering::Equal => {
+                        // rpc is synced past the needed block. make sure the block isn't too old for it
+                        if self.has_block_data(rpc, needed_block_num) {
+                            debug!("{} has {}", rpc, needed_block_num);
+                            return true;
+                        } else {
+                            debug!("{} does not have {}", rpc, needed_block_num);
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            // no rpc data for this rpc. thats not promising
+            return true;
+        }
+
+        false
+    }
+
     // TODO: better name for this
-    pub fn filter(
+    pub fn rpc_will_work_now(
         &self,
         skip: &[Arc<Web3Rpc>],
         min_block_needed: Option<&U64>,
@@ -244,7 +276,7 @@ impl fmt::Debug for ConsensusWeb3Rpcs {
         // TODO: print the actual conns?
         f.debug_struct("ConsensusWeb3Rpcs")
             .field("head_block", &self.head_block)
-            .field("num_conns", &self.best_rpcs.len())
+            .field("num_conns", &self.head_rpcs.len())
             .finish_non_exhaustive()
     }
 }
@@ -272,7 +304,7 @@ impl Web3Rpcs {
         let consensus = self.watch_consensus_rpcs_sender.borrow();
 
         if let Some(consensus) = consensus.as_ref() {
-            !consensus.best_rpcs.is_empty()
+            !consensus.head_rpcs.is_empty()
         } else {
             false
         }
@@ -282,7 +314,7 @@ impl Web3Rpcs {
         let consensus = self.watch_consensus_rpcs_sender.borrow();
 
         if let Some(consensus) = consensus.as_ref() {
-            consensus.best_rpcs.len()
+            consensus.head_rpcs.len()
         } else {
             0
         }
@@ -598,7 +630,7 @@ impl ConsensusFinder {
             let consensus = ConsensusWeb3Rpcs {
                 tier,
                 head_block: maybe_head_block.clone(),
-                best_rpcs: consensus_rpcs,
+                head_rpcs: consensus_rpcs,
                 other_rpcs,
                 backups_needed,
                 rpc_data,
