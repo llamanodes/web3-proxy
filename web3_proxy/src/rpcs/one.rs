@@ -1223,9 +1223,11 @@ impl Web3Rpc {
             // we already have an unlocked provider. no need to lock
         } else {
             warn!("no provider on {}", self);
+            // TODO: wait for provider? that will probably slow us down more than we want
             return Ok(OpenRequestResult::NotReady);
         }
 
+        // check cached rate limits
         if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
             let hard_limit_ready = *hard_limit_until.borrow();
             let now = Instant::now();
@@ -1234,7 +1236,7 @@ impl Web3Rpc {
             }
         }
 
-        // check rate limits
+        // check shared rate limits
         if let Some(ratelimiter) = self.hard_limit.as_ref() {
             // TODO: how should we know if we should set expire or not?
             match ratelimiter
@@ -1247,6 +1249,7 @@ impl Web3Rpc {
                 }
                 RedisRateLimitResult::RetryAt(retry_at, _) => {
                     // rate limit gave us a wait time
+                    // if not a backup server, warn. backups hit rate limits often
                     if !self.backup {
                         let when = retry_at.duration_since(Instant::now());
                         warn!(
@@ -1263,6 +1266,7 @@ impl Web3Rpc {
                     return Ok(OpenRequestResult::RetryAt(retry_at));
                 }
                 RedisRateLimitResult::RetryNever => {
+                    warn!("how did retry never on {} happen?", self);
                     return Ok(OpenRequestResult::NotReady);
                 }
             }
@@ -1342,7 +1346,7 @@ impl Hash for Web3Rpc {
         self.ws_url.hash(state);
         self.automatic_block_limit.hash(state);
         self.backup.hash(state);
-        // TODO: including soft_limit might need to change if we change them to be dynamic
+        // TODO: don't include soft_limit if we change them to be dynamic
         self.soft_limit.hash(state);
         self.tier.hash(state);
         self.created_at.hash(state);
