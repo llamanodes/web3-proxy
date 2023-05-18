@@ -573,15 +573,11 @@ impl Web3ProxyApp {
                 // these two rate limiters can share the base limiter
                 // these are deferred rate limiters because we don't want redis network requests on the hot path
                 // TODO: take cache_size from config
-                frontend_ip_rate_limiter = Some(DeferredRateLimiter::<IpAddr>::new(
-                    10_000,
-                    "ip",
-                    rpc_rrl.clone(),
-                    None,
-                ));
-                frontend_registered_user_rate_limiter = Some(DeferredRateLimiter::<u64>::new(
-                    10_000, "key", rpc_rrl, None,
-                ));
+                frontend_ip_rate_limiter = Some(
+                    DeferredRateLimiter::<IpAddr>::new(20_000, "ip", rpc_rrl.clone(), None).await,
+                );
+                frontend_registered_user_rate_limiter =
+                    Some(DeferredRateLimiter::<u64>::new(10_000, "key", rpc_rrl, None).await);
             }
 
             // login rate limiter

@@ -1310,7 +1310,7 @@ dependencies = [
  "anyhow",
  "hashbrown 0.13.2",
  "log",
- "moka",
+ "quick_cache_ttl",
  "redis-rate-limiter",
  "tokio",
 ]
