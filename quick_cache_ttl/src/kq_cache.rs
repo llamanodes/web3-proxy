@@ -8,10 +8,10 @@ use tokio::task::JoinHandle;
 use tokio::time::{sleep_until, Instant};
 
 pub struct KQCacheWithTTL<Key, Qey, Val, We, B> {
-    pub(crate) cache: Arc<KQCache<Key, Qey, Val, We, B>>,
+    cache: Arc<KQCache<Key, Qey, Val, We, B>>,
     pub task_handle: JoinHandle<()>,
     ttl: Duration,
-    pub(crate) tx: flume::Sender<(Instant, Key, Qey)>,
+    tx: flume::Sender<(Instant, Key, Qey)>,
 }
 
 struct KQCacheWithTTLTask<Key, Qey, Val, We, B> {
@@ -66,6 +66,11 @@ impl<
             ttl,
             tx,
         }
+    }
+
+    #[inline]
+    pub fn get(&self, key: &Key, qey: &Qey) -> Option<Val> {
+        self.cache.get(key, qey)
     }
 
     #[inline]

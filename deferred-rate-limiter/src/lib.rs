@@ -1,6 +1,6 @@
 //#![warn(missing_docs)]
 use log::error;
-use quick_cache_ttl::{CacheWithTTL, UnitWeighter};
+use quick_cache_ttl::CacheWithTTL;
 use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
 use std::cmp::Eq;
 use std::fmt::{Debug, Display};
@@ -16,8 +16,7 @@ pub struct DeferredRateLimiter<K>
 where
     K: Send + Sync,
 {
-    local_cache:
-        CacheWithTTL<K, Arc<AtomicU64>, UnitWeighter, hashbrown::hash_map::DefaultHashBuilder>,
+    local_cache: CacheWithTTL<K, Arc<AtomicU64>>,
     prefix: String,
     rrl: RedisRateLimiter,
     /// if None, defers to the max on rrl
@@ -46,18 +45,8 @@ where
         // TODO: time to live is not exactly right. we want this ttl counter to start only after redis is down. this works for now
         // TODO: what do these weigh?
         // TODO: allow skipping max_capacity
-        let local_cache = CacheWithTTL::new(
-            cache_size,
-            cache_size as u64,
-            UnitWeighter,
-            hashbrown::hash_map::DefaultHashBuilder::default(),
-            Duration::from_secs(ttl),
-        )
-        .await;
-        // .time_to_live(Duration::from_secs(ttl))
-        // .max_capacity(cache_size)
-        // .name(prefix)
-        // .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+        let local_cache =
+            CacheWithTTL::new_with_capacity(cache_size, Duration::from_secs(ttl)).await;
 
         Self {
             local_cache,

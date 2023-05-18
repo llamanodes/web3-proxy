@@ -1,5 +1,5 @@
 ///! Load balanced communication with a group of web3 rpc providers
-use super::blockchain::{BlocksByHashCache, Web3ProxyBlock};
+use super::blockchain::{BlocksByHashCache, BlocksByNumberCache, Web3ProxyBlock};
 use super::consensus::{ConsensusWeb3Rpcs, ShouldWaitForBlock};
 use super::one::Web3Rpc;
 use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
@@ -16,7 +16,7 @@ use anyhow::Context;
 use arc_swap::ArcSwap;
 use counter::Counter;
 use derive_more::From;
-use ethers::prelude::{ProviderError, TxHash, H256, U64};
+use ethers::prelude::{ProviderError, TxHash, U64};
 use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -24,8 +24,8 @@ use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
-use moka::future::Cache;
 use ordered_float::OrderedFloat;
+use quick_cache_ttl::CacheWithTTL;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
@@ -58,15 +58,14 @@ pub struct Web3Rpcs {
     /// this head receiver makes it easy to wait until there is a new block
     pub(super) watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// keep track of transactions that we have sent through subscriptions
-    pub(super) pending_transaction_cache:
-        Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
+    pub(super) pending_transaction_cache: Arc<CacheWithTTL<TxHash, TxStatus>>,
     pub(super) pending_tx_id_receiver: flume::Receiver<TxHashAndRpc>,
     pub(super) pending_tx_id_sender: flume::Sender<TxHashAndRpc>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
     pub(super) blocks_by_hash: BlocksByHashCache,
     /// blocks on the heaviest chain
-    pub(super) blocks_by_number: Cache<U64, H256, hashbrown::hash_map::DefaultHashBuilder>,
+    pub(super) blocks_by_number: BlocksByNumberCache,
     /// the number of rpcs required to agree on consensus for the head block (thundering herd protection)
     pub(super) min_head_rpcs: usize,
     /// the soft limit required to agree on consensus for the head block. (thundering herd protection)
@@ -89,7 +88,7 @@ impl Web3Rpcs {
         min_head_rpcs: usize,
         min_sum_soft_limit: u32,
         name: String,
-        pending_transaction_cache: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
+        pending_transaction_cache: Arc<CacheWithTTL<TxHash, TxStatus>>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     ) -> anyhow::Result<(
@@ -159,24 +158,23 @@ impl Web3Rpcs {
         };
 
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
-        // TODO: how can we do the weigher better? need to know actual allocated size
+        // TODO: how can we do the weigher this? need to know actual allocated size
         // TODO: time_to_idle instead?
         // TODO: limits from config
-        let blocks_by_hash: BlocksByHashCache = Cache::builder()
-            .max_capacity(1024 * 1024 * 1024)
-            .weigher(|_k, v: &Web3ProxyBlock| {
-                1 + v.block.transactions.len().try_into().unwrap_or(u32::MAX)
-            })
-            .time_to_live(Duration::from_secs(30 * 60))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+        let blocks_by_hash: BlocksByHashCache =
+            Arc::new(CacheWithTTL::new_with_capacity(10_000, Duration::from_secs(30 * 60)).await);
+        // .max_capacity(1024 * 1024 * 1024)
+        // .weigher(|_k, v: &Web3ProxyBlock| {
+        //     1 + v.block.transactions.len().try_into().unwrap_or(u32::MAX)
+        // })
+        // .time_to_live(Duration::from_secs(30 * 60))
+        // .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
 
         // all block numbers are the same size, so no need for weigher
         // TODO: limits from config
         // TODO: time_to_idle instead?
-        let blocks_by_number = Cache::builder()
-            .time_to_live(Duration::from_secs(30 * 60))
-            .max_capacity(10_000)
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+        let blocks_by_number =
+            Arc::new(CacheWithTTL::new_with_capacity(10_000, Duration::from_secs(30 * 60)).await);
 
         let (watch_consensus_rpcs_sender, consensus_connections_watcher) =
             watch::channel(Default::default());
@@ -264,7 +262,7 @@ impl Web3Rpcs {
                 };
 
                 let pending_tx_id_sender = Some(self.pending_tx_id_sender.clone());
-                let blocks_by_hash = self.blocks_by_hash.clone();
+                let blocks_by_hash_cache = self.blocks_by_hash.clone();
                 let http_interval_sender = self.http_interval_sender.clone();
                 let chain_id = app.config.chain_id;
 
@@ -277,7 +275,7 @@ impl Web3Rpcs {
                     chain_id,
                     http_client,
                     http_interval_sender,
-                    blocks_by_hash,
+                    blocks_by_hash_cache,
                     block_sender,
                     pending_tx_id_sender,
                     true,
@@ -1249,6 +1247,7 @@ mod tests {
     use crate::rpcs::consensus::ConsensusFinder;
     use crate::rpcs::{blockchain::Web3ProxyBlock, provider::Web3Provider};
     use arc_swap::ArcSwap;
+    use ethers::types::H256;
     use ethers::types::{Block, U256};
     use latency::PeakEwmaLatency;
     use log::{trace, LevelFilter};
@@ -1436,14 +1435,15 @@ mod tests {
             name: "test".to_string(),
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
-            pending_transaction_cache: Cache::builder()
-                .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
+            pending_transaction_cache: CacheWithTTL::arc_with_capacity(
+                100,
+                Duration::from_secs(60),
+            )
+            .await,
             pending_tx_id_receiver,
             pending_tx_id_sender,
-            blocks_by_hash: Cache::builder()
-                .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
-            blocks_by_number: Cache::builder()
-                .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
+            blocks_by_hash: CacheWithTTL::arc_with_capacity(100, Duration::from_secs(60)).await,
+            blocks_by_number: CacheWithTTL::arc_with_capacity(100, Duration::from_secs(60)).await,
             // TODO: test max_block_age?
             max_block_age: None,
             // TODO: test max_block_lag?
@@ -1688,14 +1688,15 @@ mod tests {
             name: "test".to_string(),
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
-            pending_transaction_cache: Cache::builder()
-                .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
+            pending_transaction_cache: CacheWithTTL::arc_with_capacity(
+                100,
+                Duration::from_secs(120),
+            )
+            .await,
             pending_tx_id_receiver,
             pending_tx_id_sender,
-            blocks_by_hash: Cache::builder()
-                .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
-            blocks_by_number: Cache::builder()
-                .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
+            blocks_by_hash: CacheWithTTL::arc_with_capacity(100, Duration::from_secs(120)).await,
+            blocks_by_number: CacheWithTTL::arc_with_capacity(100, Duration::from_secs(120)).await,
             min_head_rpcs: 1,
             min_sum_soft_limit: 4_000,
             max_block_age: None,
@@ -1853,14 +1854,16 @@ mod tests {
             name: "test".to_string(),
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
-            pending_transaction_cache: Cache::builder()
-                .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
+            pending_transaction_cache: CacheWithTTL::arc_with_capacity(
+                10_000,
+                Duration::from_secs(120),
+            )
+            .await,
             pending_tx_id_receiver,
             pending_tx_id_sender,
-            blocks_by_hash: Cache::builder()
-                .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
-            blocks_by_number: Cache::builder()
-                .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default()),
+            blocks_by_hash: CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(120)).await,
+            blocks_by_number: CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(120))
+                .await,
             min_head_rpcs: 1,
             min_sum_soft_limit: 1_000,
             max_block_age: None,

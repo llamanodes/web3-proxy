@@ -23,6 +23,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::borrow::Cow;
 use std::cmp::min;
+use std::convert::Infallible;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicBool, AtomicU64, AtomicUsize};
@@ -622,8 +623,11 @@ impl Web3Rpc {
 
                 // if we already have this block saved, set new_head_block to that arc. otherwise store this copy
                 let new_head_block = block_map
-                    .get_with(new_hash, async move { new_head_block })
-                    .await;
+                    .get_or_insert_async::<Infallible, _>(
+                        &new_hash,
+                        async move { Ok(new_head_block) },
+                    )
+                    .await?;
 
                 // save the block so we don't send the same one multiple times
                 // also save so that archive checks can know how far back to query

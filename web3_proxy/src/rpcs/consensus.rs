@@ -8,10 +8,11 @@ use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use itertools::{Itertools, MinMaxResult};
 use log::{debug, trace, warn};
-use moka::future::Cache;
+use quick_cache_ttl::Cache;
 use serde::Serialize;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BTreeMap;
+use std::convert::Infallible;
 use std::fmt;
 use std::sync::Arc;
 use tokio::time::Instant;
@@ -321,7 +322,7 @@ impl Web3Rpcs {
     }
 }
 
-type FirstSeenCache = Cache<H256, Instant, hashbrown::hash_map::DefaultHashBuilder>;
+type FirstSeenCache = Cache<H256, Instant>;
 
 /// A ConsensusConnections builder that tracks all connection heads across multiple groups of servers
 pub struct ConsensusFinder {
@@ -342,9 +343,7 @@ impl ConsensusFinder {
     pub fn new(max_block_age: Option<u64>, max_block_lag: Option<U64>) -> Self {
         // TODO: what's a good capacity for this? it shouldn't need to be very large
         // TODO: if we change Web3ProxyBlock to store the instance, i think we could use the block_by_hash cache
-        let first_seen = Cache::builder()
-            .max_capacity(16)
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+        let first_seen = Cache::new(16);
 
         // TODO: hard coding 0-9 isn't great, but its easier than refactoring this to be smart about config reloading
         let rpc_heads = HashMap::new();
@@ -372,8 +371,9 @@ impl ConsensusFinder {
     async fn insert(&mut self, rpc: Arc<Web3Rpc>, block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
         let first_seen = self
             .first_seen
-            .get_with_by_ref(block.hash(), async { Instant::now() })
-            .await;
+            .get_or_insert_async::<Infallible>(block.hash(), async { Ok(Instant::now()) })
+            .await
+            .unwrap();
 
         // calculate elapsed time before trying to lock
         let latency = first_seen.elapsed();

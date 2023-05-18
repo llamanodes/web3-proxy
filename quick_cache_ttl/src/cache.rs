@@ -2,25 +2,60 @@ use quick_cache::{DefaultHashBuilder, UnitWeighter, Weighter};
 use std::{
     future::Future,
     hash::{BuildHasher, Hash},
+    sync::Arc,
     time::Duration,
 };
 
 use crate::{KQCacheWithTTL, PlaceholderGuardWithTTL};
 
-pub struct CacheWithTTL<Key, Val, We, B>(KQCacheWithTTL<Key, (), Val, We, B>);
+pub struct CacheWithTTL<Key, Val, We = UnitWeighter, B = DefaultHashBuilder>(
+    KQCacheWithTTL<Key, (), Val, We, B>,
+);
 
 impl<Key: Eq + Hash + Clone + Send + Sync + 'static, Val: Clone + Send + Sync + 'static>
     CacheWithTTL<Key, Val, UnitWeighter, DefaultHashBuilder>
 {
-    pub async fn new_with_unit_weights(estimated_items_capacity: usize, ttl: Duration) -> Self {
+    pub async fn new_with_capacity(capacity: usize, ttl: Duration) -> Self {
         Self::new(
-            estimated_items_capacity,
-            estimated_items_capacity as u64,
+            capacity,
+            capacity as u64,
             UnitWeighter,
             DefaultHashBuilder::default(),
             ttl,
         )
         .await
+    }
+
+    pub async fn arc_with_capacity(capacity: usize, ttl: Duration) -> Arc<Self> {
+        let x = Self::new_with_capacity(capacity, ttl).await;
+
+        Arc::new(x)
+    }
+}
+
+impl<
+        Key: Eq + Hash + Clone + Send + Sync + 'static,
+        Val: Clone + Send + Sync + 'static,
+        We: Weighter<Key, (), Val> + Clone + Send + Sync + 'static,
+        B: BuildHasher + Clone + Default + Send + Sync + 'static,
+    > CacheWithTTL<Key, Val, We, B>
+{
+    pub async fn new_with_weights(
+        estimated_items_capacity: usize,
+        weight_capacity: u64,
+        weighter: We,
+        ttl: Duration,
+    ) -> Self {
+        let inner = KQCacheWithTTL::new(
+            estimated_items_capacity,
+            weight_capacity,
+            weighter,
+            B::default(),
+            ttl,
+        )
+        .await;
+
+        Self(inner)
     }
 }
 
@@ -48,6 +83,11 @@ impl<
         .await;
 
         Self(inner)
+    }
+
+    #[inline]
+    pub fn get(&self, key: &Key) -> Option<Val> {
+        self.0.get(key, &())
     }
 
     #[inline]

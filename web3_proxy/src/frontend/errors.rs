@@ -5,7 +5,6 @@ use crate::jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
 use crate::response_cache::JsonRpcResponseData;
 
 use std::error::Error;
-use std::sync::Arc;
 use std::{borrow::Cow, net::IpAddr};
 
 use axum::{
@@ -33,13 +32,11 @@ impl From<Web3ProxyError> for Web3ProxyResult<()> {
     }
 }
 
-// TODO:
 #[derive(Debug, Display, Error, From)]
 pub enum Web3ProxyError {
     AccessDenied,
     #[error(ignore)]
     Anyhow(anyhow::Error),
-    Arc(Arc<Web3ProxyError>),
     #[error(ignore)]
     #[from(ignore)]
     BadRequest(String),
@@ -684,13 +681,6 @@ impl Web3ProxyError {
                         data: None,
                     },
                 )
-            }
-            Self::Arc(err) => {
-                return match Arc::try_unwrap(err) {
-                    Ok(err) => err,
-                    Err(err) => Self::Anyhow(anyhow::anyhow!("{}", err)),
-                }
-                .into_response_parts();
             }
             Self::SemaphoreAcquireError(err) => {
                 warn!("semaphore acquire err={:?}", err);

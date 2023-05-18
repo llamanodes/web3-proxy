@@ -4,7 +4,7 @@ use derive_more::From;
 use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
-use log::{debug, error, info, trace};
+use log::{error, info, trace};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;

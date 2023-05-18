@@ -46,7 +46,7 @@ use migration::sea_orm::{
 };
 use migration::sea_query::table::ColumnDef;
 use migration::{Alias, DbErr, Migrator, MigratorTrait, Table};
-use moka::future::Cache;
+use quick_cache_ttl::{Cache, CacheWithTTL};
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use serde::Serialize;
@@ -61,7 +61,6 @@ use std::time::Duration;
 use tokio::sync::{broadcast, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
-use ulid::Ulid;
 
 // TODO: make this customizable?
 // TODO: include GIT_REF in here. i had trouble getting https://docs.rs/vergen/latest/vergen/ to work with a workspace. also .git is in .dockerignore
@@ -127,9 +126,8 @@ impl DatabaseReplica {
     }
 }
 
-// TODO: this should be a the secret key id, not the key itself!
-pub type RpcSecretKeyCache =
-    Cache<Ulid, AuthorizationChecks, hashbrown::hash_map::DefaultHashBuilder>;
+/// Cache data from the database about rpc keys
+pub type RpcSecretKeyCache = Arc<CacheWithTTL<RpcSecretKey, AuthorizationChecks>>;
 
 /// The application
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
@@ -161,7 +159,7 @@ pub struct Web3ProxyApp {
     pub hostname: Option<String>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     /// TODO: think about this more. might be worth storing if we sent the transaction or not and using this for automatic retries
-    pub pending_transactions: Cache<TxHash, TxStatus, hashbrown::hash_map::DefaultHashBuilder>,
+    pub pending_transactions: Arc<CacheWithTTL<TxHash, TxStatus>>,
     /// rate limit anonymous users
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     /// rate limit authenticated users
@@ -178,13 +176,11 @@ pub struct Web3ProxyApp {
     // TODO: should the key be our RpcSecretKey class instead of Ulid?
     pub rpc_secret_key_cache: RpcSecretKeyCache,
     /// concurrent/parallel RPC request limits for authenticated users
-    pub registered_user_semaphores:
-        Cache<NonZeroU64, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
+    pub rpc_key_semaphores: Cache<NonZeroU64, Arc<Semaphore>>,
     /// concurrent/parallel request limits for anonymous users
-    pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
+    pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>>,
     /// concurrent/parallel application request limits for authenticated users
-    pub bearer_token_semaphores:
-        Cache<UserBearerToken, Arc<Semaphore>, hashbrown::hash_map::DefaultHashBuilder>,
+    pub bearer_token_semaphores: Cache<UserBearerToken, Arc<Semaphore>>,
     pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
     /// channel for sending stats in a background task
     pub stat_sender: Option<flume::Sender<AppStat>>,
@@ -510,10 +506,8 @@ impl Web3ProxyApp {
         // if there is no database of users, there will be no keys and so this will be empty
         // TODO: max_capacity from config
         // TODO: ttl from config
-        let rpc_secret_key_cache = Cache::builder()
-            .max_capacity(10_000)
-            .time_to_live(Duration::from_secs(600))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+        let rpc_secret_key_cache =
+            CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(600)).await;
 
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
@@ -603,13 +597,11 @@ impl Web3ProxyApp {
         // TODO: capacity from configs
         // all these are the same size, so no need for a weigher
         // TODO: this used to have a time_to_idle
-        let pending_transactions = Cache::builder()
-            .max_capacity(10_000)
-            // TODO: different chains might handle this differently
-            // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
-            // TODO: this used to be time_to_update, but
-            .time_to_live(Duration::from_secs(300))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+        // TODO: different chains might handle this differently
+        // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
+        // TODO: this used to be time_to_update, but
+        let pending_transactions =
+            CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(300)).await;
 
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
         // TODO: don't allow any response to be bigger than X% of the cache
@@ -624,17 +616,15 @@ impl Web3ProxyApp {
         )
         .await;
 
+        // TODO: how should we handle hitting this max?
+        let max_users = 20_000;
+
         // create semaphores for concurrent connection limits
+        // TODO: how can we implement time til idle?
         // TODO: what should tti be for semaphores?
-        let bearer_token_semaphores = Cache::builder()
-            .time_to_idle(Duration::from_secs(120))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-        let ip_semaphores = Cache::builder()
-            .time_to_idle(Duration::from_secs(120))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
-        let registered_user_semaphores = Cache::builder()
-            .time_to_idle(Duration::from_secs(120))
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+        let bearer_token_semaphores = Cache::new(max_users);
+        let ip_semaphores = Cache::new(max_users);
+        let registered_user_semaphores = Cache::new(max_users);
 
         let (balanced_rpcs, balanced_handle, consensus_connections_watcher) = Web3Rpcs::spawn(
             top_config.app.chain_id,
@@ -745,7 +735,7 @@ impl Web3ProxyApp {
             rpc_secret_key_cache,
             bearer_token_semaphores,
             ip_semaphores,
-            registered_user_semaphores,
+            rpc_key_semaphores: registered_user_semaphores,
             stat_sender,
         };
 

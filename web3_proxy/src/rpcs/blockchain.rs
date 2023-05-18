@@ -10,10 +10,11 @@ use crate::{config::BlockAndRpc, jsonrpc::JsonRpcRequest};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use log::{debug, trace, warn, Level};
-use moka::future::Cache;
+use quick_cache_ttl::CacheWithTTL;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use serde_json::json;
+use std::convert::Infallible;
 use std::hash::Hash;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
@@ -22,7 +23,8 @@ use tokio::time::Duration;
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
 
-pub type BlocksByHashCache = Cache<H256, Web3ProxyBlock, hashbrown::hash_map::DefaultHashBuilder>;
+pub type BlocksByHashCache = Arc<CacheWithTTL<H256, Web3ProxyBlock>>;
+pub type BlocksByNumberCache = Arc<CacheWithTTL<U64, H256>>;
 
 /// A block and its age.
 #[derive(Clone, Debug, Default, From)]
@@ -168,9 +170,7 @@ impl Web3Rpcs {
         heaviest_chain: bool,
     ) -> Web3ProxyResult<Web3ProxyBlock> {
         // TODO: i think we can rearrange this function to make it faster on the hot path
-        let block_hash = block.hash();
-
-        if block_hash.is_zero() {
+        if block.hash().is_zero() {
             debug!("Skipping block without hash!");
             return Ok(block);
         }
@@ -182,15 +182,18 @@ impl Web3Rpcs {
             // this is the only place that writes to block_numbers
             // multiple inserts should be okay though
             // TODO: info that there was a fork?
-            self.blocks_by_number.insert(*block_num, *block_hash).await;
+            self.blocks_by_number.insert(*block_num, *block.hash());
         }
 
         // this block is very likely already in block_hashes
         // TODO: use their get_with
+        let block_hash = *block.hash();
+
         let block = self
             .blocks_by_hash
-            .get_with(*block_hash, async move { block })
-            .await;
+            .get_or_insert_async::<Infallible, _>(&block_hash, async move { Ok(block) })
+            .await
+            .unwrap();
 
         Ok(block)
     }
@@ -423,7 +426,7 @@ impl Web3Rpcs {
             return Ok(());
         }
 
-        let new_synced_connections = match consensus_finder
+        let new_consensus_rpcs = match consensus_finder
             .find_consensus_connections(authorization, self)
             .await
         {
@@ -436,21 +439,21 @@ impl Web3Rpcs {
             Ok(Some(x)) => x,
         };
 
-        trace!("new_synced_connections: {:#?}", new_synced_connections);
+        trace!("new_synced_connections: {:#?}", new_consensus_rpcs);
 
         let watch_consensus_head_sender = self.watch_consensus_head_sender.as_ref().unwrap();
-        let consensus_tier = new_synced_connections.tier;
+        let consensus_tier = new_consensus_rpcs.tier;
         // TODO: think more about this unwrap
         let total_tiers = consensus_finder.worst_tier().unwrap_or(10);
-        let backups_needed = new_synced_connections.backups_needed;
-        let consensus_head_block = new_synced_connections.head_block.clone();
-        let num_consensus_rpcs = new_synced_connections.num_consensus_rpcs();
+        let backups_needed = new_consensus_rpcs.backups_needed;
+        let consensus_head_block = new_consensus_rpcs.head_block.clone();
+        let num_consensus_rpcs = new_consensus_rpcs.num_consensus_rpcs();
         let num_active_rpcs = consensus_finder.len();
         let total_rpcs = self.by_name.load().len();
 
         let old_consensus_head_connections = self
             .watch_consensus_rpcs_sender
-            .send_replace(Some(Arc::new(new_synced_connections)));
+            .send_replace(Some(Arc::new(new_consensus_rpcs)));
 
         let backups_voted_str = if backups_needed { "B " } else { "" };
 
