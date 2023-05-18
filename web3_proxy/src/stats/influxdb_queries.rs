@@ -184,7 +184,8 @@ pub async fn query_user_stats<'a>(
         {filter_chain_id}
         {drop_method}
 
-    cumsum = base
+    // cumsum = base
+    base
         |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
         |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
         |> drop(columns: ["balance"])
@@ -199,19 +200,19 @@ pub async fn query_user_stats<'a>(
         |> group()
         |> sort(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"], desc: true)
 
-    balance = base
-        |> toFloat()
-        |> aggregateWindow(every: {query_window_seconds}s, fn: mean, createEmpty: false)
-        |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
-        |> group(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"])
-        |> mean(column: "balance")
-        |> group()
-        |> sort(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"], desc: true)
+    // balance = base
+    //     |> toFloat()
+    //     |> aggregateWindow(every: {query_window_seconds}s, fn: mean, createEmpty: false)
+    //     |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+    //     |> group(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"])
+    //     |> mean(column: "balance")
+    //     |> group()
+    //     |> sort(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"], desc: true)
 
-    join(
-        tables: {{cumsum, balance}},
-        on: {join_candidates}
-    )
+    // join(
+    //     tables: {{cumsum, balance}},
+    //     on: {join_candidates}
+    // )
     "#);
 
     info!("Raw query to db is: {:?}", query);
@@ -219,8 +220,10 @@ pub async fn query_user_stats<'a>(
     info!("Query to db is: {:?}", query);
 
     // Make the query and collect all data
-    let raw_influx_responses: Vec<FluxRecord> =
-        influxdb_client.query_raw(Some(query.clone())).await?;
+    let raw_influx_responses: Vec<FluxRecord> = influxdb_client
+        .query_raw(Some(query.clone()))
+        .await
+        .context("failed parsing query result into a FluxRecord")?;
 
     // Basically rename all items to be "total",
     // calculate number of "archive_needed" and "error_responses" through their boolean representations ...

@@ -4,7 +4,7 @@ use derive_more::From;
 use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
-use log::{error, info, trace};
+use log::{debug, error, info, trace};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;
@@ -249,17 +249,24 @@ impl StatBuffer {
                 while num_left > 0 {
                     let batch_size = num_left.min(max_batch_size);
 
+                    // TODO: there has to be a better way to chunk this up. chunk on the stream with the stream being an iter?
                     let p = points.split_off(batch_size);
 
                     num_left -= batch_size;
 
                     if let Err(err) = influxdb_client
-                        .write_with_precision(bucket, stream::iter(p), self.timestamp_precision)
+                        .write_with_precision(
+                            bucket,
+                            stream::iter(points),
+                            self.timestamp_precision,
+                        )
                         .await
                     {
                         // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
                         error!("unable to save {} tsdb stats! err={:?}", batch_size, err);
                     }
+
+                    points = p;
                 }
             }
         }
