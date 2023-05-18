@@ -495,7 +495,7 @@ impl Web3Rpcs {
         &self,
         authorization: &Arc<Authorization>,
         request_metadata: Option<&Arc<RequestMetadata>>,
-        skip: &[Arc<Web3Rpc>],
+        skip: &mut Vec<Arc<Web3Rpc>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
     ) -> Web3ProxyResult<OpenRequestResult> {
@@ -591,6 +591,8 @@ impl Web3Rpcs {
                 // TODO: ties to the server with the smallest block_data_limit
                 let best_rpc = min_by_key(rpc_a, rpc_b, |x| x.peak_ewma());
                 trace!("{:?} - winner: {}", request_ulid, best_rpc);
+
+                skip.push(best_rpc.clone());
 
                 // just because it has lower latency doesn't mean we are sure to get a connection
                 match best_rpc.try_request_handle(authorization, None).await {
@@ -805,7 +807,7 @@ impl Web3Rpcs {
                 .best_available_rpc(
                     authorization,
                     request_metadata,
-                    &skip_rpcs,
+                    &mut skip_rpcs,
                     min_block_needed,
                     max_block_needed,
                 )
@@ -821,9 +823,6 @@ impl Web3Rpcs {
                     }
 
                     let is_backup_response = rpc.backup;
-
-                    // TODO: instead of entirely skipping, maybe demote a tier?
-                    skip_rpcs.push(rpc);
 
                     // TODO: get the log percent from the user data
                     let response_result: Result<Box<RawValue>, _> = active_request_handle
@@ -1493,7 +1492,7 @@ mod tests {
             .best_available_rpc(
                 &authorization,
                 None,
-                &[],
+                &mut vec![],
                 Some(head_block.number.as_ref().unwrap()),
                 None,
             )
@@ -1587,28 +1586,28 @@ mod tests {
 
         // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
-            rpcs.best_available_rpc(&authorization, None, &[], None, None)
+            rpcs.best_available_rpc(&authorization, None, &mut vec![], None, None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
-            rpcs.best_available_rpc(&authorization, None, &[], Some(&0.into()), None)
+            rpcs.best_available_rpc(&authorization, None, &mut vec![], Some(&0.into()), None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
-            rpcs.best_available_rpc(&authorization, None, &[], Some(&1.into()), None)
+            rpcs.best_available_rpc(&authorization, None, &mut vec![], Some(&1.into()), None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // future block should not get a handle
         let future_rpc = rpcs
-            .best_available_rpc(&authorization, None, &[], Some(&2.into()), None)
+            .best_available_rpc(&authorization, None, &mut vec![], Some(&2.into()), None)
             .await;
         assert!(matches!(future_rpc, Ok(OpenRequestResult::NotReady)));
     }
@@ -1733,7 +1732,13 @@ mod tests {
         // best_synced_backend_connection requires servers to be synced with the head block
         // TODO: test with and without passing the head_block.number?
         let best_available_server = rpcs
-            .best_available_rpc(&authorization, None, &[], Some(head_block.number()), None)
+            .best_available_rpc(
+                &authorization,
+                None,
+                &mut vec![],
+                Some(head_block.number()),
+                None,
+            )
             .await;
 
         debug!("best_available_server: {:#?}", best_available_server);
@@ -1744,13 +1749,13 @@ mod tests {
         ));
 
         let _best_available_server_from_none = rpcs
-            .best_available_rpc(&authorization, None, &[], None, None)
+            .best_available_rpc(&authorization, None, &mut vec![], None, None)
             .await;
 
         // assert_eq!(best_available_server, best_available_server_from_none);
 
         let best_archive_server = rpcs
-            .best_available_rpc(&authorization, None, &[], Some(&1.into()), None)
+            .best_available_rpc(&authorization, None, &mut vec![], Some(&1.into()), None)
             .await;
 
         match best_archive_server {
