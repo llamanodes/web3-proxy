@@ -129,18 +129,19 @@ impl ConsensusWeb3Rpcs {
         needed_block_num: Option<&U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
     ) -> ShouldWaitForBlock {
-        if self
-            .head_rpcs
-            .iter()
-            .any(|rpc| self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs))
-        {
-            let head_num = self.head_block.number();
+        // TODO: i think checking synced is always a waste of time. though i guess there could be a race
+        // if self
+        //     .head_rpcs
+        //     .iter()
+        //     .any(|rpc| self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs))
+        // {
+        //     let head_num = self.head_block.number();
 
-            if Some(head_num) >= needed_block_num {
-                debug!("best (head) block: {}", head_num);
-                return ShouldWaitForBlock::Ready;
-            }
-        }
+        //     if Some(head_num) >= needed_block_num {
+        //         debug!("best (head) block: {}", head_num);
+        //         return ShouldWaitForBlock::Ready;
+        //     }
+        // }
 
         // all of the head rpcs are skipped
 
