@@ -1243,7 +1243,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef552e6f588e446098f6ba40d89ac146c8c7b64aade83c051ee00bb5d2bc18d"
 dependencies = [
  "serde",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -1532,7 +1532,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "ulid",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -1708,7 +1708,7 @@ dependencies = [
  "serde_json",
  "syn 2.0.15",
  "tokio",
- "toml 0.7.3",
+ "toml 0.7.4",
  "url",
  "walkdir",
 ]
@@ -2580,15 +2580,15 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.23.2"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1788965e61b367cd03a62950836d5cd41560c3577d90e40e0819373194d1661c"
+checksum = "0646026eb1b3eea4cd9ba47912ea5ce9cc07713d105b1a14698f4e6433d348b7"
 dependencies = [
  "http",
  "hyper",
- "rustls",
+ "rustls 0.21.1",
  "tokio",
- "tokio-rustls",
+ "tokio-rustls 0.24.0",
 ]
 
 [[package]]
@@ -3011,7 +3011,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0500463acd96259d219abb05dc57e5a076ef04b2db9a2112846929b5f174c96"
 dependencies = [
  "libc",
- "uuid 1.3.2",
+ "uuid 1.3.3",
  "winapi",
 ]
 
@@ -4187,9 +4187,9 @@ dependencies = [
 
 [[package]]
 name = "rdkafka"
-version = "0.30.0"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97640b53443880ca65df40e9373a8193f9ad58b3f7419bc7206067f4a952500d"
+checksum = "88383df3a85a38adfa2aa447d3ab6eb9cedcb49613adcf18e7e7ebb3b62e9b03"
 dependencies = [
  "futures-channel",
  "futures-util",
@@ -4319,9 +4319,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.11.17"
+version = "0.11.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13293b639a097af28fc8a90f22add145a9c954e49d77da06263d58cf44d5fb91"
+checksum = "cde824a14b7c14f85caff81225f411faacc04a2013f41670f41443742b1c1c55"
 dependencies = [
  "base64 0.21.0",
  "bytes",
@@ -4342,14 +4342,14 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
- "rustls",
+ "rustls 0.21.1",
  "rustls-pemfile",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "tokio",
  "tokio-native-tls",
- "tokio-rustls",
+ "tokio-rustls 0.24.0",
  "tokio-util",
  "tower-service",
  "url",
@@ -4567,12 +4567,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c911ba11bc8433e811ce56fde130ccf32f5127cab0e0194e9c68c5a5b671791e"
+dependencies = [
+ "log",
+ "ring",
+ "rustls-webpki",
+ "sct",
+]
+
+[[package]]
 name = "rustls-pemfile"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d194b56d58803a43635bdc398cd17e383d6f71f9182b9a192c127ca42494a59b"
 dependencies = [
  "base64 0.21.0",
+]
+
+[[package]]
+name = "rustls-webpki"
+version = "0.100.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6207cd5ed3d8dca7816f8f3725513a34609c0c765bf652b8c3cb4cfd87db46b"
+dependencies = [
+ "ring",
+ "untrusted",
 ]
 
 [[package]]
@@ -4703,7 +4725,7 @@ dependencies = [
  "time 0.3.21",
  "tracing",
  "url",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4764,7 +4786,7 @@ dependencies = [
  "sea-query-derive",
  "serde_json",
  "time 0.3.21",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4780,7 +4802,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "time 0.3.21",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4927,7 +4949,7 @@ checksum = "6c3d7f8bf7373e75222452fcdd9347d857452a92d0eec738f941bc4656c5b5df"
 dependencies = [
  "httpdate",
  "reqwest",
- "rustls",
+ "rustls 0.20.8",
  "sentry-anyhow",
  "sentry-backtrace",
  "sentry-contexts",
@@ -5023,7 +5045,7 @@ dependencies = [
  "thiserror",
  "time 0.3.21",
  "url",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -5101,9 +5123,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0efd8caf556a6cebd3b285caf480045fcc1ac04f6bd786b09a6f11af30c4fcf4"
+checksum = "93107647184f6027e3b7dcb2e11034cf95ffa1e3a682c67951963ac69c1c007d"
 dependencies = [
  "serde",
 ]
@@ -5415,7 +5437,7 @@ dependencies = [
  "rand",
  "rsa",
  "rust_decimal",
- "rustls",
+ "rustls 0.20.8",
  "rustls-pemfile",
  "serde",
  "serde_json",
@@ -5429,7 +5451,7 @@ dependencies = [
  "time 0.3.21",
  "tokio-stream",
  "url",
- "uuid 1.3.2",
+ "uuid 1.3.3",
  "webpki-roots",
 ]
 
@@ -5460,7 +5482,7 @@ checksum = "804d3f245f894e61b1e6263c84b23ca675d96753b5abfd5cc8597d86806e8024"
 dependencies = [
  "once_cell",
  "tokio",
- "tokio-rustls",
+ "tokio-rustls 0.23.4",
 ]
 
 [[package]]
@@ -5844,9 +5866,19 @@ version = "0.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c43ee83903113e03984cb9e5cebe6c04a5116269e900e3ddba8f068a62adda59"
 dependencies = [
- "rustls",
+ "rustls 0.20.8",
  "tokio",
  "webpki",
+]
+
+[[package]]
+name = "tokio-rustls"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0d409377ff5b1e3ca6437aa86c1eb7d40c134bfec254e44c830defa92669db5"
+dependencies = [
+ "rustls 0.21.1",
+ "tokio",
 ]
 
 [[package]]
@@ -5869,9 +5901,9 @@ checksum = "54319c93411147bced34cb5609a80e0a8e44c5999c93903a81cd866630ec0bfd"
 dependencies = [
  "futures-util",
  "log",
- "rustls",
+ "rustls 0.20.8",
  "tokio",
- "tokio-rustls",
+ "tokio-rustls 0.23.4",
  "tungstenite",
  "webpki",
  "webpki-roots",
@@ -5916,9 +5948,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.7.3"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b403acf6f2bb0859c93c7f0d967cb4a75a7ac552100f9322faf64dc047669b21"
+checksum = "d6135d499e69981f9ff0ef2167955a5333c35e36f6937d382974566b3d5b94ec"
 dependencies = [
  "serde",
  "serde_spanned",
@@ -5928,18 +5960,18 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ab8ed2edee10b50132aed5f331333428b011c99402b5a534154ed15746f9622"
+checksum = "5a76a9312f5ba4c2dec6b9161fdf25d87ad8a09256ccea5a556fef03c706a10f"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "toml_edit"
-version = "0.19.8"
+version = "0.19.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "239410c8609e8125456927e6707163a3b1fdb40561e4b803bc041f466ccfdc13"
+checksum = "92d964908cec0d030b812013af25a0e57fddfadb1e066ecc6681d86253129d4f"
 dependencies = [
  "indexmap",
  "serde",
@@ -6173,7 +6205,7 @@ dependencies = [
  "httparse",
  "log",
  "rand",
- "rustls",
+ "rustls 0.20.8",
  "sha1",
  "thiserror",
  "url",
@@ -6213,7 +6245,7 @@ checksum = "13a3aaa69b04e5b66cc27309710a569ea23593612387d67daaf102e73aa974fd"
 dependencies = [
  "rand",
  "serde",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -6285,7 +6317,7 @@ dependencies = [
  "base64 0.13.1",
  "log",
  "once_cell",
- "rustls",
+ "rustls 0.20.8",
  "url",
  "webpki",
  "webpki-roots",
@@ -6321,9 +6353,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.3.2"
+version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dad5567ad0cf5b760e5665964bec1b47dfd077ba8a2544b513f3556d3d239a2"
+checksum = "345444e32442451b267fc254ae85a209c64be56d2890e601a0c37ff0c3c5ecd2"
 dependencies = [
  "getrandom",
  "serde",
@@ -6535,12 +6567,12 @@ dependencies = [
  "tokio-console",
  "tokio-stream",
  "tokio-uring",
- "toml 0.7.3",
+ "toml 0.7.4",
  "tower",
  "tower-http",
  "ulid",
  "url",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
