@@ -245,13 +245,7 @@ impl Web3Rpcs {
                 // TODO: request_metadata? maybe we should put it in the authorization?
                 // TODO: think more about this wait_for_sync
                 let response = self
-                    .try_send_best_consensus_head_connection(
-                        authorization,
-                        &request,
-                        None,
-                        None,
-                        None,
-                    )
+                    .try_send_best_connection(authorization, &request, None, None, None)
                     .await?;
 
                 let value = match response {
@@ -346,7 +340,7 @@ impl Web3Rpcs {
         let request: JsonRpcRequest = serde_json::from_value(request)?;
 
         let response = self
-            .try_send_best_consensus_head_connection(authorization, &request, None, Some(num), None)
+            .try_send_best_connection(authorization, &request, None, Some(num), None)
             .await?;
 
         let value = match response {

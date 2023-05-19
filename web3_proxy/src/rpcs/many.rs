@@ -10,7 +10,6 @@ use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcRequest};
 use crate::response_cache::JsonRpcResponseData;
-use crate::rpcs::consensus::{RankedRpcMap, RpcRanking};
 use crate::rpcs::transactions::TxStatus;
 use anyhow::Context;
 use arc_swap::ArcSwap;
@@ -32,7 +31,6 @@ use serde_json::json;
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::cmp::{min_by_key, Reverse};
-use std::collections::BTreeMap;
 use std::fmt::{self, Display};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -491,141 +489,241 @@ impl Web3Rpcs {
         unimplemented!("this shouldn't be possible")
     }
 
-    pub async fn best_available_rpc(
+    async fn _best_available_rpc(
+        &self,
+        authorization: &Arc<Authorization>,
+        potential_rpcs: &[Arc<Web3Rpc>],
+        skip: &mut Vec<Arc<Web3Rpc>>,
+    ) -> OpenRequestResult {
+        let mut earliest_retry_at = None;
+
+        for (rpc_a, rpc_b) in potential_rpcs.iter().circular_tuple_windows() {
+            trace!("{} vs {}", rpc_a, rpc_b);
+            // TODO: cached key to save a read lock
+            // TODO: ties to the server with the smallest block_data_limit
+            let faster_rpc = min_by_key(rpc_a, rpc_b, |x| x.peak_ewma());
+            trace!("winner: {}", faster_rpc);
+
+            // add to the skip list in case this one fails
+            skip.push(Arc::clone(faster_rpc));
+
+            // just because it has lower latency doesn't mean we are sure to get a connection. there might be rate limits
+            match faster_rpc.try_request_handle(authorization, None).await {
+                Ok(OpenRequestResult::Handle(handle)) => {
+                    trace!("opened handle: {}", faster_rpc);
+                    return OpenRequestResult::Handle(handle);
+                }
+                Ok(OpenRequestResult::RetryAt(retry_at)) => {
+                    trace!(
+                        "retry on {} @ {}",
+                        faster_rpc,
+                        retry_at.duration_since(Instant::now()).as_secs_f32()
+                    );
+
+                    if earliest_retry_at.is_none() {
+                        earliest_retry_at = Some(retry_at);
+                    } else {
+                        earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                    }
+                }
+                Ok(OpenRequestResult::NotReady) => {
+                    // TODO: log a warning? emit a stat?
+                    trace!("best_rpc not ready: {}", faster_rpc);
+                }
+                Err(err) => {
+                    trace!("No request handle for {}. err={:?}", faster_rpc, err)
+                }
+            }
+        }
+
+        if let Some(retry_at) = earliest_retry_at {
+            OpenRequestResult::RetryAt(retry_at)
+        } else {
+            OpenRequestResult::NotReady
+        }
+    }
+
+    pub async fn wait_for_best_rpc(
         &self,
         authorization: &Arc<Authorization>,
         request_metadata: Option<&Arc<RequestMetadata>>,
-        skip: &mut Vec<Arc<Web3Rpc>>,
+        skip_rpcs: &mut Vec<Arc<Web3Rpc>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
     ) -> Web3ProxyResult<OpenRequestResult> {
-        // TODO: use tracing and add this so logs are easy
-        let request_ulid = request_metadata.map(|x| &x.request_ulid);
+        let mut earliest_retry_at: Option<Instant> = None;
 
-        let mut usable_rpcs_by_tier_and_head_number = {
-            let mut m: RankedRpcMap = BTreeMap::new();
+        if self.watch_consensus_head_sender.is_none() {
+            trace!("this Web3Rpcs is not tracking head blocks. pick any server");
 
-            if let Some(consensus_rpcs) = self.watch_consensus_rpcs_sender.borrow().as_ref() {
-                // first place is the blocks that are synced close to head. if those don't work. try all the rpcs. if those don't work, keep trying for a few seconds
+            let by_name = self.by_name.load();
 
-                let head_block = &consensus_rpcs.head_block;
+            let mut potential_rpcs: Vec<_> = by_name
+                .values()
+                .filter(|rpc| !skip_rpcs.contains(rpc))
+                .filter(|rpc| {
+                    min_block_needed
+                        .map(|x| rpc.has_block_data(x))
+                        .unwrap_or(true)
+                })
+                .filter(|rpc| {
+                    max_block_needed
+                        .map(|x| rpc.has_block_data(x))
+                        .unwrap_or(true)
+                })
+                .cloned()
+                .collect();
 
-                let head_block_num = *head_block.number();
+            potential_rpcs.shuffle(&mut thread_fast_rng::thread_fast_rng());
 
-                let best_key = RpcRanking::new(
-                    consensus_rpcs.tier,
-                    consensus_rpcs.backups_needed,
-                    Some(head_block_num),
-                );
-
-                // todo: for now, build the map m here. once that works, do as much of it as possible while building ConsensusWeb3Rpcs
-                for x in consensus_rpcs.head_rpcs.iter().filter(|rpc| {
-                    consensus_rpcs.rpc_will_work_now(skip, min_block_needed, max_block_needed, rpc)
-                }) {
-                    m.entry(best_key).or_insert_with(Vec::new).push(x.clone());
-                }
-
-                let tier_offset = consensus_rpcs.tier + 1;
-
-                for (k, v) in consensus_rpcs.other_rpcs.iter() {
-                    let v: Vec<_> = v
-                        .iter()
-                        .filter(|rpc| {
-                            consensus_rpcs.rpc_will_work_now(
-                                skip,
-                                min_block_needed,
-                                max_block_needed,
-                                rpc,
-                            )
-                        })
-                        .cloned()
-                        .collect();
-
-                    let offset_ranking = k.add_offset(tier_offset);
-
-                    m.entry(offset_ranking).or_insert_with(Vec::new).extend(v);
-                }
-            } else if self.watch_consensus_head_sender.is_none() {
-                trace!("this Web3Rpcs is not tracking head blocks. pick any server");
-
-                for x in self.by_name.load().values() {
-                    if skip.contains(x) {
-                        trace!("{:?} - already skipped. {}", request_ulid, x);
-                        continue;
+            match self
+                ._best_available_rpc(authorization, &potential_rpcs, skip_rpcs)
+                .await
+            {
+                OpenRequestResult::Handle(x) => return Ok(OpenRequestResult::Handle(x)),
+                OpenRequestResult::NotReady => {}
+                OpenRequestResult::RetryAt(retry_at) => {
+                    if earliest_retry_at.is_none() {
+                        earliest_retry_at = Some(retry_at);
+                    } else {
+                        earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                     }
-
-                    let key = RpcRanking::default_with_backup(x.backup);
-
-                    m.entry(key).or_insert_with(Vec::new).push(x.clone());
                 }
             }
+        } else {
+            let start = Instant::now();
 
-            m
-        };
+            // TODO: get from config or argument
+            let max_wait = Duration::from_secs(10);
 
-        trace!(
-            "{:?} - usable_rpcs_by_tier_and_head_number: {:#?}",
-            request_ulid,
-            usable_rpcs_by_tier_and_head_number
-        );
+            let mut watch_consensus_rpcs = self.watch_consensus_rpcs_sender.subscribe();
 
-        let mut earliest_retry_at = None;
+            let mut potential_rpcs = Vec::with_capacity(self.by_name.load().len());
 
-        for usable_rpcs in usable_rpcs_by_tier_and_head_number.values_mut() {
-            // sort the tier randomly
-            if usable_rpcs.len() == 1 {
-                // TODO: include an rpc from the next tier?
-            } else {
-                // we can't get the rng outside of this loop because it is not Send
-                // this function should be pretty fast anyway, so it shouldn't matter too much
-                let mut rng = thread_fast_rng::thread_fast_rng();
-                usable_rpcs.shuffle(&mut rng);
-            };
+            while start.elapsed() < max_wait {
+                let consensus_rpcs = watch_consensus_rpcs.borrow_and_update().clone();
 
-            // now that the rpcs are shuffled, try to get an active request handle for one of them
-            // pick the first two and try the one with the lower rpc.latency.ewma
-            // TODO: chunks or tuple windows?
-            for (rpc_a, rpc_b) in usable_rpcs.iter().circular_tuple_windows() {
-                trace!("{:?} - {} vs {}", request_ulid, rpc_a, rpc_b);
-                // TODO: cached key to save a read lock
-                // TODO: ties to the server with the smallest block_data_limit
-                let best_rpc = min_by_key(rpc_a, rpc_b, |x| x.peak_ewma());
-                trace!("{:?} - winner: {}", request_ulid, best_rpc);
+                potential_rpcs.clear();
 
-                skip.push(best_rpc.clone());
+                // first check everything that is synced
+                // even though we might be querying an old block that an unsynced server can handle,
+                // it is best to not send queries to a syncing server. that slows down sync and can bloat erigon's disk usage.
+                if let Some(consensus_rpcs) = consensus_rpcs {
+                    potential_rpcs.extend(
+                        consensus_rpcs
+                            .head_rpcs
+                            .iter()
+                            .filter(|rpc| {
+                                consensus_rpcs.rpc_will_work_now(
+                                    skip_rpcs,
+                                    min_block_needed,
+                                    max_block_needed,
+                                    rpc,
+                                )
+                            })
+                            .cloned(),
+                    );
 
-                // just because it has lower latency doesn't mean we are sure to get a connection
-                match best_rpc.try_request_handle(authorization, None).await {
-                    Ok(OpenRequestResult::Handle(handle)) => {
-                        trace!("{:?} - opened handle: {}", request_ulid, best_rpc);
-                        return Ok(OpenRequestResult::Handle(handle));
+                    potential_rpcs.shuffle(&mut thread_fast_rng::thread_fast_rng());
+
+                    if potential_rpcs.len() >= self.min_head_rpcs {
+                        // we have enough potential rpcs. try to load balance
+
+                        match self
+                            ._best_available_rpc(authorization, &potential_rpcs, skip_rpcs)
+                            .await
+                        {
+                            OpenRequestResult::Handle(x) => {
+                                return Ok(OpenRequestResult::Handle(x))
+                            }
+                            OpenRequestResult::NotReady => {}
+                            OpenRequestResult::RetryAt(retry_at) => {
+                                if earliest_retry_at.is_none() {
+                                    earliest_retry_at = Some(retry_at);
+                                } else {
+                                    earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                                }
+                            }
+                        }
+
+                        // these rpcs were tried. don't try them again
+                        potential_rpcs.clear();
                     }
-                    Ok(OpenRequestResult::RetryAt(retry_at)) => {
-                        trace!(
-                            "{:?} - retry on {} @ {}",
-                            request_ulid,
-                            best_rpc,
-                            retry_at.duration_since(Instant::now()).as_secs_f32()
-                        );
 
-                        if earliest_retry_at.is_none() {
-                            earliest_retry_at = Some(retry_at);
-                        } else {
-                            earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                    for next_rpcs in consensus_rpcs.other_rpcs.values() {
+                        // we have to collect in order to shuffle
+                        let mut more_rpcs: Vec<_> = next_rpcs
+                            .iter()
+                            .filter(|rpc| {
+                                consensus_rpcs.rpc_will_work_now(
+                                    skip_rpcs,
+                                    min_block_needed,
+                                    max_block_needed,
+                                    rpc,
+                                )
+                            })
+                            .cloned()
+                            .collect();
+
+                        // shuffle only the new entries. that way the highest tier still gets preference
+                        more_rpcs.shuffle(&mut thread_fast_rng::thread_fast_rng());
+
+                        potential_rpcs.extend(more_rpcs.into_iter());
+
+                        if potential_rpcs.len() >= self.min_head_rpcs {
+                            // we have enough potential rpcs. try to load balance
+                            match self
+                                ._best_available_rpc(authorization, &potential_rpcs, skip_rpcs)
+                                .await
+                            {
+                                OpenRequestResult::Handle(x) => {
+                                    return Ok(OpenRequestResult::Handle(x))
+                                }
+                                OpenRequestResult::NotReady => {}
+                                OpenRequestResult::RetryAt(retry_at) => {
+                                    if earliest_retry_at.is_none() {
+                                        earliest_retry_at = Some(retry_at);
+                                    } else {
+                                        earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                                    }
+                                }
+                            }
+
+                            // these rpcs were tried. don't try them again
+                            potential_rpcs.clear();
                         }
                     }
-                    Ok(OpenRequestResult::NotReady) => {
-                        // TODO: log a warning? emit a stat?
-                        trace!("{:?} - best_rpc not ready: {}", request_ulid, best_rpc);
+
+                    if !potential_rpcs.is_empty() {
+                        // even after scanning all the tiers, there are not enough rpcs that can serve this request. try anyways
+                        match self
+                            ._best_available_rpc(authorization, &potential_rpcs, skip_rpcs)
+                            .await
+                        {
+                            OpenRequestResult::Handle(x) => {
+                                return Ok(OpenRequestResult::Handle(x))
+                            }
+                            OpenRequestResult::NotReady => {}
+                            OpenRequestResult::RetryAt(retry_at) => {
+                                if earliest_retry_at.is_none() {
+                                    earliest_retry_at = Some(retry_at);
+                                } else {
+                                    earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                                }
+                            }
+                        }
                     }
-                    Err(err) => {
-                        trace!(
-                            "{:?} - No request handle for {}. err={:?}",
-                            request_ulid,
-                            best_rpc,
-                            err
-                        )
+
+                    let waiting_for = min_block_needed.max(max_block_needed);
+
+                    match consensus_rpcs.should_wait_for_block(waiting_for, skip_rpcs) {
+                        ShouldWaitForBlock::NeverReady => break,
+                        ShouldWaitForBlock::Ready => continue,
+                        ShouldWaitForBlock::Wait { .. } => {}
                     }
+
+                    // TODO: select on consensus_rpcs changing and on earliest_retry_at
+                    watch_consensus_rpcs.changed().await?;
                 }
             }
         }
@@ -634,41 +732,20 @@ impl Web3Rpcs {
             request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
         }
 
-        match earliest_retry_at {
-            None => {
-                // none of the servers gave us a time to retry at
-                debug!(
-                    "{:?} - no servers in {} gave a retry time! Skipped {:?}. {:#?}",
-                    request_ulid, self, skip, usable_rpcs_by_tier_and_head_number
-                );
+        if let Some(retry_at) = earliest_retry_at {
+            // TODO: log the server that retry_at came from
+            warn!(
+                "no servers in {} ready! Skipped {:?}. Retry in {:?}s",
+                self,
+                skip_rpcs,
+                retry_at.duration_since(Instant::now()).as_secs_f32()
+            );
 
-                // TODO: bring this back? need to think about how to do this with `allow_backups`
-                // we could return an error here, but maybe waiting a second will fix the problem
-                // TODO: configurable max wait? the whole max request time, or just some portion?
-                // let handle = sorted_rpcs
-                //     .get(0)
-                //     .expect("at least 1 is available")
-                //     .wait_for_request_handle(authorization, Duration::from_secs(3), false)
-                //     .await?;
-                // Ok(OpenRequestResult::Handle(handle))
+            Ok(OpenRequestResult::RetryAt(retry_at))
+        } else {
+            warn!("no servers in {} ready! Skipped {:?}", self, skip_rpcs);
 
-                Ok(OpenRequestResult::NotReady)
-            }
-            Some(earliest_retry_at) => {
-                // TODO: log the server that retry_at came from
-                // TODO: `self` doesn't log well. get a pretty name for this group of servers
-                warn!(
-                    "{:?} - no servers in {} ready! Skipped {:?}. Retry in {:?}s",
-                    request_ulid,
-                    self,
-                    skip,
-                    earliest_retry_at
-                        .duration_since(Instant::now())
-                        .as_secs_f32()
-                );
-
-                Ok(OpenRequestResult::RetryAt(earliest_retry_at))
-            }
+            Ok(OpenRequestResult::NotReady)
         }
     }
 
@@ -784,7 +861,7 @@ impl Web3Rpcs {
 
     /// be sure there is a timeout on this or it might loop forever
     /// TODO: think more about wait_for_sync
-    pub async fn try_send_best_consensus_head_connection(
+    pub async fn try_send_best_connection(
         &self,
         authorization: &Arc<Authorization>,
         request: &JsonRpcRequest,
@@ -802,9 +879,10 @@ impl Web3Rpcs {
         // TODO: get from config
         let max_wait = Duration::from_secs(10);
 
+        // TODO: the loop here feels somewhat redundant with the loop in best_available_rpc
         while start.elapsed() < max_wait {
             match self
-                .best_available_rpc(
+                .wait_for_best_rpc(
                     authorization,
                     request_metadata,
                     &mut skip_rpcs,
@@ -963,21 +1041,7 @@ impl Web3Rpcs {
                     }
                 }
                 OpenRequestResult::NotReady => {
-                    if let Some(request_metadata) = request_metadata {
-                        request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
-                    }
-
-                    let waiting_for = min_block_needed.max(max_block_needed);
-
-                    if let Some(consensus_rpcs) = watch_consensus_rpcs.borrow_and_update().as_ref()
-                    {
-                        match consensus_rpcs.should_wait_for_block(waiting_for, &skip_rpcs) {
-                            ShouldWaitForBlock::NeverReady => break,
-                            ShouldWaitForBlock::Ready => continue,
-                            ShouldWaitForBlock::Wait { .. } => {}
-                        }
-                    }
-                    watch_consensus_rpcs.changed().await?;
+                    break;
                 }
             }
         }
@@ -1152,7 +1216,7 @@ impl Web3Rpcs {
     ) -> Web3ProxyResult<JsonRpcResponseData> {
         match authorization.checks.proxy_mode {
             ProxyMode::Debug | ProxyMode::Best => {
-                self.try_send_best_consensus_head_connection(
+                self.try_send_best_connection(
                     authorization,
                     request,
                     request_metadata,
@@ -1489,7 +1553,7 @@ mod tests {
 
         // best_synced_backend_connection which servers to be synced with the head block should not find any nodes
         let x = rpcs
-            .best_available_rpc(
+            .wait_for_best_rpc(
                 &authorization,
                 None,
                 &mut vec![],
@@ -1586,28 +1650,28 @@ mod tests {
 
         // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
-            rpcs.best_available_rpc(&authorization, None, &mut vec![], None, None)
+            rpcs.wait_for_best_rpc(&authorization, None, &mut vec![], None, None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
-            rpcs.best_available_rpc(&authorization, None, &mut vec![], Some(&0.into()), None)
+            rpcs.wait_for_best_rpc(&authorization, None, &mut vec![], Some(&0.into()), None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
-            rpcs.best_available_rpc(&authorization, None, &mut vec![], Some(&1.into()), None)
+            rpcs.wait_for_best_rpc(&authorization, None, &mut vec![], Some(&1.into()), None)
                 .await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // future block should not get a handle
         let future_rpc = rpcs
-            .best_available_rpc(&authorization, None, &mut vec![], Some(&2.into()), None)
+            .wait_for_best_rpc(&authorization, None, &mut vec![], Some(&2.into()), None)
             .await;
         assert!(matches!(future_rpc, Ok(OpenRequestResult::NotReady)));
     }
@@ -1732,7 +1796,7 @@ mod tests {
         // best_synced_backend_connection requires servers to be synced with the head block
         // TODO: test with and without passing the head_block.number?
         let best_available_server = rpcs
-            .best_available_rpc(
+            .wait_for_best_rpc(
                 &authorization,
                 None,
                 &mut vec![],
@@ -1749,13 +1813,13 @@ mod tests {
         ));
 
         let _best_available_server_from_none = rpcs
-            .best_available_rpc(&authorization, None, &mut vec![], None, None)
+            .wait_for_best_rpc(&authorization, None, &mut vec![], None, None)
             .await;
 
         // assert_eq!(best_available_server, best_available_server_from_none);
 
         let best_archive_server = rpcs
-            .best_available_rpc(&authorization, None, &mut vec![], Some(&1.into()), None)
+            .wait_for_best_rpc(&authorization, None, &mut vec![], Some(&1.into()), None)
             .await;
 
         match best_archive_server {

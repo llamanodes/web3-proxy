@@ -190,7 +190,7 @@ impl ConsensusWeb3Rpcs {
     }
 
     // TODO: take method as a param, too. mark nodes with supported methods (maybe do it optimistically? on)
-    fn rpc_will_work_eventually(
+    pub fn rpc_will_work_eventually(
         &self,
         rpc: &Arc<Web3Rpc>,
         needed_block_num: Option<&U64>,

@@ -1,6 +1,6 @@
 //! Handle registration, logins, and managing account data.
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse};
+use crate::frontend::errors::Web3ProxyResponse;
 use crate::referral_code::ReferralCode;
 use anyhow::Context;
 use axum::{
@@ -10,10 +10,9 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::{referrer, user_tier};
+use entities::referrer;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::warn;
 use migration::sea_orm;
 use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;
@@ -38,20 +37,7 @@ pub async fn user_referral_link_get(
         .db_replica()
         .context("getting replica db for user's revert logs")?;
 
-    // Second, check if the user is a premium user
-    let user_tier = user_tier::Entity::find()
-        .filter(user_tier::Column::Id.eq(user.user_tier_id))
-        .one(db_replica.conn())
-        .await?
-        .ok_or(Web3ProxyError::UnknownKey)?;
-
-    warn!("User tier is: {:?}", user_tier);
-    // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
-    if user_tier.id != 6 {
-        return Err(Web3ProxyError::PaymentRequired);
-    }
-
-    // Then get the referral token
+    // Then get the referral token. If one doesn't exist, create one
     let user_referrer = referrer::Entity::find()
         .filter(referrer::Column::UserId.eq(user.id))
         .one(db_replica.conn())
@@ -60,18 +46,18 @@ pub async fn user_referral_link_get(
     let (referral_code, status_code) = match user_referrer {
         Some(x) => (x.referral_code, StatusCode::OK),
         None => {
-            // Connect to the database for mutable write
+            // Connect to the database for writes
             let db_conn = app.db_conn().context("getting db_conn")?;
 
-            let referral_code = ReferralCode::default().0;
-            // Log that this guy was referred by another guy
-            // Do not automatically create a new
+            let referral_code = ReferralCode::default().to_string();
+
             let referrer_entry = referrer::ActiveModel {
                 user_id: sea_orm::ActiveValue::Set(user.id),
                 referral_code: sea_orm::ActiveValue::Set(referral_code.clone()),
                 ..Default::default()
             };
             referrer_entry.save(&db_conn).await?;
+
             (referral_code, StatusCode::CREATED)
         }
     };
