@@ -138,36 +138,33 @@ pub async fn admin_increase_balance(
         .one(&db_conn)
         .await?
         .context("Premium tier was not found!")?;
-    if balance_entry.available_balance + amount >= Decimal::new(10, 0)
-        && user_entry.user_tier_id != premium_user_tier.id
-    {
-        let balance_entry = balance_entry.into_active_model();
-        balance::Entity::insert(balance_entry)
-            .on_conflict(
-                OnConflict::new()
-                    .values([
-                        // (
-                        //     balance::Column::Id,
-                        //     Expr::col(balance::Column::Id).add(self.frontend_requests),
-                        // ),
-                        (
-                            balance::Column::AvailableBalance,
-                            Expr::col(balance::Column::AvailableBalance).add(amount),
-                        ),
-                        // (
-                        //     balance::Column::Used,
-                        //     Expr::col(balance::Column::UsedBalance).add(self.backend_retries),
-                        // ),
-                        // (
-                        //     balance::Column::UserId,
-                        //     Expr::col(balance::Column::UserId).add(self.no_servers),
-                        // ),
-                    ])
-                    .to_owned(),
-            )
-            .exec(&db_conn)
-            .await?;
-    }
+
+    let balance_entry = balance_entry.into_active_model();
+    balance::Entity::insert(balance_entry)
+        .on_conflict(
+            OnConflict::new()
+                .values([
+                    // (
+                    //     balance::Column::Id,
+                    //     Expr::col(balance::Column::Id).add(self.frontend_requests),
+                    // ),
+                    (
+                        balance::Column::AvailableBalance,
+                        Expr::col(balance::Column::AvailableBalance).add(amount),
+                    ),
+                    // (
+                    //     balance::Column::Used,
+                    //     Expr::col(balance::Column::UsedBalance).add(self.backend_retries),
+                    // ),
+                    // (
+                    //     balance::Column::UserId,
+                    //     Expr::col(balance::Column::UserId).add(self.no_servers),
+                    // ),
+                ])
+                .to_owned(),
+        )
+        .exec(&db_conn)
+        .await?;
     // TODO: Downgrade otherwise, right now not functioning properly
 
     // Then read and save in one transaction
