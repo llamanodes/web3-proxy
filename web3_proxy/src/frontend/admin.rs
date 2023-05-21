@@ -79,6 +79,15 @@ pub async fn admin_increase_balance(
             Web3ProxyError::BadRequest("Unable to parse user_address as an Address".to_string())
         })?;
     let user_address_bytes: Vec<u8> = user_address.clone().to_fixed_bytes().into();
+    let note: String = params
+        .get("note")
+        .ok_or_else(|| {
+            Web3ProxyError::BadRequest("Unable to find 'note' key in request".to_string())
+        })?
+        .parse::<String>()
+        .map_err(|_| {
+            Web3ProxyError::BadRequest("Unable to parse 'note' as a String".to_string())
+        })?;
     // Get the amount from params
     let amount: Decimal = Decimal::from_str(params.get("amount").ok_or_else(|| {
         Web3ProxyError::BadRequest("Unable to get the amount key from the request".to_string())
@@ -103,6 +112,7 @@ pub async fn admin_increase_balance(
         amount: sea_orm::Set(amount),
         admin_id: sea_orm::Set(admin_entry.id),
         deposit_to_user_id: sea_orm::Set(user_entry.id),
+        note: sea_orm::Set(note),
         ..Default::default()
     };
     increase_balance_receipt.save(&db_conn).await?;

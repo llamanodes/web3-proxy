@@ -11,6 +11,7 @@ pub struct Model {
     pub amount: Decimal,
     pub admin_id: u64,
     pub deposit_to_user_id: u64,
+    pub note: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

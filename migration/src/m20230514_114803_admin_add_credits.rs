@@ -51,6 +51,11 @@ impl MigrationTrait for Migration {
                             )
                             .to(User::Table, User::Id),
                     )
+                    .col(
+                        ColumnDef::new(AdminIncreaseBalanceReceipt::Note)
+                            .string()
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await
@@ -88,4 +93,5 @@ enum AdminIncreaseBalanceReceipt {
     Amount,
     AdminId,
     DepositToUserId,
+    Note,
 }
