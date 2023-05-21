@@ -50,11 +50,9 @@ pub async fn admin_increase_balance(
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
-    println!("Got here 1 {:?}", bearer);
     let (caller, _) = app.bearer_is_authorized(bearer).await?;
     let caller_id = caller.id;
 
-    println!("Got here 2, {:?}", caller_id);
     // Establish connections
     let db_conn = app
         .db_conn()
@@ -67,7 +65,6 @@ pub async fn admin_increase_balance(
         .await?
         .ok_or(Web3ProxyError::AccessDenied)?;
 
-    // println!("Got here 2, {:?}", caller_id);
     // Get the user from params
     let user_address: Address = params
         .get("user_address")
@@ -99,7 +96,6 @@ pub async fn admin_increase_balance(
         )))
     })?;
 
-    // TODO: Gotta check if this reference is ok
     let user_entry: user::Model = user::Entity::find()
         .filter(user::Column::Address.eq(user_address_bytes.clone()))
         .one(&db_conn)
@@ -130,8 +126,6 @@ pub async fn admin_increase_balance(
         .one(&db_conn)
         .await?
         .context("User does not have a balance row")?;
-
-    println!("New amount: {:?}", balance_entry.available_balance);
 
     // Finally make the user premium if balance is above 10$
     let premium_user_tier = user_tier::Entity::find()
