@@ -423,14 +423,20 @@ pub async fn query_user_stats<'a>(
                     }
                 } else if key == "archive_needed" {
                     match value {
-                        influxdb2_structmap::value::Value::Long(inner) => {
+                        influxdb2_structmap::value::Value::String(inner) => {
                             out.insert(
                                 "archive_needed".to_owned(),
-                                serde_json::Value::Number(inner.into()),
+                                if inner == "true" {
+                                    serde_json::Value::Bool(true)
+                                } else if inner == "false" {
+                                    serde_json::Value::Bool(false)
+                                } else {
+                                    serde_json::Value::String("error".to_owned())
+                                },
                             );
                         }
                         _ => {
-                            error!("archive_needed should always be a Long!");
+                            error!("archive_needed should always be a String!");
                         }
                     }
                 } else if key == "error_response" {
