@@ -28,9 +28,10 @@ use http::StatusCode;
 use log::{debug, info, warn};
 use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-    TransactionTrait,
+    self, ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    TransactionTrait, Update,
 };
+use migration::{ConnectionTrait, Expr, OnConflict};
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
@@ -113,36 +114,52 @@ pub async fn admin_increase_balance(
     );
     out.insert("amount", serde_json::Value::String(amount.to_string()));
 
-    let txn = db_conn.begin().await?;
-
     // Get the balance row
     let balance_entry: balance::Model = balance::Entity::find()
         .filter(balance::Column::UserId.eq(user_entry.id))
-        .one(&txn)
+        .one(&db_conn)
         .await?
         .context("User does not have a balance row")?;
 
-    let new_amount = balance_entry.available_balance + amount;
-    let mut balance_entry = balance_entry.into_active_model();
-    balance_entry.available_balance = sea_orm::Set(new_amount);
-
-    println!("New amount: {:?}", new_amount);
+    println!("New amount: {:?}", balance_entry.available_balance);
 
     // Finally make the user premium if balance is above 10$
     let premium_user_tier = user_tier::Entity::find()
         .filter(user_tier::Column::Title.eq("Premium"))
-        .one(&txn)
+        .one(&db_conn)
         .await?
         .context("Premium tier was not found!")?;
-    if new_amount >= Decimal::new(10, 0) && user_entry.user_tier_id != premium_user_tier.id {
-        let mut user_entry = user_entry.into_active_model();
-        user_entry.user_tier_id = sea_orm::Set(premium_user_tier.id);
-        user_entry.save(&txn).await?;
+    if balance_entry.available_balance + amount >= Decimal::new(10, 0)
+        && user_entry.user_tier_id != premium_user_tier.id
+    {
+        let balance_entry = balance_entry.into_active_model();
+        balance::Entity::insert(balance_entry)
+            .on_conflict(
+                OnConflict::new()
+                    .values([
+                        // (
+                        //     balance::Column::Id,
+                        //     Expr::col(balance::Column::Id).add(self.frontend_requests),
+                        // ),
+                        (
+                            balance::Column::AvailableBalance,
+                            Expr::col(balance::Column::AvailableBalance).add(amount),
+                        ),
+                        // (
+                        //     balance::Column::Used,
+                        //     Expr::col(balance::Column::UsedBalance).add(self.backend_retries),
+                        // ),
+                        // (
+                        //     balance::Column::UserId,
+                        //     Expr::col(balance::Column::UserId).add(self.no_servers),
+                        // ),
+                    ])
+                    .to_owned(),
+            )
+            .exec(&db_conn)
+            .await?;
     }
     // TODO: Downgrade otherwise, right now not functioning properly
-
-    balance_entry.save(&txn).await?;
-    txn.commit().await?;
 
     // Then read and save in one transaction
     let response = (StatusCode::OK, Json(out)).into_response();
