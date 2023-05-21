@@ -9,6 +9,7 @@ use crate::http_params::get_user_id_from_params;
 use crate::user_token::UserBearerToken;
 use crate::PostLogin;
 use anyhow::Context;
+use axum::body::HttpBody;
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -86,15 +87,19 @@ pub async fn admin_increase_balance(
             Web3ProxyError::BadRequest("Unable to parse 'note' as a String".to_string())
         })?;
     // Get the amount from params
-    let amount: Decimal = Decimal::from_str(params.get("amount").ok_or_else(|| {
-        Web3ProxyError::BadRequest("Unable to get the amount key from the request".to_string())
-    })?)
-    .or_else(|err| {
-        Err(Web3ProxyError::BadRequest(format!(
-            "Unable to parse amount from the request {:?}",
-            err
-        )))
-    })?;
+    // Decimal::from_str
+    let amount: Decimal = params
+        .get("amount")
+        .ok_or_else(|| {
+            Web3ProxyError::BadRequest("Unable to get the amount key from the request".to_string())
+        })
+        .map(|x| Decimal::from_str(x))?
+        .or_else(|err| {
+            Err(Web3ProxyError::BadRequest(format!(
+                "Unable to parse amount from the request {:?}",
+                err
+            )))
+        })?;
 
     let user_entry: user::Model = user::Entity::find()
         .filter(user::Column::Address.eq(user_address_bytes.clone()))
