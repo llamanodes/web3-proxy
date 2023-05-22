@@ -287,7 +287,6 @@ impl Web3RpcConfig {
         blocks_by_hash_cache: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
-        reconnect: bool,
     ) -> anyhow::Result<(Arc<Web3Rpc>, AnyhowJoinHandle<()>)> {
         if !self.extra.is_empty() {
             warn!("unknown Web3RpcConfig fields!: {:?}", self.extra.keys());
@@ -304,7 +303,6 @@ impl Web3RpcConfig {
             blocks_by_hash_cache,
             block_sender,
             tx_id_sender,
-            reconnect,
         )
         .await
     }

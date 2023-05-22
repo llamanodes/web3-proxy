@@ -166,7 +166,6 @@ pub async fn user_balance_post(
                     "eth_getTransactionReceipt",
                     &vec![format!("0x{}", hex::encode(tx_hash))],
                     Level::Trace.into(),
-                    None,
                 )
                 .await
                 // TODO: What kind of error would be here
@@ -217,7 +216,7 @@ pub async fn user_balance_post(
             ]);
             debug!("Params are: {:?}", &params);
             let accepted_token: String = handle
-                .request("eth_call", &params, Level::Trace.into(), None)
+                .request("eth_call", &params, Level::Trace.into())
                 .await
                 // TODO: What kind of error would be here
                 .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
@@ -267,7 +266,7 @@ pub async fn user_balance_post(
             ]);
             debug!("ERC20 Decimal request params are: {:?}", &params);
             let decimals: String = handle
-                .request("eth_call", &params, Level::Trace.into(), None)
+                .request("eth_call", &params, Level::Trace.into())
                 .await
                 .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
             debug!("Decimals response is: {:?}", decimals);

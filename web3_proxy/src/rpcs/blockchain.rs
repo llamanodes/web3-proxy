@@ -219,13 +219,12 @@ impl Web3Rpcs {
         // TODO: if error, retry?
         let block: Web3ProxyBlock = match rpc {
             Some(rpc) => rpc
-                .wait_for_request_handle(authorization, Some(Duration::from_secs(30)), None)
+                .wait_for_request_handle(authorization, Some(Duration::from_secs(30)))
                 .await?
                 .request::<_, Option<ArcBlock>>(
                     "eth_getBlockByHash",
                     &json!(get_block_params),
                     Level::Error.into(),
-                    None,
                 )
                 .await?
                 .and_then(|x| {

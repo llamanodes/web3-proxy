@@ -276,7 +276,6 @@ impl Web3Rpcs {
                     blocks_by_hash_cache,
                     block_sender,
                     pending_tx_id_sender,
-                    true,
                 ));
 
                 Some(handle)
@@ -303,9 +302,9 @@ impl Web3Rpcs {
                             while new_head_receiver.borrow_and_update().is_none() {
                                 new_head_receiver.changed().await?;
                             }
-                        }
 
-                        old_rpc.disconnect().await.context("disconnect old rpc")?;
+                            // TODO: tell ethers to disconnect? is there a function for that?
+                        }
                     }
 
                     // TODO: what should we do with the new handle? make sure error logs aren't dropped
@@ -435,7 +434,7 @@ impl Web3Rpcs {
             .into_iter()
             .map(|active_request_handle| async move {
                 let result: Result<Box<RawValue>, _> = active_request_handle
-                    .request(method, &json!(&params), error_level.into(), None)
+                    .request(method, &json!(&params), error_level.into())
                     .await;
                 result
             })
@@ -508,7 +507,7 @@ impl Web3Rpcs {
             skip.push(Arc::clone(faster_rpc));
 
             // just because it has lower latency doesn't mean we are sure to get a connection. there might be rate limits
-            match faster_rpc.try_request_handle(authorization, None).await {
+            match faster_rpc.try_request_handle(authorization).await {
                 Ok(OpenRequestResult::Handle(handle)) => {
                     trace!("opened handle: {}", faster_rpc);
                     return OpenRequestResult::Handle(handle);
@@ -831,7 +830,7 @@ impl Web3Rpcs {
             }
 
             // check rate limits and increment our connection counter
-            match rpc.try_request_handle(authorization, None).await {
+            match rpc.try_request_handle(authorization).await {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
                     trace!("{} is rate limited. skipping", rpc);
@@ -908,7 +907,6 @@ impl Web3Rpcs {
                             &request.method,
                             &json!(request.params),
                             RequestErrorHandler::Save,
-                            None,
                         )
                         .await;
 
@@ -1307,8 +1305,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+    use crate::rpcs::blockchain::Web3ProxyBlock;
     use crate::rpcs::consensus::ConsensusFinder;
-    use crate::rpcs::{blockchain::Web3ProxyBlock, provider::Web3Provider};
     use arc_swap::ArcSwap;
     use ethers::types::H256;
     use ethers::types::{Block, U256};
@@ -1451,7 +1449,6 @@ mod tests {
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: Some(tx_synced),
-            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
@@ -1466,7 +1463,6 @@ mod tests {
             block_data_limit: block_data_limit.into(),
             tier: 0,
             head_block: Some(tx_lagged),
-            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
@@ -1707,7 +1703,6 @@ mod tests {
             block_data_limit: 64.into(),
             tier: 1,
             head_block: Some(tx_pruned),
-            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
 
@@ -1721,7 +1716,6 @@ mod tests {
             block_data_limit: u64::MAX.into(),
             tier: 2,
             head_block: Some(tx_archive),
-            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             ..Default::default()
         };
 
@@ -1876,7 +1870,6 @@ mod tests {
             block_data_limit: 64.into(),
             tier: 0,
             head_block: Some(tx_mock_geth),
-            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
@@ -1889,7 +1882,6 @@ mod tests {
             block_data_limit: u64::MAX.into(),
             tier: 1,
             head_block: Some(tx_mock_erigon_archive),
-            provider: AsyncRwLock::new(Some(Arc::new(Web3Provider::Mock))),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
