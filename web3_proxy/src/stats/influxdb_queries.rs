@@ -190,7 +190,6 @@ pub async fn query_user_stats<'a>(
         |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
         |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
         |> drop(columns: ["balance"])
-        |> map(fn: (r) => ({{ r with "error_response": if r.error_response == "true" then r.frontend_requests else 0}}))
         |> group(columns: ["_time", "_measurement", "archive_needed", "chain_id", "error_response", "method", "rpc_secret_key_id"])
         |> sort(columns: ["frontend_requests"])
         |> map(fn:(r) => ({{ r with "sum_credits_used": float(v: r["sum_credits_used"]) }}))
