@@ -75,6 +75,7 @@ pub async fn query_user_stats<'a>(
         "_measurement".to_string(),
         "archive_needed".to_string(),
         "chain_id".to_string(),
+        "error_response".to_string(),
     ];
 
     // Include a hashmap to go from rpc_secret_key_id to the rpc_secret_key
@@ -190,14 +191,14 @@ pub async fn query_user_stats<'a>(
         |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
         |> drop(columns: ["balance"])
         |> map(fn: (r) => ({{ r with "error_response": if r.error_response == "true" then r.frontend_requests else 0}}))
-        |> group(columns: ["_time", "_measurement", "archive_needed", "chain_id", "method", "rpc_secret_key_id"])
+        |> group(columns: ["_time", "_measurement", "archive_needed", "chain_id", "error_response", "method", "rpc_secret_key_id"])
         |> sort(columns: ["frontend_requests"])
         |> map(fn:(r) => ({{ r with "sum_credits_used": float(v: r["sum_credits_used"]) }}))
-        |> cumulativeSum(columns: ["error_response", "backend_requests", "cache_hits", "cache_misses", "frontend_requests", "sum_credits_used", "sum_request_bytes", "sum_response_bytes", "sum_response_millis"])
+        |> cumulativeSum(columns: ["backend_requests", "cache_hits", "cache_misses", "frontend_requests", "sum_credits_used", "sum_request_bytes", "sum_response_bytes", "sum_response_millis"])
         |> sort(columns: ["frontend_requests"], desc: true)
         |> limit(n: 1)
         |> group()
-        |> sort(columns: ["_time", "_measurement", "archive_needed", "chain_id", "method", "rpc_secret_key_id"], desc: true)
+        |> sort(columns: ["_time", "_measurement", "archive_needed", "chain_id", "error_response", "method", "rpc_secret_key_id"], desc: true)
     "#);
 
     info!("Raw query to db is: {:?}", query);
@@ -441,10 +442,16 @@ pub async fn query_user_stats<'a>(
                     }
                 } else if key == "error_response" {
                     match value {
-                        influxdb2_structmap::value::Value::Long(inner) => {
+                        influxdb2_structmap::value::Value::String(inner) => {
                             out.insert(
                                 "error_response".to_owned(),
-                                serde_json::Value::Number(inner.into()),
+                                if inner == "true" {
+                                    serde_json::Value::Bool(true)
+                                } else if inner == "false" {
+                                    serde_json::Value::Bool(false)
+                                } else {
+                                    serde_json::Value::String("error".to_owned())
+                                },
                             );
                         }
                         _ => {
