@@ -44,6 +44,7 @@ impl RttEstimate {
             );
             Duration::from_nanos(next_estimate as u64)
         };
+
         self.rtt
     }
 
@@ -101,7 +102,7 @@ impl AtomicRttEstimate {
     }
 
     /// Fetches the value, and applies a function to it that returns an
-    /// new rtt. Retrns the new RttEstimate with new update_at.
+    /// new rtt. Returns the new RttEstimate with new update_at.
     ///
     /// Automatically updates the update_at with Instant::now(). This
     /// method omits ordering arguments, defaulting to Relaxed since

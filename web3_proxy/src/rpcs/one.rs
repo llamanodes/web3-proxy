@@ -159,8 +159,7 @@ impl Web3Rpc {
         // TODO Should these defaults be in config
         let peak_latency = PeakEwmaLatency::spawn(
             // Decay over 15s
-            // TODO! This is wrong! needs to be as_nanos!
-            Duration::from_secs(15).as_millis() as f64,
+            Duration::from_secs(15),
             // Peak requests so far around 5k, we will use an order of magnitude
             // more to be safe. Should only use about 50mb RAM
             50_000,
@@ -1220,7 +1219,7 @@ impl Serialize for Web3Rpc {
 
         state.serialize_field(
             "peak_latency",
-            &self.peak_latency.as_ref().unwrap().latency(),
+            &self.peak_latency.as_ref().unwrap().latency().as_millis(),
         )?;
 
         state.serialize_field("peak_ewma", self.peak_ewma().as_ref())?;

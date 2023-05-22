@@ -356,9 +356,7 @@ impl OpenRequestHandle {
                 }
             }
         } else if let Some(peak_latency) = &self.rpc.peak_latency {
-            // trace!("updating peak_latency: {}", latency.as_secs_f64());
-            // peak_latency.report(latency);
-            trace!("peak latency disabled for now");
+            peak_latency.report(latency);
         } else {
             unreachable!("peak_latency not initialized");
         }
