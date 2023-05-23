@@ -877,7 +877,11 @@ impl Web3Rpcs {
                             let rate_limit_substrings = ["limit", "exceeded", "quota usage"];
                             for rate_limit_substr in rate_limit_substrings {
                                 if error_msg.contains(rate_limit_substr) {
-                                    warn!("rate limited by {}", skip_rpcs.last().unwrap());
+                                    warn!(
+                                        "rate limited ({}) by {}",
+                                        error_msg,
+                                        skip_rpcs.last().unwrap()
+                                    );
                                     continue;
                                 }
                             }
