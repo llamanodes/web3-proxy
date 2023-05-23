@@ -199,6 +199,10 @@ pub async fn serve(
             "/user/logout",
             post(users::authentication::user_logout_post),
         )
+        .route(
+            "/admin/increase_balance",
+            get(admin::admin_increase_balance),
+        )
         .route("/admin/modify_role", get(admin::admin_change_user_roles))
         .route(
             "/admin/imitate-login/:admin_address/:user_address",
