@@ -1012,14 +1012,14 @@ impl Serialize for Web3Rpc {
             &self.active_requests.load(atomic::Ordering::Relaxed),
         )?;
 
-        state.serialize_field("head_latency", &self.head_latency.read().value())?;
+        state.serialize_field("head_latency_ms", &self.head_latency.read().value())?;
 
         state.serialize_field(
-            "peak_latency",
+            "peak_latency_ms",
             &self.peak_latency.as_ref().unwrap().latency().as_millis(),
         )?;
 
-        state.serialize_field("peak_ewma", self.peak_ewma().as_ref())?;
+        state.serialize_field("peak_ewma_s", self.peak_ewma().as_ref())?;
 
         state.end()
     }
