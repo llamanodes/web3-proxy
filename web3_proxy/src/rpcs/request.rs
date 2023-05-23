@@ -184,7 +184,9 @@ impl OpenRequestHandle {
         } else if let Some(ref p) = self.rpc.ws_provider {
             p.request(method, params).await
         } else {
-            unimplemented!("no provider. cannot send request")
+            return Err(ProviderError::CustomError(
+                "no provider configured!".to_string(),
+            ));
         };
 
         // we do NOT want to measure errors, so we intentionally do not record this latency now.

@@ -5,11 +5,9 @@ use super::errors::Web3ProxyResponse;
 use crate::admin_queries::query_admin_modify_usertier;
 use crate::app::Web3ProxyApp;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext};
-use crate::http_params::get_user_id_from_params;
 use crate::user_token::UserBearerToken;
 use crate::PostLogin;
 use anyhow::Context;
-use axum::body::HttpBody;
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -29,10 +27,9 @@ use http::StatusCode;
 use log::{debug, info, warn};
 use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
-    self, ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-    TransactionTrait, Update,
+    self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
-use migration::{ConnectionTrait, Expr, OnConflict};
+use migration::{Expr, OnConflict};
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
@@ -76,7 +73,7 @@ pub async fn admin_increase_balance(
         .map_err(|_| {
             Web3ProxyError::BadRequest("Unable to parse user_address as an Address".to_string())
         })?;
-    let user_address_bytes: Vec<u8> = user_address.clone().to_fixed_bytes().into();
+    let user_address_bytes: Vec<u8> = user_address.to_fixed_bytes().into();
     let note: String = params
         .get("note")
         .ok_or_else(|| {
@@ -94,11 +91,8 @@ pub async fn admin_increase_balance(
             Web3ProxyError::BadRequest("Unable to get the amount key from the request".to_string())
         })
         .map(|x| Decimal::from_str(x))?
-        .or_else(|err| {
-            Err(Web3ProxyError::BadRequest(format!(
-                "Unable to parse amount from the request {:?}",
-                err
-            )))
+        .map_err(|err| {
+            Web3ProxyError::BadRequest(format!("Unable to parse amount from the request {:?}", err))
         })?;
 
     let user_entry: user::Model = user::Entity::find()
