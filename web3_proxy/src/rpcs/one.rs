@@ -227,18 +227,16 @@ impl Web3Rpc {
     }
 
     pub fn peak_ewma(&self) -> OrderedFloat<f64> {
-        // TODO: bug inside peak ewma somewhere. possible with atomics being relaxed or the conversion to pair and back
-        // let peak_latency = if let Some(peak_latency) = self.peak_latency.as_ref() {
-        //     peak_latency.latency().as_secs_f64()
-        // } else {
-        //     0.0
-        // };
-        let head_latency = self.head_latency.read().value();
+        let peak_latency = if let Some(peak_latency) = self.peak_latency.as_ref() {
+            peak_latency.latency().as_secs_f64()
+        } else {
+            1.0
+        };
 
         // TODO: what ordering?
         let active_requests = self.active_requests.load(atomic::Ordering::Acquire) as f64 + 1.0;
 
-        OrderedFloat(head_latency * active_requests)
+        OrderedFloat(peak_latency * active_requests)
     }
 
     // TODO: would be great if rpcs exposed this. see https://github.com/ledgerwatch/erigon/issues/6391
