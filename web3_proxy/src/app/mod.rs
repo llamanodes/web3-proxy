@@ -1011,20 +1011,12 @@ impl Web3ProxyApp {
     ) -> Web3ProxyResult<(StatusCode, JsonRpcForwardedResponseEnum, Vec<Arc<Web3Rpc>>)> {
         // trace!(?request, "proxy_web3_rpc");
 
-        // even though we have timeouts on the requests to our backend providers,
-        // we need a timeout for the incoming request so that retries don't run forever
-        // TODO: take this as an optional argument. check for a different max from the user_tier?
-        // TODO: how much time was spent on this request alredy?
-        let max_time = Duration::from_secs(240);
-
         // TODO: use streams and buffers so we don't overwhelm our server
         let response = match request {
             JsonRpcRequestEnum::Single(mut request) => {
-                let (status_code, response, rpcs) = timeout(
-                    max_time,
-                    self.proxy_cached_request(&authorization, &mut request, None),
-                )
-                .await?;
+                let (status_code, response, rpcs) = self
+                    .proxy_cached_request(&authorization, &mut request, None)
+                    .await;
 
                 (
                     status_code,
@@ -1033,11 +1025,9 @@ impl Web3ProxyApp {
                 )
             }
             JsonRpcRequestEnum::Batch(requests) => {
-                let (responses, rpcs) = timeout(
-                    max_time,
-                    self.proxy_web3_rpc_requests(&authorization, requests),
-                )
-                .await??;
+                let (responses, rpcs) = self
+                    .proxy_web3_rpc_requests(&authorization, requests)
+                    .await?;
 
                 // TODO: real status code
                 (
@@ -1331,7 +1321,8 @@ impl Web3ProxyApp {
             | "eth_getUserOperationReceipt"
             | "eth_supportedEntryPoints") => match self.bundler_4337_rpcs.as_ref() {
                 Some(bundler_4337_rpcs) => {
-                    bundler_4337_rpcs
+                // TODO: timeout
+                bundler_4337_rpcs
                         .try_proxy_connection(
                             authorization,
                             request,
@@ -1367,6 +1358,7 @@ impl Web3ProxyApp {
                 JsonRpcResponseData::from(json!(Address::zero()))
             }
             "eth_estimateGas" => {
+                // TODO: timeout
                 let response_data = self
                     .balanced_rpcs
                     .try_proxy_connection(
@@ -1403,6 +1395,7 @@ impl Web3ProxyApp {
             }
             "eth_getTransactionReceipt" | "eth_getTransactionByHash" => {
                 // try to get the transaction without specifying a min_block_height
+                // TODO: timeout
                 let mut response_data = self
                     .balanced_rpcs
                     .try_proxy_connection(
@@ -1446,12 +1439,7 @@ impl Web3ProxyApp {
 
                 // TODO: error if the chain_id is incorrect
 
-                // TODO: check the cache to see if we have sent this transaction recently
-                // TODO: if so, use a cached response.
-                // TODO: if not,
-                // TODO: - cache successes for up to 1 minute
-                // TODO: - cache failures for 1 block (we see transactions skipped because out of funds. but that can change block to block)
-
+                // TODO: timeout
                 let mut response_data = self
                     .try_send_protected(
                         authorization,
@@ -1581,6 +1569,7 @@ impl Web3ProxyApp {
             ,
             "web3_sha3" => {
                 // returns Keccak-256 (not the standardized SHA3-256) of the given data.
+                // TODO: timeout
                 match &request.params {
                     Some(serde_json::Value::Array(params)) => {
                         // TODO: make a struct and use serde conversion to clean this up
@@ -1740,6 +1729,9 @@ impl Web3ProxyApp {
 
                 let authorization = authorization.clone();
 
+                // TODO: different timeouts for different user tiers
+                let duration = Duration::from_secs(240);
+
                 if let Some(cache_key) = cache_key {
                     let from_block_num = cache_key.from_block.as_ref().map(|x| x.number.unwrap());
                     let to_block_num = cache_key.to_block.as_ref().map(|x| x.number.unwrap());
@@ -1750,15 +1742,18 @@ impl Web3ProxyApp {
                     {
                         Ok(x) => x,
                         Err(x) => {
-                            let response_data = self.balanced_rpcs
-                                .try_proxy_connection(
-                                    &authorization,
-                                    request,
-                                    Some(request_metadata),
-                                    from_block_num.as_ref(),
-                                    to_block_num.as_ref(),
+                            let response_data = timeout(
+                                duration,
+                                self.balanced_rpcs
+                                    .try_proxy_connection(
+                                        &authorization,
+                                        request,
+                                        Some(request_metadata),
+                                        from_block_num.as_ref(),
+                                        to_block_num.as_ref(),
+                                    )
                                 )
-                                .await?;
+                                .await??;
 
                             // TODO: convert the Box<RawValue> to an Arc<RawValue>
                             x.insert(response_data.clone());
@@ -1767,15 +1762,18 @@ impl Web3ProxyApp {
                         }
                     }
                 } else {
-                self.balanced_rpcs
-                    .try_proxy_connection(
-                        &authorization,
-                        request,
-                        Some(request_metadata),
-                        None,
-                        None,
+                    timeout(
+                        duration,
+                        self.balanced_rpcs
+                        .try_proxy_connection(
+                            &authorization,
+                            request,
+                            Some(request_metadata),
+                            None,
+                            None,
+                        )
                     )
-                    .await?
+                    .await??
                 }
             }
         };
