@@ -75,7 +75,7 @@ rdkafka = { version = "0.31.0" }
 regex = "1.8.2"
 reqwest = { version = "0.11.18", default-features = false, features = ["json", "tokio-rustls"] }
 rmp-serde = "1.1.1"
-sentry = { version = "0.31.1", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
+sentry = { version = "0.31.2", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
 serde = { version = "1.0.163", features = [] }
 serde_json = { version = "1.0.96", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.2.2"
