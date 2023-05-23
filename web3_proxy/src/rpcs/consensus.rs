@@ -374,7 +374,7 @@ impl ConsensusFinder {
             .first_seen
             .get_or_insert_async::<Infallible>(block.hash(), async { Ok(Instant::now()) })
             .await
-            .unwrap();
+            .expect("this cache get is infallible");
 
         // calculate elapsed time before trying to lock
         let latency = first_seen.elapsed();

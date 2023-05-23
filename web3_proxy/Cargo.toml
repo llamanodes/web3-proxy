@@ -55,6 +55,7 @@ hdrhistogram = "7.5.2"
 hex_fmt = "0.3.0"
 hostname = "0.3.1"
 http = "0.2.9"
+hyper = { version = "0.14.26", features = ["full"] }
 influxdb2 = { git = "https://github.com/llamanodes/influxdb2", features = ["rustls"] }
 influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/"}
 ipnet = "2.7.2"

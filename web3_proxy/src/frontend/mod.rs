@@ -28,6 +28,8 @@ use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
+use self::errors::Web3ProxyResult;
+
 /// simple keys for caching responses
 #[derive(Copy, Clone, Hash, PartialEq, Eq, EnumCount, EnumIter)]
 pub enum ResponseCacheKey {
@@ -49,7 +51,7 @@ pub async fn serve(
     proxy_app: Arc<Web3ProxyApp>,
     mut shutdown_receiver: broadcast::Receiver<()>,
     shutdown_complete_sender: broadcast::Sender<()>,
-) -> anyhow::Result<()> {
+) -> Web3ProxyResult<()> {
     // setup caches for whatever the frontend needs
     // no need for max items since it is limited by the enum key
     // TODO: latest moka allows for different ttls for different

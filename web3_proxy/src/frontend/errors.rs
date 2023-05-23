@@ -47,14 +47,15 @@ pub enum Web3ProxyError {
     Database(DbErr),
     #[display(fmt = "{:#?}, {:#?}", _0, _1)]
     EipVerificationFailed(Box<Web3ProxyError>, Box<Web3ProxyError>),
-    EthersHttpClientError(ethers::prelude::HttpClientError),
-    EthersProviderError(ethers::prelude::ProviderError),
-    EthersWsClientError(ethers::prelude::WsClientError),
-    FlumeRecvError(flume::RecvError),
+    EthersHttpClient(ethers::prelude::HttpClientError),
+    EthersProvider(ethers::prelude::ProviderError),
+    EthersWsClient(ethers::prelude::WsClientError),
+    FlumeRecv(flume::RecvError),
     GasEstimateNotU256,
     Headers(headers::Error),
     HeaderToString(ToStrError),
-    InfluxDb2RequestError(influxdb2::RequestError),
+    Hyper(hyper::Error),
+    InfluxDb2Request(influxdb2::RequestError),
     #[display(fmt = "{} > {}", min, max)]
     #[from(ignore)]
     InvalidBlockBounds {
@@ -64,6 +65,7 @@ pub enum Web3ProxyError {
     InvalidHeaderValue(InvalidHeaderValue),
     InvalidEip,
     InvalidInviteCode,
+    Io(std::io::Error),
     UnknownReferralCode,
     InvalidReferer,
     InvalidSignatureLength,
@@ -87,6 +89,12 @@ pub enum Web3ProxyError {
     NotEnoughRpcs {
         num_known: usize,
         min_head_rpcs: usize,
+    },
+    #[display(fmt = "{}/{}", available, needed)]
+    #[from(ignore)]
+    NotEnoughSoftLimit {
+        available: u32,
+        needed: u32,
     },
     NotFound,
     NotImplemented,
@@ -136,6 +144,7 @@ pub enum Web3ProxyError {
 
 impl Web3ProxyError {
     pub fn into_response_parts(self) -> (StatusCode, JsonRpcResponseData) {
+        // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
             Self::AccessDenied => {
                 // TODO: attach something to this trace. probably don't include much in the message though. don't want to leak creds by accident
@@ -223,7 +232,7 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::EthersHttpClientError(err) => {
+            Self::EthersHttpClient(err) => {
                 warn!("EthersHttpClientError err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -234,7 +243,7 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::EthersProviderError(err) => {
+            Self::EthersProvider(err) => {
                 warn!("EthersProviderError err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -245,7 +254,7 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::EthersWsClientError(err) => {
+            Self::EthersWsClient(err) => {
                 warn!("EthersWsClientError err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -256,7 +265,7 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::FlumeRecvError(err) => {
+            Self::FlumeRecv(err) => {
                 warn!("FlumeRecvError err={:#?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -290,7 +299,19 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::InfluxDb2RequestError(err) => {
+            Self::Hyper(err) => {
+                warn!("hyper err={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        // TODO: is it safe to expose these error strings?
+                        message: Cow::Owned(err.to_string()),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::InfluxDb2Request(err) => {
                 // TODO: attach a request id to the message and to this error so that if people report problems, we can dig in sentry to find out more
                 error!("influxdb2 err={:?}", err);
                 (
@@ -367,6 +388,18 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: Cow::Borrowed("invalid invite code"),
                         code: StatusCode::UNAUTHORIZED.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::Io(err) => {
+                warn!("std io err={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        // TODO: is it safe to expose our io error strings?
+                        message: Cow::Owned(err.to_string()),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
                 )
@@ -522,6 +555,20 @@ impl Web3ProxyError {
                         message: Cow::Owned(format!(
                             "not enough rpcs connected {}/{}",
                             num_known, min_head_rpcs
+                        )),
+                        code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::NotEnoughSoftLimit { available, needed } => {
+                error!("NotEnoughSoftLimit {}/{}", available, needed);
+                (
+                    StatusCode::BAD_GATEWAY,
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!(
+                            "not enough soft limit available {}/{}",
+                            available, needed
                         )),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
                         data: None,

@@ -1,5 +1,6 @@
 use super::one::Web3Rpc;
 use crate::frontend::authorization::Authorization;
+use crate::frontend::errors::Web3ProxyResult;
 use anyhow::Context;
 use chrono::Utc;
 use entities::revert_log;
@@ -13,7 +14,7 @@ use std::fmt;
 use std::sync::atomic;
 use std::sync::Arc;
 use thread_fast_rng::rand::Rng;
-use tokio::time::{sleep, Duration, Instant};
+use tokio::time::{Duration, Instant};
 
 #[derive(Debug)]
 pub enum OpenRequestResult {
@@ -75,7 +76,7 @@ impl Authorization {
         self: Arc<Self>,
         method: Method,
         params: EthCallFirstParams,
-    ) -> anyhow::Result<()> {
+    ) -> Web3ProxyResult<()> {
         let rpc_key_id = match self.checks.rpc_secret_key_id {
             Some(rpc_key_id) => rpc_key_id.into(),
             None => {

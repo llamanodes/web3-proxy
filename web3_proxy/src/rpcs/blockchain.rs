@@ -18,7 +18,6 @@ use std::convert::Infallible;
 use std::hash::Hash;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
-use tokio::time::Duration;
 
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
@@ -193,7 +192,7 @@ impl Web3Rpcs {
             .blocks_by_hash
             .get_or_insert_async::<Infallible, _>(&block_hash, async move { Ok(block) })
             .await
-            .unwrap();
+            .expect("this cache get is infallible");
 
         Ok(block)
     }
@@ -219,12 +218,11 @@ impl Web3Rpcs {
         // TODO: if error, retry?
         let block: Web3ProxyBlock = match rpc {
             Some(rpc) => rpc
-                .wait_for_request_handle(authorization, Some(Duration::from_secs(30)))
-                .await?
                 .request::<_, Option<ArcBlock>>(
                     "eth_getBlockByHash",
                     &json!(get_block_params),
                     Level::Error.into(),
+                    authorization.clone(),
                 )
                 .await?
                 .and_then(|x| {
@@ -366,7 +364,7 @@ impl Web3Rpcs {
         // TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
         // Geth's subscriptions have the same potential for skipping blocks.
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
-    ) -> anyhow::Result<()> {
+    ) -> Web3ProxyResult<()> {
         let mut connection_heads = ConsensusFinder::new(self.max_block_age, self.max_block_lag);
 
         loop {

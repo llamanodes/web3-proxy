@@ -74,7 +74,7 @@ pub static APP_USER_AGENT: &str = concat!(
 // aggregate across 1 week
 pub const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
 
-pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
+pub type Web3ProxyJoinHandle<T> = JoinHandle<Web3ProxyResult<T>>;
 
 /// TODO: move this
 #[derive(Clone, Debug, Default, From)]
@@ -176,7 +176,7 @@ pub struct Web3ProxyApp {
     // TODO: should the key be our RpcSecretKey class instead of Ulid?
     pub rpc_secret_key_cache: RpcSecretKeyCache,
     /// concurrent/parallel RPC request limits for authenticated users
-    pub rpc_key_semaphores: Cache<NonZeroU64, Arc<Semaphore>>,
+    pub user_semaphores: Cache<NonZeroU64, Arc<Semaphore>>,
     /// concurrent/parallel request limits for anonymous users
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>>,
     /// concurrent/parallel application request limits for authenticated users
@@ -188,7 +188,7 @@ pub struct Web3ProxyApp {
 
 /// flatten a JoinError into an anyhow error
 /// Useful when joining multiple futures.
-pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T> {
+pub async fn flatten_handle<T>(handle: Web3ProxyJoinHandle<T>) -> Web3ProxyResult<T> {
     match handle.await {
         Ok(Ok(result)) => Ok(result),
         Ok(Err(err)) => Err(err),
@@ -198,8 +198,8 @@ pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T>
 
 /// return the first error, or Ok if everything worked
 pub async fn flatten_handles<T>(
-    mut handles: FuturesUnordered<AnyhowJoinHandle<T>>,
-) -> anyhow::Result<()> {
+    mut handles: FuturesUnordered<Web3ProxyJoinHandle<T>>,
+) -> Web3ProxyResult<()> {
     while let Some(x) = handles.next().await {
         match x {
             Err(e) => return Err(e.into()),
@@ -315,9 +315,9 @@ pub struct Web3ProxyAppSpawn {
     /// the app. probably clone this to use in other groups of handles
     pub app: Arc<Web3ProxyApp>,
     /// handles for the balanced and private rpcs
-    pub app_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
+    pub app_handles: FuturesUnordered<Web3ProxyJoinHandle<()>>,
     /// these are important and must be allowed to finish
-    pub background_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
+    pub background_handles: FuturesUnordered<Web3ProxyJoinHandle<()>>,
     /// config changes are sent here
     pub new_top_config_sender: watch::Sender<TopConfig>,
     /// watch this to know when to start the app
@@ -359,10 +359,12 @@ impl Web3ProxyApp {
         }
 
         // these futures are key parts of the app. if they stop running, the app has encountered an irrecoverable error
-        let app_handles = FuturesUnordered::new();
+        // TODO: this is a small enough group, that a vec with try_join_all is probably fine
+        let app_handles: FuturesUnordered<Web3ProxyJoinHandle<()>> = FuturesUnordered::new();
 
         // we must wait for these to end on their own (and they need to subscribe to shutdown_sender)
-        let important_background_handles = FuturesUnordered::new();
+        let important_background_handles: FuturesUnordered<Web3ProxyJoinHandle<()>> =
+            FuturesUnordered::new();
 
         // connect to the database and make sure the latest migrations have run
         let mut db_conn = None::<DatabaseConnection>;
@@ -624,12 +626,10 @@ impl Web3ProxyApp {
         // TODO: what should tti be for semaphores?
         let bearer_token_semaphores = Cache::new(max_users);
         let ip_semaphores = Cache::new(max_users);
-        let registered_user_semaphores = Cache::new(max_users);
+        let user_semaphores = Cache::new(max_users);
 
         let (balanced_rpcs, balanced_handle, consensus_connections_watcher) = Web3Rpcs::spawn(
-            top_config.app.chain_id,
             db_conn.clone(),
-            http_client.clone(),
             top_config.app.max_block_age,
             top_config.app.max_block_lag,
             top_config.app.min_synced_rpcs,
@@ -654,9 +654,7 @@ impl Web3ProxyApp {
             // TODO: Merge
             // let (private_rpcs, private_rpcs_handle) = Web3Rpcs::spawn(
             let (private_rpcs, private_handle, _) = Web3Rpcs::spawn(
-                top_config.app.chain_id,
                 db_conn.clone(),
-                http_client.clone(),
                 // private rpcs don't get subscriptions, so no need for max_block_age or max_block_lag
                 None,
                 None,
@@ -688,9 +686,7 @@ impl Web3ProxyApp {
         } else {
             // TODO: do something with the spawn handle
             let (bundler_4337_rpcs, bundler_4337_rpcs_handle, _) = Web3Rpcs::spawn(
-                top_config.app.chain_id,
                 db_conn.clone(),
-                http_client.clone(),
                 // bundler_4337_rpcs don't get subscriptions, so no need for max_block_age or max_block_lag
                 None,
                 None,
@@ -735,7 +731,7 @@ impl Web3ProxyApp {
             rpc_secret_key_cache,
             bearer_token_semaphores,
             ip_semaphores,
-            rpc_key_semaphores: registered_user_semaphores,
+            user_semaphores,
             stat_sender,
         };
 
@@ -752,9 +748,9 @@ impl Web3ProxyApp {
                 loop {
                     let new_top_config = new_top_config_receiver.borrow_and_update().to_owned();
 
-                    app.apply_top_config(new_top_config)
-                        .await
-                        .context("failed applying new top_config")?;
+                    if let Err(err) = app.apply_top_config(new_top_config).await {
+                        error!("unable to apply config! {:?}", err);
+                    };
 
                     new_top_config_receiver
                         .changed()
@@ -790,7 +786,7 @@ impl Web3ProxyApp {
             .into())
     }
 
-    pub async fn apply_top_config(&self, new_top_config: TopConfig) -> anyhow::Result<()> {
+    pub async fn apply_top_config(&self, new_top_config: TopConfig) -> Web3ProxyResult<()> {
         // TODO: also update self.config from new_top_config.app
 
         // connect to the backends

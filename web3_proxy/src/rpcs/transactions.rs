@@ -1,4 +1,4 @@
-use crate::frontend::authorization::Authorization;
+use crate::frontend::{authorization::Authorization, errors::Web3ProxyResult};
 
 use super::many::Web3Rpcs;
 ///! Load balanced communication with a group of web3 providers
@@ -70,7 +70,7 @@ impl Web3Rpcs {
         rpc: Arc<Web3Rpc>,
         pending_tx_id: TxHash,
         pending_tx_sender: broadcast::Sender<TxStatus>,
-    ) -> anyhow::Result<()> {
+    ) -> Web3ProxyResult<()> {
         // TODO: how many retries? until some timestamp is hit is probably better. maybe just loop and call this with a timeout
         // TODO: after more investigation, i don't think retries will help. i think this is because chains of transactions get dropped from memory
         // TODO: also check the "confirmed transactions" mapping? maybe one shared mapping with TxState in it?

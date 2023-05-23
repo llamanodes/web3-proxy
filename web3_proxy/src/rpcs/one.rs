@@ -2,18 +2,18 @@
 use super::blockchain::{ArcBlock, BlocksByHashCache, Web3ProxyBlock};
 use super::provider::{connect_http, connect_ws, EthersHttpProvider, EthersWsProvider};
 use super::request::{OpenRequestHandle, OpenRequestResult};
-use crate::app::{flatten_handle, AnyhowJoinHandle};
+use crate::app::{flatten_handle, Web3ProxyJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::Authorization;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
-use ethers::prelude::{Bytes, Middleware, ProviderError, TxHash, H256, U64};
+use ethers::prelude::{Bytes, Middleware, TxHash, U64};
 use ethers::types::{Address, Transaction, U256};
 use futures::future::try_join_all;
 use futures::StreamExt;
 use latency::{EwmaLatency, PeakEwmaLatency};
-use log::{debug, error, info, trace, warn, Level};
+use log::{debug, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use ordered_float::OrderedFloat;
 use parking_lot::RwLock;
@@ -21,16 +21,12 @@ use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
-use std::borrow::Cow;
-use std::cmp::min;
 use std::convert::Infallible;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{self, AtomicBool, AtomicU64, AtomicUsize};
+use std::sync::atomic::{self, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
-use thread_fast_rng::rand::Rng;
-use thread_fast_rng::thread_fast_rng;
-use tokio::sync::{broadcast, oneshot, watch, RwLock as AsyncRwLock};
+use tokio::sync::watch;
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
 use url::Url;
 
@@ -88,13 +84,12 @@ impl Web3Rpc {
         db_conn: Option<DatabaseConnection>,
         // optional because this is only used for http providers. websocket providers don't use it
         http_client: Option<reqwest::Client>,
-        // TODO: rename to http_new_head_interval_sender?
-        http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         redis_pool: Option<RedisPool>,
+        block_interval: Duration,
         block_map: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
-    ) -> anyhow::Result<(Arc<Web3Rpc>, AnyhowJoinHandle<()>)> {
+    ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         let created_at = Instant::now();
 
         let hard_limit = match (config.hard_limit, redis_pool) {
@@ -151,8 +146,6 @@ impl Web3Rpc {
             }
         }
 
-        let (disconnect_sender, disconnect_receiver) = watch::channel(false);
-
         let (head_block, _) = watch::channel(None);
 
         // Spawn the task for calculting average peak latency
@@ -170,7 +163,7 @@ impl Web3Rpc {
         let http_provider = if let Some(http_url) = config.http_url {
             let http_url = http_url.parse::<Url>()?;
 
-            Some(connect_http(Cow::Owned(http_url), http_client)?)
+            Some(connect_http(http_url, http_client, block_interval)?)
 
             // TODO: check the provider is on the right chain
         } else {
@@ -180,12 +173,14 @@ impl Web3Rpc {
         let ws_provider = if let Some(ws_url) = config.ws_url {
             let ws_url = ws_url.parse::<Url>()?;
 
-            Some(connect_ws(Cow::Owned(ws_url), usize::MAX).await?)
+            Some(connect_ws(ws_url, usize::MAX).await?)
 
             // TODO: check the provider is on the right chain
         } else {
             None
         };
+
+        let (disconnect_watch, _) = watch::channel(false);
 
         let new_rpc = Self {
             automatic_block_limit,
@@ -193,7 +188,6 @@ impl Web3Rpc {
             block_data_limit,
             created_at: Some(created_at),
             db_conn: db_conn.clone(),
-            disconnect_watch: Some(disconnect_sender),
             display_name: config.display_name,
             hard_limit,
             hard_limit_until: Some(hard_limit_until),
@@ -203,6 +197,8 @@ impl Web3Rpc {
             peak_latency: Some(peak_latency),
             soft_limit: config.soft_limit,
             tier: config.tier,
+            ws_provider,
+            disconnect_watch: Some(disconnect_watch),
             ..Default::default()
         };
 
@@ -221,8 +217,6 @@ impl Web3Rpc {
                         block_map,
                         block_sender,
                         chain_id,
-                        disconnect_receiver,
-                        http_interval_sender,
                         tx_id_sender,
                     )
                     .await
@@ -264,13 +258,12 @@ impl Web3Rpc {
         // TODO: binary search between 90k and max?
         // TODO: start at 0 or 1?
         for block_data_limit in [0, 32, 64, 128, 256, 512, 1024, 90_000, u64::MAX] {
-            let handle = self.wait_for_request_handle(authorization, None).await?;
-
-            let head_block_num_future = handle.request::<Option<()>, U256>(
+            let head_block_num_future = self.request::<Option<()>, U256>(
                 "eth_blockNumber",
                 &None,
                 // error here are expected, so keep the level low
                 Level::Debug.into(),
+                authorization.clone(),
             );
 
             let head_block_num = timeout(Duration::from_secs(5), head_block_num_future)
@@ -288,9 +281,7 @@ impl Web3Rpc {
 
             // TODO: wait for the handle BEFORE we check the current block number. it might be delayed too!
             // TODO: what should the request be?
-            let handle = self.wait_for_request_handle(authorization, None).await?;
-
-            let archive_result: Result<Bytes, _> = handle
+            let archive_result: Result<Bytes, _> = self
                 .request(
                     "eth_getCode",
                     &json!((
@@ -299,6 +290,7 @@ impl Web3Rpc {
                     )),
                     // error here are expected, so keep the level low
                     Level::Trace.into(),
+                    authorization.clone(),
                 )
                 .await;
 
@@ -377,23 +369,20 @@ impl Web3Rpc {
     }
 
     /// query the web3 provider to confirm it is on the expected chain with the expected data available
-    async fn check_provider(
-        self: &Arc<Self>,
-        block_sender: Option<&flume::Sender<BlockAndRpc>>,
-        chain_id: u64,
-        db_conn: Option<&DatabaseConnection>,
-    ) -> anyhow::Result<()> {
-        let authorization = Arc::new(Authorization::internal(db_conn.cloned())?);
+    async fn check_provider(self: &Arc<Self>, chain_id: u64) -> Web3ProxyResult<()> {
+        let authorization = Arc::new(Authorization::internal(self.db_conn.clone())?);
 
         // check the server's chain_id here
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
         // TODO: what should the timeout be? should there be a request timeout?
         // trace!("waiting on chain id for {}", self);
         let found_chain_id: Result<U64, _> = self
-            .wait_for_request_handle(&authorization, None)
-            .await
-            .context(format!("waiting for request handle on {}", self))?
-            .request("eth_chainId", &json!(Vec::<()>::new()), Level::Trace.into())
+            .request(
+                "eth_chainId",
+                &json!(Vec::<()>::new()),
+                Level::Trace.into(),
+                authorization.clone(),
+            )
             .await;
         trace!("found_chain_id: {:#?}", found_chain_id);
 
@@ -406,12 +395,14 @@ impl Web3Rpc {
                         chain_id,
                         found_chain_id
                     )
-                    .context(format!("failed @ {}", self)));
+                    .context(format!("failed @ {}", self))
+                    .into());
                 }
             }
             Err(e) => {
                 return Err(anyhow::Error::from(e)
-                    .context(format!("unable to parse eth_chainId from {}", self)));
+                    .context(format!("unable to parse eth_chainId from {}", self))
+                    .into());
             }
         }
 
@@ -426,26 +417,24 @@ impl Web3Rpc {
 
     pub(crate) async fn send_head_block_result(
         self: &Arc<Self>,
-        new_head_block: Result<Option<ArcBlock>, ProviderError>,
+        new_head_block: Web3ProxyResult<Option<ArcBlock>>,
         block_sender: &flume::Sender<BlockAndRpc>,
-        block_map: BlocksByHashCache,
-    ) -> anyhow::Result<()> {
+        block_map: &BlocksByHashCache,
+    ) -> Web3ProxyResult<()> {
         let new_head_block = match new_head_block {
             Ok(None) => {
-                {
-                    let head_block_tx = self.head_block.as_ref().unwrap();
+                let head_block_tx = self.head_block.as_ref().unwrap();
 
-                    if head_block_tx.borrow().is_none() {
-                        // we previously sent a None. return early
-                        return Ok(());
-                    }
-
-                    let age = self.created_at.unwrap().elapsed().as_millis();
-
-                    debug!("clearing head block on {} ({}ms old)!", self, age);
-
-                    head_block_tx.send_replace(None);
+                if head_block_tx.borrow().is_none() {
+                    // we previously sent a None. return early
+                    return Ok(());
                 }
+
+                let age = self.created_at.unwrap().elapsed().as_millis();
+
+                debug!("clearing head block on {} ({}ms old)!", self, age);
+
+                head_block_tx.send_replace(None);
 
                 None
             }
@@ -461,7 +450,8 @@ impl Web3Rpc {
                         &new_hash,
                         async move { Ok(new_head_block) },
                     )
-                    .await?;
+                    .await
+                    .expect("this cache get is infallible");
 
                 // save the block so we don't send the same one multiple times
                 // also save so that archive checks can know how far back to query
@@ -504,9 +494,61 @@ impl Web3Rpc {
         *self.disconnect_watch.as_ref().unwrap().borrow()
     }
 
+    async fn healthcheck(
+        self: &Arc<Self>,
+        authorization: &Arc<Authorization>,
+        error_handler: RequestErrorHandler,
+    ) -> Web3ProxyResult<()> {
+        let head_block = self.head_block.as_ref().unwrap().borrow().clone();
+
+        if let Some(head_block) = head_block {
+            let head_block = head_block.block;
+
+            // TODO: if head block is very old and not expected to be syncing, emit warning
+
+            let block_number = head_block.number.context("no block number")?;
+
+            let to = if let Some(txid) = head_block.transactions.last().cloned() {
+                let tx = self
+                    .request::<_, Option<Transaction>>(
+                        "eth_getTransactionByHash",
+                        &(txid,),
+                        error_handler,
+                        authorization.clone(),
+                    )
+                    .await?
+                    .context("no transaction")?;
+
+                // TODO: what default? something real?
+                tx.to.unwrap_or_else(|| {
+                    "0xdead00000000000000000000000000000000beef"
+                        .parse::<Address>()
+                        .expect("deafbeef")
+                })
+            } else {
+                "0xdead00000000000000000000000000000000beef"
+                    .parse::<Address>()
+                    .expect("deafbeef")
+            };
+
+            let _code = self
+                .request::<_, Option<Bytes>>(
+                    "eth_getCode",
+                    &(to, block_number),
+                    error_handler,
+                    authorization.clone(),
+                )
+                .await?;
+        } else {
+            // TODO: if head block is none for too long, give an error
+        }
+
+        Ok(())
+    }
+
     /// subscribe to blocks and transactions
     /// This should only exit when the program is exiting.
-    /// TODO: should more of these args be on self?
+    /// TODO: should more of these args be on self? chain_id for sure
     #[allow(clippy::too_many_arguments)]
     async fn subscribe(
         self: Arc<Self>,
@@ -514,220 +556,97 @@ impl Web3Rpc {
         block_map: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         chain_id: u64,
-        disconnect_receiver: watch::Receiver<bool>,
-        http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
-    ) -> anyhow::Result<()> {
+    ) -> Web3ProxyResult<()> {
         let error_handler = if self.backup {
             RequestErrorHandler::DebugLevel
         } else {
             RequestErrorHandler::ErrorLevel
         };
 
-        todo!();
+        debug!("starting subscriptions on {}", self);
 
-        /*
+        self.check_provider(chain_id).await?;
+
         let mut futures = vec![];
 
-        while false {
-            let http_interval_receiver = http_interval_sender.as_ref().map(|x| x.subscribe());
+        // health check that runs if there haven't been any recent requests
+        {
+            // TODO: move this into a proper function
+            let authorization = authorization.clone();
+            let rpc = self.clone();
 
-            {
-                // TODO: move this into a proper function
-                let authorization = authorization.clone();
-                let block_sender = block_sender.clone();
-                let rpc = self.clone();
-                let (ready_tx, ready_rx) = oneshot::channel();
-                let f = async move {
-                    // initial sleep to allow for the initial connection
-                    rpc.retrying_connect(
-                        block_sender.as_ref(),
-                        chain_id,
-                        authorization.db_conn.as_ref(),
-                        delay_start,
-                    )
-                    .await?;
+            // TODO: how often? different depending on the chain?
+            // TODO: reset this timeout when a new block is seen? we need to keep request_latency updated though
+            let health_sleep_seconds = 10;
 
-                    // provider is ready
-                    ready_tx.send(()).unwrap();
+            // health check loop
+            let f = async move {
+                // TODO: benchmark this and lock contention
+                let mut old_total_requests = 0;
+                let mut new_total_requests;
 
-                    // TODO: how often? different depending on the chain?
-                    // TODO: reset this timeout when a new block is seen? we need to keep request_latency updated though
-                    let health_sleep_seconds = 10;
+                // TODO: errors here should not cause the loop to exit!
+                while !rpc.should_disconnect() {
+                    new_total_requests = rpc.total_requests.load(atomic::Ordering::Relaxed);
 
-                    // TODO: benchmark this and lock contention
-                    let mut old_total_requests = 0;
-                    let mut new_total_requests;
-
-                    // health check loop
-                    loop {
-                        // TODO: do we need this to be abortable?
-                        if rpc.should_disconnect() {
-                            break;
-                        }
-
-                        sleep(Duration::from_secs(health_sleep_seconds)).await;
-
-                        trace!("health check on {}", rpc);
-
-                        // TODO: what if we just happened to have this check line up with another restart?
-                        // TODO: think more about this
-                        if let Some(client) = rpc.ws_provider.read().await.clone() {
-                            // health check as a way of keeping this rpc's request_ewma accurate
-                            // TODO: do something different if this is a backup server?
-
-                            new_total_requests = rpc.total_requests.load(atomic::Ordering::Acquire);
-
-                            // TODO: how many requests should we require in order to skip a health check?
-                            if new_total_requests - old_total_requests < 10 {
-                                // TODO: if this fails too many times, reset the connection
-                                // TODO: move this into a function and the chaining should be easier
-                                let head_block = rpc.head_block.as_ref().unwrap().borrow().clone();
-
-                                if let Some((block_number, txid)) = head_block.and_then(|x| {
-                                    let block = x.block;
-
-                                    let block_number = block.number?;
-                                    let txid = block.transactions.last().cloned()?;
-
-                                    Some((block_number, txid))
-                                }) {
-                                    let to = rpc
-                                        .wait_for_query::<_, Option<Transaction>>(
-                                            "eth_getTransactionByHash",
-                                            &(txid,),
-                                            error_handler,
-                                            authorization.clone(),
-                                            Some(client.clone()),
-                                        )
-                                        .await
-                                        .and_then(|tx| {
-                                            let tx = tx.context("no transaction found")?;
-
-                                            // TODO: what default? something real?
-                                            let to = tx.to.unwrap_or_else(|| {
-                                                "0xdead00000000000000000000000000000000beef"
-                                                    .parse::<Address>()
-                                                    .expect("deafbeef")
-                                            });
-
-                                            Ok(to)
-                                        });
-
-                                    let code = match to {
-                                        Err(err) => {
-                                            // TODO: an "error" here just means that the hash wasn't available. i dont think its truly an "error"
-                                            if rpc.backup {
-                                                debug!(
-                                                    "{} failed health check query! {:#?}",
-                                                    rpc, err
-                                                );
-                                            } else {
-                                                warn!(
-                                                    "{} failed health check query! {:#?}",
-                                                    rpc, err
-                                                );
-                                            }
-                                            continue;
-                                        }
-                                        Ok(to) => {
-                                            rpc.wait_for_query::<_, Option<Bytes>>(
-                                                "eth_getCode",
-                                                &(to, block_number),
-                                                error_handler,
-                                                authorization.clone(),
-                                                Some(client),
-                                            )
-                                            .await
-                                        }
-                                    };
-
-                                    if let Err(err) = code {
-                                        if rpc.backup {
-                                            debug!("{} failed health check query! {:#?}", rpc, err);
-                                        } else {
-                                            warn!("{} failed health check query! {:#?}", rpc, err);
-                                        }
-                                        continue;
-                                    }
-                                }
-                            }
-
-                            old_total_requests = new_total_requests;
+                    if new_total_requests - old_total_requests < 10 {
+                        // TODO: if this fails too many times, reset the connection
+                        // TODO: move this into a function and the chaining should be easier
+                        if let Err(err) = rpc.healthcheck(&authorization, error_handler).await {
+                            // TODO: different level depending on the error handler
+                            warn!("health checking {} failed: {:?}", rpc, err);
                         }
                     }
-                    debug!("health checks for {} exited", rpc);
 
-                    Ok(())
-                };
+                    // TODO: should we count the requests done inside this health check
+                    old_total_requests = new_total_requests;
 
-                futures.push(flatten_handle(tokio::spawn(f)));
-
-                // wait on the initial connection
-                ready_rx.await?;
-            }
-
-            if let Some(block_sender) = &block_sender {
-                // TODO: do we need this to be abortable?
-                let f = self.clone().subscribe_new_heads(
-                    authorization.clone(),
-                    http_interval_receiver,
-                    block_sender.clone(),
-                    block_map.clone(),
-                );
-
-                futures.push(flatten_handle(tokio::spawn(f)));
-            }
-
-            if let Some(tx_id_sender) = &tx_id_sender {
-                // TODO: do we need this to be abortable?
-                let f = self
-                    .clone()
-                    .subscribe_pending_transactions(authorization.clone(), tx_id_sender.clone());
-
-                futures.push(flatten_handle(tokio::spawn(f)));
-            }
-
-            match try_join_all(futures).await {
-                Ok(_) => {
-                    // future exited without error
-                    // TODO: think about this more. we never set it to false. this can't be right
-                    break;
+                    sleep(Duration::from_secs(health_sleep_seconds)).await;
                 }
-                Err(err) => {
-                    let disconnect_sender = self.disconnect_watch.as_ref().unwrap();
 
-                    if self.reconnect.load(atomic::Ordering::Acquire) {
-                        warn!("{} connection ended. reconnecting. err={:?}", self, err);
+                debug!("healthcheck loop on {} exited", rpc);
 
-                        // TODO: i'm not sure if this is necessary, but telling everything to disconnect seems like a better idea than relying on timeouts and dropped futures.
-                        disconnect_sender.send_replace(true);
-                        disconnect_sender.send_replace(false);
+                Ok(())
+            };
 
-                        // we call retrying_connect here with initial_delay=true. above, initial_delay=false
-                        delay_start = true;
-
-                        continue;
-                    }
-
-                    // reconnect is not enabled.
-                    if *disconnect_receiver.borrow() {
-                        info!("{} is disconnecting", self);
-                        break;
-                    } else {
-                        error!("{} subscription exited. err={:?}", self, err);
-
-                        disconnect_sender.send_replace(true);
-
-                        break;
-                    }
-                }
-            }
+            futures.push(flatten_handle(tokio::spawn(f)));
         }
 
+        // subscribe to new heads
+        if let Some(block_sender) = &block_sender {
+            // TODO: do we need this to be abortable?
+            let f = self.clone().subscribe_new_heads(
+                authorization.clone(),
+                block_sender.clone(),
+                block_map.clone(),
+            );
 
-        */
-        info!("all subscriptions on {} completed", self);
+            futures.push(flatten_handle(tokio::spawn(f)));
+        }
+
+        // subscribe pending transactions
+        // TODO: make this opt-in. its a lot of bandwidth
+        if let Some(tx_id_sender) = tx_id_sender {
+            // TODO: do we need this to be abortable?
+            let f = self
+                .clone()
+                .subscribe_pending_transactions(authorization.clone(), tx_id_sender);
+
+            futures.push(flatten_handle(tokio::spawn(f)));
+        }
+
+        // try_join on the futures
+        if let Err(err) = try_join_all(futures).await {
+            warn!("subscription erred: {:?}", err);
+        }
+
+        debug!("subscriptions on {} exited", self);
+
+        self.disconnect_watch
+            .as_ref()
+            .expect("disconnect_watch should always be set")
+            .send_replace(true);
 
         Ok(())
     }
@@ -736,197 +655,76 @@ impl Web3Rpc {
     async fn subscribe_new_heads(
         self: Arc<Self>,
         authorization: Arc<Authorization>,
-        http_interval_receiver: Option<broadcast::Receiver<()>>,
         block_sender: flume::Sender<BlockAndRpc>,
         block_map: BlocksByHashCache,
-    ) -> anyhow::Result<()> {
-        trace!("watching new heads on {}", self);
+    ) -> Web3ProxyResult<()> {
+        debug!("subscribing to new heads on {}", self);
 
         if let Some(ws_provider) = self.ws_provider.as_ref() {
-            todo!("subscribe")
+            // todo: move subscribe_blocks onto the request handle
+            let active_request_handle = self.wait_for_request_handle(&authorization, None).await;
+            let mut blocks = ws_provider.subscribe_blocks().await?;
+            drop(active_request_handle);
+
+            // query the block once since the subscription doesn't send the current block
+            // there is a very small race condition here where the stream could send us a new block right now
+            // but all seeing the same block twice won't break anything
+            // TODO: how does this get wrapped in an arc? does ethers handle that?
+            // TODO: can we force this to use the websocket?
+            let latest_block: Result<Option<ArcBlock>, _> = self
+                .request(
+                    "eth_getBlockByNumber",
+                    &json!(("latest", false)),
+                    Level::Warn.into(),
+                    authorization,
+                )
+                .await;
+
+            self.send_head_block_result(latest_block, &block_sender, &block_map)
+                .await?;
+
+            while let Some(block) = blocks.next().await {
+                if self.should_disconnect() {
+                    break;
+                }
+
+                let block = Arc::new(block);
+
+                self.send_head_block_result(Ok(Some(block)), &block_sender, &block_map)
+                    .await?;
+            }
         } else if let Some(http_provider) = self.http_provider.as_ref() {
-            todo!("poll")
+            // there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
+            let mut blocks = http_provider.watch_blocks().await?;
+
+            while let Some(block_hash) = blocks.next().await {
+                if self.should_disconnect() {
+                    break;
+                }
+
+                let block = if let Some(block) = block_map.get(&block_hash) {
+                    block.block
+                } else if let Some(block) = http_provider.get_block(block_hash).await? {
+                    Arc::new(block)
+                } else {
+                    continue;
+                };
+
+                self.send_head_block_result(Ok(Some(block)), &block_sender, &block_map)
+                    .await?;
+            }
         } else {
             unimplemented!("no ws or http provider!")
         }
 
-        /*
-        match provider.as_ref() {
-            Web3Provider::Http(_client) => {
-                // there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
-                // TODO: try watch_blocks and fall back to this?
-
-                let mut http_interval_receiver = http_interval_receiver.unwrap();
-
-                let mut last_hash = H256::zero();
-
-                while !self.should_disconnect() {
-                    // TODO: what should the max_wait be?
-                    // we do not pass unlocked_provider because we want to get a new one each call. otherwise we might re-use an old one
-                    match self.wait_for_request_handle(&authorization, None).await {
-                        Ok(active_request_handle) => {
-                            let block: Result<Option<ArcBlock>, _> = active_request_handle
-                                .request(
-                                    "eth_getBlockByNumber",
-                                    &json!(("latest", false)),
-                                    Level::Warn.into(),
-                                )
-                                .await;
-
-                            match block {
-                                Ok(None) => {
-                                    warn!("no head block on {}", self);
-
-                                    self.send_head_block_result(
-                                        Ok(None),
-                                        &block_sender,
-                                        block_map.clone(),
-                                    )
-                                    .await?;
-                                }
-                                Ok(Some(block)) => {
-                                    if let Some(new_hash) = block.hash {
-                                        // don't send repeat blocks
-                                        if new_hash != last_hash {
-                                            // new hash!
-                                            last_hash = new_hash;
-
-                                            self.send_head_block_result(
-                                                Ok(Some(block)),
-                                                &block_sender,
-                                                block_map.clone(),
-                                            )
-                                            .await?;
-                                        }
-                                    } else {
-                                        // TODO: why is this happening?
-                                        warn!("empty head block on {}", self);
-
-                                        self.send_head_block_result(
-                                            Ok(None),
-                                            &block_sender,
-                                            block_map.clone(),
-                                        )
-                                        .await?;
-                                    }
-                                }
-                                Err(err) => {
-                                    // we did not get a block back. something is up with the server. take it out of rotation
-                                    self.send_head_block_result(
-                                        Err(err),
-                                        &block_sender,
-                                        block_map.clone(),
-                                    )
-                                    .await?;
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            warn!("Internal error on latest block from {}. {:?}", self, err);
-
-                            self.send_head_block_result(Ok(None), &block_sender, block_map.clone())
-                                .await?;
-
-                            // TODO: what should we do? sleep? extra time?
-                        }
-                    }
-
-                    // wait for the next interval
-                    // TODO: if error or rate limit, increase interval?
-                    while let Err(err) = http_interval_receiver.recv().await {
-                        match err {
-                            broadcast::error::RecvError::Closed => {
-                                // channel is closed! that's not good. bubble the error up
-                                return Err(err.into());
-                            }
-                            broadcast::error::RecvError::Lagged(lagged) => {
-                                // querying the block was delayed
-                                // this can happen if tokio is very busy or waiting for requests limits took too long
-                                if self.backup {
-                                    debug!("http interval on {} lagging by {}!", self, lagged);
-                                } else {
-                                    warn!("http interval on {} lagging by {}!", self, lagged);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Web3Provider::Both(_, client) | Web3Provider::Ws(client) => {
-                // todo: move subscribe_blocks onto the request handle?
-                let active_request_handle =
-                    self.wait_for_request_handle(&authorization, None).await;
-                let mut stream = client.subscribe_blocks().await?;
-                drop(active_request_handle);
-
-                // query the block once since the subscription doesn't send the current block
-                // there is a very small race condition here where the stream could send us a new block right now
-                // but all that does is print "new block" for the same block as current block
-                // TODO: how does this get wrapped in an arc? does ethers handle that?
-                // TODO: do this part over http?
-                let block: Result<Option<ArcBlock>, _> = self
-                    .wait_for_request_handle(&authorization, None)
-                    .await?
-                    .request(
-                        "eth_getBlockByNumber",
-                        &json!(("latest", false)),
-                        Level::Warn.into(),
-                    )
-                    .await;
-
-                let mut last_hash = match &block {
-                    Ok(Some(new_block)) => new_block
-                        .hash
-                        .expect("blocks should always have a hash here"),
-                    _ => H256::zero(),
-                };
-
-                self.send_head_block_result(block, &block_sender, block_map.clone())
-                    .await?;
-
-                while let Some(new_block) = stream.next().await {
-                    // TODO: select on disconnect_watch instead of waiting for a block to arrive
-                    if self.should_disconnect() {
-                        break;
-                    }
-
-                    // TODO: check the new block's hash to be sure we don't send dupes
-                    let new_hash = new_block
-                        .hash
-                        .expect("blocks should always have a hash here");
-
-                    if new_hash == last_hash {
-                        // some rpcs like to give us duplicates. don't waste our time on them
-                        continue;
-                    } else {
-                        last_hash = new_hash;
-                    }
-
-                    self.send_head_block_result(
-                        Ok(Some(Arc::new(new_block))),
-                        &block_sender,
-                        block_map.clone(),
-                    )
-                    .await?;
-                }
-
-                // TODO: is this always an error?
-                // TODO: we probably don't want a warn and to return error
-                debug!("new_heads subscription to {} ended", self);
-            }
-            #[cfg(test)]
-            Web3Provider::Mock => unimplemented!(),
-        }
-        */
-
         // clear the head block. this might not be needed, but it won't hurt
-        self.send_head_block_result(Ok(None), &block_sender, block_map)
+        self.send_head_block_result(Ok(None), &block_sender, &block_map)
             .await?;
 
         if self.should_disconnect() {
             Ok(())
         } else {
-            Err(anyhow!("new_heads subscription exited. reconnect needed"))
+            Err(anyhow!("new_heads subscription exited. reconnect needed").into())
         }
     }
 
@@ -935,7 +733,7 @@ impl Web3Rpc {
         self: Arc<Self>,
         authorization: Arc<Authorization>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
-    ) -> anyhow::Result<()> {
+    ) -> Web3ProxyResult<()> {
         // TODO: make this subscription optional
         self.wait_for_disconnect().await?;
 
@@ -985,9 +783,7 @@ impl Web3Rpc {
         if self.should_disconnect() {
             Ok(())
         } else {
-            Err(anyhow!(
-                "pending_transactions subscription exited. reconnect needed"
-            ))
+            Err(anyhow!("pending_transactions subscription exited. reconnect needed").into())
         }
     }
 
@@ -1034,7 +830,7 @@ impl Web3Rpc {
                     }
 
                     // TODO: sleep how long? maybe just error?
-                    // TODO: instead of an arbitrary sleep, subscribe to the head block on this
+                    // TODO: instead of an arbitrary sleep, subscribe to the head block on this?
                     sleep(Duration::from_millis(10)).await;
                 }
                 Err(err) => return Err(err),
@@ -1099,36 +895,39 @@ impl Web3Rpc {
     }
 
     async fn wait_for_disconnect(&self) -> Result<(), tokio::sync::watch::error::RecvError> {
-        let mut disconnect_watch = self.disconnect_watch.as_ref().unwrap().subscribe();
+        let mut disconnect_subscription = self.disconnect_watch.as_ref().unwrap().subscribe();
 
         loop {
-            if *disconnect_watch.borrow_and_update() {
+            if *disconnect_subscription.borrow_and_update() {
                 // disconnect watch is set to "true"
                 return Ok(());
             }
 
-            // wait for disconnect_watch to change
-            disconnect_watch.changed().await?;
+            // wait for disconnect_subscription to change
+            disconnect_subscription.changed().await?;
         }
     }
 
-    pub async fn wait_for_query<P, R>(
+    pub async fn request<P, R>(
         self: &Arc<Self>,
         method: &str,
         params: &P,
         revert_handler: RequestErrorHandler,
         authorization: Arc<Authorization>,
-    ) -> anyhow::Result<R>
+    ) -> Web3ProxyResult<R>
     where
         // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
         P: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
         R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug + Send,
     {
-        self.wait_for_request_handle(&authorization, None)
+        // TODO: take max_wait as a function argument?
+        let x = self
+            .wait_for_request_handle(&authorization, None)
             .await?
             .request::<P, R>(method, params, revert_handler)
-            .await
-            .context("ProviderError from the backend")
+            .await?;
+
+        Ok(x)
     }
 }
 
@@ -1255,7 +1054,7 @@ impl fmt::Display for Web3Rpc {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use ethers::types::{Block, U256};
+    use ethers::types::{Block, H256, U256};
 
     #[test]
     fn test_archive_node_has_block_data() {

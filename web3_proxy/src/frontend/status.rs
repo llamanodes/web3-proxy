@@ -36,7 +36,7 @@ pub async fn health(
             Ok(_health(app).await)
         })
         .await
-        .unwrap();
+        .expect("this cache get is infallible");
 
     Response::builder()
         .status(code)
@@ -70,7 +70,7 @@ pub async fn backups_needed(
             Ok(_backups_needed(app).await)
         })
         .await
-        .unwrap();
+        .expect("this cache get is infallible");
 
     Response::builder()
         .status(code)
@@ -120,7 +120,7 @@ pub async fn status(
             Ok(_status(app).await)
         })
         .await
-        .unwrap();
+        .expect("this cache get is infallible");
 
     Response::builder()
         .status(code)

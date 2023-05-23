@@ -8,9 +8,9 @@ pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 
 use crate::app::RpcSecretKeyCache;
 use crate::frontend::authorization::{Authorization, RequestMetadata};
-use crate::frontend::errors::Web3ProxyError;
+use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::rpcs::one::Web3Rpc;
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
@@ -229,13 +229,14 @@ impl BufferedRpcQueryStats {
         db_conn: &DatabaseConnection,
         key: RpcQueryKey,
         rpc_secret_key_cache: Option<&RpcSecretKeyCache>,
-    ) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            key.response_timestamp > 0,
-            "no response_timestamp! This is a bug! {:?} {:?}",
-            key,
-            self
-        );
+    ) -> Web3ProxyResult<()> {
+        if key.response_timestamp == 0 {
+            return Err(Web3ProxyError::Anyhow(anyhow!(
+                "no response_timestamp! This is a bug! {:?} {:?}",
+                key,
+                self
+            )));
+        }
 
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
@@ -670,8 +671,9 @@ impl RpcQueryStats {
         method: Option<&str>,
     ) -> Decimal {
         // for now, always return 0 for cost
-        return 0.into();
+        0.into()
 
+        /*
         // some methods should be free. there might be cases where method isn't set (though they should be uncommon)
         // TODO: get this list from config (and add more to it)
         if let Some(method) = method.as_ref() {
@@ -704,5 +706,6 @@ impl RpcQueryStats {
         }
 
         cost
+        */
     }
 }

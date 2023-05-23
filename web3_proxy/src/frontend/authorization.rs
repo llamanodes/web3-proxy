@@ -30,7 +30,7 @@ use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
 use std::convert::Infallible;
 use std::fmt::Display;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::mem;
 use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64, AtomicUsize};
 use std::time::Duration;
@@ -42,20 +42,10 @@ use ulid::Ulid;
 use uuid::Uuid;
 
 /// This lets us use UUID and ULID while we transition to only ULIDs
-/// TODO: include the key's description.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum RpcSecretKey {
     Ulid(Ulid),
     Uuid(Uuid),
-}
-
-impl Hash for RpcSecretKey {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            Self::Ulid(x) => state.write_u128(x.0),
-            Self::Uuid(x) => state.write_u128(x.as_u128()),
-        }
-    }
 }
 
 /// TODO: should this have IpAddr and Origin or AuthorizationChecks?
@@ -97,6 +87,17 @@ pub struct KafkaDebugLogger {
     producer: FutureProducer,
     num_requests: AtomicUsize,
     num_responses: AtomicUsize,
+}
+
+impl Hash for RpcSecretKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let x = match self {
+            Self::Ulid(x) => x.0,
+            Self::Uuid(x) => x.as_u128(),
+        };
+
+        x.hash(state);
+    }
 }
 
 impl fmt::Debug for KafkaDebugLogger {
@@ -883,17 +884,13 @@ impl Web3ProxyApp {
         if let Some(max_concurrent_requests) = self.config.public_max_concurrent_requests {
             let semaphore = self
                 .ip_semaphores
-                .get_or_insert_async::<Web3ProxyError>(ip, async move {
+                .get_or_insert_async::<Infallible>(ip, async move {
                     // TODO: set max_concurrent_requests dynamically based on load?
                     let s = Semaphore::new(max_concurrent_requests);
                     Ok(Arc::new(s))
                 })
-                .await?;
-
-            // if semaphore.available_permits() == 0 {
-            //     // TODO: concurrent limit hit! emit a stat? less important for anon users
-            //     // TODO: there is probably a race here
-            // }
+                .await
+                .expect("infallible");
 
             let semaphore_permit = semaphore.acquire_owned().await?;
 
@@ -903,8 +900,8 @@ impl Web3ProxyApp {
         }
     }
 
-    /// Limit the number of concurrent requests from the given rpc key.
-    pub async fn registered_user_semaphore(
+    /// Limit the number of concurrent requests for a given user across all of their keys
+    pub async fn user_semaphore(
         &self,
         authorization_checks: &AuthorizationChecks,
     ) -> Web3ProxyResult<Option<OwnedSemaphorePermit>> {
@@ -915,25 +912,19 @@ impl Web3ProxyApp {
                 .or(Err(Web3ProxyError::UserIdZero))?;
 
             let semaphore = self
-                .rpc_key_semaphores
-                .get_or_insert_async(&user_id, async move {
+                .user_semaphores
+                .get_or_insert_async::<Infallible>(&user_id, async move {
                     let s = Semaphore::new(max_concurrent_requests as usize);
-                    // trace!("new semaphore for user_id {}", user_id);
-                    Ok::<_, Infallible>(Arc::new(s))
+                    Ok(Arc::new(s))
                 })
                 .await
-                .unwrap();
-
-            // if semaphore.available_permits() == 0 {
-            //     // TODO: concurrent limit hit! emit a stat? this has a race condition though.
-            //     // TODO: maybe have a stat on how long we wait to acquire the semaphore instead?
-            // }
+                .expect("infallible");
 
             let semaphore_permit = semaphore.acquire_owned().await?;
 
             Ok(Some(semaphore_permit))
         } else {
-            // unlimited requests allowed
+            // unlimited concurrency
             Ok(None)
         }
     }
@@ -955,7 +946,7 @@ impl Web3ProxyApp {
                 Ok(Arc::new(s))
             })
             .await
-            .unwrap();
+            .expect("infallible");
 
         let semaphore_permit = semaphore.acquire_owned().await?;
 
@@ -1043,7 +1034,7 @@ impl Web3ProxyApp {
         // they do check origin because we can override rate limits for some origins
         let authorization = Authorization::external(
             allowed_origin_requests_per_period,
-            self.db_conn.clone(),
+            self.db_conn(),
             ip,
             origin,
             proxy_mode,
@@ -1098,8 +1089,7 @@ impl Web3ProxyApp {
         proxy_mode: ProxyMode,
         rpc_secret_key: RpcSecretKey,
     ) -> Web3ProxyResult<AuthorizationChecks> {
-        let authorization_checks: Result<_, Web3ProxyError> = self
-            .rpc_secret_key_cache
+        self.rpc_secret_key_cache
             .get_or_insert_async(&rpc_secret_key, async move {
                 // trace!(?rpc_secret_key, "user cache miss");
 
@@ -1119,7 +1109,6 @@ impl Web3ProxyApp {
                     Some(rpc_key_model) => {
                         // TODO: move these splits into helper functions
                         // TODO: can we have sea orm handle this for us?
-                        // TODO: don't expect. return an application error
                         let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
                             .one(db_replica.conn())
                             .await?
@@ -1129,8 +1118,8 @@ impl Web3ProxyApp {
                             .filter(balance::Column::UserId.eq(user_model.id))
                             .one(db_replica.conn())
                             .await?
-                            .map(|x| x.available_balance)
-                            .unwrap_or_default();
+                            .expect("related balance")
+                            .available_balance;
 
                         let user_tier_model =
                             user_tier::Entity::find_by_id(user_model.user_tier_id)
@@ -1220,9 +1209,7 @@ impl Web3ProxyApp {
                     None => Ok(AuthorizationChecks::default()),
                 }
             })
-            .await;
-
-        authorization_checks
+            .await
     }
 
     /// Authorized the ip/origin/referer/useragent and rate limit and concurrency
@@ -1246,9 +1233,7 @@ impl Web3ProxyApp {
 
         // only allow this rpc_key to run a limited amount of concurrent requests
         // TODO: rate limit should be BEFORE the semaphore!
-        let semaphore = self
-            .registered_user_semaphore(&authorization_checks)
-            .await?;
+        let semaphore = self.user_semaphore(&authorization_checks).await?;
 
         let authorization = Authorization::try_new(
             authorization_checks,
