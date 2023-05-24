@@ -18,7 +18,6 @@ use hashbrown::HashMap;
 use hex_fmt::HexFmt;
 use http::StatusCode;
 use log::{debug, info, warn, Level};
-use migration::sea_orm;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;
@@ -26,6 +25,7 @@ use migration::sea_orm::EntityTrait;
 use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::QueryFilter;
 use migration::sea_orm::TransactionTrait;
+use migration::{sea_orm, Expr, OnConflict};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -384,10 +384,13 @@ pub async fn user_balance_post(
             recipient_account, token, amount
         );
 
+        // Create a new transaction that will be used for joint transaction
+        let txn = db_conn.begin().await?;
+
         // Encoding is inefficient, revisit later
         let recipient = match user::Entity::find()
             .filter(user::Column::Address.eq(&recipient_account.encode()[12..]))
-            .one(db_replica.conn())
+            .one(&txn)
             .await?
         {
             Some(x) => Ok(x),
@@ -413,60 +416,51 @@ pub async fn user_balance_post(
         // Check if the item is in the database. If it is not, then add it into the database
         let user_balance = balance::Entity::find()
             .filter(balance::Column::UserId.eq(recipient.id))
-            .one(&db_conn)
+            .one(&txn)
             .await?;
 
         // Get the premium user-tier
         let premium_user_tier = user_tier::Entity::find()
             .filter(user_tier::Column::Title.eq("Premium"))
-            .one(&db_conn)
+            .one(&txn)
             .await?
             .context("Could not find 'Premium' Tier in user-database")?;
 
-        let txn = db_conn.begin().await?;
-        match user_balance {
-            Some(user_balance) => {
-                let balance_plus_amount = user_balance.available_balance + amount;
-                info!("New user balance is: {:?}", balance_plus_amount);
-                // Update the entry, adding the balance
-                let mut active_user_balance = user_balance.into_active_model();
-                active_user_balance.available_balance = sea_orm::Set(balance_plus_amount);
-
-                if balance_plus_amount >= Decimal::new(10, 0) {
-                    // Also make the user premium at this point ...
-                    let mut active_recipient = recipient.clone().into_active_model();
-                    // Make the recipient premium "Effectively Unlimited"
-                    active_recipient.user_tier_id = sea_orm::Set(premium_user_tier.id);
-                    active_recipient.save(&txn).await?;
-                }
-
-                debug!("New user balance model is: {:?}", active_user_balance);
-                active_user_balance.save(&txn).await?;
-                // txn.commit().await?;
-                // user_balance
-            }
-            None => {
-                // Create the entry with the respective balance
-                let active_user_balance = balance::ActiveModel {
-                    available_balance: sea_orm::ActiveValue::Set(amount),
-                    user_id: sea_orm::ActiveValue::Set(recipient.id),
-                    ..Default::default()
-                };
-
-                if amount >= Decimal::new(10, 0) {
-                    // Also make the user premium at this point ...
-                    let mut active_recipient = recipient.clone().into_active_model();
-                    // Make the recipient premium "Effectively Unlimited"
-                    active_recipient.user_tier_id = sea_orm::Set(premium_user_tier.id);
-                    active_recipient.save(&txn).await?;
-                }
-
-                info!("New user balance model is: {:?}", active_user_balance);
-                active_user_balance.save(&txn).await?;
-                // txn.commit().await?;
-                // user_balance // .try_into_model().unwrap()
-            }
+        let balance_entry = balance::ActiveModel {
+            id: sea_orm::NotSet,
+            available_balance: sea_orm::Set(amount),
+            used_balance: sea_orm::Set(Decimal::new(0, 0)),
+            user_id: sea_orm::Set(recipient.id),
         };
+
+        // TODO: Do an insert on conflict update ...
+        let balance_entry_id = balance::Entity::insert(balance_entry)
+            .on_conflict(
+                OnConflict::new()
+                    .values([(
+                        balance::Column::AvailableBalance,
+                        Expr::col(balance::Column::AvailableBalance).add(amount),
+                    )])
+                    .to_owned(),
+            )
+            .exec(&txn)
+            .await?
+            .last_insert_id;
+
+        let new_balance_entry = balance::Entity::find()
+            .filter(balance::Column::Id.eq(balance_entry_id))
+            .one(&txn)
+            .await?
+            .context("Could not find the newly inserted balance_entry, something went wrong!")?;
+
+        // Then also make the user premium if the payment is above 10$
+        if new_balance_entry.available_balance >= Decimal::new(10, 0) {
+            let mut active_recipient = recipient.clone().into_active_model();
+            // Make the recipient premium "Effectively Unlimited"
+            active_recipient.user_tier_id = sea_orm::Set(premium_user_tier.id);
+            active_recipient.save(&txn).await?;
+        }
+
         debug!("Setting tx_hash: {:?}", tx_hash);
         let receipt = increase_on_chain_balance_receipt::ActiveModel {
             tx_hash: sea_orm::ActiveValue::Set(hex::encode(tx_hash)),
