@@ -41,6 +41,13 @@ pub async fn query_user_stats<'a>(
         None => 0,
     };
 
+    // Return an error if the bearer is set, but the StatType is Detailed
+    if stat_response_type == StatType::Detailed && user_id == 0 {
+        return Err(Web3ProxyError::BadRequest(
+            "Detailed Stats Response requires you to authorize with a bearer token".to_owned(),
+        ));
+    }
+
     let db_replica = app
         .db_replica()
         .context("query_user_stats needs a db replica")?;
