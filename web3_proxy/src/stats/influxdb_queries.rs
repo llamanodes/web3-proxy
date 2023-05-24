@@ -41,6 +41,13 @@ pub async fn query_user_stats<'a>(
         None => 0,
     };
 
+    // Return an error if the bearer is set, but the StatType is Detailed
+    if stat_response_type == StatType::Detailed && user_id == 0 {
+        return Err(Web3ProxyError::BadRequest(
+            "Detailed Stats Response requires you to authorize with a bearer token".to_owned(),
+        ));
+    }
+
     let db_replica = app
         .db_replica()
         .context("query_user_stats needs a db replica")?;
@@ -69,14 +76,6 @@ pub async fn query_user_stats<'a>(
     } else {
         "opt_in_proxy"
     };
-
-    let mut join_candidates: Vec<String> = vec![
-        "_time".to_string(),
-        "_measurement".to_string(),
-        "archive_needed".to_string(),
-        "chain_id".to_string(),
-        "error_response".to_string(),
-    ];
 
     // Include a hashmap to go from rpc_secret_key_id to the rpc_secret_key
     let mut rpc_key_id_to_key = HashMap::new();
@@ -133,9 +132,6 @@ pub async fn query_user_stats<'a>(
             ));
         }
 
-        // Make the tables join on the rpc_key_id as well:
-        join_candidates.push("rpc_secret_key_id".to_string());
-
         // Iterate, pop and add to string
         f!(
             r#"|> filter(fn: (r) => contains(value: r["rpc_secret_key_id"], set: {:?}))"#,
@@ -170,13 +166,8 @@ pub async fn query_user_stats<'a>(
 
     let drop_method = match stat_response_type {
         StatType::Aggregated => f!(r#"|> drop(columns: ["method"])"#),
-        StatType::Detailed => {
-            // Make the tables join on the method column as well
-            join_candidates.push("method".to_string());
-            "".to_string()
-        }
+        StatType::Detailed => "".to_string(),
     };
-    let join_candidates = f!(r#"{:?}"#, join_candidates);
 
     let query = f!(r#"
     base = from(bucket: "{bucket}")
