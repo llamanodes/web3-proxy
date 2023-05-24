@@ -1,6 +1,6 @@
 use super::one::Web3Rpc;
-use super::provider::Web3Provider;
 use crate::frontend::authorization::Authorization;
+use crate::frontend::errors::Web3ProxyResult;
 use anyhow::Context;
 use chrono::Utc;
 use entities::revert_log;
@@ -14,7 +14,7 @@ use std::fmt;
 use std::sync::atomic;
 use std::sync::Arc;
 use thread_fast_rng::rand::Rng;
-use tokio::time::{sleep, Duration, Instant};
+use tokio::time::{Duration, Instant};
 
 #[derive(Debug)]
 pub enum OpenRequestResult {
@@ -76,7 +76,7 @@ impl Authorization {
         self: Arc<Self>,
         method: Method,
         params: EthCallFirstParams,
-    ) -> anyhow::Result<()> {
+    ) -> Web3ProxyResult<()> {
         let rpc_key_id = match self.checks.rpc_secret_key_id {
             Some(rpc_key_id) => rpc_key_id.into(),
             None => {
@@ -158,7 +158,6 @@ impl OpenRequestHandle {
         method: &str,
         params: &P,
         mut error_handler: RequestErrorHandler,
-        unlocked_provider: Option<Arc<Web3Provider>>,
     ) -> Result<R, ProviderError>
     where
         // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
@@ -170,29 +169,6 @@ impl OpenRequestHandle {
         // trace!(rpc=%self.rpc, %method, "request");
         trace!("requesting from {}", self.rpc);
 
-        let mut provider = if unlocked_provider.is_some() {
-            unlocked_provider
-        } else {
-            self.rpc.provider.read().await.clone()
-        };
-
-        let mut logged = false;
-        // TODO: instead of a lock, i guess it should be a watch?
-        while provider.is_none() {
-            // trace!("waiting on provider: locking...");
-            // TODO: i dont like this. subscribing to a channel could be better
-            sleep(Duration::from_millis(100)).await;
-
-            if !logged {
-                debug!("no provider for open handle on {}", self.rpc);
-                logged = true;
-            }
-
-            provider = self.rpc.provider.read().await.clone();
-        }
-
-        let provider = provider.expect("provider was checked already");
-
         self.rpc
             .total_requests
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -202,21 +178,18 @@ impl OpenRequestHandle {
         let start = Instant::now();
 
         // TODO: replace ethers-rs providers with our own that supports streaming the responses
-        let response = match provider.as_ref() {
-            #[cfg(test)]
-            Web3Provider::Mock => {
-                return Err(ProviderError::CustomError(
-                    "mock provider can't respond".to_string(),
-                ))
-            }
-            Web3Provider::Ws(p) => p.request(method, params).await,
-            Web3Provider::Http(p) | Web3Provider::Both(p, _) => {
-                // TODO: i keep hearing that http is faster. but ws has always been better for me. investigate more with actual benchmarks
-                p.request(method, params).await
-            }
+        // TODO: replace ethers-rs providers with our own that handles "id" being null
+        let response: Result<R, _> = if let Some(ref p) = self.rpc.http_provider {
+            p.request(method, params).await
+        } else if let Some(ref p) = self.rpc.ws_provider {
+            p.request(method, params).await
+        } else {
+            return Err(ProviderError::CustomError(
+                "no provider configured!".to_string(),
+            ));
         };
 
-        // note. we intentionally do not record this latency now. we do NOT want to measure errors
+        // we do NOT want to measure errors, so we intentionally do not record this latency now.
         let latency = start.elapsed();
 
         // we used to fetch_sub the active_request count here, but sometimes the handle is dropped without request being called!
@@ -277,11 +250,7 @@ impl OpenRequestHandle {
             // TODO: move this info a function on ResponseErrorType
             let response_type = if let ProviderError::JsonRpcClientError(err) = err {
                 // Http and Ws errors are very similar, but different types
-                let msg = match &*provider {
-                    #[cfg(test)]
-                    Web3Provider::Mock => unimplemented!(),
-                    _ => err.as_error_response().map(|x| x.message.clone()),
-                };
+                let msg = err.as_error_response().map(|x| x.message.clone());
 
                 trace!("error message: {:?}", msg);
 
@@ -390,9 +359,7 @@ impl OpenRequestHandle {
                 }
             }
         } else if let Some(peak_latency) = &self.rpc.peak_latency {
-            // trace!("updating peak_latency: {}", latency.as_secs_f64());
-            // peak_latency.report(latency);
-            trace!("peak latency disabled for now");
+            peak_latency.report(latency);
         } else {
             unreachable!("peak_latency not initialized");
         }

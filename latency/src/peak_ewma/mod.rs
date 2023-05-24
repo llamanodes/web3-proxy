@@ -2,9 +2,7 @@ mod rtt_estimate;
 
 use std::sync::Arc;
 
-use log::{error, trace};
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::TrySendError;
+use log::{error, log_enabled, trace};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
@@ -20,7 +18,7 @@ pub struct PeakEwmaLatency {
     /// Join handle for the latency calculation task
     pub join_handle: JoinHandle<()>,
     /// Send to update with each request duration
-    request_tx: mpsc::Sender<Duration>,
+    request_tx: flume::Sender<Duration>,
     /// Latency average and last update time
     rtt_estimate: Arc<AtomicRttEstimate>,
     /// Decay time
@@ -32,9 +30,12 @@ impl PeakEwmaLatency {
     ///
     /// Returns a handle that can also be used to read the current
     /// average latency.
-    pub fn spawn(decay_ns: f64, buf_size: usize, start_latency: Duration) -> Self {
+    pub fn spawn(decay: Duration, buf_size: usize, start_latency: Duration) -> Self {
+        let decay_ns = decay.as_nanos() as f64;
+
         debug_assert!(decay_ns > 0.0, "decay_ns must be positive");
-        let (request_tx, request_rx) = mpsc::channel(buf_size);
+
+        let (request_tx, request_rx) = flume::bounded(buf_size);
         let rtt_estimate = Arc::new(AtomicRttEstimate::new(start_latency));
         let task = PeakEwmaLatencyTask {
             request_rx,
@@ -56,15 +57,19 @@ impl PeakEwmaLatency {
         let mut estimate = self.rtt_estimate.load();
 
         let now = Instant::now();
-        assert!(
-            estimate.update_at <= now,
-            "update_at is {}ns in the future",
-            estimate.update_at.duration_since(now).as_nanos(),
-        );
 
-        // Update the RTT estimate to account for decay since the last update.
-        // TODO: having an update here means we don't actually write from just one thread!! Thats how we get partially written stuff i think
-        estimate.update(0.0, self.decay_ns, now)
+        if estimate.update_at > now {
+            if log_enabled!(log::Level::Trace) {
+                trace!(
+                    "update_at is {}ns in the future",
+                    estimate.update_at.duration_since(now).as_nanos()
+                );
+            }
+            estimate.rtt
+        } else {
+            // Update the RTT estimate to account for decay since the last update.
+            estimate.update(0.0, self.decay_ns, now)
+        }
     }
 
     /// Report latency from a single request
@@ -73,14 +78,11 @@ impl PeakEwmaLatency {
     pub fn report(&self, duration: Duration) {
         match self.request_tx.try_send(duration) {
             Ok(()) => {}
-            Err(TrySendError::Full(_)) => {
+            Err(err) => {
                 // We don't want to block if the channel is full, just
                 // report the error
-                error!("Latency report channel full");
+                error!("Latency report channel full. {}", err);
                 // TODO: could we spawn a new tokio task to report tthis later?
-            }
-            Err(TrySendError::Closed(_)) => {
-                unreachable!("Owner should keep channel open");
             }
         };
     }
@@ -90,7 +92,7 @@ impl PeakEwmaLatency {
 #[derive(Debug)]
 struct PeakEwmaLatencyTask {
     /// Receive new request timings for update
-    request_rx: mpsc::Receiver<Duration>,
+    request_rx: flume::Receiver<Duration>,
     /// Current estimate and update time
     rtt_estimate: Arc<AtomicRttEstimate>,
     /// Last update time, used for decay calculation
@@ -101,8 +103,8 @@ struct PeakEwmaLatencyTask {
 
 impl PeakEwmaLatencyTask {
     /// Run the loop for updating latency
-    async fn run(mut self) {
-        while let Some(rtt) = self.request_rx.recv().await {
+    async fn run(self) {
+        while let Ok(rtt) = self.request_rx.recv_async().await {
             self.update(rtt);
         }
         trace!("latency loop exited");
@@ -128,14 +130,15 @@ impl PeakEwmaLatencyTask {
 mod tests {
     use tokio::time::{self, Duration};
 
-    use crate::util::nanos::NANOS_PER_MILLI;
-
     /// The default RTT estimate decays, so that new nodes are considered if the
     /// default RTT is too high.
     #[tokio::test(start_paused = true)]
     async fn default_decay() {
-        let estimate =
-            super::PeakEwmaLatency::spawn(NANOS_PER_MILLI * 1_000.0, 8, Duration::from_millis(10));
+        let estimate = super::PeakEwmaLatency::spawn(
+            Duration::from_millis(1_000),
+            8,
+            Duration::from_millis(10),
+        );
         let load = estimate.latency();
         assert_eq!(load, Duration::from_millis(10));
 

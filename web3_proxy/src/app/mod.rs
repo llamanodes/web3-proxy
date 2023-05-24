@@ -74,7 +74,7 @@ pub static APP_USER_AGENT: &str = concat!(
 // aggregate across 1 week
 pub const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
 
-pub type AnyhowJoinHandle<T> = JoinHandle<anyhow::Result<T>>;
+pub type Web3ProxyJoinHandle<T> = JoinHandle<Web3ProxyResult<T>>;
 
 /// TODO: move this
 #[derive(Clone, Debug, Default, From)]
@@ -176,7 +176,7 @@ pub struct Web3ProxyApp {
     // TODO: should the key be our RpcSecretKey class instead of Ulid?
     pub rpc_secret_key_cache: RpcSecretKeyCache,
     /// concurrent/parallel RPC request limits for authenticated users
-    pub rpc_key_semaphores: Cache<NonZeroU64, Arc<Semaphore>>,
+    pub user_semaphores: Cache<NonZeroU64, Arc<Semaphore>>,
     /// concurrent/parallel request limits for anonymous users
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>>,
     /// concurrent/parallel application request limits for authenticated users
@@ -188,7 +188,7 @@ pub struct Web3ProxyApp {
 
 /// flatten a JoinError into an anyhow error
 /// Useful when joining multiple futures.
-pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T> {
+pub async fn flatten_handle<T>(handle: Web3ProxyJoinHandle<T>) -> Web3ProxyResult<T> {
     match handle.await {
         Ok(Ok(result)) => Ok(result),
         Ok(Err(err)) => Err(err),
@@ -198,8 +198,8 @@ pub async fn flatten_handle<T>(handle: AnyhowJoinHandle<T>) -> anyhow::Result<T>
 
 /// return the first error, or Ok if everything worked
 pub async fn flatten_handles<T>(
-    mut handles: FuturesUnordered<AnyhowJoinHandle<T>>,
-) -> anyhow::Result<()> {
+    mut handles: FuturesUnordered<Web3ProxyJoinHandle<T>>,
+) -> Web3ProxyResult<()> {
     while let Some(x) = handles.next().await {
         match x {
             Err(e) => return Err(e.into()),
@@ -315,9 +315,9 @@ pub struct Web3ProxyAppSpawn {
     /// the app. probably clone this to use in other groups of handles
     pub app: Arc<Web3ProxyApp>,
     /// handles for the balanced and private rpcs
-    pub app_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
+    pub app_handles: FuturesUnordered<Web3ProxyJoinHandle<()>>,
     /// these are important and must be allowed to finish
-    pub background_handles: FuturesUnordered<AnyhowJoinHandle<()>>,
+    pub background_handles: FuturesUnordered<Web3ProxyJoinHandle<()>>,
     /// config changes are sent here
     pub new_top_config_sender: watch::Sender<TopConfig>,
     /// watch this to know when to start the app
@@ -359,10 +359,12 @@ impl Web3ProxyApp {
         }
 
         // these futures are key parts of the app. if they stop running, the app has encountered an irrecoverable error
-        let app_handles = FuturesUnordered::new();
+        // TODO: this is a small enough group, that a vec with try_join_all is probably fine
+        let app_handles: FuturesUnordered<Web3ProxyJoinHandle<()>> = FuturesUnordered::new();
 
         // we must wait for these to end on their own (and they need to subscribe to shutdown_sender)
-        let important_background_handles = FuturesUnordered::new();
+        let important_background_handles: FuturesUnordered<Web3ProxyJoinHandle<()>> =
+            FuturesUnordered::new();
 
         // connect to the database and make sure the latest migrations have run
         let mut db_conn = None::<DatabaseConnection>;
@@ -624,12 +626,10 @@ impl Web3ProxyApp {
         // TODO: what should tti be for semaphores?
         let bearer_token_semaphores = Cache::new(max_users);
         let ip_semaphores = Cache::new(max_users);
-        let registered_user_semaphores = Cache::new(max_users);
+        let user_semaphores = Cache::new(max_users);
 
         let (balanced_rpcs, balanced_handle, consensus_connections_watcher) = Web3Rpcs::spawn(
-            top_config.app.chain_id,
             db_conn.clone(),
-            http_client.clone(),
             top_config.app.max_block_age,
             top_config.app.max_block_lag,
             top_config.app.min_synced_rpcs,
@@ -654,9 +654,7 @@ impl Web3ProxyApp {
             // TODO: Merge
             // let (private_rpcs, private_rpcs_handle) = Web3Rpcs::spawn(
             let (private_rpcs, private_handle, _) = Web3Rpcs::spawn(
-                top_config.app.chain_id,
                 db_conn.clone(),
-                http_client.clone(),
                 // private rpcs don't get subscriptions, so no need for max_block_age or max_block_lag
                 None,
                 None,
@@ -688,9 +686,7 @@ impl Web3ProxyApp {
         } else {
             // TODO: do something with the spawn handle
             let (bundler_4337_rpcs, bundler_4337_rpcs_handle, _) = Web3Rpcs::spawn(
-                top_config.app.chain_id,
                 db_conn.clone(),
-                http_client.clone(),
                 // bundler_4337_rpcs don't get subscriptions, so no need for max_block_age or max_block_lag
                 None,
                 None,
@@ -735,7 +731,7 @@ impl Web3ProxyApp {
             rpc_secret_key_cache,
             bearer_token_semaphores,
             ip_semaphores,
-            rpc_key_semaphores: registered_user_semaphores,
+            user_semaphores,
             stat_sender,
         };
 
@@ -752,9 +748,9 @@ impl Web3ProxyApp {
                 loop {
                     let new_top_config = new_top_config_receiver.borrow_and_update().to_owned();
 
-                    app.apply_top_config(new_top_config)
-                        .await
-                        .context("failed applying new top_config")?;
+                    if let Err(err) = app.apply_top_config(new_top_config).await {
+                        error!("unable to apply config! {:?}", err);
+                    };
 
                     new_top_config_receiver
                         .changed()
@@ -790,7 +786,7 @@ impl Web3ProxyApp {
             .into())
     }
 
-    pub async fn apply_top_config(&self, new_top_config: TopConfig) -> anyhow::Result<()> {
+    pub async fn apply_top_config(&self, new_top_config: TopConfig) -> Web3ProxyResult<()> {
         // TODO: also update self.config from new_top_config.app
 
         // connect to the backends
@@ -1015,20 +1011,12 @@ impl Web3ProxyApp {
     ) -> Web3ProxyResult<(StatusCode, JsonRpcForwardedResponseEnum, Vec<Arc<Web3Rpc>>)> {
         // trace!(?request, "proxy_web3_rpc");
 
-        // even though we have timeouts on the requests to our backend providers,
-        // we need a timeout for the incoming request so that retries don't run forever
-        // TODO: take this as an optional argument. check for a different max from the user_tier?
-        // TODO: how much time was spent on this request alredy?
-        let max_time = Duration::from_secs(240);
-
         // TODO: use streams and buffers so we don't overwhelm our server
         let response = match request {
             JsonRpcRequestEnum::Single(mut request) => {
-                let (status_code, response, rpcs) = timeout(
-                    max_time,
-                    self.proxy_cached_request(&authorization, &mut request, None),
-                )
-                .await?;
+                let (status_code, response, rpcs) = self
+                    .proxy_cached_request(&authorization, &mut request, None)
+                    .await;
 
                 (
                     status_code,
@@ -1037,11 +1025,9 @@ impl Web3ProxyApp {
                 )
             }
             JsonRpcRequestEnum::Batch(requests) => {
-                let (responses, rpcs) = timeout(
-                    max_time,
-                    self.proxy_web3_rpc_requests(&authorization, requests),
-                )
-                .await??;
+                let (responses, rpcs) = self
+                    .proxy_web3_rpc_requests(&authorization, requests)
+                    .await?;
 
                 // TODO: real status code
                 (
@@ -1335,7 +1321,8 @@ impl Web3ProxyApp {
             | "eth_getUserOperationReceipt"
             | "eth_supportedEntryPoints") => match self.bundler_4337_rpcs.as_ref() {
                 Some(bundler_4337_rpcs) => {
-                    bundler_4337_rpcs
+                // TODO: timeout
+                bundler_4337_rpcs
                         .try_proxy_connection(
                             authorization,
                             request,
@@ -1371,6 +1358,7 @@ impl Web3ProxyApp {
                 JsonRpcResponseData::from(json!(Address::zero()))
             }
             "eth_estimateGas" => {
+                // TODO: timeout
                 let response_data = self
                     .balanced_rpcs
                     .try_proxy_connection(
@@ -1407,6 +1395,7 @@ impl Web3ProxyApp {
             }
             "eth_getTransactionReceipt" | "eth_getTransactionByHash" => {
                 // try to get the transaction without specifying a min_block_height
+                // TODO: timeout
                 let mut response_data = self
                     .balanced_rpcs
                     .try_proxy_connection(
@@ -1450,12 +1439,7 @@ impl Web3ProxyApp {
 
                 // TODO: error if the chain_id is incorrect
 
-                // TODO: check the cache to see if we have sent this transaction recently
-                // TODO: if so, use a cached response.
-                // TODO: if not,
-                // TODO: - cache successes for up to 1 minute
-                // TODO: - cache failures for 1 block (we see transactions skipped because out of funds. but that can change block to block)
-
+                // TODO: timeout
                 let mut response_data = self
                     .try_send_protected(
                         authorization,
@@ -1585,6 +1569,7 @@ impl Web3ProxyApp {
             ,
             "web3_sha3" => {
                 // returns Keccak-256 (not the standardized SHA3-256) of the given data.
+                // TODO: timeout
                 match &request.params {
                     Some(serde_json::Value::Array(params)) => {
                         // TODO: make a struct and use serde conversion to clean this up
@@ -1744,6 +1729,9 @@ impl Web3ProxyApp {
 
                 let authorization = authorization.clone();
 
+                // TODO: different timeouts for different user tiers
+                let duration = Duration::from_secs(240);
+
                 if let Some(cache_key) = cache_key {
                     let from_block_num = cache_key.from_block.as_ref().map(|x| x.number.unwrap());
                     let to_block_num = cache_key.to_block.as_ref().map(|x| x.number.unwrap());
@@ -1754,15 +1742,18 @@ impl Web3ProxyApp {
                     {
                         Ok(x) => x,
                         Err(x) => {
-                            let response_data = self.balanced_rpcs
-                                .try_proxy_connection(
-                                    &authorization,
-                                    request,
-                                    Some(request_metadata),
-                                    from_block_num.as_ref(),
-                                    to_block_num.as_ref(),
+                            let response_data = timeout(
+                                duration,
+                                self.balanced_rpcs
+                                    .try_proxy_connection(
+                                        &authorization,
+                                        request,
+                                        Some(request_metadata),
+                                        from_block_num.as_ref(),
+                                        to_block_num.as_ref(),
+                                    )
                                 )
-                                .await?;
+                                .await??;
 
                             // TODO: convert the Box<RawValue> to an Arc<RawValue>
                             x.insert(response_data.clone());
@@ -1771,15 +1762,18 @@ impl Web3ProxyApp {
                         }
                     }
                 } else {
-                self.balanced_rpcs
-                    .try_proxy_connection(
-                        &authorization,
-                        request,
-                        Some(request_metadata),
-                        None,
-                        None,
+                    timeout(
+                        duration,
+                        self.balanced_rpcs
+                        .try_proxy_connection(
+                            &authorization,
+                            request,
+                            Some(request_metadata),
+                            None,
+                            None,
+                        )
                     )
-                    .await?
+                    .await??
                 }
             }
         };

@@ -1,5 +1,6 @@
 use super::{AppStat, RpcQueryKey};
-use crate::app::RpcSecretKeyCache;
+use crate::app::{RpcSecretKeyCache, Web3ProxyJoinHandle};
+use crate::frontend::errors::Web3ProxyResult;
 use derive_more::From;
 use futures::stream;
 use hashbrown::HashMap;
@@ -9,7 +10,6 @@ use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
 use tokio::time::interval;
 
 #[derive(Debug, Default)]
@@ -32,7 +32,7 @@ pub struct BufferedRpcQueryStats {
 pub struct SpawnedStatBuffer {
     pub stat_sender: flume::Sender<AppStat>,
     /// these handles are important and must be allowed to finish
-    pub background_handle: JoinHandle<anyhow::Result<()>>,
+    pub background_handle: Web3ProxyJoinHandle<()>,
 }
 pub struct StatBuffer {
     accounting_db_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
@@ -96,7 +96,7 @@ impl StatBuffer {
         bucket: String,
         stat_receiver: flume::Receiver<AppStat>,
         mut shutdown_receiver: broadcast::Receiver<()>,
-    ) -> anyhow::Result<()> {
+    ) -> Web3ProxyResult<()> {
         let mut tsdb_save_interval =
             interval(Duration::from_secs(self.tsdb_save_interval_seconds as u64));
         let mut db_save_interval =

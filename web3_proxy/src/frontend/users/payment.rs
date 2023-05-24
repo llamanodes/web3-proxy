@@ -153,7 +153,7 @@ pub async fn user_balance_post(
     // Just make an rpc request, idk if i need to call this super extensive code
     let transaction_receipt: TransactionReceipt = match app
         .balanced_rpcs
-        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None)
+        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None, None)
         .await
     {
         Ok(OpenRequestResult::Handle(handle)) => {
@@ -166,7 +166,6 @@ pub async fn user_balance_post(
                     "eth_getTransactionReceipt",
                     &vec![format!("0x{}", hex::encode(tx_hash))],
                     Level::Trace.into(),
-                    None,
                 )
                 .await
                 // TODO: What kind of error would be here
@@ -188,7 +187,7 @@ pub async fn user_balance_post(
     debug!("Transaction receipt is: {:?}", transaction_receipt);
     let accepted_token: Address = match app
         .balanced_rpcs
-        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None)
+        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None, None)
         .await
     {
         Ok(OpenRequestResult::Handle(handle)) => {
@@ -217,7 +216,7 @@ pub async fn user_balance_post(
             ]);
             debug!("Params are: {:?}", &params);
             let accepted_token: String = handle
-                .request("eth_call", &params, Level::Trace.into(), None)
+                .request("eth_call", &params, Level::Trace.into())
                 .await
                 // TODO: What kind of error would be here
                 .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
@@ -243,7 +242,7 @@ pub async fn user_balance_post(
     debug!("Accepted token is: {:?}", accepted_token);
     let decimals: u32 = match app
         .balanced_rpcs
-        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None)
+        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None, None)
         .await
     {
         Ok(OpenRequestResult::Handle(handle)) => {
@@ -267,7 +266,7 @@ pub async fn user_balance_post(
             ]);
             debug!("ERC20 Decimal request params are: {:?}", &params);
             let decimals: String = handle
-                .request("eth_call", &params, Level::Trace.into(), None)
+                .request("eth_call", &params, Level::Trace.into())
                 .await
                 .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
             debug!("Decimals response is: {:?}", decimals);
