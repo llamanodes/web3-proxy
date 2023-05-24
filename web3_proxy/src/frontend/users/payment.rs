@@ -153,7 +153,7 @@ pub async fn user_balance_post(
     // Just make an rpc request, idk if i need to call this super extensive code
     let transaction_receipt: TransactionReceipt = match app
         .balanced_rpcs
-        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None)
+        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None, None)
         .await
     {
         Ok(OpenRequestResult::Handle(handle)) => {
@@ -187,7 +187,7 @@ pub async fn user_balance_post(
     debug!("Transaction receipt is: {:?}", transaction_receipt);
     let accepted_token: Address = match app
         .balanced_rpcs
-        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None)
+        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None, None)
         .await
     {
         Ok(OpenRequestResult::Handle(handle)) => {
@@ -242,7 +242,7 @@ pub async fn user_balance_post(
     debug!("Accepted token is: {:?}", accepted_token);
     let decimals: u32 = match app
         .balanced_rpcs
-        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None)
+        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None, None)
         .await
     {
         Ok(OpenRequestResult::Handle(handle)) => {
