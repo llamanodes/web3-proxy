@@ -394,9 +394,7 @@ impl BufferedRpcQueryStats {
                                 "This user id has no balance entry! {:?}",
                                 sender_rpc_entity
                             )))?;
-                        let referee_balance = sender_balance.clone();
                         Some((
-                            referee_balance,
                             referee_entity,
                             referrer_user_entity,
                             referrer_balance_entity,
@@ -426,11 +424,10 @@ impl BufferedRpcQueryStats {
         // UPDATE REFERRER & REFEREE BALANCE //
         // ================================= //
         // Only branch into this if the referrer logic applies, i.e. if a referral logic applies
-        if let Some((referee_balance, referee_entity, referrer_user_entity, referrer_balance)) =
-            referral_objects
-        {
+        if let Some((referee_entity, referrer_user_entity, referrer_balance)) = referral_objects {
             // update the referrer balance
             // Turn everything into active models that we can modify
+            let referee_balance = active_sender_balance;
             let mut active_referee_balance = referee_balance.clone().into_active_model();
             let mut active_referee_entity = referee_entity.clone().into_active_model();
             let mut active_referrer_balance = referrer_balance.clone().into_active_model();
@@ -438,10 +435,11 @@ impl BufferedRpcQueryStats {
             // If the credits have not yet been applied to the referee, apply 10M credits / $100.00 USD worth of credits.
             // TODO: Hardcode this parameter also in config, so it's easier to tune
             if !referee_entity.credits_applied_for_referee
-                && (referee_balance.used_balance + self.sum_credits_used) >= Decimal::from(100)
+                && (referee_balance.used_balance.unwrap() + self.sum_credits_used)
+                    >= Decimal::from(100)
             {
                 active_referee_balance.available_balance =
-                    sea_orm::Set(referee_balance.available_balance + Decimal::from(100));
+                    sea_orm::Set(referee_balance.available_balance.unwrap() + Decimal::from(100));
                 active_referee_entity.credits_applied_for_referee = sea_orm::Set(true);
                 active_referee_balance.save(&txn).await?;
             }
