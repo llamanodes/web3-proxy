@@ -3,8 +3,8 @@
 pub mod db_queries;
 pub mod influxdb_queries;
 mod stat_buffer;
-
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
+use std::cmp;
 
 use crate::app::RpcSecretKeyCache;
 use crate::frontend::authorization::{Authorization, RequestMetadata};
@@ -17,13 +17,14 @@ use derive_more::From;
 use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key, user, user_tier};
 use influxdb2::models::DataPoint;
-use log::{error, trace, warn};
+use log::{error, info, trace, warn};
 use migration::sea_orm::prelude::Decimal;
+use migration::sea_orm::QuerySelect;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
-    QueryFilter,
+    QueryFilter, TransactionTrait,
 };
-use migration::{Expr, OnConflict};
+use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::cmp::max;
@@ -222,6 +223,9 @@ impl BufferedRpcQueryStats {
             .unwrap_or(Decimal::from(0));
     }
 
+    /// Check a user's balance and possibly downgrade him in the cache
+    async fn downgrade_user(self) {}
+
     // TODO: take a db transaction instead so that we can batch?
     async fn save_db(
         self,
@@ -240,7 +244,9 @@ impl BufferedRpcQueryStats {
 
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
-        // this is a lot of variables
+        // =============================== //
+        //       UPDATE STATISTICS         //
+        // =============================== //
         let accounting_entry = rpc_accounting_v2::ActiveModel {
             id: sea_orm::NotSet,
             rpc_key_id: sea_orm::Set(key.rpc_secret_key_id.map(Into::into)),
@@ -318,216 +324,201 @@ impl BufferedRpcQueryStats {
             .exec(db_conn)
             .await?;
 
-        // TODO: Refactor this function a bit more just so it looks and feels nicer
-        // TODO: Figure out how to go around unmatching, it shouldn't return an error, but this is disgusting
-
-        // All the referral & balance arithmetic takes place here
+        // =============================== //
+        // PREPARE FOR UPDATE USER BALANCE //
+        // =============================== //
         let rpc_secret_key_id: u64 = match key.rpc_secret_key_id {
             Some(x) => x.into(),
             // Return early if the RPC key is not found, because then it is an anonymous user
             None => return Ok(()),
         };
 
-        // (1) Get the user with that RPC key. This is the referee
-        let sender_rpc_key = rpc_key::Entity::find()
+        // =============================== //
+        //       GET ALL VARIABLES         //
+        // =============================== //
+        // Get all the variables that we might be working with
+        let txn = db_conn.begin().await?;
+
+        // (1) Get the user with that RPC key. This is also the referee
+        let sender_rpc_entity = rpc_key::Entity::find()
             .filter(rpc_key::Column::Id.eq(rpc_secret_key_id))
-            .one(db_conn)
-            .await?;
-
-        // Technicall there should always be a user ... still let's return "Ok(())" for now
-        let sender_user_id: u64 = match sender_rpc_key {
-            Some(x) => x.user_id,
-            // Return early if the User is not found, because then it is an anonymous user
-            // Let's also issue a warning because obviously the RPC key should correspond to a user
-            None => {
-                warn!(
-                    "No user was found for the following rpc key: {:?}",
-                    rpc_secret_key_id
-                );
-                return Ok(());
-            }
-        };
-
-        // (1) Do some general bookkeeping on the user
-        let sender_balance = match balance::Entity::find()
-            .filter(balance::Column::UserId.eq(sender_user_id))
-            .one(db_conn)
+            .lock(LockType::Update)
+            .one(&txn)
             .await?
-        {
-            Some(x) => x,
-            None => {
-                warn!("This user id has no balance entry! {:?}", sender_user_id);
-                return Ok(());
-            }
-        };
-
-        let mut active_sender_balance = sender_balance.clone().into_active_model();
-
-        // Still subtract from the user in any case,
-        // Modify the balance of the sender completely (in mysql, next to the stats)
-        // In any case, add this to "spent"
-        // TODO! we need to do the math in mysql (like with `Expr::col` above). if we do the addition here, there is a race condition
-        active_sender_balance.used_balance =
-            sea_orm::Set(sender_balance.used_balance + self.sum_credits_used);
-
-        // Also update the available balance
-        // TODO! this needs to be queried from the database
-        let new_available_balance = max(
-            sender_balance.available_balance - self.sum_credits_used,
-            Decimal::from(0),
-        );
-        active_sender_balance.available_balance = sea_orm::Set(new_available_balance);
-
-        active_sender_balance.save(db_conn).await?;
-
-        let downgrade_user = match user::Entity::find()
-            .filter(user::Column::Id.eq(sender_user_id))
-            .one(db_conn)
-            .await?
-        {
-            Some(x) => x,
-            None => {
-                warn!("No user was found with this sender id!");
-                return Ok(());
-            }
-        };
-
-        let downgrade_user_role = user_tier::Entity::find()
-            .filter(user_tier::Column::Id.eq(downgrade_user.user_tier_id))
-            .one(db_conn)
-            .await?
-            .context(format!(
-                "The foreign key for the user's user_tier_id was not found! {:?}",
-                downgrade_user.user_tier_id
+            .ok_or(Web3ProxyError::BadRequest(
+                "Could not find rpc key in db".to_string(),
             ))?;
 
-        // Downgrade a user to premium - out of funds if there's less than 10$ in the account, and if the user was premium before
-        // TODO: lets let them get under $1
-        // TODO: instead of checking for a specific title, downgrade if the downgrade id is set to anything
-        if new_available_balance < Decimal::from(10u64) && downgrade_user_role.title == "Premium" {
-            // TODO: we could do this outside the balance low block, but I think its fine. or better, update the cache if <$10 and downgrade if <$1
-            if let Some(rpc_secret_key_cache) = rpc_secret_key_cache {
-                error!("expire (or probably better to update) the user cache now that the balance is low");
-                // actually i think we need to have 2 caches. otherwise users with 2 keys are going to have seperate caches
-                // 1. rpc_secret_key_id -> AuthorizationChecks (cuz we don't want to hit the db every time)
-                // 2. user_id -> Balance
-            }
+        let sender_balance = balance::Entity::find()
+            .filter(balance::Column::UserId.eq(sender_rpc_entity.user_id))
+            .lock(LockType::Update)
+            .one(&txn)
+            .await?
+            .ok_or(Web3ProxyError::BadRequest(format!(
+                "This user id has no balance entry! {:?}",
+                sender_rpc_entity
+            )))?;
 
-            // Only downgrade the user in local process memory, not elsewhere
-
-            // let mut active_downgrade_user = downgrade_user.into_active_model();
-            // active_downgrade_user.user_tier_id = sea_orm::Set(downgrade_user_role.id);
-            // active_downgrade_user.save(db_conn).await?;
-        }
-
-        // Get the referee, and the referrer
-        // (2) Look up the code that this user used. This is the referee table
-        let referee_object = match referee::Entity::find()
-            .filter(referee::Column::UserId.eq(sender_user_id))
-            .one(db_conn)
+        // This will be optional
+        let referral_objects = match referee::Entity::find()
+            .filter(referee::Column::UserId.eq(sender_rpc_entity.user_id))
+            .lock(LockType::Update)
+            .one(&txn)
             .await?
         {
-            Some(x) => x,
-            None => {
-                warn!(
-                    "No referral code was found for this user: {:?}",
-                    sender_user_id
-                );
-                return Ok(());
+            Some(referee_entity) => {
+                // In this case, also fetch the referrer
+                match referrer::Entity::find()
+                    .filter(referrer::Column::Id.eq(referee_entity.used_referral_code))
+                    .lock(LockType::Update)
+                    .one(&txn)
+                    .await?
+                {
+                    Some(referrer_connection) => {
+                        // Get the referring user and their balance
+                        let referrer_user_entity = user::Entity::find()
+                            .filter(user::Column::Id.eq(referrer_connection.user_id))
+                            .lock(LockType::Update)
+                            .one(&txn)
+                            .await?
+                            .ok_or(Web3ProxyError::BadRequest(
+                                "Could not find rpc key in db".to_string(),
+                            ))?;
+                        // And their bala
+                        let referrer_balance_entity = balance::Entity::find()
+                            .filter(balance::Column::UserId.eq(referrer_connection.user_id))
+                            .lock(LockType::Update)
+                            .one(&txn)
+                            .await?
+                            .ok_or(Web3ProxyError::BadRequest(format!(
+                                "This user id has no balance entry! {:?}",
+                                sender_rpc_entity
+                            )))?;
+                        let referee_balance = sender_balance.clone();
+                        Some((
+                            referee_balance,
+                            referee_entity,
+                            referrer_user_entity,
+                            referrer_balance_entity,
+                        ))
+                    }
+                    None => None,
+                }
             }
+            None => None,
         };
 
-        // (3) Look up the matching referrer in the referrer table
-        // Referral table -> Get the referee id
-        let user_with_that_referral_code = match referrer::Entity::find()
-            .filter(referrer::Column::ReferralCode.eq(referee_object.used_referral_code))
-            .one(db_conn)
-            .await?
-        {
-            Some(x) => x,
-            None => {
-                // TODO: warn seems too verbose for this. it should be fine for a user to not have a referall code, right?
-                warn!(
-                    "No referrer with that referral code was found {:?}",
-                    referee_object
-                );
-                return Ok(());
-            }
-        };
+        // =============================== //
+        //    UPDATE CALLER BALANCE        //
+        // =============================== //
+        // Update is regardless of referrals
 
-        // Ok, now we add the credits to both users if applicable...
-        // (4 onwards) Add balance to the referrer,
-
-        // (5) Check if referee has used up $100.00 USD in total (Have a config item that says how many credits account to 1$)
-        // Get balance for the referrer (optionally make it into an active model ...)
-        let sender_balance = match balance::Entity::find()
-            .filter(balance::Column::UserId.eq(referee_object.user_id))
-            .one(db_conn)
-            .await?
-        {
-            Some(x) => x,
-            None => {
-                warn!(
-                    "This user id has no balance entry! {:?}",
-                    referee_object.user_id
-                );
-                return Ok(());
-            }
-        };
-
-        // TODO: don't clone on this. use the active_model later
+        // I think I can update the balance naively now basically
         let mut active_sender_balance = sender_balance.clone().into_active_model();
-        let referrer_balance = match balance::Entity::find()
-            .filter(balance::Column::UserId.eq(user_with_that_referral_code.user_id))
-            .one(db_conn)
-            .await?
+        active_sender_balance.available_balance = sea_orm::Set(cmp::max(
+            Decimal::from(0),
+            sender_balance.available_balance - self.sum_credits_used,
+        ));
+        active_sender_balance.used_balance =
+            sea_orm::Set(sender_balance.available_balance + self.sum_credits_used);
+
+        // ================================= //
+        // UPDATE REFERRER & REFEREE BALANCE //
+        // ================================= //
+        // Only branch into this if the referrer logic applies, i.e. if a referral logic applies
+        if let Some((referee_balance, referee_entity, referrer_user_entity, referrer_balance)) =
+            referral_objects
         {
-            Some(x) => x,
-            None => {
-                warn!(
-                    "This user id has no balance entry! {:?}",
-                    referee_object.user_id
-                );
-                return Ok(());
-            }
-        };
-
-        // I could try to circumvene the clone here, but let's skip that for now
-        let mut active_referee = referee_object.clone().into_active_model();
-
-        // (5.1) If not, go to (7). If yes, go to (6)
-        // Hardcode this parameter also in config, so it's easier to tune
-        if !referee_object.credits_applied_for_referee
-            && (sender_balance.used_balance + self.sum_credits_used) >= Decimal::from(100)
-        {
-            // (6) If the credits have not yet been applied to the referee, apply 10M credits / $100.00 USD worth of credits.
-            // Make it into an active model, and add credits
-            // TODO! race condition here! we can't set. need to let the db do the math
-            active_sender_balance.available_balance =
-                sea_orm::Set(sender_balance.available_balance + Decimal::from(100));
-            // Also mark referral as "credits_applied_for_referee"
-            active_referee.credits_applied_for_referee = sea_orm::Set(true);
-        }
-
-        // (7) If the referral-start-date has not been passed, apply 10% of the credits to the referrer.
-        let now = Utc::now();
-        let valid_until = DateTime::<Utc>::from_utc(referee_object.referral_start_date, Utc)
-            .checked_add_months(Months::new(12))
-            .unwrap();
-        if now <= valid_until {
+            // update the referrer balance
+            // Turn everything into active models that we can modify
+            let mut active_referee_balance = referee_balance.clone().into_active_model();
+            let mut active_referee_entity = referee_entity.clone().into_active_model();
             let mut active_referrer_balance = referrer_balance.clone().into_active_model();
-            // Add 10% referral fees ...
-            active_referrer_balance.available_balance = sea_orm::Set(
-                referrer_balance.available_balance + self.sum_credits_used / Decimal::from(10),
-            );
-            // Also record how much the current referrer has "provided" / "gifted" away
-            active_referee.credits_applied_for_referrer =
-                sea_orm::Set(referee_object.credits_applied_for_referrer + self.sum_credits_used);
-            active_referrer_balance.save(db_conn).await?;
+
+            // If the credits have not yet been applied to the referee, apply 10M credits / $100.00 USD worth of credits.
+            // TODO: Hardcode this parameter also in config, so it's easier to tune
+            if !referee_entity.credits_applied_for_referee
+                && (referee_balance.used_balance + self.sum_credits_used) >= Decimal::from(100)
+            {
+                active_referee_balance.available_balance =
+                    sea_orm::Set(referee_balance.available_balance + Decimal::from(100));
+                active_referee_entity.credits_applied_for_referee = sea_orm::Set(true);
+                active_referee_balance.save(&txn).await?;
+            }
+
+            // Also apply some (10%) credits to the referrer if the referral is not too old
+            let now = Utc::now();
+            let valid_until = DateTime::<Utc>::from_utc(referee_entity.referral_start_date, Utc)
+                .checked_add_months(Months::new(12))
+                .unwrap();
+
+            if now <= valid_until {
+                active_referrer_balance.available_balance = sea_orm::Set(
+                    referrer_balance.available_balance
+                        + self.sum_credits_used / Decimal::new(10, 0),
+                );
+                // Also record how much the current referrer has "provided" / "gifted" away
+                active_referee_entity.credits_applied_for_referrer = sea_orm::Set(
+                    referee_entity.credits_applied_for_referrer + self.sum_credits_used,
+                );
+                active_referrer_balance.save(&txn).await?;
+            }
+            // Do this if anything has changed, otherwise it's redundant
+            // We start the transaction anyways though, so that's fine
+            active_referee_entity.save(&txn).await?;
         }
 
-        active_sender_balance.save(db_conn).await?;
-        active_referee.save(db_conn).await?;
+        // =============================== //
+        //  DOWNGRADE USER ROLE IN CACHE   //
+        // =============================== //
+        // TODO: Only do it in cache, not like this!
+        // let new_balance_entry = balance::Entity::find()
+        //     .filter(balance::Column::Id.eq(sender_balance_id))
+        //     .one(&txn)
+        //     .await?
+        //     .context("Could not find the newly inserted balance_entry, something went wrong!")?;
+        //
+        // let downgrade_user = match user::Entity::find()
+        //     .filter(user::Column::Id.eq(sender_rpc_entity))
+        //     .one(&txn)
+        //     .await?
+        // {
+        //     Some(x) => x,
+        //     None => {
+        //         warn!("No user was found with this sender id!");
+        //         return Ok(());
+        //     }
+        // };
+        //
+        // let downgrade_user_role = user_tier::Entity::find()
+        //     .filter(user_tier::Column::Id.eq(downgrade_user.user_tier_id))
+        //     .one(&txn)
+        //     .await?
+        //     .context(format!(
+        //         "The foreign key for the user's user_tier_id was not found! {:?}",
+        //         downgrade_user.user_tier_id
+        //     ))?;
+
+        // // Downgrade a user to premium - out of funds if there's less than 10$ in the account, and if the user was premium before
+        // // TODO: lets let them get under $1
+        // // TODO: instead of checking for a specific title, downgrade if the downgrade id is set to anything
+        // if new_available_balance < Decimal::from(10u64) && downgrade_user_role.title == "Premium" {
+        //     // TODO: we could do this outside the balance low block, but I think its fine. or better, update the cache if <$10 and downgrade if <$1
+        //     if let Some(rpc_secret_key_cache) = rpc_secret_key_cache {
+        //         error!("expire (or probably better to update) the user cache now that the balance is low");
+        //         // actually i think we need to have 2 caches. otherwise users with 2 keys are going to have seperate caches
+        //         // 1. rpc_secret_key_id -> AuthorizationChecks (cuz we don't want to hit the db every time)
+        //         // 2. user_id -> Balance
+        //     }
+        //
+        //     // Only downgrade the user in local process memory, not elsewhere
+        //
+        //     // let mut active_downgrade_user = downgrade_user.into_active_model();
+        //     // active_downgrade_user.user_tier_id = sea_orm::Set(downgrade_user_role.id);
+        //     // active_downgrade_user.save(db_conn).await?;
+        // }
+
+        txn.commit().await?;
 
         Ok(())
     }

@@ -137,24 +137,10 @@ pub async fn admin_increase_balance(
     balance::Entity::insert(balance_entry)
         .on_conflict(
             OnConflict::new()
-                .values([
-                    // (
-                    //     balance::Column::Id,
-                    //     Expr::col(balance::Column::Id).add(self.frontend_requests),
-                    // ),
-                    (
-                        balance::Column::AvailableBalance,
-                        Expr::col(balance::Column::AvailableBalance).add(amount),
-                    ),
-                    // (
-                    //     balance::Column::Used,
-                    //     Expr::col(balance::Column::UsedBalance).add(self.backend_retries),
-                    // ),
-                    // (
-                    //     balance::Column::UserId,
-                    //     Expr::col(balance::Column::UserId).add(self.no_servers),
-                    // ),
-                ])
+                .values([(
+                    balance::Column::AvailableBalance,
+                    Expr::col(balance::Column::AvailableBalance).add(amount),
+                )])
                 .to_owned(),
         )
         .exec(&db_conn)

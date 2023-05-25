@@ -24,8 +24,9 @@ use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::EntityTrait;
 use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::QueryFilter;
+use migration::sea_orm::QuerySelect;
 use migration::sea_orm::TransactionTrait;
-use migration::{sea_orm, Expr, OnConflict};
+use migration::{sea_orm, Expr, LockType, OnConflict};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -387,9 +388,13 @@ pub async fn user_balance_post(
         // Create a new transaction that will be used for joint transaction
         let txn = db_conn.begin().await?;
 
+        // We must (1) lock the user and (2) lock the balance
+        // Both balance and lock must be present
+        // no need to do OnConflict with this functionality
         // Encoding is inefficient, revisit later
         let recipient = match user::Entity::find()
             .filter(user::Column::Address.eq(&recipient_account.encode()[12..]))
+            .lock(LockType::Update)
             .one(&txn)
             .await?
         {
@@ -416,8 +421,10 @@ pub async fn user_balance_post(
         // Check if the item is in the database. If it is not, then add it into the database
         let user_balance = balance::Entity::find()
             .filter(balance::Column::UserId.eq(recipient.id))
+            .lock(LockType::Update)
             .one(&txn)
-            .await?;
+            .await?
+            .context("Could not find User balance, this should have been created when signing up the user!")?;
 
         // Get the premium user-tier
         let premium_user_tier = user_tier::Entity::find()
@@ -426,35 +433,17 @@ pub async fn user_balance_post(
             .await?
             .context("Could not find 'Premium' Tier in user-database")?;
 
-        let balance_entry = balance::ActiveModel {
-            id: sea_orm::NotSet,
-            available_balance: sea_orm::Set(amount),
-            used_balance: sea_orm::Set(Decimal::new(0, 0)),
-            user_id: sea_orm::Set(recipient.id),
-        };
+        // Gotta add to the balance entry
+        // Should be atomic, because we do a write lock during the transaction
+        let mut active_user_balance = user_balance.clone().into_active_model();
+        active_user_balance.available_balance =
+            sea_orm::Set(user_balance.available_balance + amount);
 
-        // TODO: Do an insert on conflict update ...
-        let balance_entry_id = balance::Entity::insert(balance_entry)
-            .on_conflict(
-                OnConflict::new()
-                    .values([(
-                        balance::Column::AvailableBalance,
-                        Expr::col(balance::Column::AvailableBalance).add(amount),
-                    )])
-                    .to_owned(),
-            )
-            .exec(&txn)
-            .await?
-            .last_insert_id;
-
-        let new_balance_entry = balance::Entity::find()
-            .filter(balance::Column::Id.eq(balance_entry_id))
-            .one(&txn)
-            .await?
-            .context("Could not find the newly inserted balance_entry, something went wrong!")?;
+        // I can now call update / save and get the new object back
+        let mut user_balance = active_user_balance.save(&txn).await?;
 
         // Then also make the user premium if the payment is above 10$
-        if new_balance_entry.available_balance >= Decimal::new(10, 0) {
+        if user_balance.available_balance.unwrap() >= Decimal::new(10, 0) {
             let mut active_recipient = recipient.clone().into_active_model();
             // Make the recipient premium "Effectively Unlimited"
             active_recipient.user_tier_id = sea_orm::Set(premium_user_tier.id);
