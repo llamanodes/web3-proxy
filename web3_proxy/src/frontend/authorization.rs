@@ -2,7 +2,7 @@
 
 use super::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use super::rpc_proxy_ws::ProxyMode;
-use crate::app::{AuthorizationChecks, Web3ProxyApp, APP_USER_AGENT};
+use crate::app::{AuthorizationChecks, UserTier, Web3ProxyApp, APP_USER_AGENT};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
@@ -22,6 +22,7 @@ use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
 use log::{error, trace, warn};
+use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use rdkafka::message::{Header as KafkaHeader, OwnedHeaders as KafkaOwnedHeaders, OwnedMessage};
 use rdkafka::producer::{FutureProducer, FutureRecord};
@@ -1121,11 +1122,28 @@ impl Web3ProxyApp {
                             .expect("related balance")
                             .available_balance;
 
-                        let user_tier_model =
+                        let mut user_tier_model =
                             user_tier::Entity::find_by_id(user_model.user_tier_id)
                                 .one(db_replica.conn())
                                 .await?
                                 .expect("related user tier");
+
+                        // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
+                        // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
+                        if user_tier_model.title == "Premium" && balance < Decimal::from(10) {
+                            // Find the equivalent downgraded user tier, and modify limits from there
+                            if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
+                                user_tier_model =
+                                    user_tier::Entity::find_by_id(downgrade_user_tier)
+                                        .one(db_replica.conn())
+                                        .await?
+                                        .expect("downgrade user tier for premium");
+                            } else {
+                                return Web3ProxyResult::Err(Web3ProxyError::InvalidUserTier);
+                            }
+                        }
+
+                        let user_tier = UserTier::try_from(user_tier_model.title.as_str())?;
 
                         let allowed_ips: Option<Vec<IpNet>> =
                             if let Some(allowed_ips) = rpc_key_model.allowed_ips {
@@ -1204,6 +1222,7 @@ impl Web3ProxyApp {
                             private_txs: rpc_key_model.private_txs,
                             proxy_mode,
                             balance: Some(balance),
+                            user_tier,
                         })
                     }
                     None => Ok(AuthorizationChecks::default()),

@@ -74,6 +74,33 @@ pub static APP_USER_AGENT: &str = concat!(
 // aggregate across 1 week
 pub const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
 
+#[derive(Clone, Debug, Default)]
+pub enum UserTier {
+    #[default]
+    Free,
+    PrivateDemo,
+    EffectivelyUnlimited,
+    Unlimited,
+    PremiumOutOfFunds,
+    Premium,
+}
+
+impl TryFrom<&str> for UserTier {
+    type Error = Web3ProxyError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "Free" => Ok(UserTier::Free),
+            "Private Demo" => Ok(UserTier::PrivateDemo),
+            "Effectively Unlimited" => Ok(UserTier::EffectivelyUnlimited),
+            "Unlimited" => Ok(UserTier::Unlimited),
+            "Premium Out Of Funds" => Ok(UserTier::PremiumOutOfFunds),
+            "Premium" => Ok(UserTier::Premium),
+            _ => Err(Web3ProxyError::InvalidUserTier),
+        }
+    }
+}
+
 pub type Web3ProxyJoinHandle<T> = JoinHandle<Web3ProxyResult<T>>;
 
 /// TODO: move this
@@ -111,6 +138,7 @@ pub struct AuthorizationChecks {
     pub private_txs: bool,
     pub proxy_mode: ProxyMode,
     pub balance: Option<Decimal>,
+    pub user_tier: UserTier,
 }
 
 /// Simple wrapper so that we can keep track of read only connections.
