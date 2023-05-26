@@ -126,13 +126,6 @@ pub async fn admin_increase_balance(
         .await?
         .context("User does not have a balance row")?;
 
-    // Finally make the user premium if balance is above 10$
-    let premium_user_tier = user_tier::Entity::find()
-        .filter(user_tier::Column::Title.eq("Premium"))
-        .one(&db_conn)
-        .await?
-        .context("Premium tier was not found!")?;
-
     let balance_entry = balance_entry.into_active_model();
     balance::Entity::insert(balance_entry)
         .on_conflict(
@@ -281,7 +274,7 @@ pub async fn admin_login_get(
     // TODO: Only get the id, not the whole user object ...
     let user = user::Entity::find()
         .filter(user::Column::Address.eq(user_address))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
             "Could not find user in db".to_string(),
@@ -292,7 +285,7 @@ pub async fn admin_login_get(
     info!("Encoded admin address is: {:?}", admin_address);
     let admin = user::Entity::find()
         .filter(user::Column::Address.eq(admin_address))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
             "Could not find admin in db".to_string(),
@@ -409,7 +402,7 @@ pub async fn admin_login_post(
     // TODO: Here we will need to re-find the parameter where the admin wants to log-in as the user ...
     let user_pending_login = pending_login::Entity::find()
         .filter(pending_login::Column::Nonce.eq(login_nonce_uuid))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await
         .web3_context("database error while finding pending_login")?
         .web3_context("login nonce not found")?;
@@ -461,13 +454,13 @@ pub async fn admin_login_post(
     // TODO: Right now this loads the whole admin. I assume we might want to load the user though (?) figure this out as we go along...
     let admin = user::Entity::find()
         .filter(user::Column::Address.eq(our_msg.address.as_ref()))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?
         .web3_context("getting admin address")?;
 
     let imitating_user = user::Entity::find()
         .filter(user::Column::Id.eq(imitating_user_id))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?
         .web3_context("admin address was not found!")?;
 
@@ -491,7 +484,7 @@ pub async fn admin_login_post(
     // the user is already registered
     let admin_rpc_key = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(admin.id))
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await
         .web3_context("failed loading user's key")?;
 

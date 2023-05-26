@@ -196,7 +196,7 @@ pub async fn user_login_post(
 
     let user_pending_login = pending_login::Entity::find()
         .filter(pending_login::Column::Nonce.eq(login_nonce_uuid))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await
         .web3_context("database error while finding pending_login")?
         .web3_context("login nonce not found")?;
@@ -244,7 +244,7 @@ pub async fn user_login_post(
     // TODO: limit columns or load whole user?
     let caller = user::Entity::find()
         .filter(user::Column::Address.eq(our_msg.address.as_ref()))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?;
 
     let db_conn = app.db_conn().web3_context("login requires a db")?;
@@ -319,7 +319,7 @@ pub async fn user_login_post(
                 warn!("Using register referral code:  {:?}", referral_code);
                 let user_referrer = referrer::Entity::find()
                     .filter(referrer::Column::ReferralCode.eq(referral_code))
-                    .one(db_replica.conn())
+                    .one(db_replica.as_ref())
                     .await?
                     .ok_or(Web3ProxyError::UnknownReferralCode)?;
 
@@ -350,7 +350,7 @@ pub async fn user_login_post(
                 warn!("Using referral code: {:?}", referral_code);
                 let user_referrer = referrer::Entity::find()
                     .filter(referrer::Column::ReferralCode.eq(referral_code))
-                    .one(db_replica.conn())
+                    .one(db_replica.as_ref())
                     .await?
                     .ok_or(Web3ProxyError::BadRequest(format!(
                         "The referral_link you provided does not exist {}",
@@ -375,7 +375,7 @@ pub async fn user_login_post(
             // the user is already registered
             let user_rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(caller.id))
-                .all(db_replica.conn())
+                .all(db_replica.as_ref())
                 .await
                 .web3_context("failed loading user's key")?;
 

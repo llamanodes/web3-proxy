@@ -1,42 +1,88 @@
 use crate::{
-    frontend::errors::Web3ProxyError, jsonrpc::JsonRpcErrorData, rpcs::blockchain::ArcBlock,
+    frontend::errors::{Web3ProxyError, Web3ProxyResult},
+    jsonrpc::JsonRpcErrorData,
+    rpcs::blockchain::ArcBlock,
 };
 use derive_more::From;
-use ethers::providers::ProviderError;
+use ethers::{providers::ProviderError, types::U64};
 use hashbrown::hash_map::DefaultHashBuilder;
 use quick_cache_ttl::{CacheWithTTL, Weighter};
 use serde_json::value::RawValue;
 use std::{
     borrow::Cow,
-    hash::{Hash, Hasher},
+    hash::{BuildHasher, Hash, Hasher},
     num::NonZeroU32,
 };
 
-#[derive(Clone, Debug, From, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, From)]
 pub struct JsonRpcQueryCacheKey {
-    pub from_block: Option<ArcBlock>,
-    pub to_block: Option<ArcBlock>,
-    pub method: String,
-    pub params: Option<serde_json::Value>,
-    pub cache_errors: bool,
+    hash: u64,
+    from_block_num: Option<U64>,
+    to_block_num: Option<U64>,
+}
+
+impl JsonRpcQueryCacheKey {
+    pub fn from_block_num(&self) -> Option<U64> {
+        self.from_block_num
+    }
+    pub fn to_block_num(&self) -> Option<U64> {
+        self.to_block_num
+    }
+}
+
+impl PartialEq for JsonRpcQueryCacheKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash.eq(&other.hash)
+    }
+    fn ne(&self, other: &Self) -> bool {
+        self.hash.ne(&other.hash)
+    }
 }
 
 impl Hash for JsonRpcQueryCacheKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.from_block.as_ref().map(|x| x.hash).hash(state);
-        self.to_block.as_ref().map(|x| x.hash).hash(state);
-        self.method.hash(state);
+        // TODO: i feel like this hashes twice. oh well
+        self.hash.hash(state);
+    }
+}
 
-        // make sure preserve_order feature is OFF
-        self.params.as_ref().map(|x| x.to_string()).hash(state);
+impl JsonRpcQueryCacheKey {
+    pub fn new(
+        from_block: Option<ArcBlock>,
+        to_block: Option<ArcBlock>,
+        method: &str,
+        params: &serde_json::Value,
+        cache_errors: bool,
+    ) -> Self {
+        let from_block_num = from_block.as_ref().and_then(|x| x.number);
+        let to_block_num = to_block.as_ref().and_then(|x| x.number);
 
-        self.cache_errors.hash(state)
+        let mut hasher = DefaultHashBuilder::default().build_hasher();
+
+        from_block.as_ref().and_then(|x| x.hash).hash(&mut hasher);
+        to_block.as_ref().and_then(|x| x.hash).hash(&mut hasher);
+
+        method.hash(&mut hasher);
+
+        // TODO: make sure preserve_order feature is OFF
+        // TODO: is there a faster way to do this?
+        params.to_string().hash(&mut hasher);
+
+        cache_errors.hash(&mut hasher);
+
+        let hash = hasher.finish();
+
+        Self {
+            hash,
+            from_block_num,
+            to_block_num,
+        }
     }
 }
 
 pub type JsonRpcQueryCache = CacheWithTTL<
     JsonRpcQueryCacheKey,
-    JsonRpcResponseData,
+    JsonRpcResponseEnum<Box<RawValue>>,
     JsonRpcQueryWeigher,
     DefaultHashBuilder,
 >;
@@ -44,28 +90,30 @@ pub type JsonRpcQueryCache = CacheWithTTL<
 #[derive(Clone)]
 pub struct JsonRpcQueryWeigher;
 
-#[derive(Clone)]
-pub enum JsonRpcResponseData {
+/// TODO: we might need one that holds RawValue and one that holds serde_json::Value
+#[derive(Clone, Debug)]
+pub enum JsonRpcResponseEnum<R> {
     Result {
-        value: Box<RawValue>,
+        value: R,
         size: Option<NonZeroU32>,
     },
-    Error {
+    RpcError {
         value: JsonRpcErrorData,
         size: Option<NonZeroU32>,
     },
 }
 
-impl JsonRpcResponseData {
+// TODO: impl for other inner result types?
+impl JsonRpcResponseEnum<Box<RawValue>> {
     pub fn num_bytes(&self) -> NonZeroU32 {
         // TODO: dry this somehow
         match self {
-            JsonRpcResponseData::Result { value, size } => size.unwrap_or_else(|| {
+            JsonRpcResponseEnum::Result { value, size } => size.unwrap_or_else(|| {
                 let size = value.get().len();
 
                 NonZeroU32::new(size.clamp(1, u32::MAX as usize) as u32).unwrap()
             }),
-            JsonRpcResponseData::Error { value, size } => size.unwrap_or_else(|| {
+            JsonRpcResponseEnum::RpcError { value, size } => size.unwrap_or_else(|| {
                 let size = serde_json::to_string(value).unwrap().len();
 
                 NonZeroU32::new(size.clamp(1, u32::MAX as usize) as u32).unwrap()
@@ -74,7 +122,7 @@ impl JsonRpcResponseData {
     }
 }
 
-impl From<serde_json::Value> for JsonRpcResponseData {
+impl From<serde_json::Value> for JsonRpcResponseEnum<Box<RawValue>> {
     fn from(value: serde_json::Value) -> Self {
         let value = RawValue::from_string(value.to_string()).unwrap();
 
@@ -82,15 +130,26 @@ impl From<serde_json::Value> for JsonRpcResponseData {
     }
 }
 
-impl From<Box<RawValue>> for JsonRpcResponseData {
+impl From<Box<RawValue>> for JsonRpcResponseEnum<Box<RawValue>> {
     fn from(value: Box<RawValue>) -> Self {
         Self::Result { value, size: None }
     }
 }
 
-impl From<JsonRpcErrorData> for JsonRpcResponseData {
+impl<R> From<JsonRpcErrorData> for JsonRpcResponseEnum<R> {
     fn from(value: JsonRpcErrorData) -> Self {
-        Self::Error { value, size: None }
+        Self::RpcError { value, size: None }
+    }
+}
+
+impl<R> TryFrom<Web3ProxyResult<R>> for JsonRpcResponseEnum<R> {
+    type Error = Web3ProxyError;
+
+    fn try_from(x: Web3ProxyResult<R>) -> Result<Self, Self::Error> {
+        match x {
+            Ok(x) => todo!(),
+            Err(err) => Err(err),
+        }
     }
 }
 
@@ -130,12 +189,15 @@ impl TryFrom<ProviderError> for JsonRpcErrorData {
     }
 }
 
-impl Weighter<JsonRpcQueryCacheKey, (), JsonRpcResponseData> for JsonRpcQueryWeigher {
+/// TODO: generic type for result once num_bytes works for more things
+impl Weighter<JsonRpcQueryCacheKey, (), JsonRpcResponseEnum<Box<RawValue>>>
+    for JsonRpcQueryWeigher
+{
     fn weight(
         &self,
         _key: &JsonRpcQueryCacheKey,
         _qey: &(),
-        value: &JsonRpcResponseData,
+        value: &JsonRpcResponseEnum<Box<RawValue>>,
     ) -> NonZeroU32 {
         value.num_bytes()
     }

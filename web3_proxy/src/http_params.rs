@@ -1,5 +1,5 @@
-use crate::app::DatabaseReplica;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::relational_db::{DatabaseConnection, DatabaseReplica};
 use crate::{app::Web3ProxyApp, user_token::UserBearerToken};
 use anyhow::Context;
 use axum::{
@@ -10,7 +10,7 @@ use chrono::{NaiveDateTime, Utc};
 use entities::login;
 use hashbrown::HashMap;
 use log::{debug, warn};
-use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use redis_rate_limiter::{redis::AsyncCommands, RedisConnection};
 
 /// get the attached address for the given bearer token.
@@ -42,7 +42,7 @@ pub async fn get_user_id_from_params(
 
                     let user_login = login::Entity::find()
                         .filter(login::Column::BearerToken.eq(user_bearer_token.uuid()))
-                        .one(db_replica.conn())
+                        .one(db_replica.as_ref())
                         .await
                         .context("database error while querying for user")?
                         .ok_or(Web3ProxyError::AccessDenied)?;

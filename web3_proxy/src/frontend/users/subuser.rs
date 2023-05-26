@@ -46,7 +46,7 @@ pub async fn get_keys_as_subuser(
     // Get all secondary users that have access to this rpc key
     let secondary_user_entities = secondary_user::Entity::find()
         .filter(secondary_user::Column::UserId.eq(subuser.id))
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await?
         .into_iter()
         .map(|x| (x.rpc_secret_key_id, x))
@@ -63,7 +63,7 @@ pub async fn get_keys_as_subuser(
             ),
         )
         .find_also_related(user::Entity)
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await?;
 
     // TODO: Merge rpc-key with respective user (join is probably easiest ...)
@@ -109,7 +109,7 @@ pub async fn get_subusers(
     // Second, check if the user is a premium user
     let user_tier = user_tier::Entity::find()
         .filter(user_tier::Column::Id.eq(user.user_tier_id))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
             "Could not find user in db although bearer token is there!".to_string(),
@@ -135,7 +135,7 @@ pub async fn get_subusers(
     // Get the rpc key id
     let rpc_key = rpc_key::Entity::find()
         .filter(rpc_key::Column::SecretKey.eq(Uuid::from(rpc_key)))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
             "The provided RPC key cannot be found".to_string(),
@@ -144,7 +144,7 @@ pub async fn get_subusers(
     // Get all secondary users that have access to this rpc key
     let secondary_user_entities = secondary_user::Entity::find()
         .filter(secondary_user::Column::RpcSecretKeyId.eq(rpc_key.id))
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await?
         .into_iter()
         .map(|x| (x.user_id, x))
@@ -160,7 +160,7 @@ pub async fn get_subusers(
                     .collect::<Vec<_>>(),
             ),
         )
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await?;
 
     warn!("Subusers are: {:?}", subusers);
@@ -200,7 +200,7 @@ pub async fn modify_subuser(
     // Second, check if the user is a premium user
     let user_tier = user_tier::Entity::find()
         .filter(user_tier::Column::Id.eq(user.user_tier_id))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
             "Could not find user in db although bearer token is there!".to_string(),
@@ -278,12 +278,12 @@ pub async fn modify_subuser(
     // ---------------------------
     let subuser = user::Entity::find()
         .filter(user::Column::Address.eq(subuser_address.as_ref()))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?;
 
     let rpc_key_entity = rpc_key::Entity::find()
         .filter(rpc_key::Column::SecretKey.eq(Uuid::from(rpc_key_to_modify)))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
             "Provided RPC key does not exist!".to_owned(),
@@ -349,7 +349,7 @@ pub async fn modify_subuser(
             // the user is already registered
             let subuser_rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(subuser.id))
-                .all(db_replica.conn())
+                .all(db_replica.as_ref())
                 .await
                 .web3_context("failed loading user's key")?;
 
@@ -368,7 +368,7 @@ pub async fn modify_subuser(
     let subuser_entry_secondary_user = secondary_user::Entity::find()
         .filter(secondary_user::Column::UserId.eq(subuser.id))
         .filter(secondary_user::Column::RpcSecretKeyId.eq(rpc_key_entity.id))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await
         .web3_context("failed using the db to check for a subuser")?;
 

@@ -1,7 +1,6 @@
+//! Load balanced communication with a group of web3 providers
 use crate::frontend::{authorization::Authorization, errors::Web3ProxyResult};
-
 use super::many::Web3Rpcs;
-///! Load balanced communication with a group of web3 providers
 use super::one::Web3Rpc;
 use super::request::OpenRequestResult;
 use ethers::prelude::{ProviderError, Transaction, TxHash};
@@ -29,14 +28,13 @@ impl Web3Rpcs {
         // TODO: yearn devs have had better luck with batching these, but i think that's likely just adding a delay itself
         // TODO: if one rpc fails, try another?
         // TODO: try_request_handle, or wait_for_request_handle? I think we want wait here
-        let tx: Transaction = match rpc.try_request_handle(authorization).await {
+        let tx: Transaction = match rpc
+            .try_request_handle(authorization, Some(Level::Warn.into()))
+            .await
+        {
             Ok(OpenRequestResult::Handle(handle)) => {
                 handle
-                    .request(
-                        "eth_getTransactionByHash",
-                        &(pending_tx_id,),
-                        Level::Error.into(),
-                    )
+                    .request("eth_getTransactionByHash", &(pending_tx_id,))
                     .await?
             }
             Ok(_) => {

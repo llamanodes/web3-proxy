@@ -2,7 +2,7 @@
 
 use super::authorization::Authorization;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
-use crate::response_cache::JsonRpcResponseData;
+use crate::response_cache::JsonRpcResponseEnum;
 
 use std::error::Error;
 use std::{borrow::Cow, net::IpAddr};
@@ -78,6 +78,9 @@ pub enum Web3ProxyError {
     JoinError(JoinError),
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
+    JsonRpcErrorData(JsonRpcErrorData),
+    #[display(fmt = "{:?}", _0)]
+    #[error(ignore)]
     MsgPackEncode(rmp_serde::encode::Error),
     NoBlockNumberOrHash,
     NoBlocksKnown,
@@ -143,7 +146,7 @@ pub enum Web3ProxyError {
 }
 
 impl Web3ProxyError {
-    pub fn into_response_parts(self) -> (StatusCode, JsonRpcResponseData) {
+    pub fn into_response_parts<R>(self) -> (StatusCode, JsonRpcResponseEnum<R>) {
         // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
             Self::AccessDenied => {
@@ -478,6 +481,7 @@ impl Web3ProxyError {
                     },
                 )
             }
+            Self::JsonRpcErrorData(jsonrpc_error_data) => (StatusCode::OK, jsonrpc_error_data),
             Self::MsgPackEncode(err) => {
                 warn!("MsgPackEncode Error: {}", err);
                 (
@@ -931,7 +935,7 @@ impl Web3ProxyError {
             },
         };
 
-        (code, JsonRpcResponseData::from(err))
+        (code, JsonRpcResponseEnum::from(err))
     }
 }
 
