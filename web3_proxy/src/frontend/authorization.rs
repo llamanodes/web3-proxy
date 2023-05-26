@@ -1130,7 +1130,9 @@ impl Web3ProxyApp {
 
                         // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
                         // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
-                        if user_tier_model.title == "Premium" && balance < Decimal::from(10) {
+                        if user_tier_model.title == UserTier::Premium.to_string()
+                            && balance < Decimal::from(10)
+                        {
                             // Find the equivalent downgraded user tier, and modify limits from there
                             if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
                                 user_tier_model =

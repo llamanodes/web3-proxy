@@ -3,7 +3,7 @@
 use super::authorization::login_is_authorized;
 use super::errors::Web3ProxyResponse;
 use crate::admin_queries::query_admin_modify_usertier;
-use crate::app::Web3ProxyApp;
+use crate::app::{UserTier, Web3ProxyApp};
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::user_token::UserBearerToken;
 use crate::PostLogin;
@@ -126,9 +126,8 @@ pub async fn admin_increase_balance(
         .await?
         .context("User does not have a balance row")?;
 
-    // Finally make the user premium if balance is above 10$
     let premium_user_tier = user_tier::Entity::find()
-        .filter(user_tier::Column::Title.eq("Premium"))
+        .filter(user_tier::Column::Title.eq(UserTier::Premium.to_string()))
         .one(&db_conn)
         .await?
         .context("Premium tier was not found!")?;
@@ -145,7 +144,6 @@ pub async fn admin_increase_balance(
         )
         .exec(&db_conn)
         .await?;
-    // TODO: Downgrade otherwise, right now not functioning properly
 
     // Then read and save in one transaction
     let response = (StatusCode::OK, Json(out)).into_response();

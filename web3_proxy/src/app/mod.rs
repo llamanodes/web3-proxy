@@ -74,7 +74,7 @@ pub static APP_USER_AGENT: &str = concat!(
 // aggregate across 1 week
 pub const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum UserTier {
     #[default]
     Free,
@@ -83,6 +83,19 @@ pub enum UserTier {
     Unlimited,
     PremiumOutOfFunds,
     Premium,
+}
+
+impl ToString for UserTier {
+    fn to_string(&self) -> String {
+        match self {
+            UserTier::Free => "Free".to_owned(),
+            UserTier::PrivateDemo => "PrivateDemo".to_owned(),
+            UserTier::EffectivelyUnlimited => "EffectivelyUnlimited".to_owned(),
+            UserTier::Unlimited => "Unlimited".to_owned(),
+            UserTier::PremiumOutOfFunds => "PremiumOutOfFunds".to_owned(),
+            UserTier::Premium => "Premium".to_owned(),
+        }
+    }
 }
 
 impl TryFrom<&str> for UserTier {

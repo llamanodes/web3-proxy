@@ -1,5 +1,5 @@
 //! Handle subusers, viewing subusers, and viewing accessible rpc-keys
-use crate::app::Web3ProxyApp;
+use crate::app::{UserTier, Web3ProxyApp};
 use crate::frontend::authorization::RpcSecretKey;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use anyhow::Context;
@@ -117,7 +117,7 @@ pub async fn get_subusers(
 
     debug!("User tier is: {:?}", user_tier);
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
-    if user_tier.id != 6 {
+    if UserTier::try_from(user_tier.title.as_str())? != UserTier::Premium {
         return Err(
             anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into(),
         );
@@ -208,7 +208,7 @@ pub async fn modify_subuser(
 
     debug!("User tier is: {:?}", user_tier);
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
-    if user_tier.id != 6 {
+    if UserTier::try_from(user_tier.title.as_str())? != UserTier::Premium {
         return Err(
             anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into(),
         );

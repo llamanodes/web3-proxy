@@ -1,5 +1,5 @@
-use crate::app::Web3ProxyApp;
-use crate::frontend::authorization::Authorization as InternalAuthorization;
+use crate::app::{UserTier, Web3ProxyApp};
+use crate::frontend::authorization::{Authorization as InternalAuthorization, RpcSecretKey};
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::rpcs::request::OpenRequestResult;
 use anyhow::{anyhow, Context};
@@ -10,7 +10,7 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::{balance, increase_on_chain_balance_receipt, user, user_tier};
+use entities::{balance, increase_on_chain_balance_receipt, rpc_key, user, user_tier};
 use ethers::abi::{AbiEncode, ParamType};
 use ethers::types::{Address, TransactionReceipt, H256, U256};
 use ethers::utils::{hex, keccak256};
@@ -428,7 +428,7 @@ pub async fn user_balance_post(
 
         // Get the premium user-tier
         let premium_user_tier = user_tier::Entity::find()
-            .filter(user_tier::Column::Title.eq("Premium"))
+            .filter(user_tier::Column::Title.eq(UserTier::Premium.to_string()))
             .one(&txn)
             .await?
             .context("Could not find 'Premium' Tier in user-database")?;
@@ -441,15 +441,6 @@ pub async fn user_balance_post(
 
         // I can now call update / save and get the new object back
         let mut user_balance = active_user_balance.save(&txn).await?;
-
-        // Then also make the user premium if the payment is above 10$
-        if user_balance.available_balance.unwrap() >= Decimal::new(10, 0) {
-            let mut active_recipient = recipient.clone().into_active_model();
-            // Make the recipient premium "Effectively Unlimited"
-            active_recipient.user_tier_id = sea_orm::Set(premium_user_tier.id);
-            active_recipient.save(&txn).await?;
-        }
-
         debug!("Setting tx_hash: {:?}", tx_hash);
         let receipt = increase_on_chain_balance_receipt::ActiveModel {
             tx_hash: sea_orm::ActiveValue::Set(hex::encode(tx_hash)),
@@ -460,8 +451,25 @@ pub async fn user_balance_post(
         };
 
         receipt.save(&txn).await?;
+
+        // Invalidate the user's cache for all rpc-keys so tier can be updated
+        let rpc_keys = rpc_key::Entity::find()
+            .filter(rpc_key::Column::UserId.eq(recipient.id))
+            .all(&txn)
+            .await?;
+
         txn.commit().await?;
         debug!("Saved to db");
+
+        for rpc_key_entity in rpc_keys {
+            // TODO: Not sure which one was inserted, just delete both ...
+            app.rpc_secret_key_cache
+                .remove(&RpcSecretKey::Uuid(rpc_key_entity.secret_key));
+            app.rpc_secret_key_cache
+                .remove(&RpcSecretKey::Ulid(rpc_key_entity.secret_key.into()));
+            app.rpc_secret_key_cache
+                .remove(&RpcSecretKey::from(rpc_key_entity.secret_key));
+        }
 
         let response = (
             StatusCode::CREATED,
