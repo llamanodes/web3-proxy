@@ -1112,20 +1112,20 @@ impl Web3ProxyApp {
                         let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
                             .one(db_replica.conn())
                             .await?
-                            .expect("related user");
+                            .context("no related user")?;
 
                         let balance = balance::Entity::find()
                             .filter(balance::Column::UserId.eq(user_model.id))
                             .one(db_replica.conn())
                             .await?
-                            .expect("related balance")
-                            .available_balance;
+                            .map(|x| x.available_balance)
+                            .unwrap_or_default();
 
                         let user_tier_model =
                             user_tier::Entity::find_by_id(user_model.user_tier_id)
                                 .one(db_replica.conn())
                                 .await?
-                                .expect("related user tier");
+                                .context("no related user tier")?;
 
                         let allowed_ips: Option<Vec<IpNet>> =
                             if let Some(allowed_ips) = rpc_key_model.allowed_ips {
