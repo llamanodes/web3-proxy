@@ -32,17 +32,19 @@ RUN apt-get update && \
 # copy the application
 COPY . .
 
+ENV WEB3_PROXY_FEATURES "rdkafka-src"
+
 # test the application with cargo-nextest
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
-    cargo nextest run --features "rdkafka-src tokio-uring" --no-default-features
+    cargo nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features
 
 # build the application
 # using a "release" profile (which install does) is **very** important
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo install \
-    --features "rdkafka-src tokio-uring" \
+    --features "$WEB3_PROXY_FEATURES" \
     --locked \
     --no-default-features \
     --path ./web3_proxy \

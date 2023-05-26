@@ -8,13 +8,14 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use crate::app::Web3ProxyApp;
+use crate::frontend::errors::Web3ProxyResult;
 
 /// Run a prometheus metrics server on the given port.
 pub async fn serve(
     app: Arc<Web3ProxyApp>,
     port: u16,
     mut shutdown_receiver: broadcast::Receiver<()>,
-) -> anyhow::Result<()> {
+) -> Web3ProxyResult<()> {
     // routes should be ordered most to least common
     let app = Router::new().route("/", get(root)).layer(Extension(app));
 

@@ -1,15 +1,15 @@
-use crate::app::AnyhowJoinHandle;
+use crate::app::Web3ProxyJoinHandle;
 use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
-use ethers::prelude::TxHash;
+use ethers::prelude::{Address, TxHash, H256};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
 use log::warn;
 use migration::sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use std::time::Duration;
 
 pub type BlockAndRpc = (Option<Web3ProxyBlock>, Arc<Web3Rpc>);
 pub type TxHashAndRpc = (TxHash, Arc<Web3Rpc>);
@@ -93,6 +93,12 @@ pub struct AppConfig {
     /// 0 = block all requests
     /// None = allow all requests
     pub default_user_max_requests_per_period: Option<u64>,
+
+    /// Default ERC address for out deposit contract
+    pub deposit_factory_contract: Option<Address>,
+
+    /// Default ERC address for out deposit contract
+    pub deposit_topic: Option<H256>,
 
     /// minimum amount to increase eth_estimateGas results
     pub gas_increase_min: Option<U256>,
@@ -277,15 +283,36 @@ impl Web3RpcConfig {
         redis_pool: Option<redis_rate_limiter::RedisPool>,
         chain_id: u64,
         http_client: Option<reqwest::Client>,
-        http_interval_sender: Option<Arc<broadcast::Sender<()>>>,
         blocks_by_hash_cache: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
-        reconnect: bool,
-    ) -> anyhow::Result<(Arc<Web3Rpc>, AnyhowJoinHandle<()>)> {
+    ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         if !self.extra.is_empty() {
             warn!("unknown Web3RpcConfig fields!: {:?}", self.extra.keys());
         }
+
+        // TODO: get this from config? a helper function? where does this belong?
+        let block_interval = match chain_id {
+            // ethereum
+            1 => Duration::from_secs(12),
+            // ethereum-goerli
+            5 => Duration::from_secs(12),
+            // polygon
+            137 => Duration::from_secs(2),
+            // fantom
+            250 => Duration::from_secs(1),
+            // arbitrum
+            42161 => Duration::from_millis(500),
+            // anything else
+            _ => {
+                let default = 10;
+                warn!(
+                    "unexpected chain_id ({}). polling every {} seconds",
+                    chain_id, default
+                );
+                Duration::from_secs(default)
+            }
+        };
 
         Web3Rpc::spawn(
             self,
@@ -293,12 +320,11 @@ impl Web3RpcConfig {
             chain_id,
             db_conn,
             http_client,
-            http_interval_sender,
             redis_pool,
+            block_interval,
             blocks_by_hash_cache,
             block_sender,
             tx_id_sender,
-            reconnect,
         )
         .await
     }

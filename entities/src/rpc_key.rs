@@ -38,6 +38,8 @@ pub enum Relation {
     RpcAccounting,
     #[sea_orm(has_many = "super::rpc_accounting_v2::Entity")]
     RpcAccountingV2,
+    #[sea_orm(has_many = "super::secondary_user::Entity")]
+    SecondaryUser,
     #[sea_orm(
         belongs_to = "super::user::Entity",
         from = "Column::UserId",
@@ -63,6 +65,12 @@ impl Related<super::rpc_accounting::Entity> for Entity {
 impl Related<super::rpc_accounting_v2::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::RpcAccountingV2.def()
+    }
+}
+
+impl Related<super::secondary_user::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::SecondaryUser.def()
     }
 }
 

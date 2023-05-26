@@ -63,12 +63,14 @@ async fn _proxy_web3_rpc(
 
     let authorization = Arc::new(authorization);
 
-    let (response, rpcs, _semaphore) = app
+    // TODO: calculate payload bytes here (before turning into serde_json::Value). that will save serializing later
+
+    let (status_code, response, rpcs, _semaphore) = app
         .proxy_web3_rpc(authorization, payload)
         .await
-        .map(|(x, y)| (x, y, semaphore))?;
+        .map(|(s, x, y)| (s, x, y, semaphore))?;
 
-    let mut response = Json(&response).into_response();
+    let mut response = (status_code, Json(response)).into_response();
 
     let headers = response.headers_mut();
 
@@ -129,6 +131,8 @@ pub async fn proxy_web3_rpc_with_key(
     .await
 }
 
+// TODO: if a /debug/ request gets rejected by an invalid request, there won't be any kafka log
+// TODO:
 #[debug_handler]
 pub async fn debug_proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -228,12 +232,12 @@ async fn _proxy_web3_rpc_with_key(
 
     let rpc_secret_key_id = authorization.checks.rpc_secret_key_id;
 
-    let (response, rpcs, _semaphore) = app
+    let (status_code, response, rpcs, _semaphore) = app
         .proxy_web3_rpc(authorization, payload)
         .await
-        .map(|(x, y)| (x, y, semaphore))?;
+        .map(|(s, x, y)| (s, x, y, semaphore))?;
 
-    let mut response = Json(&response).into_response();
+    let mut response = (status_code, Json(response)).into_response();
 
     let headers = response.headers_mut();
 

@@ -1,10 +1,11 @@
 //! Utlities for logging errors for admins and displaying errors to users.
 
 use super::authorization::Authorization;
-use crate::jsonrpc::JsonRpcForwardedResponse;
+use crate::jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
+use crate::response_cache::JsonRpcResponseData;
 
-use std::net::IpAddr;
-use std::sync::Arc;
+use std::error::Error;
+use std::{borrow::Cow, net::IpAddr};
 
 use axum::{
     headers,
@@ -25,28 +26,36 @@ pub type Web3ProxyResult<T> = Result<T, Web3ProxyError>;
 // TODO: take "IntoResponse" instead of Response?
 pub type Web3ProxyResponse = Web3ProxyResult<Response>;
 
-// TODO:
+impl From<Web3ProxyError> for Web3ProxyResult<()> {
+    fn from(value: Web3ProxyError) -> Self {
+        Err(value)
+    }
+}
+
 #[derive(Debug, Display, Error, From)]
 pub enum Web3ProxyError {
     AccessDenied,
     #[error(ignore)]
     Anyhow(anyhow::Error),
-    Arc(Arc<Web3ProxyError>),
     #[error(ignore)]
     #[from(ignore)]
     BadRequest(String),
+    #[error(ignore)]
+    #[from(ignore)]
+    BadResponse(String),
     BadRouting,
     Database(DbErr),
     #[display(fmt = "{:#?}, {:#?}", _0, _1)]
     EipVerificationFailed(Box<Web3ProxyError>, Box<Web3ProxyError>),
-    EthersHttpClientError(ethers::prelude::HttpClientError),
-    EthersProviderError(ethers::prelude::ProviderError),
-    EthersWsClientError(ethers::prelude::WsClientError),
-    FlumeRecvError(flume::RecvError),
+    EthersHttpClient(ethers::prelude::HttpClientError),
+    EthersProvider(ethers::prelude::ProviderError),
+    EthersWsClient(ethers::prelude::WsClientError),
+    FlumeRecv(flume::RecvError),
     GasEstimateNotU256,
     Headers(headers::Error),
     HeaderToString(ToStrError),
-    InfluxDb2RequestError(influxdb2::RequestError),
+    Hyper(hyper::Error),
+    InfluxDb2Request(influxdb2::RequestError),
     #[display(fmt = "{} > {}", min, max)]
     #[from(ignore)]
     InvalidBlockBounds {
@@ -56,6 +65,8 @@ pub enum Web3ProxyError {
     InvalidHeaderValue(InvalidHeaderValue),
     InvalidEip,
     InvalidInviteCode,
+    Io(std::io::Error),
+    UnknownReferralCode,
     InvalidReferer,
     InvalidSignatureLength,
     InvalidUserAgent,
@@ -65,9 +76,6 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     IpNotAllowed(IpAddr),
     JoinError(JoinError),
-    #[display(fmt = "{:?}", _0)]
-    #[error(ignore)]
-    JsonRpcForwardedError(JsonRpcForwardedResponse),
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
     MsgPackEncode(rmp_serde::encode::Error),
@@ -81,6 +89,12 @@ pub enum Web3ProxyError {
     NotEnoughRpcs {
         num_known: usize,
         min_head_rpcs: usize,
+    },
+    #[display(fmt = "{}/{}", available, needed)]
+    #[from(ignore)]
+    NotEnoughSoftLimit {
+        available: u32,
+        needed: u32,
     },
     NotFound,
     NotImplemented,
@@ -118,6 +132,7 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     UserAgentNotAllowed(headers::UserAgent),
     UserIdZero,
+    PaymentRequired,
     VerificationError(siwe::VerificationError),
     WatchRecvError(tokio::sync::watch::error::RecvError),
     WatchSendError,
@@ -128,64 +143,76 @@ pub enum Web3ProxyError {
 }
 
 impl Web3ProxyError {
-    pub fn into_response_parts(self) -> (StatusCode, JsonRpcForwardedResponse) {
-        match self {
+    pub fn into_response_parts(self) -> (StatusCode, JsonRpcResponseData) {
+        // TODO: include a unique request id in the data
+        let (code, err): (StatusCode, JsonRpcErrorData) = match self {
             Self::AccessDenied => {
                 // TODO: attach something to this trace. probably don't include much in the message though. don't want to leak creds by accident
                 trace!("access denied");
                 (
                     StatusCode::FORBIDDEN,
-                    JsonRpcForwardedResponse::from_string(
-                        // TODO: is it safe to expose all of our anyhow strings?
-                        "FORBIDDEN".to_string(),
-                        Some(StatusCode::FORBIDDEN.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("FORBIDDEN"),
+                        code: StatusCode::FORBIDDEN.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::Anyhow(err) => {
                 warn!("anyhow. err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_string(
+                    JsonRpcErrorData {
                         // TODO: is it safe to expose all of our anyhow strings?
-                        err.to_string(),
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                        message: Cow::Owned(err.to_string()),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::BadRequest(err) => {
                 debug!("BAD_REQUEST: {}", err);
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        &format!("bad request: {}", err),
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("bad request: {}", err)),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::BadResponse(err) => {
+                // TODO: think about this one more. ankr gives us this because ethers fails to parse responses without an id
+                debug!("BAD_RESPONSE: {}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("bad response: {}", err)),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::BadRouting => {
                 error!("BadRouting");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "bad routing",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("bad routing"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::Database(err) => {
                 error!("database err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "database error!",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("database error!"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::EipVerificationFailed(err_1, err_191) => {
@@ -195,206 +222,241 @@ impl Web3ProxyError {
                 );
                 (
                     StatusCode::UNAUTHORIZED,
-                    JsonRpcForwardedResponse::from_string(
-                        format!(
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!(
                             "both the primary and eip191 verification failed: {:#?}; {:#?}",
                             err_1, err_191
-                        ),
-                        Some(StatusCode::UNAUTHORIZED.as_u16().into()),
-                        None,
-                    ),
+                        )),
+                        code: StatusCode::UNAUTHORIZED.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
-            Self::EthersHttpClientError(err) => {
+            Self::EthersHttpClient(err) => {
                 warn!("EthersHttpClientError err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "ether http client error",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("ether http client error"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
-            Self::EthersProviderError(err) => {
+            Self::EthersProvider(err) => {
                 warn!("EthersProviderError err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "ether provider error",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("ether provider error"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
-            Self::EthersWsClientError(err) => {
+            Self::EthersWsClient(err) => {
                 warn!("EthersWsClientError err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "ether ws client error",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("ether ws client error"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
-            Self::FlumeRecvError(err) => {
+            Self::FlumeRecv(err) => {
                 warn!("FlumeRecvError err={:#?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "flume recv error!",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("flume recv error!"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
-            Self::JsonRpcForwardedError(x) => (StatusCode::OK, x),
+            // Self::JsonRpcForwardedError(x) => (StatusCode::OK, x),
             Self::GasEstimateNotU256 => {
                 warn!("GasEstimateNotU256");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "gas estimate result is not an U256",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("gas estimate result is not an U256"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::Headers(err) => {
                 warn!("HeadersError {:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        &format!("{}", err),
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("{}", err)),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
-            Self::InfluxDb2RequestError(err) => {
+            Self::Hyper(err) => {
+                warn!("hyper err={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        // TODO: is it safe to expose these error strings?
+                        message: Cow::Owned(err.to_string()),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::InfluxDb2Request(err) => {
                 // TODO: attach a request id to the message and to this error so that if people report problems, we can dig in sentry to find out more
                 error!("influxdb2 err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "influxdb2 error!",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("influxdb2 error!"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::InvalidBlockBounds { min, max } => {
                 debug!("InvalidBlockBounds min={} max={}", min, max);
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_string(
-                        format!(
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!(
                             "Invalid blocks bounds requested. min ({}) > max ({})",
                             min, max
-                        ),
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                        )),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::IpAddrParse(err) => {
-                warn!("IpAddrParse err={:?}", err);
+                debug!("IpAddrParse err={:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        &format!("{}", err),
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(err.to_string()),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::IpNotAllowed(ip) => {
-                warn!("IpNotAllowed ip={})", ip);
+                debug!("IpNotAllowed ip={})", ip);
                 (
                     StatusCode::FORBIDDEN,
-                    JsonRpcForwardedResponse::from_string(
-                        format!("IP ({}) is not allowed!", ip),
-                        Some(StatusCode::FORBIDDEN.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("IP ({}) is not allowed!", ip)),
+                        code: StatusCode::FORBIDDEN.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::InvalidHeaderValue(err) => {
-                warn!("InvalidHeaderValue err={:?}", err);
+                debug!("InvalidHeaderValue err={:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        &format!("{}", err),
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("{}", err)),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::InvalidEip => {
-                warn!("InvalidEip");
+                debug!("InvalidEip");
                 (
-                    StatusCode::UNAUTHORIZED,
-                    JsonRpcForwardedResponse::from_str(
-                        "invalid message eip given",
-                        Some(StatusCode::UNAUTHORIZED.as_u16().into()),
-                        None,
-                    ),
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("invalid message eip given"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::InvalidInviteCode => {
-                warn!("InvalidInviteCode");
+                debug!("InvalidInviteCode");
                 (
                     StatusCode::UNAUTHORIZED,
-                    JsonRpcForwardedResponse::from_str(
-                        "invalid invite code",
-                        Some(StatusCode::UNAUTHORIZED.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("invalid invite code"),
+                        code: StatusCode::UNAUTHORIZED.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::Io(err) => {
+                warn!("std io err={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        // TODO: is it safe to expose our io error strings?
+                        message: Cow::Owned(err.to_string()),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::UnknownReferralCode => {
+                debug!("UnknownReferralCode");
+                (
+                    StatusCode::UNAUTHORIZED,
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("invalid referral code"),
+                        code: StatusCode::UNAUTHORIZED.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::InvalidReferer => {
-                warn!("InvalidReferer");
+                debug!("InvalidReferer");
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "invalid referer!",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("invalid referer!"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::InvalidSignatureLength => {
-                warn!("InvalidSignatureLength");
+                debug!("InvalidSignatureLength");
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "invalid signature length",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("invalid signature length"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::InvalidUserAgent => {
-                warn!("InvalidUserAgent");
+                debug!("InvalidUserAgent");
                 (
-                    StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "invalid user agent!",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    StatusCode::FORBIDDEN,
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("invalid user agent!"),
+                        code: StatusCode::FORBIDDEN.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::InvalidUserKey => {
                 warn!("InvalidUserKey");
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "UserKey was not a ULID or UUID",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("UserKey was not a ULID or UUID"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::JoinError(err) => {
@@ -408,78 +470,78 @@ impl Web3ProxyError {
 
                 (
                     code,
-                    JsonRpcForwardedResponse::from_str(
-                        // TODO: different messages, too?
-                        "Unable to complete request",
-                        Some(code.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        // TODO: different messages of cancelled or not?
+                        message: Cow::Borrowed("Unable to complete request"),
+                        code: code.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::MsgPackEncode(err) => {
                 warn!("MsgPackEncode Error: {}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        &format!("msgpack encode error: {}", err),
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("msgpack encode error: {}", err)),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::NoBlockNumberOrHash => {
                 warn!("NoBlockNumberOrHash");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "Blocks here must have a number or hash",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("Blocks here must have a number or hash"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::NoBlocksKnown => {
                 error!("NoBlocksKnown");
                 (
                     StatusCode::BAD_GATEWAY,
-                    JsonRpcForwardedResponse::from_str(
-                        "no blocks known",
-                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("no blocks known"),
+                        code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::NoConsensusHeadBlock => {
                 error!("NoConsensusHeadBlock");
                 (
                     StatusCode::BAD_GATEWAY,
-                    JsonRpcForwardedResponse::from_str(
-                        "no consensus head block",
-                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("no consensus head block"),
+                        code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::NoHandleReady => {
                 error!("NoHandleReady");
                 (
                     StatusCode::BAD_GATEWAY,
-                    JsonRpcForwardedResponse::from_str(
-                        "unable to retry for request handle",
-                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("unable to retry for request handle"),
+                        code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::NoServersSynced => {
                 warn!("NoServersSynced");
                 (
                     StatusCode::BAD_GATEWAY,
-                    JsonRpcForwardedResponse::from_str(
-                        "no servers synced",
-                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("no servers synced"),
+                        code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::NotEnoughRpcs {
@@ -489,11 +551,28 @@ impl Web3ProxyError {
                 error!("NotEnoughRpcs {}/{}", num_known, min_head_rpcs);
                 (
                     StatusCode::BAD_GATEWAY,
-                    JsonRpcForwardedResponse::from_string(
-                        format!("not enough rpcs connected {}/{}", num_known, min_head_rpcs),
-                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!(
+                            "not enough rpcs connected {}/{}",
+                            num_known, min_head_rpcs
+                        )),
+                        code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::NotEnoughSoftLimit { available, needed } => {
+                error!("NotEnoughSoftLimit {}/{}", available, needed);
+                (
+                    StatusCode::BAD_GATEWAY,
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!(
+                            "not enough soft limit available {}/{}",
+                            available, needed
+                        )),
+                        code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::NotFound => {
@@ -501,77 +580,88 @@ impl Web3ProxyError {
                 // TODO: instead of an error, show a normal html page for 404?
                 (
                     StatusCode::NOT_FOUND,
-                    JsonRpcForwardedResponse::from_str(
-                        "not found!",
-                        Some(StatusCode::NOT_FOUND.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("not found!"),
+                        code: StatusCode::NOT_FOUND.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::NotImplemented => {
                 trace!("NotImplemented");
                 (
                     StatusCode::NOT_IMPLEMENTED,
-                    JsonRpcForwardedResponse::from_str(
-                        "work in progress",
-                        Some(StatusCode::NOT_IMPLEMENTED.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("work in progress"),
+                        code: StatusCode::NOT_IMPLEMENTED.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::OriginRequired => {
                 trace!("OriginRequired");
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "Origin required",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("Origin required"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::OriginNotAllowed(origin) => {
                 trace!("OriginNotAllowed origin={}", origin);
                 (
                     StatusCode::FORBIDDEN,
-                    JsonRpcForwardedResponse::from_string(
-                        format!("Origin ({}) is not allowed!", origin),
-                        Some(StatusCode::FORBIDDEN.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("Origin ({}) is not allowed!", origin)),
+                        code: StatusCode::FORBIDDEN.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::ParseBytesError(err) => {
                 trace!("ParseBytesError err={:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "parse bytes error!",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("parse bytes error!"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::ParseMsgError(err) => {
                 trace!("ParseMsgError err={:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "parse message error!",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("parse message error!"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::ParseAddressError => {
                 trace!("ParseAddressError");
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "unable to parse address",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("unable to parse address"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::PaymentRequired => {
+                trace!("PaymentRequiredError");
+                (
+                    StatusCode::PAYMENT_REQUIRED,
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("Payment is required and user is not premium"),
+                        code: StatusCode::PAYMENT_REQUIRED.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             // TODO: this should actually by the id of the key. multiple users might control one key
@@ -593,89 +683,84 @@ impl Web3ProxyError {
                     format!(
                         "too many requests from rpc key #{}.{}",
                         authorization.checks.rpc_secret_key_id.unwrap(),
-                        retry_msg
+                        retry_msg,
                     )
                 };
 
                 (
                     StatusCode::TOO_MANY_REQUESTS,
-                    JsonRpcForwardedResponse::from_string(
-                        msg,
-                        Some(StatusCode::TOO_MANY_REQUESTS.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(msg),
+                        code: StatusCode::TOO_MANY_REQUESTS.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::Redis(err) => {
                 warn!("redis err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "redis error!",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("redis error!"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::RefererRequired => {
                 warn!("referer required");
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "Referer required",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("Referer required"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::RefererNotAllowed(referer) => {
                 warn!("referer not allowed referer={:?}", referer);
                 (
                     StatusCode::FORBIDDEN,
-                    JsonRpcForwardedResponse::from_string(
-                        format!("Referer ({:?}) is not allowed", referer),
-                        Some(StatusCode::FORBIDDEN.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("Referer ({:?}) is not allowed", referer)),
+                        code: StatusCode::FORBIDDEN.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
-            Self::Arc(err) => match Arc::try_unwrap(err) {
-                Ok(err) => err,
-                Err(err) => Self::Anyhow(anyhow::anyhow!("{}", err)),
-            }
-            .into_response_parts(),
             Self::SemaphoreAcquireError(err) => {
                 warn!("semaphore acquire err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_string(
+                    JsonRpcErrorData {
                         // TODO: is it safe to expose all of our anyhow strings?
-                        "semaphore acquire error".to_string(),
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                        message: Cow::Borrowed("semaphore acquire error"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::SendAppStatError(err) => {
                 error!("SendAppStatError err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "error stat_sender sending response_stat",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("error stat_sender sending response_stat"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::SerdeJson(err) => {
-                warn!("serde json err={:?}", err);
+                warn!("serde json err={:?} source={:?}", err, err.source());
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "de/serialization error!",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("de/serialization error! {}", err)),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::StatusCode(status_code, err_msg, err) => {
@@ -689,80 +774,84 @@ impl Web3ProxyError {
 
                 (
                     status_code,
-                    JsonRpcForwardedResponse::from_str(&err_msg, Some(code.into()), None),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(err_msg),
+                        code: code.into(),
+                        data: None,
+                    },
                 )
             }
             Self::Timeout(x) => (
                 StatusCode::REQUEST_TIMEOUT,
-                JsonRpcForwardedResponse::from_str(
-                    &format!("request timed out: {:?}", x),
-                    Some(StatusCode::REQUEST_TIMEOUT.as_u16().into()),
+                JsonRpcErrorData {
+                    message: Cow::Owned(format!("request timed out: {:?}", x)),
+                    code: StatusCode::REQUEST_TIMEOUT.as_u16().into(),
                     // TODO: include the actual id!
-                    None,
-                ),
+                    data: None,
+                },
             ),
             Self::HeaderToString(err) => {
                 // trace!(?err, "HeaderToString");
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        &format!("{}", err),
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(err.to_string()),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::UlidDecode(err) => {
                 // trace!(?err, "UlidDecodeError");
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        &format!("{}", err),
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("{}", err)),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::UnknownBlockNumber => {
                 error!("UnknownBlockNumber");
                 (
                     StatusCode::BAD_GATEWAY,
-                    JsonRpcForwardedResponse::from_str(
-                        "no servers synced. unknown eth_blockNumber",
-                        Some(StatusCode::BAD_GATEWAY.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("no servers synced. unknown eth_blockNumber"),
+                        code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             // TODO: stat?
             Self::UnknownKey => (
                 StatusCode::UNAUTHORIZED,
-                JsonRpcForwardedResponse::from_str(
-                    "unknown api key!",
-                    Some(StatusCode::UNAUTHORIZED.as_u16().into()),
-                    None,
-                ),
+                JsonRpcErrorData {
+                    message: Cow::Borrowed("unknown api key!"),
+                    code: StatusCode::UNAUTHORIZED.as_u16().into(),
+                    data: None,
+                },
             ),
             Self::UserAgentRequired => {
                 warn!("UserAgentRequired");
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "User agent required",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("User agent required"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::UserAgentNotAllowed(ua) => {
                 warn!("UserAgentNotAllowed ua={}", ua);
                 (
                     StatusCode::FORBIDDEN,
-                    JsonRpcForwardedResponse::from_string(
-                        format!("User agent ({}) is not allowed!", ua),
-                        Some(StatusCode::FORBIDDEN.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("User agent ({}) is not allowed!", ua)),
+                        code: StatusCode::FORBIDDEN.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::UserIdZero => {
@@ -770,75 +859,79 @@ impl Web3ProxyError {
                 // TODO: this might actually be an application error and not a BAD_REQUEST
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "user ids should always be non-zero",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("user ids should always be non-zero"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::VerificationError(err) => {
                 trace!("VerificationError err={:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "verification error!",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("verification error!"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::WatchRecvError(err) => {
                 error!("WatchRecvError err={:?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "watch recv error!",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("watch recv error!"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::WatchSendError => {
                 error!("WatchSendError");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcForwardedResponse::from_str(
-                        "watch send error!",
-                        Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("watch send error!"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::WebsocketOnly => {
                 trace!("WebsocketOnly");
                 (
                     StatusCode::BAD_REQUEST,
-                    JsonRpcForwardedResponse::from_str(
-                        "redirect_public_url not set. only websockets work here",
-                        Some(StatusCode::BAD_REQUEST.as_u16().into()),
-                        None,
-                    ),
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed(
+                            "redirect_public_url not set. only websockets work here",
+                        ),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
                 )
             }
             Self::WithContext(err, msg) => match err {
                 Some(err) => {
                     warn!("{:#?} w/ context {}", err, msg);
-                    err.into_response_parts()
+                    return err.into_response_parts();
                 }
                 None => {
                     warn!("error w/ context {}", msg);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        JsonRpcForwardedResponse::from_string(
-                            msg,
-                            Some(StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()),
-                            None,
-                        ),
+                        JsonRpcErrorData {
+                            message: Cow::Owned(msg),
+                            code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                            data: None,
+                        },
                     )
                 }
             },
-        }
+        };
+
+        (code, JsonRpcResponseData::from(err))
     }
 }
 
@@ -858,7 +951,12 @@ impl IntoResponse for Web3ProxyError {
     fn into_response(self) -> Response {
         // TODO: include the request id in these so that users can give us something that will point to logs
         // TODO: status code is in the jsonrpc response and is also the first item in the tuple. DRY
-        let (status_code, response) = self.into_response_parts();
+        let (status_code, response_data) = self.into_response_parts();
+
+        // this will be missing the jsonrpc id!
+        // its better to get request id and call from_response_data with it then to use this IntoResponse helper.
+        let response =
+            JsonRpcForwardedResponse::from_response_data(response_data, Default::default());
 
         (status_code, Json(response)).into_response()
     }

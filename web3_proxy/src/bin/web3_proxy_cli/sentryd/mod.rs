@@ -141,7 +141,7 @@ impl SentrydSubCommand {
                             None,
                         );
 
-                        if let Some(pagerduty_async) = pagerduty_async.as_ref() {
+                        if let Some(ref pagerduty_async) = pagerduty_async {
                             info!(
                                 "sending to pagerduty: {:#}",
                                 serde_json::to_string_pretty(&alert)?

@@ -1,6 +1,6 @@
 //#![warn(missing_docs)]
 use log::error;
-use moka::future::Cache;
+use quick_cache_ttl::CacheWithTTL;
 use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
 use std::cmp::Eq;
 use std::fmt::{Debug, Display};
@@ -16,7 +16,7 @@ pub struct DeferredRateLimiter<K>
 where
     K: Send + Sync,
 {
-    local_cache: Cache<K, Arc<AtomicU64>, hashbrown::hash_map::DefaultHashBuilder>,
+    local_cache: CacheWithTTL<K, Arc<AtomicU64>>,
     prefix: String,
     rrl: RedisRateLimiter,
     /// if None, defers to the max on rrl
@@ -33,9 +33,9 @@ impl<K> DeferredRateLimiter<K>
 where
     K: Copy + Debug + Display + Hash + Eq + Send + Sync + 'static,
 {
-    pub fn new(
+    pub async fn new(
         // TODO: change this to cache_size in bytes
-        cache_size: u64,
+        cache_size: usize,
         prefix: &str,
         rrl: RedisRateLimiter,
         default_max_requests_per_second: Option<u64>,
@@ -45,11 +45,8 @@ where
         // TODO: time to live is not exactly right. we want this ttl counter to start only after redis is down. this works for now
         // TODO: what do these weigh?
         // TODO: allow skipping max_capacity
-        let local_cache = Cache::builder()
-            .time_to_live(Duration::from_secs(ttl))
-            .max_capacity(cache_size)
-            .name(prefix)
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+        let local_cache =
+            CacheWithTTL::new_with_capacity(cache_size, Duration::from_secs(ttl)).await;
 
         Self {
             local_cache,
@@ -87,9 +84,9 @@ where
             let redis_key = redis_key.clone();
             let rrl = Arc::new(self.rrl.clone());
 
-            // set arc_deferred_rate_limit_result and return the coun
+            // set arc_deferred_rate_limit_result and return the count
             self.local_cache
-                .get_with(key, async move {
+                .get_or_insert_async::<anyhow::Error, _>(&key, async move {
                     // we do not use the try operator here because we want to be okay with redis errors
                     let redis_count = match rrl
                         .throttle_label(&redis_key, Some(max_requests_per_period), count)
@@ -110,7 +107,7 @@ where
                             count
                         }
                         Ok(RedisRateLimitResult::RetryNever) => {
-                            panic!("RetryNever shouldn't happen")
+                            unreachable!();
                         }
                         Err(err) => {
                             let _ = deferred_rate_limit_result
@@ -126,9 +123,9 @@ where
                         }
                     };
 
-                    Arc::new(AtomicU64::new(redis_count))
+                    Ok(Arc::new(AtomicU64::new(redis_count)))
                 })
-                .await
+                .await?
         };
 
         let mut locked = deferred_rate_limit_result.lock().await;
@@ -139,7 +136,7 @@ where
             Ok(deferred_rate_limit_result)
         } else {
             // we have a cached amount here
-            let cached_key_count = local_key_count.fetch_add(count, Ordering::Acquire);
+            let cached_key_count = local_key_count.fetch_add(count, Ordering::AcqRel);
 
             // assuming no other parallel futures incremented this key, this is the count that redis has
             let expected_key_count = cached_key_count + count;

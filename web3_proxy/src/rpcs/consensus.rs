@@ -3,33 +3,270 @@ use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use crate::frontend::authorization::Authorization;
 use crate::frontend::errors::{Web3ProxyErrorContext, Web3ProxyResult};
+use derive_more::Constructor;
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use itertools::{Itertools, MinMaxResult};
-use log::{trace, warn};
-use moka::future::Cache;
+use log::{debug, trace, warn};
+use quick_cache_ttl::Cache;
 use serde::Serialize;
-use std::cmp::Reverse;
+use std::cmp::{Ordering, Reverse};
+use std::collections::BTreeMap;
+use std::convert::Infallible;
 use std::fmt;
 use std::sync::Arc;
 use tokio::time::Instant;
 
+#[derive(Clone, Serialize)]
+struct RpcData {
+    head_block_num: U64,
+    // TODO: this is too simple. erigon has 4 prune levels (hrct)
+    oldest_block_num: U64,
+}
+
+impl RpcData {
+    fn new(rpc: &Web3Rpc, head: &Web3ProxyBlock) -> Self {
+        let head_block_num = *head.number();
+
+        let block_data_limit = rpc.block_data_limit();
+
+        let oldest_block_num = head_block_num.saturating_sub(block_data_limit);
+
+        Self {
+            head_block_num,
+            oldest_block_num,
+        }
+    }
+
+    // TODO: take an enum for the type of data (hrtc)
+    fn data_available(&self, block_num: &U64) -> bool {
+        *block_num >= self.oldest_block_num && *block_num <= self.head_block_num
+    }
+}
+
+#[derive(Constructor, Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct RpcRanking {
+    tier: u64,
+    backup: bool,
+    head_num: Option<U64>,
+}
+
+impl RpcRanking {
+    pub fn add_offset(&self, offset: u64) -> Self {
+        Self {
+            tier: self.tier + offset,
+            backup: self.backup,
+            head_num: self.head_num,
+        }
+    }
+
+    pub fn default_with_backup(backup: bool) -> Self {
+        Self {
+            backup,
+            ..Default::default()
+        }
+    }
+
+    fn sort_key(&self) -> (u64, bool, Reverse<Option<U64>>) {
+        // TODO: add soft_limit here? add peak_ewma here?
+        (self.tier, !self.backup, Reverse(self.head_num))
+    }
+}
+
+impl Ord for RpcRanking {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.sort_key().cmp(&other.sort_key())
+    }
+}
+
+impl PartialOrd for RpcRanking {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+pub type RankedRpcMap = BTreeMap<RpcRanking, Vec<Arc<Web3Rpc>>>;
+
+pub enum ShouldWaitForBlock {
+    Ready,
+    Wait { current: Option<U64> },
+    NeverReady,
+}
+
 /// A collection of Web3Rpcs that are on the same block.
-/// Serialize is so we can print it on our debug endpoint
+/// Serialize is so we can print it on our /status endpoint
 #[derive(Clone, Serialize)]
 pub struct ConsensusWeb3Rpcs {
     pub(crate) tier: u64,
-    pub(crate) head_block: Web3ProxyBlock,
-    pub(crate) best_rpcs: Vec<Arc<Web3Rpc>>,
-    // TODO: functions like "compare_backup_vote()"
-    // pub(super) backups_voted: Option<Web3ProxyBlock>,
     pub(crate) backups_needed: bool,
+
+    // TODO: this is already inside best_rpcs. Don't skip, instead make a shorter serialize
+    #[serde(skip_serializing)]
+    pub(crate) head_block: Web3ProxyBlock,
+
+    // TODO: smaller serialize
+    pub(crate) head_rpcs: Vec<Arc<Web3Rpc>>,
+
+    // TODO: make this work. the key needs to be a string. I think we need `serialize_with`
+    #[serde(skip_serializing)]
+    pub(crate) other_rpcs: RankedRpcMap,
+
+    // TODO: make this work. the key needs to be a string. I think we need `serialize_with`
+    #[serde(skip_serializing)]
+    rpc_data: HashMap<Arc<Web3Rpc>, RpcData>,
 }
 
 impl ConsensusWeb3Rpcs {
-    #[inline(always)]
-    pub fn num_conns(&self) -> usize {
-        self.best_rpcs.len()
+    #[inline]
+    pub fn num_consensus_rpcs(&self) -> usize {
+        self.head_rpcs.len()
+    }
+
+    /// will tell you if you should wait for a block
+    /// TODO: also include method (or maybe an enum representing the different prune types)
+    pub fn should_wait_for_block(
+        &self,
+        needed_block_num: Option<&U64>,
+        skip_rpcs: &[Arc<Web3Rpc>],
+    ) -> ShouldWaitForBlock {
+        // TODO: i think checking synced is always a waste of time. though i guess there could be a race
+        if self
+            .head_rpcs
+            .iter()
+            .any(|rpc| self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs))
+        {
+            let head_num = self.head_block.number();
+
+            if Some(head_num) >= needed_block_num {
+                debug!("best (head) block: {}", head_num);
+                return ShouldWaitForBlock::Ready;
+            }
+        }
+
+        // all of the head rpcs are skipped
+
+        let mut best_num = None;
+
+        // iterate the other rpc tiers to find the next best block
+        for (next_ranking, next_rpcs) in self.other_rpcs.iter() {
+            if !next_rpcs
+                .iter()
+                .any(|rpc| self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs))
+            {
+                // TODO: too verbose
+                debug!("everything in this ranking ({:?}) is skipped", next_ranking);
+                continue;
+            }
+
+            let next_head_num = next_ranking.head_num.as_ref();
+
+            if next_head_num >= needed_block_num {
+                debug!("best (head) block: {:?}", next_head_num);
+                return ShouldWaitForBlock::Ready;
+            }
+
+            best_num = next_head_num;
+        }
+
+        // TODO: this seems wrong
+        if best_num.is_some() {
+            // TODO: too verbose
+            debug!("best (old) block: {:?}", best_num);
+            ShouldWaitForBlock::Wait {
+                current: best_num.copied(),
+            }
+        } else {
+            // TODO: too verbose
+            debug!("never ready");
+            ShouldWaitForBlock::NeverReady
+        }
+    }
+
+    pub fn has_block_data(&self, rpc: &Web3Rpc, block_num: &U64) -> bool {
+        self.rpc_data
+            .get(rpc)
+            .map(|x| x.data_available(block_num))
+            .unwrap_or(false)
+    }
+
+    // TODO: take method as a param, too. mark nodes with supported methods (maybe do it optimistically? on)
+    pub fn rpc_will_work_eventually(
+        &self,
+        rpc: &Arc<Web3Rpc>,
+        needed_block_num: Option<&U64>,
+        skip_rpcs: &[Arc<Web3Rpc>],
+    ) -> bool {
+        // return true if this rpc will never work for us. "false" is good
+        if skip_rpcs.contains(rpc) {
+            // if rpc is skipped, it must have already been determined it is unable to serve the request
+            return false;
+        }
+
+        if let Some(needed_block_num) = needed_block_num {
+            if let Some(rpc_data) = self.rpc_data.get(rpc) {
+                match rpc_data.head_block_num.cmp(needed_block_num) {
+                    Ordering::Less => {
+                        debug!("{} is behind. let it catch up", rpc);
+                        return true;
+                    }
+                    Ordering::Greater | Ordering::Equal => {
+                        // rpc is synced past the needed block. make sure the block isn't too old for it
+                        if self.has_block_data(rpc, needed_block_num) {
+                            debug!("{} has {}", rpc, needed_block_num);
+                            return true;
+                        } else {
+                            debug!("{} does not have {}", rpc, needed_block_num);
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            // no rpc data for this rpc. thats not promising
+            return true;
+        }
+
+        false
+    }
+
+    // TODO: better name for this
+    pub fn rpc_will_work_now(
+        &self,
+        skip: &[Arc<Web3Rpc>],
+        min_block_needed: Option<&U64>,
+        max_block_needed: Option<&U64>,
+        rpc: &Arc<Web3Rpc>,
+    ) -> bool {
+        if skip.contains(rpc) {
+            trace!("skipping {}", rpc);
+            return false;
+        }
+
+        if let Some(min_block_needed) = min_block_needed {
+            if !self.has_block_data(rpc, min_block_needed) {
+                trace!(
+                    "{} is missing min_block_needed ({}). skipping",
+                    rpc,
+                    min_block_needed,
+                );
+                return false;
+            }
+        }
+
+        if let Some(max_block_needed) = max_block_needed {
+            if !self.has_block_data(rpc, max_block_needed) {
+                trace!(
+                    "{} is missing max_block_needed ({}). skipping",
+                    rpc,
+                    max_block_needed,
+                );
+                return false;
+            }
+        }
+
+        // we could check hard rate limits here, but i think it is faster to do later
+
+        true
     }
 
     // TODO: sum_hard_limit?
@@ -41,11 +278,12 @@ impl fmt::Debug for ConsensusWeb3Rpcs {
         // TODO: print the actual conns?
         f.debug_struct("ConsensusWeb3Rpcs")
             .field("head_block", &self.head_block)
-            .field("num_conns", &self.best_rpcs.len())
+            .field("num_conns", &self.head_rpcs.len())
             .finish_non_exhaustive()
     }
 }
 
+// TODO: refs for all of these. borrow on a Sender is cheap enough
 impl Web3Rpcs {
     // TODO: return a ref?
     pub fn head_block(&self) -> Option<Web3ProxyBlock> {
@@ -68,7 +306,7 @@ impl Web3Rpcs {
         let consensus = self.watch_consensus_rpcs_sender.borrow();
 
         if let Some(consensus) = consensus.as_ref() {
-            !consensus.best_rpcs.is_empty()
+            !consensus.head_rpcs.is_empty()
         } else {
             false
         }
@@ -78,14 +316,14 @@ impl Web3Rpcs {
         let consensus = self.watch_consensus_rpcs_sender.borrow();
 
         if let Some(consensus) = consensus.as_ref() {
-            consensus.best_rpcs.len()
+            consensus.head_rpcs.len()
         } else {
             0
         }
     }
 }
 
-type FirstSeenCache = Cache<H256, Instant, hashbrown::hash_map::DefaultHashBuilder>;
+type FirstSeenCache = Cache<H256, Instant>;
 
 /// A ConsensusConnections builder that tracks all connection heads across multiple groups of servers
 pub struct ConsensusFinder {
@@ -93,7 +331,6 @@ pub struct ConsensusFinder {
     /// `tiers[0] = only tier 0`
     /// `tiers[1] = tier 0 and tier 1`
     /// `tiers[n] = tier 0..=n`
-    /// This is a BTreeMap and not a Vec because sometimes a tier is empty
     rpc_heads: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
     /// never serve blocks that are too old
     max_block_age: Option<u64>,
@@ -107,9 +344,7 @@ impl ConsensusFinder {
     pub fn new(max_block_age: Option<u64>, max_block_lag: Option<U64>) -> Self {
         // TODO: what's a good capacity for this? it shouldn't need to be very large
         // TODO: if we change Web3ProxyBlock to store the instance, i think we could use the block_by_hash cache
-        let first_seen = Cache::builder()
-            .max_capacity(16)
-            .build_with_hasher(hashbrown::hash_map::DefaultHashBuilder::default());
+        let first_seen = Cache::new(16);
 
         // TODO: hard coding 0-9 isn't great, but its easier than refactoring this to be smart about config reloading
         let rpc_heads = HashMap::new();
@@ -137,15 +372,17 @@ impl ConsensusFinder {
     async fn insert(&mut self, rpc: Arc<Web3Rpc>, block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
         let first_seen = self
             .first_seen
-            .get_with(*block.hash(), async move { Instant::now() })
-            .await;
+            .get_or_insert_async::<Infallible>(block.hash(), async { Ok(Instant::now()) })
+            .await
+            .expect("this cache get is infallible");
 
-        // TODO: this should be 0 if we are first seen, but i think it will be slightly non-zero.
-        // calculate elapsed time before trying to lock.
+        // calculate elapsed time before trying to lock
         let latency = first_seen.elapsed();
 
+        // record the time behind the fastest node
         rpc.head_latency.write().record(latency);
 
+        // update the local mapping of rpc -> block
         self.rpc_heads.insert(rpc, block)
     }
 
@@ -165,13 +402,6 @@ impl ConsensusFinder {
                     .try_cache_block(rpc_head_block, false)
                     .await
                     .web3_context("failed caching block")?;
-
-                // if let Some(max_block_lag) = max_block_lag {
-                //     if rpc_head_block.number() < ??? {
-                //         trace!("rpc_head_block from {} is too far behind! {}", rpc, rpc_head_block);
-                //         return Ok(self.remove(&rpc).is_some());
-                //      }
-                // }
 
                 if let Some(max_age) = self.max_block_age {
                     if rpc_head_block.age() > max_age {
@@ -218,8 +448,8 @@ impl ConsensusFinder {
 
         trace!("lowest_block_number: {}", lowest_block.number());
 
-        let max_lag_block_number = highest_block_number
-            .saturating_sub(self.max_block_lag.unwrap_or_else(|| U64::from(10)));
+        let max_lag_block_number =
+            highest_block_number.saturating_sub(self.max_block_lag.unwrap_or_else(|| U64::from(5)));
 
         trace!("max_lag_block_number: {}", max_lag_block_number);
 
@@ -231,6 +461,7 @@ impl ConsensusFinder {
 
         if num_known < web3_rpcs.min_head_rpcs {
             // this keeps us from serving requests when the proxy first starts
+            trace!("not enough servers known");
             return Ok(None);
         }
 
@@ -250,18 +481,24 @@ impl ConsensusFinder {
             .0
             .tier;
 
+        // trace!("first_tier: {}", current_tier);
+
+        // trace!("rpc_heads_by_tier: {:#?}", rpc_heads_by_tier);
+
         // loop over all the rpc heads (grouped by tier) and their parents to find consensus
         // TODO: i'm sure theres a lot of shortcuts that could be taken, but this is simplest to implement
         for (rpc, rpc_head) in rpc_heads_by_tier.into_iter() {
             if current_tier != rpc.tier {
                 // we finished processing a tier. check for primary results
                 if let Some(consensus) = self.count_votes(&primary_votes, web3_rpcs) {
+                    trace!("found enough votes on tier {}", current_tier);
                     return Ok(Some(consensus));
                 }
 
                 // only set backup consensus once. we don't want it to keep checking on worse tiers if it already found consensus
                 if backup_consensus.is_none() {
                     if let Some(consensus) = self.count_votes(&backup_votes, web3_rpcs) {
+                        trace!("found backup votes on tier {}", current_tier);
                         backup_consensus = Some(consensus)
                     }
                 }
@@ -290,7 +527,11 @@ impl ConsensusFinder {
                 {
                     Ok(parent_block) => block_to_check = parent_block,
                     Err(err) => {
-                        warn!("Problem fetching parent block of {:#?} during consensus finding: {:#?}", block_to_check, err);
+                        warn!(
+                            "Problem fetching parent block of {:?} during consensus finding: {:#?}",
+                            block_to_check.hash(),
+                            err
+                        );
                         break;
                     }
                 }
@@ -319,7 +560,7 @@ impl ConsensusFinder {
     ) -> Option<ConsensusWeb3Rpcs> {
         // sort the primary votes ascending by tier and descending by block num
         let mut votes: Vec<_> = votes
-            .iter()
+            .into_iter()
             .map(|(block, (rpc_names, sum_soft_limit))| (block, sum_soft_limit, rpc_names))
             .collect();
         votes.sort_by_cached_key(|(block, sum_soft_limit, rpc_names)| {
@@ -361,11 +602,39 @@ impl ConsensusFinder {
 
             let backups_needed = consensus_rpcs.iter().any(|x| x.backup);
 
+            let mut other_rpcs = BTreeMap::new();
+
+            for (x, x_head) in self
+                .rpc_heads
+                .iter()
+                .filter(|(k, _)| !consensus_rpcs.contains(k))
+            {
+                let x_head_num = *x_head.number();
+
+                let key: RpcRanking = RpcRanking::new(x.tier, x.backup, Some(x_head_num));
+
+                other_rpcs
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .push(x.clone());
+            }
+
+            // TODO: how should we populate this?
+            let mut rpc_data = HashMap::with_capacity(self.rpc_heads.len());
+
+            for (x, x_head) in self.rpc_heads.iter() {
+                let y = RpcData::new(x, x_head);
+
+                rpc_data.insert(x.clone(), y);
+            }
+
             let consensus = ConsensusWeb3Rpcs {
                 tier,
                 head_block: maybe_head_block.clone(),
-                best_rpcs: consensus_rpcs,
+                head_rpcs: consensus_rpcs,
+                other_rpcs,
                 backups_needed,
+                rpc_data,
             };
 
             return Some(consensus);

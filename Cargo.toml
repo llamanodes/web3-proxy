@@ -2,7 +2,9 @@
 members = [
   "deferred-rate-limiter",
   "entities",
+  "latency",
   "migration",
+  "quick_cache_ttl",
   "rate-counter",
   "redis-rate-limiter",
   "thread-fast-rng",

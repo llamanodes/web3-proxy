@@ -6,7 +6,7 @@ Web3_proxy is a fast caching and load balancing proxy for web3 (Ethereum or simi
 
 Signed transactions (eth_sendRawTransaction) are sent in parallel to the configured private RPCs (eden, ethermine, flashbots, etc.).
 
-All other requests are sent to an RPC server on the latest block (alchemy, moralis, rivet, your own node, or one of many other providers). If multiple servers are in sync, they are prioritized by `active_requests/soft_limit`. Note that this means that the fastest server is most likely to serve requests and slow servers are unlikely to ever get any requests.
+All other requests are sent to an RPC server on the latest block (llamanodes, alchemy, moralis, rivet, your own node, or one of many other providers). If multiple servers are in sync, they are prioritized by `active_requests` and request latency. Note that this means that the fastest server is most likely to serve requests and slow servers are unlikely to ever get any requests.
 
 Each server has different limits to configure. The `soft_limit` is the number of parallel active requests where a server starts to slow down. The `hard_limit` is where a server starts giving rate limits or other errors.
 
@@ -54,19 +54,22 @@ Check that the proxy is working:
 ```
 curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"web3_clientVersion","id":1}' 127.0.0.1:8544
 ```
+```
+curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getBalance", "params": ["0x0000000000000000000000000000000000000000", "latest"],"id":1}' 127.0.0.1:8544
+```
 
 Check that the websocket is working:
 
 ```
 $ websocat ws://127.0.0.1:8544
 
-{"id": 1, "method": "eth_subscribe", "params": ["newHeads"]}
+{"jsonrpc": "2.0", "id": 1, "method": "eth_subscribe", "params": ["newHeads"]}
 
-{"id": 2, "method": "eth_subscribe", "params": ["newPendingTransactions"]}
+{"jsonrpc": "2.0", "id": 2, "method": "eth_subscribe", "params": ["newPendingTransactions"]}
 
-{"id": 3, "method": "eth_subscribe", "params": ["newPendingFullTransactions"]}
+{"jsonrpc": "2.0", "id": 3, "method": "eth_subscribe", "params": ["newPendingFullTransactions"]}
 
-{"id": 4, "method": "eth_subscribe", "params": ["newPendingRawTransactions"]}
+{"jsonrpc": "2.0", "id": 4, "method": "eth_subscribe", "params": ["newPendingRawTransactions"]}
 ```
 
 You can copy `config/example.toml` to `config/production-$CHAINNAME.toml` and then run `docker-compose up --build -d` start proxies for many chains.
@@ -79,7 +82,9 @@ web3_proxy_cli health_compass https://eth.llamarpc.com https://eth-ski.llamarpc.
 
 ### Run migrations
 
-This is only really useful during development. The migrations run on application start.
+Generally it is simplest to just run the app to run migrations. It runs migrations on start.
+
+But if you want to run them manually (generally only useful in development):
 
 ```
 cd migration
@@ -131,7 +136,7 @@ Flame graphs make a developer's join of finding slow code painless:
     4
     $ echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
     -1
-    $ CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --bin web3_proxy --no-inline
+    $ CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --bin web3_proxy_cli --no-inline -- proxyd
 
 Be sure to use `--no-inline` or perf will be VERY slow
 
@@ -147,6 +152,8 @@ TODO: also enable debug symbols in the release build by modifying the root Cargo
 
 Test the proxy:
 
+    wrk -t12 -c400 -d30s --latency http://127.0.0.1:8544/health
+    wrk -t12 -c400 -d30s --latency http://127.0.0.1:8544/status
     wrk -s ./wrk/getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8544/u/$API_KEY
     wrk -s ./wrk/getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8544/u/$API_KEY
 

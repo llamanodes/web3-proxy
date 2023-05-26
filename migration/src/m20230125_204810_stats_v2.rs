@@ -23,6 +23,12 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(0),
                     )
+                    .foreign_key(
+                        ForeignKeyCreateStatement::new()
+                            .from_col(RpcAccountingV2::RpcKeyId)
+                            .to_tbl(RpcKey::Table)
+                            .to_col(RpcKey::Id),
+                    )
                     .col(
                         ColumnDef::new(RpcAccountingV2::ChainId)
                             .big_unsigned()
@@ -134,6 +140,12 @@ impl MigrationTrait for Migration {
 
         Ok(())
     }
+}
+
+#[derive(Iden)]
+enum RpcKey {
+    Table,
+    Id,
 }
 
 #[derive(Iden)]

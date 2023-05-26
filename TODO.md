@@ -128,7 +128,7 @@ These are roughly in order of completition
   - this was intentional so that recently confirmed transactions go to a server that is more likely to have the tx.
   - but under heavy load, we hit their rate limits. need a "retry_until_success" function that goes to balanced_rpcs. or maybe store in redis the txids that we broadcast privately and use that to route.
 - [x] some of the DashMaps grow unbounded! Make/find a "SizedDashMap" that cleans up old rows with some garbage collection task
-  - moka is exactly what we need
+  - moka has all the features that we need and more
 - [x] if block data limit is 0, say Unknown in Debug output
 - [x] basic request method stats (using the user_id and other fields that are in the tracing frame)
 - [x] refactor from_anyhow_error to have consistent error codes and http codes. maybe implement the Error trait

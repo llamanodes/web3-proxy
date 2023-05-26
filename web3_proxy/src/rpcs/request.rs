@@ -1,6 +1,6 @@
 use super::one::Web3Rpc;
-use super::provider::Web3Provider;
 use crate::frontend::authorization::Authorization;
+use crate::frontend::errors::Web3ProxyResult;
 use anyhow::Context;
 use chrono::Utc;
 use entities::revert_log;
@@ -14,7 +14,7 @@ use std::fmt;
 use std::sync::atomic;
 use std::sync::Arc;
 use thread_fast_rng::rand::Rng;
-use tokio::time::{sleep, Duration, Instant};
+use tokio::time::{Duration, Instant};
 
 #[derive(Debug)]
 pub enum OpenRequestResult {
@@ -76,7 +76,7 @@ impl Authorization {
         self: Arc<Self>,
         method: Method,
         params: EthCallFirstParams,
-    ) -> anyhow::Result<()> {
+    ) -> Web3ProxyResult<()> {
         let rpc_key_id = match self.checks.rpc_secret_key_id {
             Some(rpc_key_id) => rpc_key_id.into(),
             None => {
@@ -121,14 +121,21 @@ impl Authorization {
     }
 }
 
+impl Drop for OpenRequestHandle {
+    fn drop(&mut self) {
+        self.rpc
+            .active_requests
+            .fetch_sub(1, atomic::Ordering::AcqRel);
+    }
+}
+
 impl OpenRequestHandle {
     pub async fn new(authorization: Arc<Authorization>, rpc: Arc<Web3Rpc>) -> Self {
         // TODO: take request_id as an argument?
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
-        // TODO: should we be using metered, or not? i think not because we want stats for each handle
-        // TODO: these should maybe be sent to an influxdb instance?
-        rpc.active_requests.fetch_add(1, atomic::Ordering::Relaxed);
+        rpc.active_requests
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
 
         Self { authorization, rpc }
     }
@@ -151,7 +158,6 @@ impl OpenRequestHandle {
         method: &str,
         params: &P,
         mut error_handler: RequestErrorHandler,
-        unlocked_provider: Option<Arc<Web3Provider>>,
     ) -> Result<R, ProviderError>
     where
         // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
@@ -163,65 +169,37 @@ impl OpenRequestHandle {
         // trace!(rpc=%self.rpc, %method, "request");
         trace!("requesting from {}", self.rpc);
 
-        let mut provider = if unlocked_provider.is_some() {
-            unlocked_provider
-        } else {
-            self.rpc.provider.read().await.clone()
-        };
-
-        let mut logged = false;
-        // TODO: instead of a lock, i guess it should be a watch?
-        while provider.is_none() {
-            // trace!("waiting on provider: locking...");
-            // TODO: i dont like this. subscribing to a channel could be better
-            sleep(Duration::from_millis(100)).await;
-
-            if !logged {
-                debug!("no provider for open handle on {}", self.rpc);
-                logged = true;
-            }
-
-            provider = self.rpc.provider.read().await.clone();
-        }
-
-        let provider = provider.expect("provider was checked already");
-
         self.rpc
             .total_requests
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
 
-        self.rpc
-            .active_requests
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // we used to fetch_add the active_request count here, but sometimes a request is made without going through this function (like with subscriptions)
 
-        // let latency = Instant::now();
+        let start = Instant::now();
 
         // TODO: replace ethers-rs providers with our own that supports streaming the responses
-        let response = match provider.as_ref() {
-            #[cfg(test)]
-            Web3Provider::Mock => {
-                return Err(ProviderError::CustomError(
-                    "mock provider can't respond".to_string(),
-                ))
-            }
-            Web3Provider::Ws(p) => p.request(method, params).await,
-            Web3Provider::Http(p) | Web3Provider::Both(p, _) => {
-                // TODO: i keep hearing that http is faster. but ws has always been better for me. investigate more with actual benchmarks
-                p.request(method, params).await
-            }
+        // TODO: replace ethers-rs providers with our own that handles "id" being null
+        let response: Result<R, _> = if let Some(ref p) = self.rpc.http_provider {
+            p.request(method, params).await
+        } else if let Some(ref p) = self.rpc.ws_provider {
+            p.request(method, params).await
+        } else {
+            return Err(ProviderError::CustomError(
+                "no provider configured!".to_string(),
+            ));
         };
 
-        // note. we intentionally do not record this latency now. we do NOT want to measure errors
-        // let latency = latency.elapsed();
+        // we do NOT want to measure errors, so we intentionally do not record this latency now.
+        let latency = start.elapsed();
 
-        self.rpc
-            .active_requests
-            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        // we used to fetch_sub the active_request count here, but sometimes the handle is dropped without request being called!
 
-        // TODO: i think ethers already has trace logging (and does it much more fancy)
         trace!(
             "response from {} for {} {:?}: {:?}",
-            self.rpc, method, params, response,
+            self.rpc,
+            method,
+            params,
+            response,
         );
 
         if let Err(err) = &response {
@@ -272,18 +250,21 @@ impl OpenRequestHandle {
             // TODO: move this info a function on ResponseErrorType
             let response_type = if let ProviderError::JsonRpcClientError(err) = err {
                 // Http and Ws errors are very similar, but different types
-                let msg = match &*provider {
-                    #[cfg(test)]
-                    Web3Provider::Mock => unimplemented!(),
-                    _ => err.as_error_response().map(|x| x.message.clone()),
-                };
+                let msg = err.as_error_response().map(|x| x.message.clone());
+
+                trace!("error message: {:?}", msg);
 
                 if let Some(msg) = msg {
                     if msg.starts_with("execution reverted") {
                         trace!("revert from {}", self.rpc);
                         ResponseTypes::Revert
                     } else if msg.contains("limit") || msg.contains("request") {
-                        trace!("rate limit from {}", self.rpc);
+                        // TODO: too verbose
+                        if self.rpc.backup {
+                            trace!("rate limit from {}", self.rpc);
+                        } else {
+                            warn!("rate limit from {}", self.rpc);
+                        }
                         ResponseTypes::RateLimit
                     } else {
                         ResponseTypes::Error
@@ -298,6 +279,15 @@ impl OpenRequestHandle {
             if matches!(response_type, ResponseTypes::RateLimit) {
                 if let Some(hard_limit_until) = self.rpc.hard_limit_until.as_ref() {
                     // TODO: how long should we actually wait? different providers have different times
+                    // TODO: if rate_limit_period_seconds is set, use that
+                    // TODO: check response headers for rate limits too
+                    // TODO: warn if production, debug if backup
+                    if self.rpc.backup {
+                        debug!("unexpected rate limit on {}!", self.rpc);
+                    } else {
+                        warn!("unexpected rate limit on {}!", self.rpc);
+                    }
+
                     let retry_at = Instant::now() + Duration::from_secs(1);
 
                     trace!("retry {} at: {:?}", self.rpc, retry_at);
@@ -352,25 +342,26 @@ impl OpenRequestHandle {
                     // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
                     let method: Method = Method::try_from_value(&method.to_string()).unwrap();
 
-                    // TODO: DO NOT UNWRAP! But also figure out the best way to keep returning ProviderErrors here
-                    let params: EthCallParams = serde_json::from_value(json!(params))
-                        .context("parsing params to EthCallParams")
-                        .unwrap();
+                    match serde_json::from_value::<EthCallParams>(json!(params)) {
+                        Ok(params) => {
+                            // spawn saving to the database so we don't slow down the request
+                            let f = self.authorization.clone().save_revert(method, params.0 .0);
 
-                    // spawn saving to the database so we don't slow down the request
-                    let f = self.authorization.clone().save_revert(method, params.0 .0);
-
-                    tokio::spawn(f);
+                            tokio::spawn(f);
+                        }
+                        Err(err) => {
+                            warn!(
+                                "failed parsing eth_call params. unable to save revert. {}",
+                                err
+                            );
+                        }
+                    }
                 }
             }
+        } else if let Some(peak_latency) = &self.rpc.peak_latency {
+            peak_latency.report(latency);
         } else {
-            // TODO: record request latency
-            // let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-            // TODO: is this lock here a problem? should this be done through a channel? i started to code it, but it didn't seem to matter
-            // let mut latency_recording = self.rpc.request_latency.write();
-
-            // latency_recording.record(latency_ms);
+            unreachable!("peak_latency not initialized");
         }
 
         response

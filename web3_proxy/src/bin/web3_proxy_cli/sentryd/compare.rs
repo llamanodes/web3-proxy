@@ -217,13 +217,12 @@ async fn check_rpc(
         .await
         .context(format!("awaiting response from {}", rpc))?;
 
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!(
-            "bad response from {}: {}",
-            rpc,
-            response.status(),
-        ));
-    }
+    anyhow::ensure!(
+        response.status().is_success(),
+        "bad response from {}: {}",
+        rpc,
+        response.status(),
+    );
 
     let body = response
         .text()

@@ -1,4 +1,4 @@
-use crate::frontend::authorization::Authorization;
+use crate::frontend::{authorization::Authorization, errors::Web3ProxyResult};
 
 use super::many::Web3Rpcs;
 ///! Load balanced communication with a group of web3 providers
@@ -29,14 +29,13 @@ impl Web3Rpcs {
         // TODO: yearn devs have had better luck with batching these, but i think that's likely just adding a delay itself
         // TODO: if one rpc fails, try another?
         // TODO: try_request_handle, or wait_for_request_handle? I think we want wait here
-        let tx: Transaction = match rpc.try_request_handle(authorization, None).await {
+        let tx: Transaction = match rpc.try_request_handle(authorization).await {
             Ok(OpenRequestResult::Handle(handle)) => {
                 handle
                     .request(
                         "eth_getTransactionByHash",
                         &(pending_tx_id,),
                         Level::Error.into(),
-                        None,
                     )
                     .await?
             }
@@ -71,7 +70,7 @@ impl Web3Rpcs {
         rpc: Arc<Web3Rpc>,
         pending_tx_id: TxHash,
         pending_tx_sender: broadcast::Sender<TxStatus>,
-    ) -> anyhow::Result<()> {
+    ) -> Web3ProxyResult<()> {
         // TODO: how many retries? until some timestamp is hit is probably better. maybe just loop and call this with a timeout
         // TODO: after more investigation, i don't think retries will help. i think this is because chains of transactions get dropped from memory
         // TODO: also check the "confirmed transactions" mapping? maybe one shared mapping with TxState in it?
@@ -82,7 +81,7 @@ impl Web3Rpcs {
         }
 
         // trace!(?pending_tx_id, "checking pending_transactions on {}", rpc);
-        if self.pending_transaction_cache.contains_key(&pending_tx_id) {
+        if self.pending_transaction_cache.get(&pending_tx_id).is_some() {
             // this transaction has already been processed
             return Ok(());
         }

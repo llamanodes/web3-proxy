@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use argh::FromArgs;
 use entities::{rpc_accounting, rpc_key};
 use futures::stream::FuturesUnordered;
@@ -9,17 +9,17 @@ use migration::sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, UpdateResult,
 };
 use migration::{Expr, Value};
-use std::net::{IpAddr, Ipv4Addr};
+use parking_lot::Mutex;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::time::Instant;
-use web3_proxy::app::{AuthorizationChecks, BILLING_PERIOD_SECONDS};
+use ulid::Ulid;
+use web3_proxy::app::BILLING_PERIOD_SECONDS;
 use web3_proxy::config::TopConfig;
-use web3_proxy::frontend::authorization::{
-    Authorization, AuthorizationType, RequestMetadata, RpcSecretKey,
-};
-use web3_proxy::stats::{RpcQueryStats, StatBuffer};
+use web3_proxy::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
+use web3_proxy::rpcs::one::Web3Rpc;
+use web3_proxy::stats::StatBuffer;
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 /// Migrate towards influxdb and rpc_accounting_v2 from rpc_accounting
@@ -67,27 +67,28 @@ impl MigrateStatsToV2 {
         };
 
         // Spawn the stat-sender
-        let stat_sender = if let Some(emitter_spawn) = StatBuffer::try_spawn(
-            top_config.app.chain_id,
+        let emitter_spawn = StatBuffer::try_spawn(
+            BILLING_PERIOD_SECONDS,
             top_config
                 .app
                 .influxdb_bucket
                 .clone()
                 .context("No influxdb bucket was provided")?,
+            top_config.app.chain_id,
             Some(db_conn.clone()),
-            influxdb_client.clone(),
             30,
-            1,
-            BILLING_PERIOD_SECONDS,
+            influxdb_client.clone(),
+            None,
             rpc_account_shutdown_recevier,
-        )? {
-            // since the database entries are used for accounting, we want to be sure everything is saved before exiting
-            important_background_handles.push(emitter_spawn.background_handle);
+            1,
+        )
+        .context("Error spawning stat buffer")?
+        .context("No stat buffer spawned. Maybe missing influx or db credentials?")?;
 
-            Some(emitter_spawn.stat_sender)
-        } else {
-            None
-        };
+        // since the database entries are used for accounting, we want to be sure everything is saved before exiting
+        important_background_handles.push(emitter_spawn.background_handle);
+
+        let stat_sender = emitter_spawn.stat_sender;
 
         let migration_timestamp = chrono::offset::Utc::now();
 
@@ -109,7 +110,10 @@ impl MigrateStatsToV2 {
             // (2) Create request metadata objects to match the old data
             // Iterate through all old rows, and put them into the above objects.
             for x in old_records.iter() {
-                let authorization_checks = match x.rpc_key_id {
+                let mut authorization = Authorization::internal(None)
+                    .context("failed creating internal authorization")?;
+
+                match x.rpc_key_id {
                     Some(rpc_key_id) => {
                         let rpc_key_obj = rpc_key::Entity::find()
                             .filter(rpc_key::Column::Id.eq(rpc_key_id))
@@ -117,34 +121,16 @@ impl MigrateStatsToV2 {
                             .await?
                             .context("Could not find rpc_key_obj for the given rpc_key_id")?;
 
-                        // TODO: Create authrization
-                        // We can probably also randomly generate this, as we don't care about the user (?)
-                        AuthorizationChecks {
-                            user_id: rpc_key_obj.user_id,
-                            rpc_secret_key: Some(RpcSecretKey::Uuid(rpc_key_obj.secret_key)),
-                            rpc_secret_key_id: Some(
-                                NonZeroU64::new(rpc_key_id)
-                                    .context("Could not use rpc_key_id to create a u64")?,
-                            ),
-                            ..Default::default()
-                        }
+                        authorization.checks.user_id = rpc_key_obj.user_id;
+                        authorization.checks.rpc_secret_key =
+                            Some(RpcSecretKey::Uuid(rpc_key_obj.secret_key));
+                        authorization.checks.rpc_secret_key_id =
+                            NonZeroU64::try_from(rpc_key_id).ok();
                     }
                     None => Default::default(),
                 };
 
-                let authorization_type = AuthorizationType::Internal;
-                let authorization = Arc::new(
-                    Authorization::try_new(
-                        authorization_checks,
-                        None,
-                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                        None,
-                        None,
-                        None,
-                        authorization_type,
-                    )
-                    .context("Initializing Authorization Struct was not successful")?,
-                );
+                let authorization = Arc::new(authorization);
 
                 // It will be like a fork basically (to simulate getting multiple single requests ...)
                 // Iterate through all frontend requests
@@ -177,46 +163,38 @@ impl MigrateStatsToV2 {
 
                     // Add module at the last step to include for any remained that we missed ... (?)
 
-                    // TODO: Create RequestMetadata
+                    let backend_rpcs: Vec<_> = (0..int_backend_requests)
+                        .map(|_| Arc::new(Web3Rpc::default()))
+                        .collect();
+
+                    let request_ulid = Ulid::new();
+
+                    // Create RequestMetadata
                     let request_metadata = RequestMetadata {
-                        start_instant: Instant::now(),    // This is overwritten later on
-                        request_bytes: int_request_bytes, // Get the mean of all the request bytes
                         archive_request: x.archive_request.into(),
-                        backend_requests: Default::default(), // This is not used, instead we modify the field later
-                        no_servers: 0.into(), // This is not relevant in the new version
+                        authorization: Some(authorization.clone()),
+                        backend_requests: Mutex::new(backend_rpcs),
                         error_response: x.error_response.into(),
+                        // debug data is in kafka, not mysql or influx
+                        kafka_debug_logger: None,
+                        method: x.method.clone(),
+                        // This is not relevant in the new version
+                        no_servers: 0.into(),
+                        // Get the mean of all the request bytes
+                        request_bytes: int_request_bytes as usize,
                         response_bytes: int_response_bytes.into(),
+                        // We did not initially record this data
+                        response_from_backup_rpc: false.into(),
+                        response_timestamp: x.period_datetime.timestamp().into(),
                         response_millis: int_response_millis.into(),
-                        // We just don't have this data
-                        response_from_backup_rpc: false.into(), // I think we did not record this back then // Default::default()
+                        // This is overwritten later on
+                        start_instant: Instant::now(),
+                        stat_sender: Some(stat_sender.clone()),
+                        request_ulid,
                     };
 
-                    // (3) Send through a channel to a stat emitter
-                    // Send it to the stats sender
-                    if let Some(stat_sender_ref) = stat_sender.as_ref() {
-                        // info!("Method is: {:?}", x.clone().method);
-                        let mut response_stat = RpcQueryStats::new(
-                            x.clone().method,
-                            authorization.clone(),
-                            Arc::new(request_metadata),
-                            (int_response_bytes)
-                                .try_into()
-                                .context("sum bytes average is not calculated properly")?,
-                        );
-                        // Modify the timestamps ..
-                        response_stat.modify_struct(
-                            int_response_millis,
-                            x.period_datetime.timestamp(),
-                            int_backend_requests,
-                        );
-                        // info!("Sending stats: {:?}", response_stat);
-                        stat_sender_ref
-                            // .send(response_stat.into())
-                            .send_async(response_stat.into())
-                            .await
-                            .context("stat_sender sending response_stat")?;
-                    } else {
-                        panic!("Stat sender was not spawned!");
+                    if let Some(x) = request_metadata.try_send_stat()? {
+                        return Err(anyhow!("failed saving stat! {:?}", x));
                     }
                 }
             }

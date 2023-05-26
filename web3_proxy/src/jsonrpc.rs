@@ -1,20 +1,17 @@
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::response_cache::JsonRpcResponseData;
 use derive_more::From;
 use ethers::prelude::ProviderError;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::value::{to_raw_value, RawValue};
+use std::borrow::Cow;
 use std::fmt;
 
-fn default_jsonrpc() -> String {
-    "2.0".to_string()
-}
-
+// TODO: &str here instead of String should save a lot of allocations
 #[derive(Clone, Deserialize, Serialize)]
 pub struct JsonRpcRequest {
-    // TODO: skip jsonrpc entirely? its against spec to drop it, but some servers bad
-    #[serde(default = "default_jsonrpc")]
     pub jsonrpc: String,
     /// id could be a stricter type, but many rpcs do things against the spec
     pub id: Box<RawValue>,
@@ -51,7 +48,7 @@ impl JsonRpcRequest {
         params: Option<serde_json::Value>,
     ) -> anyhow::Result<Self> {
         let x = Self {
-            jsonrpc: default_jsonrpc(),
+            jsonrpc: "2.0".to_string(),
             id: id.to_raw_value(),
             method,
             params,
@@ -194,10 +191,30 @@ pub struct JsonRpcErrorData {
     /// The error code
     pub code: i64,
     /// The error message
-    pub message: String,
+    pub message: Cow<'static, str>,
     /// Additional data
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
+}
+
+impl From<&'static str> for JsonRpcErrorData {
+    fn from(value: &'static str) -> Self {
+        Self {
+            code: -32000,
+            message: Cow::Borrowed(value),
+            data: None,
+        }
+    }
+}
+
+impl From<String> for JsonRpcErrorData {
+    fn from(value: String) -> Self {
+        Self {
+            code: -32000,
+            message: Cow::Owned(value),
+            data: None,
+        }
+    }
 }
 
 /// A complete response
@@ -205,8 +222,7 @@ pub struct JsonRpcErrorData {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct JsonRpcForwardedResponse {
     // TODO: jsonrpc a &str?
-    #[serde(default = "default_jsonrpc")]
-    pub jsonrpc: String,
+    pub jsonrpc: &'static str,
     pub id: Box<RawValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Box<RawValue>>,
@@ -242,40 +258,40 @@ impl JsonRpcForwardedResponse {
         // TODO: this is too verbose. plenty of errors are valid, like users giving an invalid address. no need to log that
         // TODO: can we somehow get the initial request here? if we put that into a tracing span, will things slow down a ton?
         JsonRpcForwardedResponse {
-            jsonrpc: "2.0".to_string(),
-            id: id.unwrap_or_else(|| JsonRpcId::None.to_raw_value()),
+            jsonrpc: "2.0",
+            id: id.unwrap_or_default(),
             result: None,
             error: Some(JsonRpcErrorData {
                 code: code.unwrap_or(-32099),
-                message,
+                message: Cow::Owned(message),
                 // TODO: accept data as an argument
                 data: None,
             }),
         }
     }
 
-    pub fn from_response(partial_response: Box<RawValue>, id: Box<RawValue>) -> Self {
+    pub fn from_raw_response(result: Box<RawValue>, id: Box<RawValue>) -> Self {
         JsonRpcForwardedResponse {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0",
             id,
             // TODO: since we only use the result here, should that be all we return from try_send_request?
-            result: Some(partial_response),
+            result: Some(result),
             error: None,
         }
     }
 
-    pub fn from_value(partial_response: serde_json::Value, id: Box<RawValue>) -> Self {
-        let partial_response =
-            to_raw_value(&partial_response).expect("Value to RawValue should always work");
+    pub fn from_value(result: serde_json::Value, id: Box<RawValue>) -> Self {
+        let partial_response = to_raw_value(&result).expect("Value to RawValue should always work");
 
         JsonRpcForwardedResponse {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0",
             id,
             result: Some(partial_response),
             error: None,
         }
     }
 
+    // TODO: delete this. its on JsonRpcErrorData
     pub fn from_ethers_error(e: ProviderError, id: Box<RawValue>) -> Web3ProxyResult<Self> {
         // TODO: move turning ClientError into json to a helper function?
         let code;
@@ -290,21 +306,24 @@ impl JsonRpcForwardedResponse {
                     data = err.data.clone();
                 } else if let Some(err) = err.as_serde_error() {
                     // this is not an rpc error. keep it as an error
-                    return Err(Web3ProxyError::BadRequest(format!("bad request: {}", err)));
+                    return Err(Web3ProxyError::BadResponse(format!(
+                        "bad response: {}",
+                        err
+                    )));
                 } else {
-                    return Err(anyhow::anyhow!("unexpected ethers error!").into());
+                    return Err(anyhow::anyhow!("unexpected ethers error! {:?}", err).into());
                 }
             }
             e => return Err(e.into()),
         }
 
         Ok(Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0",
             id,
             result: None,
             error: Some(JsonRpcErrorData {
                 code,
-                message,
+                message: Cow::Owned(message),
                 data,
             }),
         })
@@ -315,16 +334,21 @@ impl JsonRpcForwardedResponse {
         id: Box<RawValue>,
     ) -> Web3ProxyResult<Self> {
         match result {
-            Ok(response) => Ok(Self::from_response(response, id)),
+            Ok(response) => Ok(Self::from_raw_response(response, id)),
             Err(e) => Self::from_ethers_error(e, id),
         }
     }
 
-    pub fn num_bytes(&self) -> usize {
-        // TODO: not sure how to do this without wasting a ton of allocations
-        serde_json::to_string(self)
-            .expect("this should always be valid json")
-            .len()
+    pub fn from_response_data(data: JsonRpcResponseData, id: Box<RawValue>) -> Self {
+        match data {
+            JsonRpcResponseData::Result { value, .. } => Self::from_raw_response(value, id),
+            JsonRpcResponseData::Error { value, .. } => JsonRpcForwardedResponse {
+                jsonrpc: "2.0",
+                id,
+                result: None,
+                error: Some(value),
+            },
+        }
     }
 }
 

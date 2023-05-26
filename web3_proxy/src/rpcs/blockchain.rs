@@ -5,23 +5,25 @@ use super::one::Web3Rpc;
 use super::transactions::TxStatus;
 use crate::frontend::authorization::Authorization;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
+use crate::response_cache::JsonRpcResponseData;
 use crate::{config::BlockAndRpc, jsonrpc::JsonRpcRequest};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use log::{debug, trace, warn, Level};
-use moka::future::Cache;
+use quick_cache_ttl::CacheWithTTL;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use serde_json::json;
+use std::convert::Infallible;
 use std::hash::Hash;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
-use tokio::time::Duration;
 
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
 
-pub type BlocksByHashCache = Cache<H256, Web3ProxyBlock, hashbrown::hash_map::DefaultHashBuilder>;
+pub type BlocksByHashCache = Arc<CacheWithTTL<H256, Web3ProxyBlock>>;
+pub type BlocksByNumberCache = Arc<CacheWithTTL<U64, H256>>;
 
 /// A block and its age.
 #[derive(Clone, Debug, Default, From)]
@@ -167,10 +169,7 @@ impl Web3Rpcs {
         heaviest_chain: bool,
     ) -> Web3ProxyResult<Web3ProxyBlock> {
         // TODO: i think we can rearrange this function to make it faster on the hot path
-        let block_hash = block.hash();
-
-        // skip Block::default()
-        if block_hash.is_zero() {
+        if block.hash().is_zero() {
             debug!("Skipping block without hash!");
             return Ok(block);
         }
@@ -182,15 +181,18 @@ impl Web3Rpcs {
             // this is the only place that writes to block_numbers
             // multiple inserts should be okay though
             // TODO: info that there was a fork?
-            self.blocks_by_number.insert(*block_num, *block_hash).await;
+            self.blocks_by_number.insert(*block_num, *block.hash());
         }
 
         // this block is very likely already in block_hashes
         // TODO: use their get_with
+        let block_hash = *block.hash();
+
         let block = self
             .blocks_by_hash
-            .get_with(*block_hash, async move { block.clone() })
-            .await;
+            .get_or_insert_async::<Infallible, _>(&block_hash, async move { Ok(block) })
+            .await
+            .expect("this cache get is infallible");
 
         Ok(block)
     }
@@ -216,13 +218,11 @@ impl Web3Rpcs {
         // TODO: if error, retry?
         let block: Web3ProxyBlock = match rpc {
             Some(rpc) => rpc
-                .wait_for_request_handle(authorization, Some(Duration::from_secs(30)), None)
-                .await?
                 .request::<_, Option<ArcBlock>>(
                     "eth_getBlockByHash",
                     &json!(get_block_params),
                     Level::Error.into(),
-                    None,
+                    authorization.clone(),
                 )
                 .await?
                 .and_then(|x| {
@@ -236,30 +236,23 @@ impl Web3Rpcs {
             None => {
                 // TODO: helper for method+params => JsonRpcRequest
                 // TODO: does this id matter?
-                let request = json!({ "id": "1", "method": "eth_getBlockByHash", "params": get_block_params });
+                let request = json!({ "jsonrpc": "2.0", "id": "1", "method": "eth_getBlockByHash", "params": get_block_params });
                 let request: JsonRpcRequest = serde_json::from_value(request)?;
 
                 // TODO: request_metadata? maybe we should put it in the authorization?
                 // TODO: think more about this wait_for_sync
                 let response = self
-                    .try_send_best_consensus_head_connection(
-                        authorization,
-                        request,
-                        None,
-                        None,
-                        None,
-                    )
+                    .try_send_best_connection(authorization, &request, None, None, None)
                     .await?;
 
-                if response.error.is_some() {
-                    return Err(response.into());
-                }
+                let value = match response {
+                    JsonRpcResponseData::Error { .. } => {
+                        return Err(anyhow::anyhow!("failed fetching block").into());
+                    }
+                    JsonRpcResponseData::Result { value, .. } => value,
+                };
 
-                let block = response
-                    .result
-                    .web3_context("no error, but also no block")?;
-
-                let block: Option<ArcBlock> = serde_json::from_str(block.get())?;
+                let block: Option<ArcBlock> = serde_json::from_str(value.get())?;
 
                 let block: ArcBlock = block.web3_context("no block in the response")?;
 
@@ -344,16 +337,17 @@ impl Web3Rpcs {
         let request: JsonRpcRequest = serde_json::from_value(request)?;
 
         let response = self
-            .try_send_best_consensus_head_connection(authorization, request, None, Some(num), None)
+            .try_send_best_connection(authorization, &request, None, Some(num), None)
             .await?;
 
-        if response.error.is_some() {
-            return Err(response.into());
-        }
+        let value = match response {
+            JsonRpcResponseData::Error { .. } => {
+                return Err(anyhow::anyhow!("failed fetching block").into());
+            }
+            JsonRpcResponseData::Result { value, .. } => value,
+        };
 
-        let raw_block = response.result.web3_context("no cannonical block result")?;
-
-        let block: ArcBlock = serde_json::from_str(raw_block.get())?;
+        let block: ArcBlock = serde_json::from_str(value.get())?;
 
         let block = Web3ProxyBlock::try_from(block)?;
 
@@ -370,7 +364,7 @@ impl Web3Rpcs {
         // TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
         // Geth's subscriptions have the same potential for skipping blocks.
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
-    ) -> anyhow::Result<()> {
+    ) -> Web3ProxyResult<()> {
         let mut connection_heads = ConsensusFinder::new(self.max_block_age, self.max_block_lag);
 
         loop {
@@ -423,7 +417,7 @@ impl Web3Rpcs {
             return Ok(());
         }
 
-        let new_synced_connections = match consensus_finder
+        let new_consensus_rpcs = match consensus_finder
             .find_consensus_connections(authorization, self)
             .await
         {
@@ -436,19 +430,21 @@ impl Web3Rpcs {
             Ok(Some(x)) => x,
         };
 
+        trace!("new_synced_connections: {:#?}", new_consensus_rpcs);
+
         let watch_consensus_head_sender = self.watch_consensus_head_sender.as_ref().unwrap();
-        let consensus_tier = new_synced_connections.tier;
+        let consensus_tier = new_consensus_rpcs.tier;
         // TODO: think more about this unwrap
         let total_tiers = consensus_finder.worst_tier().unwrap_or(10);
-        let backups_needed = new_synced_connections.backups_needed;
-        let consensus_head_block = new_synced_connections.head_block.clone();
-        let num_consensus_rpcs = new_synced_connections.num_conns();
+        let backups_needed = new_consensus_rpcs.backups_needed;
+        let consensus_head_block = new_consensus_rpcs.head_block.clone();
+        let num_consensus_rpcs = new_consensus_rpcs.num_consensus_rpcs();
         let num_active_rpcs = consensus_finder.len();
-        let total_rpcs = self.by_name.read().len();
+        let total_rpcs = self.by_name.load().len();
 
         let old_consensus_head_connections = self
             .watch_consensus_rpcs_sender
-            .send_replace(Some(Arc::new(new_synced_connections)));
+            .send_replace(Some(Arc::new(new_consensus_rpcs)));
 
         let backups_voted_str = if backups_needed { "B " } else { "" };
 

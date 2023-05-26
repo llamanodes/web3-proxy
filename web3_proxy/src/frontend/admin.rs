@@ -7,6 +7,7 @@ use crate::app::Web3ProxyApp;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::user_token::UserBearerToken;
 use crate::PostLogin;
+use anyhow::Context;
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -16,15 +17,19 @@ use axum::{
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
-use entities::{admin_trail, login, pending_login, rpc_key, user};
+use entities::{
+    admin, admin_increase_balance_receipt, admin_trail, balance, login, pending_login, rpc_key,
+    user, user_tier,
+};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;
 use log::{debug, info, warn};
-use migration::sea_orm::prelude::Uuid;
+use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
+use migration::{Expr, OnConflict};
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
@@ -32,6 +37,135 @@ use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use ulid::Ulid;
+
+/// `GET /admin/increase_balance` -- As an admin, modify a user's user-tier
+///
+/// - user_address that is to credited balance
+/// - user_role_tier that is supposed to be adapted
+#[debug_handler]
+pub async fn admin_increase_balance(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Web3ProxyResponse {
+    let (caller, _) = app.bearer_is_authorized(bearer).await?;
+    let caller_id = caller.id;
+
+    // Establish connections
+    let db_conn = app
+        .db_conn()
+        .context("query_admin_modify_user needs a db")?;
+
+    // Check if the caller is an admin (if not, return early)
+    let admin_entry: admin::Model = admin::Entity::find()
+        .filter(admin::Column::UserId.eq(caller_id))
+        .one(&db_conn)
+        .await?
+        .ok_or(Web3ProxyError::AccessDenied)?;
+
+    // Get the user from params
+    let user_address: Address = params
+        .get("user_address")
+        .ok_or_else(|| {
+            Web3ProxyError::BadRequest("Unable to find user_address key in request".to_string())
+        })?
+        .parse::<Address>()
+        .map_err(|_| {
+            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".to_string())
+        })?;
+    let user_address_bytes: Vec<u8> = user_address.to_fixed_bytes().into();
+    let note: String = params
+        .get("note")
+        .ok_or_else(|| {
+            Web3ProxyError::BadRequest("Unable to find 'note' key in request".to_string())
+        })?
+        .parse::<String>()
+        .map_err(|_| {
+            Web3ProxyError::BadRequest("Unable to parse 'note' as a String".to_string())
+        })?;
+    // Get the amount from params
+    // Decimal::from_str
+    let amount: Decimal = params
+        .get("amount")
+        .ok_or_else(|| {
+            Web3ProxyError::BadRequest("Unable to get the amount key from the request".to_string())
+        })
+        .map(|x| Decimal::from_str(x))?
+        .map_err(|err| {
+            Web3ProxyError::BadRequest(format!("Unable to parse amount from the request {:?}", err))
+        })?;
+
+    let user_entry: user::Model = user::Entity::find()
+        .filter(user::Column::Address.eq(user_address_bytes.clone()))
+        .one(&db_conn)
+        .await?
+        .ok_or(Web3ProxyError::BadRequest(
+            "No user with this id found".to_string(),
+        ))?;
+
+    let increase_balance_receipt = admin_increase_balance_receipt::ActiveModel {
+        amount: sea_orm::Set(amount),
+        admin_id: sea_orm::Set(admin_entry.id),
+        deposit_to_user_id: sea_orm::Set(user_entry.id),
+        note: sea_orm::Set(note),
+        ..Default::default()
+    };
+    increase_balance_receipt.save(&db_conn).await?;
+
+    let mut out = HashMap::new();
+    out.insert(
+        "user",
+        serde_json::Value::String(format!("{:?}", user_address)),
+    );
+    out.insert("amount", serde_json::Value::String(amount.to_string()));
+
+    // Get the balance row
+    let balance_entry: balance::Model = balance::Entity::find()
+        .filter(balance::Column::UserId.eq(user_entry.id))
+        .one(&db_conn)
+        .await?
+        .context("User does not have a balance row")?;
+
+    // Finally make the user premium if balance is above 10$
+    let premium_user_tier = user_tier::Entity::find()
+        .filter(user_tier::Column::Title.eq("Premium"))
+        .one(&db_conn)
+        .await?
+        .context("Premium tier was not found!")?;
+
+    let balance_entry = balance_entry.into_active_model();
+    balance::Entity::insert(balance_entry)
+        .on_conflict(
+            OnConflict::new()
+                .values([
+                    // (
+                    //     balance::Column::Id,
+                    //     Expr::col(balance::Column::Id).add(self.frontend_requests),
+                    // ),
+                    (
+                        balance::Column::AvailableBalance,
+                        Expr::col(balance::Column::AvailableBalance).add(amount),
+                    ),
+                    // (
+                    //     balance::Column::Used,
+                    //     Expr::col(balance::Column::UsedBalance).add(self.backend_retries),
+                    // ),
+                    // (
+                    //     balance::Column::UserId,
+                    //     Expr::col(balance::Column::UserId).add(self.no_servers),
+                    // ),
+                ])
+                .to_owned(),
+        )
+        .exec(&db_conn)
+        .await?;
+    // TODO: Downgrade otherwise, right now not functioning properly
+
+    // Then read and save in one transaction
+    let response = (StatusCode::OK, Json(out)).into_response();
+
+    Ok(response)
+}
 
 /// `GET /admin/modify_role` -- As an admin, modify a user's user-tier
 ///
@@ -108,8 +242,8 @@ pub async fn admin_login_get(
     let login_domain = app
         .config
         .login_domain
-        .clone()
-        .unwrap_or_else(|| "llamanodes.com".to_string());
+        .as_deref()
+        .unwrap_or("llamanodes.com");
 
     // Also there must basically be a token, that says that one admin logins _as a user_.
     // I'm not yet fully sure how to handle with that logic specifically ...

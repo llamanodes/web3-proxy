@@ -1,11 +1,11 @@
 use super::StatType;
-use crate::http_params::get_stats_column_from_params;
+use crate::frontend::errors::Web3ProxyErrorContext;
 use crate::{
     app::Web3ProxyApp,
     frontend::errors::{Web3ProxyError, Web3ProxyResponse},
     http_params::{
         get_chain_id_from_params, get_query_start_from_params, get_query_stop_from_params,
-        get_query_window_seconds_from_params, get_user_id_from_params,
+        get_query_window_seconds_from_params,
     },
 };
 use anyhow::Context;
@@ -14,38 +14,18 @@ use axum::{
     response::IntoResponse,
     Json, TypedHeader,
 };
-use chrono::{DateTime, FixedOffset};
+use entities::sea_orm_active_enums::Role;
+use entities::{rpc_key, secondary_user};
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
+use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
-use influxdb2::FromDataPoint;
-use itertools::Itertools;
-use log::trace;
-use serde::Serialize;
-use serde_json::{json, Number, Value};
-
-// This type-API is extremely brittle! Make sure that the types conform 1-to-1 as defined here
-// https://docs.rs/influxdb2-structmap/0.2.0/src/influxdb2_structmap/value.rs.html#1-98
-#[derive(Debug, Default, FromDataPoint, Serialize)]
-pub struct AggregatedRpcAccounting {
-    chain_id: String,
-    _field: String,
-    _value: i64,
-    _time: DateTime<FixedOffset>,
-    error_response: String,
-    archive_needed: String,
-}
-
-#[derive(Debug, Default, FromDataPoint, Serialize)]
-pub struct DetailedRpcAccounting {
-    chain_id: String,
-    _field: String,
-    _value: i64,
-    _time: DateTime<FixedOffset>,
-    error_response: String,
-    archive_needed: String,
-    method: String,
-}
+use log::{error, info, warn};
+use migration::sea_orm::ColumnTrait;
+use migration::sea_orm::EntityTrait;
+use migration::sea_orm::QueryFilter;
+use serde_json::json;
+use ulid::Ulid;
 
 pub async fn query_user_stats<'a>(
     app: &'a Web3ProxyApp,
@@ -53,15 +33,24 @@ pub async fn query_user_stats<'a>(
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
-    let db_conn = app.db_conn().context("query_user_stats needs a db")?;
+    let user_id = match bearer {
+        Some(inner_bearer) => {
+            let (user, _semaphore) = app.bearer_is_authorized(inner_bearer.0 .0).await?;
+            user.id
+        }
+        None => 0,
+    };
+
+    // Return an error if the bearer is set, but the StatType is Detailed
+    if stat_response_type == StatType::Detailed && user_id == 0 {
+        return Err(Web3ProxyError::BadRequest(
+            "Detailed Stats Response requires you to authorize with a bearer token".to_owned(),
+        ));
+    }
+
     let db_replica = app
         .db_replica()
         .context("query_user_stats needs a db replica")?;
-    let mut redis_conn = app
-        .redis_conn()
-        .await
-        .context("query_user_stats had a redis connection error")?
-        .context("query_user_stats needs a redis")?;
 
     // TODO: have a getter for this. do we need a connection pool on it?
     let influxdb_client = app
@@ -69,22 +58,15 @@ pub async fn query_user_stats<'a>(
         .as_ref()
         .context("query_user_stats needs an influxdb client")?;
 
-    // get the user id first. if it is 0, we should use a cache on the app
-    let user_id =
-        get_user_id_from_params(&mut redis_conn, &db_conn, &db_replica, bearer, params).await?;
-
     let query_window_seconds = get_query_window_seconds_from_params(params)?;
     let query_start = get_query_start_from_params(params)?.timestamp();
     let query_stop = get_query_stop_from_params(params)?.timestamp();
     let chain_id = get_chain_id_from_params(app, params)?;
-    let stats_column = get_stats_column_from_params(params)?;
-
-    // query_window_seconds must be provided, and should be not 1s (?) by default ..
 
     // Return a bad request if query_start == query_stop, because then the query is empty basically
     if query_start == query_stop {
         return Err(Web3ProxyError::BadRequest(
-            "query_start and query_stop date cannot be equal. Please specify a different range"
+            "Start and Stop date cannot be equal. Please specify a (different) start date."
                 .to_owned(),
         ));
     }
@@ -95,273 +77,384 @@ pub async fn query_user_stats<'a>(
         "opt_in_proxy"
     };
 
+    // Include a hashmap to go from rpc_secret_key_id to the rpc_secret_key
+    let mut rpc_key_id_to_key = HashMap::new();
+
+    let rpc_key_filter = if user_id == 0 {
+        "".to_string()
+    } else {
+        // Fetch all rpc_secret_key_ids, and filter for these
+        let mut user_rpc_keys = rpc_key::Entity::find()
+            .filter(rpc_key::Column::UserId.eq(user_id))
+            .all(db_replica.conn())
+            .await
+            .web3_context("failed loading user's key")?
+            .into_iter()
+            .map(|x| {
+                let key = x.id.to_string();
+                let val = Ulid::from(x.secret_key);
+                rpc_key_id_to_key.insert(key.clone(), val);
+                key
+            })
+            .collect::<Vec<_>>();
+
+        // Fetch all rpc_keys where we are the subuser
+        let mut subuser_rpc_keys = secondary_user::Entity::find()
+            .filter(secondary_user::Column::UserId.eq(user_id))
+            .find_also_related(rpc_key::Entity)
+            .all(db_replica.conn())
+            // TODO: Do a join with rpc-keys
+            .await
+            .web3_context("failed loading subuser keys")?
+            .into_iter()
+            .flat_map(
+                |(subuser, wrapped_shared_rpc_key)| match wrapped_shared_rpc_key {
+                    Some(shared_rpc_key) => {
+                        if subuser.role == Role::Admin || subuser.role == Role::Owner {
+                            let key = shared_rpc_key.id.to_string();
+                            let val = Ulid::from(shared_rpc_key.secret_key);
+                            rpc_key_id_to_key.insert(key.clone(), val);
+                            Some(key)
+                        } else {
+                            None
+                        }
+                    }
+                    None => None,
+                },
+            )
+            .collect::<Vec<_>>();
+
+        user_rpc_keys.append(&mut subuser_rpc_keys);
+
+        if user_rpc_keys.is_empty() {
+            return Err(Web3ProxyError::BadRequest(
+                "User has no secret RPC keys yet".to_string(),
+            ));
+        }
+
+        // Iterate, pop and add to string
+        f!(
+            r#"|> filter(fn: (r) => contains(value: r["rpc_secret_key_id"], set: {:?}))"#,
+            user_rpc_keys
+        )
+    };
+
+    // TODO: Turn into a 500 error if bucket is not found ..
+    // Or just unwrap or so
     let bucket = &app
         .config
         .influxdb_bucket
         .clone()
-        .context("No influxdb bucket was provided")?;
-    trace!("Bucket is {:?}", bucket);
+        .context("No influxdb bucket was provided")?; // "web3_proxy";
 
-    let mut group_columns = vec![
-        "chain_id",
-        "_measurement",
-        "_field",
-        "_measurement",
-        "error_response",
-        "archive_needed",
-    ];
+    info!("Bucket is {:?}", bucket);
     let mut filter_chain_id = "".to_string();
-
-    // Add to group columns the method, if we want the detailed view as well
-    if let StatType::Detailed = stat_response_type {
-        group_columns.push("method");
-    }
-
-    if chain_id == 0 {
-        group_columns.push("chain_id");
-    } else {
+    if chain_id != 0 {
         filter_chain_id = f!(r#"|> filter(fn: (r) => r["chain_id"] == "{chain_id}")"#);
     }
 
-    let group_columns = serde_json::to_string(&json!(group_columns)).unwrap();
+    // Fetch and request for balance
 
-    let group = match stat_response_type {
-        StatType::Aggregated => f!(r#"|> group(columns: {group_columns})"#),
+    info!(
+        "Query start and stop are: {:?} {:?}",
+        query_start, query_stop
+    );
+    // info!("Query column parameters are: {:?}", stats_column);
+    info!("Query measurement is: {:?}", measurement);
+    info!("Filters are: {:?}", filter_chain_id); // filter_field
+    info!("window seconds are: {:?}", query_window_seconds);
+
+    let drop_method = match stat_response_type {
+        StatType::Aggregated => f!(r#"|> drop(columns: ["method"])"#),
         StatType::Detailed => "".to_string(),
     };
-
-    let filter_field = match stat_response_type {
-        StatType::Aggregated => {
-            f!(r#"|> filter(fn: (r) => r["_field"] == "{stats_column}")"#)
-        }
-        // TODO: Detailed should still filter it, but just "group-by" method (call it once per each method ...
-        // Or maybe it shouldn't filter it ...
-        StatType::Detailed => "".to_string(),
-    };
-
-    trace!("query time range: {:?} - {:?}", query_start, query_stop);
-    trace!("stats_column: {:?}", stats_column);
-    trace!("measurement: {:?}", measurement);
-    trace!("filters: {:?} {:?}", filter_field, filter_chain_id);
-    trace!("group: {:?}", group);
-    trace!("query_window_seconds: {:?}", query_window_seconds);
 
     let query = f!(r#"
-        from(bucket: "{bucket}")
-            |> range(start: {query_start}, stop: {query_stop})
-            |> filter(fn: (r) => r["_measurement"] == "{measurement}")
-            {filter_field}
-            {filter_chain_id}
-            {group}
-            |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
-            |> group()
+    base = from(bucket: "{bucket}")
+        |> range(start: {query_start}, stop: {query_stop})
+        {rpc_key_filter}
+        |> filter(fn: (r) => r["_measurement"] == "{measurement}")
+        {filter_chain_id}
+        {drop_method}
+
+    base
+        |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
+        |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+        |> drop(columns: ["balance"])
+        |> group(columns: ["_time", "_measurement", "archive_needed", "chain_id", "error_response", "method", "rpc_secret_key_id"])
+        |> sort(columns: ["frontend_requests"])
+        |> map(fn:(r) => ({{ r with "sum_credits_used": float(v: r["sum_credits_used"]) }}))
+        |> cumulativeSum(columns: ["backend_requests", "cache_hits", "cache_misses", "frontend_requests", "sum_credits_used", "sum_request_bytes", "sum_response_bytes", "sum_response_millis"])
+        |> sort(columns: ["frontend_requests"], desc: true)
+        |> limit(n: 1)
+        |> group()
+        |> sort(columns: ["_time", "_measurement", "archive_needed", "chain_id", "error_response", "method", "rpc_secret_key_id"], desc: true)
     "#);
 
-    trace!("Raw query to db is: {:?}", query);
+    info!("Raw query to db is: {:?}", query);
     let query = Query::new(query.to_string());
-    trace!("Query to db is: {:?}", query);
+    info!("Query to db is: {:?}", query);
 
-    // Return a different result based on the query
-    let datapoints = match stat_response_type {
-        StatType::Aggregated => {
-            let influx_responses: Vec<AggregatedRpcAccounting> = influxdb_client
-                .query::<AggregatedRpcAccounting>(Some(query))
-                .await?;
-            trace!("Influx responses are {:?}", &influx_responses);
-            for res in &influx_responses {
-                trace!("Resp is: {:?}", res);
-            }
+    // Make the query and collect all data
+    let raw_influx_responses: Vec<FluxRecord> = influxdb_client
+        .query_raw(Some(query.clone()))
+        .await
+        .context("failed parsing query result into a FluxRecord")?;
 
-            influx_responses
-                .into_iter()
-                .map(|x| (x._time, x))
-                .into_group_map()
-                .into_iter()
-                .map(|(group, grouped_items)| {
-                    trace!("Group is: {:?}", group);
-
-                    // Now put all the fields next to each other
-                    // (there will be exactly one field per timestamp, but we want to arrive at a new object)
-                    let mut out = HashMap::new();
-                    // Could also add a timestamp
-
-                    let mut archive_requests = 0;
-                    let mut error_responses = 0;
-
-                    out.insert("method".to_owned(), json!("null"));
-
-                    for x in grouped_items {
-                        trace!("Iterating over grouped item {:?}", x);
-
-                        let key = format!("total_{}", x._field).to_string();
-                        trace!("Looking at {:?}: {:?}", key, x._value);
-
-                        // Insert it once, and then fix it
-                        match out.get_mut(&key) {
-                            Some(existing) => {
-                                match existing {
-                                    Value::Number(old_value) => {
-                                        trace!("Old value is {:?}", old_value);
-                                        // unwrap will error when someone has too many credits ..
-                                        let old_value = old_value.as_i64().unwrap();
-                                        *existing = serde_json::Value::Number(Number::from(
-                                            old_value + x._value,
-                                        ));
-                                        trace!("New value is {:?}", existing);
-                                    }
-                                    _ => {
-                                        panic!("Should be nothing but a number")
-                                    }
-                                };
+    // Basically rename all items to be "total",
+    // calculate number of "archive_needed" and "error_responses" through their boolean representations ...
+    // HashMap<String, serde_json::Value>
+    // let mut datapoints = HashMap::new();
+    // TODO: I must be able to probably zip the balance query...
+    let datapoints = raw_influx_responses
+        .into_iter()
+        // .into_values()
+        .map(|x| x.values)
+        .map(|value_map| {
+            // Unwrap all relevant numbers
+            // BTreeMap<String, value::Value>
+            let mut out: HashMap<String, serde_json::Value> = HashMap::new();
+            value_map.into_iter().for_each(|(key, value)| {
+                if key == "_measurement" {
+                    match value {
+                        influxdb2_structmap::value::Value::String(inner) => {
+                            if inner == "opt_in_proxy" {
+                                out.insert(
+                                    "collection".to_owned(),
+                                    serde_json::Value::String("opt-in".to_owned()),
+                                );
+                            } else if inner == "global_proxy" {
+                                out.insert(
+                                    "collection".to_owned(),
+                                    serde_json::Value::String("global".to_owned()),
+                                );
+                            } else {
+                                warn!("Some datapoints are not part of any _measurement!");
+                                out.insert(
+                                    "collection".to_owned(),
+                                    serde_json::Value::String("unknown".to_owned()),
+                                );
                             }
-                            None => {
-                                trace!("Does not exist yet! Insert new!");
-                                out.insert(key, serde_json::Value::Number(Number::from(x._value)));
-                            }
-                        };
-
-                        if !out.contains_key("query_window_timestamp") {
-                            out.insert(
-                                "query_window_timestamp".to_owned(),
-                                // serde_json::Value::Number(x.time.timestamp().into())
-                                json!(x._time.timestamp()),
-                            );
                         }
-
-                        // Interpret archive needed as a boolean
-                        let archive_needed = match x.archive_needed.as_str() {
-                            "true" => true,
-                            "false" => false,
-                            _ => {
-                                panic!("This should never be!")
-                            }
-                        };
-                        let error_response = match x.error_response.as_str() {
-                            "true" => true,
-                            "false" => false,
-                            _ => {
-                                panic!("This should never be!")
-                            }
-                        };
-
-                        // Add up to archive requests and error responses
-                        // TODO: Gotta double check if errors & archive is based on frontend requests, or other metrics
-                        if x._field == "frontend_requests" && archive_needed {
-                            archive_requests += x._value as u64 // This is the number of requests
-                        }
-                        if x._field == "frontend_requests" && error_response {
-                            error_responses += x._value as u64
+                        _ => {
+                            error!("_measurement should always be a String!");
                         }
                     }
-
-                    out.insert("archive_request".to_owned(), json!(archive_requests));
-                    out.insert("error_response".to_owned(), json!(error_responses));
-
-                    json!(out)
-                })
-                .collect::<Vec<_>>()
-        }
-        StatType::Detailed => {
-            let influx_responses: Vec<DetailedRpcAccounting> = influxdb_client
-                .query::<DetailedRpcAccounting>(Some(query))
-                .await?;
-            trace!("Influx responses are {:?}", &influx_responses);
-            for res in &influx_responses {
-                trace!("Resp is: {:?}", res);
-            }
-
-            // Group by all fields together ..
-            influx_responses
-                .into_iter()
-                .map(|x| ((x._time, x.method.clone()), x))
-                .into_group_map()
-                .into_iter()
-                .map(|(group, grouped_items)| {
-                    // Now put all the fields next to each other
-                    // (there will be exactly one field per timestamp, but we want to arrive at a new object)
-                    let mut out = HashMap::new();
-                    // Could also add a timestamp
-
-                    let mut archive_requests = 0;
-                    let mut error_responses = 0;
-
-                    // Should probably move this outside ... (?)
-                    let method = group.1;
-                    out.insert("method".to_owned(), json!(method));
-
-                    for x in grouped_items {
-                        trace!("Iterating over grouped item {:?}", x);
-
-                        let key = format!("total_{}", x._field).to_string();
-                        trace!("Looking at {:?}: {:?}", key, x._value);
-
-                        // Insert it once, and then fix it
-                        match out.get_mut(&key) {
-                            Some(existing) => {
-                                match existing {
-                                    Value::Number(old_value) => {
-                                        trace!("Old value is {:?}", old_value);
-
-                                        // unwrap will error when someone has too many credits ..
-                                        let old_value = old_value.as_i64().unwrap();
-                                        *existing = serde_json::Value::Number(Number::from(
-                                            old_value + x._value,
-                                        ));
-
-                                        trace!("New value is {:?}", existing.as_i64());
-                                    }
-                                    _ => {
-                                        panic!("Should be nothing but a number")
-                                    }
-                                };
-                            }
-                            None => {
-                                trace!("Does not exist yet! Insert new!");
-                                out.insert(key, serde_json::Value::Number(Number::from(x._value)));
-                            }
-                        };
-
-                        if !out.contains_key("query_window_timestamp") {
+                } else if key == "_stop" {
+                    match value {
+                        influxdb2_structmap::value::Value::TimeRFC(inner) => {
                             out.insert(
-                                "query_window_timestamp".to_owned(),
-                                json!(x._time.timestamp()),
+                                "stop_time".to_owned(),
+                                serde_json::Value::String(inner.to_string()),
                             );
                         }
-
-                        // Interpret archive needed as a boolean
-                        let archive_needed = match x.archive_needed.as_str() {
-                            "true" => true,
-                            "false" => false,
-                            _ => {
-                                panic!("This should never be!")
-                            }
-                        };
-                        let error_response = match x.error_response.as_str() {
-                            "true" => true,
-                            "false" => false,
-                            _ => {
-                                panic!("This should never be!")
-                            }
-                        };
-
-                        // Add up to archive requests and error responses
-                        // TODO: Gotta double check if errors & archive is based on frontend requests, or other metrics
-                        if x._field == "frontend_requests" && archive_needed {
-                            archive_requests += x._value as i32 // This is the number of requests
+                        _ => {
+                            error!("_stop should always be a TimeRFC!");
                         }
-                        if x._field == "frontend_requests" && error_response {
-                            error_responses += x._value as i32
+                    };
+                } else if key == "_time" {
+                    match value {
+                        influxdb2_structmap::value::Value::TimeRFC(inner) => {
+                            out.insert(
+                                "time".to_owned(),
+                                serde_json::Value::String(inner.to_string()),
+                            );
+                        }
+                        _ => {
+                            error!("_stop should always be a TimeRFC!");
                         }
                     }
+                } else if key == "backend_requests" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_backend_requests".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("backend_requests should always be a Long!");
+                        }
+                    }
+                } else if key == "balance" {
+                    match value {
+                        influxdb2_structmap::value::Value::Double(inner) => {
+                            out.insert("balance".to_owned(), json!(f64::from(inner)));
+                        }
+                        _ => {
+                            error!("balance should always be a Double!");
+                        }
+                    }
+                } else if key == "cache_hits" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_cache_hits".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("cache_hits should always be a Long!");
+                        }
+                    }
+                } else if key == "cache_misses" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_cache_misses".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("cache_misses should always be a Long!");
+                        }
+                    }
+                } else if key == "frontend_requests" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_frontend_requests".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("frontend_requests should always be a Long!");
+                        }
+                    }
+                } else if key == "no_servers" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "no_servers".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("no_servers should always be a Long!");
+                        }
+                    }
+                } else if key == "sum_credits_used" {
+                    match value {
+                        influxdb2_structmap::value::Value::Double(inner) => {
+                            out.insert("total_credits_used".to_owned(), json!(f64::from(inner)));
+                        }
+                        _ => {
+                            error!("sum_credits_used should always be a Double!");
+                        }
+                    }
+                } else if key == "sum_request_bytes" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_request_bytes".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("sum_request_bytes should always be a Long!");
+                        }
+                    }
+                } else if key == "sum_response_bytes" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_response_bytes".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("sum_response_bytes should always be a Long!");
+                        }
+                    }
+                } else if key == "rpc_secret_key_id" {
+                    match value {
+                        influxdb2_structmap::value::Value::String(inner) => {
+                            out.insert(
+                                "rpc_key".to_owned(),
+                                serde_json::Value::String(
+                                    rpc_key_id_to_key.get(&inner).unwrap().to_string(),
+                                ),
+                            );
+                        }
+                        _ => {
+                            error!("rpc_secret_key_id should always be a String!");
+                        }
+                    }
+                } else if key == "sum_response_millis" {
+                    match value {
+                        influxdb2_structmap::value::Value::Long(inner) => {
+                            out.insert(
+                                "total_response_millis".to_owned(),
+                                serde_json::Value::Number(inner.into()),
+                            );
+                        }
+                        _ => {
+                            error!("sum_response_millis should always be a Long!");
+                        }
+                    }
+                }
+                // Make this if detailed ...
+                else if stat_response_type == StatType::Detailed && key == "method" {
+                    match value {
+                        influxdb2_structmap::value::Value::String(inner) => {
+                            out.insert("method".to_owned(), serde_json::Value::String(inner));
+                        }
+                        _ => {
+                            error!("method should always be a String!");
+                        }
+                    }
+                } else if key == "chain_id" {
+                    match value {
+                        influxdb2_structmap::value::Value::String(inner) => {
+                            out.insert("chain_id".to_owned(), serde_json::Value::String(inner));
+                        }
+                        _ => {
+                            error!("chain_id should always be a String!");
+                        }
+                    }
+                } else if key == "archive_needed" {
+                    match value {
+                        influxdb2_structmap::value::Value::String(inner) => {
+                            out.insert(
+                                "archive_needed".to_owned(),
+                                if inner == "true" {
+                                    serde_json::Value::Bool(true)
+                                } else if inner == "false" {
+                                    serde_json::Value::Bool(false)
+                                } else {
+                                    serde_json::Value::String("error".to_owned())
+                                },
+                            );
+                        }
+                        _ => {
+                            error!("archive_needed should always be a String!");
+                        }
+                    }
+                } else if key == "error_response" {
+                    match value {
+                        influxdb2_structmap::value::Value::String(inner) => {
+                            out.insert(
+                                "error_response".to_owned(),
+                                if inner == "true" {
+                                    serde_json::Value::Bool(true)
+                                } else if inner == "false" {
+                                    serde_json::Value::Bool(false)
+                                } else {
+                                    serde_json::Value::String("error".to_owned())
+                                },
+                            );
+                        }
+                        _ => {
+                            error!("error_response should always be a Long!");
+                        }
+                    }
+                }
+            });
 
-                    out.insert("archive_request".to_owned(), json!(archive_requests));
-                    out.insert("error_response".to_owned(), json!(error_responses));
-
-                    json!(out)
-                })
-                .collect::<Vec<_>>()
-        }
-    };
+            // datapoints.insert(out.get("time"), out);
+            json!(out)
+        })
+        .collect::<Vec<_>>();
 
     // I suppose archive requests could be either gathered by default (then summed up), or retrieved on a second go.
     // Same with error responses ..

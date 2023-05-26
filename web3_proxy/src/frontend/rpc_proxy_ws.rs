@@ -5,12 +5,12 @@
 use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, RequestMetadata};
 use super::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::jsonrpc::JsonRpcId;
-use crate::stats::RpcQueryStats;
 use crate::{
     app::Web3ProxyApp,
     frontend::errors::Web3ProxyResult,
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
 };
+use anyhow::Context;
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -20,6 +20,8 @@ use axum::{
 };
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
+use ethers::types::U64;
+use fstrings::{f, format_args_f};
 use futures::SinkExt;
 use futures::{
     future::AbortHandle,
@@ -28,12 +30,13 @@ use futures::{
 use handlebars::Handlebars;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{info, trace, warn};
+use log::{info, trace};
 use serde_json::json;
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock};
 
+/// How to select backend servers for a request
 #[derive(Copy, Clone, Debug)]
 pub enum ProxyMode {
     /// send to the "best" synced server
@@ -43,6 +46,7 @@ pub enum ProxyMode {
     /// send to all servers for benchmarking. return the fastest non-error response
     Versus,
     /// send all requests and responses to kafka
+    /// TODO: should this be seperate from best/fastest/versus?
     Debug,
 }
 
@@ -314,110 +318,121 @@ async fn proxy_web3_socket(
 }
 
 /// websockets support a few more methods than http clients
+/// TODO: i think this subscriptions hashmap grows unbounded
 async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
     authorization: &Arc<Authorization>,
     payload: &str,
     response_sender: &flume::Sender<Message>,
     subscription_count: &AtomicUsize,
-    subscriptions: Arc<RwLock<HashMap<String, AbortHandle>>>,
-) -> (Message, Option<OwnedSemaphorePermit>) {
+    subscriptions: Arc<RwLock<HashMap<U64, AbortHandle>>>,
+) -> Web3ProxyResult<(Message, Option<OwnedSemaphorePermit>)> {
     let (authorization, semaphore) = match authorization.check_again(&app).await {
         Ok((a, s)) => (a, s),
         Err(err) => {
             let (_, err) = err.into_response_parts();
 
-            let err = serde_json::to_string(&err).expect("to_string should always work here");
+            let err = JsonRpcForwardedResponse::from_response_data(err, Default::default());
 
-            return (Message::Text(err), None);
+            let err = serde_json::to_string(&err)?;
+
+            return Ok((Message::Text(err), None));
         }
     };
 
     // TODO: do any clients send batches over websockets?
-    let (id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
+    // TODO: change response into response_data
+    let (response_id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
         Ok(json_request) => {
-            let id = json_request.id.clone();
+            let response_id = json_request.id.clone();
 
-            let response: Web3ProxyResult<JsonRpcForwardedResponseEnum> = match &json_request.method
-                [..]
-            {
-                "eth_subscribe" => {
-                    // TODO: how can we subscribe with proxy_mode?
-                    match app
-                        .eth_subscribe(
-                            authorization.clone(),
-                            json_request,
-                            subscription_count,
-                            response_sender.clone(),
-                        )
+            // TODO: move this to a seperate function so we can use the try operator
+            let response: Web3ProxyResult<JsonRpcForwardedResponseEnum> =
+                match &json_request.method[..] {
+                    "eth_subscribe" => {
+                        // TODO: how can we subscribe with proxy_mode?
+                        match app
+                            .eth_subscribe(
+                                authorization.clone(),
+                                json_request,
+                                subscription_count,
+                                response_sender.clone(),
+                            )
+                            .await
+                        {
+                            Ok((handle, response)) => {
+                                {
+                                    let mut x = subscriptions.write().await;
+
+                                    let result: &serde_json::value::RawValue = response
+                                        .result
+                                        .as_ref()
+                                        .context("there should be a result here")?;
+
+                                    // TODO: there must be a better way to turn a RawValue
+                                    let k: U64 = serde_json::from_str(result.get())
+                                        .context("subscription ids must be U64s")?;
+
+                                    x.insert(k, handle);
+                                };
+
+                                Ok(response.into())
+                            }
+                            Err(err) => Err(err),
+                        }
+                    }
+                    "eth_unsubscribe" => {
+                        let request_metadata =
+                            RequestMetadata::new(&app, authorization.clone(), &json_request, None)
+                                .await;
+
+                        #[derive(serde::Deserialize)]
+                        struct EthUnsubscribeParams([U64; 1]);
+
+                        if let Some(params) = json_request.params {
+                            match serde_json::from_value(params) {
+                                Ok::<EthUnsubscribeParams, _>(params) => {
+                                    let subscription_id = &params.0[0];
+
+                                    // TODO: is this the right response?
+                                    let partial_response = {
+                                        let mut x = subscriptions.write().await;
+                                        match x.remove(subscription_id) {
+                                            None => false,
+                                            Some(handle) => {
+                                                handle.abort();
+                                                true
+                                            }
+                                        }
+                                    };
+
+                                    // TODO: don't create the response here. use a JsonRpcResponseData instead
+                                    let response = JsonRpcForwardedResponse::from_value(
+                                        json!(partial_response),
+                                        response_id.clone(),
+                                    );
+
+                                    request_metadata.add_response(&response);
+
+                                    Ok(response.into())
+                                }
+                                Err(err) => Err(Web3ProxyError::BadRequest(f!(
+                                    "incorrect params given for eth_unsubscribe. {err:?}"
+                                ))),
+                            }
+                        } else {
+                            Err(Web3ProxyError::BadRequest(
+                                "no params given for eth_unsubscribe".to_string(),
+                            ))
+                        }
+                    }
+                    _ => app
+                        .proxy_web3_rpc(authorization.clone(), json_request.into())
                         .await
-                    {
-                        Ok((handle, response)) => {
-                            // TODO: better key
-                            let mut x = subscriptions.write().await;
+                        .map(|(status_code, response, _)| response),
+                };
 
-                            x.insert(
-                                response
-                                    .result
-                                    .as_ref()
-                                    // TODO: what if there is an error?
-                                    .expect("response should always have a result, not an error")
-                                    .to_string(),
-                                handle,
-                            );
-
-                            Ok(response.into())
-                        }
-                        Err(err) => Err(err),
-                    }
-                }
-                "eth_unsubscribe" => {
-                    // TODO: move this logic into the app?
-                    let request_bytes = json_request.num_bytes();
-
-                    let request_metadata = Arc::new(RequestMetadata::new(request_bytes));
-
-                    let subscription_id = json_request.params.unwrap().to_string();
-
-                    let mut x = subscriptions.write().await;
-
-                    // TODO: is this the right response?
-                    let partial_response = match x.remove(&subscription_id) {
-                        None => false,
-                        Some(handle) => {
-                            handle.abort();
-                            true
-                        }
-                    };
-
-                    drop(x);
-
-                    let response =
-                        JsonRpcForwardedResponse::from_value(json!(partial_response), id.clone());
-
-                    if let Some(stat_sender) = app.stat_sender.as_ref() {
-                        let response_stat = RpcQueryStats::new(
-                            Some(json_request.method.clone()),
-                            authorization.clone(),
-                            request_metadata,
-                            response.num_bytes(),
-                        );
-
-                        if let Err(err) = stat_sender.send_async(response_stat.into()).await {
-                            // TODO: what should we do?
-                            warn!("stat_sender failed during eth_unsubscribe: {:?}", err);
-                        }
-                    }
-
-                    Ok(response.into())
-                }
-                _ => app
-                    .proxy_web3_rpc(authorization.clone(), json_request.into())
-                    .await
-                    .map(|(response, _)| response),
-            };
-
-            (id, response)
+            (response_id, response)
         }
         Err(err) => {
             let id = JsonRpcId::None.to_raw_value();
@@ -428,13 +443,15 @@ async fn handle_socket_payload(
     let response_str = match response {
         Ok(x) => serde_json::to_string(&x).expect("to_string should always work here"),
         Err(err) => {
-            let (_, mut response) = err.into_response_parts();
-            response.id = id;
+            let (_, response_data) = err.into_response_parts();
+
+            let response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
+
             serde_json::to_string(&response).expect("to_string should always work here")
         }
     };
 
-    (Message::Text(response_str), semaphore)
+    Ok((Message::Text(response_str), semaphore))
 }
 
 async fn read_web3_socket(
@@ -443,7 +460,7 @@ async fn read_web3_socket(
     mut ws_rx: SplitStream<WebSocket>,
     response_sender: flume::Sender<Message>,
 ) {
-    // TODO: need a concurrent hashmap
+    // RwLock should be fine here. a user isn't going to be opening tons of subscriptions
     let subscriptions = Arc::new(RwLock::new(HashMap::new()));
     let subscription_count = Arc::new(AtomicUsize::new(1));
 
@@ -467,16 +484,17 @@ async fn read_web3_socket(
 
                         // new message from our client. forward to a backend and then send it through response_tx
                         let response_msg = match msg {
-                            Message::Text(payload) => {
+                            Message::Text(ref payload) => {
+                                // TODO: do not unwrap!
                                 let (msg, s) = handle_socket_payload(
                                     app.clone(),
                                     &authorization,
-                                    &payload,
+                                    payload,
                                     &response_sender,
                                     &subscription_count,
                                     subscriptions,
                                 )
-                                .await;
+                                .await.unwrap();
 
                                 _semaphore = s;
 
@@ -499,6 +517,7 @@ async fn read_web3_socket(
                             Message::Binary(mut payload) => {
                                 let payload = from_utf8_mut(&mut payload).unwrap();
 
+                                // TODO: do not unwrap!
                                 let (msg, s) = handle_socket_payload(
                                     app.clone(),
                                     &authorization,
@@ -507,7 +526,7 @@ async fn read_web3_socket(
                                     &subscription_count,
                                     subscriptions,
                                 )
-                                .await;
+                                .await.unwrap();
 
                                 _semaphore = s;
 
