@@ -60,7 +60,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20230307_002623_migrate_rpc_accounting_to_rpc_accounting_v2::Migration),
             Box::new(m20230412_171916_modify_secondary_user_add_primary_user::Migration),
             Box::new(m20230422_172555_premium_downgrade_logic::Migration),
-            Box::new(m20230511_161214_remove_columns_statsv2_origin_and_method::Migration),
             Box::new(m20230512_220213_allow_null_rpc_key_id_in_stats_v2::Migration),
             Box::new(m20230514_114803_admin_add_credits::Migration),
         ]
