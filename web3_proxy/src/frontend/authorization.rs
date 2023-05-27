@@ -7,6 +7,7 @@ use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
 use crate::user_token::UserBearerToken;
+use anyhow::Context;
 use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
