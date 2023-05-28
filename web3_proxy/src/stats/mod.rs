@@ -3,11 +3,13 @@
 pub mod db_queries;
 pub mod influxdb_queries;
 mod stat_buffer;
+
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
+use std::borrow::BorrowMut;
 use std::cmp;
 
-use crate::app::RpcSecretKeyCache;
-use crate::frontend::authorization::{Authorization, RequestMetadata};
+use crate::app::{RpcSecretKeyCache, UserBalanceCache};
+use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
@@ -25,7 +27,7 @@ use migration::sea_orm::{
     QueryFilter, TransactionTrait,
 };
 use migration::{Expr, LockType, OnConflict};
-use num_traits::ToPrimitive;
+use num_traits::{clamp, clamp_min, ToPrimitive};
 use parking_lot::Mutex;
 use std::cmp::max;
 use std::num::NonZeroU64;
@@ -58,6 +60,8 @@ pub struct RpcQueryStats {
     pub response_timestamp: i64,
     /// Credits used signifies how how much money was used up
     pub credits_used: Decimal,
+    /// Last credits used
+    pub latest_balance: Decimal,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
@@ -216,11 +220,9 @@ impl BufferedRpcQueryStats {
         self.sum_credits_used += stat.credits_used;
 
         // Also record the latest balance for this user ..
-        self.latest_balance = stat
-            .authorization
-            .checks
-            .balance
-            .unwrap_or(Decimal::from(0));
+        // Also subtract the used balance from the cache so we
+        // TODO: We are already using the cache. We could also inject the cache into save_tsdb
+        self.latest_balance = stat.latest_balance;
     }
 
     /// Check a user's balance and possibly downgrade him in the cache
@@ -232,7 +234,8 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         db_conn: &DatabaseConnection,
         key: RpcQueryKey,
-        rpc_secret_key_cache: Option<&RpcSecretKeyCache>,
+        rpc_secret_key_cache: RpcSecretKeyCache,
+        user_balance_cache: UserBalanceCache,
     ) -> Web3ProxyResult<()> {
         if key.response_timestamp == 0 {
             return Err(Web3ProxyError::Anyhow(anyhow!(
@@ -243,6 +246,8 @@ impl BufferedRpcQueryStats {
         }
 
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
+
+        // TODO: Could add last balance here (can take the element from the cache, and RpcQueryKey::AuthorizationCheck)
 
         // =============================== //
         //       UPDATE STATISTICS         //
@@ -466,55 +471,40 @@ impl BufferedRpcQueryStats {
             active_referee_entity.save(&txn).await?;
         }
 
-        // =============================== //
-        //  DOWNGRADE USER ROLE IN CACHE   //
-        // =============================== //
-        // TODO: Only do it in cache, not like this!
-        // let new_balance_entry = balance::Entity::find()
-        //     .filter(balance::Column::Id.eq(sender_balance_id))
-        //     .one(&txn)
-        //     .await?
-        //     .context("Could not find the newly inserted balance_entry, something went wrong!")?;
-        //
-        // let downgrade_user = match user::Entity::find()
-        //     .filter(user::Column::Id.eq(sender_rpc_entity))
-        //     .one(&txn)
-        //     .await?
-        // {
-        //     Some(x) => x,
-        //     None => {
-        //         warn!("No user was found with this sender id!");
-        //         return Ok(());
-        //     }
-        // };
-        //
-        // let downgrade_user_role = user_tier::Entity::find()
-        //     .filter(user_tier::Column::Id.eq(downgrade_user.user_tier_id))
-        //     .one(&txn)
-        //     .await?
-        //     .context(format!(
-        //         "The foreign key for the user's user_tier_id was not found! {:?}",
-        //         downgrade_user.user_tier_id
-        //     ))?;
+        // ============================================================= //
+        //  INVALIDATE USER CACHE FOR CALCULATION IF BALANCE IS TOO LOW  //
+        // ============================================================= //
+        // Gotta update the balance in authorization checks ...
 
-        // // Downgrade a user to premium - out of funds if there's less than 10$ in the account, and if the user was premium before
-        // // TODO: lets let them get under $1
-        // // TODO: instead of checking for a specific title, downgrade if the downgrade id is set to anything
-        // if new_available_balance < Decimal::from(10u64) && downgrade_user_role.title == "Premium" {
-        //     // TODO: we could do this outside the balance low block, but I think its fine. or better, update the cache if <$10 and downgrade if <$1
-        //     if let Some(rpc_secret_key_cache) = rpc_secret_key_cache {
-        //         error!("expire (or probably better to update) the user cache now that the balance is low");
-        //         // actually i think we need to have 2 caches. otherwise users with 2 keys are going to have seperate caches
-        //         // 1. rpc_secret_key_id -> AuthorizationChecks (cuz we don't want to hit the db every time)
-        //         // 2. user_id -> Balance
-        //     }
-        //
-        //     // Only downgrade the user in local process memory, not elsewhere
-        //
-        //     // let mut active_downgrade_user = downgrade_user.into_active_model();
-        //     // active_downgrade_user.user_tier_id = sea_orm::Set(downgrade_user_role.id);
-        //     // active_downgrade_user.save(db_conn).await?;
-        // }
+        // Invalidate cache if user is below 10$ credits (premium downgrade condition)
+        // Reduce credits if there was no issue
+        // This is not atomic, so this may be an issue because it's not sequentially consistent across threads
+        // It is a good-enough approximation though, and if the TTL for the balance cache is high enough, this should be ok
+        // TODO: Ask about feedback here, prob cache with no modification, and some read-write may be more accurate ...
+        let latest_balance = user_balance_cache
+            .get(&sender_rpc_entity.user_id)
+            .unwrap_or(Decimal::from(0));
+        user_balance_cache.insert(
+            sender_rpc_entity.user_id,
+            clamp_min(latest_balance - self.sum_credits_used, Decimal::from(0)),
+        );
+
+        // Should only refresh cache if the premium threshold is crossed
+        if (latest_balance >= Decimal::from(10))
+            && (latest_balance - self.sum_credits_used) < Decimal::from(10)
+        {
+            let rpc_keys = rpc_key::Entity::find()
+                .filter(rpc_key::Column::UserId.eq(sender_rpc_entity.user_id))
+                .all(&txn)
+                .await?;
+
+            for rpc_key_entity in rpc_keys {
+                // TODO: Not sure which one was inserted, just delete both ...
+                rpc_secret_key_cache.remove(&RpcSecretKey::Uuid(rpc_key_entity.secret_key));
+                rpc_secret_key_cache.remove(&RpcSecretKey::Ulid(rpc_key_entity.secret_key.into()));
+                rpc_secret_key_cache.remove(&RpcSecretKey::from(rpc_key_entity.secret_key));
+            }
+        }
 
         txn.commit().await?;
 
@@ -643,6 +633,7 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
             response_millis,
             response_timestamp,
             credits_used,
+            latest_balance: metadata.latest_balance,
         };
 
         Ok(x)

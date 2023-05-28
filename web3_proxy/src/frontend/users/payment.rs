@@ -453,6 +453,7 @@ pub async fn user_balance_post(
         receipt.save(&txn).await?;
 
         // Invalidate the user's cache for all rpc-keys so tier can be updated
+        // For payments, the user's RPC keys and balance should always be invalidated ...
         let rpc_keys = rpc_key::Entity::find()
             .filter(rpc_key::Column::UserId.eq(recipient.id))
             .all(&txn)
@@ -460,6 +461,9 @@ pub async fn user_balance_post(
 
         txn.commit().await?;
         debug!("Saved to db");
+
+        app.user_balance_cache
+            .remove(&user_balance.user_id.unwrap());
 
         for rpc_key_entity in rpc_keys {
             // TODO: Not sure which one was inserted, just delete both ...

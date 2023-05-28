@@ -1,5 +1,5 @@
 use super::{AppStat, RpcQueryKey};
-use crate::app::{RpcSecretKeyCache, Web3ProxyJoinHandle};
+use crate::app::{RpcSecretKeyCache, UserBalanceCache, Web3ProxyJoinHandle};
 use crate::frontend::errors::Web3ProxyResult;
 use derive_more::From;
 use futures::stream;
@@ -8,6 +8,7 @@ use influxdb2::api::write::TimestampPrecision;
 use log::{error, info, trace};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time::interval;
@@ -43,7 +44,8 @@ pub struct StatBuffer {
     global_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     influxdb_client: Option<influxdb2::Client>,
     opt_in_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
-    rpc_secret_key_cache: Option<RpcSecretKeyCache>,
+    rpc_secret_key_cache: RpcSecretKeyCache,
+    user_balance_cache: UserBalanceCache,
     timestamp_precision: TimestampPrecision,
     tsdb_save_interval_seconds: u32,
 }
@@ -58,6 +60,7 @@ impl StatBuffer {
         db_save_interval_seconds: u32,
         influxdb_client: Option<influxdb2::Client>,
         rpc_secret_key_cache: Option<RpcSecretKeyCache>,
+        user_balance_cache: Option<UserBalanceCache>,
         shutdown_receiver: broadcast::Receiver<()>,
         tsdb_save_interval_seconds: u32,
     ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
@@ -77,7 +80,8 @@ impl StatBuffer {
             global_timeseries_buffer: Default::default(),
             influxdb_client,
             opt_in_timeseries_buffer: Default::default(),
-            rpc_secret_key_cache,
+            rpc_secret_key_cache: rpc_secret_key_cache.unwrap(),
+            user_balance_cache: user_balance_cache.unwrap(),
             timestamp_precision,
             tsdb_save_interval_seconds,
         };
@@ -183,7 +187,8 @@ impl StatBuffer {
                         self.chain_id,
                         db_conn,
                         key,
-                        self.rpc_secret_key_cache.as_ref(),
+                        self.rpc_secret_key_cache.clone(),
+                        self.user_balance_cache.clone(), // Is cloning the Cache ok
                     )
                     .await
                 {

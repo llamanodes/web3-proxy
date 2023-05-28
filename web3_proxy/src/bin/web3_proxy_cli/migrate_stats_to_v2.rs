@@ -4,6 +4,7 @@ use entities::{rpc_accounting, rpc_key};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use log::{error, info};
+use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::QueryOrder;
 use migration::sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, UpdateResult,
@@ -78,6 +79,7 @@ impl MigrateStatsToV2 {
             Some(db_conn.clone()),
             30,
             influxdb_client.clone(),
+            None,
             None,
             rpc_account_shutdown_recevier,
             1,
@@ -169,6 +171,8 @@ impl MigrateStatsToV2 {
 
                     let request_ulid = Ulid::new();
 
+                    let latest_balance = Decimal::from(0);
+
                     // Create RequestMetadata
                     let request_metadata = RequestMetadata {
                         archive_request: x.archive_request.into(),
@@ -191,6 +195,7 @@ impl MigrateStatsToV2 {
                         start_instant: Instant::now(),
                         stat_sender: Some(stat_sender.clone()),
                         request_ulid,
+                        latest_balance,
                     };
 
                     if let Some(x) = request_metadata.try_send_stat()? {

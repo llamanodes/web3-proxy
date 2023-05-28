@@ -46,6 +46,7 @@ use migration::sea_orm::{
 };
 use migration::sea_query::table::ColumnDef;
 use migration::{Alias, DbErr, Migrator, MigratorTrait, Table};
+use parking_lot::RwLock;
 use quick_cache_ttl::{Cache, CacheWithTTL};
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
@@ -56,6 +57,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::num::NonZeroU64;
 use std::str::FromStr;
+use std::sync::atomic::AtomicU64;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::sync::{broadcast, watch, Semaphore};
@@ -150,7 +152,6 @@ pub struct AuthorizationChecks {
     /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
     pub private_txs: bool,
     pub proxy_mode: ProxyMode,
-    pub balance: Option<Decimal>,
     pub user_tier: UserTier,
 }
 
@@ -169,6 +170,7 @@ impl DatabaseReplica {
 
 /// Cache data from the database about rpc keys
 pub type RpcSecretKeyCache = Arc<CacheWithTTL<RpcSecretKey, AuthorizationChecks>>;
+pub type UserBalanceCache = Arc<CacheWithTTL<u64, Decimal>>; // Could also be an AtomicDecimal
 
 /// The application
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
@@ -216,6 +218,8 @@ pub struct Web3ProxyApp {
     /// cache authenticated users so that we don't have to query the database on the hot path
     // TODO: should the key be our RpcSecretKey class instead of Ulid?
     pub rpc_secret_key_cache: RpcSecretKeyCache,
+    /// cache user balances so we don't have to check downgrade logic every single time
+    pub user_balance_cache: UserBalanceCache,
     /// concurrent/parallel RPC request limits for authenticated users
     pub user_semaphores: Cache<NonZeroU64, Arc<Semaphore>>,
     /// concurrent/parallel request limits for anonymous users
@@ -552,6 +556,10 @@ impl Web3ProxyApp {
         let rpc_secret_key_cache =
             CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(600)).await;
 
+        // TODO: TTL left low, this could also be a solution instead of modifiying the cache, that may be disgusting across threads / slow anyways
+        let user_balance_cache =
+            CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(120)).await;
+
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
         // stats can be saved in mysql, influxdb, both, or none
@@ -565,6 +573,7 @@ impl Web3ProxyApp {
                 60,
                 influxdb_client.clone(),
                 Some(rpc_secret_key_cache.clone()),
+                Some(user_balance_cache.clone()),
                 stat_buffer_shutdown_receiver,
                 1,
             )? {
@@ -770,6 +779,7 @@ impl Web3ProxyApp {
             hostname,
             vredis_pool,
             rpc_secret_key_cache,
+            user_balance_cache,
             bearer_token_semaphores,
             ip_semaphores,
             user_semaphores,

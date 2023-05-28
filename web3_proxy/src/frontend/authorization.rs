@@ -34,6 +34,7 @@ use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::mem;
 use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64, AtomicUsize};
+use std::sync::RwLock;
 use std::time::Duration;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -281,6 +282,9 @@ pub struct RequestMetadata {
 
     /// Cancel-safe channel for sending stats to the buffer
     pub stat_sender: Option<flume::Sender<AppStat>>,
+
+    /// Last balance
+    pub latest_balance: Decimal,
 }
 
 impl Default for RequestMetadata {
@@ -301,6 +305,7 @@ impl Default for RequestMetadata {
             response_timestamp: Default::default(),
             start_instant: Instant::now(),
             stat_sender: Default::default(),
+            latest_balance: Default::default(),
         }
     }
 }
@@ -417,6 +422,9 @@ impl RequestMetadata {
             }
         }
 
+        // Fetch the balance from the cache
+        let latest_balance = app.user_balance_cache.get(&authorization.checks.user_id);
+
         let x = Self {
             archive_request: false.into(),
             backend_requests: Default::default(),
@@ -433,6 +441,7 @@ impl RequestMetadata {
             response_timestamp: 0.into(),
             start_instant: Instant::now(),
             stat_sender: app.stat_sender.clone(),
+            latest_balance: latest_balance.unwrap_or(Decimal::from(0)),
         };
 
         Arc::new(x)
@@ -1084,6 +1093,34 @@ impl Web3ProxyApp {
         }
     }
 
+    /// Get the balance for the user.
+    ///
+    /// If a subuser calls this function, the subuser needs to have first attained the user_id that the rpc key belongs to.
+    /// This function should be called anywhere where balance is required (i.e. only rpc calls, I believe ... non-rpc calls don't really require balance)
+    pub(crate) async fn balance_checks(&self, user_id: u64) -> Web3ProxyResult<Decimal> {
+        // Downgrade the user if the balance is too low ...
+        if user_id == 0 {
+            Ok(Decimal::from(0))
+        } else {
+            self.user_balance_cache
+                .get_or_insert_async(&user_id, async move {
+                    let db_replica = self
+                        .db_replica()
+                        .web3_context("Getting database connection")?;
+
+                    let balance = balance::Entity::find()
+                        .filter(balance::Column::UserId.eq(user_id))
+                        .one(db_replica.conn())
+                        .await?
+                        .expect("related balance")
+                        .available_balance;
+
+                    Ok(balance)
+                })
+                .await
+        }
+    }
+
     // check the local cache for user data, or query the database
     pub(crate) async fn authorization_checks(
         &self,
@@ -1110,43 +1147,6 @@ impl Web3ProxyApp {
                     Some(rpc_key_model) => {
                         // TODO: move these splits into helper functions
                         // TODO: can we have sea orm handle this for us?
-                        let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
-                            .one(db_replica.conn())
-                            .await?
-                            .expect("related user");
-
-                        let balance = balance::Entity::find()
-                            .filter(balance::Column::UserId.eq(user_model.id))
-                            .one(db_replica.conn())
-                            .await?
-                            .expect("related balance")
-                            .available_balance;
-
-                        let mut user_tier_model =
-                            user_tier::Entity::find_by_id(user_model.user_tier_id)
-                                .one(db_replica.conn())
-                                .await?
-                                .expect("related user tier");
-
-                        // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
-                        // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
-                        if user_tier_model.title == UserTier::Premium.to_string()
-                            && balance < Decimal::from(10)
-                        {
-                            // Find the equivalent downgraded user tier, and modify limits from there
-                            if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
-                                user_tier_model =
-                                    user_tier::Entity::find_by_id(downgrade_user_tier)
-                                        .one(db_replica.conn())
-                                        .await?
-                                        .expect("downgrade user tier for premium");
-                            } else {
-                                return Web3ProxyResult::Err(Web3ProxyError::InvalidUserTier);
-                            }
-                        }
-
-                        let user_tier = UserTier::try_from(user_tier_model.title.as_str())?;
-
                         let allowed_ips: Option<Vec<IpNet>> =
                             if let Some(allowed_ips) = rpc_key_model.allowed_ips {
                                 let x = allowed_ips
@@ -1206,6 +1206,44 @@ impl Web3ProxyApp {
                                 None
                             };
 
+                        // Get the user_tier
+                        let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
+                            .one(db_replica.conn())
+                            .await?
+                            .expect("related user");
+
+                        let balance = balance::Entity::find()
+                            .filter(balance::Column::UserId.eq(user_model.id))
+                            .one(db_replica.conn())
+                            .await?
+                            .expect("related balance")
+                            .available_balance;
+
+                        let mut user_tier_model =
+                            user_tier::Entity::find_by_id(user_model.user_tier_id)
+                                .one(db_replica.conn())
+                                .await?
+                                .expect("related user tier");
+
+                        // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
+                        // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
+                        if user_tier_model.title == UserTier::Premium.to_string()
+                            && balance < Decimal::from(10)
+                        {
+                            // Find the equivalent downgraded user tier, and modify limits from there
+                            if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
+                                user_tier_model =
+                                    user_tier::Entity::find_by_id(downgrade_user_tier)
+                                        .one(db_replica.conn())
+                                        .await?
+                                        .expect("downgrade user tier for premium");
+                            } else {
+                                return Web3ProxyResult::Err(Web3ProxyError::InvalidUserTier);
+                            }
+                        }
+
+                        let user_tier = UserTier::try_from(user_tier_model.title.as_str())?;
+
                         let rpc_key_id =
                             Some(rpc_key_model.id.try_into().expect("db ids are never 0"));
 
@@ -1223,7 +1261,6 @@ impl Web3ProxyApp {
                             max_requests_per_period: user_tier_model.max_requests_per_period,
                             private_txs: rpc_key_model.private_txs,
                             proxy_mode,
-                            balance: Some(balance),
                             user_tier,
                         })
                     }
@@ -1244,6 +1281,7 @@ impl Web3ProxyApp {
         user_agent: Option<UserAgent>,
     ) -> Web3ProxyResult<RateLimitResult> {
         let authorization_checks = self.authorization_checks(proxy_mode, rpc_key).await?;
+        let balance = self.balance_checks(authorization_checks.user_id).await?;
 
         // if no rpc_key_id matching the given rpc was found, then we can't rate limit by key
         if authorization_checks.rpc_secret_key_id.is_none() {
