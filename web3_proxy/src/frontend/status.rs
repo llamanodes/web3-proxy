@@ -31,12 +31,15 @@ pub async fn health(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
-    let (code, content_type, body) = cache
-        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::Health, async move {
-            Ok(_health(app).await)
-        })
-        .await
-        .expect("this cache get is infallible");
+    // let (code, content_type, body) = cache
+    //     .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::Health, async move {
+    //         Ok(_health(app).await)
+    //     })
+    //     .await
+    //     .expect("this cache get is infallible");
+
+    // TODO: cache this once new TTLs work
+    let (code, content_type, body) = _health(app).await;
 
     Response::builder()
         .status(code)
@@ -115,12 +118,15 @@ pub async fn status(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
-    let (code, content_type, body) = cache
-        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::Status, async move {
-            Ok(_status(app).await)
-        })
-        .await
-        .expect("this cache get is infallible");
+    // let (code, content_type, body) = cache
+    //     .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::Status, async move {
+    //         Ok(_status(app).await)
+    //     })
+    //     .await
+    //     .expect("this cache get is infallible");
+
+    // TODO: cache this once new TTLs work
+    let (code, content_type, body) = _status(app).await;
 
     Response::builder()
         .status(code)
