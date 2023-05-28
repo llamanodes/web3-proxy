@@ -68,12 +68,15 @@ pub async fn backups_needed(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
-    let (code, content_type, body) = cache
-        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::BackupsNeeded, async move {
-            Ok(_backups_needed(app).await)
-        })
-        .await
-        .expect("this cache get is infallible");
+    // let (code, content_type, body) = cache
+    //     .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::BackupsNeeded, async move {
+    //         Ok(_backups_needed(app).await)
+    //     })
+    //     .await
+    //     .expect("this cache get is infallible");
+
+    // TODO: cache this once new TTLs work
+    let (code, content_type, body) = _backups_needed(app).await;
 
     Response::builder()
         .status(code)
