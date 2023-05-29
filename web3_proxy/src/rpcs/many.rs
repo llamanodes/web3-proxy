@@ -339,7 +339,7 @@ impl Web3Rpcs {
                 .spawn(async move {
                     loop {
                         sleep(Duration::from_secs(600)).await;
-                        // TODO: "every interval, check that the provider is still connected"
+                        // TODO: "every interval, do a health check or disconnect the rpc"
                     }
                 })?;
 
