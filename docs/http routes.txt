@@ -20,9 +20,39 @@ POST /rpc/:rpc_key
     If connecting with a browser, it redirects to the key's stat page on llamanodes.com.
     If connecting with a websocket, it is rate limited by key and routes to the Web3 RPC.
 
+GET /debug/:rpc_key
+    Similar to GET /rpc/:rpc_key but includes additional debugging information.
+
+POST /debug/:rpc_key
+    Similar to POST /rpc/:rpc_key but includes additional debugging information.
+
 GET /health
     If servers are synced, this gives a 200 "OK".
     If no servers are synced, it gives a 502 ":("
+
+GET /fastest
+    Similar to POST /fastest, but for websocket connections.
+
+POST /fastest
+    Routes the request to the fastest server.
+
+POST /fastest/:rpc_key
+    Routes the authenticated request to the fastest server.
+
+POST /versus
+    This is an experimental endpoint for testing Web3 RPC performance.
+
+GET /versus
+    Similar to POST /versus, but for websocket connections.
+
+POST /versus/:rpc_key
+    This is an authenticated version of the /versus endpoint.
+
+GET /versus/:rpc_key
+    Similar to POST /versus/:rpc_key, but for websocket connections.
+
+GET /fastest/:rpc_key
+    Similar to POST /fastest/:rpc_key, but for websocket connections.
 
 GET /user/login/:user_address
     Displays a "Sign in With Ethereum" message to be signed by the address's private key.
@@ -90,6 +120,62 @@ POST /user/balance/:txid
 GET /user/keys
     Checks the "AUTHORIZATION" header for a valid bearer token.
     If valid, displays data about the user's keys as JSON.
+
+GET /status
+    Gives information about the system's status.
+
+GET /status/backups_needed
+    Indicates if backups are needed for the system.
+
+GET /user/subuser
+    Modifies (adds or removes) a specific subuser to a certain rpc_key.
+    Takes in "rpc_key", "subuser_address", "new_status" (one of "upsert", "remove"), "new_role" (one of "owner", "admin", "collaborator") as query-parameters
+
+GET /user/subusers
+    Retrieves all the subusers of a given user's rpc key, including their roles and addresses.
+    Takes in "rpc_key" as a query-parameter
+
+GET /subuser/rpc_keys
+    Retrieves RPC keys for the subuser (i.e. all RPC-keys that were shared with me, being the subuser)
+
+GET /user/deposits
+    Retrieves the user's deposit history.
+
+GET /user/balance/:tx_hash
+    Accepts a tx_hash and updates the user's balance according to this transaction.
+    Any authorized user can call this endpoint for any other user's transaction.
+
+GET /user/referral
+    Fetches a user's referral link.
+
+GET /admin/increase_balance
+    Increases the balance for a user. This is an administrative endpoint.
+    Query parameters are:
+    - "user_address"
+    - "note"
+    - "amount" (Decimal)
+    Can only be called by admins
+
+GET /admin/modify_role
+    Changes the role of a user. This is an administrative endpoint.
+    Query parameters are:
+    - "user_address"
+    - "user_tier_title"
+    Can only be called by admins
+
+GET /admin/imitate-login/:admin_address/:user_address
+    Allows an admin to imitate a login as another user.
+    Query parameters are:
+    - "admin_address"
+    - "user_address"
+    This creates a login-message, you can use this message and login with the /admin/imitate-login/:admin_address/:user_address/:message_eip to imitate the user
+
+POST /admin/imitate-login
+    Verifies the admin's imitation login request.
+    (Similar to the login flow)
+
+POST /admin/imitate-logout
+    Allows an admin to imitate a logout operation.
 
 POST or PUT /user/keys
     Checks the "AUTHORIZATION" header for a valid bearer token.

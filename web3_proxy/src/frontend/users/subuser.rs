@@ -11,6 +11,7 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use entities::sea_orm_active_enums::Role;
+use entities::user::Relation::UserTier;
 use entities::{balance, rpc_key, secondary_user, user, user_tier};
 use ethers::types::Address;
 use hashbrown::HashMap;
@@ -119,7 +120,7 @@ pub async fn get_subusers(
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
     if user_tier.id != 6 {
         return Err(
-            anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into(),
+            anyhow::anyhow!("User is not premium. Must be premium to access subusers.").into(),
         );
     }
 
@@ -210,7 +211,7 @@ pub async fn modify_subuser(
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
     if user_tier.id != 6 {
         return Err(
-            anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into(),
+            anyhow::anyhow!("User is not premium. Must be premium to create subusers.").into(),
         );
     }
 
@@ -257,7 +258,7 @@ pub async fn modify_subuser(
         .remove("new_role")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
-            "You have not provided the new_stats key in the request".to_string(),
+            "You have not provided the new_role key in the request".to_string(),
         ))?
         .as_str()
     {
