@@ -13,7 +13,7 @@ use crate::jsonrpc::{
     JsonRpcRequestEnum,
 };
 use crate::response_cache::{
-    JsonRpcQueryCache, JsonRpcQueryCacheKey, JsonRpcQueryWeigher, JsonRpcResponseData,
+    JsonRpcQueryWeigher, JsonRpcResponseCache, JsonRpcResponseCacheKey, JsonRpcResponseData,
 };
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::consensus::ConsensusWeb3Rpcs;
@@ -144,7 +144,7 @@ pub struct Web3ProxyApp {
     /// TODO: include another type so that we can use private miner relays that do not use JSONRPC requests
     pub private_rpcs: Option<Arc<Web3Rpcs>>,
     /// track JSONRPC responses
-    pub jsonrpc_query_cache: JsonRpcQueryCache,
+    pub jsonrpc_response_cache: JsonRpcResponseCache,
     /// rpc clients that subscribe to newHeads use this channel
     /// don't drop this or the sender will stop working
     /// TODO: broadcast channel instead?
@@ -609,8 +609,9 @@ impl Web3ProxyApp {
         // TODO: don't allow any response to be bigger than X% of the cache
         // TODO: we should emit stats to calculate a more accurate expected cache size
         // TODO: do we actually want a TTL on this?
-        let response_cache = JsonRpcQueryCache::new(
+        let response_cache = JsonRpcResponseCache::new_with_options(
             (top_config.app.response_cache_max_bytes / 2048) as usize,
+            2u32.pow(20).try_into().unwrap(),
             top_config.app.response_cache_max_bytes,
             JsonRpcQueryWeigher,
             DefaultHashBuilder::default(),
@@ -716,7 +717,7 @@ impl Web3ProxyApp {
             http_client,
             kafka_producer,
             private_rpcs,
-            jsonrpc_query_cache: response_cache,
+            jsonrpc_response_cache: response_cache,
             watch_consensus_head_receiver,
             pending_tx_sender,
             pending_transactions,
@@ -1637,7 +1638,7 @@ impl Web3ProxyApp {
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
                 // TODO: this cache key can be rather large. is that okay?
-                let cache_key: Option<JsonRpcQueryCacheKey> = match block_needed(
+                let cache_key: Option<JsonRpcResponseCacheKey> = match block_needed(
                     authorization,
                     method,
                     request.params.as_mut(),
@@ -1646,7 +1647,7 @@ impl Web3ProxyApp {
                 )
                 .await?
                 {
-                    BlockNeeded::CacheSuccessForever => Some(JsonRpcQueryCacheKey {
+                    BlockNeeded::CacheSuccessForever => Some(JsonRpcResponseCacheKey {
                         from_block: None,
                         to_block: None,
                         method: method.to_string(),
@@ -1675,7 +1676,7 @@ impl Web3ProxyApp {
                             .await?
                             .block;
 
-                        Some(JsonRpcQueryCacheKey {
+                        Some(JsonRpcResponseCacheKey {
                             from_block: Some(request_block),
                             to_block: None,
                             method: method.to_string(),
@@ -1717,7 +1718,7 @@ impl Web3ProxyApp {
                             .await?
                             .block;
 
-                        Some(JsonRpcQueryCacheKey {
+                        Some(JsonRpcResponseCacheKey {
                             from_block: Some(from_block),
                             to_block: Some(to_block),
                             method: method.to_string(),
@@ -1737,7 +1738,7 @@ impl Web3ProxyApp {
                     let to_block_num = cache_key.to_block.as_ref().map(|x| x.number.unwrap());
 
                     match self
-                        .jsonrpc_query_cache
+                        .jsonrpc_response_cache
                         .get_value_or_guard_async(cache_key).await
                     {
                         Ok(x) => x,

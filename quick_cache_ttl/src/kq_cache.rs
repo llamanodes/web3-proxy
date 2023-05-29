@@ -2,6 +2,7 @@ use quick_cache::sync::KQCache;
 use quick_cache::{PlaceholderGuard, Weighter};
 use std::future::Future;
 use std::hash::{BuildHasher, Hash};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -9,9 +10,12 @@ use tokio::time::{sleep_until, Instant};
 
 pub struct KQCacheWithTTL<Key, Qey, Val, We, B> {
     cache: Arc<KQCache<Key, Qey, Val, We, B>>,
-    pub task_handle: JoinHandle<()>,
+    max_item_weight: NonZeroU32,
     ttl: Duration,
     tx: flume::Sender<(Instant, Key, Qey)>,
+    weighter: We,
+
+    pub task_handle: JoinHandle<()>,
 }
 
 struct KQCacheWithTTLTask<Key, Qey, Val, We, B> {
@@ -35,8 +39,9 @@ impl<
         B: BuildHasher + Clone + Send + Sync + 'static,
     > KQCacheWithTTL<Key, Qey, Val, We, B>
 {
-    pub async fn new(
+    pub async fn new_with_options(
         estimated_items_capacity: usize,
+        max_item_weight: NonZeroU32,
         weight_capacity: u64,
         weighter: We,
         hash_builder: B,
@@ -47,7 +52,7 @@ impl<
         let cache = KQCache::with(
             estimated_items_capacity,
             weight_capacity,
-            weighter,
+            weighter.clone(),
             hash_builder,
         );
 
@@ -62,9 +67,11 @@ impl<
 
         Self {
             cache,
+            max_item_weight,
             task_handle,
             ttl,
             tx,
+            weighter,
         }
     }
 
@@ -99,14 +106,39 @@ impl<
         }
     }
 
-    pub fn insert(&self, key: Key, qey: Qey, val: Val) {
-        let expire_at = Instant::now() + self.ttl;
-
-        self.cache.insert(key.clone(), qey.clone(), val);
-
-        self.tx.send((expire_at, key, qey)).unwrap();
+    #[inline]
+    pub fn hits(&self) -> u64 {
+        self.cache.hits()
     }
 
+    #[inline]
+    pub fn insert(&self, key: Key, qey: Qey, val: Val) -> Result<(), (Key, Qey, Val)> {
+        let expire_at = Instant::now() + self.ttl;
+
+        let weight = self.weighter.weight(&key, &qey, &val);
+
+        if weight <= self.max_item_weight {
+            self.cache.insert(key.clone(), qey.clone(), val);
+
+            self.tx.send((expire_at, key, qey)).unwrap();
+
+            Ok(())
+        } else {
+            Err((key, qey, val))
+        }
+    }
+
+    #[inline]
+    pub fn misses(&self) -> u64 {
+        self.cache.misses()
+    }
+
+    #[inline]
+    pub fn peek(&self, key: &Key, qey: &Qey) -> Option<Val> {
+        self.cache.peek(key, qey)
+    }
+
+    #[inline]
     pub fn remove(&self, key: &Key, qey: &Qey) -> bool {
         self.cache.remove(key, qey)
     }

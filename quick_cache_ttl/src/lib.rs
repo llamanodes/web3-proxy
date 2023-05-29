@@ -16,7 +16,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn test_time_passing() {
-        let x = CacheWithTTL::<u32, u32>::new_with_capacity(2, Duration::from_secs(2)).await;
+        let x = CacheWithTTL::<u32, u32>::new(2, Duration::from_secs(2)).await;
 
         assert!(x.get(&0).is_none());
 
@@ -28,7 +28,7 @@ mod tests {
 
         assert!(x.get(&0).is_some());
 
-        time::advance(Duration::from_secs(2)).await;
+        time::advance(Duration::from_secs(1)).await;
 
         // yield so that the expiration code gets a chance to run
         yield_now().await;
@@ -38,7 +38,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn test_capacity_based_eviction() {
-        let x = CacheWithTTL::<u32, ()>::new_with_capacity(1, Duration::from_secs(2)).await;
+        let x = CacheWithTTL::<u32, ()>::new(1, Duration::from_secs(2)).await;
 
         assert!(x.get(&0).is_none());
 

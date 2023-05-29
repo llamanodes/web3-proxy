@@ -181,7 +181,9 @@ impl Web3Rpcs {
             // this is the only place that writes to block_numbers
             // multiple inserts should be okay though
             // TODO: info that there was a fork?
-            self.blocks_by_number.insert(*block_num, *block.hash());
+            if let Err((k, v)) = self.blocks_by_number.insert(*block_num, *block.hash()) {
+                warn!("unable to cache {} as {}", k, v);
+            }
         }
 
         // this block is very likely already in block_hashes
