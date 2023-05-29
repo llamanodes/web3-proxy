@@ -184,6 +184,14 @@ pub async fn serve(
             "/user/referral",
             get(users::referral::user_referral_link_get),
         )
+        .route(
+            "/user/referral/stats/used",
+            get(users::referral::user_used_referral_stats),
+        )
+        .route(
+            "/user/referral/stats/shared",
+            get(users::referral::user_shared_referral_stats),
+        )
         .route("/user/revert_logs", get(users::stats::user_revert_logs_get))
         .route(
             "/user/stats/aggregate",
