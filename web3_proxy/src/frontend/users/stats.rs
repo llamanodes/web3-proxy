@@ -14,7 +14,7 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use entities;
-use entities::{revert_log, rpc_key};
+use entities::{revert_log, rpc_key, secondary_user};
 use hashbrown::HashMap;
 use migration::sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use serde_json::json;
@@ -53,8 +53,22 @@ pub async fn user_revert_logs_get(
         .await
         .web3_context("failed loading user's key")?;
 
+    // Also add rpc keys for which this user has access
+    let shared_rpc_keys = secondary_user::Entity::find()
+        .filter(secondary_user::Column::UserId.eq(user.id))
+        .all(db_replica.conn())
+        .await?
+        .into_iter()
+        .map(|x| x.rpc_secret_key_id);
+
+    // We shouldn't need to be deduped, bcs the set of shared keys is distinct from the user's keys,
+    // the database also handles deduplication bcs it's a projection operation
     // TODO: only select the ids
-    let uks: Vec<_> = uks.into_iter().map(|x| x.id).collect();
+    let uks: Vec<_> = uks
+        .into_iter()
+        .map(|x| x.id)
+        .chain(shared_rpc_keys)
+        .collect();
 
     // get revert logs
     let mut q = revert_log::Entity::find()
