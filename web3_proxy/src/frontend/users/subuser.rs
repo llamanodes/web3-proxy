@@ -11,6 +11,7 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use entities::sea_orm_active_enums::Role;
+use entities::user::Relation::UserTier;
 use entities::{balance, rpc_key, secondary_user, user, user_tier};
 use ethers::types::Address;
 use hashbrown::HashMap;
@@ -223,7 +224,7 @@ pub async fn modify_subuser(
         .remove("new_role")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
-            "You have not provided the new_stats key in the request".to_string(),
+            "You have not provided the new_role key in the request".to_string(),
         ))?
         .as_str()
     {
