@@ -45,8 +45,7 @@ where
         // TODO: time to live is not exactly right. we want this ttl counter to start only after redis is down. this works for now
         // TODO: what do these weigh?
         // TODO: allow skipping max_capacity
-        let local_cache =
-            CacheWithTTL::new_with_capacity(cache_size, Duration::from_secs(ttl)).await;
+        let local_cache = CacheWithTTL::new(cache_size, Duration::from_secs(ttl)).await;
 
         Self {
             local_cache,
@@ -86,7 +85,7 @@ where
 
             // set arc_deferred_rate_limit_result and return the count
             self.local_cache
-                .get_or_insert_async::<anyhow::Error, _>(&key, async move {
+                .try_get_or_insert_async::<anyhow::Error, _>(&key, async move {
                     // we do not use the try operator here because we want to be okay with redis errors
                     let redis_count = match rrl
                         .throttle_label(&redis_key, Some(max_requests_per_period), count)

@@ -1091,7 +1091,7 @@ impl Web3ProxyApp {
         rpc_secret_key: RpcSecretKey,
     ) -> Web3ProxyResult<AuthorizationChecks> {
         self.rpc_secret_key_cache
-            .get_or_insert_async(&rpc_secret_key, async move {
+            .try_get_or_insert_async(&rpc_secret_key, async move {
                 // trace!(?rpc_secret_key, "user cache miss");
 
                 let db_replica = self

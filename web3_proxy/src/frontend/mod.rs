@@ -57,8 +57,7 @@ pub async fn serve(
     // TODO: latest moka allows for different ttls for different
     let response_cache_size = ResponseCacheKey::COUNT;
 
-    let response_cache =
-        ResponseCache::new_with_capacity(response_cache_size, Duration::from_secs(1)).await;
+    let response_cache = ResponseCache::new(response_cache_size, Duration::from_secs(1)).await;
 
     // TODO: read config for if fastest/versus should be available publicly. default off
 

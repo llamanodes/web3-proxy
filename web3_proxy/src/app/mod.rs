@@ -13,7 +13,7 @@ use crate::jsonrpc::{
     JsonRpcRequestEnum,
 };
 use crate::response_cache::{
-    JsonRpcQueryCache, JsonRpcQueryCacheKey, JsonRpcQueryWeigher, JsonRpcResponseData,
+    JsonRpcResponseCache, JsonRpcResponseCacheKey, JsonRpcResponseData, JsonRpcResponseWeigher,
 };
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::consensus::ConsensusWeb3Rpcs;
@@ -36,7 +36,6 @@ use ethers::types::U256;
 use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
-use hashbrown::hash_map::DefaultHashBuilder;
 use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
 use log::{debug, error, info, trace, warn, Level};
@@ -54,7 +53,7 @@ use serde_json::json;
 use std::borrow::Cow;
 use std::fmt;
 use std::net::IpAddr;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::str::FromStr;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
@@ -144,7 +143,7 @@ pub struct Web3ProxyApp {
     /// TODO: include another type so that we can use private miner relays that do not use JSONRPC requests
     pub private_rpcs: Option<Arc<Web3Rpcs>>,
     /// track JSONRPC responses
-    pub jsonrpc_query_cache: JsonRpcQueryCache,
+    pub jsonrpc_response_cache: JsonRpcResponseCache,
     /// rpc clients that subscribe to newHeads use this channel
     /// don't drop this or the sender will stop working
     /// TODO: broadcast channel instead?
@@ -606,14 +605,15 @@ impl Web3ProxyApp {
             CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(300)).await;
 
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
-        // TODO: don't allow any response to be bigger than X% of the cache
         // TODO: we should emit stats to calculate a more accurate expected cache size
         // TODO: do we actually want a TTL on this?
-        let response_cache = JsonRpcQueryCache::new(
-            (top_config.app.response_cache_max_bytes / 2048) as usize,
+        // TODO: configurable max item weight instead of using ~0.1%
+        // TODO: resize the cache automatically
+        let response_cache = JsonRpcResponseCache::new_with_weights(
+            (top_config.app.response_cache_max_bytes / 16_384) as usize,
+            NonZeroU32::try_from((top_config.app.response_cache_max_bytes / 1024) as u32).unwrap(),
             top_config.app.response_cache_max_bytes,
-            JsonRpcQueryWeigher,
-            DefaultHashBuilder::default(),
+            JsonRpcResponseWeigher,
             Duration::from_secs(3600),
         )
         .await;
@@ -716,7 +716,7 @@ impl Web3ProxyApp {
             http_client,
             kafka_producer,
             private_rpcs,
-            jsonrpc_query_cache: response_cache,
+            jsonrpc_response_cache: response_cache,
             watch_consensus_head_receiver,
             pending_tx_sender,
             pending_transactions,
@@ -1637,7 +1637,7 @@ impl Web3ProxyApp {
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
                 // TODO: this cache key can be rather large. is that okay?
-                let cache_key: Option<JsonRpcQueryCacheKey> = match block_needed(
+                let cache_key: Option<JsonRpcResponseCacheKey> = match block_needed(
                     authorization,
                     method,
                     request.params.as_mut(),
@@ -1646,7 +1646,7 @@ impl Web3ProxyApp {
                 )
                 .await?
                 {
-                    BlockNeeded::CacheSuccessForever => Some(JsonRpcQueryCacheKey {
+                    BlockNeeded::CacheSuccessForever => Some(JsonRpcResponseCacheKey {
                         from_block: None,
                         to_block: None,
                         method: method.to_string(),
@@ -1675,7 +1675,7 @@ impl Web3ProxyApp {
                             .await?
                             .block;
 
-                        Some(JsonRpcQueryCacheKey {
+                        Some(JsonRpcResponseCacheKey {
                             from_block: Some(request_block),
                             to_block: None,
                             method: method.to_string(),
@@ -1717,7 +1717,7 @@ impl Web3ProxyApp {
                             .await?
                             .block;
 
-                        Some(JsonRpcQueryCacheKey {
+                        Some(JsonRpcResponseCacheKey {
                             from_block: Some(from_block),
                             to_block: Some(to_block),
                             method: method.to_string(),
@@ -1737,7 +1737,7 @@ impl Web3ProxyApp {
                     let to_block_num = cache_key.to_block.as_ref().map(|x| x.number.unwrap());
 
                     match self
-                        .jsonrpc_query_cache
+                        .jsonrpc_response_cache
                         .get_value_or_guard_async(cache_key).await
                     {
                         Ok(x) => x,

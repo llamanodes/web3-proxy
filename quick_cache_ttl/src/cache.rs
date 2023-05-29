@@ -2,6 +2,7 @@ use quick_cache::{DefaultHashBuilder, UnitWeighter, Weighter};
 use std::{
     future::Future,
     hash::{BuildHasher, Hash},
+    num::NonZeroU32,
     sync::Arc,
     time::Duration,
 };
@@ -15,9 +16,10 @@ pub struct CacheWithTTL<Key, Val, We = UnitWeighter, B = DefaultHashBuilder>(
 impl<Key: Eq + Hash + Clone + Send + Sync + 'static, Val: Clone + Send + Sync + 'static>
     CacheWithTTL<Key, Val, UnitWeighter, DefaultHashBuilder>
 {
-    pub async fn new_with_capacity(capacity: usize, ttl: Duration) -> Self {
-        Self::new(
+    pub async fn new(capacity: usize, ttl: Duration) -> Self {
+        Self::new_with_options(
             capacity,
+            1.try_into().unwrap(),
             capacity as u64,
             UnitWeighter,
             DefaultHashBuilder::default(),
@@ -27,7 +29,7 @@ impl<Key: Eq + Hash + Clone + Send + Sync + 'static, Val: Clone + Send + Sync + 
     }
 
     pub async fn arc_with_capacity(capacity: usize, ttl: Duration) -> Arc<Self> {
-        let x = Self::new_with_capacity(capacity, ttl).await;
+        let x = Self::new(capacity, ttl).await;
 
         Arc::new(x)
     }
@@ -42,12 +44,16 @@ impl<
 {
     pub async fn new_with_weights(
         estimated_items_capacity: usize,
+        max_item_weigth: NonZeroU32,
         weight_capacity: u64,
         weighter: We,
         ttl: Duration,
     ) -> Self {
-        let inner = KQCacheWithTTL::new(
+        let max_item_weigth = max_item_weigth.min((weight_capacity as u32).try_into().unwrap());
+
+        let inner = KQCacheWithTTL::new_with_options(
             estimated_items_capacity,
+            max_item_weigth,
             weight_capacity,
             weighter,
             B::default(),
@@ -57,24 +63,18 @@ impl<
 
         Self(inner)
     }
-}
 
-impl<
-        Key: Eq + Hash + Clone + Send + Sync + 'static,
-        Val: Clone + Send + Sync + 'static,
-        We: Weighter<Key, (), Val> + Clone + Send + Sync + 'static,
-        B: BuildHasher + Clone + Send + Sync + 'static,
-    > CacheWithTTL<Key, Val, We, B>
-{
-    pub async fn new(
+    pub async fn new_with_options(
         estimated_items_capacity: usize,
+        max_item_weight: NonZeroU32,
         weight_capacity: u64,
         weighter: We,
         hash_builder: B,
         ttl: Duration,
     ) -> Self {
-        let inner = KQCacheWithTTL::new(
+        let inner = KQCacheWithTTL::new_with_options(
             estimated_items_capacity,
+            max_item_weight,
             weight_capacity,
             weighter,
             hash_builder,
@@ -91,11 +91,19 @@ impl<
     }
 
     #[inline]
-    pub async fn get_or_insert_async<E, Fut>(&self, key: &Key, f: Fut) -> Result<Val, E>
+    pub async fn get_or_insert_async<Fut>(&self, key: &Key, f: Fut) -> Val
+    where
+        Fut: Future<Output = Val>,
+    {
+        self.0.get_or_insert_async(key, &(), f).await
+    }
+
+    #[inline]
+    pub async fn try_get_or_insert_async<E, Fut>(&self, key: &Key, f: Fut) -> Result<Val, E>
     where
         Fut: Future<Output = Result<Val, E>>,
     {
-        self.0.get_or_insert_async(key, &(), f).await
+        self.0.try_get_or_insert_async(key, &(), f).await
     }
 
     #[inline]
@@ -106,9 +114,10 @@ impl<
         self.0.get_value_or_guard_async(key, ()).await
     }
 
+    /// if the item was too large to insert, it is returned with the error
     #[inline]
-    pub fn insert(&self, key: Key, val: Val) {
-        self.0.insert(key, (), val)
+    pub fn try_insert(&self, key: Key, val: Val) -> Result<(), (Key, Val)> {
+        self.0.try_insert(key, (), val).map_err(|(k, _q, v)| (k, v))
     }
 
     #[inline]
