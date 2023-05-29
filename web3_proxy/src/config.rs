@@ -297,6 +297,8 @@ impl Web3RpcConfig {
             1 => Duration::from_secs(12),
             // ethereum-goerli
             5 => Duration::from_secs(12),
+            // binance
+            56 => Duration::from_secs(3),
             // polygon
             137 => Duration::from_secs(2),
             // fantom
@@ -307,7 +309,7 @@ impl Web3RpcConfig {
             _ => {
                 let default = 10;
                 warn!(
-                    "unexpected chain_id ({}). polling every {} seconds",
+                    "unknown chain_id ({}). defaulting polling every {} seconds",
                     chain_id, default
                 );
                 Duration::from_secs(default)
