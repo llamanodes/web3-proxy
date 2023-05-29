@@ -196,7 +196,6 @@ impl ConsensusWeb3Rpcs {
         needed_block_num: Option<&U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
     ) -> bool {
-        // return true if this rpc will never work for us. "false" is good
         if skip_rpcs.contains(rpc) {
             // if rpc is skipped, it must have already been determined it is unable to serve the request
             return false;
@@ -206,7 +205,8 @@ impl ConsensusWeb3Rpcs {
             if let Some(rpc_data) = self.rpc_data.get(rpc) {
                 match rpc_data.head_block_num.cmp(needed_block_num) {
                     Ordering::Less => {
-                        debug!("{} is behind. let it catch up", rpc);
+                        trace!("{} is behind. let it catch up", rpc);
+                        // TODO: what if this is a pruned rpc that is behind by a lot, and the block is old, too?
                         return true;
                     }
                     Ordering::Greater | Ordering::Equal => {
@@ -223,10 +223,11 @@ impl ConsensusWeb3Rpcs {
             }
 
             // no rpc data for this rpc. thats not promising
-            return true;
+            false
+        } else {
+            // if no needed_block_num was specified, then this should work
+            true
         }
-
-        false
     }
 
     // TODO: better name for this
@@ -267,8 +268,8 @@ impl ConsensusWeb3Rpcs {
         }
 
         // TODO: this might be a big perf hit. benchmark
-        if let Some(x) = rpc.hard_limit_until {
-            if x.borrow() > Instant::now() {
+        if let Some(x) = rpc.hard_limit_until.as_ref() {
+            if *x.borrow() > Instant::now() {
                 trace!("{} is rate limited. skipping", rpc,);
                 return false;
             }
