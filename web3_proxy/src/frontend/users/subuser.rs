@@ -106,23 +106,6 @@ pub async fn get_subusers(
         .db_replica()
         .context("getting replica db for user's revert logs")?;
 
-    // Second, check if the user is a premium user
-    let user_tier = user_tier::Entity::find()
-        .filter(user_tier::Column::Id.eq(user.user_tier_id))
-        .one(db_replica.conn())
-        .await?
-        .ok_or(Web3ProxyError::BadRequest(
-            "Could not find user in db although bearer token is there!".to_string(),
-        ))?;
-
-    debug!("User tier is: {:?}", user_tier);
-    // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
-    if user_tier.id != 6 {
-        return Err(
-            anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into(),
-        );
-    }
-
     let rpc_key: Ulid = params
         .remove("rpc_key")
         // TODO: map_err so this becomes a 500. routing must be bad
@@ -197,24 +180,7 @@ pub async fn modify_subuser(
         .db_replica()
         .context("getting replica db for user's revert logs")?;
 
-    // Second, check if the user is a premium user
-    let user_tier = user_tier::Entity::find()
-        .filter(user_tier::Column::Id.eq(user.user_tier_id))
-        .one(db_replica.conn())
-        .await?
-        .ok_or(Web3ProxyError::BadRequest(
-            "Could not find user in db although bearer token is there!".to_string(),
-        ))?;
-
-    debug!("User tier is: {:?}", user_tier);
-    // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
-    if user_tier.id != 6 {
-        return Err(
-            anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into(),
-        );
-    }
-
-    warn!("Parameters are: {:?}", params);
+    debug!("Parameters are: {:?}", params);
 
     // Then, distinguish the endpoint to modify
     let rpc_key_to_modify: Ulid = params
