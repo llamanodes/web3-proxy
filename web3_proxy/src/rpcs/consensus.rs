@@ -138,7 +138,7 @@ impl ConsensusWeb3Rpcs {
             let head_num = self.head_block.number();
 
             if Some(head_num) >= needed_block_num {
-                debug!("best (head) block: {}", head_num);
+                trace!("best (head) block: {}", head_num);
                 return ShouldWaitForBlock::Ready;
             }
         }
@@ -153,15 +153,14 @@ impl ConsensusWeb3Rpcs {
                 .iter()
                 .any(|rpc| self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs))
             {
-                // TODO: too verbose
-                debug!("everything in this ranking ({:?}) is skipped", next_ranking);
+                trace!("everything in this ranking ({:?}) is skipped", next_ranking);
                 continue;
             }
 
             let next_head_num = next_ranking.head_num.as_ref();
 
             if next_head_num >= needed_block_num {
-                debug!("best (head) block: {:?}", next_head_num);
+                trace!("best (head) block: {:?}", next_head_num);
                 return ShouldWaitForBlock::Ready;
             }
 
@@ -170,14 +169,12 @@ impl ConsensusWeb3Rpcs {
 
         // TODO: this seems wrong
         if best_num.is_some() {
-            // TODO: too verbose
-            debug!("best (old) block: {:?}", best_num);
+            trace!("best (old) block: {:?}", best_num);
             ShouldWaitForBlock::Wait {
                 current: best_num.copied(),
             }
         } else {
-            // TODO: too verbose
-            debug!("never ready");
+            trace!("never ready");
             ShouldWaitForBlock::NeverReady
         }
     }
@@ -212,10 +209,10 @@ impl ConsensusWeb3Rpcs {
                     Ordering::Greater | Ordering::Equal => {
                         // rpc is synced past the needed block. make sure the block isn't too old for it
                         if self.has_block_data(rpc, needed_block_num) {
-                            debug!("{} has {}", rpc, needed_block_num);
+                            trace!("{} has {}", rpc, needed_block_num);
                             return true;
                         } else {
-                            debug!("{} does not have {}", rpc, needed_block_num);
+                            trace!("{} does not have {}", rpc, needed_block_num);
                             return false;
                         }
                     }
