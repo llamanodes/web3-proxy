@@ -230,6 +230,8 @@ impl ConsensusWeb3Rpcs {
     }
 
     // TODO: better name for this
+    // TODO: this should probably be on the rpcs as "can_serve_request"
+    // TODO: this should probably take the method, too
     pub fn rpc_will_work_now(
         &self,
         skip: &[Arc<Web3Rpc>],
@@ -264,7 +266,13 @@ impl ConsensusWeb3Rpcs {
             }
         }
 
-        // we could check hard rate limits here, but i think it is faster to do later
+        // TODO: this might be a big perf hit. benchmark
+        if let Some(x) = rpc.hard_limit_until {
+            if x.borrow() > Instant::now() {
+                trace!("{} is rate limited. skipping", rpc,);
+                return false;
+            }
+        }
 
         true
     }
