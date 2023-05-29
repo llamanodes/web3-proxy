@@ -519,6 +519,7 @@ impl Web3Rpcs {
                 .cloned()
                 .collect();
 
+            // TODO: include tiers in this?
             potential_rpcs.shuffle(&mut thread_fast_rng::thread_fast_rng());
 
             match self
@@ -676,16 +677,21 @@ impl Web3Rpcs {
 
                     match consensus_rpcs.should_wait_for_block(waiting_for, skip_rpcs) {
                         ShouldWaitForBlock::NeverReady => break,
-                        ShouldWaitForBlock::Ready => {}
+                        ShouldWaitForBlock::Ready => {
+                            if Instant::now() > stop_trying_at {
+                                break;
+                            }
+                        }
                         ShouldWaitForBlock::Wait { .. } => select! {
                             _ = watch_consensus_rpcs.changed() => {},
-                            _ = sleep_until(stop_trying_at) => {},
+                            _ = sleep_until(stop_trying_at) => break,
                         },
                     }
-                }
-
-                if Instant::now() > stop_trying_at {
-                    break;
+                } else {
+                    select! {
+                        _ = watch_consensus_rpcs.changed() => {},
+                        _ = sleep_until(stop_trying_at) => break,
+                    }
                 }
             }
         }
