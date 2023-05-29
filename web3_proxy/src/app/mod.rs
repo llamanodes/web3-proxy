@@ -13,7 +13,7 @@ use crate::jsonrpc::{
     JsonRpcRequestEnum,
 };
 use crate::response_cache::{
-    JsonRpcQueryWeigher, JsonRpcResponseCache, JsonRpcResponseCacheKey, JsonRpcResponseData,
+    JsonRpcResponseCache, JsonRpcResponseCacheKey, JsonRpcResponseData, JsonRpcResponseWeigher,
 };
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::consensus::ConsensusWeb3Rpcs;
@@ -36,7 +36,6 @@ use ethers::types::U256;
 use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
-use hashbrown::hash_map::DefaultHashBuilder;
 use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
 use log::{debug, error, info, trace, warn, Level};
@@ -54,7 +53,7 @@ use serde_json::json;
 use std::borrow::Cow;
 use std::fmt;
 use std::net::IpAddr;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::str::FromStr;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
@@ -606,15 +605,15 @@ impl Web3ProxyApp {
             CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(300)).await;
 
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
-        // TODO: don't allow any response to be bigger than X% of the cache
         // TODO: we should emit stats to calculate a more accurate expected cache size
         // TODO: do we actually want a TTL on this?
-        let response_cache = JsonRpcResponseCache::new_with_options(
-            (top_config.app.response_cache_max_bytes / 2048) as usize,
-            2u32.pow(20).try_into().unwrap(),
+        // TODO: configurable max item weight instead of using ~0.1%
+        // TODO: resize the cache automatically
+        let response_cache = JsonRpcResponseCache::new_with_weights(
+            (top_config.app.response_cache_max_bytes / 16_384) as usize,
+            NonZeroU32::try_from((top_config.app.response_cache_max_bytes / 1024) as u32).unwrap(),
             top_config.app.response_cache_max_bytes,
-            JsonRpcQueryWeigher,
-            DefaultHashBuilder::default(),
+            JsonRpcResponseWeigher,
             Duration::from_secs(3600),
         )
         .await;

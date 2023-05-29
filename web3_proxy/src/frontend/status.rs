@@ -14,7 +14,7 @@ use axum::{
 use axum_macros::debug_handler;
 use once_cell::sync::Lazy;
 use serde_json::json;
-use std::{convert::Infallible, sync::Arc};
+use std::sync::Arc;
 
 static HEALTH_OK: Lazy<Bytes> = Lazy::new(|| Bytes::from("OK\n"));
 static HEALTH_NOT_OK: Lazy<Bytes> = Lazy::new(|| Bytes::from(":(\n"));
@@ -32,11 +32,8 @@ pub async fn health(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     let (code, content_type, body) = cache
-        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::Health, async move {
-            Ok(_health(app).await)
-        })
-        .await
-        .expect("this cache get is infallible");
+        .get_or_insert_async(&ResponseCacheKey::Health, async move { _health(app).await })
+        .await;
 
     Response::builder()
         .status(code)
@@ -66,11 +63,10 @@ pub async fn backups_needed(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     let (code, content_type, body) = cache
-        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::BackupsNeeded, async move {
-            Ok(_backups_needed(app).await)
+        .get_or_insert_async(&ResponseCacheKey::BackupsNeeded, async move {
+            _backups_needed(app).await
         })
-        .await
-        .expect("this cache get is infallible");
+        .await;
 
     Response::builder()
         .status(code)
@@ -116,11 +112,8 @@ pub async fn status(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     let (code, content_type, body) = cache
-        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::Status, async move {
-            Ok(_status(app).await)
-        })
-        .await
-        .expect("this cache get is infallible");
+        .get_or_insert_async(&ResponseCacheKey::Status, async move { _status(app).await })
+        .await;
 
     Response::builder()
         .status(code)

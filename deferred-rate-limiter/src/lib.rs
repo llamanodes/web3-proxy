@@ -85,7 +85,7 @@ where
 
             // set arc_deferred_rate_limit_result and return the count
             self.local_cache
-                .get_or_insert_async::<anyhow::Error, _>(&key, async move {
+                .try_get_or_insert_async::<anyhow::Error, _>(&key, async move {
                     // we do not use the try operator here because we want to be okay with redis errors
                     let redis_count = match rrl
                         .throttle_label(&redis_key, Some(max_requests_per_period), count)

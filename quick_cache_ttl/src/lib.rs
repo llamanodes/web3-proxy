@@ -20,7 +20,7 @@ mod tests {
 
         assert!(x.get(&0).is_none());
 
-        x.insert(0, 0).unwrap();
+        x.try_insert(0, 0).unwrap();
 
         assert!(x.get(&0).is_some());
 
@@ -42,11 +42,11 @@ mod tests {
 
         assert!(x.get(&0).is_none());
 
-        x.insert(0, ()).unwrap();
+        x.try_insert(0, ()).unwrap();
 
         assert!(x.get(&0).is_some());
 
-        x.insert(1, ()).unwrap();
+        x.try_insert(1, ()).unwrap();
 
         assert!(x.get(&1).is_some());
         assert!(x.get(&0).is_none());

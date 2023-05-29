@@ -1,5 +1,6 @@
 use quick_cache::sync::KQCache;
 use quick_cache::{PlaceholderGuard, Weighter};
+use std::convert::Infallible;
 use std::future::Future;
 use std::hash::{BuildHasher, Hash};
 use std::num::NonZeroU32;
@@ -81,7 +82,23 @@ impl<
     }
 
     #[inline]
-    pub async fn get_or_insert_async<E, Fut>(&self, key: &Key, qey: &Qey, f: Fut) -> Result<Val, E>
+    pub async fn get_or_insert_async<Fut>(&self, key: &Key, qey: &Qey, f: Fut) -> Val
+    where
+        Fut: Future<Output = Val>,
+    {
+        self.cache
+            .get_or_insert_async::<Infallible>(key, qey, async move { Ok(f.await) })
+            .await
+            .expect("infallible")
+    }
+
+    #[inline]
+    pub async fn try_get_or_insert_async<E, Fut>(
+        &self,
+        key: &Key,
+        qey: &Qey,
+        f: Fut,
+    ) -> Result<Val, E>
     where
         Fut: Future<Output = Result<Val, E>>,
     {
@@ -111,8 +128,9 @@ impl<
         self.cache.hits()
     }
 
+    /// if the item was too large to insert, it is returned with the error
     #[inline]
-    pub fn insert(&self, key: Key, qey: Qey, val: Val) -> Result<(), (Key, Qey, Val)> {
+    pub fn try_insert(&self, key: Key, qey: Qey, val: Val) -> Result<(), (Key, Qey, Val)> {
         let expire_at = Instant::now() + self.ttl;
 
         let weight = self.weighter.weight(&key, &qey, &val);

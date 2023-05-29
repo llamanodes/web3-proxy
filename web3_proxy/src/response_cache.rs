@@ -3,7 +3,6 @@ use crate::{
 };
 use derive_more::From;
 use ethers::providers::ProviderError;
-use hashbrown::hash_map::DefaultHashBuilder;
 use quick_cache_ttl::{CacheWithTTL, Weighter};
 use serde_json::value::RawValue;
 use std::{
@@ -34,17 +33,13 @@ impl Hash for JsonRpcResponseCacheKey {
     }
 }
 
-pub type JsonRpcResponseCache = CacheWithTTL<
-    JsonRpcResponseCacheKey,
-    JsonRpcResponseData,
-    JsonRpcQueryWeigher,
-    DefaultHashBuilder,
->;
+pub type JsonRpcResponseCache =
+    CacheWithTTL<JsonRpcResponseCacheKey, JsonRpcResponseData, JsonRpcResponseWeigher>;
 
 #[derive(Clone)]
-pub struct JsonRpcQueryWeigher;
+pub struct JsonRpcResponseWeigher;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum JsonRpcResponseData {
     Result {
         value: Box<RawValue>,
@@ -131,13 +126,61 @@ impl TryFrom<ProviderError> for JsonRpcErrorData {
     }
 }
 
-impl Weighter<JsonRpcResponseCacheKey, (), JsonRpcResponseData> for JsonRpcQueryWeigher {
-    fn weight(
-        &self,
-        _key: &JsonRpcResponseCacheKey,
-        _qey: &(),
-        value: &JsonRpcResponseData,
-    ) -> NonZeroU32 {
+impl<K, Q> Weighter<K, Q, JsonRpcResponseData> for JsonRpcResponseWeigher {
+    fn weight(&self, _key: &K, _qey: &Q, value: &JsonRpcResponseData) -> NonZeroU32 {
         value.num_bytes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{JsonRpcResponseData, JsonRpcResponseWeigher};
+    use quick_cache_ttl::CacheWithTTL;
+    use std::{num::NonZeroU32, time::Duration};
+
+    #[tokio::test(start_paused = true)]
+    async fn test_json_rpc_query_weigher() {
+        let max_item_weight = 200;
+        let weight_capacity = 1_000;
+
+        let response_cache: CacheWithTTL<u32, JsonRpcResponseData, JsonRpcResponseWeigher> =
+            CacheWithTTL::new_with_weights(
+                5,
+                max_item_weight.try_into().unwrap(),
+                weight_capacity,
+                JsonRpcResponseWeigher,
+                Duration::from_secs(2),
+            )
+            .await;
+
+        let small_data: JsonRpcResponseData = JsonRpcResponseData::Result {
+            value: Default::default(),
+            num_bytes: NonZeroU32::try_from(max_item_weight / 2).unwrap(),
+        };
+
+        let max_sized_data = JsonRpcResponseData::Result {
+            value: Default::default(),
+            num_bytes: NonZeroU32::try_from(max_item_weight).unwrap(),
+        };
+
+        let oversized_data = JsonRpcResponseData::Result {
+            value: Default::default(),
+            num_bytes: NonZeroU32::try_from(max_item_weight * 2).unwrap(),
+        };
+
+        response_cache.try_insert(0, small_data).unwrap();
+
+        response_cache.get(&0).unwrap();
+
+        response_cache.try_insert(1, max_sized_data).unwrap();
+
+        response_cache.get(&0).unwrap();
+        response_cache.get(&1).unwrap();
+
+        response_cache.try_insert(2, oversized_data).unwrap_err();
+
+        response_cache.get(&0).unwrap();
+        response_cache.get(&1).unwrap();
+        assert!(response_cache.get(&2).is_none());
     }
 }

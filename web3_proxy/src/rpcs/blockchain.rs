@@ -14,7 +14,6 @@ use quick_cache_ttl::CacheWithTTL;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use serde_json::json;
-use std::convert::Infallible;
 use std::hash::Hash;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
@@ -181,7 +180,7 @@ impl Web3Rpcs {
             // this is the only place that writes to block_numbers
             // multiple inserts should be okay though
             // TODO: info that there was a fork?
-            if let Err((k, v)) = self.blocks_by_number.insert(*block_num, *block.hash()) {
+            if let Err((k, v)) = self.blocks_by_number.try_insert(*block_num, *block.hash()) {
                 warn!("unable to cache {} as {}", k, v);
             }
         }
@@ -192,9 +191,8 @@ impl Web3Rpcs {
 
         let block = self
             .blocks_by_hash
-            .get_or_insert_async::<Infallible, _>(&block_hash, async move { Ok(block) })
-            .await
-            .expect("this cache get is infallible");
+            .get_or_insert_async(&block_hash, async move { block })
+            .await;
 
         Ok(block)
     }
