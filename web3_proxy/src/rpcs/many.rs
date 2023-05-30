@@ -9,7 +9,6 @@ use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
-use crate::response_cache::JsonRpcResponseEnum;
 use crate::rpcs::transactions::TxStatus;
 use arc_swap::ArcSwap;
 use counter::Counter;
@@ -20,7 +19,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
-use log::{debug, error, info, trace, warn, Level};
+use log::{debug, error, info, trace, warn};
 use migration::sea_orm::DatabaseConnection;
 use ordered_float::OrderedFloat;
 use quick_cache_ttl::CacheWithTTL;
@@ -1140,7 +1139,7 @@ impl Web3Rpcs {
                         .try_send_parallel_requests(active_request_handles, method, params)
                         .await?;
 
-                    todo!();
+                    return Ok(x);
                 }
                 Err(None) => {
                     warn!(

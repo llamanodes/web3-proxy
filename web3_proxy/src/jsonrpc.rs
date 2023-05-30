@@ -78,6 +78,22 @@ pub enum JsonRpcRequestEnum {
     Single(JsonRpcRequest),
 }
 
+impl JsonRpcRequestEnum {
+    /// panics if batch is empty
+    /// TODO: i'd like to do this without copying, but references make things difficult
+    pub fn first_id(&self) -> Web3ProxyResult<Box<RawValue>> {
+        match self {
+            Self::Batch(x) => match x.first() {
+                Some(x) => Ok(x.id.clone()),
+                None => Err(Web3ProxyError::BadRequest(
+                    "no requests in the batch".to_string(),
+                )),
+            },
+            Self::Single(x) => Ok(x.id.clone()),
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

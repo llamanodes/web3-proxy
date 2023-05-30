@@ -21,6 +21,7 @@ use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
 use serde::Serialize;
+use serde_json::value::RawValue;
 use tokio::{sync::AcquireError, task::JoinError, time::Instant};
 
 pub type Web3ProxyResult<T> = Result<T, Web3ProxyError>;
@@ -938,6 +939,18 @@ impl Web3ProxyError {
 
         (code, JsonRpcResponseEnum::from(err))
     }
+
+    pub fn into_response_with_id(self, id: Box<RawValue>) -> Response {
+        // TODO: include the request id in these so that users can give us something that will point to logs
+        // TODO: status code is in the jsonrpc response and is also the first item in the tuple. DRY
+        let (status_code, response_data) = self.into_response_parts();
+
+        // this will be missing the jsonrpc id!
+        // its better to get request id and call from_response_data with it then to use this IntoResponse helper.
+        let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
+
+        (status_code, Json(response)).into_response()
+    }
 }
 
 impl From<ethers::types::ParseBytesError> for Web3ProxyError {
@@ -953,20 +966,13 @@ impl From<tokio::time::error::Elapsed> for Web3ProxyError {
 }
 
 impl IntoResponse for Web3ProxyError {
+    #[inline]
     fn into_response(self) -> Response {
-        // TODO: include the request id in these so that users can give us something that will point to logs
-        // TODO: status code is in the jsonrpc response and is also the first item in the tuple. DRY
-        let (status_code, response_data) = self.into_response_parts();
-
-        // this will be missing the jsonrpc id!
-        // its better to get request id and call from_response_data with it then to use this IntoResponse helper.
-        let response =
-            JsonRpcForwardedResponse::from_response_data(response_data, Default::default());
-
-        (status_code, Json(response)).into_response()
+        self.into_response_with_id(Default::default())
     }
 }
 
+#[inline]
 pub async fn handler_404() -> Response {
     Web3ProxyError::NotFound.into_response()
 }
