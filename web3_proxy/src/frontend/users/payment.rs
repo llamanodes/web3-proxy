@@ -28,6 +28,7 @@ use migration::sea_orm::QuerySelect;
 use migration::sea_orm::TransactionTrait;
 use migration::{sea_orm, Expr, LockType, OnConflict};
 use serde_json::json;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 /// Implements any logic related to payments
@@ -440,7 +441,7 @@ pub async fn user_balance_post(
             sea_orm::Set(user_balance.available_balance + amount);
 
         // I can now call update / save and get the new object back
-        let mut user_balance = active_user_balance.save(&txn).await?;
+        let user_balance = active_user_balance.save(&txn).await?;
         debug!("Setting tx_hash: {:?}", tx_hash);
         let receipt = increase_on_chain_balance_receipt::ActiveModel {
             tx_hash: sea_orm::ActiveValue::Set(hex::encode(tx_hash)),
@@ -462,17 +463,16 @@ pub async fn user_balance_post(
         txn.commit().await?;
         debug!("Saved to db");
 
-        app.user_balance_cache
-            .remove(&user_balance.user_id.unwrap());
+        match NonZeroU64::try_from(user_balance.user_id.unwrap()) {
+            Err(_) => {}
+            Ok(x) => {
+                app.user_balance_cache.remove(&x);
+            }
+        };
 
         for rpc_key_entity in rpc_keys {
-            // TODO: Not sure which one was inserted, just delete both ...
             app.rpc_secret_key_cache
-                .remove(&RpcSecretKey::Uuid(rpc_key_entity.secret_key));
-            app.rpc_secret_key_cache
-                .remove(&RpcSecretKey::Ulid(rpc_key_entity.secret_key.into()));
-            app.rpc_secret_key_cache
-                .remove(&RpcSecretKey::from(rpc_key_entity.secret_key));
+                .remove(&rpc_key_entity.secret_key.into());
         }
 
         let response = (

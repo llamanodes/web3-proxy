@@ -13,6 +13,7 @@ use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKe
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
+use atomic_float::AtomicF64;
 use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
@@ -26,7 +27,7 @@ use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter, TransactionTrait,
 };
-use migration::{Expr, LockType, OnConflict};
+use migration::{Expr, LockType, OnConflict, Order};
 use num_traits::{clamp, clamp_min, ToPrimitive};
 use parking_lot::Mutex;
 use std::cmp::max;
@@ -61,7 +62,7 @@ pub struct RpcQueryStats {
     /// Credits used signifies how how much money was used up
     pub credits_used: Decimal,
     /// Last credits used
-    pub latest_balance: Decimal,
+    pub latest_balance: Arc<AtomicF64>,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
@@ -364,6 +365,7 @@ impl BufferedRpcQueryStats {
                 sender_rpc_entity
             )))?;
 
+        // TODO: Also make sure that the referrer is premium, otherwise do not assign credits
         // This will be optional
         let referral_objects = match referee::Entity::find()
             .filter(referee::Column::UserId.eq(sender_rpc_entity.user_id))
@@ -481,18 +483,25 @@ impl BufferedRpcQueryStats {
         // This is not atomic, so this may be an issue because it's not sequentially consistent across threads
         // It is a good-enough approximation though, and if the TTL for the balance cache is high enough, this should be ok
         // TODO: Ask about feedback here, prob cache with no modification, and some read-write may be more accurate ...
-        let latest_balance = user_balance_cache
-            .get(&sender_rpc_entity.user_id)
-            .unwrap_or(Decimal::from(0));
-        user_balance_cache.insert(
-            sender_rpc_entity.user_id,
-            clamp_min(latest_balance - self.sum_credits_used, Decimal::from(0)),
+        let latest_balance = match NonZeroU64::try_from(sender_rpc_entity.user_id) {
+            Ok(x) => user_balance_cache
+                .get(&x)
+                .unwrap_or(Arc::new(AtomicF64::from(0.))),
+            Err(_) => Arc::new(AtomicF64::default()),
+        };
+        // Just modify the AtomicF64 locally ...
+        let balance_before = latest_balance.fetch_sub(
+            self.sum_credits_used
+                .to_f64()
+                .context("Could not convert Decimal to f64")?,
+            Ordering::Acquire,
         );
+        latest_balance.fetch_max(0., Ordering::Acquire);
+
+        // Also check if the referrer is premium
 
         // Should only refresh cache if the premium threshold is crossed
-        if (latest_balance >= Decimal::from(10))
-            && (latest_balance - self.sum_credits_used) < Decimal::from(10)
-        {
+        if balance_before >= 10. && latest_balance.load(Ordering::Acquire) < 10. {
             let rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(sender_rpc_entity.user_id))
                 .all(&txn)
@@ -500,9 +509,7 @@ impl BufferedRpcQueryStats {
 
             for rpc_key_entity in rpc_keys {
                 // TODO: Not sure which one was inserted, just delete both ...
-                rpc_secret_key_cache.remove(&RpcSecretKey::Uuid(rpc_key_entity.secret_key));
-                rpc_secret_key_cache.remove(&RpcSecretKey::Ulid(rpc_key_entity.secret_key.into()));
-                rpc_secret_key_cache.remove(&RpcSecretKey::from(rpc_key_entity.secret_key));
+                rpc_secret_key_cache.remove(&rpc_key_entity.secret_key.into());
             }
         }
 
@@ -549,12 +556,7 @@ impl BufferedRpcQueryStats {
                     .to_f64()
                     .expect("number is really (too) large"),
             )
-            .field(
-                "balance",
-                self.latest_balance
-                    .to_f64()
-                    .expect("number is really (too) large"),
-            );
+            .field("balance", self.latest_balance.load(Ordering::Relaxed));
 
         // .round() as i64
 
@@ -633,7 +635,8 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
             response_millis,
             response_timestamp,
             credits_used,
-            latest_balance: metadata.latest_balance,
+            // To we need to clone it here ... (?)
+            latest_balance: metadata.latest_balance.clone(),
         };
 
         Ok(x)

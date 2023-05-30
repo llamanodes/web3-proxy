@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context};
 use argh::FromArgs;
+use atomic_float::AtomicF64;
 use entities::{rpc_accounting, rpc_key};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -171,7 +172,7 @@ impl MigrateStatsToV2 {
 
                     let request_ulid = Ulid::new();
 
-                    let latest_balance = Decimal::from(0);
+                    let latest_balance = Arc::new(AtomicF64::from(0.));
 
                     // Create RequestMetadata
                     let request_metadata = RequestMetadata {

@@ -1,6 +1,7 @@
 use super::{AppStat, RpcQueryKey};
 use crate::app::{RpcSecretKeyCache, UserBalanceCache, Web3ProxyJoinHandle};
 use crate::frontend::errors::Web3ProxyResult;
+use atomic_float::AtomicF64;
 use derive_more::From;
 use futures::stream;
 use hashbrown::HashMap;
@@ -26,7 +27,7 @@ pub struct BufferedRpcQueryStats {
     pub sum_response_millis: u64,
     pub sum_credits_used: Decimal,
     /// Balance tells us the user's balance at this point in time
-    pub latest_balance: Decimal,
+    pub latest_balance: Arc<AtomicF64>,
 }
 
 #[derive(From)]
@@ -188,7 +189,7 @@ impl StatBuffer {
                         db_conn,
                         key,
                         self.rpc_secret_key_cache.clone(),
-                        self.user_balance_cache.clone(), // Is cloning the Cache ok
+                        self.user_balance_cache.clone(),
                     )
                     .await
                 {

@@ -34,6 +34,7 @@ arc-swap = "1.6.0"
 argh = "0.1.10"
 axum = { version = "0.6.18", features = ["headers", "ws"] }
 axum-client-ip = "0.4.1"
+atomic_float = "0.1.0"
 axum-macros = "0.3.7"
 chrono = "0.4.24"
 console-subscriber = { version = "*", optional = true }

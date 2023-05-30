@@ -7,6 +7,8 @@ use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
 use crate::user_token::UserBearerToken;
+use anyhow::Context;
+use atomic_float::AtomicF64;
 use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
@@ -24,6 +26,7 @@ use ipnet::IpNet;
 use log::{error, trace, warn};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use num_traits::ToPrimitive;
 use rdkafka::message::{Header as KafkaHeader, OwnedHeaders as KafkaOwnedHeaders, OwnedMessage};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
@@ -33,6 +36,7 @@ use std::convert::Infallible;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::mem;
+use std::num::NonZeroU64;
 use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64, AtomicUsize};
 use std::time::Duration;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
@@ -283,7 +287,7 @@ pub struct RequestMetadata {
     pub stat_sender: Option<flume::Sender<AppStat>>,
 
     /// Last balance
-    pub latest_balance: Decimal,
+    pub latest_balance: Arc<AtomicF64>,
 }
 
 impl Default for RequestMetadata {
@@ -422,8 +426,10 @@ impl RequestMetadata {
         }
 
         // Fetch the balance from the cache
-        let latest_balance = app.user_balance_cache.get(&authorization.checks.user_id);
-
+        let latest_balance = match NonZeroU64::try_from(authorization.checks.user_id) {
+            Err(_) => Arc::new(AtomicF64::from(0.)),
+            Ok(x) => app.user_balance_cache.get(&x).unwrap_or_default(),
+        };
         let x = Self {
             archive_request: false.into(),
             backend_requests: Default::default(),
@@ -440,7 +446,7 @@ impl RequestMetadata {
             response_timestamp: 0.into(),
             start_instant: Instant::now(),
             stat_sender: app.stat_sender.clone(),
-            latest_balance: latest_balance.unwrap_or(Decimal::from(0)),
+            latest_balance,
         };
 
         Arc::new(x)
@@ -1096,27 +1102,32 @@ impl Web3ProxyApp {
     ///
     /// If a subuser calls this function, the subuser needs to have first attained the user_id that the rpc key belongs to.
     /// This function should be called anywhere where balance is required (i.e. only rpc calls, I believe ... non-rpc calls don't really require balance)
-    pub(crate) async fn balance_checks(&self, user_id: u64) -> Web3ProxyResult<Decimal> {
-        // Downgrade the user if the balance is too low ...
+    pub(crate) async fn balance_checks(&self, user_id: u64) -> Web3ProxyResult<Arc<AtomicF64>> {
         if user_id == 0 {
-            Ok(Decimal::from(0))
-        } else {
-            self.user_balance_cache
-                .get_or_insert_async(&user_id, async move {
-                    let db_replica = self
-                        .db_replica()
-                        .web3_context("Getting database connection")?;
+            return Ok(Arc::new(AtomicF64::from(0.)));
+        }
+        match NonZeroU64::try_from(user_id) {
+            Err(_) => Ok(Arc::new(AtomicF64::from(0.))),
+            Ok(x) => {
+                self.user_balance_cache
+                    .get_or_insert_async(&x, async move {
+                        let db_replica = self
+                            .db_replica()
+                            .web3_context("Getting database connection")?;
 
-                    let balance = balance::Entity::find()
-                        .filter(balance::Column::UserId.eq(user_id))
-                        .one(db_replica.conn())
-                        .await?
-                        .expect("related balance")
-                        .available_balance;
+                        let balance: Decimal = balance::Entity::find()
+                            .filter(balance::Column::UserId.eq(user_id))
+                            .one(db_replica.conn())
+                            .await?
+                            .context("did not find related balance")?
+                            .available_balance;
 
-                    Ok(balance)
-                })
-                .await
+                        Ok(Arc::new(AtomicF64::from(balance.to_f64().context(
+                            "Balance is too high, or too low to turn into a float!",
+                        )?)))
+                    })
+                    .await
+            }
         }
     }
 
@@ -1209,20 +1220,20 @@ impl Web3ProxyApp {
                         let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
                             .one(db_replica.conn())
                             .await?
-                            .expect("related user");
+                            .context("user model was not found, but every rpc_key should have a user")?;
 
                         let balance = balance::Entity::find()
                             .filter(balance::Column::UserId.eq(user_model.id))
                             .one(db_replica.conn())
                             .await?
-                            .expect("related balance")
+                            .context("related balance was not found but every user should have a balance")?
                             .available_balance;
 
                         let mut user_tier_model =
                             user_tier::Entity::find_by_id(user_model.user_tier_id)
                                 .one(db_replica.conn())
                                 .await?
-                                .expect("related user tier");
+                                .context("related user tier not found, but every user should have a tier")?;
 
                         // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
                         // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
@@ -1233,7 +1244,7 @@ impl Web3ProxyApp {
                                     user_tier::Entity::find_by_id(downgrade_user_tier)
                                         .one(db_replica.conn())
                                         .await?
-                                        .expect("downgrade user tier for premium");
+                                        .context("finding the downgrade user tier for premium did not work for premium")?;
                             } else {
                                 return Web3ProxyResult::Err(Web3ProxyError::InvalidUserTier);
                             }
@@ -1241,8 +1252,7 @@ impl Web3ProxyApp {
 
                         let user_tier = user_tier_model.title;
 
-                        let rpc_key_id =
-                            Some(rpc_key_model.id.try_into().expect("db ids are never 0"));
+                        let rpc_key_id = Some(rpc_key_model.id.try_into().context("db ids are never 0")?);
 
                         Ok(AuthorizationChecks {
                             user_id: rpc_key_model.user_id,
