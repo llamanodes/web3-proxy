@@ -12,9 +12,10 @@ use axum::{
     Extension,
 };
 use axum_macros::debug_handler;
+use log::trace;
 use once_cell::sync::Lazy;
 use serde_json::json;
-use std::{convert::Infallible, sync::Arc};
+use std::sync::Arc;
 
 static HEALTH_OK: Lazy<Bytes> = Lazy::new(|| Bytes::from("OK\n"));
 static HEALTH_NOT_OK: Lazy<Bytes> = Lazy::new(|| Bytes::from(":(\n"));
@@ -32,11 +33,8 @@ pub async fn health(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     let (code, content_type, body) = cache
-        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::Health, async move {
-            Ok(_health(app).await)
-        })
-        .await
-        .expect("this cache get is infallible");
+        .get_or_insert_async(&ResponseCacheKey::Health, async move { _health(app).await })
+        .await;
 
     Response::builder()
         .status(code)
@@ -48,6 +46,8 @@ pub async fn health(
 // TODO: _health doesn't need to be async, but _quick_cache_ttl needs an async function
 #[inline]
 async fn _health(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
+    trace!("health is not cached");
+
     if app.balanced_rpcs.synced() {
         (StatusCode::OK, CONTENT_TYPE_PLAIN, HEALTH_OK.clone())
     } else {
@@ -66,11 +66,10 @@ pub async fn backups_needed(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     let (code, content_type, body) = cache
-        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::BackupsNeeded, async move {
-            Ok(_backups_needed(app).await)
+        .get_or_insert_async(&ResponseCacheKey::BackupsNeeded, async move {
+            _backups_needed(app).await
         })
-        .await
-        .expect("this cache get is infallible");
+        .await;
 
     Response::builder()
         .status(code)
@@ -81,6 +80,8 @@ pub async fn backups_needed(
 
 #[inline]
 async fn _backups_needed(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
+    trace!("backups_needed is not cached");
+
     let code = {
         let consensus_rpcs = app
             .balanced_rpcs
@@ -116,11 +117,8 @@ pub async fn status(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     let (code, content_type, body) = cache
-        .get_or_insert_async::<Infallible, _>(&ResponseCacheKey::Status, async move {
-            Ok(_status(app).await)
-        })
-        .await
-        .expect("this cache get is infallible");
+        .get_or_insert_async(&ResponseCacheKey::Status, async move { _status(app).await })
+        .await;
 
     Response::builder()
         .status(code)
@@ -132,6 +130,8 @@ pub async fn status(
 // TODO: _status doesn't need to be async, but _quick_cache_ttl needs an async function
 #[inline]
 async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
+    trace!("status is not cached");
+
     // TODO: what else should we include? uptime, cache hit rates, cpu load, memory used
     // TODO: the hostname is probably not going to change. only get once at the start?
     let body = json!({
