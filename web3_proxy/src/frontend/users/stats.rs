@@ -14,6 +14,7 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use entities;
+use entities::sea_orm_active_enums::Role;
 use entities::{revert_log, rpc_key, secondary_user};
 use hashbrown::HashMap;
 use migration::sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
@@ -56,6 +57,7 @@ pub async fn user_revert_logs_get(
     // Also add rpc keys for which this user has access
     let shared_rpc_keys = secondary_user::Entity::find()
         .filter(secondary_user::Column::UserId.eq(user.id))
+        .filter(secondary_user::Column::Role.eq(Role::Owner))
         .all(db_replica.conn())
         .await?
         .into_iter()
