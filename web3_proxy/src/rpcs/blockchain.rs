@@ -175,19 +175,19 @@ impl Web3Rpcs {
 
         let block_num = block.number();
 
+        // this block is very likely already in block_hashes
+        // TODO: use their get_with
+        let block_hash = *block.hash();
+
         // TODO: think more about heaviest_chain. would be better to do the check inside this function
         if heaviest_chain {
             // this is the only place that writes to block_numbers
             // multiple inserts should be okay though
             // TODO: info that there was a fork?
-            if let Err((k, v)) = self.blocks_by_number.try_insert(*block_num, *block.hash()) {
-                warn!("unable to cache {} as {}", k, v);
-            }
+            self.blocks_by_number
+                .get_or_insert_async(block_num, async move { block_hash })
+                .await;
         }
-
-        // this block is very likely already in block_hashes
-        // TODO: use their get_with
-        let block_hash = *block.hash();
 
         let block = self
             .blocks_by_hash

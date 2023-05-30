@@ -12,6 +12,7 @@ use axum::{
     Extension,
 };
 use axum_macros::debug_handler;
+use log::debug;
 use once_cell::sync::Lazy;
 use serde_json::json;
 use std::sync::Arc;
@@ -125,6 +126,8 @@ pub async fn status(
 // TODO: _status doesn't need to be async, but _quick_cache_ttl needs an async function
 #[inline]
 async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
+    debug!("status is not cached");
+
     // TODO: what else should we include? uptime, cache hit rates, cpu load, memory used
     // TODO: the hostname is probably not going to change. only get once at the start?
     let body = json!({

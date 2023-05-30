@@ -1,6 +1,8 @@
+use log::{log_enabled, trace};
 use quick_cache::sync::KQCache;
 use quick_cache::{PlaceholderGuard, Weighter};
 use std::convert::Infallible;
+use std::fmt::Debug;
 use std::future::Future;
 use std::hash::{BuildHasher, Hash};
 use std::num::NonZeroU32;
@@ -12,6 +14,7 @@ use tokio::time::{sleep_until, Instant};
 pub struct KQCacheWithTTL<Key, Qey, Val, We, B> {
     cache: Arc<KQCache<Key, Qey, Val, We, B>>,
     max_item_weight: NonZeroU32,
+    name: &'static str,
     ttl: Duration,
     tx: flume::Sender<(Instant, Key, Qey)>,
     weighter: We,
@@ -21,10 +24,12 @@ pub struct KQCacheWithTTL<Key, Qey, Val, We, B> {
 
 struct KQCacheWithTTLTask<Key, Qey, Val, We, B> {
     cache: Arc<KQCache<Key, Qey, Val, We, B>>,
+    name: &'static str,
     rx: flume::Receiver<(Instant, Key, Qey)>,
 }
 
 pub struct PlaceholderGuardWithTTL<'a, Key, Qey, Val, We, B> {
+    name: &'a str,
     inner: PlaceholderGuard<'a, Key, Qey, Val, We, B>,
     key: Key,
     qey: Qey,
@@ -33,14 +38,15 @@ pub struct PlaceholderGuardWithTTL<'a, Key, Qey, Val, We, B> {
 }
 
 impl<
-        Key: Eq + Hash + Clone + Send + Sync + 'static,
-        Qey: Eq + Hash + Clone + Send + Sync + 'static,
+        Key: Clone + Debug + Eq + Hash + Send + Sync + 'static,
+        Qey: Clone + Debug + Eq + Hash + Send + Sync + 'static,
         Val: Clone + Send + Sync + 'static,
         We: Weighter<Key, Qey, Val> + Clone + Send + Sync + 'static,
         B: BuildHasher + Clone + Send + Sync + 'static,
     > KQCacheWithTTL<Key, Qey, Val, We, B>
 {
     pub async fn new_with_options(
+        name: &'static str,
         estimated_items_capacity: usize,
         max_item_weight: NonZeroU32,
         weight_capacity: u64,
@@ -61,6 +67,7 @@ impl<
 
         let task = KQCacheWithTTLTask {
             cache: cache.clone(),
+            name,
             rx,
         };
 
@@ -69,6 +76,7 @@ impl<
         Self {
             cache,
             max_item_weight,
+            name,
             task_handle,
             ttl,
             tx,
@@ -86,8 +94,7 @@ impl<
     where
         Fut: Future<Output = Val>,
     {
-        self.cache
-            .get_or_insert_async::<Infallible>(key, qey, async move { Ok(f.await) })
+        self.try_get_or_insert_async::<Infallible, _>(key, qey, async move { Ok(f.await) })
             .await
             .expect("infallible")
     }
@@ -102,7 +109,27 @@ impl<
     where
         Fut: Future<Output = Result<Val, E>>,
     {
-        self.cache.get_or_insert_async(key, qey, f).await
+        self.cache
+            .get_or_insert_async(key, qey, async move {
+                let x = f.await;
+
+                if x.is_ok() {
+                    let expire_at = Instant::now() + self.ttl;
+
+                    trace!(
+                        "{}, {:?}, {:?} expiring in {}s",
+                        self.name,
+                        &key,
+                        &qey,
+                        expire_at.duration_since(Instant::now()).as_secs_f32()
+                    );
+
+                    self.tx.send((expire_at, key.clone(), qey.clone())).unwrap();
+                }
+
+                x
+            })
+            .await
     }
 
     #[inline]
@@ -114,6 +141,7 @@ impl<
         match self.cache.get_value_or_guard_async(&key, &qey).await {
             Ok(x) => Ok(x),
             Err(inner) => Err(PlaceholderGuardWithTTL {
+                name: self.name,
                 inner,
                 key,
                 qey,
@@ -129,6 +157,7 @@ impl<
     }
 
     /// if the item was too large to insert, it is returned with the error
+    /// IMPORTANT! Inserting the same key multiple times does NOT reset the TTL!
     #[inline]
     pub fn try_insert(&self, key: Key, qey: Qey, val: Val) -> Result<(), (Key, Qey, Val)> {
         let expire_at = Instant::now() + self.ttl;
@@ -137,6 +166,14 @@ impl<
 
         if weight <= self.max_item_weight {
             self.cache.insert(key.clone(), qey.clone(), val);
+
+            trace!(
+                "{}, {:?}, {:?} expiring in {}s",
+                self.name,
+                &key,
+                &qey,
+                expire_at.duration_since(Instant::now()).as_secs_f32()
+            );
 
             self.tx.send((expire_at, key, qey)).unwrap();
 
@@ -163,26 +200,51 @@ impl<
 }
 
 impl<
-        Key: Eq + Hash,
-        Qey: Eq + Hash,
+        Key: Debug + Eq + Hash,
+        Qey: Debug + Eq + Hash,
         Val: Clone,
         We: Weighter<Key, Qey, Val> + Clone,
         B: BuildHasher + Clone,
     > KQCacheWithTTLTask<Key, Qey, Val, We, B>
 {
     async fn run(self) {
-        while let Ok((expire_at, key, qey)) = self.rx.recv_async().await {
-            sleep_until(expire_at).await;
+        trace!("watching for expirations on {}", self.name);
 
-            self.cache.remove(&key, &qey);
+        while let Ok((expire_at, key, qey)) = self.rx.recv_async().await {
+            let now = Instant::now();
+            if expire_at > now {
+                if log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "{}, {:?}, {:?} sleeping for {}ms.",
+                        self.name,
+                        key,
+                        qey,
+                        expire_at.duration_since(now).as_millis(),
+                    );
+                }
+
+                sleep_until(expire_at).await;
+
+                trace!("{}, {:?}, {:?} done sleeping", self.name, key, qey);
+            } else {
+                trace!("no need to sleep!");
+            }
+
+            if self.cache.remove(&key, &qey) {
+                trace!("removed {}, {:?}, {:?}", self.name, key, qey);
+            } else {
+                trace!("empty {}, {:?}, {:?}", self.name, key, qey);
+            };
         }
+
+        trace!("watching for expirations on {}", self.name)
     }
 }
 
 impl<
         'a,
-        Key: Clone + Hash + Eq,
-        Qey: Clone + Hash + Eq,
+        Key: Clone + Debug + Hash + Eq,
+        Qey: Clone + Debug + Hash + Eq,
         Val: Clone,
         We: Weighter<Key, Qey, Val>,
         B: BuildHasher,
@@ -192,6 +254,16 @@ impl<
         let expire_at = Instant::now() + self.ttl;
 
         self.inner.insert(val);
+
+        if log_enabled!(log::Level::Trace) {
+            trace!(
+                "{}, {:?}, {:?} expiring in {}s",
+                self.name,
+                self.key,
+                self.qey,
+                expire_at.duration_since(Instant::now()).as_secs_f32()
+            );
+        }
 
         self.tx.send((expire_at, self.key, self.qey)).unwrap();
     }

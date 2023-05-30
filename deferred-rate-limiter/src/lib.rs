@@ -45,7 +45,13 @@ where
         // TODO: time to live is not exactly right. we want this ttl counter to start only after redis is down. this works for now
         // TODO: what do these weigh?
         // TODO: allow skipping max_capacity
-        let local_cache = CacheWithTTL::new(cache_size, Duration::from_secs(ttl)).await;
+        // TODO: prefix instead of a static str
+        let local_cache = CacheWithTTL::new(
+            "deferred rate limiter",
+            cache_size,
+            Duration::from_secs(ttl),
+        )
+        .await;
 
         Self {
             local_cache,

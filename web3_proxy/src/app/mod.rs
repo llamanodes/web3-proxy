@@ -507,8 +507,12 @@ impl Web3ProxyApp {
         // if there is no database of users, there will be no keys and so this will be empty
         // TODO: max_capacity from config
         // TODO: ttl from config
-        let rpc_secret_key_cache =
-            CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(600)).await;
+        let rpc_secret_key_cache = CacheWithTTL::arc_with_capacity(
+            "rpc_secret_key_cache",
+            10_000,
+            Duration::from_secs(600),
+        )
+        .await;
 
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
@@ -601,8 +605,12 @@ impl Web3ProxyApp {
         // TODO: different chains might handle this differently
         // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
         // TODO: this used to be time_to_update, but
-        let pending_transactions =
-            CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(300)).await;
+        let pending_transactions = CacheWithTTL::arc_with_capacity(
+            "pending_transactions",
+            10_000,
+            Duration::from_secs(300),
+        )
+        .await;
 
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
         // TODO: we should emit stats to calculate a more accurate expected cache size
@@ -610,6 +618,7 @@ impl Web3ProxyApp {
         // TODO: configurable max item weight instead of using ~0.1%
         // TODO: resize the cache automatically
         let response_cache = JsonRpcResponseCache::new_with_weights(
+            "response_cache",
             (top_config.app.response_cache_max_bytes / 16_384) as usize,
             NonZeroU32::try_from((top_config.app.response_cache_max_bytes / 1024) as u32).unwrap(),
             top_config.app.response_cache_max_bytes,

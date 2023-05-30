@@ -145,6 +145,7 @@ mod tests {
 
         let response_cache: CacheWithTTL<u32, JsonRpcResponseData, JsonRpcResponseWeigher> =
             CacheWithTTL::new_with_weights(
+                "test",
                 5,
                 max_item_weight.try_into().unwrap(),
                 weight_capacity,
