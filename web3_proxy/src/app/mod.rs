@@ -112,7 +112,6 @@ pub struct AuthorizationChecks {
     /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
     pub private_txs: bool,
     pub proxy_mode: ProxyMode,
-    pub user_tier: String,
 }
 
 /// Simple wrapper so that we can keep track of read only connections.

@@ -1259,7 +1259,6 @@ impl Web3ProxyApp {
                             max_requests_per_period: user_tier_model.max_requests_per_period,
                             private_txs: rpc_key_model.private_txs,
                             proxy_mode,
-                            user_tier,
                         })
                     }
                     None => Ok(AuthorizationChecks::default()),
