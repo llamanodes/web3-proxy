@@ -13,7 +13,7 @@ use axum_macros::debug_handler;
 use entities::{balance, increase_on_chain_balance_receipt, user};
 use ethers::abi::{AbiEncode, ParamType};
 use ethers::types::{Address, TransactionReceipt, H256, U256};
-use ethers::utils::{hex, keccak256};
+use ethers::utils::keccak256;
 use hashbrown::HashMap;
 use hex_fmt::HexFmt;
 use http::StatusCode;
@@ -22,7 +22,6 @@ use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::EntityTrait;
-use migration::sea_orm::IntoActiveModel;
 use migration::sea_orm::QueryFilter;
 use migration::sea_orm::QuerySelect;
 use migration::sea_orm::TransactionTrait;
@@ -92,7 +91,7 @@ pub async fn user_deposits_get(
             let mut out = HashMap::new();
             out.insert("amount", serde_json::Value::String(x.amount.to_string()));
             out.insert("chain_id", serde_json::Value::Number(x.chain_id.into()));
-            out.insert("tx_hash", serde_json::Value::String(x.tx_hash));
+            out.insert("tx_hash", serde_json::Value::String(x.tx_hash.encode_hex()));
             out
         })
         .collect::<Vec<_>>();
@@ -134,7 +133,7 @@ pub async fn user_balance_post(
 
     // Return straight false if the tx was already added ...
     let receipt = increase_on_chain_balance_receipt::Entity::find()
-        .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(hex::encode(tx_hash)))
+        .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
         .one(&db_conn)
         .await?;
     if receipt.is_some() {
@@ -157,12 +156,12 @@ pub async fn user_balance_post(
         Ok(OpenRequestResult::Handle(handle)) => {
             debug!(
                 "Params are: {:?}",
-                &vec![format!("0x{}", hex::encode(tx_hash))]
+                &vec![format!("0x{}", tx_hash.encode_hex())]
             );
             handle
                 .request(
                     "eth_getTransactionReceipt",
-                    &vec![format!("0x{}", hex::encode(tx_hash))],
+                    &vec![format!("0x{}", tx_hash.encode_hex())],
                     Level::Trace.into(),
                 )
                 .await
@@ -176,7 +175,7 @@ pub async fn user_balance_post(
         Err(err) => {
             log::trace!(
                 "cancelled funneling transaction {} from: {:?}",
-                tx_hash,
+                tx_hash.encode_hex(),
                 err,
             );
             Err(err)
@@ -231,7 +230,7 @@ pub async fn user_balance_post(
         Err(err) => {
             log::trace!(
                 "cancelled funneling transaction {} from: {:?}",
-                tx_hash,
+                tx_hash.encode_hex(),
                 err,
             );
             Err(err)
@@ -278,7 +277,7 @@ pub async fn user_balance_post(
         Err(err) => {
             log::trace!(
                 "cancelled funneling transaction {} from: {:?}",
-                tx_hash,
+                tx_hash.encode_hex(),
                 err,
             );
             Err(err)
@@ -415,23 +414,31 @@ pub async fn user_balance_post(
         let _ = amount.set_scale(decimals);
         debug!("Amount is: {:?}", amount);
 
-        // Check if the item is in the database. If it is not, then add it into the database
-        let user_balance = balance::Entity::find()
-            .filter(balance::Column::UserId.eq(recipient.id))
-            .lock(LockType::Update)
-            .one(&txn)
+        // Modify the users balance in the database
+        let user_balance = balance::ActiveModel {
+            id: sea_orm::NotSet,
+            available_balance: sea_orm::Set(amount),
+            used_balance: sea_orm::Set(Decimal::new(0, 0)),
+            user_id: sea_orm::Set(recipient.id),
+        };
+
+        // TODO: Do an insert on conflict update ...
+        let _ = balance::Entity::insert(user_balance)
+            .on_conflict(
+                OnConflict::new()
+                    .values([(
+                        balance::Column::AvailableBalance,
+                        Expr::col(balance::Column::AvailableBalance).add(amount),
+                    )])
+                    .to_owned(),
+            )
+            .exec(&txn)
             .await?
-            .context("Could not find User balance, this should have been created when signing up the user!")?;
+            .last_insert_id;
 
-        // Gotta add to the balance entry
-        // Should be atomic, because we do a write lock during the transaction
-        let mut active_user_balance = user_balance.clone().into_active_model();
-        active_user_balance.available_balance =
-            sea_orm::Set(user_balance.available_balance + amount);
-
-        debug!("Setting tx_hash: {:?}", tx_hash);
+        debug!("Setting tx_hash: {:?}", tx_hash.encode_hex());
         let receipt = increase_on_chain_balance_receipt::ActiveModel {
-            tx_hash: sea_orm::ActiveValue::Set(hex::encode(tx_hash)),
+            tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
             chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
             amount: sea_orm::ActiveValue::Set(amount),
             deposit_to_user_id: sea_orm::ActiveValue::Set(recipient.id),
@@ -445,7 +452,7 @@ pub async fn user_balance_post(
         let response = (
             StatusCode::CREATED,
             Json(json!({
-                "tx_hash": tx_hash,
+                "tx_hash": tx_hash.encode_hex(),
                 "amount": amount
             })),
         )
