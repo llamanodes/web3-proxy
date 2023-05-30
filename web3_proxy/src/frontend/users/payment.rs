@@ -66,7 +66,7 @@ pub async fn user_balance_get(
     // Just return the balance for the user
     let user_balance = balance::Entity::find()
         .filter(balance::Column::UserId.eq(_user.id))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?
         .map(|x| x.available_balance)
         .unwrap_or_default();
@@ -94,7 +94,7 @@ pub async fn user_deposits_get(
     // Filter by user ...
     let receipts = increase_on_chain_balance_receipt::Entity::find()
         .filter(increase_on_chain_balance_receipt::Column::DepositToUserId.eq(user.id))
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await?;
 
     // Return the response, all except the user ...

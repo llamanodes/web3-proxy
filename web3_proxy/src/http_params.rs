@@ -42,7 +42,7 @@ pub async fn get_user_id_from_params(
 
                     let user_login = login::Entity::find()
                         .filter(login::Column::BearerToken.eq(user_bearer_token.uuid()))
-                        .one(db_replica.conn())
+                        .one(db_replica.as_ref())
                         .await
                         .context("database error while querying for user")?
                         .ok_or(Web3ProxyError::AccessDenied)?;

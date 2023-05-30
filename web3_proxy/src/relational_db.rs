@@ -15,18 +15,9 @@ pub use migration::sea_orm::DatabaseConnection;
 #[derive(Clone, From)]
 pub struct DatabaseReplica(DatabaseConnection);
 
-/// TODO: is this a good use of smart pointers? we do DatabaseConnection::as_ref a lot so this seems close
-impl Deref for DatabaseReplica {
-    type Target = DatabaseConnection;
-
-    fn deref(&self) -> &DatabaseConnection {
+impl AsRef<DatabaseConnection> for DatabaseReplica {
+    fn as_ref(&self) -> &DatabaseConnection {
         &self.0
-    }
-}
-
-impl DatabaseReplica {
-    pub fn conn(&self) -> &DatabaseConnection {
-        self.deref()
     }
 }
 
