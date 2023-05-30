@@ -2,7 +2,7 @@
 
 use super::authorization::Authorization;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
-use crate::response_cache::JsonRpcResponseData;
+use crate::response_cache::JsonRpcResponseEnum;
 
 use std::error::Error;
 use std::{borrow::Cow, net::IpAddr};
@@ -20,6 +20,8 @@ use log::{debug, error, info, trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
+use serde::Serialize;
+use serde_json::value::RawValue;
 use tokio::{sync::AcquireError, task::JoinError, time::Instant};
 
 pub type Web3ProxyResult<T> = Result<T, Web3ProxyError>;
@@ -76,6 +78,9 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     IpNotAllowed(IpAddr),
     JoinError(JoinError),
+    #[display(fmt = "{:?}", _0)]
+    #[error(ignore)]
+    JsonRpcErrorData(JsonRpcErrorData),
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
     MsgPackEncode(rmp_serde::encode::Error),
@@ -143,7 +148,7 @@ pub enum Web3ProxyError {
 }
 
 impl Web3ProxyError {
-    pub fn into_response_parts(self) -> (StatusCode, JsonRpcResponseData) {
+    pub fn into_response_parts<R: Serialize>(self) -> (StatusCode, JsonRpcResponseEnum<R>) {
         // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
             Self::AccessDenied => {
@@ -478,6 +483,7 @@ impl Web3ProxyError {
                     },
                 )
             }
+            Self::JsonRpcErrorData(jsonrpc_error_data) => (StatusCode::OK, jsonrpc_error_data),
             Self::MsgPackEncode(err) => {
                 warn!("MsgPackEncode Error: {}", err);
                 (
@@ -931,7 +937,15 @@ impl Web3ProxyError {
             },
         };
 
-        (code, JsonRpcResponseData::from(err))
+        (code, JsonRpcResponseEnum::from(err))
+    }
+
+    pub fn into_response_with_id(self, id: Box<RawValue>) -> Response {
+        let (status_code, response_data) = self.into_response_parts();
+
+        let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
+
+        (status_code, Json(response)).into_response()
     }
 }
 
@@ -948,20 +962,13 @@ impl From<tokio::time::error::Elapsed> for Web3ProxyError {
 }
 
 impl IntoResponse for Web3ProxyError {
+    #[inline]
     fn into_response(self) -> Response {
-        // TODO: include the request id in these so that users can give us something that will point to logs
-        // TODO: status code is in the jsonrpc response and is also the first item in the tuple. DRY
-        let (status_code, response_data) = self.into_response_parts();
-
-        // this will be missing the jsonrpc id!
-        // its better to get request id and call from_response_data with it then to use this IntoResponse helper.
-        let response =
-            JsonRpcForwardedResponse::from_response_data(response_data, Default::default());
-
-        (status_code, Json(response)).into_response()
+        self.into_response_with_id(Default::default())
     }
 }
 
+#[inline]
 pub async fn handler_404() -> Response {
     Web3ProxyError::NotFound.into_response()
 }

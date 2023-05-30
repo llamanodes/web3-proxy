@@ -1,4 +1,4 @@
-///! Load balanced communication with a group of web3 rpc providers
+//! Load balanced communication with a group of web3 rpc providers
 use super::blockchain::{BlocksByHashCache, BlocksByNumberCache, Web3ProxyBlock};
 use super::consensus::{ConsensusWeb3Rpcs, ShouldWaitForBlock};
 use super::one::Web3Rpc;
@@ -8,8 +8,7 @@ use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
-use crate::jsonrpc::{JsonRpcErrorData, JsonRpcRequest};
-use crate::response_cache::JsonRpcResponseData;
+use crate::jsonrpc::{JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::transactions::TxStatus;
 use arc_swap::ArcSwap;
 use counter::Counter;
@@ -20,7 +19,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
-use log::{debug, error, info, trace, warn, Level};
+use log::{debug, error, info, trace, warn};
 use migration::sea_orm::DatabaseConnection;
 use ordered_float::OrderedFloat;
 use quick_cache_ttl::CacheWithTTL;
@@ -359,22 +358,21 @@ impl Web3Rpcs {
 
     /// Send the same request to all the handles. Returning the most common success or most common error.
     /// TODO: option to return the fastest response and handles for all the others instead?
-    pub async fn try_send_parallel_requests(
+    pub async fn try_send_parallel_requests<P: JsonRpcParams>(
         &self,
         active_request_handles: Vec<OpenRequestHandle>,
         method: &str,
-        params: Option<&serde_json::Value>,
-        error_level: Level,
+        params: &P,
         // TODO: remove this box once i figure out how to do the options
-    ) -> Web3ProxyResult<JsonRpcResponseData> {
+    ) -> Result<Box<RawValue>, ProviderError> {
         // TODO: if only 1 active_request_handles, do self.try_send_request?
 
+        // TODO: iter stream
         let responses = active_request_handles
             .into_iter()
             .map(|active_request_handle| async move {
-                let result: Result<Box<RawValue>, _> = active_request_handle
-                    .request(method, &json!(&params), error_level.into())
-                    .await;
+                let result: Result<Box<RawValue>, _> =
+                    active_request_handle.request(method, &json!(&params)).await;
                 result
             })
             .collect::<FuturesUnordered<_>>()
@@ -400,6 +398,7 @@ impl Web3Rpcs {
             counts.update([s].into_iter());
         }
 
+        // return the most_common success if any. otherwise return the most_common error
         for (most_common, _) in counts.most_common_ordered() {
             let most_common = count_map
                 .remove(&most_common)
@@ -408,17 +407,15 @@ impl Web3Rpcs {
             match most_common {
                 Ok(x) => {
                     // return the most common success
-                    return Ok(x.into());
+                    return Ok(x);
                 }
                 Err(err) => {
                     if any_ok_with_json_result {
-                        // the most common is an error, but there is an Ok in here somewhere. loop to find it
+                        // the most common is an error, but there is an Ok in here somewhere. continue the loop to find it
                         continue;
                     }
 
-                    let err: JsonRpcErrorData = err.try_into()?;
-
-                    return Ok(err.into());
+                    return Err(err);
                 }
             }
         }
@@ -430,6 +427,7 @@ impl Web3Rpcs {
     async fn _best_available_rpc(
         &self,
         authorization: &Arc<Authorization>,
+        error_handler: Option<RequestErrorHandler>,
         potential_rpcs: &[Arc<Web3Rpc>],
         skip: &mut Vec<Arc<Web3Rpc>>,
     ) -> OpenRequestResult {
@@ -446,7 +444,11 @@ impl Web3Rpcs {
             skip.push(Arc::clone(faster_rpc));
 
             // just because it has lower latency doesn't mean we are sure to get a connection. there might be rate limits
-            match faster_rpc.try_request_handle(authorization).await {
+            // TODO: what error_handler?
+            match faster_rpc
+                .try_request_handle(authorization, error_handler)
+                .await
+            {
                 Ok(OpenRequestResult::Handle(handle)) => {
                     trace!("opened handle: {}", faster_rpc);
                     return OpenRequestResult::Handle(handle);
@@ -483,17 +485,22 @@ impl Web3Rpcs {
 
     pub async fn wait_for_best_rpc(
         &self,
-        authorization: &Arc<Authorization>,
         request_metadata: Option<&Arc<RequestMetadata>>,
         skip_rpcs: &mut Vec<Arc<Web3Rpc>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
         max_wait: Option<Duration>,
+        error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestResult> {
         let mut earliest_retry_at: Option<Instant> = None;
 
+        // TODO: pass db_conn to the "default" authorization for revert logging
+        let authorization = request_metadata
+            .and_then(|x| x.authorization.clone())
+            .unwrap_or_default();
+
         if self.watch_consensus_head_sender.is_none() {
-            trace!("this Web3Rpcs is not tracking head blocks. pick any server");
+            // this Web3Rpcs is not tracking head blocks. pick any server
 
             let by_name = self.by_name.load();
 
@@ -517,7 +524,7 @@ impl Web3Rpcs {
             potential_rpcs.shuffle(&mut thread_fast_rng::thread_fast_rng());
 
             match self
-                ._best_available_rpc(authorization, &potential_rpcs, skip_rpcs)
+                ._best_available_rpc(&authorization, error_handler, &potential_rpcs, skip_rpcs)
                 .await
             {
                 OpenRequestResult::Handle(x) => return Ok(OpenRequestResult::Handle(x)),
@@ -568,7 +575,12 @@ impl Web3Rpcs {
                         // we have enough potential rpcs. try to load balance
 
                         match self
-                            ._best_available_rpc(authorization, &potential_rpcs, skip_rpcs)
+                            ._best_available_rpc(
+                                &authorization,
+                                error_handler,
+                                &potential_rpcs,
+                                skip_rpcs,
+                            )
                             .await
                         {
                             OpenRequestResult::Handle(x) => {
@@ -611,7 +623,12 @@ impl Web3Rpcs {
                         if potential_rpcs.len() >= self.min_head_rpcs {
                             // we have enough potential rpcs. try to load balance
                             match self
-                                ._best_available_rpc(authorization, &potential_rpcs, skip_rpcs)
+                                ._best_available_rpc(
+                                    &authorization,
+                                    error_handler,
+                                    &potential_rpcs,
+                                    skip_rpcs,
+                                )
                                 .await
                             {
                                 OpenRequestResult::Handle(x) => {
@@ -635,7 +652,12 @@ impl Web3Rpcs {
                     if !potential_rpcs.is_empty() {
                         // even after scanning all the tiers, there are not enough rpcs that can serve this request. try anyways
                         match self
-                            ._best_available_rpc(authorization, &potential_rpcs, skip_rpcs)
+                            ._best_available_rpc(
+                                &authorization,
+                                error_handler,
+                                &potential_rpcs,
+                                skip_rpcs,
+                            )
                             .await
                         {
                             OpenRequestResult::Handle(x) => {
@@ -703,11 +725,12 @@ impl Web3Rpcs {
     // TODO: this is broken
     pub async fn all_connections(
         &self,
-        authorization: &Arc<Authorization>,
+        request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
         max_count: Option<usize>,
         allow_backups: bool,
+        error_level: Option<RequestErrorHandler>,
     ) -> Result<Vec<OpenRequestHandle>, Option<Instant>> {
         let mut earliest_retry_at = None;
 
@@ -745,6 +768,10 @@ impl Web3Rpcs {
 
         trace!("all_rpcs: {:#?}", all_rpcs);
 
+        let authorization = request_metadata
+            .and_then(|x| x.authorization.clone())
+            .unwrap_or_default();
+
         for rpc in itertools::chain(synced_rpcs, all_rpcs) {
             if max_count == 0 {
                 break;
@@ -778,7 +805,7 @@ impl Web3Rpcs {
             }
 
             // check rate limits and increment our connection counter
-            match rpc.try_request_handle(authorization).await {
+            match rpc.try_request_handle(&authorization, error_level).await {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
                     trace!("{} is rate limited. skipping", rpc);
@@ -806,16 +833,25 @@ impl Web3Rpcs {
         Err(earliest_retry_at)
     }
 
-    /// be sure there is a timeout on this or it might loop forever
-    /// TODO: think more about wait_for_sync
-    pub async fn try_send_best_connection(
+    pub async fn internal_request<P: JsonRpcParams, R: JsonRpcResultData>(
         &self,
-        authorization: &Arc<Authorization>,
-        request: &JsonRpcRequest,
+        method: &str,
+        params: &P,
+    ) -> Web3ProxyResult<R> {
+        // TODO: no request_metadata means we won't have stats on this internal request.
+        self.request_with_metadata(method, params, None, None, None)
+            .await
+    }
+
+    /// Track stats
+    pub async fn request_with_metadata<P: JsonRpcParams, R: JsonRpcResultData>(
+        &self,
+        method: &str,
+        params: &P,
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-    ) -> Web3ProxyResult<JsonRpcResponseData> {
+    ) -> Web3ProxyResult<R> {
         let mut skip_rpcs = vec![];
         let mut method_not_available_response = None;
 
@@ -823,19 +859,21 @@ impl Web3Rpcs {
 
         let start = Instant::now();
 
-        // TODO: get from config
+        // TODO: get from config or arguments
         let max_wait = Duration::from_secs(10);
+
+        let error_handler = Some(RequestErrorHandler::Save);
 
         // TODO: the loop here feels somewhat redundant with the loop in best_available_rpc
         while start.elapsed() < max_wait {
             match self
                 .wait_for_best_rpc(
-                    authorization,
                     request_metadata,
                     &mut skip_rpcs,
                     min_block_needed,
                     max_block_needed,
                     None,
+                    error_handler,
                 )
                 .await?
             {
@@ -850,16 +888,7 @@ impl Web3Rpcs {
 
                     let is_backup_response = rpc.backup;
 
-                    // TODO: get the log percent from the user data
-                    let response_result: Result<Box<RawValue>, _> = active_request_handle
-                        .request(
-                            &request.method,
-                            &json!(request.params),
-                            RequestErrorHandler::Save,
-                        )
-                        .await;
-
-                    match response_result {
+                    match active_request_handle.request::<P, R>(method, params).await {
                         Ok(response) => {
                             // TODO: if there are multiple responses being aggregated, this will only use the last server's backup type
                             if let Some(request_metadata) = request_metadata {
@@ -868,7 +897,7 @@ impl Web3Rpcs {
                                     .store(is_backup_response, Ordering::Release);
                             }
 
-                            return Ok(response.into());
+                            return Ok(response);
                         }
                         Err(error) => {
                             // trace!(?response, "rpc error");
@@ -963,7 +992,7 @@ impl Web3Rpcs {
                             //     hard_limit_until.send_replace(retry_at);
                             // }
 
-                            return Ok(error.into());
+                            return Err(error.into());
                         }
                     }
                 }
@@ -1005,11 +1034,9 @@ impl Web3Rpcs {
         }
 
         if let Some(err) = method_not_available_response {
-            // TODO: this error response is likely the user's fault. do we actually want it marked as an error? maybe keep user and server error bools?
-            // TODO: emit a stat for unsupported methods? it would be best to block them at the proxy instead of at the backend
-            // TODO: this is too verbose!
-            debug!("{}", serde_json::to_string(&err)?);
-            return Ok(err.into());
+            // this error response is likely the user's fault
+            // TODO: emit a stat for unsupported methods. then we can know what there is demand for or if we are missing a feature
+            return Err(err.into());
         }
 
         let num_conns = self.by_name.load().len();
@@ -1046,7 +1073,7 @@ impl Web3Rpcs {
 
         // TODO: what error code?
         // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
-        Ok(JsonRpcErrorData {
+        Err(JsonRpcErrorData {
             message: Cow::Borrowed("Requested data is not available"),
             code: -32043,
             data: None,
@@ -1056,32 +1083,33 @@ impl Web3Rpcs {
 
     /// be sure there is a timeout on this or it might loop forever
     #[allow(clippy::too_many_arguments)]
-    pub async fn try_send_all_synced_connections(
+    pub async fn try_send_all_synced_connections<P: JsonRpcParams>(
         self: &Arc<Self>,
-        authorization: &Arc<Authorization>,
-        request: &JsonRpcRequest,
-        request_metadata: Option<Arc<RequestMetadata>>,
+        method: &str,
+        params: &P,
+        request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-        error_level: Level,
-        max_count: Option<usize>,
-        always_include_backups: bool,
-    ) -> Web3ProxyResult<JsonRpcResponseData> {
+        error_level: Option<RequestErrorHandler>,
+        max_sends: Option<usize>,
+        include_backups: bool,
+    ) -> Web3ProxyResult<Box<RawValue>> {
         let mut watch_consensus_rpcs = self.watch_consensus_rpcs_sender.subscribe();
 
-        let start = Instant::now();
+        // TODO: get from config or function arguments
+        let max_wait = Duration::from_secs(5);
 
-        // TODO: get from config
-        let max_wait = Duration::from_secs(3);
+        let wait_until = Instant::now() + max_wait;
 
-        while start.elapsed() < max_wait {
+        while Instant::now() < wait_until {
             match self
                 .all_connections(
-                    authorization,
+                    request_metadata,
                     min_block_needed,
                     max_block_needed,
-                    max_count,
-                    always_include_backups,
+                    max_sends,
+                    include_backups,
+                    error_level,
                 )
                 .await
             {
@@ -1107,14 +1135,11 @@ impl Web3Rpcs {
                             .store(only_backups_used, Ordering::Release);
                     }
 
-                    return self
-                        .try_send_parallel_requests(
-                            active_request_handles,
-                            request.method.as_ref(),
-                            request.params.as_ref(),
-                            error_level,
-                        )
-                        .await;
+                    let x = self
+                        .try_send_parallel_requests(active_request_handles, method, params)
+                        .await?;
+
+                    return Ok(x);
                 }
                 Err(None) => {
                     warn!(
@@ -1127,20 +1152,25 @@ impl Web3Rpcs {
                         request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
                     }
 
-                    watch_consensus_rpcs.changed().await?;
-                    watch_consensus_rpcs.borrow_and_update();
-
+                    tokio::select! {
+                        _ = sleep_until(wait_until) => break,
+                        _ = watch_consensus_rpcs.changed() => {
+                            watch_consensus_rpcs.borrow_and_update();
+                        }
+                    }
                     continue;
                 }
                 Err(Some(retry_at)) => {
-                    // TODO: move this to a helper function
-                    // sleep (TODO: with a lock?) until our rate limits should be available
-                    // TODO: if a server catches up sync while we are waiting, we could stop waiting
-                    warn!("All rate limits exceeded. Sleeping");
-
                     if let Some(request_metadata) = &request_metadata {
                         request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
                     }
+
+                    if retry_at > wait_until {
+                        warn!("All rate limits exceeded. And sleeping would take too long");
+                        break;
+                    }
+
+                    warn!("All rate limits exceeded. Sleeping");
 
                     tokio::select! {
                         _ = sleep_until(retry_at) => {}
@@ -1157,19 +1187,21 @@ impl Web3Rpcs {
         Err(Web3ProxyError::NoServersSynced)
     }
 
-    pub async fn try_proxy_connection(
+    pub async fn try_proxy_connection<P: JsonRpcParams, R: JsonRpcResultData>(
         &self,
-        authorization: &Arc<Authorization>,
-        request: &JsonRpcRequest,
+        method: &str,
+        params: &P,
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-    ) -> Web3ProxyResult<JsonRpcResponseData> {
-        match authorization.checks.proxy_mode {
+    ) -> Web3ProxyResult<R> {
+        let proxy_mode = request_metadata.map(|x| x.proxy_mode()).unwrap_or_default();
+
+        match proxy_mode {
             ProxyMode::Debug | ProxyMode::Best => {
-                self.try_send_best_connection(
-                    authorization,
-                    request,
+                self.request_with_metadata(
+                    method,
+                    params,
                     request_metadata,
                     min_block_needed,
                     max_block_needed,
@@ -1502,7 +1534,7 @@ mod tests {
 
         // all_backend_connections gives all non-backup servers regardless of sync status
         assert_eq!(
-            rpcs.all_connections(&authorization, None, None, None, false)
+            rpcs.all_connections(None, None, None, None, false, None)
                 .await
                 .unwrap()
                 .len(),
@@ -1512,12 +1544,12 @@ mod tests {
         // best_synced_backend_connection which servers to be synced with the head block should not find any nodes
         let x = rpcs
             .wait_for_best_rpc(
-                &authorization,
                 None,
                 &mut vec![],
                 Some(head_block.number.as_ref().unwrap()),
                 None,
                 Some(Duration::from_secs(0)),
+                Some(RequestErrorHandler::DebugLevel),
             )
             .await
             .unwrap();
@@ -1610,12 +1642,12 @@ mod tests {
         // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
             rpcs.wait_for_best_rpc(
-                &authorization,
                 None,
                 &mut vec![],
                 None,
                 None,
-                Some(Duration::from_secs(0))
+                Some(Duration::from_secs(0)),
+                None,
             )
             .await,
             Ok(OpenRequestResult::Handle(_))
@@ -1624,12 +1656,12 @@ mod tests {
         // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
             rpcs.wait_for_best_rpc(
-                &authorization,
                 None,
                 &mut vec![],
                 Some(&0.into()),
                 None,
                 Some(Duration::from_secs(0)),
+                None,
             )
             .await,
             Ok(OpenRequestResult::Handle(_))
@@ -1638,12 +1670,12 @@ mod tests {
         // TODO: make sure the handle is for the expected rpc
         assert!(matches!(
             rpcs.wait_for_best_rpc(
-                &authorization,
                 None,
                 &mut vec![],
                 Some(&1.into()),
                 None,
                 Some(Duration::from_secs(0)),
+                None,
             )
             .await,
             Ok(OpenRequestResult::Handle(_))
@@ -1652,12 +1684,12 @@ mod tests {
         // future block should not get a handle
         let future_rpc = rpcs
             .wait_for_best_rpc(
-                &authorization,
                 None,
                 &mut vec![],
                 Some(&2.into()),
                 None,
                 Some(Duration::from_secs(0)),
+                None,
             )
             .await;
         assert!(matches!(future_rpc, Ok(OpenRequestResult::NotReady)));
@@ -1791,12 +1823,12 @@ mod tests {
         // TODO: test with and without passing the head_block.number?
         let best_available_server = rpcs
             .wait_for_best_rpc(
-                &authorization,
                 None,
                 &mut vec![],
                 Some(head_block.number()),
                 None,
                 Some(Duration::from_secs(0)),
+                None,
             )
             .await;
 
@@ -1809,12 +1841,12 @@ mod tests {
 
         let _best_available_server_from_none = rpcs
             .wait_for_best_rpc(
-                &authorization,
                 None,
                 &mut vec![],
                 None,
                 None,
                 Some(Duration::from_secs(0)),
+                None,
             )
             .await;
 
@@ -1822,12 +1854,12 @@ mod tests {
 
         let best_archive_server = rpcs
             .wait_for_best_rpc(
-                &authorization,
                 None,
                 &mut vec![],
                 Some(&1.into()),
                 None,
                 Some(Duration::from_secs(0)),
+                None,
             )
             .await;
 
@@ -1984,7 +2016,7 @@ mod tests {
         // best_synced_backend_connection requires servers to be synced with the head block
         // TODO: test with and without passing the head_block.number?
         let head_connections = rpcs
-            .all_connections(&authorization, Some(block_2.number()), None, None, false)
+            .all_connections(None, Some(block_2.number()), None, None, false, None)
             .await;
 
         debug!("head_connections: {:#?}", head_connections);
@@ -1996,7 +2028,7 @@ mod tests {
         );
 
         let all_connections = rpcs
-            .all_connections(&authorization, Some(block_1.number()), None, None, false)
+            .all_connections(None, Some(block_1.number()), None, None, false, None)
             .await;
 
         debug!("all_connections: {:#?}", all_connections);
@@ -2008,7 +2040,7 @@ mod tests {
         );
 
         let all_connections = rpcs
-            .all_connections(&authorization, None, None, None, false)
+            .all_connections(None, None, None, None, false, None)
             .await;
 
         debug!("all_connections: {:#?}", all_connections);

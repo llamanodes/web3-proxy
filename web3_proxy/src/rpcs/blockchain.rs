@@ -1,15 +1,14 @@
-///! Keep track of the blockchain as seen by a Web3Rpcs.
+//! Keep track of the blockchain as seen by a Web3Rpcs.
 use super::consensus::ConsensusFinder;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use super::transactions::TxStatus;
+use crate::config::BlockAndRpc;
 use crate::frontend::authorization::Authorization;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::response_cache::JsonRpcResponseData;
-use crate::{config::BlockAndRpc, jsonrpc::JsonRpcRequest};
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
-use log::{debug, trace, warn, Level};
+use log::{debug, trace, warn};
 use quick_cache_ttl::CacheWithTTL;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
@@ -199,7 +198,6 @@ impl Web3Rpcs {
 
     /// Get a block from caches with fallback.
     /// Will query a specific node or the best available.
-    /// TODO: return `Web3ProxyResult<Option<ArcBlock>>`?
     pub async fn block(
         &self,
         authorization: &Arc<Authorization>,
@@ -215,57 +213,30 @@ impl Web3Rpcs {
 
         // block not in cache. we need to ask an rpc for it
         let get_block_params = (*hash, false);
-        // TODO: if error, retry?
-        let block: Web3ProxyBlock = match rpc {
-            Some(rpc) => rpc
-                .request::<_, Option<ArcBlock>>(
-                    "eth_getBlockByHash",
-                    &json!(get_block_params),
-                    Level::Error.into(),
-                    authorization.clone(),
-                )
+
+        let block: Option<ArcBlock> = if let Some(rpc) = rpc {
+            // TODO: request_with_metadata would probably be better
+            rpc.authorized_request::<_, Option<ArcBlock>>(
+                "eth_getBlockByHash",
+                &get_block_params,
+                authorization,
+                None,
+            )
+            .await?
+        } else {
+            // TODO: request_with_metadata would probably be better
+            self.internal_request::<_, Option<ArcBlock>>("eth_getBlockByHash", &get_block_params)
                 .await?
-                .and_then(|x| {
-                    if x.number.is_none() {
-                        None
-                    } else {
-                        x.try_into().ok()
-                    }
-                })
-                .web3_context("no block!")?,
-            None => {
-                // TODO: helper for method+params => JsonRpcRequest
-                // TODO: does this id matter?
-                let request = json!({ "jsonrpc": "2.0", "id": "1", "method": "eth_getBlockByHash", "params": get_block_params });
-                let request: JsonRpcRequest = serde_json::from_value(request)?;
-
-                // TODO: request_metadata? maybe we should put it in the authorization?
-                // TODO: think more about this wait_for_sync
-                let response = self
-                    .try_send_best_connection(authorization, &request, None, None, None)
-                    .await?;
-
-                let value = match response {
-                    JsonRpcResponseData::Error { .. } => {
-                        return Err(anyhow::anyhow!("failed fetching block").into());
-                    }
-                    JsonRpcResponseData::Result { value, .. } => value,
-                };
-
-                let block: Option<ArcBlock> = serde_json::from_str(value.get())?;
-
-                let block: ArcBlock = block.web3_context("no block in the response")?;
-
-                // TODO: received time is going to be weird
-                Web3ProxyBlock::try_from(block)?
-            }
         };
 
-        // the block was fetched using eth_getBlockByHash, so it should have all fields
-        // TODO: fill in heaviest_chain! if the block is old enough, is this definitely true?
-        let block = self.try_cache_block(block, false).await?;
-
-        Ok(block)
+        match block {
+            Some(block) => {
+                let block = self.try_cache_block(block.try_into()?, false).await?;
+                Ok(block)
+            }
+            // TODO: better error. some blocks are known, just not this one
+            None => Err(Web3ProxyError::NoBlocksKnown),
+        }
     }
 
     /// Convenience method to get the cannonical block at a given block height.
@@ -283,6 +254,7 @@ impl Web3Rpcs {
 
     /// Get the heaviest chain's block from cache or backend rpc
     /// Caution! If a future block is requested, this might wait forever. Be sure to have a timeout outside of this!
+    /// TODO: take a RequestMetadata
     pub async fn cannonical_block(
         &self,
         authorization: &Arc<Authorization>,
@@ -332,24 +304,13 @@ impl Web3Rpcs {
         }
 
         // block number not in cache. we need to ask an rpc for it
-        // TODO: helper for method+params => JsonRpcRequest
-        let request = json!({ "jsonrpc": "2.0", "id": "1", "method": "eth_getBlockByNumber", "params": (num, false) });
-        let request: JsonRpcRequest = serde_json::from_value(request)?;
-
+        // TODO: this error is too broad
         let response = self
-            .try_send_best_connection(authorization, &request, None, Some(num), None)
-            .await?;
+            .internal_request::<_, Option<ArcBlock>>("eth_getBlockByNumber", &(*num, false))
+            .await?
+            .ok_or(Web3ProxyError::NoBlocksKnown)?;
 
-        let value = match response {
-            JsonRpcResponseData::Error { .. } => {
-                return Err(anyhow::anyhow!("failed fetching block").into());
-            }
-            JsonRpcResponseData::Result { value, .. } => value,
-        };
-
-        let block: ArcBlock = serde_json::from_str(value.get())?;
-
-        let block = Web3ProxyBlock::try_from(block)?;
+        let block = Web3ProxyBlock::try_from(response)?;
 
         // the block was fetched using eth_getBlockByNumber, so it should have all fields and be on the heaviest chain
         let block = self.try_cache_block(block, true).await?;

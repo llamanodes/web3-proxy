@@ -72,7 +72,6 @@ pub enum AuthorizationType {
 #[derive(Clone, Debug)]
 pub struct Authorization {
     pub checks: AuthorizationChecks,
-    // TODO: instead of the conn, have a channel?
     pub db_conn: Option<DatabaseConnection>,
     pub ip: IpAddr,
     pub origin: Option<Origin>,
@@ -283,6 +282,12 @@ pub struct RequestMetadata {
     pub stat_sender: Option<flume::Sender<AppStat>>,
 }
 
+impl Default for Authorization {
+    fn default() -> Self {
+        Authorization::internal(None).unwrap()
+    }
+}
+
 impl Default for RequestMetadata {
     fn default() -> Self {
         Self {
@@ -302,6 +307,15 @@ impl Default for RequestMetadata {
             start_instant: Instant::now(),
             stat_sender: Default::default(),
         }
+    }
+}
+
+impl RequestMetadata {
+    pub fn proxy_mode(&self) -> ProxyMode {
+        self.authorization
+            .as_ref()
+            .map(|x| x.checks.proxy_mode)
+            .unwrap_or_default()
     }
 }
 
@@ -961,7 +975,7 @@ impl Web3ProxyApp {
         let user = user::Entity::find()
             .left_join(login::Entity)
             .filter(login::Column::BearerToken.eq(user_bearer_uuid))
-            .one(db_replica.conn())
+            .one(db_replica.as_ref())
             .await
             .web3_context("fetching user from db by bearer token")?
             .web3_context("unknown bearer token")?;
@@ -1104,27 +1118,27 @@ impl Web3ProxyApp {
                 match rpc_key::Entity::find()
                     .filter(rpc_key::Column::SecretKey.eq(<Uuid>::from(rpc_secret_key)))
                     .filter(rpc_key::Column::Active.eq(true))
-                    .one(db_replica.conn())
+                    .one(db_replica.as_ref())
                     .await?
                 {
                     Some(rpc_key_model) => {
                         // TODO: move these splits into helper functions
                         // TODO: can we have sea orm handle this for us?
                         let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
-                            .one(db_replica.conn())
+                            .one(db_replica.as_ref())
                             .await?
                             .context("no related user")?;
 
                         let balance = balance::Entity::find()
                             .filter(balance::Column::UserId.eq(user_model.id))
-                            .one(db_replica.conn())
+                            .one(db_replica.as_ref())
                             .await?
                             .map(|x| x.available_balance)
                             .unwrap_or_default();
 
                         let user_tier_model =
                             user_tier::Entity::find_by_id(user_model.user_tier_id)
-                                .one(db_replica.conn())
+                                .one(db_replica.as_ref())
                                 .await?
                                 .context("no related user tier")?;
 
