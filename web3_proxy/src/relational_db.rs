@@ -25,7 +25,7 @@ impl Deref for DatabaseReplica {
 }
 
 impl DatabaseReplica {
-    pub fn as_ref(&self) -> &DatabaseConnection {
+    pub fn conn(&self) -> &DatabaseConnection {
         self.deref()
     }
 }

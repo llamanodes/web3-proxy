@@ -338,7 +338,9 @@ impl JsonRpcForwardedResponse {
     pub fn from_response_data(data: JsonRpcResponseEnum<Box<RawValue>>, id: Box<RawValue>) -> Self {
         match data {
             JsonRpcResponseEnum::Result { value, .. } => Self::from_raw_response(value, id),
-            JsonRpcResponseEnum::RpcError { value, .. } => JsonRpcForwardedResponse {
+            JsonRpcResponseEnum::RpcError {
+                error_data: value, ..
+            } => JsonRpcForwardedResponse {
                 jsonrpc: "2.0",
                 id,
                 result: None,

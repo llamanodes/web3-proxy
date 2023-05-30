@@ -86,7 +86,7 @@ pub async fn query_user_stats<'a>(
         // Fetch all rpc_secret_key_ids, and filter for these
         let mut user_rpc_keys = rpc_key::Entity::find()
             .filter(rpc_key::Column::UserId.eq(user_id))
-            .all(db_replica.as_ref())
+            .all(db_replica.conn())
             .await
             .web3_context("failed loading user's key")?
             .into_iter()
@@ -102,7 +102,7 @@ pub async fn query_user_stats<'a>(
         let mut subuser_rpc_keys = secondary_user::Entity::find()
             .filter(secondary_user::Column::UserId.eq(user_id))
             .find_also_related(rpc_key::Entity)
-            .all(db_replica.as_ref())
+            .all(db_replica.conn())
             // TODO: Do a join with rpc-keys
             .await
             .web3_context("failed loading subuser keys")?

@@ -20,6 +20,7 @@ use log::{debug, error, info, trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
+use serde::Serialize;
 use tokio::{sync::AcquireError, task::JoinError, time::Instant};
 
 pub type Web3ProxyResult<T> = Result<T, Web3ProxyError>;
@@ -146,7 +147,7 @@ pub enum Web3ProxyError {
 }
 
 impl Web3ProxyError {
-    pub fn into_response_parts<R>(self) -> (StatusCode, JsonRpcResponseEnum<R>) {
+    pub fn into_response_parts<R: Serialize>(self) -> (StatusCode, JsonRpcResponseEnum<R>) {
         // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
             Self::AccessDenied => {

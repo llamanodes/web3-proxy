@@ -1,7 +1,5 @@
 use crate::{
-    frontend::errors::{Web3ProxyError, Web3ProxyResult},
-    jsonrpc::JsonRpcErrorData,
-    rpcs::blockchain::ArcBlock,
+    frontend::errors::Web3ProxyError, jsonrpc::JsonRpcErrorData, rpcs::blockchain::ArcBlock,
 };
 use derive_more::From;
 use ethers::{providers::ProviderError, types::U64};
@@ -19,6 +17,7 @@ pub struct JsonRpcQueryCacheKey {
     hash: u64,
     from_block_num: Option<U64>,
     to_block_num: Option<U64>,
+    cache_errors: bool,
 }
 
 impl JsonRpcQueryCacheKey {
@@ -28,14 +27,14 @@ impl JsonRpcQueryCacheKey {
     pub fn to_block_num(&self) -> Option<U64> {
         self.to_block_num
     }
+    pub fn cache_errors(&self) -> bool {
+        self.cache_errors
+    }
 }
 
 impl PartialEq for JsonRpcQueryCacheKey {
     fn eq(&self, other: &Self) -> bool {
         self.hash.eq(&other.hash)
-    }
-    fn ne(&self, other: &Self) -> bool {
-        self.hash.ne(&other.hash)
     }
 }
 
@@ -76,48 +75,36 @@ impl JsonRpcQueryCacheKey {
             hash,
             from_block_num,
             to_block_num,
+            cache_errors,
         }
     }
 }
 
-pub type JsonRpcQueryCache = CacheWithTTL<
-    JsonRpcQueryCacheKey,
-    JsonRpcResponseEnum<Box<RawValue>>,
-    JsonRpcQueryWeigher,
-    DefaultHashBuilder,
->;
+pub type JsonRpcResponseCache =
+    CacheWithTTL<JsonRpcQueryCacheKey, JsonRpcResponseEnum<Box<RawValue>>, JsonRpcResponseWeigher>;
 
 #[derive(Clone)]
-pub struct JsonRpcQueryWeigher;
+pub struct JsonRpcResponseWeigher;
 
 /// TODO: we might need one that holds RawValue and one that holds serde_json::Value
 #[derive(Clone, Debug)]
 pub enum JsonRpcResponseEnum<R> {
     Result {
         value: R,
-        size: Option<NonZeroU32>,
+        num_bytes: NonZeroU32,
     },
     RpcError {
-        value: JsonRpcErrorData,
-        size: Option<NonZeroU32>,
+        error_data: JsonRpcErrorData,
+        num_bytes: NonZeroU32,
     },
 }
 
 // TODO: impl for other inner result types?
-impl JsonRpcResponseEnum<Box<RawValue>> {
+impl<R> JsonRpcResponseEnum<R> {
     pub fn num_bytes(&self) -> NonZeroU32 {
-        // TODO: dry this somehow
         match self {
-            JsonRpcResponseEnum::Result { value, size } => size.unwrap_or_else(|| {
-                let size = value.get().len();
-
-                NonZeroU32::new(size.clamp(1, u32::MAX as usize) as u32).unwrap()
-            }),
-            JsonRpcResponseEnum::RpcError { value, size } => size.unwrap_or_else(|| {
-                let size = serde_json::to_string(value).unwrap().len();
-
-                NonZeroU32::new(size.clamp(1, u32::MAX as usize) as u32).unwrap()
-            }),
+            Self::Result { num_bytes, .. } => *num_bytes,
+            Self::RpcError { num_bytes, .. } => *num_bytes,
         }
     }
 }
@@ -126,29 +113,60 @@ impl From<serde_json::Value> for JsonRpcResponseEnum<Box<RawValue>> {
     fn from(value: serde_json::Value) -> Self {
         let value = RawValue::from_string(value.to_string()).unwrap();
 
-        Self::Result { value, size: None }
+        value.into()
     }
 }
 
 impl From<Box<RawValue>> for JsonRpcResponseEnum<Box<RawValue>> {
     fn from(value: Box<RawValue>) -> Self {
-        Self::Result { value, size: None }
+        let num_bytes = value.get().len();
+
+        let num_bytes = NonZeroU32::try_from(num_bytes as u32).unwrap();
+
+        Self::Result { value, num_bytes }
+    }
+}
+
+impl<R> TryFrom<Web3ProxyError> for JsonRpcResponseEnum<R> {
+    type Error = Web3ProxyError;
+
+    fn try_from(value: Web3ProxyError) -> Result<Self, Self::Error> {
+        match value {
+            Web3ProxyError::EthersProvider(provider_err) => {
+                let err = JsonRpcErrorData::try_from(provider_err)?;
+
+                Ok(err.into())
+            }
+            err => Err(err),
+        }
+    }
+}
+
+impl TryFrom<Result<Box<RawValue>, Web3ProxyError>> for JsonRpcResponseEnum<Box<RawValue>> {
+    type Error = Web3ProxyError;
+
+    fn try_from(value: Result<Box<RawValue>, Web3ProxyError>) -> Result<Self, Self::Error> {
+        match value {
+            Ok(x) => Ok(x.into()),
+            Err(err) => {
+                let x: Self = err.try_into()?;
+
+                Ok(x)
+            }
+        }
     }
 }
 
 impl<R> From<JsonRpcErrorData> for JsonRpcResponseEnum<R> {
     fn from(value: JsonRpcErrorData) -> Self {
-        Self::RpcError { value, size: None }
-    }
-}
+        // TODO: wrap the error in a complete response?
+        let num_bytes = serde_json::to_string(&value).unwrap().len();
 
-impl<R> TryFrom<Web3ProxyResult<R>> for JsonRpcResponseEnum<R> {
-    type Error = Web3ProxyError;
+        let num_bytes = NonZeroU32::try_from(num_bytes as u32).unwrap();
 
-    fn try_from(x: Web3ProxyResult<R>) -> Result<Self, Self::Error> {
-        match x {
-            Ok(x) => todo!(),
-            Err(err) => Err(err),
+        Self::RpcError {
+            error_data: value,
+            num_bytes,
         }
     }
 }
@@ -189,16 +207,66 @@ impl TryFrom<ProviderError> for JsonRpcErrorData {
     }
 }
 
-/// TODO: generic type for result once num_bytes works for more things
-impl Weighter<JsonRpcQueryCacheKey, (), JsonRpcResponseEnum<Box<RawValue>>>
-    for JsonRpcQueryWeigher
-{
-    fn weight(
-        &self,
-        _key: &JsonRpcQueryCacheKey,
-        _qey: &(),
-        value: &JsonRpcResponseEnum<Box<RawValue>>,
-    ) -> NonZeroU32 {
+impl<K, Q> Weighter<K, Q, JsonRpcResponseEnum<Box<RawValue>>> for JsonRpcResponseWeigher {
+    fn weight(&self, _key: &K, _qey: &Q, value: &JsonRpcResponseEnum<Box<RawValue>>) -> NonZeroU32 {
         value.num_bytes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{JsonRpcResponseEnum, JsonRpcResponseWeigher};
+    use quick_cache_ttl::CacheWithTTL;
+    use serde_json::value::RawValue;
+    use std::{num::NonZeroU32, time::Duration};
+
+    #[tokio::test(start_paused = true)]
+    async fn test_json_rpc_query_weigher() {
+        let max_item_weight = 200;
+        let weight_capacity = 1_000;
+
+        let test_cache: CacheWithTTL<
+            u32,
+            JsonRpcResponseEnum<Box<RawValue>>,
+            JsonRpcResponseWeigher,
+        > = CacheWithTTL::new_with_weights(
+            "test",
+            5,
+            max_item_weight.try_into().unwrap(),
+            weight_capacity,
+            JsonRpcResponseWeigher,
+            Duration::from_secs(2),
+        )
+        .await;
+
+        let small_data = JsonRpcResponseEnum::Result {
+            value: Default::default(),
+            num_bytes: NonZeroU32::try_from(max_item_weight / 2).unwrap(),
+        };
+
+        let max_sized_data = JsonRpcResponseEnum::Result {
+            value: Default::default(),
+            num_bytes: NonZeroU32::try_from(max_item_weight).unwrap(),
+        };
+
+        let oversized_data = JsonRpcResponseEnum::Result {
+            value: Default::default(),
+            num_bytes: NonZeroU32::try_from(max_item_weight * 2).unwrap(),
+        };
+
+        test_cache.try_insert(0, small_data).unwrap();
+
+        test_cache.get(&0).unwrap();
+
+        test_cache.try_insert(1, max_sized_data).unwrap();
+
+        test_cache.get(&0).unwrap();
+        test_cache.get(&1).unwrap();
+
+        test_cache.try_insert(2, oversized_data).unwrap_err();
+
+        test_cache.get(&0).unwrap();
+        test_cache.get(&1).unwrap();
+        assert!(test_cache.get(&2).is_none());
     }
 }

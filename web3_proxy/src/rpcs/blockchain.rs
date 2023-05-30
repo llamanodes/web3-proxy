@@ -6,7 +6,6 @@ use super::transactions::TxStatus;
 use crate::config::BlockAndRpc;
 use crate::frontend::authorization::Authorization;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::response_cache::JsonRpcResponseEnum;
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use log::{debug, trace, warn};
@@ -14,7 +13,6 @@ use quick_cache_ttl::CacheWithTTL;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use serde_json::json;
-use std::convert::Infallible;
 use std::hash::Hash;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
@@ -176,23 +174,24 @@ impl Web3Rpcs {
 
         let block_num = block.number();
 
+        // this block is very likely already in block_hashes
+        // TODO: use their get_with
+        let block_hash = *block.hash();
+
         // TODO: think more about heaviest_chain. would be better to do the check inside this function
         if heaviest_chain {
             // this is the only place that writes to block_numbers
             // multiple inserts should be okay though
             // TODO: info that there was a fork?
-            self.blocks_by_number.insert(*block_num, *block.hash());
+            self.blocks_by_number
+                .get_or_insert_async(block_num, async move { block_hash })
+                .await;
         }
-
-        // this block is very likely already in block_hashes
-        // TODO: use their get_with
-        let block_hash = *block.hash();
 
         let block = self
             .blocks_by_hash
-            .get_or_insert_async::<Infallible, _>(&block_hash, async move { Ok(block) })
-            .await
-            .expect("this cache get is infallible");
+            .get_or_insert_async(&block_hash, async move { block })
+            .await;
 
         Ok(block)
     }
@@ -309,7 +308,7 @@ impl Web3Rpcs {
         // block number not in cache. we need to ask an rpc for it
         // TODO: this error is too broad
         let response = self
-            .internal_request::<_, Option<ArcBlock>>("eth_getBlockByNumber", (num, false))
+            .internal_request::<_, Option<ArcBlock>>("eth_getBlockByNumber", &(*num, false))
             .await?
             .ok_or(Web3ProxyError::NoBlocksKnown)?;
 

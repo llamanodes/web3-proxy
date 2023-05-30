@@ -18,7 +18,7 @@ use axum::{
 };
 use http::{header::AUTHORIZATION, StatusCode};
 use listenfd::ListenFd;
-use log::info;
+use log::{debug, info};
 use quick_cache_ttl::UnitWeighter;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -31,7 +31,7 @@ use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use self::errors::Web3ProxyResult;
 
 /// simple keys for caching responses
-#[derive(Copy, Clone, Hash, PartialEq, Eq, EnumCount, EnumIter)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, EnumCount, EnumIter)]
 pub enum ResponseCacheKey {
     BackupsNeeded,
     Health,
@@ -57,8 +57,14 @@ pub async fn serve(
     // TODO: latest moka allows for different ttls for different
     let response_cache_size = ResponseCacheKey::COUNT;
 
-    let response_cache =
-        ResponseCache::new_with_capacity(response_cache_size, Duration::from_secs(1)).await;
+    debug!("response_cache size: {}", response_cache_size);
+
+    let response_cache = ResponseCache::new(
+        "response_cache",
+        response_cache_size,
+        Duration::from_secs(1),
+    )
+    .await;
 
     // TODO: read config for if fastest/versus should be available publicly. default off
 

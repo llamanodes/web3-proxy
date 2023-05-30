@@ -40,7 +40,7 @@ pub async fn user_referral_link_get(
     // Then get the referral token. If one doesn't exist, create one
     let user_referrer = referrer::Entity::find()
         .filter(referrer::Column::UserId.eq(user.id))
-        .one(db_replica.as_ref())
+        .one(db_replica.conn())
         .await?;
 
     let (referral_code, status_code) = match user_referrer {

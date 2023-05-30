@@ -4031,6 +4031,7 @@ name = "quick_cache_ttl"
 version = "0.1.0"
 dependencies = [
  "flume",
+ "log",
  "quick_cache",
  "tokio",
 ]

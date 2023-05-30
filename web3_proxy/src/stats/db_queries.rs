@@ -241,7 +241,7 @@ pub async fn query_user_stats<'a>(
     // query the database for number of items and pages
     let pages_result = q
         .clone()
-        .paginate(db_replica.as_ref(), page_size)
+        .paginate(db_replica.conn(), page_size)
         .num_items_and_pages()
         .await?;
 
@@ -251,7 +251,7 @@ pub async fn query_user_stats<'a>(
     // query the database (todo: combine with the pages_result query?)
     let query_response = q
         .into_json()
-        .paginate(db_replica.as_ref(), page_size)
+        .paginate(db_replica.conn(), page_size)
         .fetch_page(page)
         .await?;
 

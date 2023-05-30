@@ -97,14 +97,16 @@ impl Web3Rpcs {
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         // TODO: actual weighter on this
         // TODO: time_to_idle instead?
-        let blocks_by_hash: BlocksByHashCache =
-            Arc::new(CacheWithTTL::new_with_capacity(10_000, Duration::from_secs(30 * 60)).await);
+        let blocks_by_hash: BlocksByHashCache = Arc::new(
+            CacheWithTTL::new("blocks_by_hash", 10_000, Duration::from_secs(30 * 60)).await,
+        );
 
         // all block numbers are the same size, so no need for weigher
         // TODO: limits from config
         // TODO: time_to_idle instead?
-        let blocks_by_number =
-            Arc::new(CacheWithTTL::new_with_capacity(10_000, Duration::from_secs(30 * 60)).await);
+        let blocks_by_number = Arc::new(
+            CacheWithTTL::new("blocks_by_number", 10_000, Duration::from_secs(30 * 60)).await,
+        );
 
         let (watch_consensus_rpcs_sender, consensus_connections_watcher) =
             watch::channel(Default::default());
@@ -339,7 +341,7 @@ impl Web3Rpcs {
                 .spawn(async move {
                     loop {
                         sleep(Duration::from_secs(600)).await;
-                        // TODO: "every interval, check that the provider is still connected"
+                        // TODO: "every interval, do a health check or disconnect the rpc"
                     }
                 })?;
 
@@ -406,7 +408,7 @@ impl Web3Rpcs {
             match most_common {
                 Ok(x) => {
                     // return the most common success
-                    return Ok(x.into());
+                    return Ok(x);
                 }
                 Err(err) => {
                     if any_ok_with_json_result {
@@ -896,7 +898,7 @@ impl Web3Rpcs {
                                     .store(is_backup_response, Ordering::Release);
                             }
 
-                            return Ok(response.into());
+                            return Ok(response);
                         }
                         Err(error) => {
                             // trace!(?response, "rpc error");
@@ -1189,7 +1191,7 @@ impl Web3Rpcs {
     pub async fn try_proxy_connection<P: JsonRpcParams, R: JsonRpcResultData>(
         &self,
         method: &str,
-        params: P,
+        params: &P,
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
@@ -1200,7 +1202,7 @@ impl Web3Rpcs {
             ProxyMode::Debug | ProxyMode::Best => {
                 self.request_with_metadata(
                     method,
-                    &params,
+                    params,
                     request_metadata,
                     min_block_needed,
                     max_block_needed,
@@ -1477,14 +1479,25 @@ mod tests {
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
             pending_transaction_cache: CacheWithTTL::arc_with_capacity(
+                "pending_transaction_cache",
                 100,
                 Duration::from_secs(60),
             )
             .await,
             pending_tx_id_receiver,
             pending_tx_id_sender,
-            blocks_by_hash: CacheWithTTL::arc_with_capacity(100, Duration::from_secs(60)).await,
-            blocks_by_number: CacheWithTTL::arc_with_capacity(100, Duration::from_secs(60)).await,
+            blocks_by_hash: CacheWithTTL::arc_with_capacity(
+                "blocks_by_hash",
+                100,
+                Duration::from_secs(60),
+            )
+            .await,
+            blocks_by_number: CacheWithTTL::arc_with_capacity(
+                "blocks_by_number",
+                100,
+                Duration::from_secs(60),
+            )
+            .await,
             // TODO: test max_block_age?
             max_block_age: None,
             // TODO: test max_block_lag?
@@ -1755,14 +1768,25 @@ mod tests {
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
             pending_transaction_cache: CacheWithTTL::arc_with_capacity(
+                "pending_transaction_cache",
                 100,
                 Duration::from_secs(120),
             )
             .await,
             pending_tx_id_receiver,
             pending_tx_id_sender,
-            blocks_by_hash: CacheWithTTL::arc_with_capacity(100, Duration::from_secs(120)).await,
-            blocks_by_number: CacheWithTTL::arc_with_capacity(100, Duration::from_secs(120)).await,
+            blocks_by_hash: CacheWithTTL::arc_with_capacity(
+                "blocks_by_hash",
+                100,
+                Duration::from_secs(120),
+            )
+            .await,
+            blocks_by_number: CacheWithTTL::arc_with_capacity(
+                "blocks_by_number",
+                100,
+                Duration::from_secs(120),
+            )
+            .await,
             min_head_rpcs: 1,
             min_sum_soft_limit: 4_000,
             max_block_age: None,
@@ -1939,15 +1963,25 @@ mod tests {
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
             pending_transaction_cache: CacheWithTTL::arc_with_capacity(
+                "pending_transaction_cache",
                 10_000,
                 Duration::from_secs(120),
             )
             .await,
             pending_tx_id_receiver,
             pending_tx_id_sender,
-            blocks_by_hash: CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(120)).await,
-            blocks_by_number: CacheWithTTL::arc_with_capacity(10_000, Duration::from_secs(120))
-                .await,
+            blocks_by_hash: CacheWithTTL::arc_with_capacity(
+                "blocks_by_hash",
+                10_000,
+                Duration::from_secs(120),
+            )
+            .await,
+            blocks_by_number: CacheWithTTL::arc_with_capacity(
+                "blocks_by_number",
+                10_000,
+                Duration::from_secs(120),
+            )
+            .await,
             min_head_rpcs: 1,
             min_sum_soft_limit: 1_000,
             max_block_age: None,
