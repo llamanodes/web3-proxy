@@ -1,4 +1,4 @@
-use crate::app::{UserTier, Web3ProxyApp};
+use crate::app::Web3ProxyApp;
 use crate::frontend::authorization::{Authorization as InternalAuthorization, RpcSecretKey};
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::rpcs::request::OpenRequestResult;
@@ -428,7 +428,7 @@ pub async fn user_balance_post(
 
         // Get the premium user-tier
         let premium_user_tier = user_tier::Entity::find()
-            .filter(user_tier::Column::Title.eq(UserTier::Premium.to_string()))
+            .filter(user_tier::Column::Title.eq("Premium"))
             .one(&txn)
             .await?
             .context("Could not find 'Premium' Tier in user-database")?;

@@ -3,7 +3,7 @@
 use super::authorization::login_is_authorized;
 use super::errors::Web3ProxyResponse;
 use crate::admin_queries::query_admin_modify_usertier;
-use crate::app::{UserTier, Web3ProxyApp};
+use crate::app::Web3ProxyApp;
 use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::user_token::UserBearerToken;
 use crate::PostLogin;
@@ -127,7 +127,7 @@ pub async fn admin_increase_balance(
         .context("User does not have a balance row")?;
 
     let premium_user_tier = user_tier::Entity::find()
-        .filter(user_tier::Column::Title.eq(UserTier::Premium.to_string()))
+        .filter(user_tier::Column::Title.eq("Premium"))
         .one(&db_conn)
         .await?
         .context("Premium tier was not found!")?;

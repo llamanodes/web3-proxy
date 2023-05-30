@@ -2,7 +2,7 @@
 
 use super::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use super::rpc_proxy_ws::ProxyMode;
-use crate::app::{AuthorizationChecks, UserTier, Web3ProxyApp, APP_USER_AGENT};
+use crate::app::{AuthorizationChecks, Web3ProxyApp, APP_USER_AGENT};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
@@ -1227,9 +1227,7 @@ impl Web3ProxyApp {
 
                         // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
                         // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
-                        if user_tier_model.title == UserTier::Premium.to_string()
-                            && balance < Decimal::from(10)
-                        {
+                        if user_tier_model.title == "Premium" && balance < Decimal::from(10) {
                             // Find the equivalent downgraded user tier, and modify limits from there
                             if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
                                 user_tier_model =
@@ -1242,7 +1240,7 @@ impl Web3ProxyApp {
                             }
                         }
 
-                        let user_tier = UserTier::try_from(user_tier_model.title.as_str())?;
+                        let user_tier = user_tier_model.title;
 
                         let rpc_key_id =
                             Some(rpc_key_model.id.try_into().expect("db ids are never 0"));

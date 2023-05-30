@@ -76,46 +76,6 @@ pub static APP_USER_AGENT: &str = concat!(
 // aggregate across 1 week
 pub const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum UserTier {
-    #[default]
-    Free,
-    PrivateDemo,
-    EffectivelyUnlimited,
-    Unlimited,
-    PremiumOutOfFunds,
-    Premium,
-}
-
-impl ToString for UserTier {
-    fn to_string(&self) -> String {
-        match self {
-            UserTier::Free => "Free".to_owned(),
-            UserTier::PrivateDemo => "PrivateDemo".to_owned(),
-            UserTier::EffectivelyUnlimited => "EffectivelyUnlimited".to_owned(),
-            UserTier::Unlimited => "Unlimited".to_owned(),
-            UserTier::PremiumOutOfFunds => "PremiumOutOfFunds".to_owned(),
-            UserTier::Premium => "Premium".to_owned(),
-        }
-    }
-}
-
-impl TryFrom<&str> for UserTier {
-    type Error = Web3ProxyError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "Free" => Ok(UserTier::Free),
-            "Private Demo" => Ok(UserTier::PrivateDemo),
-            "Effectively Unlimited" => Ok(UserTier::EffectivelyUnlimited),
-            "Unlimited" => Ok(UserTier::Unlimited),
-            "Premium Out Of Funds" => Ok(UserTier::PremiumOutOfFunds),
-            "Premium" => Ok(UserTier::Premium),
-            _ => Err(Web3ProxyError::InvalidUserTier),
-        }
-    }
-}
-
 pub type Web3ProxyJoinHandle<T> = JoinHandle<Web3ProxyResult<T>>;
 
 /// TODO: move this
@@ -152,7 +112,7 @@ pub struct AuthorizationChecks {
     /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
     pub private_txs: bool,
     pub proxy_mode: ProxyMode,
-    pub user_tier: UserTier,
+    pub user_tier: String,
 }
 
 /// Simple wrapper so that we can keep track of read only connections.
