@@ -171,7 +171,7 @@ impl OpenRequestHandle {
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// depending on how things are locked, you might need to pass the provider in
     /// we take self to ensure this function only runs once
-    pub async fn request<P: JsonRpcParams, R: JsonRpcResultData>(
+    pub async fn request<P: JsonRpcParams, R: JsonRpcResultData + serde::Serialize>(
         self,
         method: &str,
         params: &P,

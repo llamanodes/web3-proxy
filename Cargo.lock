@@ -6455,6 +6455,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "argh",
+ "async-trait",
  "axum",
  "axum-client-ip",
  "axum-macros",

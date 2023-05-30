@@ -423,7 +423,7 @@ async fn handle_socket_payload(
                     _ => app
                         .proxy_web3_rpc(authorization.clone(), json_request.into())
                         .await
-                        .map(|(status_code, response, _)| response),
+                        .map(|(_, response, _)| response),
                 };
 
             (response_id, response)

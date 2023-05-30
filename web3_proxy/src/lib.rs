@@ -7,6 +7,7 @@ pub mod config;
 pub mod frontend;
 pub mod http_params;
 pub mod jsonrpc;
+pub mod jsonrpc_client;
 pub mod pagerduty;
 pub mod prometheus;
 pub mod referral_code;
