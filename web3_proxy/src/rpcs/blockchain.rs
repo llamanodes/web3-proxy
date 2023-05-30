@@ -236,9 +236,7 @@ impl Web3Rpcs {
             }
             // TODO: better error. some blocks are known, just not this one
             None => Err(Web3ProxyError::NoBlocksKnown),
-        };
-
-        todo!();
+        }
     }
 
     /// Convenience method to get the cannonical block at a given block height.
