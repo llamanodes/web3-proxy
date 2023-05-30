@@ -103,7 +103,6 @@ pub async fn user_used_referral_stats(
         credits_applied_for_referrer: Decimal, // Probably make this a float instead (approximate anyways)
         referral_start_date: DateTime,
         used_referral_code: String,
-        referrer_address: String, // Address of the referrer
     };
 
     let mut out: Vec<Info> = Vec::new();
@@ -119,7 +118,6 @@ pub async fn user_used_referral_stats(
             credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
             referral_start_date: referral_record.referral_start_date,
             used_referral_code: referrer_record.referral_code,
-            referrer_address: format!("{:?}", Address::from_slice(referring_user.address.as_ref())),
         };
         // Start inserting json's into this
         out.push(tmp);
@@ -157,9 +155,14 @@ pub async fn user_shared_referral_stats(
 
     // Return early if the user does not have any referred entities
     if referrals.len() == 0 {
-        return Err(Web3ProxyError::BadRequest(
-            "No referral code found for this user".to_string(),
-        ));
+        let response_json = json!({
+        "referrals": Vec::<()>::new(),
+        "used_referral_code": "",
+        "user": user,
+        });
+
+        let response = (StatusCode::OK, Json(response_json)).into_response();
+        return Ok(response);
     }
 
     // For each related referral person, find the corresponding user-address
