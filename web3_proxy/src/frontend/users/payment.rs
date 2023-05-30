@@ -390,7 +390,6 @@ pub async fn user_balance_post(
         // Encoding is inefficient, revisit later
         let recipient = match user::Entity::find()
             .filter(user::Column::Address.eq(&recipient_account.encode()[12..]))
-            .lock(LockType::Update)
             .one(&txn)
             .await?
         {

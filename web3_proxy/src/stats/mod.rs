@@ -330,141 +330,166 @@ impl BufferedRpcQueryStats {
         };
 
         // =============================== //
-        //       GET ALL VARIABLES         //
+        // GET ALL (STATIC) VARIABLES      //
         // =============================== //
-        // Get all the variables that we might be working with
+        // Get the user with that RPC key. This is also the referee
+
+        // Txn is not strictly necessary, but still good to keep things consistent across tables
         let txn = db_conn.begin().await?;
 
-        // (1) Get the user with that RPC key. This is also the referee
         let sender_rpc_entity = rpc_key::Entity::find()
             .filter(rpc_key::Column::Id.eq(rpc_secret_key_id))
-            .lock(LockType::Update)
             .one(&txn)
             .await?
             .ok_or(Web3ProxyError::BadRequest(
                 "Could not find rpc key in db".to_string(),
             ))?;
 
-        let sender_balance = balance::Entity::find()
-            .filter(balance::Column::UserId.eq(sender_rpc_entity.user_id))
-            .lock(LockType::Update)
-            .one(&txn)
-            .await?
-            .ok_or(Web3ProxyError::BadRequest(format!(
-                "This user id has no balance entry! {:?}",
-                sender_rpc_entity
-            )))?;
-
-        // This will be optional
+        // I think one lock here is fine, because only one server has access to the "credits_applied_for_referee" entry
         let referral_objects = match referee::Entity::find()
             .filter(referee::Column::UserId.eq(sender_rpc_entity.user_id))
             .lock(LockType::Update)
+            .find_also_related(referrer::Entity)
             .one(&txn)
             .await?
         {
-            Some(referee_entity) => {
-                // In this case, also fetch the referrer
-                match referrer::Entity::find()
-                    .filter(referrer::Column::Id.eq(referee_entity.used_referral_code))
-                    .lock(LockType::Update)
-                    .one(&txn)
-                    .await?
-                {
-                    Some(referrer_connection) => {
-                        // Get the referring user and their balance
-                        let referrer_user_entity = user::Entity::find()
-                            .filter(user::Column::Id.eq(referrer_connection.user_id))
-                            .lock(LockType::Update)
-                            .one(&txn)
-                            .await?
-                            .ok_or(Web3ProxyError::BadRequest(
-                                "Could not find rpc key in db".to_string(),
-                            ))?;
-                        // And their bala
-                        let referrer_balance_entity = balance::Entity::find()
-                            .filter(balance::Column::UserId.eq(referrer_connection.user_id))
-                            .lock(LockType::Update)
-                            .one(&txn)
-                            .await?
-                            .ok_or(Web3ProxyError::BadRequest(format!(
-                                "This user id has no balance entry! {:?}",
-                                sender_rpc_entity
-                            )))?;
-                        Some((
-                            referee_entity,
-                            referrer_user_entity,
-                            referrer_balance_entity,
-                        ))
-                    }
-                    None => None,
-                }
-            }
+            Some(x) => Some((
+                x.0,
+                x.1.context("Could not fine corresponding referrer code")?,
+            )),
             None => None,
         };
 
-        // =============================== //
-        //    UPDATE CALLER BALANCE        //
-        // =============================== //
-        // Update is regardless of referrals
+        // ====================== //
+        //     INITIATE DELTAS    //
+        // ====================== //
+        // Calculate Balance Only (No referrer)
+        let mut sender_available_balance_delta = Decimal::from(-1) * self.sum_credits_used;
+        let sender_used_balance_delta = self.sum_credits_used;
+        let mut sender_bonus_applied;
+        // Calculate Referrer Bonuses
+        let mut referrer_balance_delta = Decimal::from(0);
 
-        // I think I can update the balance naively now basically
-        let mut active_sender_balance = sender_balance.clone().into_active_model();
-        active_sender_balance.available_balance = sea_orm::Set(cmp::max(
-            Decimal::from(0),
-            sender_balance.available_balance - self.sum_credits_used,
-        ));
-        active_sender_balance.used_balance =
-            sea_orm::Set(sender_balance.available_balance + self.sum_credits_used);
+        // ============================================================ //
+        //  BASED ON REFERRERS, CALCULATE HOW MUCH SHOULD BE ATTRIBUTED //
+        // ============================================================ //
+        // If we don't lock the database as we do above on the referral_entry, we would have to do this operation on the database
+        if let Some((referral_entity, referrer_code_entity)) = referral_objects {
+            sender_bonus_applied = referral_entity.credits_applied_for_referee;
 
-        // ================================= //
-        // UPDATE REFERRER & REFEREE BALANCE //
-        // ================================= //
-        // Only branch into this if the referrer logic applies, i.e. if a referral logic applies
-        if let Some((referee_entity, referrer_user_entity, referrer_balance)) = referral_objects {
-            // update the referrer balance
-            // Turn everything into active models that we can modify
-            let referee_balance = active_sender_balance;
-            let mut active_referee_balance = referee_balance.clone().into_active_model();
-            let mut active_referee_entity = referee_entity.clone().into_active_model();
-            let mut active_referrer_balance = referrer_balance.clone().into_active_model();
-
-            // If the credits have not yet been applied to the referee, apply 10M credits / $100.00 USD worth of credits.
-            // TODO: Hardcode this parameter also in config, so it's easier to tune
-            if !referee_entity.credits_applied_for_referee
-                && (referee_balance.used_balance.unwrap() + self.sum_credits_used)
+            // Calculate if we are above the usage threshold, and apply a bonus
+            // Optimally we would read this from the balance, but if we do it like this, we only have to lock a single table (much safer w.r.t. deadlocks)
+            if !referral_entity.credits_applied_for_referee
+                && (referral_entity.credits_applied_for_referrer * (Decimal::from(10))
+                    + self.sum_credits_used)
                     >= Decimal::from(100)
             {
-                active_referee_balance.available_balance =
-                    sea_orm::Set(referee_balance.available_balance.unwrap() + Decimal::from(100));
-                active_referee_entity.credits_applied_for_referee = sea_orm::Set(true);
-                active_referee_balance.save(&txn).await?;
+                sender_available_balance_delta += Decimal::from(100);
+                sender_bonus_applied = true;
             }
 
-            // Also apply some (10%) credits to the referrer if the referral is not too old
+            // Calculate how much the referrer should get, limited to the last 12 months
+            // Apply 10% of the used balance as a bonus if applicable
             let now = Utc::now();
-            let valid_until = DateTime::<Utc>::from_utc(referee_entity.referral_start_date, Utc)
+            let valid_until = DateTime::<Utc>::from_utc(referral_entity.referral_start_date, Utc)
                 .checked_add_months(Months::new(12))
                 .unwrap();
 
             if now <= valid_until {
-                active_referrer_balance.available_balance = sea_orm::Set(
-                    referrer_balance.available_balance
-                        + self.sum_credits_used / Decimal::new(10, 0),
-                );
-                // Also record how much the current referrer has "provided" / "gifted" away
-                active_referee_entity.credits_applied_for_referrer = sea_orm::Set(
-                    referee_entity.credits_applied_for_referrer + self.sum_credits_used,
-                );
-                active_referrer_balance.save(&txn).await?;
+                referrer_balance_delta += self.sum_credits_used / Decimal::new(10, 0);
             }
-            // Do this if anything has changed, otherwise it's redundant
-            // We start the transaction anyways though, so that's fine
-            active_referee_entity.save(&txn).await?;
+
+            // Do the referrer_entry updates
+            if referrer_balance_delta > Decimal::from(0) {
+                let referee_entry = referee::ActiveModel {
+                    id: sea_orm::Unchanged(referral_entity.id),
+                    referral_start_date: sea_orm::Unchanged(referral_entity.referral_start_date),
+                    used_referral_code: sea_orm::Unchanged(referral_entity.used_referral_code),
+                    user_id: sea_orm::Unchanged(referral_entity.user_id),
+
+                    credits_applied_for_referee: sea_orm::Set(sender_bonus_applied),
+                    credits_applied_for_referrer: sea_orm::Set(referrer_balance_delta),
+                };
+                referee::Entity::insert(referee_entry)
+                    .on_conflict(
+                        OnConflict::new()
+                            .values([
+                                (
+                                    referee::Column::CreditsAppliedForReferee,
+                                    // Make it a "Set"
+                                    Expr::col(referee::Column::CreditsAppliedForReferee)
+                                        .eq(sender_bonus_applied),
+                                ),
+                                (
+                                    referee::Column::CreditsAppliedForReferrer,
+                                    Expr::col(referee::Column::CreditsAppliedForReferrer)
+                                        .add(referrer_balance_delta),
+                                ),
+                            ])
+                            .to_owned(),
+                    )
+                    .exec(&txn)
+                    .await?
+                    .last_insert_id;
+            }
         }
 
-        // =============================== //
-        //   REFRESH USER ROLE IN CACHE    //
-        // =============================== //
+        // ================================= //
+        //  UPDATE REFERRER & USER BALANCE   //
+        // ================================= //
+        let user_balance = balance::ActiveModel {
+            id: sea_orm::NotSet,
+            available_balance: sea_orm::Set(sender_available_balance_delta),
+            used_balance: sea_orm::Set(sender_used_balance_delta),
+            user_id: sea_orm::Set(sender_rpc_entity.user_id),
+        };
+
+        let _ = balance::Entity::insert(user_balance)
+            .on_conflict(
+                OnConflict::new()
+                    .values([
+                        (
+                            balance::Column::AvailableBalance,
+                            Expr::col(balance::Column::AvailableBalance)
+                                .add(sender_available_balance_delta),
+                        ),
+                        (
+                            balance::Column::UsedBalance,
+                            Expr::col(balance::Column::UsedBalance).add(sender_used_balance_delta),
+                        ),
+                    ])
+                    .to_owned(),
+            )
+            .exec(&txn)
+            .await?
+            .last_insert_id;
+
+        if referrer_balance_delta > Decimal::from(0) {
+            let user_balance = balance::ActiveModel {
+                id: sea_orm::NotSet,
+                available_balance: sea_orm::Set(referrer_balance_delta),
+                used_balance: sea_orm::Set(Decimal::from(0)),
+                user_id: sea_orm::Set(sender_rpc_entity.user_id),
+            };
+
+            let _ = balance::Entity::insert(user_balance)
+                .on_conflict(
+                    OnConflict::new()
+                        .values([(
+                            balance::Column::AvailableBalance,
+                            Expr::col(balance::Column::AvailableBalance)
+                                .add(referrer_balance_delta),
+                        )])
+                        .to_owned(),
+                )
+                .exec(&txn)
+                .await?
+                .last_insert_id;
+        }
+
+        // ================================ //
+        // TODO: REFRESH USER ROLE IN CACHE //
+        // ================================ //
         txn.commit().await?;
 
         Ok(())
