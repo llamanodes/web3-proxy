@@ -79,8 +79,6 @@ pub enum JsonRpcRequestEnum {
 }
 
 impl JsonRpcRequestEnum {
-    /// panics if batch is empty
-    /// TODO: i'd like to do this without copying, but references make things difficult
     pub fn first_id(&self) -> Web3ProxyResult<Box<RawValue>> {
         match self {
             Self::Batch(x) => match x.first() {
@@ -106,7 +104,6 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
             Id,
             Method,
             Params,
-            // TODO: jsonrpc here, too?
         }
 
         struct JsonRpcBatchVisitor;

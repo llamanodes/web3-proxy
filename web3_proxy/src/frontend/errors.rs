@@ -941,12 +941,8 @@ impl Web3ProxyError {
     }
 
     pub fn into_response_with_id(self, id: Box<RawValue>) -> Response {
-        // TODO: include the request id in these so that users can give us something that will point to logs
-        // TODO: status code is in the jsonrpc response and is also the first item in the tuple. DRY
         let (status_code, response_data) = self.into_response_parts();
 
-        // this will be missing the jsonrpc id!
-        // its better to get request id and call from_response_data with it then to use this IntoResponse helper.
         let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
 
         (status_code, Json(response)).into_response()
