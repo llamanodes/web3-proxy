@@ -19,7 +19,7 @@ use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::{
     admin, admin_increase_balance_receipt, admin_trail, balance, login, pending_login, rpc_key,
-    user, user_tier,
+    user,
 };
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
@@ -125,13 +125,6 @@ pub async fn admin_increase_balance(
         .one(&db_conn)
         .await?
         .context("User does not have a balance row")?;
-
-    // Finally make the user premium if balance is above 10$
-    let premium_user_tier = user_tier::Entity::find()
-        .filter(user_tier::Column::Title.eq("Premium"))
-        .one(&db_conn)
-        .await?
-        .context("Premium tier was not found!")?;
 
     let balance_entry = balance_entry.into_active_model();
     balance::Entity::insert(balance_entry)

@@ -15,9 +15,9 @@ use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::sea_orm_active_enums::TrackingLevel;
-use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key, user, user_tier};
+use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key, user};
 use influxdb2::models::DataPoint;
-use log::{error, info, trace, warn};
+use log::trace;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::QuerySelect;
 use migration::sea_orm::{
@@ -27,7 +27,6 @@ use migration::sea_orm::{
 use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
-use std::cmp::max;
 use std::num::NonZeroU64;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
@@ -222,9 +221,6 @@ impl BufferedRpcQueryStats {
             .balance
             .unwrap_or(Decimal::from(0));
     }
-
-    /// Check a user's balance and possibly downgrade him in the cache
-    async fn downgrade_user(self) {}
 
     // TODO: take a db transaction instead so that we can batch?
     async fn save_db(
@@ -467,55 +463,8 @@ impl BufferedRpcQueryStats {
         }
 
         // =============================== //
-        //  DOWNGRADE USER ROLE IN CACHE   //
+        //   REFRESH USER ROLE IN CACHE    //
         // =============================== //
-        // TODO: Only do it in cache, not like this!
-        // let new_balance_entry = balance::Entity::find()
-        //     .filter(balance::Column::Id.eq(sender_balance_id))
-        //     .one(&txn)
-        //     .await?
-        //     .context("Could not find the newly inserted balance_entry, something went wrong!")?;
-        //
-        // let downgrade_user = match user::Entity::find()
-        //     .filter(user::Column::Id.eq(sender_rpc_entity))
-        //     .one(&txn)
-        //     .await?
-        // {
-        //     Some(x) => x,
-        //     None => {
-        //         warn!("No user was found with this sender id!");
-        //         return Ok(());
-        //     }
-        // };
-        //
-        // let downgrade_user_role = user_tier::Entity::find()
-        //     .filter(user_tier::Column::Id.eq(downgrade_user.user_tier_id))
-        //     .one(&txn)
-        //     .await?
-        //     .context(format!(
-        //         "The foreign key for the user's user_tier_id was not found! {:?}",
-        //         downgrade_user.user_tier_id
-        //     ))?;
-
-        // // Downgrade a user to premium - out of funds if there's less than 10$ in the account, and if the user was premium before
-        // // TODO: lets let them get under $1
-        // // TODO: instead of checking for a specific title, downgrade if the downgrade id is set to anything
-        // if new_available_balance < Decimal::from(10u64) && downgrade_user_role.title == "Premium" {
-        //     // TODO: we could do this outside the balance low block, but I think its fine. or better, update the cache if <$10 and downgrade if <$1
-        //     if let Some(rpc_secret_key_cache) = rpc_secret_key_cache {
-        //         error!("expire (or probably better to update) the user cache now that the balance is low");
-        //         // actually i think we need to have 2 caches. otherwise users with 2 keys are going to have seperate caches
-        //         // 1. rpc_secret_key_id -> AuthorizationChecks (cuz we don't want to hit the db every time)
-        //         // 2. user_id -> Balance
-        //     }
-        //
-        //     // Only downgrade the user in local process memory, not elsewhere
-        //
-        //     // let mut active_downgrade_user = downgrade_user.into_active_model();
-        //     // active_downgrade_user.user_tier_id = sea_orm::Set(downgrade_user_role.id);
-        //     // active_downgrade_user.save(db_conn).await?;
-        // }
-
         txn.commit().await?;
 
         Ok(())

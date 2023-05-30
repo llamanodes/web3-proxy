@@ -10,7 +10,7 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::{balance, increase_on_chain_balance_receipt, user, user_tier};
+use entities::{balance, increase_on_chain_balance_receipt, user};
 use ethers::abi::{AbiEncode, ParamType};
 use ethers::types::{Address, TransactionReceipt, H256, U256};
 use ethers::utils::{hex, keccak256};
@@ -131,9 +131,6 @@ pub async fn user_balance_post(
         .context("unable to parse tx_hash")?;
 
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
-    let db_replica = app
-        .db_replica()
-        .context("query_user_stats needs a db replica")?;
 
     // Return straight false if the tx was already added ...
     let receipt = increase_on_chain_balance_receipt::Entity::find()
@@ -426,29 +423,11 @@ pub async fn user_balance_post(
             .await?
             .context("Could not find User balance, this should have been created when signing up the user!")?;
 
-        // Get the premium user-tier
-        let premium_user_tier = user_tier::Entity::find()
-            .filter(user_tier::Column::Title.eq("Premium"))
-            .one(&txn)
-            .await?
-            .context("Could not find 'Premium' Tier in user-database")?;
-
         // Gotta add to the balance entry
         // Should be atomic, because we do a write lock during the transaction
         let mut active_user_balance = user_balance.clone().into_active_model();
         active_user_balance.available_balance =
             sea_orm::Set(user_balance.available_balance + amount);
-
-        // I can now call update / save and get the new object back
-        let mut user_balance = active_user_balance.save(&txn).await?;
-
-        // Then also make the user premium if the payment is above 10$
-        if user_balance.available_balance.unwrap() >= Decimal::new(10, 0) {
-            let mut active_recipient = recipient.clone().into_active_model();
-            // Make the recipient premium "Effectively Unlimited"
-            active_recipient.user_tier_id = sea_orm::Set(premium_user_tier.id);
-            active_recipient.save(&txn).await?;
-        }
 
         debug!("Setting tx_hash: {:?}", tx_hash);
         let receipt = increase_on_chain_balance_receipt::ActiveModel {

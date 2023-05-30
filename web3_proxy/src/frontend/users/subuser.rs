@@ -107,7 +107,7 @@ pub async fn get_subusers(
         .context("getting replica db for user's revert logs")?;
 
     // Second, check if the user is a premium user
-    let user_tier = user_tier::Entity::find()
+    let user_tier_entity = user_tier::Entity::find()
         .filter(user_tier::Column::Id.eq(user.user_tier_id))
         .one(db_replica.conn())
         .await?
@@ -115,9 +115,9 @@ pub async fn get_subusers(
             "Could not find user in db although bearer token is there!".to_string(),
         ))?;
 
-    debug!("User tier is: {:?}", user_tier);
+    debug!("User tier is: {:?}", user_tier_entity);
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
-    if user_tier.id != 6 {
+    if user_tier_entity.id != 6 {
         return Err(
             anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into(),
         );
@@ -198,7 +198,7 @@ pub async fn modify_subuser(
         .context("getting replica db for user's revert logs")?;
 
     // Second, check if the user is a premium user
-    let user_tier = user_tier::Entity::find()
+    let user_tier_entity = user_tier::Entity::find()
         .filter(user_tier::Column::Id.eq(user.user_tier_id))
         .one(db_replica.conn())
         .await?
@@ -206,9 +206,9 @@ pub async fn modify_subuser(
             "Could not find user in db although bearer token is there!".to_string(),
         ))?;
 
-    debug!("User tier is: {:?}", user_tier);
+    debug!("User tier is: {:?}", user_tier_entity);
     // TODO: This shouldn't be hardcoded. Also, it should be an enum, not sth like this ...
-    if user_tier.id != 6 {
+    if user_tier_entity.id != 6 {
         return Err(
             anyhow::anyhow!("User is not premium. Must be premium to create referrals.").into(),
         );

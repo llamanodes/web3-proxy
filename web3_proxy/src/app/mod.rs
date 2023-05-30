@@ -1073,7 +1073,7 @@ impl Web3ProxyApp {
         let mut collected_rpcs: Vec<Arc<Web3Rpc>> = vec![];
         for response in responses {
             // TODO: any way to attach the tried rpcs to the error? it is likely helpful
-            let (status_code, response, rpcs) = response;
+            let (_status_code, response, rpcs) = response;
 
             collected.push(response);
             collected_rpcs.extend(rpcs.into_iter().filter(|x| {
