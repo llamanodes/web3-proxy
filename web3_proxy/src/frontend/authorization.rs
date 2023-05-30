@@ -34,7 +34,6 @@ use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::mem;
 use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64, AtomicUsize};
-use std::sync::RwLock;
 use std::time::Duration;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};

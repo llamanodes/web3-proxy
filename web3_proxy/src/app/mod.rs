@@ -32,7 +32,7 @@ use entities::sea_orm_active_enums::TrackingLevel;
 use entities::user;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U64};
-use ethers::types::U256;
+use ethers::types::{I256, U256};
 use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -46,7 +46,6 @@ use migration::sea_orm::{
 };
 use migration::sea_query::table::ColumnDef;
 use migration::{Alias, DbErr, Migrator, MigratorTrait, Table};
-use parking_lot::RwLock;
 use quick_cache_ttl::{Cache, CacheWithTTL};
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
@@ -129,7 +128,7 @@ impl DatabaseReplica {
 
 /// Cache data from the database about rpc keys
 pub type RpcSecretKeyCache = Arc<CacheWithTTL<RpcSecretKey, AuthorizationChecks>>;
-pub type UserBalanceCache = Arc<CacheWithTTL<u64, Decimal>>; // Could also be an AtomicDecimal
+pub type UserBalanceCache = Arc<CacheWithTTL<NonZeroU64, U256>>; // Could also be an AtomicDecimal
 
 /// The application
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
