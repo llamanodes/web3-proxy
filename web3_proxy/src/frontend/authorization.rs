@@ -1138,7 +1138,7 @@ impl Web3ProxyApp {
         rpc_secret_key: RpcSecretKey,
     ) -> Web3ProxyResult<AuthorizationChecks> {
         self.rpc_secret_key_cache
-            .get_or_insert_async(&rpc_secret_key, async move {
+            .try_get_or_insert_async(&rpc_secret_key, async move {
                 // trace!(?rpc_secret_key, "user cache miss");
 
                 let db_replica = self
@@ -1157,6 +1157,24 @@ impl Web3ProxyApp {
                     Some(rpc_key_model) => {
                         // TODO: move these splits into helper functions
                         // TODO: can we have sea orm handle this for us?
+                        let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
+                            .one(db_replica.conn())
+                            .await?
+                            .context("no related user")?;
+
+                        let balance = balance::Entity::find()
+                            .filter(balance::Column::UserId.eq(user_model.id))
+                            .one(db_replica.conn())
+                            .await?
+                            .map(|x| x.available_balance)
+                            .unwrap_or_default();
+
+                        let user_tier_model =
+                            user_tier::Entity::find_by_id(user_model.user_tier_id)
+                                .one(db_replica.conn())
+                                .await?
+                                .context("no related user tier")?;
+
                         let allowed_ips: Option<Vec<IpNet>> =
                             if let Some(allowed_ips) = rpc_key_model.allowed_ips {
                                 let x = allowed_ips

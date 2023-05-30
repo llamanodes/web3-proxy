@@ -1,0 +1,15 @@
+Hello, I'm pretty new to tracing so my vocabulary might be wrong. I've got my app using tracing to log to stdout. I have a bunch of fields including user_id and ip_addr that make telling where logs are from nice and easy.
+
+Now there is one part of my code where I want to save a log to a database. I'm not sure of the best/correct way to do this. I can get the current span with tracing::Span::current(), but AFAICT that doesn't have a way to get to the values. I think I need to write my own Subscriber or Visitor (or both) and then tell tracing to use it only in this one part of the code. Am I on the right track? Is there a place in the docs that explains something similar?
+
+https://burgers.io/custom-logging-in-rust-using-tracing
+
+if you are doing it learn how to write a subscriber then you should write a custom layer.  If you are simply trying to work on your main project there are several subscribers that already do this work for you.
+
+look at opentelemetry_otlp .. this will let you connect opentelemetry collector to your tracing using tracing_opentelemetry
+
+I'd suggest using the Registry subscriber because it can take multiple layers ... and use a filtered_layer to filter out the messages (look at env_filter, it can take the filtering params from an environment variable or a config string)   and then have your collector be the second layer. e.... Registery can take in a vector of layers that are also-in-turn multi-layered.
+let me see if i can pull up an example
+On the https://docs.rs/tracing-subscriber/latest/tracing_subscriber/layer/ page about half-way down there is an example of boxed layers
+
+you basically end up composing different layers that output to different trace stores and also configure each using per-layer filtering (see https://docs.rs/tracing-subscriber/latest/tracing_subscriber/layer/#per-layer-filtering)

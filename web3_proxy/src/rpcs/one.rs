@@ -21,7 +21,6 @@ use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
-use std::convert::Infallible;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU64, AtomicUsize};
@@ -444,12 +443,8 @@ impl Web3Rpc {
 
                 // if we already have this block saved, set new_head_block to that arc. otherwise store this copy
                 let new_head_block = block_map
-                    .get_or_insert_async::<Infallible, _>(
-                        &new_hash,
-                        async move { Ok(new_head_block) },
-                    )
-                    .await
-                    .expect("this cache get is infallible");
+                    .get_or_insert_async(&new_hash, async move { new_head_block })
+                    .await;
 
                 // save the block so we don't send the same one multiple times
                 // also save so that archive checks can know how far back to query
