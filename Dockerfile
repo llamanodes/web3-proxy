@@ -1,13 +1,31 @@
-FROM rust:1.69.0-bullseye AS builder
+FROM debian:bullseye-slim as builder
 
 WORKDIR /app
 ENV CARGO_TERM_COLOR always
+
+# install rustup dependencies
+RUN apt-get update && \
+    apt-get install --yes \
+    build-essential \
+    curl \
+    git \
+    && \
+    rm -rf /var/lib/apt/lists/*
+
+# install rustup
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+
+# install the correct version of rust
+# we need nightly for a few features
+COPY rust-toolchain.toml .
+RUN /root/.cargo/bin/rustup update
 
 # a next-generation test runner for Rust projects.
 # We only pay the installation cost once, 
 # it will be cached from the second build onwards
 # TODO: more mount type cache?
-# TODO: do this in a seperate FROM and COPY it in
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install cargo-nextest
 
@@ -26,6 +44,7 @@ RUN apt-get update && \
     libssl-dev \
     libzstd-dev \
     make \
+    pkg-config \
     && \
     rm -rf /var/lib/apt/lists/*
 
@@ -40,7 +59,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features
 
 # build the application
-# using a "release" profile (which install does) is **very** important
+# using a "release" profile (which install does by default) is **very** important
+# we use the "faster_release" profile which builds with `codegen-units = 1`
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo install \
@@ -71,3 +91,6 @@ CMD [ "--config", "/web3-proxy.toml", "proxyd" ]
 ENV RUST_LOG "warn,ethers_providers::rpc=off,web3_proxy=debug,web3_proxy_cli=debug"
 
 COPY --from=builder /usr/local/bin/* /usr/local/bin/
+
+# make sure the app works
+RUN web3_proxy_cli --help

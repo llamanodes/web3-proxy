@@ -1,5 +1,5 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use anyhow::Context;
 use ethers::{
     prelude::{BlockNumber, U64},
@@ -124,7 +124,7 @@ pub enum BlockNeeded {
 pub async fn block_needed(
     authorization: &Arc<Authorization>,
     method: &str,
-    params: Option<&mut serde_json::Value>,
+    params: &mut serde_json::Value,
     head_block_num: U64,
     rpcs: &Web3Rpcs,
 ) -> Web3ProxyResult<BlockNeeded> {
@@ -134,18 +134,13 @@ pub async fn block_needed(
         return Ok(BlockNeeded::CacheNever);
     }
 
-    let params = if let Some(params) = params {
-        // grab the params so we can inspect and potentially modify them
-        params
-    } else {
-        // if no params, no block is needed
-        // TODO: check all the methods with no params, some might not be cacheable
-        // caching with the head block /should/ always be okay
+    if matches!(params, serde_json::Value::Null) {
+        // no params given
         return Ok(BlockNeeded::Cache {
             block_num: head_block_num,
             cache_errors: true,
         });
-    };
+    }
 
     // get the index for the BlockNumber
     // The BlockNumber is usually the last element.
@@ -179,10 +174,10 @@ pub async fn block_needed(
             // TODO: jsonrpc has a specific code for this
             let obj = params
                 .get_mut(0)
-                .ok_or_else(|| Web3ProxyError::BadRequest("invalid format. no params".to_string()))?
+                .ok_or_else(|| Web3ProxyError::BadRequest("invalid format. no params".into()))?
                 .as_object_mut()
                 .ok_or_else(|| {
-                    Web3ProxyError::BadRequest("invalid format. params not object".to_string())
+                    Web3ProxyError::BadRequest("invalid format. params not object".into())
                 })?;
 
             if obj.contains_key("blockHash") {

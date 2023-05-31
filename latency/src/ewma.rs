@@ -3,7 +3,7 @@ use serde::Serialize;
 use tokio::time::Duration;
 
 pub struct EwmaLatency {
-    /// exponentially weighted moving average of how many milliseconds behind the fastest node we are
+    /// exponentially weighted of some latency in milliseconds
     ewma: ewma::EWMA,
 }
 

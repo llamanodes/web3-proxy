@@ -519,7 +519,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] if user-specific caches have evictions that aren't from timeouts, log a warning
 - [ ] make sure the email address is valid. probably have a "verified" column in the database
 - [ ] if invalid user id given, we give a 500. should be a different error code instead
-  - WARN http_request: web3_proxy::frontend::errors: anyhow err=UserKey was not a ULID or UUID id=01GER4VBTS0FDHEBR96D1JRDZF method=POST
+  - WARN http_request: web3_proxy::errors: anyhow err=UserKey was not a ULID or UUID id=01GER4VBTS0FDHEBR96D1JRDZF method=POST
 - [ ] admin-only endpoint for seeing a user's stats for support requests
 - [ ] from what i thought, /status should show hashes > numbers!
   - but block numbers count is maxed out (10k)

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::Web3ProxyResult;
+use crate::errors::Web3ProxyResult;
 
 /// Run a prometheus metrics server on the given port.
 pub async fn serve(

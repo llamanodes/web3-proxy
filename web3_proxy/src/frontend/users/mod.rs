@@ -6,8 +6,8 @@ pub mod rpc_keys;
 pub mod stats;
 pub mod subuser;
 
-use super::errors::{Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::app::Web3ProxyApp;
+use crate::errors::{Web3ProxyErrorContext, Web3ProxyResponse};
 
 use axum::{
     headers::{authorization::Bearer, Authorization},

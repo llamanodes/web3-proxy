@@ -34,8 +34,9 @@ use std::{
 use tokio::runtime;
 use web3_proxy::pagerduty::panic_handler;
 use web3_proxy::{
-    app::{get_db, get_migrated_db, APP_USER_AGENT},
+    app::APP_USER_AGENT,
     config::TopConfig,
+    relational_db::{get_db, get_migrated_db},
 };
 
 #[cfg(feature = "mimalloc")]
@@ -140,6 +141,7 @@ fn main() -> anyhow::Result<()> {
                     "ethers=debug",
                     "ethers_providers::rpc=off",
                     "ethers_providers=debug",
+                    "quick_cache_ttl=debug",
                     "redis_rate_limit=debug",
                     "web3_proxy::rpcs::blockchain=info",
                     "web3_proxy::rpcs::request=debug",
@@ -154,6 +156,7 @@ fn main() -> anyhow::Result<()> {
                     "ethers=debug",
                     "ethers_providers::rpc=off",
                     "ethers_providers=error",
+                    "quick_cache_ttl=info",
                     "redis_rate_limit=debug",
                     // "web3_proxy::stats::influxdb_queries=trace",
                     "web3_proxy=debug",

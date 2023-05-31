@@ -1,6 +1,6 @@
 //! Handle registration, logins, and managing account data.
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::{Web3ProxyErrorContext, Web3ProxyResponse};
+use crate::errors::{Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
 };
@@ -49,7 +49,7 @@ pub async fn user_revert_logs_get(
 
     let uks = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(user.id))
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await
         .web3_context("failed loading user's key")?;
 
@@ -72,7 +72,7 @@ pub async fn user_revert_logs_get(
     // query the database for number of items and pages
     let pages_result = q
         .clone()
-        .paginate(db_replica.conn(), page_size)
+        .paginate(db_replica.as_ref(), page_size)
         .num_items_and_pages()
         .await?;
 
@@ -81,7 +81,7 @@ pub async fn user_revert_logs_get(
 
     // query the database for the revert logs
     let revert_logs = q
-        .paginate(db_replica.conn(), page_size)
+        .paginate(db_replica.as_ref(), page_size)
         .fetch_page(page)
         .await?;
 
