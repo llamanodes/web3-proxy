@@ -174,10 +174,10 @@ pub async fn block_needed(
             // TODO: jsonrpc has a specific code for this
             let obj = params
                 .get_mut(0)
-                .ok_or_else(|| Web3ProxyError::BadRequest("invalid format. no params".to_string()))?
+                .ok_or_else(|| Web3ProxyError::BadRequest("invalid format. no params".into()))?
                 .as_object_mut()
                 .ok_or_else(|| {
-                    Web3ProxyError::BadRequest("invalid format. params not object".to_string())
+                    Web3ProxyError::BadRequest("invalid format. params not object".into())
                 })?;
 
             if obj.contains_key("blockHash") {

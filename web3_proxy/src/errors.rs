@@ -41,7 +41,7 @@ pub enum Web3ProxyError {
     Anyhow(anyhow::Error),
     #[error(ignore)]
     #[from(ignore)]
-    BadRequest(String),
+    BadRequest(Cow<'static, str>),
     #[error(ignore)]
     #[from(ignore)]
     BadResponse(String),

@@ -224,7 +224,7 @@ pub fn get_query_window_seconds_from_params(
         |query_window_seconds: &String| {
             // parse the given timestamp
             query_window_seconds.parse::<u64>().map_err(|_| {
-                Web3ProxyError::BadRequest("Unable to parse query_window_seconds".to_string())
+                Web3ProxyError::BadRequest("Unable to parse query_window_seconds".into())
             })
         },
     )
@@ -259,7 +259,7 @@ pub fn get_stats_column_from_params(params: &HashMap<String, String>) -> Web3Pro
                     sum_response_millis, \
                     sum_credits_used, \
                     balance"
-                        .to_string(),
+                        .into(),
                 )),
             }
         },

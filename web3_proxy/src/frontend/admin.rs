@@ -67,32 +67,30 @@ pub async fn admin_increase_balance(
     let user_address: Address = params
         .get("user_address")
         .ok_or_else(|| {
-            Web3ProxyError::BadRequest("Unable to find user_address key in request".to_string())
+            Web3ProxyError::BadRequest("Unable to find user_address key in request".into())
         })?
         .parse::<Address>()
         .map_err(|_| {
-            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".to_string())
+            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".into())
         })?;
     let user_address_bytes: Vec<u8> = user_address.to_fixed_bytes().into();
     let note: String = params
         .get("note")
-        .ok_or_else(|| {
-            Web3ProxyError::BadRequest("Unable to find 'note' key in request".to_string())
-        })?
+        .ok_or_else(|| Web3ProxyError::BadRequest("Unable to find 'note' key in request".into()))?
         .parse::<String>()
-        .map_err(|_| {
-            Web3ProxyError::BadRequest("Unable to parse 'note' as a String".to_string())
-        })?;
+        .map_err(|_| Web3ProxyError::BadRequest("Unable to parse 'note' as a String".into()))?;
     // Get the amount from params
     // Decimal::from_str
     let amount: Decimal = params
         .get("amount")
         .ok_or_else(|| {
-            Web3ProxyError::BadRequest("Unable to get the amount key from the request".to_string())
+            Web3ProxyError::BadRequest("Unable to get the amount key from the request".into())
         })
         .map(|x| Decimal::from_str(x))?
         .map_err(|err| {
-            Web3ProxyError::BadRequest(format!("Unable to parse amount from the request {:?}", err))
+            Web3ProxyError::BadRequest(
+                format!("Unable to parse amount from the request {:?}", err).into(),
+            )
         })?;
 
     let user_entry: user::Model = user::Entity::find()
@@ -100,7 +98,7 @@ pub async fn admin_increase_balance(
         .one(&db_conn)
         .await?
         .ok_or(Web3ProxyError::BadRequest(
-            "No user with this id found".to_string(),
+            "No user with this id found".into(),
         ))?;
 
     let increase_balance_receipt = admin_increase_balance_receipt::ActiveModel {
@@ -211,22 +209,22 @@ pub async fn admin_login_get(
     let admin_address: Address = params
         .get("admin_address")
         .ok_or_else(|| {
-            Web3ProxyError::BadRequest("Unable to find admin_address key in request".to_string())
+            Web3ProxyError::BadRequest("Unable to find admin_address key in request".into())
         })?
         .parse::<Address>()
         .map_err(|_err| {
-            Web3ProxyError::BadRequest("Unable to parse admin_address as an Address".to_string())
+            Web3ProxyError::BadRequest("Unable to parse admin_address as an Address".into())
         })?;
 
     // Fetch the user_address parameter from the login string ... (as who we want to be logging in ...)
     let user_address: Vec<u8> = params
         .get("user_address")
         .ok_or_else(|| {
-            Web3ProxyError::BadRequest("Unable to find user_address key in request".to_string())
+            Web3ProxyError::BadRequest("Unable to find user_address key in request".into())
         })?
         .parse::<Address>()
         .map_err(|_err| {
-            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".to_string())
+            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".into())
         })?
         .to_fixed_bytes()
         .into();
@@ -277,7 +275,7 @@ pub async fn admin_login_get(
         .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
-            "Could not find user in db".to_string(),
+            "Could not find user in db".into(),
         ))?;
 
     // TODO: Gotta check if encoding messes up things maybe ...
@@ -288,7 +286,7 @@ pub async fn admin_login_get(
         .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
-            "Could not find admin in db".to_string(),
+            "Could not find admin in db".into(),
         ))?;
 
     // Note that the admin is trying to log in as this user

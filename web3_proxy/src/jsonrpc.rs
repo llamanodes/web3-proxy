@@ -84,7 +84,7 @@ impl JsonRpcRequestEnum {
             Self::Batch(x) => match x.first() {
                 Some(x) => Ok(x.id.clone()),
                 None => Err(Web3ProxyError::BadRequest(
-                    "no requests in the batch".to_string(),
+                    "no requests in the batch".into(),
                 )),
             },
             Self::Single(x) => Ok(x.id.clone()),

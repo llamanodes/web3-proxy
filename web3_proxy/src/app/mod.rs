@@ -739,6 +739,13 @@ impl Web3ProxyApp {
         self.watch_consensus_head_receiver.clone()
     }
 
+    /// an ethers provider that you can use with ether's abigen.
+    /// this works for now, but I don't like it
+    /// TODO: I would much prefer we figure out the traits and `impl JsonRpcClient for Web3ProxyApp`
+    pub fn internal_provider(&self) -> &Arc<EthersHttpProvider> {
+        &self.internal_provider
+    }
+
     pub async fn prometheus_metrics(&self) -> String {
         let globals = HashMap::new();
         // TODO: what globals? should this be the hostname or what?
@@ -1417,19 +1424,19 @@ impl Web3ProxyApp {
                             .as_array()
                             .ok_or_else(|| {
                                 Web3ProxyError::BadRequest(
-                                    "Unable to get array from params".to_string(),
+                                    "Unable to get array from params".into(),
                                 )
                             })?
                             .get(0)
                             .ok_or_else(|| {
                                 Web3ProxyError::BadRequest(
-                                    "Unable to get item 0 from params".to_string(),
+                                    "Unable to get item 0 from params".into(),
                                 )
                             })?
                             .as_str()
                             .ok_or_else(|| {
                                 Web3ProxyError::BadRequest(
-                                    "Unable to get string from params item 0".to_string(),
+                                    "Unable to get string from params item 0".into(),
                                 )
                             })?;
 
@@ -1546,7 +1553,7 @@ impl Web3ProxyApp {
                             .map_err(|x| {
                                 trace!("bad request: {:?}", x);
                                 Web3ProxyError::BadRequest(
-                                    "param 0 could not be read as H256".to_string(),
+                                    "param 0 could not be read as H256".into(),
                                 )
                             })?;
 

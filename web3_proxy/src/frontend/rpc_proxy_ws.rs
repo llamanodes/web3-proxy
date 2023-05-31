@@ -415,9 +415,9 @@ async fn handle_socket_payload(
 
                                 Ok(response.into())
                             }
-                            Err(err) => Err(Web3ProxyError::BadRequest(f!(
-                                "incorrect params given for eth_unsubscribe. {err:?}"
-                            ))),
+                            Err(err) => Err(Web3ProxyError::BadRequest(
+                                f!("incorrect params given for eth_unsubscribe. {err:?}").into(),
+                            )),
                         }
                     }
                     _ => app

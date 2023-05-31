@@ -38,6 +38,8 @@ abigen!(
     PaymentFactory,
     r#"[
         event PaymentReceived(address indexed account, address token, uint256 amount)
+        account_to_payment_address(address) -> address
+        payment_address_to_account(address) -> address
     ]"#,
 );
 
@@ -137,30 +139,31 @@ pub async fn user_balance_post(
     // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
     let tx_hash: H256 = params
         .remove("tx_hash")
-        // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
-            "You have not provided the tx_hash in which you paid in".to_string(),
+            "You have not provided a tx_hash".into(),
         ))?
         .parse()
-        .context("unable to parse tx_hash")?;
+        .map_err(|err| {
+            Web3ProxyError::BadRequest(format!("unable to parse tx_hash: {}", err).into())
+        })?;
 
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
-    // let db_replica = app
-    //     .db_replica()
-    //     .context("query_user_stats needs a db replica")?;
 
     // Return straight false if the tx was already added ...
-    // TODO: TxHash being string
-    let receipt = increase_on_chain_balance_receipt::Entity::find()
+    if increase_on_chain_balance_receipt::Entity::find()
         .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
         .one(&db_conn)
-        .await?;
-    if receipt.is_some() {
-        return Err(Web3ProxyError::BadRequest(
-            "The transaction you provided has already been accounted for!".to_string(),
-        ));
+        .await?
+        .is_some()
+    {
+        let response = Json(json!({
+            "result": "success",
+            "message": "this transaction was already in the database",
+        }))
+        .into_response();
+
+        return Ok(response);
     }
-    debug!("Receipt: {:?}", receipt);
 
     // Iterate through all logs, and add them to the transaction list if there is any
     // Address will be hardcoded in the config
@@ -170,17 +173,31 @@ pub async fn user_balance_post(
 
     trace!("Transaction receipt: {:#?}", transaction_receipt);
 
-    // there is no need to check accepted tokens. the smart contract already does that
+    // there is no need to check accepted tokens. the smart contract already reverts if the token isn't accepted
 
-    // parse the log from the transaction receipt to get the token address,
-    /*
-    event PaymentReceived:
-        account: indexed(address)
-        token: address
-        amount: uint256
-     */
+    let payment_factory_address = app
+        .config
+        .deposit_factory_contract
+        .context("A deposit_contract must be provided in the config to parse payments")?;
+
+    let payment_factory =
+        PaymentFactory::new(payment_factory_address, app.internal_provider().clone());
+
+    // TODO: parse the log from the transaction receipt
+
+    // let deposit_log = payment_factory.payment_received_filter().topic;
+
+    // // // TODO: do a quick check that this transaction contains the required log
+    // if !transaction_receipt.logs_bloom.contains_input(deposit_log) {
+    //     return Err(Web3ProxyError::BadRequest("no matching logs found".into()));
+    // }
+
+    // TODO: get the payment token address
+    // TODO: get the account the payment was received on behalf of (any account could have sent it)
 
     // TODO: get the decimals for the token
+
+    // TODO: payment_factory.payment_address_to_account(...).call();
 
     // Go through all logs, this should prob capture it,
     // At least according to this SE logs are just concatenations of the underlying types (like a struct..)
@@ -380,8 +397,4 @@ pub async fn user_balance_post(
             return Ok(response);
         }
          */
-
-    Err(Web3ProxyError::BadRequest(
-        "No such transaction was found, or token is not supported!".to_string(),
-    ))
 }

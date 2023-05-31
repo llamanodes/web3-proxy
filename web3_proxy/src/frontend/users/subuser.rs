@@ -111,7 +111,7 @@ pub async fn get_subusers(
         .remove("rpc_key")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
-            "You have not provided the 'rpc_key' whose access to modify".to_string(),
+            "You have not provided the 'rpc_key' whose access to modify".into(),
         ))?
         .parse()
         .context(format!("unable to parse rpc_key {:?}", params))?;
@@ -122,7 +122,7 @@ pub async fn get_subusers(
         .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
-            "The provided RPC key cannot be found".to_string(),
+            "The provided RPC key cannot be found".into(),
         ))?;
 
     // Get all secondary users that have access to this rpc key
@@ -188,7 +188,7 @@ pub async fn modify_subuser(
         .remove("rpc_key")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
-            "You have not provided the 'rpc_key' whose access to modify".to_string(),
+            "You have not provided the 'rpc_key' whose access to modify".into(),
         ))?
         .parse::<Ulid>()
         .context(format!("unable to parse rpc_key {:?}", params))?;
@@ -198,7 +198,7 @@ pub async fn modify_subuser(
         .remove("subuser_address")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
-            "You have not provided the 'user_address' whose access to modify".to_string(),
+            "You have not provided the 'user_address' whose access to modify".into(),
         ))?
         .parse()
         .context(format!("unable to parse subuser_address {:?}", params))?;
@@ -209,14 +209,14 @@ pub async fn modify_subuser(
         .remove("new_status")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
-            "You have not provided the new_stats key in the request".to_string(),
+            "You have not provided the new_stats key in the request".into(),
         ))?
         .as_str()
     {
         "upsert" => Ok(true),
         "remove" => Ok(false),
         _ => Err(Web3ProxyError::BadRequest(
-            "'new_status' must be one of 'upsert' or 'remove'".to_string(),
+            "'new_status' must be one of 'upsert' or 'remove'".into(),
         )),
     }?;
 
@@ -224,7 +224,7 @@ pub async fn modify_subuser(
         .remove("new_role")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
-            "You have not provided the new_role key in the request".to_string(),
+            "You have not provided the new_role key in the request".into(),
         ))?
         .as_str()
     {
@@ -235,7 +235,7 @@ pub async fn modify_subuser(
         "admin" => Ok(Role::Admin),
         "collaborator" => Ok(Role::Collaborator),
         _ => Err(Web3ProxyError::BadRequest(
-            "'new_role' must be one of 'owner', 'admin', 'collaborator'".to_string(),
+            "'new_role' must be one of 'owner', 'admin', 'collaborator'".into(),
         )),
     }?;
 
@@ -253,13 +253,13 @@ pub async fn modify_subuser(
         .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
-            "Provided RPC key does not exist!".to_owned(),
+            "Provided RPC key does not exist!".into(),
         ))?;
 
     // Make sure that the user owns the rpc_key_entity
     if rpc_key_entity.user_id != user.id {
         return Err(Web3ProxyError::BadRequest(
-            "you must own the RPC for which you are giving permissions out".to_string(),
+            "you must own the RPC for which you are giving permissions out".into(),
         ));
     }
 
@@ -308,7 +308,7 @@ pub async fn modify_subuser(
         Some(subuser) => {
             if subuser.id == user.id {
                 return Err(Web3ProxyError::BadRequest(
-                    "you cannot make a subuser out of yourself".to_string(),
+                    "you cannot make a subuser out of yourself".into(),
                 ));
             }
 
