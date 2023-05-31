@@ -766,6 +766,7 @@ pub async fn login_is_authorized(app: &Web3ProxyApp, ip: IpAddr) -> Web3ProxyRes
 }
 
 /// semaphore won't ever be None, but its easier if key auth and ip auth work the same way
+/// keep the semaphore alive until the user's request is entirely complete
 pub async fn ip_is_authorized(
     app: &Arc<Web3ProxyApp>,
     ip: IpAddr,
@@ -831,6 +832,7 @@ pub async fn ip_is_authorized(
 }
 
 /// like app.rate_limit_by_rpc_key but converts to a Web3ProxyError;
+/// keep the semaphore alive until the user's request is entirely complete
 pub async fn key_is_authorized(
     app: &Arc<Web3ProxyApp>,
     rpc_key: RpcSecretKey,
@@ -916,6 +918,7 @@ impl Web3ProxyApp {
     }
 
     /// Limit the number of concurrent requests for a given user across all of their keys
+    /// keep the semaphore alive until the user's request is entirely complete
     pub async fn user_semaphore(
         &self,
         authorization_checks: &AuthorizationChecks,
@@ -946,6 +949,7 @@ impl Web3ProxyApp {
 
     /// Verify that the given bearer token and address are allowed to take the specified action.
     /// This includes concurrent request limiting.
+    /// keep the semaphore alive until the user's request is entirely complete
     pub async fn bearer_is_authorized(
         &self,
         bearer: Bearer,

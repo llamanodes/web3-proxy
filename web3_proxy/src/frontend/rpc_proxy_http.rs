@@ -62,7 +62,7 @@ async fn _proxy_web3_rpc(
 
     let first_id = payload.first_id().map_err(|e| e.into_response())?;
 
-    let (authorization, semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode)
+    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode)
         .await
         .map_err(|e| e.into_response_with_id(first_id.to_owned()))?;
 
@@ -70,10 +70,9 @@ async fn _proxy_web3_rpc(
 
     // TODO: calculate payload bytes here (before turning into serde_json::Value). that will save serializing later
 
-    let (status_code, response, rpcs, _semaphore) = app
+    let (status_code, response, rpcs) = app
         .proxy_web3_rpc(authorization, payload)
         .await
-        .map(|(s, x, y)| (s, x, y, semaphore))
         .map_err(|e| e.into_response_with_id(first_id.to_owned()))?;
 
     let mut response = (status_code, Json(response)).into_response();
@@ -227,7 +226,7 @@ async fn _proxy_web3_rpc_with_key(
         .parse()
         .map_err(|e: Web3ProxyError| e.into_response_with_id(first_id.to_owned()))?;
 
-    let (authorization, semaphore) = key_is_authorized(
+    let (authorization, _semaphore) = key_is_authorized(
         &app,
         rpc_key,
         ip,
@@ -243,10 +242,9 @@ async fn _proxy_web3_rpc_with_key(
 
     let rpc_secret_key_id = authorization.checks.rpc_secret_key_id;
 
-    let (status_code, response, rpcs, _semaphore) = app
+    let (status_code, response, rpcs) = app
         .proxy_web3_rpc(authorization, payload)
         .await
-        .map(|(s, x, y)| (s, x, y, semaphore))
         .map_err(|e| e.into_response_with_id(first_id.to_owned()))?;
 
     let mut response = (status_code, Json(response)).into_response();
