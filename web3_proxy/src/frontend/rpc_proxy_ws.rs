@@ -32,6 +32,7 @@ use hashbrown::HashMap;
 use http::StatusCode;
 use log::{info, trace};
 use serde_json::json;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock};
@@ -318,13 +319,12 @@ async fn proxy_web3_socket(
 }
 
 /// websockets support a few more methods than http clients
-/// TODO: i think this subscriptions hashmap grows unbounded
 async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
     authorization: &Arc<Authorization>,
     payload: &str,
     response_sender: &flume::Sender<Message>,
-    subscription_count: &AtomicUsize,
+    subscription_count: &AtomicU64,
     subscriptions: Arc<RwLock<HashMap<U64, AbortHandle>>>,
 ) -> Web3ProxyResult<(Message, Option<OwnedSemaphorePermit>)> {
     let (authorization, semaphore) = match authorization.check_again(&app).await {
@@ -456,7 +456,7 @@ async fn read_web3_socket(
 ) {
     // RwLock should be fine here. a user isn't going to be opening tons of subscriptions
     let subscriptions = Arc::new(RwLock::new(HashMap::new()));
-    let subscription_count = Arc::new(AtomicUsize::new(1));
+    let subscription_count = Arc::new(AtomicU64::new(1));
 
     let (close_sender, mut close_receiver) = broadcast::channel(1);
 
@@ -464,8 +464,7 @@ async fn read_web3_socket(
         tokio::select! {
             msg = ws_rx.next() => {
                 if let Some(Ok(msg)) = msg {
-                    // spawn so that we can serve responses from this loop even faster
-                    // TODO: only do these clones if the msg is text/binary?
+                    // clone things so we can handle multiple messages in parallel
                     let close_sender = close_sender.clone();
                     let app = app.clone();
                     let authorization = authorization.clone();
@@ -474,13 +473,12 @@ async fn read_web3_socket(
                     let subscription_count = subscription_count.clone();
 
                     let f = async move {
-                        let mut _semaphore = None;
-
-                        // new message from our client. forward to a backend and then send it through response_tx
-                        let response_msg = match msg {
+                        // new message from our client. forward to a backend and then send it through response_sender
+                        let (response_msg, _semaphore) = match msg {
                             Message::Text(ref payload) => {
-                                // TODO: do not unwrap!
-                                let (msg, s) = handle_socket_payload(
+                                // TODO: do not unwrap! turn errors into a jsonrpc response and send that instead
+                                // TODO: some providers close the connection on error. i don't like that
+                                let (m, s) = handle_socket_payload(
                                     app.clone(),
                                     &authorization,
                                     payload,
@@ -490,13 +488,11 @@ async fn read_web3_socket(
                                 )
                                 .await.unwrap();
 
-                                _semaphore = s;
-
-                                msg
+                                (m, Some(s))
                             }
                             Message::Ping(x) => {
                                 trace!("ping: {:?}", x);
-                                Message::Pong(x)
+                                (Message::Pong(x), None)
                             }
                             Message::Pong(x) => {
                                 trace!("pong: {:?}", x);
@@ -511,8 +507,8 @@ async fn read_web3_socket(
                             Message::Binary(mut payload) => {
                                 let payload = from_utf8_mut(&mut payload).unwrap();
 
-                                // TODO: do not unwrap!
-                                let (msg, s) = handle_socket_payload(
+                                // TODO: do not unwrap! turn errors into a jsonrpc response and send that instead
+                                let (m, s) = handle_socket_payload(
                                     app.clone(),
                                     &authorization,
                                     payload,
@@ -522,18 +518,13 @@ async fn read_web3_socket(
                                 )
                                 .await.unwrap();
 
-                                _semaphore = s;
-
-                                msg
+                                (m, Some(s))
                             }
                         };
 
                         if response_sender.send_async(response_msg).await.is_err() {
                             let _ = close_sender.send(true);
-                            return;
                         };
-
-                        _semaphore = None;
                     };
 
                     tokio::spawn(f);
@@ -554,11 +545,10 @@ async fn write_web3_socket(
 ) {
     // TODO: increment counter for open websockets
 
-    // TODO: is there any way to make this stream receive.
     while let Ok(msg) = response_rx.recv_async().await {
         // a response is ready
 
-        // TODO: poke rate limits for this user?
+        // we do not check rate limits here. they are checked before putting things into response_sender;
 
         // forward the response to through the websocket
         if let Err(err) = ws_tx.send(msg).await {

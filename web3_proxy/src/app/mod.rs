@@ -985,7 +985,7 @@ impl Web3ProxyApp {
                     .proxy_web3_rpc_requests(&authorization, requests)
                     .await?;
 
-                // TODO: real status code. i don't think we are following the spec here
+                // TODO: real status code. if an error happens, i don't think we are following the spec here
                 (
                     StatusCode::OK,
                     JsonRpcForwardedResponseEnum::Batch(responses),
