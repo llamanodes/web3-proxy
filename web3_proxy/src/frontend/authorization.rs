@@ -8,7 +8,7 @@ use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
-use axum::headers::authorization::Bearer;
+use axum::headers::authorization::{self, Bearer};
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
 use core::fmt;
@@ -1049,6 +1049,13 @@ impl Web3ProxyApp {
         origin: Option<Origin>,
         proxy_mode: ProxyMode,
     ) -> Web3ProxyResult<RateLimitResult> {
+        if ip.is_loopback() {
+            // TODO: localhost being unlimited should be optional
+            let authorization = Authorization::internal(self.db_conn())?;
+
+            return Ok(RateLimitResult::Allowed(authorization, None));
+        }
+
         // ip rate limits don't check referer or user agent
         // they do check origin because we can override rate limits for some origins
         let authorization = Authorization::external(

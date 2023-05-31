@@ -19,6 +19,7 @@ use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::consensus::ConsensusWeb3Rpcs;
 use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
+use crate::rpcs::provider::{connect_http, EthersHttpProvider};
 use crate::rpcs::transactions::TxStatus;
 use crate::stats::{AppStat, StatBuffer};
 use crate::user_token::UserBearerToken;
@@ -140,6 +141,7 @@ pub struct Web3ProxyApp {
     /// Optional read-only database for users and accounting
     pub db_replica: Option<DatabaseReplica>,
     pub hostname: Option<String>,
+    pub internal_provider: Arc<EthersHttpProvider>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     /// TODO: think about this more. might be worth storing if we sent the transaction or not and using this for automatic retries
     pub pending_transactions: Arc<CacheWithTTL<TxHash, TxStatus>>,
@@ -212,6 +214,7 @@ pub struct Web3ProxyAppSpawn {
 impl Web3ProxyApp {
     /// The main entrypoint.
     pub async fn spawn(
+        app_frontend_port: u16,
         top_config: TopConfig,
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
@@ -604,30 +607,45 @@ impl Web3ProxyApp {
             .ok()
             .and_then(|x| x.to_str().map(|x| x.to_string()));
 
+        // TODO: i'm sure theres much better ways to do this, but i don't want to spend time fighting traits right now
+        // TODO: what interval? i don't think we use it
+        // i tried and failed to `impl JsonRpcClient for Web3ProxyApi`
+        // i tried and failed to set up ipc. http is already running, so lets just use that
+        let internal_provider = connect_http(
+            format!("http://127.0.0.1:{}", app_frontend_port)
+                .parse()
+                .unwrap(),
+            http_client.clone(),
+            Duration::from_secs(10),
+        )?;
+
+        let internal_provider = Arc::new(internal_provider);
+
         let app = Self {
-            config: top_config.app.clone(),
             balanced_rpcs,
+            bearer_token_semaphores,
             bundler_4337_rpcs,
-            http_client,
-            kafka_producer,
-            private_rpcs,
-            jsonrpc_response_cache: response_cache,
-            watch_consensus_head_receiver,
-            pending_tx_sender,
-            pending_transactions,
-            frontend_ip_rate_limiter,
-            frontend_registered_user_rate_limiter,
-            login_rate_limiter,
+            config: top_config.app.clone(),
             db_conn,
             db_replica,
-            influxdb_client,
+            frontend_ip_rate_limiter,
+            frontend_registered_user_rate_limiter,
             hostname,
-            vredis_pool,
-            rpc_secret_key_cache,
-            bearer_token_semaphores,
+            http_client,
+            influxdb_client,
+            internal_provider,
             ip_semaphores,
-            user_semaphores,
+            jsonrpc_response_cache: response_cache,
+            kafka_producer,
+            login_rate_limiter,
+            pending_transactions,
+            pending_tx_sender,
+            private_rpcs,
+            rpc_secret_key_cache,
             stat_sender,
+            user_semaphores,
+            vredis_pool,
+            watch_consensus_head_receiver,
         };
 
         let app = Arc::new(app);

@@ -7,7 +7,6 @@ pub mod config;
 pub mod errors;
 pub mod frontend;
 pub mod http_params;
-pub mod ipc;
 pub mod jsonrpc;
 pub mod pagerduty;
 pub mod prometheus;
