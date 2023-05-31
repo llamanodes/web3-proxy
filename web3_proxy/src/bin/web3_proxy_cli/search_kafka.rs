@@ -10,7 +10,7 @@ use rdkafka::{
 };
 use std::num::NonZeroU64;
 use uuid::Uuid;
-use web3_proxy::{app::get_db, config::TopConfig, frontend::authorization::RpcSecretKey};
+use web3_proxy::{config::TopConfig, frontend::authorization::RpcSecretKey, relational_db::get_db};
 
 /// Second subcommand.
 #[derive(FromArgs, PartialEq, Debug, Eq)]

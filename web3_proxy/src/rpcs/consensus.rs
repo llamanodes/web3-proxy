@@ -1,8 +1,8 @@
 use super::blockchain::Web3ProxyBlock;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
+use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
-use crate::frontend::errors::{Web3ProxyErrorContext, Web3ProxyResult};
 use derive_more::Constructor;
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
@@ -138,7 +138,7 @@ impl ConsensusWeb3Rpcs {
             let head_num = self.head_block.number();
 
             if Some(head_num) >= needed_block_num {
-                debug!("best (head) block: {}", head_num);
+                trace!("best (head) block: {}", head_num);
                 return ShouldWaitForBlock::Ready;
             }
         }
@@ -153,15 +153,14 @@ impl ConsensusWeb3Rpcs {
                 .iter()
                 .any(|rpc| self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs))
             {
-                // TODO: too verbose
-                debug!("everything in this ranking ({:?}) is skipped", next_ranking);
+                trace!("everything in this ranking ({:?}) is skipped", next_ranking);
                 continue;
             }
 
             let next_head_num = next_ranking.head_num.as_ref();
 
             if next_head_num >= needed_block_num {
-                debug!("best (head) block: {:?}", next_head_num);
+                trace!("best (head) block: {:?}", next_head_num);
                 return ShouldWaitForBlock::Ready;
             }
 
@@ -170,14 +169,12 @@ impl ConsensusWeb3Rpcs {
 
         // TODO: this seems wrong
         if best_num.is_some() {
-            // TODO: too verbose
-            debug!("best (old) block: {:?}", best_num);
+            trace!("best (old) block: {:?}", best_num);
             ShouldWaitForBlock::Wait {
                 current: best_num.copied(),
             }
         } else {
-            // TODO: too verbose
-            debug!("never ready");
+            trace!("never ready");
             ShouldWaitForBlock::NeverReady
         }
     }
@@ -196,7 +193,6 @@ impl ConsensusWeb3Rpcs {
         needed_block_num: Option<&U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
     ) -> bool {
-        // return true if this rpc will never work for us. "false" is good
         if skip_rpcs.contains(rpc) {
             // if rpc is skipped, it must have already been determined it is unable to serve the request
             return false;
@@ -206,16 +202,17 @@ impl ConsensusWeb3Rpcs {
             if let Some(rpc_data) = self.rpc_data.get(rpc) {
                 match rpc_data.head_block_num.cmp(needed_block_num) {
                     Ordering::Less => {
-                        debug!("{} is behind. let it catch up", rpc);
+                        trace!("{} is behind. let it catch up", rpc);
+                        // TODO: what if this is a pruned rpc that is behind by a lot, and the block is old, too?
                         return true;
                     }
                     Ordering::Greater | Ordering::Equal => {
                         // rpc is synced past the needed block. make sure the block isn't too old for it
                         if self.has_block_data(rpc, needed_block_num) {
-                            debug!("{} has {}", rpc, needed_block_num);
+                            trace!("{} has {}", rpc, needed_block_num);
                             return true;
                         } else {
-                            debug!("{} does not have {}", rpc, needed_block_num);
+                            trace!("{} does not have {}", rpc, needed_block_num);
                             return false;
                         }
                     }
@@ -223,13 +220,16 @@ impl ConsensusWeb3Rpcs {
             }
 
             // no rpc data for this rpc. thats not promising
-            return true;
+            false
+        } else {
+            // if no needed_block_num was specified, then this should work
+            true
         }
-
-        false
     }
 
     // TODO: better name for this
+    // TODO: this should probably be on the rpcs as "can_serve_request"
+    // TODO: this should probably take the method, too
     pub fn rpc_will_work_now(
         &self,
         skip: &[Arc<Web3Rpc>],
@@ -264,7 +264,13 @@ impl ConsensusWeb3Rpcs {
             }
         }
 
-        // we could check hard rate limits here, but i think it is faster to do later
+        // TODO: this might be a big perf hit. benchmark
+        if let Some(x) = rpc.hard_limit_until.as_ref() {
+            if *x.borrow() > Instant::now() {
+                trace!("{} is rate limited. skipping", rpc,);
+                return false;
+            }
+        }
 
         true
     }

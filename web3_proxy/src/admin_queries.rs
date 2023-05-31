@@ -1,5 +1,5 @@
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse};
+use crate::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::http_params::get_user_id_from_params;
 use anyhow::Context;
 use axum::response::IntoResponse;
@@ -29,18 +29,16 @@ pub async fn query_admin_modify_usertier<'a>(
     let user_address: Vec<u8> = params
         .get("user_address")
         .ok_or_else(|| {
-            Web3ProxyError::BadRequest("Unable to find user_address key in request".to_string())
+            Web3ProxyError::BadRequest("Unable to find user_address key in request".into())
         })?
         .parse::<Address>()
         .map_err(|_| {
-            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".to_string())
+            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".into())
         })?
         .to_fixed_bytes()
         .into();
     let user_tier_title = params.get("user_tier_title").ok_or_else(|| {
-        Web3ProxyError::BadRequest(
-            "Unable to get the user_tier_title key from the request".to_string(),
-        )
+        Web3ProxyError::BadRequest("Unable to get the user_tier_title key from the request".into())
     })?;
 
     // Prepare output body
@@ -84,7 +82,7 @@ pub async fn query_admin_modify_usertier<'a>(
         .one(&db_conn)
         .await?
         .ok_or(Web3ProxyError::BadRequest(
-            "No user with this id found".to_string(),
+            "No user with this id found".into(),
         ))?;
     // Return early if the target user_tier_id is the same as the original user_tier_id
     response_body.insert(
@@ -98,7 +96,7 @@ pub async fn query_admin_modify_usertier<'a>(
         .one(&db_conn)
         .await?
         .ok_or(Web3ProxyError::BadRequest(
-            "User Tier name was not found".to_string(),
+            "User Tier name was not found".into(),
         ))?;
 
     if user.user_tier_id == new_user_tier.id {

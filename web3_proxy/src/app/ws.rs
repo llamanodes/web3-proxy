@@ -1,11 +1,11 @@
 //! Websocket-specific functions for the Web3ProxyApp
 
 use super::Web3ProxyApp;
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMethod};
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcRequest;
-use crate::response_cache::JsonRpcResponseData;
+use crate::response_cache::JsonRpcResponseEnum;
 use crate::rpcs::transactions::TxStatus;
 use axum::extract::ws::Message;
 use ethers::types::U64;
@@ -47,265 +47,261 @@ impl Web3ProxyApp {
 
         // TODO: calling json! on every request is probably not fast. but we can only match against
         // TODO: i think we need a stricter EthSubscribeRequest type that JsonRpcRequest can turn into
-        match jsonrpc_request.params.as_ref() {
-            Some(x) if x == &json!(["newHeads"]) => {
-                let head_block_receiver = self.watch_consensus_head_receiver.clone();
-                let app = self.clone();
+        if jsonrpc_request.params == json!(["newHeads"]) {
+            let head_block_receiver = self.watch_consensus_head_receiver.clone();
+            let app = self.clone();
 
-                trace!("newHeads subscription {:?}", subscription_id);
-                tokio::spawn(async move {
-                    let mut head_block_receiver = Abortable::new(
-                        WatchStream::new(head_block_receiver),
-                        subscription_registration,
-                    );
-
-                    while let Some(new_head) = head_block_receiver.next().await {
-                        let new_head = if let Some(new_head) = new_head {
-                            new_head
-                        } else {
-                            continue;
-                        };
-
-                        let subscription_request_metadata = RequestMetadata::new(
-                            &app,
-                            authorization.clone(),
-                            RequestOrMethod::Method("eth_subscribe(newHeads)", 0),
-                            Some(new_head.number()),
-                        )
-                        .await;
-
-                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                        let response_json = json!({
-                            "jsonrpc": "2.0",
-                            "method":"eth_subscription",
-                            "params": {
-                                "subscription": subscription_id,
-                                // TODO: option to include full transaction objects instead of just the hashes?
-                                "result": new_head.block,
-                            },
-                        });
-
-                        let response_str = serde_json::to_string(&response_json)
-                            .expect("this should always be valid json");
-
-                        // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
-                        let response_bytes = response_str.len();
-
-                        // TODO: do clients support binary messages?
-                        // TODO: can we check a content type header?
-                        let response_msg = Message::Text(response_str);
-
-                        if response_sender.send_async(response_msg).await.is_err() {
-                            // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
-                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                            break;
-                        };
-
-                        subscription_request_metadata.add_response(response_bytes);
-                    }
-
-                    trace!("closed newHeads subscription {:?}", subscription_id);
-                });
-            }
-            Some(x) if x == &json!(["newPendingTransactions"]) => {
-                let pending_tx_receiver = self.pending_tx_sender.subscribe();
-                let app = self.clone();
-
-                let mut pending_tx_receiver = Abortable::new(
-                    BroadcastStream::new(pending_tx_receiver),
+            trace!("newHeads subscription {:?}", subscription_id);
+            tokio::spawn(async move {
+                let mut head_block_receiver = Abortable::new(
+                    WatchStream::new(head_block_receiver),
                     subscription_registration,
                 );
 
-                trace!(
-                    "pending newPendingTransactions subscription id: {:?}",
-                    subscription_id
-                );
+                while let Some(new_head) = head_block_receiver.next().await {
+                    let new_head = if let Some(new_head) = new_head {
+                        new_head
+                    } else {
+                        continue;
+                    };
 
-                // TODO: do something with this handle?
-                tokio::spawn(async move {
-                    while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
-                        let subscription_request_metadata = RequestMetadata::new(
-                            &app,
-                            authorization.clone(),
-                            RequestOrMethod::Method("eth_subscribe(newPendingTransactions)", 0),
-                            None,
-                        )
-                        .await;
+                    let subscription_request_metadata = RequestMetadata::new(
+                        &app,
+                        authorization.clone(),
+                        RequestOrMethod::Method("eth_subscribe(newHeads)", 0),
+                        Some(new_head.number()),
+                    )
+                    .await;
 
-                        let new_tx = match new_tx_state {
-                            TxStatus::Pending(tx) => tx,
-                            TxStatus::Confirmed(..) => continue,
-                            TxStatus::Orphaned(tx) => tx,
-                        };
+                    // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                    let response_json = json!({
+                        "jsonrpc": "2.0",
+                        "method":"eth_subscription",
+                        "params": {
+                            "subscription": subscription_id,
+                            // TODO: option to include full transaction objects instead of just the hashes?
+                            "result": new_head.block,
+                        },
+                    });
 
-                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                        let response_json = json!({
-                            "jsonrpc": "2.0",
-                            "method": "eth_subscription",
-                            "params": {
-                                "subscription": subscription_id,
-                                "result": new_tx.hash,
-                            },
-                        });
+                    let response_str = serde_json::to_string(&response_json)
+                        .expect("this should always be valid json");
 
-                        let response_str = serde_json::to_string(&response_json)
-                            .expect("this should always be valid json");
+                    // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
+                    let response_bytes = response_str.len();
 
-                        // TODO: test that this len is the same as JsonRpcForwardedResponseEnum.num_bytes()
-                        let response_bytes = response_str.len();
+                    // TODO: do clients support binary messages?
+                    // TODO: can we check a content type header?
+                    let response_msg = Message::Text(response_str);
 
-                        subscription_request_metadata.add_response(response_bytes);
+                    if response_sender.send_async(response_msg).await.is_err() {
+                        // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
+                        // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                        break;
+                    };
 
-                        // TODO: do clients support binary messages?
-                        let response_msg = Message::Text(response_str);
+                    subscription_request_metadata.add_response(response_bytes);
+                }
 
-                        if response_sender.send_async(response_msg).await.is_err() {
-                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                            break;
-                        };
-                    }
+                trace!("closed newHeads subscription {:?}", subscription_id);
+            });
+        } else if jsonrpc_request.params == json!(["newPendingTransactions"]) {
+            let pending_tx_receiver = self.pending_tx_sender.subscribe();
+            let app = self.clone();
 
-                    trace!(
-                        "closed newPendingTransactions subscription: {:?}",
-                        subscription_id
-                    );
-                });
-            }
-            Some(x) if x == &json!(["newPendingFullTransactions"]) => {
-                // TODO: too much copy/pasta with newPendingTransactions
-                let pending_tx_receiver = self.pending_tx_sender.subscribe();
-                let app = self.clone();
+            let mut pending_tx_receiver = Abortable::new(
+                BroadcastStream::new(pending_tx_receiver),
+                subscription_registration,
+            );
 
-                let mut pending_tx_receiver = Abortable::new(
-                    BroadcastStream::new(pending_tx_receiver),
-                    subscription_registration,
-                );
+            trace!(
+                "pending newPendingTransactions subscription id: {:?}",
+                subscription_id
+            );
 
-                trace!(
-                    "pending newPendingFullTransactions subscription: {:?}",
-                    subscription_id
-                );
+            // TODO: do something with this handle?
+            tokio::spawn(async move {
+                while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
+                    let subscription_request_metadata = RequestMetadata::new(
+                        &app,
+                        authorization.clone(),
+                        RequestOrMethod::Method("eth_subscribe(newPendingTransactions)", 0),
+                        None,
+                    )
+                    .await;
 
-                // TODO: do something with this handle?
-                tokio::spawn(async move {
-                    while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
-                        let subscription_request_metadata = RequestMetadata::new(
-                            &app,
-                            authorization.clone(),
-                            RequestOrMethod::Method("eth_subscribe(newPendingFullTransactions)", 0),
-                            None,
-                        )
-                        .await;
+                    let new_tx = match new_tx_state {
+                        TxStatus::Pending(tx) => tx,
+                        TxStatus::Confirmed(..) => continue,
+                        TxStatus::Orphaned(tx) => tx,
+                    };
 
-                        let new_tx = match new_tx_state {
-                            TxStatus::Pending(tx) => tx,
-                            TxStatus::Confirmed(..) => continue,
-                            TxStatus::Orphaned(tx) => tx,
-                        };
+                    // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                    let response_json = json!({
+                        "jsonrpc": "2.0",
+                        "method": "eth_subscription",
+                        "params": {
+                            "subscription": subscription_id,
+                            "result": new_tx.hash,
+                        },
+                    });
 
-                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                        let response_json = json!({
-                            "jsonrpc": "2.0",
-                            "method": "eth_subscription",
-                            "params": {
-                                "subscription": subscription_id,
-                                // upstream just sends the txid, but we want to send the whole transaction
-                                "result": new_tx,
-                            },
-                        });
+                    let response_str = serde_json::to_string(&response_json)
+                        .expect("this should always be valid json");
 
-                        subscription_request_metadata.add_response(&response_json);
+                    // TODO: test that this len is the same as JsonRpcForwardedResponseEnum.num_bytes()
+                    let response_bytes = response_str.len();
 
-                        let response_str = serde_json::to_string(&response_json)
-                            .expect("this should always be valid json");
+                    subscription_request_metadata.add_response(response_bytes);
 
-                        // TODO: do clients support binary messages?
-                        let response_msg = Message::Text(response_str);
+                    // TODO: do clients support binary messages?
+                    let response_msg = Message::Text(response_str);
 
-                        if response_sender.send_async(response_msg).await.is_err() {
-                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                            break;
-                        };
-                    }
-
-                    trace!(
-                        "closed newPendingFullTransactions subscription: {:?}",
-                        subscription_id
-                    );
-                });
-            }
-            Some(x) if x == &json!(["newPendingRawTransactions"]) => {
-                // TODO: too much copy/pasta with newPendingTransactions
-                let pending_tx_receiver = self.pending_tx_sender.subscribe();
-                let app = self.clone();
-
-                let mut pending_tx_receiver = Abortable::new(
-                    BroadcastStream::new(pending_tx_receiver),
-                    subscription_registration,
-                );
+                    if response_sender.send_async(response_msg).await.is_err() {
+                        // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                        break;
+                    };
+                }
 
                 trace!(
-                    "pending transactions subscription id: {:?}",
+                    "closed newPendingTransactions subscription: {:?}",
                     subscription_id
                 );
+            });
+        } else if jsonrpc_request.params == json!(["newPendingFullTransactions"]) {
+            // TODO: too much copy/pasta with newPendingTransactions
+            let pending_tx_receiver = self.pending_tx_sender.subscribe();
+            let app = self.clone();
 
-                // TODO: do something with this handle?
-                tokio::spawn(async move {
-                    while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
-                        let subscription_request_metadata = RequestMetadata::new(
-                            &app,
-                            authorization.clone(),
-                            "eth_subscribe(newPendingRawTransactions)",
-                            None,
-                        )
-                        .await;
+            let mut pending_tx_receiver = Abortable::new(
+                BroadcastStream::new(pending_tx_receiver),
+                subscription_registration,
+            );
 
-                        let new_tx = match new_tx_state {
-                            TxStatus::Pending(tx) => tx,
-                            TxStatus::Confirmed(..) => continue,
-                            TxStatus::Orphaned(tx) => tx,
-                        };
+            trace!(
+                "pending newPendingFullTransactions subscription: {:?}",
+                subscription_id
+            );
 
-                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                        let response_json = json!({
-                            "jsonrpc": "2.0",
-                            "method": "eth_subscription",
-                            "params": {
-                                "subscription": subscription_id,
-                                // upstream just sends the txid, but we want to send the raw transaction
-                                "result": new_tx.rlp(),
-                            },
-                        });
+            // TODO: do something with this handle?
+            tokio::spawn(async move {
+                while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
+                    let subscription_request_metadata = RequestMetadata::new(
+                        &app,
+                        authorization.clone(),
+                        RequestOrMethod::Method("eth_subscribe(newPendingFullTransactions)", 0),
+                        None,
+                    )
+                    .await;
 
-                        let response_str = serde_json::to_string(&response_json)
-                            .expect("this should always be valid json");
+                    let new_tx = match new_tx_state {
+                        TxStatus::Pending(tx) => tx,
+                        TxStatus::Confirmed(..) => continue,
+                        TxStatus::Orphaned(tx) => tx,
+                    };
 
-                        // we could use response.num_bytes() here, but since we already have the string, this is easier
-                        let response_bytes = response_str.len();
+                    // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                    let response_json = json!({
+                        "jsonrpc": "2.0",
+                        "method": "eth_subscription",
+                        "params": {
+                            "subscription": subscription_id,
+                            // upstream just sends the txid, but we want to send the whole transaction
+                            "result": new_tx,
+                        },
+                    });
 
-                        // TODO: do clients support binary messages?
-                        let response_msg = Message::Text(response_str);
+                    subscription_request_metadata.add_response(&response_json);
 
-                        if response_sender.send_async(response_msg).await.is_err() {
-                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                            break;
-                        };
+                    let response_str = serde_json::to_string(&response_json)
+                        .expect("this should always be valid json");
 
-                        subscription_request_metadata.add_response(response_bytes);
-                    }
+                    // TODO: do clients support binary messages?
+                    let response_msg = Message::Text(response_str);
 
-                    trace!(
-                        "closed newPendingRawTransactions subscription: {:?}",
-                        subscription_id
-                    );
-                });
-            }
-            _ => return Err(Web3ProxyError::NotImplemented),
+                    if response_sender.send_async(response_msg).await.is_err() {
+                        // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                        break;
+                    };
+                }
+
+                trace!(
+                    "closed newPendingFullTransactions subscription: {:?}",
+                    subscription_id
+                );
+            });
+        } else if jsonrpc_request.params == json!(["newPendingRawTransactions"]) {
+            // TODO: too much copy/pasta with newPendingTransactions
+            let pending_tx_receiver = self.pending_tx_sender.subscribe();
+            let app = self.clone();
+
+            let mut pending_tx_receiver = Abortable::new(
+                BroadcastStream::new(pending_tx_receiver),
+                subscription_registration,
+            );
+
+            trace!(
+                "pending transactions subscription id: {:?}",
+                subscription_id
+            );
+
+            // TODO: do something with this handle?
+            tokio::spawn(async move {
+                while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
+                    let subscription_request_metadata = RequestMetadata::new(
+                        &app,
+                        authorization.clone(),
+                        "eth_subscribe(newPendingRawTransactions)",
+                        None,
+                    )
+                    .await;
+
+                    let new_tx = match new_tx_state {
+                        TxStatus::Pending(tx) => tx,
+                        TxStatus::Confirmed(..) => continue,
+                        TxStatus::Orphaned(tx) => tx,
+                    };
+
+                    // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                    let response_json = json!({
+                        "jsonrpc": "2.0",
+                        "method": "eth_subscription",
+                        "params": {
+                            "subscription": subscription_id,
+                            // upstream just sends the txid, but we want to send the raw transaction
+                            "result": new_tx.rlp(),
+                        },
+                    });
+
+                    let response_str = serde_json::to_string(&response_json)
+                        .expect("this should always be valid json");
+
+                    // we could use response.num_bytes() here, but since we already have the string, this is easier
+                    let response_bytes = response_str.len();
+
+                    // TODO: do clients support binary messages?
+                    let response_msg = Message::Text(response_str);
+
+                    if response_sender.send_async(response_msg).await.is_err() {
+                        // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                        break;
+                    };
+
+                    subscription_request_metadata.add_response(response_bytes);
+                }
+
+                trace!(
+                    "closed newPendingRawTransactions subscription: {:?}",
+                    subscription_id
+                );
+            });
+        } else {
+            return Err(Web3ProxyError::NotImplemented);
         }
 
         // TODO: do something with subscription_join_handle?
 
-        let response_data = JsonRpcResponseData::from(json!(subscription_id));
+        let response_data = JsonRpcResponseEnum::from(json!(subscription_id));
 
         let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
 

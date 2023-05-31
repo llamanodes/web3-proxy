@@ -3,11 +3,11 @@
 //! WebSockets are the preferred method of receiving requests, but not all clients have good support.
 
 use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, RequestMetadata};
-use super::errors::{Web3ProxyError, Web3ProxyResponse};
+use crate::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::jsonrpc::JsonRpcId;
 use crate::{
     app::Web3ProxyApp,
-    frontend::errors::Web3ProxyResult,
+    errors::Web3ProxyResult,
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
 };
 use anyhow::Context;
@@ -389,47 +389,41 @@ async fn handle_socket_payload(
                         #[derive(serde::Deserialize)]
                         struct EthUnsubscribeParams([U64; 1]);
 
-                        if let Some(params) = json_request.params {
-                            match serde_json::from_value(params) {
-                                Ok::<EthUnsubscribeParams, _>(params) => {
-                                    let subscription_id = &params.0[0];
+                        match serde_json::from_value(json_request.params) {
+                            Ok::<EthUnsubscribeParams, _>(params) => {
+                                let subscription_id = &params.0[0];
 
-                                    // TODO: is this the right response?
-                                    let partial_response = {
-                                        let mut x = subscriptions.write().await;
-                                        match x.remove(subscription_id) {
-                                            None => false,
-                                            Some(handle) => {
-                                                handle.abort();
-                                                true
-                                            }
+                                // TODO: is this the right response?
+                                let partial_response = {
+                                    let mut x = subscriptions.write().await;
+                                    match x.remove(subscription_id) {
+                                        None => false,
+                                        Some(handle) => {
+                                            handle.abort();
+                                            true
                                         }
-                                    };
+                                    }
+                                };
 
-                                    // TODO: don't create the response here. use a JsonRpcResponseData instead
-                                    let response = JsonRpcForwardedResponse::from_value(
-                                        json!(partial_response),
-                                        response_id.clone(),
-                                    );
+                                // TODO: don't create the response here. use a JsonRpcResponseData instead
+                                let response = JsonRpcForwardedResponse::from_value(
+                                    json!(partial_response),
+                                    response_id.clone(),
+                                );
 
-                                    request_metadata.add_response(&response);
+                                request_metadata.add_response(&response);
 
-                                    Ok(response.into())
-                                }
-                                Err(err) => Err(Web3ProxyError::BadRequest(f!(
-                                    "incorrect params given for eth_unsubscribe. {err:?}"
-                                ))),
+                                Ok(response.into())
                             }
-                        } else {
-                            Err(Web3ProxyError::BadRequest(
-                                "no params given for eth_unsubscribe".to_string(),
-                            ))
+                            Err(err) => Err(Web3ProxyError::BadRequest(
+                                f!("incorrect params given for eth_unsubscribe. {err:?}").into(),
+                            )),
                         }
                     }
                     _ => app
                         .proxy_web3_rpc(authorization.clone(), json_request.into())
                         .await
-                        .map(|(status_code, response, _)| response),
+                        .map(|(_, response, _)| response),
                 };
 
             (response_id, response)

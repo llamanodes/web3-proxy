@@ -1,11 +1,12 @@
-///! Rate-limited communication with a web3 provider.
+//! Rate-limited communication with a web3 provider.
 use super::blockchain::{ArcBlock, BlocksByHashCache, Web3ProxyBlock};
 use super::provider::{connect_http, connect_ws, EthersHttpProvider, EthersWsProvider};
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, Web3ProxyJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
 use ethers::prelude::{Bytes, Middleware, TxHash, U64};
@@ -21,7 +22,6 @@ use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
-use std::convert::Infallible;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU64, AtomicUsize};
@@ -209,16 +209,9 @@ impl Web3Rpc {
         // TODO: make transaction subscription optional (just pass None for tx_id_sender)
         let handle = {
             let new_connection = new_connection.clone();
-            let authorization = Arc::new(Authorization::internal(db_conn)?);
             tokio::spawn(async move {
                 new_connection
-                    .subscribe(
-                        &authorization,
-                        block_map,
-                        block_sender,
-                        chain_id,
-                        tx_id_sender,
-                    )
+                    .subscribe(block_map, block_sender, chain_id, tx_id_sender)
                     .await
             })
         };
@@ -240,10 +233,7 @@ impl Web3Rpc {
     }
 
     // TODO: would be great if rpcs exposed this. see https://github.com/ledgerwatch/erigon/issues/6391
-    async fn check_block_data_limit(
-        self: &Arc<Self>,
-        authorization: &Arc<Authorization>,
-    ) -> anyhow::Result<Option<u64>> {
+    async fn check_block_data_limit(self: &Arc<Self>) -> anyhow::Result<Option<u64>> {
         if !self.automatic_block_limit {
             // TODO: is this a good thing to return?
             return Ok(None);
@@ -256,12 +246,11 @@ impl Web3Rpc {
         // TODO: binary search between 90k and max?
         // TODO: start at 0 or 1?
         for block_data_limit in [0, 32, 64, 128, 256, 512, 1024, 90_000, u64::MAX] {
-            let head_block_num_future = self.request::<Option<()>, U256>(
+            let head_block_num_future = self.internal_request::<_, U256>(
                 "eth_blockNumber",
-                &None,
+                &(),
                 // error here are expected, so keep the level low
-                Level::Debug.into(),
-                authorization.clone(),
+                Some(Level::Debug.into()),
             );
 
             let head_block_num = timeout(Duration::from_secs(5), head_block_num_future)
@@ -280,15 +269,14 @@ impl Web3Rpc {
             // TODO: wait for the handle BEFORE we check the current block number. it might be delayed too!
             // TODO: what should the request be?
             let archive_result: Result<Bytes, _> = self
-                .request(
+                .internal_request(
                     "eth_getCode",
                     &json!((
                         "0xdead00000000000000000000000000000000beef",
                         maybe_archive_block,
                     )),
                     // error here are expected, so keep the level low
-                    Level::Trace.into(),
-                    authorization.clone(),
+                    Some(Level::Trace.into()),
                 )
                 .await;
 
@@ -368,43 +356,27 @@ impl Web3Rpc {
 
     /// query the web3 provider to confirm it is on the expected chain with the expected data available
     async fn check_provider(self: &Arc<Self>, chain_id: u64) -> Web3ProxyResult<()> {
-        let authorization = Arc::new(Authorization::internal(self.db_conn.clone())?);
-
         // check the server's chain_id here
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
         // TODO: what should the timeout be? should there be a request timeout?
         // trace!("waiting on chain id for {}", self);
-        let found_chain_id: Result<U64, _> = self
-            .request(
-                "eth_chainId",
-                &json!(Vec::<()>::new()),
-                Level::Trace.into(),
-                authorization.clone(),
-            )
-            .await;
+        let found_chain_id: U64 = self
+            .internal_request("eth_chainId", &(), Some(Level::Trace.into()))
+            .await?;
+
         trace!("found_chain_id: {:#?}", found_chain_id);
 
-        match found_chain_id {
-            Ok(found_chain_id) => {
-                // TODO: there has to be a cleaner way to do this
-                if chain_id != found_chain_id.as_u64() {
-                    return Err(anyhow::anyhow!(
-                        "incorrect chain id! Config has {}, but RPC has {}",
-                        chain_id,
-                        found_chain_id
-                    )
-                    .context(format!("failed @ {}", self))
-                    .into());
-                }
-            }
-            Err(e) => {
-                return Err(anyhow::Error::from(e)
-                    .context(format!("unable to parse eth_chainId from {}", self))
-                    .into());
-            }
+        if chain_id != found_chain_id.as_u64() {
+            return Err(anyhow::anyhow!(
+                "incorrect chain id! Config has {}, but RPC has {}",
+                chain_id,
+                found_chain_id
+            )
+            .context(format!("failed @ {}", self))
+            .into());
         }
 
-        self.check_block_data_limit(&authorization)
+        self.check_block_data_limit()
             .await
             .context(format!("unable to check_block_data_limit of {}", self))?;
 
@@ -444,12 +416,8 @@ impl Web3Rpc {
 
                 // if we already have this block saved, set new_head_block to that arc. otherwise store this copy
                 let new_head_block = block_map
-                    .get_or_insert_async::<Infallible, _>(
-                        &new_hash,
-                        async move { Ok(new_head_block) },
-                    )
-                    .await
-                    .expect("this cache get is infallible");
+                    .get_or_insert_async(&new_hash, async move { new_head_block })
+                    .await;
 
                 // save the block so we don't send the same one multiple times
                 // also save so that archive checks can know how far back to query
@@ -459,8 +427,7 @@ impl Web3Rpc {
                     .send_replace(Some(new_head_block.clone()));
 
                 if self.block_data_limit() == U64::zero() {
-                    let authorization = Arc::new(Authorization::internal(self.db_conn.clone())?);
-                    if let Err(err) = self.check_block_data_limit(&authorization).await {
+                    if let Err(err) = self.check_block_data_limit().await {
                         warn!(
                             "failed checking block limit after {} finished syncing. {:?}",
                             self, err
@@ -494,8 +461,7 @@ impl Web3Rpc {
 
     async fn healthcheck(
         self: &Arc<Self>,
-        authorization: &Arc<Authorization>,
-        error_handler: RequestErrorHandler,
+        error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<()> {
         let head_block = self.head_block.as_ref().unwrap().borrow().clone();
 
@@ -508,11 +474,10 @@ impl Web3Rpc {
 
             let to = if let Some(txid) = head_block.transactions.last().cloned() {
                 let tx = self
-                    .request::<_, Option<Transaction>>(
+                    .internal_request::<_, Option<Transaction>>(
                         "eth_getTransactionByHash",
                         &(txid,),
                         error_handler,
-                        authorization.clone(),
                     )
                     .await?
                     .context("no transaction")?;
@@ -530,11 +495,10 @@ impl Web3Rpc {
             };
 
             let _code = self
-                .request::<_, Option<Bytes>>(
+                .internal_request::<_, Option<Bytes>>(
                     "eth_getCode",
                     &(to, block_number),
                     error_handler,
-                    authorization.clone(),
                 )
                 .await?;
         } else {
@@ -550,16 +514,15 @@ impl Web3Rpc {
     #[allow(clippy::too_many_arguments)]
     async fn subscribe(
         self: Arc<Self>,
-        authorization: &Arc<Authorization>,
         block_map: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
         chain_id: u64,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> Web3ProxyResult<()> {
         let error_handler = if self.backup {
-            RequestErrorHandler::DebugLevel
+            Some(RequestErrorHandler::DebugLevel)
         } else {
-            RequestErrorHandler::ErrorLevel
+            Some(RequestErrorHandler::ErrorLevel)
         };
 
         debug!("starting subscriptions on {}", self);
@@ -571,7 +534,6 @@ impl Web3Rpc {
         // health check that runs if there haven't been any recent requests
         {
             // TODO: move this into a proper function
-            let authorization = authorization.clone();
             let rpc = self.clone();
 
             // TODO: how often? different depending on the chain?
@@ -591,7 +553,7 @@ impl Web3Rpc {
                     if new_total_requests - old_total_requests < 10 {
                         // TODO: if this fails too many times, reset the connection
                         // TODO: move this into a function and the chaining should be easier
-                        if let Err(err) = rpc.healthcheck(&authorization, error_handler).await {
+                        if let Err(err) = rpc.healthcheck(error_handler).await {
                             // TODO: different level depending on the error handler
                             warn!("health checking {} failed: {:?}", rpc, err);
                         }
@@ -614,11 +576,9 @@ impl Web3Rpc {
         // subscribe to new heads
         if let Some(block_sender) = &block_sender {
             // TODO: do we need this to be abortable?
-            let f = self.clone().subscribe_new_heads(
-                authorization.clone(),
-                block_sender.clone(),
-                block_map.clone(),
-            );
+            let f = self
+                .clone()
+                .subscribe_new_heads(block_sender.clone(), block_map.clone());
 
             futures.push(flatten_handle(tokio::spawn(f)));
         }
@@ -627,9 +587,7 @@ impl Web3Rpc {
         // TODO: make this opt-in. its a lot of bandwidth
         if let Some(tx_id_sender) = tx_id_sender {
             // TODO: do we need this to be abortable?
-            let f = self
-                .clone()
-                .subscribe_pending_transactions(authorization.clone(), tx_id_sender);
+            let f = self.clone().subscribe_pending_transactions(tx_id_sender);
 
             futures.push(flatten_handle(tokio::spawn(f)));
         }
@@ -652,15 +610,20 @@ impl Web3Rpc {
     /// Subscribe to new blocks.
     async fn subscribe_new_heads(
         self: Arc<Self>,
-        authorization: Arc<Authorization>,
         block_sender: flume::Sender<BlockAndRpc>,
         block_map: BlocksByHashCache,
     ) -> Web3ProxyResult<()> {
         debug!("subscribing to new heads on {}", self);
 
+        // TODO: different handler depending on backup or not
+        let error_handler = None;
+        let authorization = Default::default();
+
         if let Some(ws_provider) = self.ws_provider.as_ref() {
             // todo: move subscribe_blocks onto the request handle
-            let active_request_handle = self.wait_for_request_handle(&authorization, None).await;
+            let active_request_handle = self
+                .wait_for_request_handle(&authorization, None, error_handler)
+                .await;
             let mut blocks = ws_provider.subscribe_blocks().await?;
             drop(active_request_handle);
 
@@ -670,11 +633,11 @@ impl Web3Rpc {
             // TODO: how does this get wrapped in an arc? does ethers handle that?
             // TODO: can we force this to use the websocket?
             let latest_block: Result<Option<ArcBlock>, _> = self
-                .request(
+                .authorized_request(
                     "eth_getBlockByNumber",
-                    &json!(("latest", false)),
-                    Level::Warn.into(),
-                    authorization,
+                    &("latest", false),
+                    &authorization,
+                    Some(Level::Warn.into()),
                 )
                 .await;
 
@@ -729,7 +692,6 @@ impl Web3Rpc {
     /// Turn on the firehose of pending transactions
     async fn subscribe_pending_transactions(
         self: Arc<Self>,
-        authorization: Arc<Authorization>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
     ) -> Web3ProxyResult<()> {
         // TODO: make this subscription optional
@@ -785,16 +747,16 @@ impl Web3Rpc {
         }
     }
 
-    /// be careful with this; it might wait forever!
-    pub async fn wait_for_request_handle<'a>(
-        self: &'a Arc<Self>,
-        authorization: &'a Arc<Authorization>,
+    pub async fn wait_for_request_handle(
+        self: &Arc<Self>,
+        authorization: &Arc<Authorization>,
         max_wait: Option<Duration>,
+        error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestHandle> {
-        let max_wait = max_wait.map(|x| Instant::now() + x);
+        let max_wait_until = max_wait.map(|x| Instant::now() + x);
 
         loop {
-            match self.try_request_handle(authorization).await {
+            match self.try_request_handle(authorization, error_handler).await {
                 Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
@@ -806,8 +768,8 @@ impl Web3Rpc {
                         self
                     );
 
-                    if let Some(max_wait) = max_wait {
-                        if retry_at > max_wait {
+                    if let Some(max_wait_until) = max_wait_until {
+                        if retry_at > max_wait_until {
                             // break now since we will wait past our maximum wait time
                             return Err(Web3ProxyError::Timeout(None));
                         }
@@ -819,10 +781,8 @@ impl Web3Rpc {
                     // TODO: when can this happen? log? emit a stat?
                     trace!("{} has no handle ready", self);
 
-                    if let Some(max_wait) = max_wait {
-                        let now = Instant::now();
-
-                        if now > max_wait {
+                    if let Some(max_wait_until) = max_wait_until {
+                        if Instant::now() > max_wait_until {
                             return Err(Web3ProxyError::NoHandleReady);
                         }
                     }
@@ -839,6 +799,7 @@ impl Web3Rpc {
     pub async fn try_request_handle(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
+        error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestResult> {
         // TODO: if websocket is reconnecting, return an error?
 
@@ -887,9 +848,10 @@ impl Web3Rpc {
             }
         };
 
-        let handle = OpenRequestHandle::new(authorization.clone(), self.clone()).await;
+        let handle =
+            OpenRequestHandle::new(authorization.clone(), self.clone(), error_handler).await;
 
-        Ok(OpenRequestResult::Handle(handle))
+        Ok(handle.into())
     }
 
     async fn wait_for_disconnect(&self) -> Result<(), tokio::sync::watch::error::RecvError> {
@@ -906,23 +868,30 @@ impl Web3Rpc {
         }
     }
 
-    pub async fn request<P, R>(
+    pub async fn internal_request<P: JsonRpcParams, R: JsonRpcResultData>(
         self: &Arc<Self>,
         method: &str,
         params: &P,
-        revert_handler: RequestErrorHandler,
-        authorization: Arc<Authorization>,
-    ) -> Web3ProxyResult<R>
-    where
-        // TODO: not sure about this type. would be better to not need clones, but measure and spawns combine to need it
-        P: Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static,
-        R: serde::Serialize + serde::de::DeserializeOwned + fmt::Debug + Send,
-    {
+        error_handler: Option<RequestErrorHandler>,
+    ) -> Web3ProxyResult<R> {
+        let authorization = Default::default();
+
+        self.authorized_request(method, params, &authorization, error_handler)
+            .await
+    }
+
+    pub async fn authorized_request<P: JsonRpcParams, R: JsonRpcResultData>(
+        self: &Arc<Self>,
+        method: &str,
+        params: &P,
+        authorization: &Arc<Authorization>,
+        error_handler: Option<RequestErrorHandler>,
+    ) -> Web3ProxyResult<R> {
         // TODO: take max_wait as a function argument?
         let x = self
-            .wait_for_request_handle(&authorization, None)
+            .wait_for_request_handle(authorization, None, error_handler)
             .await?
-            .request::<P, R>(method, params, revert_handler)
+            .request::<P, R>(method, params)
             .await?;
 
         Ok(x)

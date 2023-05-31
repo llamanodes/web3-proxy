@@ -1,6 +1,6 @@
 use super::StatType;
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
     get_query_window_seconds_from_params, get_user_id_from_params,
@@ -208,7 +208,7 @@ pub async fn query_user_stats<'a>(
     // TODO: move getting the param and checking the bearer token into a helper function
     if let Some(rpc_key_id) = params.get("rpc_key_id") {
         let rpc_key_id = rpc_key_id.parse::<u64>().map_err(|e| {
-            Web3ProxyError::BadRequest(format!("Unable to parse rpc_key_id. {:?}", e))
+            Web3ProxyError::BadRequest(format!("Unable to parse rpc_key_id. {}", e).into())
         })?;
 
         response_body.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
@@ -241,7 +241,7 @@ pub async fn query_user_stats<'a>(
     // query the database for number of items and pages
     let pages_result = q
         .clone()
-        .paginate(db_replica.conn(), page_size)
+        .paginate(db_replica.as_ref(), page_size)
         .num_items_and_pages()
         .await?;
 
@@ -251,7 +251,7 @@ pub async fn query_user_stats<'a>(
     // query the database (todo: combine with the pages_result query?)
     let query_response = q
         .into_json()
-        .paginate(db_replica.conn(), page_size)
+        .paginate(db_replica.as_ref(), page_size)
         .fetch_page(page)
         .await?;
 

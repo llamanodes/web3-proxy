@@ -3,11 +3,15 @@ rustflags = [
     # potentially faster. https://nnethercote.github.io/perf-book/build-configuration.html
     "-C", "target-cpu=native",
     # tokio unstable is needed for tokio-console
-    "--cfg", "tokio_unstable"
+    "--cfg", "tokio_unstable",
+    # uuid unstable is needed for zerocopy deserialize
+    "--cfg", "uuid_unstable",
 ]
 rustdocflags = [
     # potentially faster. https://nnethercote.github.io/perf-book/build-configuration.html
     "-C", "target-cpu=native",
     # tokio unstable is needed for tokio-console
-    "--cfg", "tokio_unstable"
+    "--cfg", "tokio_unstable",
+    # uuid unstable is needed for zerocopy deserialize
+    "--cfg", "uuid_unstable",
 ]
