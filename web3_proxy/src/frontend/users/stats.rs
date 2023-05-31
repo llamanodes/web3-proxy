@@ -65,7 +65,7 @@ pub async fn user_revert_logs_get(
     // Also add rpc keys for which this user has access
     let shared_rpc_keys = secondary_user::Entity::find()
         .filter(secondary_user::Column::UserId.eq(user.id))
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await?
         .into_iter()
         .map(|x| OutTuple {
