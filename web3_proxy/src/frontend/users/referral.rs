@@ -100,7 +100,7 @@ pub async fn user_used_referral_stats(
     #[derive(Debug, Serialize)]
     struct Info {
         credits_applied_for_referee: bool,
-        credits_applied_for_referrer: Decimal, // Probably make this a float instead (approximate anyways)
+        credits_applied_for_referrer: Decimal,
         referral_start_date: DateTime,
         used_referral_code: String,
     };
@@ -156,8 +156,8 @@ pub async fn user_shared_referral_stats(
     // Return early if the user does not have any referred entities
     if referrals.len() == 0 {
         let response_json = json!({
-        "referrals": Vec::<()>::new(),
-        "used_referral_code": "",
+        "referrals": [],
+        "used_referral_code": None::<()>,
         "user": user,
         });
 
@@ -169,8 +169,9 @@ pub async fn user_shared_referral_stats(
     #[derive(Debug, Serialize)]
     struct Info {
         credits_applied_for_referee: bool,
-        credits_applied_for_referrer: Decimal, // Probably make this a float instead (approximate anyways)
+        credits_applied_for_referrer: Decimal,
         referral_start_date: DateTime,
+        referred_address: Address,
     };
 
     let mut out: Vec<Info> = Vec::new();
@@ -187,6 +188,7 @@ pub async fn user_shared_referral_stats(
             credits_applied_for_referee: referral_record.credits_applied_for_referee,
             credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
             referral_start_date: referral_record.referral_start_date,
+            referred_address: Address::from_slice(&referred_user.address),
         };
         // Start inserting json's into this
         out.push(tmp);
