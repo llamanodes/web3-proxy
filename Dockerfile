@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --features "$WEB3_PROXY_FEATURES" \
     --locked \
     --no-default-features \
-    --path ./web3_proxy_cli \
+    --path ./web3_proxy \
     --profile faster_release \
     --root /usr/local/bin \
     ;

@@ -9,7 +9,6 @@ members = [
   "redis-rate-limiter",
   "thread-fast-rng",
   "web3_proxy",
-  "web3_proxy_cli",
 ]
 
 [profile.release]
