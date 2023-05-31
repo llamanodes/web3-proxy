@@ -11,45 +11,21 @@ use axum_macros::debug_handler;
 use entities::{balance, increase_on_chain_balance_receipt, user};
 use ethbloom::Input as BloomInput;
 use ethers::abi::{AbiEncode, ParamType};
-use ethers::prelude::abigen;
 use ethers::types::{Address, TransactionReceipt, H256, U256};
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{debug, info, trace, warn};
+use log::{debug, info, trace};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
     TransactionTrait,
 };
 use num_traits::Pow;
+use payment_contracts::ierc20::IERC20;
+use payment_contracts::payment_factory::PaymentFactory;
 use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
-
-// TODO: do this in a build.rs so that the editor autocomplete and docs are better
-abigen!(
-    IERC20,
-    r#"[
-        decimals() external view returns (uint256)
-        event Transfer(address indexed from, address indexed to, uint256 value)
-        event Approval(address indexed owner, address indexed spender, uint256 value)
-    ]"#,
-);
-
-abigen!(
-    PaymentFactory,
-    r#"[
-        event PaymentReceived(address indexed account, address token, uint256 amount)
-        account_to_payment_address(address) external view returns (address)
-        payment_address_to_account(address) external view returns (address)
-    ]"#,
-);
-
-abigen!(
-    PaymentSweeper,
-    r#"[
-    ]"#,
-);
 
 /// Implements any logic related to payments
 /// Removed this mainly from "user" as this was getting clogged
@@ -152,7 +128,7 @@ pub async fn user_balance_post(
 
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
 
-    // Return straight false if the tx was already added ...
+    // Return early if the tx was already added
     if increase_on_chain_balance_receipt::Entity::find()
         .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
         .one(&db_conn)

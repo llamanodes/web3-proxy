@@ -3614,6 +3614,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 
 [[package]]
+name = "payment-contracts"
+version = "0.1.0"
+dependencies = [
+ "ethers",
+ "glob",
+]
+
+[[package]]
 name = "pbkdf2"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6528,6 +6536,7 @@ dependencies = [
  "ordered-float",
  "pagerduty-rs",
  "parking_lot 0.12.1",
+ "payment-contracts",
  "prettytable",
  "proctitle",
  "quick_cache_ttl",

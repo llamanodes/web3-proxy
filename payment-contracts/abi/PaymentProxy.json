@@ -1,0 +1,29 @@
+[
+    {
+        "stateMutability": "nonpayable",
+        "type": "constructor",
+        "inputs": [
+            {
+                "name": "_factory",
+                "type": "address"
+            }
+        ],
+        "outputs": []
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "fallback"
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "implementation",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address"
+            }
+        ]
+    }
+]

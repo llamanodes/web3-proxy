@@ -19,6 +19,7 @@ deferred-rate-limiter = { path = "../deferred-rate-limiter" }
 entities = { path = "../entities" }
 latency = { path = "../latency" }
 migration = { path = "../migration" }
+payment-contracts = { path = "../payment-contracts" }
 quick_cache_ttl = { path = "../quick_cache_ttl" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 thread-fast-rng = { path = "../thread-fast-rng" }
