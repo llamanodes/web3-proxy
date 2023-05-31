@@ -17,15 +17,13 @@ use http::StatusCode;
 use log::{debug, info, trace};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-    TransactionTrait,
+    self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
 use migration::{Expr, OnConflict};
 use num_traits::Pow;
 use payment_contracts::ierc20::IERC20;
 use payment_contracts::payment_factory::{self, PaymentFactory};
 use serde_json::json;
-use std::str::FromStr;
 use std::sync::Arc;
 
 /// Implements any logic related to payments
