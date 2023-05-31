@@ -503,7 +503,7 @@ impl BufferedRpcQueryStats {
 
         // Also check if the referrer is premium (thought above 10$ will always be treated as premium at least)
         // Should only refresh cache if the premium threshold is crossed
-        if balance_before >= Decimal::from(10) && *latest_balance < Decimal::from(10) {
+        if balance_before >= self.sum_credits_used && *latest_balance < self.sum_credits_used {
             let rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(sender_rpc_entity.user_id))
                 .all(&txn)
