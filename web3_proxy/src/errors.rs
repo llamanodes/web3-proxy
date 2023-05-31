@@ -797,7 +797,7 @@ impl Web3ProxyError {
                 )
             }
             Self::SerdeJson(err) => {
-                warn!("serde json err={:?} source={:?}", err, err.source());
+                trace!("serde json err={:?} source={:?}", err, err.source());
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
