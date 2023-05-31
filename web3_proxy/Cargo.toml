@@ -41,7 +41,6 @@ argh = "0.1.10"
 async-trait = "0.1.68"
 axum = { version = "0.6.18", features = ["headers", "ws"] }
 axum-client-ip = "0.4.1"
-atomic_float = "0.1.0"
 axum-macros = "0.3.7"
 chrono = "0.4.26"
 console-subscriber = { version = "0.1.9", optional = true }
