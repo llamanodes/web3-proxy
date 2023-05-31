@@ -13,7 +13,6 @@ use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
-use atomic_float::AtomicF64;
 use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
@@ -34,6 +33,7 @@ use std::cmp::max;
 use std::num::NonZeroU64;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use self::stat_buffer::BufferedRpcQueryStats;
 
@@ -62,7 +62,7 @@ pub struct RpcQueryStats {
     /// Credits used signifies how how much money was used up
     pub credits_used: Decimal,
     /// Last credits used
-    pub latest_balance: Arc<AtomicF64>,
+    pub latest_balance: Arc<RwLock<Decimal>>,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
@@ -488,22 +488,22 @@ impl BufferedRpcQueryStats {
         let latest_balance = match NonZeroU64::try_from(sender_rpc_entity.user_id) {
             Ok(x) => user_balance_cache
                 .get(&x)
-                .unwrap_or(Arc::new(AtomicF64::from(0.))),
-            Err(_) => Arc::new(AtomicF64::default()),
+                .unwrap_or(Arc::new(RwLock::new(Decimal::default()))),
+            Err(_) => Arc::new(RwLock::new(Decimal::default())),
         };
-        // Just modify the AtomicF64 locally ...
-        let balance_before = latest_balance.fetch_sub(
-            self.sum_credits_used
-                .to_f64()
-                .context("Could not convert Decimal to f64")?,
-            Ordering::Acquire,
-        );
-        latest_balance.fetch_max(0., Ordering::Acquire);
+        // Lock it, subtract and max it
+        let mut latest_balance = latest_balance.write().await;
+        // Double check that this copies correctly (the underlying value, not the reference)
+        let balance_before = (*latest_balance).clone();
+        // Now modify the balance
+        *latest_balance = *latest_balance - self.sum_credits_used;
+        if *latest_balance < Decimal::from(0) {
+            *latest_balance = Decimal::from(0);
+        }
 
-        // Also check if the referrer is premium
-
+        // Also check if the referrer is premium (thought above 10$ will always be treated as premium at least)
         // Should only refresh cache if the premium threshold is crossed
-        if balance_before >= 10. && latest_balance.load(Ordering::Acquire) < 10. {
+        if balance_before >= Decimal::from(10) && *latest_balance < Decimal::from(10) {
             let rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(sender_rpc_entity.user_id))
                 .all(&txn)
@@ -538,6 +538,12 @@ impl BufferedRpcQueryStats {
             builder = builder.tag("method", method);
         }
 
+        // Read the latest balance ...
+        let balance;
+        {
+            balance = *(self.latest_balance.read().await);
+        }
+
         builder = builder
             .tag("archive_needed", key.archive_needed.to_string())
             .tag("error_response", key.error_response.to_string())
@@ -556,9 +562,12 @@ impl BufferedRpcQueryStats {
                 "sum_credits_used",
                 self.sum_credits_used
                     .to_f64()
-                    .expect("number is really (too) large"),
+                    .context("number is really (too) large")?,
             )
-            .field("balance", self.latest_balance.load(Ordering::Relaxed));
+            .field(
+                "balance",
+                balance.to_f64().context("number is really (too) large")?,
+            );
 
         // .round() as i64
 

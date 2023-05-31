@@ -8,7 +8,6 @@ use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
-use atomic_float::AtomicF64;
 use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
@@ -40,7 +39,7 @@ use std::num::NonZeroU64;
 use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64, AtomicUsize};
 use std::time::Duration;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use ulid::Ulid;
@@ -286,7 +285,7 @@ pub struct RequestMetadata {
     pub stat_sender: Option<flume::Sender<AppStat>>,
 
     /// Last balance
-    pub latest_balance: Arc<AtomicF64>,
+    pub latest_balance: Arc<RwLock<Decimal>>,
 }
 
 impl Default for Authorization {
@@ -441,7 +440,7 @@ impl RequestMetadata {
 
         // Fetch the balance from the cache
         let latest_balance = match NonZeroU64::try_from(authorization.checks.user_id) {
-            Err(_) => Arc::new(AtomicF64::from(0.)),
+            Err(_) => Arc::new(RwLock::new(Decimal::default())),
             Ok(x) => app.user_balance_cache.get(&x).unwrap_or_default(),
         };
         let x = Self {
@@ -1127,9 +1126,12 @@ impl Web3ProxyApp {
     ///
     /// If a subuser calls this function, the subuser needs to have first attained the user_id that the rpc key belongs to.
     /// This function should be called anywhere where balance is required (i.e. only rpc calls, I believe ... non-rpc calls don't really require balance)
-    pub(crate) async fn balance_checks(&self, user_id: u64) -> Web3ProxyResult<Arc<AtomicF64>> {
+    pub(crate) async fn balance_checks(
+        &self,
+        user_id: u64,
+    ) -> Web3ProxyResult<Arc<RwLock<Decimal>>> {
         match NonZeroU64::try_from(user_id) {
-            Err(_) => Ok(Arc::new(AtomicF64::from(0.))),
+            Err(_) => Ok(Arc::new(RwLock::new(Decimal::default()))),
             Ok(x) => {
                 self.user_balance_cache
                     .try_get_or_insert_async(&x, async move {
@@ -1145,9 +1147,7 @@ impl Web3ProxyApp {
                             Some(x) => x.available_balance,
                             None => Decimal::default(),
                         };
-                        Ok(Arc::new(AtomicF64::from(balance.to_f64().context(
-                            "Balance is too high, or too low to turn into a float!",
-                        )?)))
+                        Ok(Arc::new(RwLock::new(balance)))
                     })
                     .await
             }

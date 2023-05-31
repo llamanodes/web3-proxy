@@ -1,7 +1,6 @@
 use super::{AppStat, RpcQueryKey};
 use crate::app::{RpcSecretKeyCache, UserBalanceCache, Web3ProxyJoinHandle};
 use crate::errors::Web3ProxyResult;
-use atomic_float::AtomicF64;
 use derive_more::From;
 use futures::stream;
 use hashbrown::HashMap;
@@ -11,7 +10,7 @@ use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, RwLock};
 use tokio::time::interval;
 
 #[derive(Debug, Default)]
@@ -27,7 +26,7 @@ pub struct BufferedRpcQueryStats {
     pub sum_response_millis: u64,
     pub sum_credits_used: Decimal,
     /// Balance tells us the user's balance at this point in time
-    pub latest_balance: Arc<AtomicF64>,
+    pub latest_balance: Arc<RwLock<Decimal>>,
 }
 
 #[derive(From)]

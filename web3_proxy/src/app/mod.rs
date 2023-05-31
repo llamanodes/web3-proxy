@@ -24,7 +24,6 @@ use crate::rpcs::transactions::TxStatus;
 use crate::stats::{AppStat, StatBuffer};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
-use atomic_float::AtomicF64;
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::http::StatusCode;
 use chrono::Utc;
@@ -56,7 +55,7 @@ use std::num::{NonZeroU32, NonZeroU64};
 use std::str::FromStr;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::sync::{broadcast, watch, Semaphore};
+use tokio::sync::{broadcast, watch, RwLock, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -112,7 +111,7 @@ pub struct AuthorizationChecks {
 
 /// Cache data from the database about rpc keys
 pub type RpcSecretKeyCache = Arc<CacheWithTTL<RpcSecretKey, AuthorizationChecks>>;
-pub type UserBalanceCache = Arc<CacheWithTTL<NonZeroU64, Arc<AtomicF64>>>; // Could also be an AtomicDecimal
+pub type UserBalanceCache = Arc<CacheWithTTL<NonZeroU64, Arc<RwLock<Decimal>>>>; // Could also be an AtomicDecimal
 
 /// The application
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
