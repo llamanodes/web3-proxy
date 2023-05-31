@@ -29,12 +29,10 @@ struct KQCacheWithTTLTask<Key, Qey, Val, We, B> {
 }
 
 pub struct PlaceholderGuardWithTTL<'a, Key, Qey, Val, We, B> {
-    name: &'a str,
+    cache: &'a KQCacheWithTTL<Key, Qey, Val, We, B>,
     inner: PlaceholderGuard<'a, Key, Qey, Val, We, B>,
     key: Key,
     qey: Qey,
-    ttl: Duration,
-    tx: &'a flume::Sender<(Instant, Key, Qey)>,
 }
 
 impl<
@@ -141,12 +139,10 @@ impl<
         match self.cache.get_value_or_guard_async(&key, &qey).await {
             Ok(x) => Ok(x),
             Err(inner) => Err(PlaceholderGuardWithTTL {
-                name: self.name,
+                cache: self,
                 inner,
                 key,
                 qey,
-                ttl: self.ttl,
-                tx: &self.tx,
             }),
         }
     }
@@ -251,20 +247,24 @@ impl<
     > PlaceholderGuardWithTTL<'a, Key, Qey, Val, We, B>
 {
     pub fn insert(self, val: Val) {
-        let expire_at = Instant::now() + self.ttl;
+        let expire_at = Instant::now() + self.cache.ttl;
 
-        self.inner.insert(val);
+        let weight = self.cache.weighter.weight(&self.key, &self.qey, &val);
 
-        if log_enabled!(log::Level::Trace) {
-            trace!(
-                "{}, {:?}, {:?} expiring in {}s",
-                self.name,
-                self.key,
-                self.qey,
-                expire_at.duration_since(Instant::now()).as_secs_f32()
-            );
+        if weight <= self.cache.max_item_weight {
+            self.inner.insert(val);
+
+            if log_enabled!(log::Level::Trace) {
+                trace!(
+                    "{}, {:?}, {:?} expiring in {}s",
+                    self.cache.name,
+                    self.key,
+                    self.qey,
+                    expire_at.duration_since(Instant::now()).as_secs_f32()
+                );
+            }
+
+            self.cache.tx.send((expire_at, self.key, self.qey)).unwrap();
         }
-
-        self.tx.send((expire_at, self.key, self.qey)).unwrap();
     }
 }

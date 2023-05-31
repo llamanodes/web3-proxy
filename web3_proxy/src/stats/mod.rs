@@ -9,8 +9,8 @@ use std::borrow::BorrowMut;
 use std::cmp;
 
 use crate::app::{RpcSecretKeyCache, UserBalanceCache};
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
 use atomic_float::AtomicF64;
@@ -352,7 +352,7 @@ impl BufferedRpcQueryStats {
             .one(&txn)
             .await?
             .ok_or(Web3ProxyError::BadRequest(
-                "Could not find rpc key in db".to_string(),
+                "Could not find rpc key in db".into(),
             ))?;
 
         let sender_balance = balance::Entity::find()
@@ -360,10 +360,9 @@ impl BufferedRpcQueryStats {
             .lock(LockType::Update)
             .one(&txn)
             .await?
-            .ok_or(Web3ProxyError::BadRequest(format!(
-                "This user id has no balance entry! {:?}",
-                sender_rpc_entity
-            )))?;
+            .ok_or(Web3ProxyError::BadRequest(
+                format!("This user id has no balance entry! {:?}", sender_rpc_entity).into(),
+            ))?;
 
         // TODO: Also make sure that the referrer is premium, otherwise do not assign credits
         // This will be optional
@@ -389,7 +388,7 @@ impl BufferedRpcQueryStats {
                             .one(&txn)
                             .await?
                             .ok_or(Web3ProxyError::BadRequest(
-                                "Could not find rpc key in db".to_string(),
+                                "Could not find rpc key in db".into(),
                             ))?;
                         // And their bala
                         let referrer_balance_entity = balance::Entity::find()
@@ -397,10 +396,13 @@ impl BufferedRpcQueryStats {
                             .lock(LockType::Update)
                             .one(&txn)
                             .await?
-                            .ok_or(Web3ProxyError::BadRequest(format!(
-                                "This user id has no balance entry! {:?}",
-                                sender_rpc_entity
-                            )))?;
+                            .ok_or(Web3ProxyError::BadRequest(
+                                format!(
+                                    "This user id has no balance entry! {:?}",
+                                    sender_rpc_entity
+                                )
+                                .into(),
+                            ))?;
                         Some((
                             referee_entity,
                             referrer_user_entity,

@@ -1,7 +1,7 @@
 //! Handle registration, logins, and managing account data.
 use super::super::authorization::RpcSecretKey;
-use super::super::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::app::Web3ProxyApp;
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::{
     headers::{authorization::Bearer, Authorization},
@@ -37,7 +37,7 @@ pub async fn rpc_keys_get(
 
     let uks = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(user.id))
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await
         .web3_context("failed loading user's key")?;
 
@@ -103,7 +103,7 @@ pub async fn rpc_keys_management(
         rpc_key::Entity::find()
             .filter(rpc_key::Column::UserId.eq(user.id))
             .filter(rpc_key::Column::Id.eq(existing_key_id))
-            .one(db_replica.conn())
+            .one(db_replica.as_ref())
             .await
             .web3_context("failed loading user's key")?
             .web3_context("key does not exist or is not controlled by this bearer token")?

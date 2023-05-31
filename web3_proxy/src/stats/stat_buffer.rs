@@ -1,6 +1,6 @@
 use super::{AppStat, RpcQueryKey};
 use crate::app::{RpcSecretKeyCache, UserBalanceCache, Web3ProxyJoinHandle};
-use crate::frontend::errors::Web3ProxyResult;
+use crate::errors::Web3ProxyResult;
 use atomic_float::AtomicF64;
 use derive_more::From;
 use futures::stream;

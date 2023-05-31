@@ -1,8 +1,8 @@
 //! Utilities for authorization of logged in and anonymous users.
 
-use super::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{AuthorizationChecks, Web3ProxyApp, APP_USER_AGENT};
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
@@ -76,7 +76,6 @@ pub enum AuthorizationType {
 #[derive(Clone, Debug)]
 pub struct Authorization {
     pub checks: AuthorizationChecks,
-    // TODO: instead of the conn, have a channel?
     pub db_conn: Option<DatabaseConnection>,
     pub ip: IpAddr,
     pub origin: Option<Origin>,
@@ -290,6 +289,12 @@ pub struct RequestMetadata {
     pub latest_balance: Arc<AtomicF64>,
 }
 
+impl Default for Authorization {
+    fn default() -> Self {
+        Authorization::internal(None).unwrap()
+    }
+}
+
 impl Default for RequestMetadata {
     fn default() -> Self {
         Self {
@@ -310,6 +315,15 @@ impl Default for RequestMetadata {
             stat_sender: Default::default(),
             latest_balance: Default::default(),
         }
+    }
+}
+
+impl RequestMetadata {
+    pub fn proxy_mode(&self) -> ProxyMode {
+        self.authorization
+            .as_ref()
+            .map(|x| x.checks.proxy_mode)
+            .unwrap_or_default()
     }
 }
 
@@ -766,6 +780,7 @@ pub async fn login_is_authorized(app: &Web3ProxyApp, ip: IpAddr) -> Web3ProxyRes
 }
 
 /// semaphore won't ever be None, but its easier if key auth and ip auth work the same way
+/// keep the semaphore alive until the user's request is entirely complete
 pub async fn ip_is_authorized(
     app: &Arc<Web3ProxyApp>,
     ip: IpAddr,
@@ -831,6 +846,7 @@ pub async fn ip_is_authorized(
 }
 
 /// like app.rate_limit_by_rpc_key but converts to a Web3ProxyError;
+/// keep the semaphore alive until the user's request is entirely complete
 pub async fn key_is_authorized(
     app: &Arc<Web3ProxyApp>,
     rpc_key: RpcSecretKey,
@@ -916,6 +932,7 @@ impl Web3ProxyApp {
     }
 
     /// Limit the number of concurrent requests for a given user across all of their keys
+    /// keep the semaphore alive until the user's request is entirely complete
     pub async fn user_semaphore(
         &self,
         authorization_checks: &AuthorizationChecks,
@@ -946,6 +963,7 @@ impl Web3ProxyApp {
 
     /// Verify that the given bearer token and address are allowed to take the specified action.
     /// This includes concurrent request limiting.
+    /// keep the semaphore alive until the user's request is entirely complete
     pub async fn bearer_is_authorized(
         &self,
         bearer: Bearer,
@@ -975,7 +993,7 @@ impl Web3ProxyApp {
         let user = user::Entity::find()
             .left_join(login::Entity)
             .filter(login::Column::BearerToken.eq(user_bearer_uuid))
-            .one(db_replica.conn())
+            .one(db_replica.as_ref())
             .await
             .web3_context("fetching user from db by bearer token")?
             .web3_context("unknown bearer token")?;
@@ -1045,6 +1063,13 @@ impl Web3ProxyApp {
         origin: Option<Origin>,
         proxy_mode: ProxyMode,
     ) -> Web3ProxyResult<RateLimitResult> {
+        if ip.is_loopback() {
+            // TODO: localhost being unlimited should be optional
+            let authorization = Authorization::internal(self.db_conn())?;
+
+            return Ok(RateLimitResult::Allowed(authorization, None));
+        }
+
         // ip rate limits don't check referer or user agent
         // they do check origin because we can override rate limits for some origins
         let authorization = Authorization::external(
@@ -1107,14 +1132,14 @@ impl Web3ProxyApp {
             Err(_) => Ok(Arc::new(AtomicF64::from(0.))),
             Ok(x) => {
                 self.user_balance_cache
-                    .get_or_insert_async(&x, async move {
+                    .try_get_or_insert_async(&x, async move {
                         let db_replica = self
                             .db_replica()
                             .web3_context("Getting database connection")?;
 
                         let balance: Decimal = match balance::Entity::find()
                             .filter(balance::Column::UserId.eq(user_id))
-                            .one(db_replica.conn())
+                            .one(db_replica.as_ref())
                             .await?
                         {
                             Some(x) => x.available_balance,
@@ -1149,17 +1174,12 @@ impl Web3ProxyApp {
                 match rpc_key::Entity::find()
                     .filter(rpc_key::Column::SecretKey.eq(<Uuid>::from(rpc_secret_key)))
                     .filter(rpc_key::Column::Active.eq(true))
-                    .one(db_replica.conn())
+                    .one(db_replica.as_ref())
                     .await?
                 {
                     Some(rpc_key_model) => {
                         // TODO: move these splits into helper functions
                         // TODO: can we have sea orm handle this for us?
-                        let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
-                            .one(db_replica.conn())
-                            .await?
-                            .context("no related user")?;
-
                         let allowed_ips: Option<Vec<IpNet>> =
                             if let Some(allowed_ips) = rpc_key_model.allowed_ips {
                                 let x = allowed_ips
@@ -1221,20 +1241,21 @@ impl Web3ProxyApp {
 
                         // Get the user_tier
                         let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
-                            .one(db_replica.conn())
+                            .one(db_replica.as_ref())
                             .await?
                             .context("user model was not found, but every rpc_key should have a user")?;
 
-                        let balance = balance::Entity::find()
+                        let balance = match balance::Entity::find()
                             .filter(balance::Column::UserId.eq(user_model.id))
-                            .one(db_replica.conn())
-                            .await?
-                            .context("related balance was not found but every user should have a balance")?
-                            .available_balance;
+                            .one(db_replica.as_ref())
+                            .await? {
+                            Some(x) => x.available_balance,
+                            None => Decimal::default()
+                        };
 
                         let mut user_tier_model =
                             user_tier::Entity::find_by_id(user_model.user_tier_id)
-                                .one(db_replica.conn())
+                                .one(db_replica.as_ref())
                                 .await?
                                 .context("related user tier not found, but every user should have a tier")?;
 
@@ -1245,7 +1266,7 @@ impl Web3ProxyApp {
                             if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
                                 user_tier_model =
                                     user_tier::Entity::find_by_id(downgrade_user_tier)
-                                        .one(db_replica.conn())
+                                        .one(db_replica.as_ref())
                                         .await?
                                         .context("finding the downgrade user tier for premium did not work for premium")?;
                             } else {

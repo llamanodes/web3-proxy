@@ -1,6 +1,6 @@
 use argh::FromArgs;
 use migration::sea_orm::DatabaseConnection;
-use web3_proxy::app::{drop_migration_lock, migrate_db};
+use web3_proxy::relational_db::{drop_migration_lock, migrate_db};
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 /// In case of emergency, break glass.
