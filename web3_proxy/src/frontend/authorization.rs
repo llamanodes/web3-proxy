@@ -1103,9 +1103,6 @@ impl Web3ProxyApp {
     /// If a subuser calls this function, the subuser needs to have first attained the user_id that the rpc key belongs to.
     /// This function should be called anywhere where balance is required (i.e. only rpc calls, I believe ... non-rpc calls don't really require balance)
     pub(crate) async fn balance_checks(&self, user_id: u64) -> Web3ProxyResult<Arc<AtomicF64>> {
-        if user_id == 0 {
-            return Ok(Arc::new(AtomicF64::from(0.)));
-        }
         match NonZeroU64::try_from(user_id) {
             Err(_) => Ok(Arc::new(AtomicF64::from(0.))),
             Ok(x) => {
@@ -1115,13 +1112,14 @@ impl Web3ProxyApp {
                             .db_replica()
                             .web3_context("Getting database connection")?;
 
-                        let balance: Decimal = balance::Entity::find()
+                        let balance: Decimal = match balance::Entity::find()
                             .filter(balance::Column::UserId.eq(user_id))
                             .one(db_replica.conn())
                             .await?
-                            .context("did not find related balance")?
-                            .available_balance;
-
+                        {
+                            Some(x) => x.available_balance,
+                            None => Decimal::default(),
+                        };
                         Ok(Arc::new(AtomicF64::from(balance.to_f64().context(
                             "Balance is too high, or too low to turn into a float!",
                         )?)))
@@ -1161,19 +1159,6 @@ impl Web3ProxyApp {
                             .one(db_replica.conn())
                             .await?
                             .context("no related user")?;
-
-                        let balance = balance::Entity::find()
-                            .filter(balance::Column::UserId.eq(user_model.id))
-                            .one(db_replica.conn())
-                            .await?
-                            .map(|x| x.available_balance)
-                            .unwrap_or_default();
-
-                        let user_tier_model =
-                            user_tier::Entity::find_by_id(user_model.user_tier_id)
-                                .one(db_replica.conn())
-                                .await?
-                                .context("no related user tier")?;
 
                         let allowed_ips: Option<Vec<IpNet>> =
                             if let Some(allowed_ips) = rpc_key_model.allowed_ips {
