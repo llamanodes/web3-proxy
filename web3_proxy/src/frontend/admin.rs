@@ -117,42 +117,26 @@ pub async fn admin_increase_balance(
     );
     out.insert("amount", serde_json::Value::String(amount.to_string()));
 
-    // Get the balance row
-    let balance_entry: balance::Model = balance::Entity::find()
-        .filter(balance::Column::UserId.eq(user_entry.id))
-        .one(&db_conn)
-        .await?
-        .context("User does not have a balance row")?;
+    // update balance
+    let balance_entry = balance::ActiveModel {
+        id: sea_orm::NotSet,
+        available_balance: sea_orm::Set(amount),
+        user_id: sea_orm::Set(user_entry.id),
+        ..Default::default()
+    };
 
-    let balance_entry = balance_entry.into_active_model();
     balance::Entity::insert(balance_entry)
         .on_conflict(
             OnConflict::new()
-                .values([
-                    // (
-                    //     balance::Column::Id,
-                    //     Expr::col(balance::Column::Id).add(self.frontend_requests),
-                    // ),
-                    (
-                        balance::Column::AvailableBalance,
-                        Expr::col(balance::Column::AvailableBalance).add(amount),
-                    ),
-                    // (
-                    //     balance::Column::Used,
-                    //     Expr::col(balance::Column::UsedBalance).add(self.backend_retries),
-                    // ),
-                    // (
-                    //     balance::Column::UserId,
-                    //     Expr::col(balance::Column::UserId).add(self.no_servers),
-                    // ),
-                ])
+                .values([(
+                    balance::Column::AvailableBalance,
+                    Expr::col(balance::Column::AvailableBalance).add(amount),
+                )])
                 .to_owned(),
         )
         .exec(&db_conn)
         .await?;
-    // TODO: Downgrade otherwise, right now not functioning properly
 
-    // Then read and save in one transaction
     let response = (StatusCode::OK, Json(out)).into_response();
 
     Ok(response)

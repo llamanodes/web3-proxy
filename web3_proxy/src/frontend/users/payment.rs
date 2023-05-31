@@ -20,6 +20,7 @@ use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
     TransactionTrait,
 };
+use migration::{Expr, OnConflict};
 use num_traits::Pow;
 use payment_contracts::ierc20::IERC20;
 use payment_contracts::payment_factory::{self, PaymentFactory};
@@ -251,42 +252,31 @@ pub async fn user_balance_post(
                 payment_token_wei, payment_token_decimals, payment_token_amount
             );
 
-            // Check if the item is in the database. If it is not, then add it into the database
-            // TODO: `insert ... on duplicate update` to avoid a race
-            let user_balance = balance::Entity::find()
-                .filter(balance::Column::UserId.eq(recipient.id))
-                .one(&txn)
+            // create or update the balance
+            let balance_entry = balance::ActiveModel {
+                id: sea_orm::NotSet,
+                available_balance: sea_orm::Set(payment_token_amount),
+                user_id: sea_orm::Set(recipient.id),
+                ..Default::default()
+            };
+            balance::Entity::insert(balance_entry)
+                .on_conflict(
+                    OnConflict::new()
+                        .values([(
+                            balance::Column::AvailableBalance,
+                            Expr::col(balance::Column::AvailableBalance).add(payment_token_amount),
+                        )])
+                        .to_owned(),
+                )
+                .exec(&txn)
                 .await?;
 
-            match user_balance {
-                Some(user_balance) => {
-                    // Update the entry, adding the balance
-                    let balance_plus_amount = user_balance.available_balance + payment_token_amount;
-
-                    let mut active_user_balance = user_balance.into_active_model();
-                    active_user_balance.available_balance = sea_orm::Set(balance_plus_amount);
-
-                    debug!("New user balance: {:?}", active_user_balance);
-                    active_user_balance.save(&txn).await?;
-                }
-                None => {
-                    // Create the entry with the respective balance
-                    let active_user_balance = balance::ActiveModel {
-                        available_balance: sea_orm::ActiveValue::Set(payment_token_amount),
-                        user_id: sea_orm::ActiveValue::Set(recipient.id),
-                        ..Default::default()
-                    };
-
-                    debug!("New user balance: {:?}", active_user_balance);
-                    active_user_balance.save(&txn).await?;
-                }
-            }
-
-            debug!("Setting tx_hash: {:?}", tx_hash);
+            debug!("Saving tx_hash: {:?}", tx_hash);
             let receipt = increase_on_chain_balance_receipt::ActiveModel {
                 tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
                 chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
                 // TODO: need a migration that adds log_index
+                // TODO: need a migration that adds payment_token_address. will be useful for stats
                 amount: sea_orm::ActiveValue::Set(payment_token_amount),
                 deposit_to_user_id: sea_orm::ActiveValue::Set(recipient.id),
                 ..Default::default()
