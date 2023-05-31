@@ -1249,11 +1249,9 @@ impl Web3ProxyApp {
                                         .await?
                                         .context("finding the downgrade user tier for premium did not work for premium")?;
                             } else {
-                                return Web3ProxyResult::Err(Web3ProxyError::InvalidUserTier);
+                                return Err(Web3ProxyError::InvalidUserTier);
                             }
                         }
-
-                        let user_tier = user_tier_model.title;
 
                         let rpc_key_id = Some(rpc_key_model.id.try_into().context("db ids are never 0")?);
 
