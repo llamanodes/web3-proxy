@@ -15,9 +15,8 @@ use ethers::abi::{AbiEncode, ParamType};
 use ethers::types::{Address, TransactionReceipt, H256, U256};
 use ethers::utils::keccak256;
 use hashbrown::HashMap;
-use hex_fmt::HexFmt;
 use http::StatusCode;
-use log::{debug, info, warn, Level};
+use log::{debug, info, trace, warn, Level};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;
@@ -154,14 +153,11 @@ pub async fn user_balance_post(
         .await
     {
         Ok(OpenRequestResult::Handle(handle)) => {
-            debug!(
-                "Params are: {:?}",
-                &vec![format!("0x{}", tx_hash.encode_hex())]
-            );
+            debug!("Params are: {:?}", &vec![tx_hash.encode_hex()]);
             handle
                 .request(
                     "eth_getTransactionReceipt",
-                    &vec![format!("0x{}", tx_hash.encode_hex())],
+                    &vec![tx_hash.encode_hex()],
                     Level::Trace.into(),
                 )
                 .await
@@ -201,10 +197,9 @@ pub async fn user_balance_post(
             // We then want to include the function that we want to call
             accepted_tokens_request_object.insert(
                 "data".to_owned(),
-                serde_json::Value::String(format!(
-                    "0x{}",
-                    HexFmt(keccak256("get_approved_tokens()".to_owned().into_bytes()))
-                )),
+                serde_json::Value::String(
+                    keccak256("get_approved_tokens()".to_owned().into_bytes()).encode_hex(),
+                ),
                 // hex::encode(
             );
             let params = serde_json::Value::Array(vec![
@@ -248,14 +243,13 @@ pub async fn user_balance_post(
                 serde_json::Map::new();
             token_decimals_request_object.insert(
                 "to".to_owned(),
-                serde_json::Value::String(format!("0x{}", HexFmt(accepted_token))),
+                serde_json::Value::String(accepted_token.encode_hex()),
             );
             token_decimals_request_object.insert(
                 "data".to_owned(),
-                serde_json::Value::String(format!(
-                    "0x{}",
-                    HexFmt(keccak256("decimals()".to_owned().into_bytes()))
-                )),
+                serde_json::Value::String(
+                    keccak256("decimals()".to_owned().into_bytes()).encode_hex(),
+                ),
             );
             let params = serde_json::Value::Array(vec![
                 serde_json::Value::Object(token_decimals_request_object),
@@ -421,8 +415,7 @@ pub async fn user_balance_post(
             user_id: sea_orm::Set(recipient.id),
         };
 
-        // TODO: Do an insert on conflict update ...
-        let _ = balance::Entity::insert(user_balance)
+        balance::Entity::insert(user_balance)
             .on_conflict(
                 OnConflict::new()
                     .values([(
@@ -432,10 +425,9 @@ pub async fn user_balance_post(
                     .to_owned(),
             )
             .exec(&txn)
-            .await?
-            .last_insert_id;
+            .await?;
 
-        debug!("Setting tx_hash: {:?}", tx_hash.encode_hex());
+        trace!("Setting tx_hash: {:?}", tx_hash);
         let receipt = increase_on_chain_balance_receipt::ActiveModel {
             tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
             chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
@@ -451,7 +443,7 @@ pub async fn user_balance_post(
         let response = (
             StatusCode::CREATED,
             Json(json!({
-                "tx_hash": tx_hash.encode_hex(),
+                "tx_hash": tx_hash,
                 "amount": amount
             })),
         )

@@ -392,8 +392,7 @@ impl BufferedRpcQueryStats {
             // Apply 10% of the used balance as a bonus if applicable
             let now = Utc::now();
             let valid_until = DateTime::<Utc>::from_utc(referral_entity.referral_start_date, Utc)
-                .checked_add_months(Months::new(12))
-                .unwrap();
+                + Months::new(12);
 
             if now <= valid_until {
                 referrer_balance_delta += self.sum_credits_used / Decimal::new(10, 0);
@@ -490,7 +489,9 @@ impl BufferedRpcQueryStats {
         // ================================ //
         // TODO: REFRESH USER ROLE IN CACHE //
         // ================================ //
-        txn.commit().await?;
+        txn.commit()
+            .await
+            .context("Failed to update referral and balance updates")?;
 
         Ok(())
     }
