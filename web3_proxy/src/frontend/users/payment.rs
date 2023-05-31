@@ -1,5 +1,5 @@
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse};
+use crate::errors::{Web3ProxyError, Web3ProxyResponse};
 use anyhow::{anyhow, Context};
 use axum::{
     extract::Path,

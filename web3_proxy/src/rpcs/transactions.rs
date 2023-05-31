@@ -2,7 +2,8 @@
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use super::request::OpenRequestResult;
-use crate::frontend::{authorization::Authorization, errors::Web3ProxyResult};
+use crate::errors::Web3ProxyResult;
+use crate::frontend::authorization::Authorization;
 use ethers::prelude::{ProviderError, Transaction, TxHash};
 use log::{debug, trace, Level};
 use std::sync::Arc;

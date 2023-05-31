@@ -1,6 +1,4 @@
-use crate::{
-    frontend::errors::Web3ProxyError, jsonrpc::JsonRpcErrorData, rpcs::blockchain::ArcBlock,
-};
+use crate::{errors::Web3ProxyError, jsonrpc::JsonRpcErrorData, rpcs::blockchain::ArcBlock};
 use derive_more::From;
 use ethers::{providers::ProviderError, types::U64};
 use hashbrown::hash_map::DefaultHashBuilder;

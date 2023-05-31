@@ -4,8 +4,8 @@ use super::provider::{connect_http, connect_ws, EthersHttpProvider, EthersWsProv
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, Web3ProxyJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};

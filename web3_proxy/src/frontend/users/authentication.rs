@@ -1,7 +1,7 @@
 //! Handle registration, logins, and managing account data.
 use crate::app::Web3ProxyApp;
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::frontend::authorization::{login_is_authorized, RpcSecretKey};
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::user_token::UserBearerToken;
 use crate::{PostLogin, PostLoginQuery};
 use axum::{

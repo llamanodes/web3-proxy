@@ -1,6 +1,6 @@
 use super::one::Web3Rpc;
+use crate::errors::Web3ProxyResult;
 use crate::frontend::authorization::Authorization;
-use crate::frontend::errors::Web3ProxyResult;
 use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use anyhow::Context;
 use chrono::Utc;

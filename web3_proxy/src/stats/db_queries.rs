@@ -1,6 +1,6 @@
 use super::StatType;
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
     get_query_window_seconds_from_params, get_user_id_from_params,

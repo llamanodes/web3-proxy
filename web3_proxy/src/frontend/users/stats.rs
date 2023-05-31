@@ -1,6 +1,6 @@
 //! Handle registration, logins, and managing account data.
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::{Web3ProxyErrorContext, Web3ProxyResponse};
+use crate::errors::{Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
 };

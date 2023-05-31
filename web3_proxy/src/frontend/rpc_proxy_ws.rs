@@ -3,11 +3,11 @@
 //! WebSockets are the preferred method of receiving requests, but not all clients have good support.
 
 use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, RequestMetadata};
-use super::errors::{Web3ProxyError, Web3ProxyResponse};
+use crate::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::jsonrpc::JsonRpcId;
 use crate::{
     app::Web3ProxyApp,
-    frontend::errors::Web3ProxyResult,
+    errors::Web3ProxyResult,
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
 };
 use anyhow::Context;

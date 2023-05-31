@@ -1,5 +1,5 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use anyhow::Context;
 use ethers::{
     prelude::{BlockNumber, U64},

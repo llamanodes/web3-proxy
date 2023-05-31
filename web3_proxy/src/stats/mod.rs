@@ -7,8 +7,8 @@ mod stat_buffer;
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 
 use crate::app::RpcSecretKeyCache;
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
 use axum::headers::Origin;

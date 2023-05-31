@@ -1,4 +1,4 @@
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::relational_db::{DatabaseConnection, DatabaseReplica};
 use crate::{app::Web3ProxyApp, user_token::UserBearerToken};
 use anyhow::Context;

@@ -1,8 +1,8 @@
 //! Websocket-specific functions for the Web3ProxyApp
 
 use super::Web3ProxyApp;
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMethod};
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::response_cache::JsonRpcResponseEnum;

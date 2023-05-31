@@ -1,8 +1,8 @@
 //! Utilities for authorization of logged in and anonymous users.
 
-use super::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{AuthorizationChecks, Web3ProxyApp, APP_USER_AGENT};
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};

@@ -1,10 +1,10 @@
 //! Handle admin helper logic
 
 use super::authorization::login_is_authorized;
-use super::errors::Web3ProxyResponse;
 use crate::admin_queries::query_admin_modify_usertier;
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyErrorContext};
+use crate::errors::Web3ProxyResponse;
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::user_token::UserBearerToken;
 use crate::PostLogin;
 use anyhow::Context;

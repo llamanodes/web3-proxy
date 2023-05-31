@@ -1,6 +1,6 @@
 //! Handle registration, logins, and managing account data.
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::Web3ProxyResponse;
+use crate::errors::Web3ProxyResponse;
 use crate::referral_code::ReferralCode;
 use anyhow::Context;
 use axum::{

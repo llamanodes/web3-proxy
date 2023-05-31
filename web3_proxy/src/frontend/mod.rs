@@ -1,11 +1,10 @@
 //! `frontend` contains HTTP and websocket endpoints for use by a website or web3 wallet.
 //!
 //! Important reading about axum extractors: <https://docs.rs/axum/latest/axum/extract/index.html#the-order-of-extractors>
-
+// TODO: these are only public so docs are generated. What's a better way to do this?
 pub mod admin;
 pub mod authorization;
 pub mod errors;
-// TODO: these are only public so docs are generated. What's a better way to do this?
 pub mod rpc_proxy_http;
 pub mod rpc_proxy_ws;
 pub mod status;
@@ -28,7 +27,7 @@ use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
-use self::errors::Web3ProxyResult;
+use crate::errors::Web3ProxyResult;
 
 /// simple keys for caching responses
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, EnumCount, EnumIter)]

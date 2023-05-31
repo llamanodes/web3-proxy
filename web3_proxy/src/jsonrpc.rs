@@ -1,4 +1,4 @@
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::response_cache::JsonRpcResponseEnum;
 use derive_more::From;
 use ethers::prelude::ProviderError;
