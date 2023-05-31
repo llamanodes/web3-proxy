@@ -190,11 +190,11 @@ pub async fn serve(
             get(users::referral::user_referral_link_get),
         )
         .route(
-            "/user/referral/stats/used",
+            "/user/referral/stats/used-codes",
             get(users::referral::user_used_referral_stats),
         )
         .route(
-            "/user/referral/stats/shared",
+            "/user/referral/stats/shared-codes",
             get(users::referral::user_shared_referral_stats),
         )
         .route("/user/revert_logs", get(users::stats::user_revert_logs_get))

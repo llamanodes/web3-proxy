@@ -107,7 +107,7 @@ pub async fn user_used_referral_stats(
 
     let mut out: Vec<Info> = Vec::new();
     for x in referrals.into_iter() {
-        let (referral_record, referrer_record) = (x.0, x.1.unwrap());
+        let (referral_record, referrer_record) = (x.0, x.1.context("each referral entity should have a referral code associated with it, but this is not the case!")?);
         // The foreign key is never optional
         let referring_user = user::Entity::find_by_id(referrer_record.user_id)
             .one(db_replica.as_ref())
@@ -171,13 +171,12 @@ pub async fn user_shared_referral_stats(
         credits_applied_for_referee: bool,
         credits_applied_for_referrer: Decimal, // Probably make this a float instead (approximate anyways)
         referral_start_date: DateTime,
-        referred_address: String, // Address of the referrer
     };
 
     let mut out: Vec<Info> = Vec::new();
     let mut used_referral_code = "".to_owned(); // This is only for safety purposes, because of the condition above we always know that there is at least one record
     for x in referrals.into_iter() {
-        let (referrer, referral_record) = (x.0, x.1.unwrap());
+        let (referrer, referral_record) = (x.0, x.1.context("each referral code should have a referee associated with it (that's what we query), but this is not the case!")?);
         used_referral_code = referrer.referral_code;
         // The foreign key is never optional
         let referred_user = user::Entity::find_by_id(referral_record.user_id)
@@ -188,7 +187,6 @@ pub async fn user_shared_referral_stats(
             credits_applied_for_referee: referral_record.credits_applied_for_referee,
             credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
             referral_start_date: referral_record.referral_start_date,
-            referred_address: format!("{:?}", Address::from_slice(referred_user.address.as_ref())),
         };
         // Start inserting json's into this
         out.push(tmp);
