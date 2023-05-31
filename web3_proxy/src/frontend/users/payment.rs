@@ -26,9 +26,11 @@ use migration::sea_orm::QueryFilter;
 use serde_json::json;
 use std::sync::Arc;
 
+// TODO: do this in a build.rs so that the editor autocomplete and docs are better
 abigen!(
     IERC20,
     r#"[
+        decimals() -> uint256
         event Transfer(address indexed from, address indexed to, uint256 value)
         event Approval(address indexed owner, address indexed spender, uint256 value)
     ]"#,
@@ -165,15 +167,22 @@ pub async fn user_balance_post(
         return Ok(response);
     }
 
-    // Iterate through all logs, and add them to the transaction list if there is any
-    // Address will be hardcoded in the config
-    let transaction_receipt: TransactionReceipt = app
+    // get the transaction receipt
+    let transaction_receipt: Option<TransactionReceipt> = app
         .internal_request("eth_getTransactionReceipt", (tx_hash,))
         .await?;
 
+    let transaction_receipt = if let Some(transaction_receipt) = transaction_receipt {
+        transaction_receipt
+    } else {
+        return Err(Web3ProxyError::BadRequest(
+            format!("transaction receipt not found for {}", tx_hash,).into(),
+        ));
+    };
+
     trace!("Transaction receipt: {:#?}", transaction_receipt);
 
-    // there is no need to check accepted tokens. the smart contract already reverts if the token isn't accepted
+    // TODO: if the transaction doesn't have enough confirmations yet, add it to a queue to try again later
 
     let payment_factory_address = app
         .config
@@ -183,44 +192,48 @@ pub async fn user_balance_post(
     let payment_factory =
         PaymentFactory::new(payment_factory_address, app.internal_provider().clone());
 
-    // TODO: parse the log from the transaction receipt
+    // there is no need to check accepted tokens. the smart contract already reverts if the token isn't accepted
 
-    // let deposit_log = payment_factory.payment_received_filter().topic;
+    // let deposit_log = payment_factory.something?;
 
-    // // // TODO: do a quick check that this transaction contains the required log
+    // // TODO: do a quick check that this transaction contains the required log
     // if !transaction_receipt.logs_bloom.contains_input(deposit_log) {
     //     return Err(Web3ProxyError::BadRequest("no matching logs found".into()));
     // }
 
-    // TODO: get the payment token address
-    // TODO: get the account the payment was received on behalf of (any account could have sent it)
+    // parse the logs from the transaction receipt
+    // there might be multiple logs with the event if the transaction is doing things in bulk
+    // TODO: change the indexes to be unique on (chain, txhash, log_index)
+    for log in transaction_receipt.logs {
+        if log.address != payment_factory_address {
+            continue;
+        }
+        // TODO: check the log topic matches our factory
+        // TODO: check the log send matches our factory
 
-    // TODO: get the decimals for the token
+        let log_index = log
+            .log_index
+            .context("no log_index. transaction must not be confirmed")?;
 
-    // TODO: payment_factory.payment_address_to_account(...).call();
+        // TODO: get the payment token address out of the event
+        let payment_token_address = Address::zero();
 
-    // Go through all logs, this should prob capture it,
-    // At least according to this SE logs are just concatenations of the underlying types (like a struct..)
-    // https://ethereum.stackexchange.com/questions/87653/how-to-decode-log-event-of-my-transaction-log
+        // TODO: get the payment token amount out of the event (wei = the integer unit)
+        let payment_token_wei = U256::zero();
 
-    todo!("refactor this to use new helpers");
+        let payment_token = IERC20::new(payment_token_address, app.internal_provider().clone());
 
+        // TODO: get the account the payment was received on behalf of (any account could have sent it)
+        let on_behalf_of_address = Address::zero();
+
+        // get the decimals for the token
+        let payment_token_decimals = payment_token.decimals().call().await;
+
+        todo!("now what?");
+    }
+
+    todo!("now what?");
     /*
-    let deposit_contract = match app.config.deposit_factory_contract {
-        Some(x) => Ok(x),
-        None => Err(Web3ProxyError::Anyhow(anyhow!(
-            "A deposit_contract must be provided in the config to parse payments"
-        ))),
-    }?;
-    let deposit_topic = match app.config.deposit_topic {
-        Some(x) => Ok(x),
-        None => Err(Web3ProxyError::Anyhow(anyhow!(
-            "A deposit_topic must be provided in the config to parse payments"
-        ))),
-    }?;
-
-    // Make sure there is only a single log within that transaction ...
-    // I don't know how to best cover the case that there might be multiple logs inside
 
     for log in transaction_receipt.logs {
         if log.address != deposit_contract {
