@@ -1,6 +1,6 @@
 //! Handle registration, logins, and managing account data.
 use crate::app::Web3ProxyApp;
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse};
+use crate::errors::Web3ProxyResponse;
 use crate::frontend::users::referral;
 use crate::referral_code::ReferralCode;
 use anyhow::Context;
@@ -93,7 +93,7 @@ pub async fn user_used_referral_stats(
     let referrals = referee::Entity::find()
         .filter(referee::Column::UserId.eq(user.id))
         .find_also_related(referrer::Entity)
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await?;
 
     // For each related referral person, find the corresponding user-address
@@ -110,7 +110,7 @@ pub async fn user_used_referral_stats(
         let (referral_record, referrer_record) = (x.0, x.1.unwrap());
         // The foreign key is never optional
         let referring_user = user::Entity::find_by_id(referrer_record.user_id)
-            .one(db_replica.conn())
+            .one(db_replica.as_ref())
             .await?
             .context("Database error, no foreign key found for referring user")?;
         let tmp = Info {
@@ -150,7 +150,7 @@ pub async fn user_shared_referral_stats(
     let referrals = referrer::Entity::find()
         .filter(referrer::Column::UserId.eq(user.id))
         .find_also_related(referee::Entity)
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await?;
 
     // Return early if the user does not have any referred entities
@@ -181,7 +181,7 @@ pub async fn user_shared_referral_stats(
         used_referral_code = referrer.referral_code;
         // The foreign key is never optional
         let referred_user = user::Entity::find_by_id(referral_record.user_id)
-            .one(db_replica.conn())
+            .one(db_replica.as_ref())
             .await?
             .context("Database error, no foreign key found for referring user")?;
         let tmp = Info {
