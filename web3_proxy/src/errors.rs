@@ -3,10 +3,7 @@
 use crate::frontend::authorization::Authorization;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
 use crate::response_cache::JsonRpcResponseEnum;
-
-use std::error::Error;
-use std::{borrow::Cow, net::IpAddr};
-
+use crate::rpcs::provider::EthersHttpProvider;
 use axum::{
     headers,
     http::StatusCode,
@@ -14,14 +11,18 @@ use axum::{
     Json,
 };
 use derive_more::{Display, Error, From};
+use ethers::prelude::ContractError;
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
 use log::{debug, error, info, trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
+use rust_decimal::Error as DecimalError;
 use serde::Serialize;
 use serde_json::value::RawValue;
+use std::error::Error;
+use std::{borrow::Cow, net::IpAddr};
 use tokio::{sync::AcquireError, task::JoinError, time::Instant};
 
 pub type Web3ProxyResult<T> = Result<T, Web3ProxyError>;
@@ -34,6 +35,7 @@ impl From<Web3ProxyError> for Web3ProxyResult<()> {
     }
 }
 
+// TODO: replace all String with `Cow<'static, str>`
 #[derive(Debug, Display, Error, From)]
 pub enum Web3ProxyError {
     AccessDenied,
@@ -46,7 +48,9 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     BadResponse(String),
     BadRouting,
+    Contract(ContractError<EthersHttpProvider>),
     Database(DbErr),
+    Decimal(DecimalError),
     #[display(fmt = "{:#?}, {:#?}", _0, _1)]
     EipVerificationFailed(Box<Web3ProxyError>, Box<Web3ProxyError>),
     EthersHttpClient(ethers::prelude::HttpClientError),
@@ -216,6 +220,28 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: Cow::Borrowed("database error!"),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::Contract(err) => {
+                warn!("Contract Error: {}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("contract error: {}", err)),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::Decimal(err) => {
+                debug!("Decimal Error: {}", err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcErrorData {
+                        message: Cow::Owned(format!("decimal error: {}", err)),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
                 )

@@ -937,13 +937,13 @@ impl Web3ProxyApp {
     }
 
     /// this is way more round-a-bout than we want, but it means stats are emitted and caches are used
-    /// request_with_caching
     pub async fn authorized_request<P: JsonRpcParams, R: JsonRpcResultData>(
         self: &Arc<Self>,
         method: &str,
         params: P,
         authorization: Arc<Authorization>,
     ) -> Web3ProxyResult<R> {
+        // TODO: proper ids
         let request = JsonRpcRequest::new(JsonRpcId::Number(1), method.to_string(), json!(params))?;
 
         let (_, response, _) = self.proxy_request(request, authorization, None).await;
