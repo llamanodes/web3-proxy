@@ -485,11 +485,16 @@ impl BufferedRpcQueryStats {
         // This is not atomic, so this may be an issue because it's not sequentially consistent across threads
         // It is a good-enough approximation though, and if the TTL for the balance cache is high enough, this should be ok
         // TODO: Ask about feedback here, prob cache with no modification, and some read-write may be more accurate ...
+        // TODO: We already cal balance above as well, but here we primarily rely on the cache. It's probably fine ...
         let latest_balance = match NonZeroU64::try_from(sender_rpc_entity.user_id) {
-            Ok(x) => user_balance_cache
-                .get(&x)
-                .unwrap_or(Arc::new(RwLock::new(Decimal::default()))),
             Err(_) => Arc::new(RwLock::new(Decimal::default())),
+            Ok(x) => {
+                user_balance_cache
+                    .get_or_insert_async(&x, async move {
+                        Arc::new(RwLock::new(sender_balance.available_balance))
+                    })
+                    .await
+            }
         };
         // Lock it, subtract and max it
         let mut latest_balance = latest_balance.write().await;

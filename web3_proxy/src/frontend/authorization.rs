@@ -7,7 +7,7 @@ use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
 use crate::user_token::UserBearerToken;
-use anyhow::Context;
+use anyhow::{Context, Error};
 use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
@@ -284,7 +284,7 @@ pub struct RequestMetadata {
     /// Cancel-safe channel for sending stats to the buffer
     pub stat_sender: Option<flume::Sender<AppStat>>,
 
-    /// Last balance
+    /// Latest balance
     pub latest_balance: Arc<RwLock<Decimal>>,
 }
 
@@ -438,11 +438,19 @@ impl RequestMetadata {
             }
         }
 
-        // Fetch the balance from the cache
-        let latest_balance = match NonZeroU64::try_from(authorization.checks.user_id) {
-            Err(_) => Arc::new(RwLock::new(Decimal::default())),
-            Ok(x) => app.user_balance_cache.get(&x).unwrap_or_default(),
+        // Get latest balance from cache
+        let latest_balance = match app
+            .balance_checks(authorization.checks.user_id)
+            .await
+            .context("Could not retrieve balance from database or cache!")
+        {
+            Ok(x) => x,
+            Err(err) => {
+                error!("{}", err);
+                Arc::new(RwLock::new(Decimal::default()))
+            }
         };
+
         let x = Self {
             archive_request: false.into(),
             backend_requests: Default::default(),
@@ -1261,7 +1269,7 @@ impl Web3ProxyApp {
 
                         // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
                         // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
-                        if user_tier_model.title == "Premium" && balance < Decimal::from(1, 1) {
+                        if user_tier_model.title == "Premium" && balance < Decimal::new(1, 1) {
                             // Find the equivalent downgraded user tier, and modify limits from there
                             if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
                                 user_tier_model =
