@@ -38,6 +38,7 @@ impl From<Web3ProxyError> for Web3ProxyResult<()> {
 // TODO: replace all String with `Cow<'static, str>`
 #[derive(Debug, Display, Error, From)]
 pub enum Web3ProxyError {
+    Abi(ethers::abi::Error),
     AccessDenied,
     #[error(ignore)]
     Anyhow(anyhow::Error),
@@ -155,6 +156,17 @@ impl Web3ProxyError {
     pub fn into_response_parts<R: Serialize>(self) -> (StatusCode, JsonRpcResponseEnum<R>) {
         // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
+            Self::Abi(err) => {
+                warn!("abi error={:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: Cow::Owned(err.to_string()),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
             Self::AccessDenied => {
                 // TODO: attach something to this trace. probably don't include much in the message though. don't want to leak creds by accident
                 trace!("access denied");
