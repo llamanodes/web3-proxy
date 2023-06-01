@@ -349,6 +349,11 @@ impl BufferedRpcQueryStats {
         };
 
         // (1) Do some general bookkeeping on the user
+        if self.sum_credits_used == 0 {
+            // return early because theres no need to touch the balance table
+            return Ok(());
+        }
+
         let sender_balance = match balance::Entity::find()
             .filter(balance::Column::UserId.eq(sender_user_id))
             .one(db_conn)
