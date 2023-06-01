@@ -1,8 +1,6 @@
 use crate::app::Web3ProxyApp;
-use crate::frontend::authorization::Authorization as InternalAuthorization;
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResponse};
-use crate::rpcs::request::OpenRequestResult;
-use anyhow::{anyhow, Context};
+use crate::errors::{Web3ProxyError, Web3ProxyResponse};
+use anyhow::Context;
 use axum::{
     extract::Path,
     headers::{authorization::Bearer, Authorization},
@@ -11,20 +9,20 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use entities::{balance, increase_on_chain_balance_receipt, user};
+use ethbloom::Input as BloomInput;
 use ethers::abi::{AbiEncode, ParamType};
-use ethers::types::{Address, TransactionReceipt, H256, U256};
-use ethers::utils::keccak256;
+use ethers::types::{Address, TransactionReceipt, ValueOrArray, H256, U256};
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{debug, info, trace, warn, Level};
+use log::{debug, info, trace};
 use migration::sea_orm::prelude::Decimal;
-use migration::sea_orm::ActiveModelTrait;
-use migration::sea_orm::ColumnTrait;
-use migration::sea_orm::EntityTrait;
-use migration::sea_orm::QueryFilter;
-use migration::sea_orm::QuerySelect;
-use migration::sea_orm::TransactionTrait;
-use migration::{sea_orm, Expr, LockType, OnConflict};
+use migration::sea_orm::{
+    self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+};
+use migration::{Expr, OnConflict};
+use num_traits::Pow;
+use payment_contracts::ierc20::IERC20;
+use payment_contracts::payment_factory::{self, PaymentFactory};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -45,20 +43,16 @@ pub async fn user_balance_get(
     let db_replica = app.db_replica().context("Getting database connection")?;
 
     // Just return the balance for the user
-    let user_balance = match balance::Entity::find()
+    let user_balance = balance::Entity::find()
         .filter(balance::Column::UserId.eq(_user.id))
-        .one(db_replica.conn())
+        .one(db_replica.as_ref())
         .await?
-    {
-        Some(x) => x.available_balance,
-        None => Decimal::from(0), // That means the user has no balance as of yet
-                                  // (user exists, but balance entry does not exist)
-                                  // In that case add this guy here
-                                  // Err(FrontendErrorResponse::BadRequest("User not found!"))
-    };
+        .map(|x| x.available_balance)
+        .unwrap_or_default();
 
-    let mut response = HashMap::new();
-    response.insert("balance", json!(user_balance));
+    let response = json!({
+        "balance": user_balance,
+    });
 
     // TODO: Gotta create a new table for the spend part
     Ok(Json(response).into_response())
@@ -79,7 +73,7 @@ pub async fn user_deposits_get(
     // Filter by user ...
     let receipts = increase_on_chain_balance_receipt::Entity::find()
         .filter(increase_on_chain_balance_receipt::Column::DepositToUserId.eq(user.id))
-        .all(db_replica.conn())
+        .all(db_replica.as_ref())
         .await?;
 
     // Return the response, all except the user ...
@@ -90,7 +84,8 @@ pub async fn user_deposits_get(
             let mut out = HashMap::new();
             out.insert("amount", serde_json::Value::String(x.amount.to_string()));
             out.insert("chain_id", serde_json::Value::Number(x.chain_id.into()));
-            out.insert("tx_hash", serde_json::Value::String(x.tx_hash.encode_hex()));
+            out.insert("tx_hash", serde_json::Value::String(x.tx_hash));
+            // TODO: log_index
             out
         })
         .collect::<Vec<_>>();
@@ -114,346 +109,194 @@ pub async fn user_balance_post(
     Path(mut params): Path<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // I suppose this is ok / good, so people don't spam this endpoint as it is not "cheap"
-    // Check that the user is logged-in and authorized. We don't need a semaphore here btw
+    // Check that the user is logged-in and authorized
+    // The semaphore keeps a user from submitting tons of transactions in parallel which would DOS our backends
     let (_, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     // Get the transaction hash, and the amount that the user wants to top up by.
     // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
     let tx_hash: H256 = params
         .remove("tx_hash")
-        // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
-            "You have not provided the tx_hash in which you paid in".to_string(),
+            "You have not provided a tx_hash".into(),
         ))?
         .parse()
-        .context("unable to parse tx_hash")?;
+        .map_err(|err| {
+            Web3ProxyError::BadRequest(format!("unable to parse tx_hash: {}", err).into())
+        })?;
 
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
 
-    // Return straight false if the tx was already added ...
-    let receipt = increase_on_chain_balance_receipt::Entity::find()
+    // Return early if the tx was already added
+    if increase_on_chain_balance_receipt::Entity::find()
         .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
         .one(&db_conn)
-        .await?;
-    if receipt.is_some() {
-        return Err(Web3ProxyError::BadRequest(
-            "The transaction you provided has already been accounted for!".to_string(),
-        ));
-    }
-    debug!("Receipt: {:?}", receipt);
-
-    // Iterate through all logs, and add them to the transaction list if there is any
-    // Address will be hardcoded in the config
-    let authorization = Arc::new(InternalAuthorization::internal(None).unwrap());
-
-    // Just make an rpc request, idk if i need to call this super extensive code
-    let transaction_receipt: TransactionReceipt = match app
-        .balanced_rpcs
-        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None, None)
-        .await
+        .await?
+        .is_some()
     {
-        Ok(OpenRequestResult::Handle(handle)) => {
-            debug!("Params are: {:?}", &vec![tx_hash.encode_hex()]);
-            handle
-                .request(
-                    "eth_getTransactionReceipt",
-                    &vec![tx_hash.encode_hex()],
-                    Level::Trace.into(),
-                )
-                .await
-                // TODO: What kind of error would be here
-                .map_err(|err| Web3ProxyError::Anyhow(err.into()))
-        }
-        Ok(_) => {
-            // TODO: @Brllan Is this the right error message?
-            Err(Web3ProxyError::NoHandleReady)
-        }
-        Err(err) => {
-            log::trace!(
-                "cancelled funneling transaction {} from: {:?}",
-                tx_hash.encode_hex(),
-                err,
-            );
-            Err(err)
-        }
-    }?;
-    debug!("Transaction receipt is: {:?}", transaction_receipt);
-    let accepted_token: Address = match app
-        .balanced_rpcs
-        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None, None)
-        .await
-    {
-        Ok(OpenRequestResult::Handle(handle)) => {
-            let mut accepted_tokens_request_object: serde_json::Map<String, serde_json::Value> =
-                serde_json::Map::new();
-            // We want to send a request to the contract
-            accepted_tokens_request_object.insert(
-                "to".to_owned(),
-                serde_json::Value::String(format!(
-                    "{:?}",
-                    app.config.deposit_factory_contract.clone()
-                )),
-            );
-            // We then want to include the function that we want to call
-            accepted_tokens_request_object.insert(
-                "data".to_owned(),
-                serde_json::Value::String(
-                    keccak256("get_approved_tokens()".to_owned().into_bytes()).encode_hex(),
-                ),
-                // hex::encode(
-            );
-            let params = serde_json::Value::Array(vec![
-                serde_json::Value::Object(accepted_tokens_request_object),
-                serde_json::Value::String("latest".to_owned()),
-            ]);
-            debug!("Params are: {:?}", &params);
-            let accepted_token: String = handle
-                .request("eth_call", &params, Level::Trace.into())
-                .await
-                // TODO: What kind of error would be here
-                .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
-            // Read the last
-            debug!("Accepted token response is: {:?}", accepted_token);
-            accepted_token[accepted_token.len() - 40..]
-                .parse::<Address>()
-                .map_err(|err| Web3ProxyError::Anyhow(err.into()))
-        }
-        Ok(_) => {
-            // TODO: @Brllan Is this the right error message?
-            Err(Web3ProxyError::NoHandleReady)
-        }
-        Err(err) => {
-            log::trace!(
-                "cancelled funneling transaction {} from: {:?}",
-                tx_hash.encode_hex(),
-                err,
-            );
-            Err(err)
-        }
-    }?;
-    debug!("Accepted token is: {:?}", accepted_token);
-    let decimals: u32 = match app
-        .balanced_rpcs
-        .wait_for_best_rpc(&authorization, None, &mut vec![], None, None, None)
-        .await
-    {
-        Ok(OpenRequestResult::Handle(handle)) => {
-            // Now get decimals points of the stablecoin
-            let mut token_decimals_request_object: serde_json::Map<String, serde_json::Value> =
-                serde_json::Map::new();
-            token_decimals_request_object.insert(
-                "to".to_owned(),
-                serde_json::Value::String(accepted_token.encode_hex()),
-            );
-            token_decimals_request_object.insert(
-                "data".to_owned(),
-                serde_json::Value::String(
-                    keccak256("decimals()".to_owned().into_bytes()).encode_hex(),
-                ),
-            );
-            let params = serde_json::Value::Array(vec![
-                serde_json::Value::Object(token_decimals_request_object),
-                serde_json::Value::String("latest".to_owned()),
-            ]);
-            debug!("ERC20 Decimal request params are: {:?}", &params);
-            let decimals: String = handle
-                .request("eth_call", &params, Level::Trace.into())
-                .await
-                .map_err(|err| Web3ProxyError::Anyhow(err.into()))?;
-            debug!("Decimals response is: {:?}", decimals);
-            u32::from_str_radix(&decimals[2..], 16)
-                .map_err(|err| Web3ProxyError::Anyhow(err.into()))
-        }
-        Ok(_) => {
-            // TODO: @Brllan Is this the right error message?
-            Err(Web3ProxyError::NoHandleReady)
-        }
-        Err(err) => {
-            log::trace!(
-                "cancelled funneling transaction {} from: {:?}",
-                tx_hash.encode_hex(),
-                err,
-            );
-            Err(err)
-        }
-    }?;
-    debug!("Decimals are: {:?}", decimals);
-    debug!("Tx receipt: {:?}", transaction_receipt);
+        // TODO: double check that the transaction is still seen as "confirmed" if it is NOT, we need to remove credits!
 
-    // Go through all logs, this should prob capture it,
-    // At least according to this SE logs are just concatenations of the underlying types (like a struct..)
-    // https://ethereum.stackexchange.com/questions/87653/how-to-decode-log-event-of-my-transaction-log
+        // this will be status code 200, not 204
+        let response = Json(json!({
+            "result": "success",
+            "message": "this transaction was already in the database",
+        }))
+        .into_response();
 
-    let deposit_contract = match app.config.deposit_factory_contract {
-        Some(x) => Ok(x),
-        None => Err(Web3ProxyError::Anyhow(anyhow!(
-            "A deposit_contract must be provided in the config to parse payments"
-        ))),
-    }?;
-    let deposit_topic = match app.config.deposit_topic {
-        Some(x) => Ok(x),
-        None => Err(Web3ProxyError::Anyhow(anyhow!(
-            "A deposit_topic must be provided in the config to parse payments"
-        ))),
-    }?;
-
-    // Make sure there is only a single log within that transaction ...
-    // I don't know how to best cover the case that there might be multiple logs inside
-
-    for log in transaction_receipt.logs {
-        if log.address != deposit_contract {
-            debug!(
-                "Out: Log is not relevant, as it is not directed to the deposit contract {:?} {:?}",
-                format!("{:?}", log.address),
-                deposit_contract
-            );
-            continue;
-        }
-
-        // Get the topics out
-        let topic: H256 = log.topics.get(0).unwrap().to_owned();
-        if topic != deposit_topic {
-            debug!(
-                "Out: Topic is not relevant: {:?} {:?}",
-                topic, deposit_topic
-            );
-            continue;
-        }
-
-        // TODO: Will this work? Depends how logs are encoded
-        let (recipient_account, token, amount): (Address, Address, U256) = match ethers::abi::decode(
-            &[
-                ParamType::Address,
-                ParamType::Address,
-                ParamType::Uint(256usize),
-            ],
-            &log.data,
-        ) {
-            Ok(tpl) => (
-                tpl.get(0)
-                    .unwrap()
-                    .clone()
-                    .into_address()
-                    .context("Could not decode recipient")?,
-                tpl.get(1)
-                    .unwrap()
-                    .clone()
-                    .into_address()
-                    .context("Could not decode token")?,
-                tpl.get(2)
-                    .unwrap()
-                    .clone()
-                    .into_uint()
-                    .context("Could not decode amount")?,
-            ),
-            Err(err) => {
-                warn!("Out: Could not decode! {:?}", err);
-                continue;
-            }
-        };
-
-        // return early if amount is 0
-        if amount == U256::from(0) {
-            warn!(
-                "Out: Found log has amount = 0 {:?}. This should never be the case according to the smart contract",
-                amount
-            );
-            continue;
-        }
-
-        // Skip if no accepted token. Right now we only accept a single stablecoin as input
-        if token != accepted_token {
-            warn!(
-                "Out: Token is not accepted: {:?} != {:?}",
-                token, accepted_token
-            );
-            continue;
-        }
-
-        info!(
-            "Found deposit transaction for: {:?} {:?} {:?}",
-            recipient_account, token, amount
-        );
-
-        // Create a new transaction that will be used for joint transaction
-        let txn = db_conn.begin().await?;
-
-        // We must (1) lock the user and (2) lock the balance
-        // Both balance and lock must be present
-        // no need to do OnConflict with this functionality
-        // Encoding is inefficient, revisit later
-        let recipient = match user::Entity::find()
-            .filter(user::Column::Address.eq(&recipient_account.encode()[12..]))
-            .one(&txn)
-            .await?
-        {
-            Some(x) => Ok(x),
-            None => Err(Web3ProxyError::BadRequest(
-                "The user must have signed up first. They are currently not signed up!".to_string(),
-            )),
-        }?;
-
-        // For now we only accept stablecoins
-        // And we hardcode the peg (later we would have to depeg this, for example
-        // 1$ = Decimal(1) for any stablecoin
-        // TODO: Let's assume that people don't buy too much at _once_, we do support >$1M which should be fine for now
-        debug!("Arithmetic is: {:?} {:?}", amount, decimals);
-        debug!(
-            "Decimals arithmetic is: {:?} {:?}",
-            Decimal::from(amount.as_u128()),
-            Decimal::from(10_u64.pow(decimals))
-        );
-        let mut amount = Decimal::from(amount.as_u128());
-        let _ = amount.set_scale(decimals);
-        debug!("Amount is: {:?}", amount);
-
-        // Modify the users balance in the database
-        let user_balance = balance::ActiveModel {
-            id: sea_orm::NotSet,
-            available_balance: sea_orm::Set(amount),
-            used_balance: sea_orm::Set(Decimal::new(0, 0)),
-            user_id: sea_orm::Set(recipient.id),
-        };
-
-        balance::Entity::insert(user_balance)
-            .on_conflict(
-                OnConflict::new()
-                    .values([(
-                        balance::Column::AvailableBalance,
-                        Expr::col(balance::Column::AvailableBalance).add(amount),
-                    )])
-                    .to_owned(),
-            )
-            .exec(&txn)
-            .await?;
-
-        trace!("Setting tx_hash: {:?}", tx_hash);
-        let receipt = increase_on_chain_balance_receipt::ActiveModel {
-            tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
-            chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
-            amount: sea_orm::ActiveValue::Set(amount),
-            deposit_to_user_id: sea_orm::ActiveValue::Set(recipient.id),
-            ..Default::default()
-        };
-
-        receipt.save(&txn).await?;
-        txn.commit().await?;
-        debug!("Saved to db");
-
-        let response = (
-            StatusCode::CREATED,
-            Json(json!({
-                "tx_hash": tx_hash,
-                "amount": amount
-            })),
-        )
-            .into_response();
-
-        // Return early if the log was added, assume there is at most one valid log per transaction
         return Ok(response);
+    };
+
+    // get the transaction receipt
+    let transaction_receipt = app
+        .internal_request::<_, Option<TransactionReceipt>>("eth_getTransactionReceipt", (tx_hash,))
+        .await?
+        .ok_or(Web3ProxyError::BadRequest(
+            format!("transaction receipt not found for {}", tx_hash,).into(),
+        ))?;
+
+    trace!("Transaction receipt: {:#?}", transaction_receipt);
+
+    // TODO: if the transaction doesn't have enough confirmations yet, add it to a queue to try again later
+
+    let payment_factory_address = app
+        .config
+        .deposit_factory_contract
+        .context("A deposit_contract must be provided in the config to parse payments")?;
+
+    let payment_factory_contract =
+        PaymentFactory::new(payment_factory_address, app.internal_provider().clone());
+
+    // check bloom filter to be sure this transaction contains any relevant logs
+    if let Some(ValueOrArray::Value(Some(x))) = payment_factory_contract
+        .payment_received_filter()
+        .filter
+        .topics[0]
+    {
+        let bloom_input = BloomInput::Hash(x.as_fixed_bytes());
+
+        // do a quick check that this transaction contains the required log
+        if !transaction_receipt.logs_bloom.contains_input(bloom_input) {
+            return Err(Web3ProxyError::BadRequest("no matching logs found".into()));
+        }
     }
 
-    Err(Web3ProxyError::BadRequest(
-        "No such transaction was found, or token is not supported!".to_string(),
-    ))
+    // the transaction might contain multiple relevant logs. collect them all
+    let mut response_data = vec![];
+
+    // all or nothing
+    let txn = db_conn.begin().await?;
+
+    // parse the logs from the transaction receipt
+    for log in transaction_receipt.logs {
+        if let Some(true) = log.removed {
+            todo!("delete this transaction from the database");
+        }
+
+        if let Ok(event) = payment_factory_contract
+            .decode_event::<payment_factory::PaymentReceivedFilter>(
+                "PaymentReceived",
+                log.topics,
+                log.data,
+            )
+        {
+            let recipient_account = event.account;
+            let payment_token_address = event.token;
+            let payment_token_wei = event.amount;
+
+            // there is no need to check that payment_token_address is an allowed token
+            // the smart contract already reverts if the token isn't accepted
+
+            // we used to skip here if amount is 0, but that means the txid wouldn't ever show up in the database which could be confusing
+            // its irrelevant though because the contract already reverts for 0 value
+
+            let log_index = log
+                .log_index
+                .context("no log_index. transaction must not be confirmed")?;
+
+            // the internal provider will handle caching of requests
+            let payment_token = IERC20::new(payment_token_address, app.internal_provider().clone());
+
+            // get the decimals for the token
+            // hopefully u32 is always enough, because the Decimal crate doesn't accept a larger scale
+            // <https://eips.ethereum.org/EIPS/eip-20> uses uint8, but i've seen pretty much every int in practice
+            let payment_token_decimals = payment_token.decimals().call().await?.as_u32();
+
+            let decimal_shift = Decimal::from(10).pow(payment_token_decimals as u64);
+
+            let mut payment_token_amount = Decimal::from_str_exact(&payment_token_wei.to_string())?;
+            payment_token_amount.set_scale(payment_token_decimals)?;
+            payment_token_amount /= decimal_shift;
+
+            info!(
+                "Found deposit transaction for: {:?} {:?} {:?}",
+                recipient_account, payment_token_address, payment_token_amount
+            );
+
+            let recipient = match user::Entity::find()
+                .filter(user::Column::Address.eq(recipient_account.encode_hex()))
+                .one(&db_conn)
+                .await?
+            {
+                Some(x) => x,
+                None => todo!("make their account"),
+            };
+
+            // For now we only accept stablecoins
+            // And we hardcode the peg (later we would have to depeg this, for example
+            // 1$ = Decimal(1) for any stablecoin
+            // TODO: Let's assume that people don't buy too much at _once_, we do support >$1M which should be fine for now
+            debug!(
+                "Arithmetic is: {:?} / 10 ^ {:?} = {:?}",
+                payment_token_wei, payment_token_decimals, payment_token_amount
+            );
+
+            // create or update the balance
+            let balance_entry = balance::ActiveModel {
+                id: sea_orm::NotSet,
+                available_balance: sea_orm::Set(payment_token_amount),
+                user_id: sea_orm::Set(recipient.id),
+                ..Default::default()
+            };
+            balance::Entity::insert(balance_entry)
+                .on_conflict(
+                    OnConflict::new()
+                        .values([(
+                            balance::Column::AvailableBalance,
+                            Expr::col(balance::Column::AvailableBalance).add(payment_token_amount),
+                        )])
+                        .to_owned(),
+                )
+                .exec(&txn)
+                .await?;
+
+            debug!("Saving tx_hash: {:?}", tx_hash);
+            let receipt = increase_on_chain_balance_receipt::ActiveModel {
+                tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
+                chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
+                // TODO: need a migration that adds log_index
+                // TODO: need a migration that adds payment_token_address. will be useful for stats
+                amount: sea_orm::ActiveValue::Set(payment_token_amount),
+                deposit_to_user_id: sea_orm::ActiveValue::Set(recipient.id),
+                ..Default::default()
+            };
+
+            receipt.save(&txn).await?;
+
+            let x = json!({
+                "tx_hash": tx_hash,
+                "log_index": log_index,
+                "token": payment_token_address,
+                "amount": payment_token_amount,
+            });
+
+            response_data.push(x);
+        }
+    }
+
+    txn.commit().await?;
+    debug!("Saved to db");
+
+    let response = (StatusCode::CREATED, Json(json!(response_data))).into_response();
+
+    Ok(response)
 }

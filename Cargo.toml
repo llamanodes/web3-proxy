@@ -4,6 +4,7 @@ members = [
   "entities",
   "latency",
   "migration",
+  "payment-contracts",
   "quick_cache_ttl",
   "rate-counter",
   "redis-rate-limiter",

@@ -34,8 +34,9 @@ use std::{
 use tokio::runtime;
 use web3_proxy::pagerduty::panic_handler;
 use web3_proxy::{
-    app::{get_db, get_migrated_db, APP_USER_AGENT},
+    app::APP_USER_AGENT,
     config::TopConfig,
+    relational_db::{get_db, get_migrated_db},
 };
 
 #[cfg(feature = "mimalloc")]

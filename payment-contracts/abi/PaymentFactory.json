@@ -1,0 +1,477 @@
+[
+    {
+        "name": "NewPaymentAddress",
+        "inputs": [
+            {
+                "name": "account",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "payment_address",
+                "type": "address",
+                "indexed": false
+            }
+        ],
+        "anonymous": false,
+        "type": "event"
+    },
+    {
+        "name": "PaymentReceived",
+        "inputs": [
+            {
+                "name": "account",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "token",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "amount",
+                "type": "uint256",
+                "indexed": false
+            }
+        ],
+        "anonymous": false,
+        "type": "event"
+    },
+    {
+        "name": "NewOwnerCommitted",
+        "inputs": [
+            {
+                "name": "owner",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "new_owner",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "finalize_time",
+                "type": "uint256",
+                "indexed": false
+            }
+        ],
+        "anonymous": false,
+        "type": "event"
+    },
+    {
+        "name": "NewOwnerAccepted",
+        "inputs": [
+            {
+                "name": "old_owner",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "owner",
+                "type": "address",
+                "indexed": false
+            }
+        ],
+        "anonymous": false,
+        "type": "event"
+    },
+    {
+        "name": "NewSweeperCommitted",
+        "inputs": [
+            {
+                "name": "sweeper",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "new_sweeper",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "finalize_time",
+                "type": "uint256",
+                "indexed": false
+            }
+        ],
+        "anonymous": false,
+        "type": "event"
+    },
+    {
+        "name": "NewSweeperSet",
+        "inputs": [
+            {
+                "name": "old_sweeper",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "sweeper",
+                "type": "address",
+                "indexed": false
+            }
+        ],
+        "anonymous": false,
+        "type": "event"
+    },
+    {
+        "name": "NewReceiverCommitted",
+        "inputs": [
+            {
+                "name": "receiver",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "new_receiver",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "finalize_time",
+                "type": "uint256",
+                "indexed": false
+            }
+        ],
+        "anonymous": false,
+        "type": "event"
+    },
+    {
+        "name": "NewReceiverSet",
+        "inputs": [
+            {
+                "name": "old_receiver",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "receiver",
+                "type": "address",
+                "indexed": false
+            }
+        ],
+        "anonymous": false,
+        "type": "event"
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "constructor",
+        "inputs": [
+            {
+                "name": "_owner",
+                "type": "address"
+            },
+            {
+                "name": "_receiver",
+                "type": "address"
+            },
+            {
+                "name": "_sweeper",
+                "type": "address"
+            },
+            {
+                "name": "_proxy",
+                "type": "address"
+            }
+        ],
+        "outputs": []
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "get_approved_tokens",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address[]"
+            }
+        ]
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "function",
+        "name": "payment_received",
+        "inputs": [
+            {
+                "name": "_token",
+                "type": "address"
+            },
+            {
+                "name": "_amount",
+                "type": "uint256"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "",
+                "type": "bool"
+            }
+        ]
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "function",
+        "name": "create_payment_address",
+        "inputs": [],
+        "outputs": []
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "function",
+        "name": "create_payment_address",
+        "inputs": [
+            {
+                "name": "_account",
+                "type": "address"
+            }
+        ],
+        "outputs": []
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "function",
+        "name": "set_token_approvals",
+        "inputs": [
+            {
+                "name": "_tokens",
+                "type": "address[]"
+            },
+            {
+                "name": "_approved",
+                "type": "bool"
+            }
+        ],
+        "outputs": []
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "function",
+        "name": "commit_new_sweeper_implementation",
+        "inputs": [
+            {
+                "name": "_sweeper",
+                "type": "address"
+            }
+        ],
+        "outputs": []
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "function",
+        "name": "finalize_new_sweeper_implementation",
+        "inputs": [],
+        "outputs": []
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "function",
+        "name": "commit_new_receiver",
+        "inputs": [
+            {
+                "name": "_receiver",
+                "type": "address"
+            }
+        ],
+        "outputs": []
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "function",
+        "name": "finalize_new_receiver",
+        "inputs": [],
+        "outputs": []
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "function",
+        "name": "commit_transfer_ownership",
+        "inputs": [
+            {
+                "name": "_new_owner",
+                "type": "address"
+            }
+        ],
+        "outputs": []
+    },
+    {
+        "stateMutability": "nonpayable",
+        "type": "function",
+        "name": "accept_transfer_ownership",
+        "inputs": [],
+        "outputs": []
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "PROXY_IMPLEMENTATION",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "sweeper_implementation",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "future_sweeper_implementation",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "owner",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "future_owner",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "receiver",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "future_receiver",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "transfer_ownership_timestamp",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "new_sweeper_timestamp",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "new_receiver_timestamp",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "is_approved_token",
+        "inputs": [
+            {
+                "name": "arg0",
+                "type": "address"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "",
+                "type": "bool"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "account_to_payment_address",
+        "inputs": [
+            {
+                "name": "arg0",
+                "type": "address"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address"
+            }
+        ]
+    },
+    {
+        "stateMutability": "view",
+        "type": "function",
+        "name": "payment_address_to_account",
+        "inputs": [
+            {
+                "name": "arg0",
+                "type": "address"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address"
+            }
+        ]
+    }
+]

@@ -1,8 +1,8 @@
 use super::StatType;
-use crate::frontend::errors::Web3ProxyErrorContext;
+use crate::errors::Web3ProxyErrorContext;
 use crate::{
     app::Web3ProxyApp,
-    frontend::errors::{Web3ProxyError, Web3ProxyResponse},
+    errors::{Web3ProxyError, Web3ProxyResponse},
     http_params::{
         get_chain_id_from_params, get_query_start_from_params, get_query_stop_from_params,
         get_query_window_seconds_from_params,
@@ -33,18 +33,18 @@ pub async fn query_user_stats<'a>(
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
-    let user_id = match bearer {
-        Some(inner_bearer) => {
-            let (user, _semaphore) = app.bearer_is_authorized(inner_bearer.0 .0).await?;
-            user.id
+    let (user_id, _semaphore) = match bearer {
+        Some(TypedHeader(Authorization(bearer))) => {
+            let (user, semaphore) = app.bearer_is_authorized(bearer).await?;
+            (user.id, Some(semaphore))
         }
-        None => 0,
+        None => (0, None),
     };
 
-    // Return an error if the bearer is set, but the StatType is Detailed
+    // Return an error if the bearer is **not** set, but the StatType is Detailed
     if stat_response_type == StatType::Detailed && user_id == 0 {
         return Err(Web3ProxyError::BadRequest(
-            "Detailed Stats Response requires you to authorize with a bearer token".to_owned(),
+            "Detailed Stats Response requires you to authorize with a bearer token".into(),
         ));
     }
 
@@ -66,8 +66,7 @@ pub async fn query_user_stats<'a>(
     // Return a bad request if query_start == query_stop, because then the query is empty basically
     if query_start == query_stop {
         return Err(Web3ProxyError::BadRequest(
-            "Start and Stop date cannot be equal. Please specify a (different) start date."
-                .to_owned(),
+            "Start and Stop date cannot be equal. Please specify a (different) start date.".into(),
         ));
     }
 
@@ -86,7 +85,7 @@ pub async fn query_user_stats<'a>(
         // Fetch all rpc_secret_key_ids, and filter for these
         let mut user_rpc_keys = rpc_key::Entity::find()
             .filter(rpc_key::Column::UserId.eq(user_id))
-            .all(db_replica.conn())
+            .all(db_replica.as_ref())
             .await
             .web3_context("failed loading user's key")?
             .into_iter()
@@ -102,7 +101,7 @@ pub async fn query_user_stats<'a>(
         let mut subuser_rpc_keys = secondary_user::Entity::find()
             .filter(secondary_user::Column::UserId.eq(user_id))
             .find_also_related(rpc_key::Entity)
-            .all(db_replica.conn())
+            .all(db_replica.as_ref())
             // TODO: Do a join with rpc-keys
             .await
             .web3_context("failed loading subuser keys")?
@@ -128,7 +127,7 @@ pub async fn query_user_stats<'a>(
 
         if user_rpc_keys.is_empty() {
             return Err(Web3ProxyError::BadRequest(
-                "User has no secret RPC keys yet".to_string(),
+                "User has no secret RPC keys yet".into(),
             ));
         }
 
@@ -481,7 +480,7 @@ pub async fn query_user_stats<'a>(
     if let Some(rpc_key_id) = params.get("rpc_key_id") {
         let rpc_key_id = rpc_key_id
             .parse::<u64>()
-            .map_err(|_| Web3ProxyError::BadRequest("Unable to parse rpc_key_id".to_string()))?;
+            .map_err(|_| Web3ProxyError::BadRequest("Unable to parse rpc_key_id".into()))?;
         response_body.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
     }
 

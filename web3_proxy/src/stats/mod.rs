@@ -7,8 +7,8 @@ pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 use std::cmp;
 
 use crate::app::RpcSecretKeyCache;
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
-use crate::frontend::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
 use axum::headers::Origin;
@@ -341,8 +341,20 @@ impl BufferedRpcQueryStats {
             .filter(rpc_key::Column::Id.eq(rpc_secret_key_id))
             .one(&txn)
             .await?
+            .context("We previous checked that the id exists, this is likely some race condition, or it just got deleted!")?;
+
+        // (1) Do some general bookkeeping on the user
+        if self.sum_credits_used == 0.into() {
+            // return early because theres no need to touch the balance table
+            return Ok(());
+        }
+
+        let sender_balance = balance::Entity::find()
+            .filter(balance::Column::UserId.eq(sender_rpc_entity.user_id))
+            .one(db_conn)
+            .await?
             .ok_or(Web3ProxyError::BadRequest(
-                "Could not find rpc key in db".to_string(),
+                "Could not find rpc key in db".into(),
             ))?;
 
         // I think one lock here is fine, because only one server has access to the "credits_applied_for_referee" entry
