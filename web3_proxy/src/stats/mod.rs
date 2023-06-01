@@ -349,7 +349,7 @@ impl BufferedRpcQueryStats {
         };
 
         // (1) Do some general bookkeeping on the user
-        if self.sum_credits_used == 0 {
+        if self.sum_credits_used == 0.into() {
             // return early because theres no need to touch the balance table
             return Ok(());
         }
