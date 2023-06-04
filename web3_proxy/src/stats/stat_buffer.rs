@@ -102,9 +102,6 @@ impl StatBuffer {
         let mut db_save_interval =
             interval(Duration::from_secs(self.db_save_interval_seconds as u64));
 
-        // TODO: Somewhere here we should probably be updating the balance of the user
-        // And also update the credits used etc. for the referred user
-
         loop {
             tokio::select! {
                 stat = stat_receiver.recv_async() => {

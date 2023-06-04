@@ -144,7 +144,7 @@ pub async fn user_balance_post(
         .into_response();
 
         return Ok(response);
-    }
+    };
 
     // get the transaction receipt
     let transaction_receipt = app

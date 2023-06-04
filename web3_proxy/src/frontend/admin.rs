@@ -19,7 +19,7 @@ use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::{
     admin, admin_increase_balance_receipt, admin_trail, balance, login, pending_login, rpc_key,
-    user, user_tier,
+    user,
 };
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
@@ -124,7 +124,6 @@ pub async fn admin_increase_balance(
         user_id: sea_orm::Set(user_entry.id),
         ..Default::default()
     };
-
     balance::Entity::insert(balance_entry)
         .on_conflict(
             OnConflict::new()
