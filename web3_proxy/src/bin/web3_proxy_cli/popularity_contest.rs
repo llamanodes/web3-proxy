@@ -130,8 +130,9 @@ impl PopularityContestSubCommand {
             "tier_request_pct",
             "total_pct",
             "head_lag",
-            "head_latency",
-            "request_latency",
+            "head_latency_ms",
+            "peak_latency_ms",
+            "peak_ewma_ms",
         ]);
 
         let total_requests = total_requests as f32;
@@ -163,6 +164,7 @@ impl PopularityContestSubCommand {
                     highest_block - rpc.head_block,
                     format!("{:.3}", rpc.head_latency_ms),
                     format!("{:.3}", rpc.peak_latency_ms),
+                    format!("{:.3}", rpc.peak_ewma_ms),
                 ]);
             }
         }
