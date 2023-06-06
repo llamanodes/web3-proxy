@@ -24,8 +24,9 @@ struct BackendRpcData<'a> {
     // block_data_limit: u64,
     head_block: u64,
     requests: u64,
-    head_latency: f64,
-    request_latency: f64,
+    head_latency_ms: f64,
+    peak_latency_ms: f64,
+    peak_ewma_ms: f64,
 }
 
 impl PopularityContestSubCommand {
@@ -83,13 +84,20 @@ impl PopularityContestSubCommand {
 
             highest_block = highest_block.max(head_block);
 
-            let head_latency = conn.get("head_latency").unwrap().as_f64().unwrap();
+            let head_latency_ms = conn.get("head_latency_ms").unwrap().as_f64().unwrap();
 
-            let request_latency = conn
-                .get("request_latency")
+            let peak_latency_ms = conn
+                .get("peak_latency_ms")
                 .unwrap_or(&serde_json::Value::Null)
                 .as_f64()
                 .unwrap_or_default();
+
+            let peak_ewma_ms = conn
+                .get("peak_ewma_s")
+                .unwrap_or(&serde_json::Value::Null)
+                .as_f64()
+                .unwrap_or_default()
+                * 1000.0;
 
             let rpc_data = BackendRpcData {
                 name,
@@ -98,8 +106,9 @@ impl PopularityContestSubCommand {
                 // block_data_limit,
                 requests,
                 head_block,
-                head_latency,
-                request_latency,
+                head_latency_ms,
+                peak_latency_ms,
+                peak_ewma_ms,
             };
 
             total_requests += rpc_data.requests;
@@ -121,8 +130,9 @@ impl PopularityContestSubCommand {
             "tier_request_pct",
             "total_pct",
             "head_lag",
-            "head_latency",
-            "request_latency",
+            "head_latency_ms",
+            "peak_latency_ms",
+            "peak_ewma_ms",
         ]);
 
         let total_requests = total_requests as f32;
@@ -152,8 +162,9 @@ impl PopularityContestSubCommand {
                     tier_request_pct,
                     total_request_pct,
                     highest_block - rpc.head_block,
-                    format!("{:.3}", rpc.head_latency),
-                    format!("{:.3}", rpc.request_latency),
+                    format!("{:.3}", rpc.head_latency_ms),
+                    format!("{:.3}", rpc.peak_latency_ms),
+                    format!("{:.3}", rpc.peak_ewma_ms),
                 ]);
             }
         }

@@ -7,15 +7,18 @@ use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::response_cache::JsonRpcResponseEnum;
 use crate::rpcs::transactions::TxStatus;
-use axum::extract::ws::Message;
+use axum::extract::ws::{CloseFrame, Message};
+use deferred_rate_limiter::DeferredRateLimitResult;
 use ethers::types::U64;
 use futures::future::AbortHandle;
 use futures::future::Abortable;
 use futures::stream::StreamExt;
-use log::trace;
+use http::StatusCode;
+use log::{error, trace};
 use serde_json::json;
-use std::sync::atomic::{self, AtomicUsize};
+use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
+use tokio::time::Instant;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 
 impl Web3ProxyApp {
@@ -23,7 +26,7 @@ impl Web3ProxyApp {
         self: &'a Arc<Self>,
         authorization: Arc<Authorization>,
         jsonrpc_request: JsonRpcRequest,
-        subscription_count: &'a AtomicUsize,
+        subscription_count: &'a AtomicU64,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
         response_sender: flume::Sender<Message>,
     ) -> Web3ProxyResult<(AbortHandle, JsonRpcForwardedResponse)> {
@@ -40,18 +43,25 @@ impl Web3ProxyApp {
         // TODO: this only needs to be unique per connection. we don't need it globably unique
         // TODO: have a max number of subscriptions per key/ip. have a global max number of subscriptions? how should this be calculated?
         let subscription_id = subscription_count.fetch_add(1, atomic::Ordering::SeqCst);
-        let subscription_id = U64::from(subscription_id as u64);
+        let subscription_id = U64::from(subscription_id);
 
         // save the id so we can use it in the response
         let id = jsonrpc_request.id.clone();
 
+        let subscribe_to = jsonrpc_request
+            .params
+            .get(0)
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| {
+                Web3ProxyError::BadRequest("unable to subscribe using these params".into())
+            })?;
+
         // TODO: calling json! on every request is probably not fast. but we can only match against
         // TODO: i think we need a stricter EthSubscribeRequest type that JsonRpcRequest can turn into
-        if jsonrpc_request.params == json!(["newHeads"]) {
+        if subscribe_to == "newHeads" {
             let head_block_receiver = self.watch_consensus_head_receiver.clone();
             let app = self.clone();
 
-            trace!("newHeads subscription {:?}", subscription_id);
             tokio::spawn(async move {
                 let mut head_block_receiver = Abortable::new(
                     WatchStream::new(head_block_receiver),
@@ -72,6 +82,14 @@ impl Web3ProxyApp {
                         Some(new_head.number()),
                     )
                     .await;
+
+                    if let Some(close_message) = app
+                        .rate_limit_close_websocket(&subscription_request_metadata)
+                        .await
+                    {
+                        let _ = response_sender.send_async(close_message).await;
+                        break;
+                    }
 
                     // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
                     let response_json = json!({
@@ -105,7 +123,7 @@ impl Web3ProxyApp {
 
                 trace!("closed newHeads subscription {:?}", subscription_id);
             });
-        } else if jsonrpc_request.params == json!(["newPendingTransactions"]) {
+        } else if subscribe_to == "newPendingTransactions" {
             let pending_tx_receiver = self.pending_tx_sender.subscribe();
             let app = self.clone();
 
@@ -119,7 +137,6 @@ impl Web3ProxyApp {
                 subscription_id
             );
 
-            // TODO: do something with this handle?
             tokio::spawn(async move {
                 while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
                     let subscription_request_metadata = RequestMetadata::new(
@@ -129,6 +146,14 @@ impl Web3ProxyApp {
                         None,
                     )
                     .await;
+
+                    if let Some(close_message) = app
+                        .rate_limit_close_websocket(&subscription_request_metadata)
+                        .await
+                    {
+                        let _ = response_sender.send_async(close_message).await;
+                        break;
+                    }
 
                     let new_tx = match new_tx_state {
                         TxStatus::Pending(tx) => tx,
@@ -154,7 +179,7 @@ impl Web3ProxyApp {
 
                     subscription_request_metadata.add_response(response_bytes);
 
-                    // TODO: do clients support binary messages?
+                    // TODO: do clients support binary messages? reply with binary if thats what we were sent
                     let response_msg = Message::Text(response_str);
 
                     if response_sender.send_async(response_msg).await.is_err() {
@@ -168,7 +193,7 @@ impl Web3ProxyApp {
                     subscription_id
                 );
             });
-        } else if jsonrpc_request.params == json!(["newPendingFullTransactions"]) {
+        } else if subscribe_to == "newPendingFullTransactions" {
             // TODO: too much copy/pasta with newPendingTransactions
             let pending_tx_receiver = self.pending_tx_sender.subscribe();
             let app = self.clone();
@@ -183,7 +208,6 @@ impl Web3ProxyApp {
                 subscription_id
             );
 
-            // TODO: do something with this handle?
             tokio::spawn(async move {
                 while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
                     let subscription_request_metadata = RequestMetadata::new(
@@ -193,6 +217,14 @@ impl Web3ProxyApp {
                         None,
                     )
                     .await;
+
+                    if let Some(close_message) = app
+                        .rate_limit_close_websocket(&subscription_request_metadata)
+                        .await
+                    {
+                        let _ = response_sender.send_async(close_message).await;
+                        break;
+                    }
 
                     let new_tx = match new_tx_state {
                         TxStatus::Pending(tx) => tx,
@@ -230,7 +262,7 @@ impl Web3ProxyApp {
                     subscription_id
                 );
             });
-        } else if jsonrpc_request.params == json!(["newPendingRawTransactions"]) {
+        } else if subscribe_to == "newPendingRawTransactions" {
             // TODO: too much copy/pasta with newPendingTransactions
             let pending_tx_receiver = self.pending_tx_sender.subscribe();
             let app = self.clone();
@@ -245,7 +277,6 @@ impl Web3ProxyApp {
                 subscription_id
             );
 
-            // TODO: do something with this handle?
             tokio::spawn(async move {
                 while let Some(Ok(new_tx_state)) = pending_tx_receiver.next().await {
                     let subscription_request_metadata = RequestMetadata::new(
@@ -255,6 +286,14 @@ impl Web3ProxyApp {
                         None,
                     )
                     .await;
+
+                    if let Some(close_message) = app
+                        .rate_limit_close_websocket(&subscription_request_metadata)
+                        .await
+                    {
+                        let _ = response_sender.send_async(close_message).await;
+                        break;
+                    }
 
                     let new_tx = match new_tx_state {
                         TxStatus::Pending(tx) => tx,
@@ -310,5 +349,56 @@ impl Web3ProxyApp {
 
         // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?
         Ok((subscription_abort_handle, response))
+    }
+
+    async fn rate_limit_close_websocket(
+        &self,
+        request_metadata: &RequestMetadata,
+    ) -> Option<Message> {
+        if let Some(authorization) = request_metadata.authorization.as_ref() {
+            if authorization.checks.rpc_secret_key_id.is_none() {
+                if let Some(rate_limiter) = &self.frontend_ip_rate_limiter {
+                    match rate_limiter
+                        .throttle(
+                            authorization.ip,
+                            authorization.checks.max_requests_per_period,
+                            1,
+                        )
+                        .await
+                    {
+                        Ok(DeferredRateLimitResult::RetryNever) => {
+                            let close_frame = CloseFrame {
+                            code: StatusCode::TOO_MANY_REQUESTS.as_u16(),
+                            reason:
+                                "rate limited. upgrade to premium for unlimited websocket messages"
+                                    .into(),
+                        };
+
+                            return Some(Message::Close(Some(close_frame)));
+                        }
+                        Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
+                            let retry_at = retry_at.duration_since(Instant::now());
+
+                            let reason = format!("rate limited. upgrade to premium for unlimited websocket messages. retry in {}s", retry_at.as_secs_f32());
+
+                            let close_frame = CloseFrame {
+                                code: StatusCode::TOO_MANY_REQUESTS.as_u16(),
+                                reason: reason.into(),
+                            };
+
+                            return Some(Message::Close(Some(close_frame)));
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            // this an internal error of some kind, not the rate limit being hit
+                            // TODO: i really want axum to do this for us in a single place.
+                            error!("rate limiter is unhappy. allowing ip. err={:?}", err);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 }

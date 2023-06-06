@@ -14,6 +14,7 @@ pub use migration::sea_orm::DatabaseConnection;
 #[derive(Clone, From)]
 pub struct DatabaseReplica(DatabaseConnection);
 
+// TODO: this still doesn't work like i want. I want to be able to do `query.one(&DatabaseReplicate).await?`
 impl AsRef<DatabaseConnection> for DatabaseReplica {
     fn as_ref(&self) -> &DatabaseConnection {
         &self.0

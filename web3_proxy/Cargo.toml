@@ -19,6 +19,7 @@ deferred-rate-limiter = { path = "../deferred-rate-limiter" }
 entities = { path = "../entities" }
 latency = { path = "../latency" }
 migration = { path = "../migration" }
+payment-contracts = { path = "../payment-contracts" }
 quick_cache_ttl = { path = "../quick_cache_ttl" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 thread-fast-rng = { path = "../thread-fast-rng" }
@@ -32,6 +33,7 @@ influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/"}
 # TODO: import chrono from sea-orm so we always have the same version
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 # TODO: rdkafka has a tracing feature
+# TODO: axum has a tracing feature
 
 # TODO: hdrhistogram for automated tiers
 
@@ -47,6 +49,7 @@ console-subscriber = { version = "0.1.9", optional = true }
 counter = "0.5.7"
 derive_more = "0.99.17"
 env_logger = "0.10.0"
+ethbloom = "0.13.0"
 ethers = { version = "2.0.6", default-features = false, features = ["rustls", "ws"] }
 ewma = "0.1.1"
 fdlimit = "0.2.1"
@@ -77,6 +80,7 @@ rdkafka = { version = "0.31.0" }
 regex = "1.8.3"
 reqwest = { version = "0.11.18", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
 rmp-serde = "1.1.1"
+rust_decimal = { version = "1.29.1", features = ["maths"] }
 sentry = { version = "0.31.3", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
 serde = { version = "1.0.163", features = [] }
 serde_json = { version = "1.0.96", default-features = false, features = ["alloc", "raw_value"] }

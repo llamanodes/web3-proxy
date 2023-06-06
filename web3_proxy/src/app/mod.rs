@@ -33,7 +33,7 @@ use entities::sea_orm_active_enums::TrackingLevel;
 use entities::user;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U64};
-use ethers::types::{I256, U256};
+use ethers::types::U256;
 use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -407,7 +407,7 @@ impl Web3ProxyApp {
 
         // TODO: TTL left low, this could also be a solution instead of modifiying the cache, that may be disgusting across threads / slow anyways
         let user_balance_cache =
-            CacheWithTTL::arc_with_capacity("user_balance_cache", 10_000, Duration::from_secs(120))
+            CacheWithTTL::arc_with_capacity("user_balance_cache", 10_000, Duration::from_secs(600))
                 .await;
 
         // create a channel for receiving stats
@@ -946,13 +946,13 @@ impl Web3ProxyApp {
     }
 
     /// this is way more round-a-bout than we want, but it means stats are emitted and caches are used
-    /// request_with_caching
     pub async fn authorized_request<P: JsonRpcParams, R: JsonRpcResultData>(
         self: &Arc<Self>,
         method: &str,
         params: P,
         authorization: Arc<Authorization>,
     ) -> Web3ProxyResult<R> {
+        // TODO: proper ids
         let request = JsonRpcRequest::new(JsonRpcId::Number(1), method.to_string(), json!(params))?;
 
         let (_, response, _) = self.proxy_request(request, authorization, None).await;
@@ -994,7 +994,7 @@ impl Web3ProxyApp {
                     .proxy_web3_rpc_requests(&authorization, requests)
                     .await?;
 
-                // TODO: real status code. i don't think we are following the spec here
+                // TODO: real status code. if an error happens, i don't think we are following the spec here
                 (
                     StatusCode::OK,
                     JsonRpcForwardedResponseEnum::Batch(responses),
@@ -1039,7 +1039,7 @@ impl Web3ProxyApp {
         let mut collected_rpcs: Vec<Arc<Web3Rpc>> = vec![];
         for response in responses {
             // TODO: any way to attach the tried rpcs to the error? it is likely helpful
-            let (status_code, response, rpcs) = response;
+            let (_status_code, response, rpcs) = response;
 
             collected.push(response);
             collected_rpcs.extend(rpcs.into_iter().filter(|x| {

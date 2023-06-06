@@ -14,10 +14,13 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use entities;
-use entities::{revert_log, rpc_key};
+use entities::sea_orm_active_enums::Role;
+use entities::{revert_log, rpc_key, secondary_user};
 use hashbrown::HashMap;
 use migration::sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+use serde::Serialize;
 use serde_json::json;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// `GET /user/revert_logs` -- Use a bearer token to get the user's revert logs.
@@ -53,13 +56,42 @@ pub async fn user_revert_logs_get(
         .await
         .web3_context("failed loading user's key")?;
 
+    #[derive(Serialize)]
+    struct OutTuple {
+        id: u64,
+        role: Role,
+    };
+
+    // Also add rpc keys for which this user has access
+    let shared_rpc_keys = secondary_user::Entity::find()
+        .filter(secondary_user::Column::UserId.eq(user.id))
+        .all(db_replica.as_ref())
+        .await?
+        .into_iter()
+        .map(|x| OutTuple {
+            id: x.rpc_secret_key_id,
+            role: x.role,
+        });
+
+    // We shouldn't need to be deduped, bcs the set of shared keys is distinct from the user's keys,
+    // the database also handles deduplication bcs it's a projection operation
     // TODO: only select the ids
-    let uks: Vec<_> = uks.into_iter().map(|x| x.id).collect();
+    let uks: Vec<_> = uks
+        .into_iter()
+        .map(|x| OutTuple {
+            id: x.id,
+            role: Role::Owner,
+        })
+        .chain(shared_rpc_keys)
+        .collect();
 
     // get revert logs
     let mut q = revert_log::Entity::find()
         .filter(revert_log::Column::Timestamp.gte(query_start))
-        .filter(revert_log::Column::RpcKeyId.is_in(uks))
+        .filter(
+            revert_log::Column::RpcKeyId
+                .is_in(uks.into_iter().map(|x| x.id).collect::<HashSet<_>>()),
+        )
         .order_by_asc(revert_log::Column::Timestamp);
 
     if chain_id == 0 {

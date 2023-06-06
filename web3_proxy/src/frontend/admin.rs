@@ -19,7 +19,7 @@ use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::{
     admin, admin_increase_balance_receipt, admin_trail, balance, login, pending_login, rpc_key,
-    user, user_tier,
+    user,
 };
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
@@ -117,14 +117,13 @@ pub async fn admin_increase_balance(
     );
     out.insert("amount", serde_json::Value::String(amount.to_string()));
 
-    // Get the balance row
-    let balance_entry: balance::Model = balance::Entity::find()
-        .filter(balance::Column::UserId.eq(user_entry.id))
-        .one(&db_conn)
-        .await?
-        .context("User does not have a balance row")?;
-
-    let balance_entry = balance_entry.into_active_model();
+    // update balance
+    let balance_entry = balance::ActiveModel {
+        id: sea_orm::NotSet,
+        available_balance: sea_orm::Set(amount),
+        user_id: sea_orm::Set(user_entry.id),
+        ..Default::default()
+    };
     balance::Entity::insert(balance_entry)
         .on_conflict(
             OnConflict::new()
@@ -137,7 +136,6 @@ pub async fn admin_increase_balance(
         .exec(&db_conn)
         .await?;
 
-    // Then read and save in one transaction
     let response = (StatusCode::OK, Json(out)).into_response();
 
     Ok(response)
