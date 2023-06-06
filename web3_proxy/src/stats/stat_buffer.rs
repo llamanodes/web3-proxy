@@ -187,8 +187,8 @@ impl StatBuffer {
                         self.chain_id,
                         db_conn,
                         key,
-                        self.rpc_secret_key_cache.clone(),
-                        self.user_balance_cache.clone(),
+                        &self.rpc_secret_key_cache,
+                        &self.user_balance_cache,
                     )
                     .await
                 {

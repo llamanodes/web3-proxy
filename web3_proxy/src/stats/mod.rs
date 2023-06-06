@@ -237,8 +237,8 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         db_conn: &DatabaseConnection,
         key: &RpcQueryKey,
-        rpc_secret_key_cache: RpcSecretKeyCache,
-        user_balance_cache: UserBalanceCache,
+        rpc_secret_key_cache: &RpcSecretKeyCache,
+        user_balance_cache: &UserBalanceCache,
     ) -> Web3ProxyResult<()> {
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
@@ -523,8 +523,8 @@ impl BufferedRpcQueryStats {
         txn: &DatabaseTransaction,
         sender_rpc_entity: &rpc_key::Model,
         referral_objects: &Option<(referee::Model, referrer::Model)>,
-        rpc_secret_key_cache: RpcSecretKeyCache,
-        user_balance_cache: UserBalanceCache,
+        rpc_secret_key_cache: &RpcSecretKeyCache,
+        user_balance_cache: &UserBalanceCache,
     ) -> Web3ProxyResult<()> {
         // ==================
         // Modify sender balance
@@ -594,8 +594,8 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         db_conn: &DatabaseConnection,
         key: RpcQueryKey,
-        rpc_secret_key_cache: RpcSecretKeyCache,
-        user_balance_cache: UserBalanceCache,
+        rpc_secret_key_cache: &RpcSecretKeyCache,
+        user_balance_cache: &UserBalanceCache,
     ) -> Web3ProxyResult<()> {
         if key.response_timestamp == 0 {
             return Err(Web3ProxyError::Anyhow(anyhow!(
@@ -610,8 +610,8 @@ impl BufferedRpcQueryStats {
             chain_id,
             db_conn,
             &key,
-            rpc_secret_key_cache.clone(),
-            user_balance_cache.clone(),
+            rpc_secret_key_cache,
+            user_balance_cache,
         )
         .await?;
 
