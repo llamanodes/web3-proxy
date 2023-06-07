@@ -1,40 +1,37 @@
 //! Store "stats" in a database for billing and a different database for graphing
 //! TODO: move some of these structs/functions into their own file?
+mod stat_buffer;
+
 pub mod db_queries;
 pub mod influxdb_queries;
-mod stat_buffer;
-pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
-use std::borrow::BorrowMut;
-use std::cmp;
 
+use self::stat_buffer::BufferedRpcQueryStats;
 use crate::app::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
+use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
 use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::sea_orm_active_enums::TrackingLevel;
-use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key, user};
-use ethers::core::k256::elliptic_curve::bigint::NonZero;
+use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key};
 use influxdb2::models::DataPoint;
-use log::{error, info, trace, warn};
+use log::trace;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
-    self, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter,
-    TransactionTrait,
+    self, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
 };
 use migration::sea_orm::{DatabaseTransaction, QuerySelect};
-use migration::{Expr, LockType, OnConflict, Order};
-use num_traits::{clamp, clamp_min, ToPrimitive};
+use migration::{Expr, LockType, OnConflict};
+use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::num::NonZeroU64;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use self::stat_buffer::BufferedRpcQueryStats;
+pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum StatType {
@@ -486,8 +483,7 @@ impl BufferedRpcQueryStats {
                             .to_owned(),
                     )
                     .exec(txn)
-                    .await?
-                    .last_insert_id;
+                    .await?;
 
                 let user_balance = balance::ActiveModel {
                     id: sea_orm::NotSet,
@@ -544,9 +540,9 @@ impl BufferedRpcQueryStats {
             None => return Ok(()),
         };
         let mut latest_balance = sender_latest_balance.write().await;
-        let balance_before = (*latest_balance).clone();
+        let balance_before = *latest_balance;
         // Now modify the balance
-        *latest_balance = *latest_balance + deltas.sender_available_balance_delta;
+        *latest_balance += deltas.sender_available_balance_delta;
         if *latest_balance < Decimal::from(0) {
             *latest_balance = Decimal::from(0);
         }
@@ -620,7 +616,7 @@ impl BufferedRpcQueryStats {
             return Ok(());
         }
         let rpc_secret_key_id: &NonZeroU64 = match &key.rpc_secret_key_id {
-            Some(x) => x.into(),
+            Some(x) => x,
             None => return Ok(()),
         };
 

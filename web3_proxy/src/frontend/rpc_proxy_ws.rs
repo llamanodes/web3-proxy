@@ -32,9 +32,9 @@ use hashbrown::HashMap;
 use http::StatusCode;
 use log::{info, trace};
 use serde_json::json;
+use std::str::from_utf8_mut;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use std::{str::from_utf8_mut, sync::atomic::AtomicUsize};
 use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock};
 
 /// How to select backend servers for a request

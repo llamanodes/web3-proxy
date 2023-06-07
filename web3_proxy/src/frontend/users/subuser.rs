@@ -11,12 +11,11 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use entities::sea_orm_active_enums::Role;
-use entities::user::Relation::UserTier;
-use entities::{balance, rpc_key, secondary_user, user, user_tier};
+use entities::{balance, rpc_key, secondary_user, user};
 use ethers::types::Address;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{debug, trace, warn};
+use log::{trace, warn};
 use migration::sea_orm;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::ActiveModelTrait;

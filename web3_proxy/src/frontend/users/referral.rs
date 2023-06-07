@@ -1,7 +1,6 @@
 //! Handle registration, logins, and managing account data.
 use crate::app::Web3ProxyApp;
 use crate::errors::Web3ProxyResponse;
-use crate::frontend::users::referral;
 use crate::referral_code::ReferralCode;
 use anyhow::Context;
 use axum::{
@@ -21,7 +20,6 @@ use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::EntityTrait;
 use migration::sea_orm::QueryFilter;
-use num_traits::one;
 use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -102,7 +100,7 @@ pub async fn user_used_referral_stats(
         credits_applied_for_referrer: Decimal,
         referral_start_date: DateTime,
         used_referral_code: String,
-    };
+    }
 
     let mut out: Vec<Info> = Vec::new();
     for x in referrals.into_iter() {
@@ -153,7 +151,7 @@ pub async fn user_shared_referral_stats(
         .await?;
 
     // Return early if the user does not have any referred entities
-    if referrals.len() == 0 {
+    if referrals.is_empty() {
         let response_json = json!({
         "referrals": [],
         "used_referral_code": None::<()>,
@@ -171,7 +169,7 @@ pub async fn user_shared_referral_stats(
         credits_applied_for_referrer: Decimal,
         referral_start_date: DateTime,
         referred_address: Address,
-    };
+    }
 
     let mut out: Vec<Info> = Vec::new();
     let mut used_referral_code = "".to_owned(); // This is only for safety purposes, because of the condition above we always know that there is at least one record

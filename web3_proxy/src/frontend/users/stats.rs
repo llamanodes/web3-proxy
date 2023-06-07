@@ -60,7 +60,7 @@ pub async fn user_revert_logs_get(
     struct OutTuple {
         id: u64,
         role: Role,
-    };
+    }
 
     // Also add rpc keys for which this user has access
     let shared_rpc_keys = secondary_user::Entity::find()
