@@ -7,7 +7,7 @@ use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
 use crate::user_token::UserBearerToken;
-use anyhow::{Context};
+use anyhow::Context;
 use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
@@ -1151,7 +1151,7 @@ impl Web3ProxyApp {
                             .one(db_replica.as_ref())
                             .await?
                         {
-                            Some(x) => x.available_balance,
+                            Some(x) => x.total_deposits - x.total_spent_outside_free_tier,
                             None => Decimal::default(),
                         };
                         Ok(Arc::new(RwLock::new(balance)))
@@ -1256,7 +1256,7 @@ impl Web3ProxyApp {
                             .filter(balance::Column::UserId.eq(user_model.id))
                             .one(db_replica.as_ref())
                             .await? {
-                            Some(x) => x.available_balance,
+                            Some(x) => x.total_deposits - x.total_spent_outside_free_tier,
                             None => Decimal::default()
                         };
 

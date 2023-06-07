@@ -294,8 +294,6 @@ pub async fn modify_subuser(
             // We should also create the balance entry ...
             let subuser_balance = balance::ActiveModel {
                 user_id: sea_orm::Set(subuser.id),
-                available_balance: sea_orm::Set(Decimal::new(0, 0)),
-                used_balance: sea_orm::Set(Decimal::new(0, 0)),
                 ..Default::default()
             };
             subuser_balance.insert(&txn).await?;

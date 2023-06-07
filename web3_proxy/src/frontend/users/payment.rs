@@ -49,7 +49,7 @@ pub async fn user_balance_get(
         .filter(balance::Column::UserId.eq(_user.id))
         .one(db_replica.as_ref())
         .await?
-        .map(|x| x.available_balance)
+        .map(|x| x.total_deposits - x.total_spent_outside_free_tier)
         .unwrap_or_default();
 
     let response = json!({
@@ -257,7 +257,7 @@ pub async fn user_balance_post(
             // create or update the balance
             let balance_entry = balance::ActiveModel {
                 id: sea_orm::NotSet,
-                available_balance: sea_orm::Set(payment_token_amount),
+                total_deposits: sea_orm::Set(payment_token_amount),
                 user_id: sea_orm::Set(recipient.id),
                 ..Default::default()
             };
@@ -265,8 +265,8 @@ pub async fn user_balance_post(
                 .on_conflict(
                     OnConflict::new()
                         .values([(
-                            balance::Column::AvailableBalance,
-                            Expr::col(balance::Column::AvailableBalance).add(payment_token_amount),
+                            balance::Column::TotalDeposits,
+                            Expr::col(balance::Column::TotalDeposits).add(payment_token_amount),
                         )])
                         .to_owned(),
                 )

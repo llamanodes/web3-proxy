@@ -185,10 +185,11 @@ impl RpcQueryStats {
 }
 
 struct Deltas {
-    sender_available_balance_delta: Decimal,
-    sender_used_balance_delta: Decimal,
+    balance_used_outside_free_tier: Decimal,
+    balance_used_including_free_tier: Decimal,
     sender_bonus_applied: bool,
-    referrer_available_balance_delta: Decimal,
+    referrer_deposit_delta: Decimal,
+    sender_bonus_balance_deposited: Decimal,
 }
 
 /// A stat that we aggregate and then store in a database.
@@ -370,14 +371,16 @@ impl BufferedRpcQueryStats {
 
     async fn _compute_balance_deltas(
         &self,
+        sender_balance: balance::Model,
         referral_objects: Option<(referee::Model, referrer::Model)>,
     ) -> Web3ProxyResult<(Deltas, Option<(referee::Model, referrer::Model)>)> {
         // Calculate Balance Only
         let mut deltas = Deltas {
-            sender_available_balance_delta: -self.sum_credits_used,
-            sender_used_balance_delta: self.sum_credits_used,
+            balance_used_outside_free_tier: Default::default(),
+            balance_used_including_free_tier: Default::default(),
             sender_bonus_applied: false,
-            referrer_available_balance_delta: Decimal::from(0),
+            referrer_deposit_delta: Default::default(),
+            sender_bonus_balance_deposited: Default::default(),
         };
 
         // Calculate a bunch using referrals as well
@@ -393,7 +396,7 @@ impl BufferedRpcQueryStats {
                     + self.sum_credits_used)
                     >= Decimal::from(100)
             {
-                deltas.sender_available_balance_delta += Decimal::from(100);
+                deltas.sender_bonus_balance_deposited += Decimal::from(10);
                 deltas.sender_bonus_applied = true;
             }
 
@@ -404,11 +407,21 @@ impl BufferedRpcQueryStats {
                 + Months::new(12);
 
             if now <= valid_until {
-                deltas.referrer_available_balance_delta +=
-                    self.sum_credits_used / Decimal::new(10, 0);
+                deltas.referrer_deposit_delta += self.sum_credits_used / Decimal::new(10, 0);
             }
 
             return Ok((deltas, Some((referral_entity, referrer_code_entity))));
+        }
+
+        let user_balance = (sender_balance.total_deposits + deltas.sender_bonus_balance_deposited
+            - sender_balance.total_spent_outside_free_tier);
+        // Split up the component of into how much of the paid component was used, and how much of the free component was used (anything after "balance")
+        if user_balance >= Decimal::from(0) {
+            deltas.balance_used_outside_free_tier = self.sum_credits_used;
+        } else {
+            deltas.balance_used_outside_free_tier =
+                user_balance + deltas.sender_bonus_balance_deposited;
+            deltas.balance_used_including_free_tier = self.sum_credits_used;
         }
 
         Ok((deltas, None))
@@ -425,8 +438,9 @@ impl BufferedRpcQueryStats {
         // Do the user updates
         let user_balance = balance::ActiveModel {
             id: sea_orm::NotSet,
-            available_balance: sea_orm::Set(deltas.sender_available_balance_delta),
-            used_balance: sea_orm::Set(deltas.sender_used_balance_delta),
+            total_deposits: sea_orm::Set(deltas.sender_bonus_balance_deposited),
+            total_spent_including_free_tier: sea_orm::Set(deltas.balance_used_including_free_tier),
+            total_spent_outside_free_tier: sea_orm::Set(deltas.balance_used_outside_free_tier),
             user_id: sea_orm::Set(sender_rpc_entity.user_id),
         };
 
@@ -435,14 +449,19 @@ impl BufferedRpcQueryStats {
                 OnConflict::new()
                     .values([
                         (
-                            balance::Column::AvailableBalance,
-                            Expr::col(balance::Column::AvailableBalance)
-                                .add(deltas.sender_available_balance_delta),
+                            balance::Column::TotalDeposits,
+                            Expr::col(balance::Column::TotalDeposits)
+                                .add(deltas.sender_bonus_balance_deposited),
                         ),
                         (
-                            balance::Column::UsedBalance,
-                            Expr::col(balance::Column::UsedBalance)
-                                .add(deltas.sender_used_balance_delta),
+                            balance::Column::TotalSpentIncludingFreeTier,
+                            Expr::col(balance::Column::TotalSpentIncludingFreeTier)
+                                .add(deltas.balance_used_including_free_tier),
+                        ),
+                        (
+                            balance::Column::TotalSpentOutsideFreeTier,
+                            Expr::col(balance::Column::TotalSpentOutsideFreeTier)
+                                .add(deltas.balance_used_outside_free_tier),
                         ),
                     ])
                     .to_owned(),
@@ -452,7 +471,7 @@ impl BufferedRpcQueryStats {
 
         // Do the referrer_entry updates
         if let Some((referral_entity, referrer_code_entity)) = referral_objects {
-            if deltas.referrer_available_balance_delta > Decimal::from(0) {
+            if deltas.referrer_deposit_delta > Decimal::from(0) {
                 let referee_entry = referee::ActiveModel {
                     id: sea_orm::Unchanged(referral_entity.id),
                     referral_start_date: sea_orm::Unchanged(referral_entity.referral_start_date),
@@ -460,9 +479,7 @@ impl BufferedRpcQueryStats {
                     user_id: sea_orm::Unchanged(referral_entity.user_id),
 
                     credits_applied_for_referee: sea_orm::Set(deltas.sender_bonus_applied),
-                    credits_applied_for_referrer: sea_orm::Set(
-                        deltas.referrer_available_balance_delta,
-                    ),
+                    credits_applied_for_referrer: sea_orm::Set(deltas.referrer_deposit_delta),
                 };
                 referee::Entity::insert(referee_entry)
                     .on_conflict(
@@ -477,7 +494,7 @@ impl BufferedRpcQueryStats {
                                 (
                                     referee::Column::CreditsAppliedForReferrer,
                                     Expr::col(referee::Column::CreditsAppliedForReferrer)
-                                        .add(deltas.referrer_available_balance_delta),
+                                        .add(deltas.referrer_deposit_delta),
                                 ),
                             ])
                             .to_owned(),
@@ -487,18 +504,18 @@ impl BufferedRpcQueryStats {
 
                 let user_balance = balance::ActiveModel {
                     id: sea_orm::NotSet,
-                    available_balance: sea_orm::Set(deltas.referrer_available_balance_delta),
-                    used_balance: sea_orm::Set(Decimal::from(0)),
+                    total_deposits: sea_orm::Set(deltas.referrer_deposit_delta),
                     user_id: sea_orm::Set(referral_entity.user_id),
+                    ..Default::default()
                 };
 
                 let _ = balance::Entity::insert(user_balance)
                     .on_conflict(
                         OnConflict::new()
                             .values([(
-                                balance::Column::AvailableBalance,
-                                Expr::col(balance::Column::AvailableBalance)
-                                    .add(deltas.referrer_available_balance_delta),
+                                balance::Column::TotalDeposits,
+                                Expr::col(balance::Column::TotalDeposits)
+                                    .add(deltas.referrer_deposit_delta),
                             )])
                             .to_owned(),
                     )
@@ -542,7 +559,9 @@ impl BufferedRpcQueryStats {
         let mut latest_balance = sender_latest_balance.write().await;
         let balance_before = *latest_balance;
         // Now modify the balance
-        *latest_balance += deltas.sender_available_balance_delta;
+        // TODO: Double check this (perhaps while testing...)
+        *latest_balance = *latest_balance - deltas.balance_used_outside_free_tier
+            + deltas.sender_bonus_balance_deposited;
         if *latest_balance < Decimal::from(0) {
             *latest_balance = Decimal::from(0);
         }
@@ -568,18 +587,21 @@ impl BufferedRpcQueryStats {
         // ==================
         // Modify referrer balance
         // ==================
-        // If the referrer object is empty, we don't care about the cache, becase this will be fetched in a next request from the database
-        if let Some((referral_entity, _)) = referral_objects {
-            if let Ok(referrer_user_id) = NonZeroU64::try_from(referral_entity.user_id) {
-                // If the referrer object is in the cache, we just remove it from the balance cache; it will be reloaded next time
-                // Get all the RPC keys, delete them from cache
-
-                // In principle, do not remove the cache for the referrer; the next reload will trigger premium
-                // We don't touch the RPC keys at this stage for the refferer, a payment must be paid to reset those (we want to keep things simple here)
-                // Anyways, the RPC keys will be updated in 5 min (600 seconds)
-                user_balance_cache.remove(&referrer_user_id);
-            }
-        };
+        // We ignore this for performance reasons right now
+        // We would have to load all the RPC keys of the referrer to de-activate them
+        // Instead, it's fine if they wait for 60 seconds until their tier reloads
+        // // If the referrer object is empty, we don't care about the cache, becase this will be fetched in a next request from the database
+        // if let Some((referral_entity, _)) = referral_objects {
+        //     if let Ok(referrer_user_id) = NonZeroU64::try_from(referral_entity.user_id) {
+        //         // If the referrer object is in the cache, we just remove it from the balance cache; it will be reloaded next time
+        //         // Get all the RPC keys, delete them from cache
+        //
+        //         // In principle, do not remove the cache for the referrer; the next reload will trigger premium
+        //         // We don't touch the RPC keys at this stage for the refferer, a payment must be paid to reset those (we want to keep things simple here)
+        //         // Anyways, the RPC keys will be updated in 5 min (600 seconds)
+        //         user_balance_cache.remove(&referrer_user_id);
+        //     }
+        // };
 
         Ok(())
     }
@@ -627,8 +649,9 @@ impl BufferedRpcQueryStats {
             self._get_relevant_entities(rpc_secret_key_id, &txn).await?;
 
         // Compute Changes in balance for user and referrer, incl. referral logic   //
-        let (deltas, referral_objects): (Deltas, Option<(referee::Model, referrer::Model)>) =
-            self._compute_balance_deltas(referral_objects).await?;
+        let (deltas, referral_objects): (Deltas, Option<(referee::Model, referrer::Model)>) = self
+            ._compute_balance_deltas(_sender_balance, referral_objects)
+            .await?;
 
         // Update balances in the database
         self._update_balances_in_db(&deltas, &txn, &sender_rpc_entity, &referral_objects)
