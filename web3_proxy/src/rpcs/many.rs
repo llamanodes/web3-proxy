@@ -97,14 +97,14 @@ impl Web3Rpcs {
         // TODO: actual weighter on this
         // TODO: time_to_idle instead?
         let blocks_by_hash: BlocksByHashCache = Arc::new(
-            CacheWithTTL::new("blocks_by_hash", 10_000, Duration::from_secs(30 * 60)).await,
+            CacheWithTTL::new("blocks_by_hash", 1_000, Duration::from_secs(30 * 60)).await,
         );
 
         // all block numbers are the same size, so no need for weigher
         // TODO: limits from config
         // TODO: time_to_idle instead?
         let blocks_by_number = Arc::new(
-            CacheWithTTL::new("blocks_by_number", 10_000, Duration::from_secs(30 * 60)).await,
+            CacheWithTTL::new("blocks_by_number", 1_000, Duration::from_secs(30 * 60)).await,
         );
 
         let (watch_consensus_rpcs_sender, consensus_connections_watcher) =
