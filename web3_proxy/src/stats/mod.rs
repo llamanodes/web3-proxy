@@ -587,18 +587,21 @@ impl BufferedRpcQueryStats {
         // ==================
         // Modify referrer balance
         // ==================
-        // If the referrer object is empty, we don't care about the cache, becase this will be fetched in a next request from the database
-        if let Some((referral_entity, _)) = referral_objects {
-            if let Ok(referrer_user_id) = NonZeroU64::try_from(referral_entity.user_id) {
-                // If the referrer object is in the cache, we just remove it from the balance cache; it will be reloaded next time
-                // Get all the RPC keys, delete them from cache
-
-                // In principle, do not remove the cache for the referrer; the next reload will trigger premium
-                // We don't touch the RPC keys at this stage for the refferer, a payment must be paid to reset those (we want to keep things simple here)
-                // Anyways, the RPC keys will be updated in 5 min (600 seconds)
-                user_balance_cache.remove(&referrer_user_id);
-            }
-        };
+        // We ignore this for performance reasons right now
+        // We would have to load all the RPC keys of the referrer to de-activate them
+        // Instead, it's fine if they wait for 60 seconds until their tier reloads
+        // // If the referrer object is empty, we don't care about the cache, becase this will be fetched in a next request from the database
+        // if let Some((referral_entity, _)) = referral_objects {
+        //     if let Ok(referrer_user_id) = NonZeroU64::try_from(referral_entity.user_id) {
+        //         // If the referrer object is in the cache, we just remove it from the balance cache; it will be reloaded next time
+        //         // Get all the RPC keys, delete them from cache
+        //
+        //         // In principle, do not remove the cache for the referrer; the next reload will trigger premium
+        //         // We don't touch the RPC keys at this stage for the refferer, a payment must be paid to reset those (we want to keep things simple here)
+        //         // Anyways, the RPC keys will be updated in 5 min (600 seconds)
+        //         user_balance_cache.remove(&referrer_user_id);
+        //     }
+        // };
 
         Ok(())
     }
