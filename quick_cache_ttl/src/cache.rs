@@ -1,4 +1,6 @@
+use crate::{KQCacheWithTTL, PlaceholderGuardWithTTL};
 use quick_cache::{DefaultHashBuilder, UnitWeighter, Weighter};
+use serde::{Serialize, Serializer};
 use std::{
     fmt::Debug,
     future::Future,
@@ -7,8 +9,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
-use crate::{KQCacheWithTTL, PlaceholderGuardWithTTL};
 
 pub struct CacheWithTTL<Key, Val, We = UnitWeighter, B = DefaultHashBuilder>(
     KQCacheWithTTL<Key, (), Val, We, B>,
@@ -111,19 +111,21 @@ impl<
     }
 
     #[inline]
-    pub async fn try_get_or_insert_async<E, Fut>(&self, key: &Key, f: Fut) -> Result<Val, E>
-    where
-        Fut: Future<Output = Result<Val, E>>,
-    {
-        self.0.try_get_or_insert_async(key, &(), f).await
-    }
-
-    #[inline]
     pub async fn get_value_or_guard_async(
         &self,
         key: Key,
     ) -> Result<Val, PlaceholderGuardWithTTL<'_, Key, (), Val, We, B>> {
         self.0.get_value_or_guard_async(key, ()).await
+    }
+
+    #[inline]
+    pub fn peek(&self, key: &Key) -> Option<Val> {
+        self.0.peek(key, &())
+    }
+
+    #[inline]
+    pub fn remove(&self, key: &Key) -> bool {
+        self.0.remove(key, &())
     }
 
     /// if the item was too large to insert, it is returned with the error
@@ -134,7 +136,25 @@ impl<
     }
 
     #[inline]
-    pub fn remove(&self, key: &Key) -> bool {
-        self.0.remove(key, &())
+    pub async fn try_get_or_insert_async<E, Fut>(&self, key: &Key, f: Fut) -> Result<Val, E>
+    where
+        Fut: Future<Output = Result<Val, E>>,
+    {
+        self.0.try_get_or_insert_async(key, &(), f).await
+    }
+}
+
+impl<
+        Key: Clone + Debug + Eq + Hash + Send + Sync + 'static,
+        Val: Clone + Send + Sync + 'static,
+        We: Weighter<Key, (), Val> + Clone + Send + Sync + 'static,
+        B: BuildHasher + Clone + Send + Sync + 'static,
+    > Serialize for CacheWithTTL<Key, Val, We, B>
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
     }
 }

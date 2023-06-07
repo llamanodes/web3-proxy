@@ -4042,6 +4042,7 @@ dependencies = [
  "flume",
  "log",
  "quick_cache",
+ "serde",
  "tokio",
 ]
 
