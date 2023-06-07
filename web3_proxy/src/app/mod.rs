@@ -55,7 +55,7 @@ use std::num::{NonZeroU32, NonZeroU64};
 use std::str::FromStr;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::sync::{broadcast, watch, Semaphore};
+use tokio::sync::{broadcast, watch, RwLock, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -107,11 +107,11 @@ pub struct AuthorizationChecks {
     /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
     pub private_txs: bool,
     pub proxy_mode: ProxyMode,
-    pub balance: Option<Decimal>,
 }
 
 /// Cache data from the database about rpc keys
 pub type RpcSecretKeyCache = Arc<CacheWithTTL<RpcSecretKey, AuthorizationChecks>>;
+pub type UserBalanceCache = Arc<CacheWithTTL<NonZeroU64, Arc<RwLock<Decimal>>>>; // Could also be an AtomicDecimal
 
 /// The application
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
@@ -160,6 +160,8 @@ pub struct Web3ProxyApp {
     /// cache authenticated users so that we don't have to query the database on the hot path
     // TODO: should the key be our RpcSecretKey class instead of Ulid?
     pub rpc_secret_key_cache: RpcSecretKeyCache,
+    /// cache user balances so we don't have to check downgrade logic every single time
+    pub user_balance_cache: UserBalanceCache,
     /// concurrent/parallel RPC request limits for authenticated users
     pub user_semaphores: Cache<NonZeroU64, Arc<Semaphore>>,
     /// concurrent/parallel request limits for anonymous users
@@ -403,6 +405,11 @@ impl Web3ProxyApp {
         )
         .await;
 
+        // TODO: TTL left low, this could also be a solution instead of modifiying the cache, that may be disgusting across threads / slow anyways
+        let user_balance_cache =
+            CacheWithTTL::arc_with_capacity("user_balance_cache", 10_000, Duration::from_secs(600))
+                .await;
+
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
         // stats can be saved in mysql, influxdb, both, or none
@@ -416,6 +423,7 @@ impl Web3ProxyApp {
                 60,
                 influxdb_client.clone(),
                 Some(rpc_secret_key_cache.clone()),
+                Some(user_balance_cache.clone()),
                 stat_buffer_shutdown_receiver,
                 1,
             )? {
@@ -631,6 +639,9 @@ impl Web3ProxyApp {
             frontend_ip_rate_limiter,
             frontend_registered_user_rate_limiter,
             hostname,
+            vredis_pool,
+            rpc_secret_key_cache,
+            user_balance_cache,
             http_client,
             influxdb_client,
             internal_provider,
@@ -641,10 +652,8 @@ impl Web3ProxyApp {
             pending_transactions,
             pending_tx_sender,
             private_rpcs,
-            rpc_secret_key_cache,
             stat_sender,
             user_semaphores,
-            vredis_pool,
             watch_consensus_head_receiver,
         };
 

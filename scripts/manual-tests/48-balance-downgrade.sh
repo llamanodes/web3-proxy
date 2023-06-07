@@ -75,7 +75,7 @@ do
   --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
 done
 
-for i in {1..100}
+for i in {1..10000}
 do
   curl \
   -X POST "127.0.0.1:8544/" \

@@ -76,6 +76,7 @@ pub enum Web3ProxyError {
     UnknownReferralCode,
     InvalidReferer,
     InvalidSignatureLength,
+    InvalidUserTier,
     InvalidUserAgent,
     InvalidUserKey,
     IpAddrParse(AddrParseError),
@@ -497,6 +498,17 @@ impl Web3ProxyError {
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
                         message: Cow::Borrowed("UserKey was not a ULID or UUID"),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::InvalidUserTier => {
+                warn!("InvalidUserTier");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: Cow::Borrowed("UserTier is not valid!"),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },

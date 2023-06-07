@@ -8,11 +8,12 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::{balance, increase_on_chain_balance_receipt, user};
+use entities::{balance, increase_on_chain_balance_receipt, rpc_key, user};
 use ethbloom::Input as BloomInput;
-use ethers::abi::{AbiEncode, ParamType};
-use ethers::types::{Address, TransactionReceipt, ValueOrArray, H256, U256};
+use ethers::abi::AbiEncode;
+use ethers::types::{Address, TransactionReceipt, ValueOrArray, H256};
 use hashbrown::HashMap;
+// use http::StatusCode;
 use http::StatusCode;
 use log::{debug, info, trace};
 use migration::sea_orm::prelude::Decimal;
@@ -24,6 +25,7 @@ use num_traits::Pow;
 use payment_contracts::ierc20::IERC20;
 use payment_contracts::payment_factory::{self, PaymentFactory};
 use serde_json::json;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 /// Implements any logic related to payments
@@ -192,6 +194,8 @@ pub async fn user_balance_post(
             todo!("delete this transaction from the database");
         }
 
+        // Create a new transaction that will be used for joint transaction
+        let txn = db_conn.begin().await?;
         if let Ok(event) = payment_factory_contract
             .decode_event::<payment_factory::PaymentReceivedFilter>(
                 "PaymentReceived",
@@ -281,6 +285,24 @@ pub async fn user_balance_post(
             };
 
             receipt.save(&txn).await?;
+
+            // Remove all RPC-keys owned by this user from the cache, s.t. rate limits are re-calculated
+            let rpc_keys = rpc_key::Entity::find()
+                .filter(rpc_key::Column::UserId.eq(recipient.id))
+                .all(&txn)
+                .await?;
+
+            match NonZeroU64::try_from(recipient.id) {
+                Err(_) => {}
+                Ok(x) => {
+                    app.user_balance_cache.remove(&x);
+                }
+            };
+
+            for rpc_key_entity in rpc_keys {
+                app.rpc_secret_key_cache
+                    .remove(&rpc_key_entity.secret_key.into());
+            }
 
             let x = json!({
                 "tx_hash": tx_hash,

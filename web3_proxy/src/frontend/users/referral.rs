@@ -28,7 +28,6 @@ use std::sync::Arc;
 
 /// Create or get the existing referral link.
 /// This is the link that the user can share to third parties, and get credits.
-/// Applies to premium users only
 #[debug_handler]
 pub async fn user_referral_link_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
