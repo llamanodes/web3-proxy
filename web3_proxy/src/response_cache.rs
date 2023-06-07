@@ -8,6 +8,7 @@ use std::{
     borrow::Cow,
     hash::{BuildHasher, Hash, Hasher},
     num::NonZeroU32,
+    sync::Arc,
 };
 
 #[derive(Clone, Debug, Eq, From)]
@@ -19,6 +20,9 @@ pub struct JsonRpcQueryCacheKey {
 }
 
 impl JsonRpcQueryCacheKey {
+    pub fn hash(&self) -> u64 {
+        self.hash
+    }
     pub fn from_block_num(&self) -> Option<U64> {
         self.from_block_num
     }
@@ -79,7 +83,7 @@ impl JsonRpcQueryCacheKey {
 }
 
 pub type JsonRpcResponseCache =
-    CacheWithTTL<JsonRpcQueryCacheKey, JsonRpcResponseEnum<Box<RawValue>>, JsonRpcResponseWeigher>;
+    CacheWithTTL<u64, JsonRpcResponseEnum<Arc<RawValue>>, JsonRpcResponseWeigher>;
 
 #[derive(Clone)]
 pub struct JsonRpcResponseWeigher;
@@ -107,7 +111,7 @@ impl<R> JsonRpcResponseEnum<R> {
     }
 }
 
-impl From<serde_json::Value> for JsonRpcResponseEnum<Box<RawValue>> {
+impl From<serde_json::Value> for JsonRpcResponseEnum<Arc<RawValue>> {
     fn from(value: serde_json::Value) -> Self {
         let value = RawValue::from_string(value.to_string()).unwrap();
 
@@ -115,11 +119,23 @@ impl From<serde_json::Value> for JsonRpcResponseEnum<Box<RawValue>> {
     }
 }
 
-impl From<Box<RawValue>> for JsonRpcResponseEnum<Box<RawValue>> {
+impl From<Arc<RawValue>> for JsonRpcResponseEnum<Arc<RawValue>> {
+    fn from(value: Arc<RawValue>) -> Self {
+        let num_bytes = value.get().len();
+
+        let num_bytes = NonZeroU32::try_from(num_bytes as u32).unwrap();
+
+        Self::Result { value, num_bytes }
+    }
+}
+
+impl From<Box<RawValue>> for JsonRpcResponseEnum<Arc<RawValue>> {
     fn from(value: Box<RawValue>) -> Self {
         let num_bytes = value.get().len();
 
         let num_bytes = NonZeroU32::try_from(num_bytes as u32).unwrap();
+
+        let value = value.into();
 
         Self::Result { value, num_bytes }
     }
@@ -140,7 +156,21 @@ impl<R> TryFrom<Web3ProxyError> for JsonRpcResponseEnum<R> {
     }
 }
 
-impl TryFrom<Result<Box<RawValue>, Web3ProxyError>> for JsonRpcResponseEnum<Box<RawValue>> {
+impl TryFrom<Result<Arc<RawValue>, Web3ProxyError>> for JsonRpcResponseEnum<Arc<RawValue>> {
+    type Error = Web3ProxyError;
+
+    fn try_from(value: Result<Arc<RawValue>, Web3ProxyError>) -> Result<Self, Self::Error> {
+        match value {
+            Ok(x) => Ok(x.into()),
+            Err(err) => {
+                let x: Self = err.try_into()?;
+
+                Ok(x)
+            }
+        }
+    }
+}
+impl TryFrom<Result<Box<RawValue>, Web3ProxyError>> for JsonRpcResponseEnum<Arc<RawValue>> {
     type Error = Web3ProxyError;
 
     fn try_from(value: Result<Box<RawValue>, Web3ProxyError>) -> Result<Self, Self::Error> {
@@ -205,8 +235,9 @@ impl TryFrom<ProviderError> for JsonRpcErrorData {
     }
 }
 
-impl<K, Q> Weighter<K, Q, JsonRpcResponseEnum<Box<RawValue>>> for JsonRpcResponseWeigher {
-    fn weight(&self, _key: &K, _qey: &Q, value: &JsonRpcResponseEnum<Box<RawValue>>) -> NonZeroU32 {
+// TODO: instead of Arc<RawValue>, be generic
+impl<K, Q> Weighter<K, Q, JsonRpcResponseEnum<Arc<RawValue>>> for JsonRpcResponseWeigher {
+    fn weight(&self, _key: &K, _qey: &Q, value: &JsonRpcResponseEnum<Arc<RawValue>>) -> NonZeroU32 {
         value.num_bytes()
     }
 }
@@ -216,7 +247,7 @@ mod tests {
     use super::{JsonRpcResponseEnum, JsonRpcResponseWeigher};
     use quick_cache_ttl::CacheWithTTL;
     use serde_json::value::RawValue;
-    use std::{num::NonZeroU32, time::Duration};
+    use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
     #[tokio::test(start_paused = true)]
     async fn test_json_rpc_query_weigher() {
@@ -225,7 +256,7 @@ mod tests {
 
         let test_cache: CacheWithTTL<
             u32,
-            JsonRpcResponseEnum<Box<RawValue>>,
+            JsonRpcResponseEnum<Arc<RawValue>>,
             JsonRpcResponseWeigher,
         > = CacheWithTTL::new_with_weights(
             "test",
@@ -238,17 +269,17 @@ mod tests {
         .await;
 
         let small_data = JsonRpcResponseEnum::Result {
-            value: Default::default(),
+            value: Box::<RawValue>::default().into(),
             num_bytes: NonZeroU32::try_from(max_item_weight / 2).unwrap(),
         };
 
         let max_sized_data = JsonRpcResponseEnum::Result {
-            value: Default::default(),
+            value: Box::<RawValue>::default().into(),
             num_bytes: NonZeroU32::try_from(max_item_weight).unwrap(),
         };
 
         let oversized_data = JsonRpcResponseEnum::Result {
-            value: Default::default(),
+            value: Box::<RawValue>::default().into(),
             num_bytes: NonZeroU32::try_from(max_item_weight * 2).unwrap(),
         };
 

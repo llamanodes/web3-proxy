@@ -8,6 +8,7 @@ use serde_json::json;
 use serde_json::value::{to_raw_value, RawValue};
 use std::borrow::Cow;
 use std::fmt;
+use std::sync::Arc;
 
 pub trait JsonRpcParams = Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static;
 pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + fmt::Debug + Send;
@@ -234,7 +235,7 @@ pub struct JsonRpcForwardedResponse {
     pub jsonrpc: &'static str,
     pub id: Box<RawValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Box<RawValue>>,
+    pub result: Option<Arc<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<JsonRpcErrorData>,
 }
@@ -279,7 +280,7 @@ impl JsonRpcForwardedResponse {
         }
     }
 
-    pub fn from_raw_response(result: Box<RawValue>, id: Box<RawValue>) -> Self {
+    pub fn from_raw_response(result: Arc<RawValue>, id: Box<RawValue>) -> Self {
         JsonRpcForwardedResponse {
             jsonrpc: "2.0",
             id,
@@ -291,6 +292,9 @@ impl JsonRpcForwardedResponse {
 
     pub fn from_value(result: serde_json::Value, id: Box<RawValue>) -> Self {
         let partial_response = to_raw_value(&result).expect("Value to RawValue should always work");
+
+        // TODO: an Arc is a waste here. change JsonRpcForwardedResponse to take an enum?
+        let partial_response = partial_response.into();
 
         JsonRpcForwardedResponse {
             jsonrpc: "2.0",
@@ -339,7 +343,7 @@ impl JsonRpcForwardedResponse {
     }
 
     pub fn try_from_response_result(
-        result: Result<Box<RawValue>, ProviderError>,
+        result: Result<Arc<RawValue>, ProviderError>,
         id: Box<RawValue>,
     ) -> Web3ProxyResult<Self> {
         match result {
@@ -348,7 +352,7 @@ impl JsonRpcForwardedResponse {
         }
     }
 
-    pub fn from_response_data(data: JsonRpcResponseEnum<Box<RawValue>>, id: Box<RawValue>) -> Self {
+    pub fn from_response_data(data: JsonRpcResponseEnum<Arc<RawValue>>, id: Box<RawValue>) -> Self {
         match data {
             JsonRpcResponseEnum::Result { value, .. } => Self::from_raw_response(value, id),
             JsonRpcResponseEnum::RpcError {

@@ -1181,7 +1181,7 @@ impl Web3ProxyApp {
         mut params: serde_json::Value,
         head_block_num: Option<U64>,
         request_metadata: &Arc<RequestMetadata>,
-    ) -> Web3ProxyResult<JsonRpcResponseEnum<Box<RawValue>>> {
+    ) -> Web3ProxyResult<JsonRpcResponseEnum<Arc<RawValue>>> {
         // TODO: don't clone into a new string?
         let request_method = method.to_string();
 
@@ -1189,7 +1189,7 @@ impl Web3ProxyApp {
 
         // TODO: serve net_version without querying the backend
         // TODO: don't force RawValue
-        let response_data: JsonRpcResponseEnum<Box<RawValue>> = match request_method.as_ref() {
+        let response_data: JsonRpcResponseEnum<Arc<RawValue>> = match request_method.as_ref() {
             // lots of commands are blocked
             method @ ("db_getHex"
             | "db_getString"
@@ -1701,14 +1701,14 @@ impl Web3ProxyApp {
 
                     match self
                         .jsonrpc_response_cache
-                        .get_value_or_guard_async(cache_key).await
+                        .get_value_or_guard_async(cache_key.hash()).await
                     {
                         Ok(x) => x,
                         Err(x) => {
                             let response_data = timeout(
                                 duration,
                                 self.balanced_rpcs
-                                    .try_proxy_connection::<_, Box<RawValue>>(
+                                    .try_proxy_connection::<_, Arc<RawValue>>(
                                         method,
                                         &params,
                                         Some(request_metadata),
@@ -1718,7 +1718,7 @@ impl Web3ProxyApp {
                                 )
                                 .await?;
 
-                            let response_data: JsonRpcResponseEnum<Box<RawValue>> = response_data.try_into()?;
+                            let response_data: JsonRpcResponseEnum<Arc<RawValue>> = response_data.try_into()?;
 
                             if matches!(response_data, JsonRpcResponseEnum::Result { .. }) || cache_errors {
                                 // TODO: convert the Box<RawValue> to an Arc<RawValue>?
@@ -1732,7 +1732,7 @@ impl Web3ProxyApp {
                     let x = timeout(
                         duration,
                         self.balanced_rpcs
-                        .try_proxy_connection::<_, Box<RawValue>>(
+                        .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             &params,
                             Some(request_metadata),
