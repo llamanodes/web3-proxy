@@ -1234,7 +1234,7 @@ impl Serialize for Web3Rpcs {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Web3Rpcs", 2)?;
+        let mut state = serializer.serialize_struct("Web3Rpcs", 8)?;
 
         {
             let by_name = self.by_name.load();
@@ -1254,12 +1254,23 @@ impl Serialize for Web3Rpcs {
             }
         }
 
-        // self.blocks_by_hash.sync();
-        // self.blocks_by_number.sync();
-        // state.serialize_field("block_hashes_count", &self.blocks_by_hash.entry_count())?;
-        // state.serialize_field("block_hashes_size", &self.blocks_by_hash.weighted_size())?;
-        // state.serialize_field("block_numbers_count", &self.blocks_by_number.entry_count())?;
-        // state.serialize_field("block_numbers_size", &self.blocks_by_number.weighted_size())?;
+        state.serialize_field("blocks_by_hash", &self.blocks_by_hash)?;
+        state.serialize_field("blocks_by_number", &self.blocks_by_number)?;
+        state.serialize_field("pending_transaction_cache", &self.pending_transaction_cache)?;
+
+        state.serialize_field("block_sender_len", &self.block_sender.len())?;
+
+        state.serialize_field(
+            "watch_consensus_rpcs_receivers",
+            &self.watch_consensus_rpcs_sender.receiver_count(),
+        )?;
+
+        if let Some(ref x) = self.watch_consensus_head_sender {
+            state.serialize_field("watch_consensus_head_receivers", &x.receiver_count())?;
+        } else {
+            state.serialize_field("watch_consensus_head_receivers", &None::<()>)?;
+        }
+
         state.end()
     }
 }
