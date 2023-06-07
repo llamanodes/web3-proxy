@@ -135,12 +135,15 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
     // TODO: what else should we include? uptime, cache hit rates, cpu load, memory used
     // TODO: the hostname is probably not going to change. only get once at the start?
     let body = json!({
-        "version": APP_USER_AGENT,
-        "chain_id": app.config.chain_id,
         "balanced_rpcs": app.balanced_rpcs,
-        "private_rpcs": app.private_rpcs,
         "bundler_4337_rpcs": app.bundler_4337_rpcs,
+        "chain_id": app.config.chain_id,
         "hostname": app.hostname,
+        "jsonrpc_response_cache": app.jsonrpc_response_cache,
+        "private_rpcs": app.private_rpcs,
+        "rpc_secret_key_cache": app.rpc_secret_key_cache,
+        "user_balance_cache": app.user_balance_cache,
+        "version": APP_USER_AGENT,
     });
 
     let body = body.to_string().into_bytes();

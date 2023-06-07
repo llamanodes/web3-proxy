@@ -1202,7 +1202,7 @@ impl Serialize for Web3Rpcs {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Web3Rpcs", 1)?;
+        let mut state = serializer.serialize_struct("Web3Rpcs", 2)?;
 
         {
             let by_name = self.by_name.load();

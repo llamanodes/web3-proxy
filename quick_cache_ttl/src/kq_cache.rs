@@ -1,6 +1,8 @@
 use log::{log_enabled, trace};
 use quick_cache::sync::KQCache;
 use quick_cache::{PlaceholderGuard, Weighter};
+use serde::ser::SerializeStruct;
+use serde::{Serialize, Serializer};
 use std::convert::Infallible;
 use std::fmt::Debug;
 use std::future::Future;
@@ -151,11 +153,6 @@ impl<
         }
     }
 
-    #[inline]
-    pub fn hits(&self) -> u64 {
-        self.cache.hits()
-    }
-
     /// if the item was too large to insert, it is returned with the error
     /// IMPORTANT! Inserting the same key multiple times does NOT reset the TTL!
     #[inline]
@@ -181,11 +178,6 @@ impl<
         } else {
             Err((key, qey, val))
         }
-    }
-
-    #[inline]
-    pub fn misses(&self) -> u64 {
-        self.cache.misses()
     }
 
     #[inline]
@@ -266,5 +258,31 @@ impl<
         }
 
         self.tx.send((expire_at, self.key, self.qey)).unwrap();
+    }
+}
+
+impl<
+        Key: Clone + Debug + Eq + Hash + Send + Sync + 'static,
+        Qey: Clone + Debug + Eq + Hash + Send + Sync + 'static,
+        Val: Clone + Send + Sync + 'static,
+        We: Weighter<Key, Qey, Val> + Clone + Send + Sync + 'static,
+        B: BuildHasher + Clone + Send + Sync + 'static,
+    > Serialize for KQCacheWithTTL<Key, Qey, Val, We, B>
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct(self.name, 5)?;
+
+        state.serialize_field("len", &self.cache.len())?;
+        state.serialize_field("weight", &self.cache.weight())?;
+
+        state.serialize_field("capacity", &self.cache.capacity())?;
+
+        state.serialize_field("hits", &self.cache.hits())?;
+        state.serialize_field("misses", &self.cache.misses())?;
+
+        state.end()
     }
 }
