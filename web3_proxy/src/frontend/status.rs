@@ -142,7 +142,6 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
         "jsonrpc_response_cache": app.jsonrpc_response_cache,
         "private_rpcs": app.private_rpcs,
         "rpc_secret_key_cache": app.rpc_secret_key_cache,
-        "user_balance_cache": app.user_balance_cache,
         "version": APP_USER_AGENT,
     });
 
