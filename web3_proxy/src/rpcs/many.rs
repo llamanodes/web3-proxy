@@ -1202,7 +1202,7 @@ impl Serialize for Web3Rpcs {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Web3Rpcs", 4)?;
+        let mut state = serializer.serialize_struct("Web3Rpcs", 8)?;
 
         {
             let by_name = self.by_name.load();
@@ -1224,6 +1224,20 @@ impl Serialize for Web3Rpcs {
 
         state.serialize_field("blocks_by_hash", &self.blocks_by_hash)?;
         state.serialize_field("blocks_by_number", &self.blocks_by_number)?;
+        state.serialize_field("pending_transaction_cache", &self.pending_transaction_cache)?;
+
+        state.serialize_field("block_sender_len", &self.block_sender.len())?;
+
+        state.serialize_field(
+            "watch_consensus_rpcs_receivers",
+            &self.watch_consensus_rpcs_sender.receiver_count(),
+        )?;
+
+        if let Some(ref x) = self.watch_consensus_head_sender {
+            state.serialize_field("watch_consensus_head_receivers", &x.receiver_count())?;
+        } else {
+            state.serialize_field("watch_consensus_head_receivers", &None::<()>)?;
+        }
 
         state.end()
     }
