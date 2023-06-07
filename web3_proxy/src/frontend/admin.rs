@@ -120,7 +120,7 @@ pub async fn admin_increase_balance(
     // update balance
     let balance_entry = balance::ActiveModel {
         id: sea_orm::NotSet,
-        available_balance: sea_orm::Set(amount),
+        total_deposits: sea_orm::Set(amount),
         user_id: sea_orm::Set(user_entry.id),
         ..Default::default()
     };
@@ -128,8 +128,8 @@ pub async fn admin_increase_balance(
         .on_conflict(
             OnConflict::new()
                 .values([(
-                    balance::Column::AvailableBalance,
-                    Expr::col(balance::Column::AvailableBalance).add(amount),
+                    balance::Column::TotalDeposits,
+                    Expr::col(balance::Column::TotalDeposits).add(amount),
                 )])
                 .to_owned(),
         )
