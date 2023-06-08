@@ -413,8 +413,8 @@ impl BufferedRpcQueryStats {
             return Ok((deltas, Some((referral_entity, referrer_code_entity))));
         }
 
-        let user_balance = (sender_balance.total_deposits + deltas.sender_bonus_balance_deposited
-            - sender_balance.total_spent_outside_free_tier);
+        let user_balance = sender_balance.total_deposits + deltas.sender_bonus_balance_deposited
+            - sender_balance.total_spent_outside_free_tier;
         // Split up the component of into how much of the paid component was used, and how much of the free component was used (anything after "balance")
         if user_balance >= Decimal::from(0) {
             deltas.balance_used_outside_free_tier = self.sum_credits_used;
