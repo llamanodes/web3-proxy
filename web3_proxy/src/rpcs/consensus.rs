@@ -8,11 +8,10 @@ use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
 use itertools::{Itertools, MinMaxResult};
 use log::{trace, warn};
-use quick_cache_ttl::Cache;
+use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BTreeMap;
-use std::convert::Infallible;
 use std::fmt;
 use std::sync::Arc;
 use tokio::time::Instant;
@@ -378,9 +377,8 @@ impl ConsensusFinder {
     async fn insert(&mut self, rpc: Arc<Web3Rpc>, block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
         let first_seen = self
             .first_seen
-            .get_or_insert_async::<Infallible>(block.hash(), async { Ok(Instant::now()) })
-            .await
-            .expect("this cache get is infallible");
+            .get_with_by_ref(block.hash(), async { Instant::now() })
+            .await;
 
         // calculate elapsed time before trying to lock
         let latency = first_seen.elapsed();

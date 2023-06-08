@@ -439,6 +439,7 @@ impl BufferedRpcQueryStats {
                 deltas.balance_spent_excluding_free_credits = self.sum_credits_used;
             }
 
+
             Ok((deltas, Some((referral_entity, referrer_code_entity))))
         } else {
             let user_balance = (sender_balance.total_deposits
@@ -637,11 +638,13 @@ impl BufferedRpcQueryStats {
 
             for rpc_key_entity in rpc_keys {
                 // TODO: Not sure which one was inserted, just delete both ...
-                rpc_secret_key_cache.remove(&rpc_key_entity.secret_key.into());
+                rpc_secret_key_cache
+                    .invalidate(&rpc_key_entity.secret_key.into())
+                    .await;
             }
 
             if let Ok(non_zero_user_id) = NonZeroU64::try_from(sender_rpc_entity.user_id) {
-                user_balance_cache.remove(&non_zero_user_id);
+                user_balance_cache.invalidate(&non_zero_user_id).await;
             }
         }
 
@@ -660,7 +663,7 @@ impl BufferedRpcQueryStats {
         //         // In principle, do not remove the cache for the referrer; the next reload will trigger premium
         //         // We don't touch the RPC keys at this stage for the refferer, a payment must be paid to reset those (we want to keep things simple here)
         //         // Anyways, the RPC keys will be updated in 5 min (600 seconds)
-        //         user_balance_cache.remove(&referrer_user_id);
+        //         user_balance_cache.invalidate(&referrer_user_id).await;
         //     }
         // };
 

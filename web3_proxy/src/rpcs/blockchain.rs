@@ -9,7 +9,7 @@ use crate::frontend::authorization::Authorization;
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use log::{debug, trace, warn};
-use quick_cache_ttl::CacheWithTTL;
+use moka::future::Cache;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use serde_json::json;
@@ -20,8 +20,8 @@ use tokio::sync::broadcast;
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
 
-pub type BlocksByHashCache = Arc<CacheWithTTL<H256, Web3ProxyBlock>>;
-pub type BlocksByNumberCache = Arc<CacheWithTTL<U64, H256>>;
+pub type BlocksByHashCache = Cache<H256, Web3ProxyBlock>;
+pub type BlocksByNumberCache = Cache<U64, H256>;
 
 /// A block and its age.
 #[derive(Clone, Debug, Default, From)]
@@ -172,8 +172,6 @@ impl Web3Rpcs {
             return Ok(block);
         }
 
-        let block_num = block.number();
-
         // this block is very likely already in block_hashes
         // TODO: use their get_with
         let block_hash = *block.hash();
@@ -182,15 +180,17 @@ impl Web3Rpcs {
         if heaviest_chain {
             // this is the only place that writes to block_numbers
             // multiple inserts should be okay though
-            // TODO: info that there was a fork?
+            // TODO: info if there was a fork?
+            let block_num = block.number();
+
             self.blocks_by_number
-                .get_or_insert_async(block_num, async move { block_hash })
+                .get_with_by_ref(block_num, async move { block_hash })
                 .await;
         }
 
         let block = self
             .blocks_by_hash
-            .get_or_insert_async(&block_hash, async move { block })
+            .get_with_by_ref(&block_hash, async move { block })
             .await;
 
         Ok(block)
@@ -468,7 +468,7 @@ impl Web3Rpcs {
                             // hash changed
 
                             debug!(
-                                "unc {}/{} {}{}/{}/{} con_head={} old={} rpc={}@{}",
+                                "unc {}/{} {}{}/{}/{} con={} old={} rpc={}@{}",
                                 consensus_tier,
                                 total_tiers,
                                 backups_voted_str,

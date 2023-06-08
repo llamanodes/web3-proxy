@@ -416,7 +416,7 @@ impl Web3Rpc {
 
                 // if we already have this block saved, set new_head_block to that arc. otherwise store this copy
                 let new_head_block = block_map
-                    .get_or_insert_async(&new_hash, async move { new_head_block })
+                    .get_with_by_ref(&new_hash, async move { new_head_block })
                     .await;
 
                 // save the block so we don't send the same one multiple times

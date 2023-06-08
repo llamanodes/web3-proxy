@@ -17,7 +17,6 @@ use hashbrown::HashMap;
 use http::StatusCode;
 use log::{trace, warn};
 use migration::sea_orm;
-use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::EntityTrait;

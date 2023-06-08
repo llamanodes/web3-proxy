@@ -312,13 +312,14 @@ pub async fn user_balance_post(
             match NonZeroU64::try_from(recipient.id) {
                 Err(_) => {}
                 Ok(x) => {
-                    app.user_balance_cache.remove(&x);
+                    app.user_balance_cache.invalidate(&x).await;
                 }
             };
 
             for rpc_key_entity in rpc_keys {
                 app.rpc_secret_key_cache
-                    .remove(&rpc_key_entity.secret_key.into());
+                    .invalidate(&rpc_key_entity.secret_key.into())
+                    .await;
             }
 
             let x = json!({
