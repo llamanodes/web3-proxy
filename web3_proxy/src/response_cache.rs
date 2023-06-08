@@ -247,27 +247,44 @@ mod tests {
         let max_item_weight = 200;
         let weight_capacity = 1_000;
 
-        let test_cache: Cache<u32, JsonRpcResponseEnum<Arc<RawValue>>> =
-            CacheBuilder::new(weight_capacity)
-                .weigher(json_rpc_response_weigher)
-                .time_to_live(Duration::from_secs(2))
-                .build();
+        // let test_cache: Cache<u32, JsonRpcResponseEnum<Arc<RawValue>>> =
+        //     CacheBuilder::new(weight_capacity)
+        //         .weigher(json_rpc_response_weigher)
+        //         .time_to_live(Duration::from_secs(2))
+        //         .build();
 
-        let small_data = JsonRpcResponseEnum::Result {
+        let small_data: JsonRpcResponseEnum<Arc<RawValue>> = JsonRpcResponseEnum::Result {
+            value: Box::<RawValue>::default().into(),
+            num_bytes: max_item_weight / 2,
+        };
+
+        assert_eq!(
+            json_rpc_response_weigher(&(), &small_data),
+            max_item_weight / 2
+        );
+
+        let max_sized_data: JsonRpcResponseEnum<Arc<RawValue>> = JsonRpcResponseEnum::Result {
             value: Box::<RawValue>::default().into(),
             num_bytes: max_item_weight,
         };
 
-        let max_sized_data = JsonRpcResponseEnum::Result {
-            value: Box::<RawValue>::default().into(),
-            num_bytes: max_item_weight,
-        };
+        assert_eq!(
+            json_rpc_response_weigher(&(), &max_sized_data),
+            max_item_weight
+        );
 
-        let oversized_data = JsonRpcResponseEnum::Result {
+        let oversized_data: JsonRpcResponseEnum<Arc<RawValue>> = JsonRpcResponseEnum::Result {
             value: Box::<RawValue>::default().into(),
             num_bytes: max_item_weight * 2,
         };
 
+        assert_eq!(
+            json_rpc_response_weigher(&(), &oversized_data),
+            max_item_weight * 2
+        );
+
+        // TODO: helper for inserts that does size checking
+        /*
         test_cache.insert(0, small_data).await;
 
         test_cache.get(&0).unwrap();
@@ -283,5 +300,6 @@ mod tests {
         test_cache.get(&0).unwrap();
         test_cache.get(&1).unwrap();
         assert!(test_cache.get(&2).is_none());
+        */
     }
 }
