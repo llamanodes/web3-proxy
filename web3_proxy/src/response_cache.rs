@@ -238,9 +238,8 @@ pub fn json_rpc_response_weigher<K, R>(_key: &K, value: &JsonRpcResponseEnum<R>)
 mod tests {
     use super::JsonRpcResponseEnum;
     use crate::response_cache::json_rpc_response_weigher;
-    use moka::future::{Cache, CacheBuilder};
     use serde_json::value::RawValue;
-    use std::{sync::Arc, time::Duration};
+    use std::sync::Arc;
 
     #[tokio::test(start_paused = true)]
     async fn test_json_rpc_query_weigher() {
