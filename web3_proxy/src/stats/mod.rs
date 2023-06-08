@@ -882,7 +882,7 @@ impl RpcQueryStats {
         method: Option<&str>,
     ) -> Decimal {
         // for now, always return 0 for cost
-        Decimal::new(1, 1)
+        Decimal::new(0, 1)
 
         /*
         // some methods should be free. there might be cases where method isn't set (though they should be uncommon)
