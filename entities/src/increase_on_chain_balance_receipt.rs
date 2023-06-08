@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
-    #[sea_orm(unique)]
     pub tx_hash: String,
     pub chain_id: u64,
     #[sea_orm(column_type = "Decimal(Some((20, 10)))")]

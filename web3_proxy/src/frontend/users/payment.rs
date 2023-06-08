@@ -168,19 +168,32 @@ pub async fn user_balance_post(
     let payment_factory_contract =
         PaymentFactory::new(payment_factory_address, app.internal_provider().clone());
 
-    // check bloom filter to be sure this transaction contains any relevant logs
-    if let Some(ValueOrArray::Value(Some(x))) = payment_factory_contract
-        .payment_received_filter()
-        .filter
-        .topics[0]
-    {
-        let bloom_input = BloomInput::Hash(x.as_fixed_bytes());
+    debug!(
+        "Payment Factor Filter is: {:?}",
+        payment_factory_contract.payment_received_filter()
+    );
 
-        // do a quick check that this transaction contains the required log
-        if !transaction_receipt.logs_bloom.contains_input(bloom_input) {
-            return Err(Web3ProxyError::BadRequest("no matching logs found".into()));
-        }
-    }
+    // check bloom filter to be sure this transaction contains any relevant logs
+    // TODO: This does not work properly right now, get back this eventually
+    // if let Some(ValueOrArray::Value(Some(x))) = payment_factory_contract
+    //     .payment_received_filter()
+    //     .filter
+    //     .topics[0]
+    // {
+    //     debug!("Bloom input bytes is: {:?}", x);
+    //     debug!("Bloom input bytes is: {:?}", x..as_fixed_bytes());
+    //     debug!("Bloom input as hex is: {:?}", hex!(x));
+    //     let bloom_input = BloomInput::Raw(hex!(x));
+    //     debug!(
+    //         "Transaction receipt logs_bloom: {:?}",
+    //         transaction_receipt.logs_bloom
+    //     );
+    //
+    //     // do a quick check that this transaction contains the required log
+    //     if !transaction_receipt.logs_bloom.contains_input(x) {
+    //         return Err(Web3ProxyError::BadRequest("no matching logs found".into()));
+    //     }
+    // }
 
     // the transaction might contain multiple relevant logs. collect them all
     let mut response_data = vec![];
@@ -195,7 +208,6 @@ pub async fn user_balance_post(
         }
 
         // Create a new transaction that will be used for joint transaction
-        let txn = db_conn.begin().await?;
         if let Ok(event) = payment_factory_contract
             .decode_event::<payment_factory::PaymentReceivedFilter>(
                 "PaymentReceived",
@@ -224,26 +236,29 @@ pub async fn user_balance_post(
             // hopefully u32 is always enough, because the Decimal crate doesn't accept a larger scale
             // <https://eips.ethereum.org/EIPS/eip-20> uses uint8, but i've seen pretty much every int in practice
             let payment_token_decimals = payment_token.decimals().call().await?.as_u32();
-
-            let decimal_shift = Decimal::from(10).pow(payment_token_decimals as u64);
-
             let mut payment_token_amount = Decimal::from_str_exact(&payment_token_wei.to_string())?;
+            // Setting the scale already does the decimal shift, no need to divide a second time
             payment_token_amount.set_scale(payment_token_decimals)?;
-            payment_token_amount /= decimal_shift;
 
             info!(
-                "Found deposit transaction for: {:?} {:?} {:?}",
-                recipient_account, payment_token_address, payment_token_amount
+                "Found deposit transaction for: {:?} {:?} {:?} {:?}",
+                &recipient_account.to_fixed_bytes(),
+                recipient_account,
+                payment_token_address,
+                payment_token_amount
             );
 
             let recipient = match user::Entity::find()
-                .filter(user::Column::Address.eq(recipient_account.encode_hex()))
+                .filter(user::Column::Address.eq(recipient_account.to_fixed_bytes().as_slice()))
                 .one(&db_conn)
                 .await?
             {
-                Some(x) => x,
-                None => todo!("make their account"),
-            };
+                Some(x) => Ok(x),
+                None => {
+                    // todo!("make their account");
+                    Err(Web3ProxyError::AccessDenied)
+                }
+            }?;
 
             // For now we only accept stablecoins
             // And we hardcode the peg (later we would have to depeg this, for example
@@ -261,6 +276,7 @@ pub async fn user_balance_post(
                 user_id: sea_orm::Set(recipient.id),
                 ..Default::default()
             };
+            info!("Trying to insert into balance entry: {:?}", balance_entry);
             balance::Entity::insert(balance_entry)
                 .on_conflict(
                     OnConflict::new()
@@ -283,6 +299,7 @@ pub async fn user_balance_post(
                 deposit_to_user_id: sea_orm::ActiveValue::Set(recipient.id),
                 ..Default::default()
             };
+            info!("Trying to insert receipt {:?}", receipt);
 
             receipt.save(&txn).await?;
 

@@ -26,7 +26,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(IncreaseOnChainBalanceReceipt::ChainId)
-                            .big_integer()
+                            .big_unsigned()
                             .not_null(),
                     )
                     .col(
@@ -37,7 +37,6 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(IncreaseOnChainBalanceReceipt::DepositToUserId)
                             .big_unsigned()
-                            .unique_key()
                             .not_null(),
                     )
                     .foreign_key(
