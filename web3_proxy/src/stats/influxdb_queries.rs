@@ -167,6 +167,23 @@ pub async fn query_user_stats<'a>(
         StatType::Detailed => "".to_string(),
     };
 
+    let join_candidates = match stat_response_type {
+        StatType::Aggregated => f!(
+            r#"{:?}"#,
+            vec!["_time", "_measurement", "chain_id", "rpc_secret_key_id"]
+        ),
+        StatType::Detailed => f!(
+            r#"{:?}"#,
+            vec![
+                "_time",
+                "_measurement",
+                "method",
+                "chain_id",
+                "rpc_secret_key_id"
+            ]
+        ),
+    };
+
     let query = f!(r#"
     base = from(bucket: "{bucket}")
         |> range(start: {query_start}, stop: {query_stop})
@@ -198,10 +215,9 @@ pub async fn query_user_stats<'a>(
 
     join(
         tables: {{cumsum, balance}},
-        on: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"]
+        on: {join_candidates}
     )
-    |> sort(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"], desc: true)
-
+        |> sort(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"], desc: true)
     "#);
 
     debug!("Raw query to db is: {:#?}", query);
