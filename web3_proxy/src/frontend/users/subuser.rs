@@ -15,7 +15,7 @@ use entities::{balance, rpc_key, secondary_user, user};
 use ethers::types::Address;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{trace, warn};
+use log::trace;
 use migration::sea_orm;
 use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;

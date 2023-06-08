@@ -181,7 +181,7 @@ pub async fn user_balance_post(
     //     .topics[0]
     // {
     //     debug!("Bloom input bytes is: {:?}", x);
-    //     debug!("Bloom input bytes is: {:?}", x..as_fixed_bytes());
+    //     debug!("Bloom input bytes is: {:?}", x.as_fixed_bytes());
     //     debug!("Bloom input as hex is: {:?}", hex!(x));
     //     let bloom_input = BloomInput::Raw(hex!(x));
     //     debug!(

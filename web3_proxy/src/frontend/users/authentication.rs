@@ -18,7 +18,7 @@ use entities::{balance, login, pending_login, referee, referrer, rpc_key, user};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{debug, warn};
+use log::{debug, warn, trace};
 use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,

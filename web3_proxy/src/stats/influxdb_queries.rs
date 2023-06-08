@@ -20,10 +20,8 @@ use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
-use log::{debug, error, info, trace, warn};
-use migration::sea_orm::ColumnTrait;
-use migration::sea_orm::EntityTrait;
-use migration::sea_orm::QueryFilter;
+use log::{debug, error, trace, warn};
+use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
 use ulid::Ulid;
 
