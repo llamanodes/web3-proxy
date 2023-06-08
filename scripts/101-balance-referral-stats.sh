@@ -109,3 +109,22 @@ do
     -H "Content-Type: application/json" \
   --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
 done
+
+
+# Get some data on the referral items
+curl \
+-H "Authorization: Bearer 01H2D5DN564M4Q2T6PETEZY83Q" \
+-X GET "127.0.0.1:8544/user/referral/stats/used-codes"
+
+curl \
+-H "Authorization: Bearer 01H2D5CAQJF7P80222P4ZAFQ26" \
+-X GET "127.0.0.1:8544/user/referral/stats/used-codes"
+
+
+curl \
+-H "Authorization: Bearer 01H2D5DN564M4Q2T6PETEZY83Q" \
+-X GET "127.0.0.1:8544/user/referral/stats/shared-codes"
+
+curl \
+-H "Authorization: Bearer 01H2D5CAQJF7P80222P4ZAFQ26" \
+-X GET "127.0.0.1:8544/user/referral/stats/shared-codes"
