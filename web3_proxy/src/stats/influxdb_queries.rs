@@ -197,7 +197,10 @@ pub async fn query_user_stats<'a>(
     let raw_influx_responses: Vec<FluxRecord> = influxdb_client
         .query_raw(Some(query.clone()))
         .await
-        .context("failed parsing query result into a FluxRecord")?;
+        .context(format!(
+            "failed parsing query result into a FluxRecord. Query={:?}",
+            query
+        ))?;
 
     // Basically rename all items to be "total",
     // calculate number of "archive_needed" and "error_responses" through their boolean representations ...
@@ -206,30 +209,28 @@ pub async fn query_user_stats<'a>(
     // TODO: I must be able to probably zip the balance query...
     let datapoints = raw_influx_responses
         .into_iter()
-        // .into_values()
         .map(|x| x.values)
         .map(|value_map| {
             // Unwrap all relevant numbers
-            // BTreeMap<String, value::Value>
-            let mut out: HashMap<String, serde_json::Value> = HashMap::new();
+            let mut out: HashMap<&str, serde_json::Value> = HashMap::new();
             value_map.into_iter().for_each(|(key, value)| {
                 if key == "_measurement" {
                     match value {
                         influxdb2_structmap::value::Value::String(inner) => {
                             if inner == "opt_in_proxy" {
                                 out.insert(
-                                    "collection".to_owned(),
+                                    "collection",
                                     serde_json::Value::String("opt-in".to_owned()),
                                 );
                             } else if inner == "global_proxy" {
                                 out.insert(
-                                    "collection".to_owned(),
+                                    "collection",
                                     serde_json::Value::String("global".to_owned()),
                                 );
                             } else {
                                 warn!("Some datapoints are not part of any _measurement!");
                                 out.insert(
-                                    "collection".to_owned(),
+                                    "collection",
                                     serde_json::Value::String("unknown".to_owned()),
                                 );
                             }
@@ -241,10 +242,7 @@ pub async fn query_user_stats<'a>(
                 } else if key == "_stop" {
                     match value {
                         influxdb2_structmap::value::Value::TimeRFC(inner) => {
-                            out.insert(
-                                "stop_time".to_owned(),
-                                serde_json::Value::String(inner.to_string()),
-                            );
+                            out.insert("stop_time", serde_json::Value::String(inner.to_string()));
                         }
                         _ => {
                             error!("_stop should always be a TimeRFC!");
@@ -253,10 +251,7 @@ pub async fn query_user_stats<'a>(
                 } else if key == "_time" {
                     match value {
                         influxdb2_structmap::value::Value::TimeRFC(inner) => {
-                            out.insert(
-                                "time".to_owned(),
-                                serde_json::Value::String(inner.to_string()),
-                            );
+                            out.insert("time", serde_json::Value::String(inner.to_string()));
                         }
                         _ => {
                             error!("_stop should always be a TimeRFC!");
@@ -266,7 +261,7 @@ pub async fn query_user_stats<'a>(
                     match value {
                         influxdb2_structmap::value::Value::Long(inner) => {
                             out.insert(
-                                "total_backend_requests".to_owned(),
+                                "total_backend_requests",
                                 serde_json::Value::Number(inner.into()),
                             );
                         }
@@ -277,7 +272,7 @@ pub async fn query_user_stats<'a>(
                 } else if key == "balance" {
                     match value {
                         influxdb2_structmap::value::Value::Double(inner) => {
-                            out.insert("balance".to_owned(), json!(f64::from(inner)));
+                            out.insert("balance", json!(f64::from(inner)));
                         }
                         _ => {
                             error!("balance should always be a Double!");
@@ -286,10 +281,7 @@ pub async fn query_user_stats<'a>(
                 } else if key == "cache_hits" {
                     match value {
                         influxdb2_structmap::value::Value::Long(inner) => {
-                            out.insert(
-                                "total_cache_hits".to_owned(),
-                                serde_json::Value::Number(inner.into()),
-                            );
+                            out.insert("total_cache_hits", serde_json::Value::Number(inner.into()));
                         }
                         _ => {
                             error!("cache_hits should always be a Long!");
@@ -299,7 +291,7 @@ pub async fn query_user_stats<'a>(
                     match value {
                         influxdb2_structmap::value::Value::Long(inner) => {
                             out.insert(
-                                "total_cache_misses".to_owned(),
+                                "total_cache_misses",
                                 serde_json::Value::Number(inner.into()),
                             );
                         }
@@ -311,7 +303,7 @@ pub async fn query_user_stats<'a>(
                     match value {
                         influxdb2_structmap::value::Value::Long(inner) => {
                             out.insert(
-                                "total_frontend_requests".to_owned(),
+                                "total_frontend_requests",
                                 serde_json::Value::Number(inner.into()),
                             );
                         }
@@ -322,10 +314,7 @@ pub async fn query_user_stats<'a>(
                 } else if key == "no_servers" {
                     match value {
                         influxdb2_structmap::value::Value::Long(inner) => {
-                            out.insert(
-                                "no_servers".to_owned(),
-                                serde_json::Value::Number(inner.into()),
-                            );
+                            out.insert("no_servers", serde_json::Value::Number(inner.into()));
                         }
                         _ => {
                             error!("no_servers should always be a Long!");
@@ -334,7 +323,7 @@ pub async fn query_user_stats<'a>(
                 } else if key == "sum_credits_used" {
                     match value {
                         influxdb2_structmap::value::Value::Double(inner) => {
-                            out.insert("total_credits_used".to_owned(), json!(f64::from(inner)));
+                            out.insert("total_credits_used", json!(f64::from(inner)));
                         }
                         _ => {
                             error!("sum_credits_used should always be a Double!");
@@ -344,7 +333,7 @@ pub async fn query_user_stats<'a>(
                     match value {
                         influxdb2_structmap::value::Value::Long(inner) => {
                             out.insert(
-                                "total_request_bytes".to_owned(),
+                                "total_request_bytes",
                                 serde_json::Value::Number(inner.into()),
                             );
                         }
@@ -356,7 +345,7 @@ pub async fn query_user_stats<'a>(
                     match value {
                         influxdb2_structmap::value::Value::Long(inner) => {
                             out.insert(
-                                "total_response_bytes".to_owned(),
+                                "total_response_bytes",
                                 serde_json::Value::Number(inner.into()),
                             );
                         }
@@ -368,7 +357,7 @@ pub async fn query_user_stats<'a>(
                     match value {
                         influxdb2_structmap::value::Value::String(inner) => {
                             out.insert(
-                                "rpc_key".to_owned(),
+                                "rpc_key",
                                 serde_json::Value::String(
                                     rpc_key_id_to_key.get(&inner).unwrap().to_string(),
                                 ),
@@ -382,7 +371,7 @@ pub async fn query_user_stats<'a>(
                     match value {
                         influxdb2_structmap::value::Value::Long(inner) => {
                             out.insert(
-                                "total_response_millis".to_owned(),
+                                "total_response_millis",
                                 serde_json::Value::Number(inner.into()),
                             );
                         }
@@ -395,7 +384,7 @@ pub async fn query_user_stats<'a>(
                 else if stat_response_type == StatType::Detailed && key == "method" {
                     match value {
                         influxdb2_structmap::value::Value::String(inner) => {
-                            out.insert("method".to_owned(), serde_json::Value::String(inner));
+                            out.insert("method", serde_json::Value::String(inner));
                         }
                         _ => {
                             error!("method should always be a String!");
@@ -404,7 +393,7 @@ pub async fn query_user_stats<'a>(
                 } else if key == "chain_id" {
                     match value {
                         influxdb2_structmap::value::Value::String(inner) => {
-                            out.insert("chain_id".to_owned(), serde_json::Value::String(inner));
+                            out.insert("chain_id", serde_json::Value::String(inner));
                         }
                         _ => {
                             error!("chain_id should always be a String!");
@@ -414,7 +403,7 @@ pub async fn query_user_stats<'a>(
                     match value {
                         influxdb2_structmap::value::Value::String(inner) => {
                             out.insert(
-                                "archive_needed".to_owned(),
+                                "archive_needed",
                                 if inner == "true" {
                                     serde_json::Value::Bool(true)
                                 } else if inner == "false" {
@@ -432,7 +421,7 @@ pub async fn query_user_stats<'a>(
                     match value {
                         influxdb2_structmap::value::Value::String(inner) => {
                             out.insert(
-                                "error_response".to_owned(),
+                                "error_response",
                                 if inner == "true" {
                                     serde_json::Value::Bool(true)
                                 } else if inner == "false" {
@@ -484,9 +473,6 @@ pub async fn query_user_stats<'a>(
     }
 
     let response = Json(json!(response_body)).into_response();
-    // Add the requests back into out
-
-    // TODO: Now impplement the proper response type
 
     Ok(response)
 }
