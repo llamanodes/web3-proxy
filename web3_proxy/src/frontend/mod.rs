@@ -18,7 +18,7 @@ use axum::{
 use http::{header::AUTHORIZATION, StatusCode};
 use listenfd::ListenFd;
 use log::{debug, info};
-use quick_cache_ttl::UnitWeighter;
+use moka::future::{Cache, CacheBuilder};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{iter::once, time::Duration};
@@ -37,12 +37,7 @@ pub enum ResponseCacheKey {
     Status,
 }
 
-pub type ResponseCache = quick_cache_ttl::CacheWithTTL<
-    ResponseCacheKey,
-    (StatusCode, &'static str, axum::body::Bytes),
-    UnitWeighter,
-    quick_cache_ttl::DefaultHashBuilder,
->;
+pub type ResponseCache = Cache<ResponseCacheKey, (StatusCode, &'static str, axum::body::Bytes)>;
 
 /// Start the frontend server.
 pub async fn serve(
@@ -58,12 +53,10 @@ pub async fn serve(
 
     debug!("response_cache size: {}", response_cache_size);
 
-    let response_cache = ResponseCache::new(
-        "response_cache",
-        response_cache_size,
-        Duration::from_secs(1),
-    )
-    .await;
+    let response_cache: ResponseCache = CacheBuilder::new(response_cache_size as u64)
+        .name("frontend_response")
+        .time_to_live(Duration::from_secs(1))
+        .build();
 
     // TODO: read config for if fastest/versus should be available publicly. default off
 

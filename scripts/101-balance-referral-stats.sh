@@ -96,16 +96,35 @@ curl \
 for i in {1..10000}
 do
   curl \
+    -X POST "127.0.0.1:8544/rpc/01H2D5CAP1KF2NKRS30SGATDSD" \
+    -H "Content-Type: application/json" \
+  --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
+done
+
+# Let's also make simultaneous requests
+for i in {1..10000}
+do
+  curl \
     -X POST "127.0.0.1:8544/rpc/01H2D5DN4D423VR2KFWBZE46TR" \
     -H "Content-Type: application/json" \
   --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
 done
 
-# Let's simultaneously also let the referrer make some requests, to make sure deadlocks do not occur
-for i in {1..10000}
-do
-  curl \
-    -X POST "127.0.0.1:8544/rpc/01H2D5CAP1KF2NKRS30SGATDSD" \
-    -H "Content-Type: application/json" \
-  --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
-done
+
+# Get some data on the referral items
+curl \
+-H "Authorization: Bearer 01H2D5DN564M4Q2T6PETEZY83Q" \
+-X GET "127.0.0.1:8544/user/referral/stats/used-codes"
+
+curl \
+-H "Authorization: Bearer 01H2D5CAQJF7P80222P4ZAFQ26" \
+-X GET "127.0.0.1:8544/user/referral/stats/used-codes"
+
+
+curl \
+-H "Authorization: Bearer 01H2D5DN564M4Q2T6PETEZY83Q" \
+-X GET "127.0.0.1:8544/user/referral/stats/shared-codes"
+
+curl \
+-H "Authorization: Bearer 01H2D5CAQJF7P80222P4ZAFQ26" \
+-X GET "127.0.0.1:8544/user/referral/stats/shared-codes"

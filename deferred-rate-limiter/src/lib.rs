@@ -1,6 +1,6 @@
 //#![warn(missing_docs)]
 use log::error;
-use quick_cache_ttl::CacheWithTTL;
+use moka::future::{Cache, CacheBuilder};
 use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
 use std::cmp::Eq;
 use std::fmt::{Debug, Display};
@@ -16,7 +16,7 @@ pub struct DeferredRateLimiter<K>
 where
     K: Send + Sync,
 {
-    local_cache: CacheWithTTL<K, Arc<AtomicU64>>,
+    local_cache: Cache<K, Arc<AtomicU64>>,
     prefix: String,
     rrl: RedisRateLimiter,
     /// if None, defers to the max on rrl
@@ -46,12 +46,10 @@ where
         // TODO: what do these weigh?
         // TODO: allow skipping max_capacity
         // TODO: prefix instead of a static str
-        let local_cache = CacheWithTTL::new(
-            "deferred rate limiter",
-            cache_size,
-            Duration::from_secs(ttl),
-        )
-        .await;
+        let local_cache = CacheBuilder::new(cache_size.try_into().unwrap())
+            .time_to_live(Duration::from_secs(ttl))
+            .name(&format!("DeferredRateLimiter-{}", prefix))
+            .build();
 
         Self {
             local_cache,
@@ -91,7 +89,7 @@ where
 
             // set arc_deferred_rate_limit_result and return the count
             self.local_cache
-                .try_get_or_insert_async::<anyhow::Error, _>(&key, async move {
+                .try_get_with_by_ref::<_, anyhow::Error, _>(&key, async move {
                     // we do not use the try operator here because we want to be okay with redis errors
                     let redis_count = match rrl
                         .throttle_label(&redis_key, Some(max_requests_per_period), count)
@@ -130,7 +128,8 @@ where
 
                     Ok(Arc::new(AtomicU64::new(redis_count)))
                 })
-                .await?
+                .await
+                .map_err(|x| anyhow::anyhow!("cache error! {}", x))?
         };
 
         let mut locked = deferred_rate_limit_result.lock().await;

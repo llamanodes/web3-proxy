@@ -15,9 +15,8 @@ use entities::{balance, rpc_key, secondary_user, user};
 use ethers::types::Address;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{trace, warn};
+use log::trace;
 use migration::sea_orm;
-use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::EntityTrait;
@@ -146,7 +145,7 @@ pub async fn get_subusers(
         .all(db_replica.as_ref())
         .await?;
 
-    warn!("Subusers are: {:?}", subusers);
+    trace!("Subusers are: {}", json!(subusers));
 
     // Now return the list
     let response_json = json!({

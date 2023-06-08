@@ -5,7 +5,6 @@ members = [
   "latency",
   "migration",
   "payment-contracts",
-  "quick_cache_ttl",
   "rate-counter",
   "redis-rate-limiter",
   "thread-fast-rng",

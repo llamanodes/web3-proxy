@@ -30,7 +30,6 @@ use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
-use std::convert::Infallible;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::mem;
@@ -921,13 +920,12 @@ impl Web3ProxyApp {
         if let Some(max_concurrent_requests) = self.config.public_max_concurrent_requests {
             let semaphore = self
                 .ip_semaphores
-                .get_or_insert_async::<Infallible>(ip, async move {
+                .get_with_by_ref(ip, async {
                     // TODO: set max_concurrent_requests dynamically based on load?
                     let s = Semaphore::new(max_concurrent_requests);
-                    Ok(Arc::new(s))
+                    Arc::new(s)
                 })
-                .await
-                .expect("infallible");
+                .await;
 
             let semaphore_permit = semaphore.acquire_owned().await?;
 
@@ -951,12 +949,11 @@ impl Web3ProxyApp {
 
             let semaphore = self
                 .user_semaphores
-                .get_or_insert_async::<Infallible>(&user_id, async move {
+                .get_with_by_ref(&user_id, async move {
                     let s = Semaphore::new(max_concurrent_requests as usize);
-                    Ok(Arc::new(s))
+                    Arc::new(s)
                 })
-                .await
-                .expect("infallible");
+                .await;
 
             let semaphore_permit = semaphore.acquire_owned().await?;
 
@@ -980,12 +977,11 @@ impl Web3ProxyApp {
         // limit concurrent requests
         let semaphore = self
             .bearer_token_semaphores
-            .get_or_insert_async::<Infallible>(&user_bearer_token, async move {
+            .get_with_by_ref(&user_bearer_token, async move {
                 let s = Semaphore::new(self.config.bearer_token_max_concurrent_requests as usize);
-                Ok(Arc::new(s))
+                Arc::new(s)
             })
-            .await
-            .expect("infallible");
+            .await;
 
         let semaphore_permit = semaphore.acquire_owned().await?;
 
@@ -1139,25 +1135,25 @@ impl Web3ProxyApp {
     ) -> Web3ProxyResult<Arc<RwLock<Decimal>>> {
         match NonZeroU64::try_from(user_id) {
             Err(_) => Ok(Arc::new(RwLock::new(Decimal::default()))),
-            Ok(x) => {
-                self.user_balance_cache
-                    .try_get_or_insert_async(&x, async move {
-                        let db_replica = self
-                            .db_replica()
-                            .web3_context("Getting database connection")?;
+            Ok(x) => self
+                .user_balance_cache
+                .try_get_with_by_ref(&x, async move {
+                    let db_replica = self
+                        .db_replica()
+                        .web3_context("Getting database connection")?;
 
-                        let balance: Decimal = match balance::Entity::find()
-                            .filter(balance::Column::UserId.eq(user_id))
-                            .one(db_replica.as_ref())
-                            .await?
-                        {
-                            Some(x) => x.total_deposits - x.total_spent_outside_free_tier,
-                            None => Decimal::default(),
-                        };
-                        Ok(Arc::new(RwLock::new(balance)))
-                    })
-                    .await
-            }
+                    let balance: Decimal = match balance::Entity::find()
+                        .filter(balance::Column::UserId.eq(user_id))
+                        .one(db_replica.as_ref())
+                        .await?
+                    {
+                        Some(x) => x.total_deposits - x.total_spent_outside_free_tier,
+                        None => Decimal::default(),
+                    };
+                    Ok(Arc::new(RwLock::new(balance)))
+                })
+                .await
+                .map_err(Into::into),
         }
     }
 
@@ -1168,7 +1164,7 @@ impl Web3ProxyApp {
         rpc_secret_key: RpcSecretKey,
     ) -> Web3ProxyResult<AuthorizationChecks> {
         self.rpc_secret_key_cache
-            .try_get_or_insert_async(&rpc_secret_key, async move {
+            .try_get_with_by_ref(&rpc_secret_key, async move {
                 // trace!(?rpc_secret_key, "user cache miss");
 
                 let db_replica = self
@@ -1303,6 +1299,7 @@ impl Web3ProxyApp {
                 }
             })
             .await
+            .map_err(Into::into)
     }
 
     /// Authorized the ip/origin/referer/useragent and rate limit and concurrency

@@ -22,6 +22,7 @@ use rust_decimal::Error as DecimalError;
 use serde::Serialize;
 use serde_json::value::RawValue;
 use std::error::Error;
+use std::sync::Arc;
 use std::{borrow::Cow, net::IpAddr};
 use tokio::{sync::AcquireError, task::JoinError, time::Instant};
 
@@ -42,6 +43,7 @@ pub enum Web3ProxyError {
     AccessDenied,
     #[error(ignore)]
     Anyhow(anyhow::Error),
+    Arc(Arc<Self>),
     #[error(ignore)]
     #[from(ignore)]
     BadRequest(Cow<'static, str>),
@@ -154,7 +156,7 @@ pub enum Web3ProxyError {
 }
 
 impl Web3ProxyError {
-    pub fn into_response_parts<R: Serialize>(self) -> (StatusCode, JsonRpcResponseEnum<R>) {
+    pub fn as_response_parts<R: Serialize>(&self) -> (StatusCode, JsonRpcResponseEnum<R>) {
         // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
             Self::Abi(err) => {
@@ -191,6 +193,10 @@ impl Web3ProxyError {
                         data: None,
                     },
                 )
+            }
+            Self::Arc(err) => {
+                // recurse
+                return err.as_response_parts::<R>();
             }
             Self::BadRequest(err) => {
                 debug!("BAD_REQUEST: {}", err);
@@ -533,7 +539,10 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::JsonRpcErrorData(jsonrpc_error_data) => (StatusCode::OK, jsonrpc_error_data),
+            Self::JsonRpcErrorData(jsonrpc_error_data) => {
+                // TODO: do this without clone? the Arc needed it though
+                (StatusCode::OK, jsonrpc_error_data.clone())
+            }
             Self::MsgPackEncode(err) => {
                 warn!("MsgPackEncode Error: {}", err);
                 (
@@ -764,7 +773,7 @@ impl Web3ProxyError {
                 )
             }
             Self::RefererRequired => {
-                warn!("referer required");
+                debug!("referer required");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -775,7 +784,7 @@ impl Web3ProxyError {
                 )
             }
             Self::RefererNotAllowed(referer) => {
-                warn!("referer not allowed referer={:?}", referer);
+                debug!("referer not allowed referer={:?}", referer);
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
@@ -829,9 +838,9 @@ impl Web3ProxyError {
                 }
 
                 (
-                    status_code,
+                    *status_code,
                     JsonRpcErrorData {
-                        message: Cow::Owned(err_msg),
+                        message: err_msg.to_owned().into(),
                         code: code.into(),
                         data: None,
                     },
@@ -840,7 +849,7 @@ impl Web3ProxyError {
             Self::Timeout(x) => (
                 StatusCode::REQUEST_TIMEOUT,
                 JsonRpcErrorData {
-                    message: Cow::Owned(format!("request timed out: {:?}", x)),
+                    message: format!("request timed out: {:?}", x).into(),
                     code: StatusCode::REQUEST_TIMEOUT.as_u16().into(),
                     // TODO: include the actual id!
                     data: None,
@@ -851,7 +860,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Owned(err.to_string()),
+                        message: err.to_string().into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -862,7 +871,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("{}", err)),
+                        message: format!("{}", err).into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -873,7 +882,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_GATEWAY,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("no servers synced. unknown eth_blockNumber"),
+                        message: "no servers synced. unknown eth_blockNumber".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
                         data: None,
                     },
@@ -889,7 +898,7 @@ impl Web3ProxyError {
                 },
             ),
             Self::UserAgentRequired => {
-                warn!("UserAgentRequired");
+                debug!("UserAgentRequired");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -900,7 +909,7 @@ impl Web3ProxyError {
                 )
             }
             Self::UserAgentNotAllowed(ua) => {
-                warn!("UserAgentNotAllowed ua={}", ua);
+                debug!("UserAgentNotAllowed ua={}", ua);
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
@@ -960,9 +969,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed(
-                            "redirect_public_url not set. only websockets work here",
-                        ),
+                        message: "redirect_public_url not set. only websockets work here".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -971,14 +978,14 @@ impl Web3ProxyError {
             Self::WithContext(err, msg) => match err {
                 Some(err) => {
                     warn!("{:#?} w/ context {}", err, msg);
-                    return err.into_response_parts();
+                    return err.as_response_parts();
                 }
                 None => {
                     warn!("error w/ context {}", msg);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         JsonRpcErrorData {
-                            message: Cow::Owned(msg),
+                            message: msg.to_owned().into(),
                             code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                             data: None,
                         },
@@ -991,7 +998,7 @@ impl Web3ProxyError {
     }
 
     pub fn into_response_with_id(self, id: Box<RawValue>) -> Response {
-        let (status_code, response_data) = self.into_response_parts();
+        let (status_code, response_data) = self.as_response_parts();
 
         let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
 

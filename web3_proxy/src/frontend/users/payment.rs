@@ -181,7 +181,7 @@ pub async fn user_balance_post(
     //     .topics[0]
     // {
     //     debug!("Bloom input bytes is: {:?}", x);
-    //     debug!("Bloom input bytes is: {:?}", x..as_fixed_bytes());
+    //     debug!("Bloom input bytes is: {:?}", x.as_fixed_bytes());
     //     debug!("Bloom input as hex is: {:?}", hex!(x));
     //     let bloom_input = BloomInput::Raw(hex!(x));
     //     debug!(
@@ -312,13 +312,14 @@ pub async fn user_balance_post(
             match NonZeroU64::try_from(recipient.id) {
                 Err(_) => {}
                 Ok(x) => {
-                    app.user_balance_cache.remove(&x);
+                    app.user_balance_cache.invalidate(&x).await;
                 }
             };
 
             for rpc_key_entity in rpc_keys {
                 app.rpc_secret_key_cache
-                    .remove(&rpc_key_entity.secret_key.into());
+                    .invalidate(&rpc_key_entity.secret_key.into())
+                    .await;
             }
 
             let x = json!({

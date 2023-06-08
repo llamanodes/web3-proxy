@@ -20,7 +20,6 @@ entities = { path = "../entities" }
 latency = { path = "../latency" }
 migration = { path = "../migration" }
 payment-contracts = { path = "../payment-contracts" }
-quick_cache_ttl = { path = "../quick_cache_ttl" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 thread-fast-rng = { path = "../thread-fast-rng" }
 
@@ -68,6 +67,7 @@ itertools = "0.10.5"
 listenfd = "1.0.1"
 log = "0.4.18"
 mimalloc = { version = "0.1.37", optional = true}
+moka = { version = "0.11.1", features = ["future"] }
 num = "0.4.0"
 num-traits = "0.2.15"
 once_cell = { version = "1.18.0" }
@@ -87,7 +87,7 @@ serde_json = { version = "1.0.96", default-features = false, features = ["alloc"
 serde_prometheus = "0.2.2"
 siwe = "0.5.2"
 strum = { version = "0.24.1", features = ["derive"] }
-time = "0.3.21"
+time = "0.3.22"
 tokio = { version = "1.28.2", features = ["full"] }
 tokio-console = { version = "0.1.8", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
