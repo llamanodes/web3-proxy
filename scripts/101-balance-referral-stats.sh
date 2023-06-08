@@ -96,16 +96,16 @@ curl \
 for i in {1..10000}
 do
   curl \
-    -X POST "127.0.0.1:8544/rpc/01H2D5DN4D423VR2KFWBZE46TR" \
+    -X POST "127.0.0.1:8544/rpc/01H2D5CAP1KF2NKRS30SGATDSD" \
     -H "Content-Type: application/json" \
   --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
 done
 
-# Let's simultaneously also let the referrer make some requests, to make sure deadlocks do not occur
+# Let's also make simultaneous requests
 for i in {1..10000}
 do
   curl \
-    -X POST "127.0.0.1:8544/rpc/01H2D5CAP1KF2NKRS30SGATDSD" \
+    -X POST "127.0.0.1:8544/rpc/01H2D5DN4D423VR2KFWBZE46TR" \
     -H "Content-Type: application/json" \
   --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
 done
