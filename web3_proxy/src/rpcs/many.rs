@@ -8,6 +8,7 @@ use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
+use crate::frontend::status::MokaCacheSerializer;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::transactions::TxStatus;
 use arc_swap::ArcSwap;
@@ -21,8 +22,8 @@ use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use migration::sea_orm::DatabaseConnection;
+use moka::future::{Cache, CacheBuilder};
 use ordered_float::OrderedFloat;
-use quick_cache_ttl::CacheWithTTL;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
@@ -53,7 +54,7 @@ pub struct Web3Rpcs {
     /// this head receiver makes it easy to wait until there is a new block
     pub(super) watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// keep track of transactions that we have sent through subscriptions
-    pub(super) pending_transaction_cache: Arc<CacheWithTTL<TxHash, TxStatus>>,
+    pub(super) pending_transaction_cache: Cache<TxHash, TxStatus>,
     pub(super) pending_tx_id_receiver: flume::Receiver<TxHashAndRpc>,
     pub(super) pending_tx_id_sender: flume::Sender<TxHashAndRpc>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
@@ -81,7 +82,7 @@ impl Web3Rpcs {
         min_head_rpcs: usize,
         min_sum_soft_limit: u32,
         name: String,
-        pending_transaction_cache: Arc<CacheWithTTL<TxHash, TxStatus>>,
+        pending_transaction_cache: Cache<TxHash, TxStatus>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     ) -> anyhow::Result<(
@@ -96,16 +97,16 @@ impl Web3Rpcs {
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         // TODO: actual weighter on this
         // TODO: time_to_idle instead?
-        let blocks_by_hash: BlocksByHashCache = Arc::new(
-            CacheWithTTL::new("blocks_by_hash", 1_000, Duration::from_secs(30 * 60)).await,
-        );
+        let blocks_by_hash: BlocksByHashCache = CacheBuilder::new(1_000)
+            .time_to_idle(Duration::from_secs(30 * 60))
+            .build();
 
         // all block numbers are the same size, so no need for weigher
         // TODO: limits from config
         // TODO: time_to_idle instead?
-        let blocks_by_number = Arc::new(
-            CacheWithTTL::new("blocks_by_number", 1_000, Duration::from_secs(30 * 60)).await,
-        );
+        let blocks_by_number = CacheBuilder::new(1_000)
+            .time_to_idle(Duration::from_secs(30 * 60))
+            .build();
 
         let (watch_consensus_rpcs_sender, consensus_connections_watcher) =
             watch::channel(Default::default());
@@ -1254,9 +1255,15 @@ impl Serialize for Web3Rpcs {
             }
         }
 
-        state.serialize_field("blocks_by_hash", &self.blocks_by_hash)?;
-        state.serialize_field("blocks_by_number", &self.blocks_by_number)?;
-        state.serialize_field("pending_transaction_cache", &self.pending_transaction_cache)?;
+        state.serialize_field("blocks_by_hash", &MokaCacheSerializer(&self.blocks_by_hash))?;
+        state.serialize_field(
+            "blocks_by_number",
+            &MokaCacheSerializer(&self.blocks_by_number),
+        )?;
+        state.serialize_field(
+            "pending_transaction_cache",
+            &MokaCacheSerializer(&self.pending_transaction_cache),
+        )?;
 
         state.serialize_field("block_sender_len", &self.block_sender.len())?;
 
@@ -1308,6 +1315,7 @@ mod tests {
     use ethers::types::{Block, U256};
     use latency::PeakEwmaLatency;
     use log::{trace, LevelFilter};
+    use moka::future::CacheBuilder;
     use parking_lot::RwLock;
     use tokio::sync::RwLock as AsyncRwLock;
 
@@ -1488,26 +1496,17 @@ mod tests {
             name: "test".to_string(),
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
-            pending_transaction_cache: CacheWithTTL::arc_with_capacity(
-                "pending_transaction_cache",
-                100,
-                Duration::from_secs(60),
-            )
-            .await,
+            pending_transaction_cache: CacheBuilder::new(100)
+                .time_to_live(Duration::from_secs(60))
+                .build(),
             pending_tx_id_receiver,
             pending_tx_id_sender,
-            blocks_by_hash: CacheWithTTL::arc_with_capacity(
-                "blocks_by_hash",
-                100,
-                Duration::from_secs(60),
-            )
-            .await,
-            blocks_by_number: CacheWithTTL::arc_with_capacity(
-                "blocks_by_number",
-                100,
-                Duration::from_secs(60),
-            )
-            .await,
+            blocks_by_hash: CacheBuilder::new(100)
+                .time_to_live(Duration::from_secs(60))
+                .build(),
+            blocks_by_number: CacheBuilder::new(100)
+                .time_to_live(Duration::from_secs(60))
+                .build(),
             // TODO: test max_block_age?
             max_block_age: None,
             // TODO: test max_block_lag?
@@ -1777,26 +1776,17 @@ mod tests {
             name: "test".to_string(),
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
-            pending_transaction_cache: CacheWithTTL::arc_with_capacity(
-                "pending_transaction_cache",
-                100,
-                Duration::from_secs(120),
-            )
-            .await,
+            pending_transaction_cache: CacheBuilder::new(100)
+                .time_to_live(Duration::from_secs(120))
+                .build(),
             pending_tx_id_receiver,
             pending_tx_id_sender,
-            blocks_by_hash: CacheWithTTL::arc_with_capacity(
-                "blocks_by_hash",
-                100,
-                Duration::from_secs(120),
-            )
-            .await,
-            blocks_by_number: CacheWithTTL::arc_with_capacity(
-                "blocks_by_number",
-                100,
-                Duration::from_secs(120),
-            )
-            .await,
+            blocks_by_hash: CacheBuilder::new(100)
+                .time_to_live(Duration::from_secs(120))
+                .build(),
+            blocks_by_number: CacheBuilder::new(100)
+                .time_to_live(Duration::from_secs(120))
+                .build(),
             min_head_rpcs: 1,
             min_sum_soft_limit: 4_000,
             max_block_age: None,
@@ -1972,26 +1962,11 @@ mod tests {
             name: "test".to_string(),
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
-            pending_transaction_cache: CacheWithTTL::arc_with_capacity(
-                "pending_transaction_cache",
-                10_000,
-                Duration::from_secs(120),
-            )
-            .await,
+            pending_transaction_cache: Cache::new(10_000),
             pending_tx_id_receiver,
             pending_tx_id_sender,
-            blocks_by_hash: CacheWithTTL::arc_with_capacity(
-                "blocks_by_hash",
-                10_000,
-                Duration::from_secs(120),
-            )
-            .await,
-            blocks_by_number: CacheWithTTL::arc_with_capacity(
-                "blocks_by_number",
-                10_000,
-                Duration::from_secs(120),
-            )
-            .await,
+            blocks_by_hash: Cache::new(10_000),
+            blocks_by_number: Cache::new(10_000),
             min_head_rpcs: 1,
             min_sum_soft_limit: 1_000,
             max_block_age: None,

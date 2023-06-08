@@ -13,7 +13,9 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use log::trace;
+use moka::future::Cache;
 use once_cell::sync::Lazy;
+use serde::{ser::SerializeStruct, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -33,7 +35,7 @@ pub async fn health(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     let (code, content_type, body) = cache
-        .get_or_insert_async(&ResponseCacheKey::Health, async move { _health(app).await })
+        .get_with(ResponseCacheKey::Health, async move { _health(app).await })
         .await;
 
     Response::builder()
@@ -66,7 +68,7 @@ pub async fn backups_needed(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     let (code, content_type, body) = cache
-        .get_or_insert_async(&ResponseCacheKey::BackupsNeeded, async move {
+        .get_with(ResponseCacheKey::BackupsNeeded, async move {
             _backups_needed(app).await
         })
         .await;
@@ -117,7 +119,7 @@ pub async fn status(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> impl IntoResponse {
     let (code, content_type, body) = cache
-        .get_or_insert_async(&ResponseCacheKey::Status, async move { _status(app).await })
+        .get_with(ResponseCacheKey::Status, async move { _status(app).await })
         .await;
 
     Response::builder()
@@ -139,10 +141,10 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
         "bundler_4337_rpcs": app.bundler_4337_rpcs,
         "chain_id": app.config.chain_id,
         "hostname": app.hostname,
-        "jsonrpc_response_cache": app.jsonrpc_response_cache,
+        "jsonrpc_response_cache": MokaCacheSerializer(&app.jsonrpc_response_cache),
         "private_rpcs": app.private_rpcs,
-        "rpc_secret_key_cache": app.rpc_secret_key_cache,
-        "user_balance_cache": app.user_balance_cache,
+        "rpc_secret_key_cache": MokaCacheSerializer(&app.rpc_secret_key_cache),
+        "user_balance_cache": MokaCacheSerializer(&app.user_balance_cache),
         "version": APP_USER_AGENT,
     });
 
@@ -157,4 +159,23 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
     };
 
     (code, CONTENT_TYPE_JSON, body)
+}
+
+pub struct MokaCacheSerializer<'a, K, V>(pub &'a Cache<K, V>);
+
+impl<'a, K, V> Serialize for MokaCacheSerializer<'a, K, V> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("MokaCache", 2)?;
+
+        self.0.weighted_size();
+
+        state.serialize_field("entry_count", &self.0.entry_count())?;
+
+        todo!();
+
+        // state.end()
+    }
 }

@@ -13,7 +13,7 @@ use crate::jsonrpc::{
 };
 use crate::relational_db::{get_db, get_migrated_db, DatabaseConnection, DatabaseReplica};
 use crate::response_cache::{
-    JsonRpcQueryCacheKey, JsonRpcResponseCache, JsonRpcResponseEnum, JsonRpcResponseWeigher,
+    json_rpc_response_weigher, JsonRpcQueryCacheKey, JsonRpcResponseCache, JsonRpcResponseEnum,
 };
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::consensus::ConsensusWeb3Rpcs;
@@ -42,7 +42,8 @@ use ipnet::IpNet;
 use log::{error, info, trace, warn, Level};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{EntityTrait, PaginatorTrait};
-use quick_cache_ttl::{Cache, CacheWithTTL};
+use moka::future::{Cache, CacheBuilder};
+use parking_lot::Mutex;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use serde::Serialize;
@@ -51,7 +52,7 @@ use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::fmt;
 use std::net::IpAddr;
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
@@ -110,8 +111,8 @@ pub struct AuthorizationChecks {
 }
 
 /// Cache data from the database about rpc keys
-pub type RpcSecretKeyCache = Arc<CacheWithTTL<RpcSecretKey, AuthorizationChecks>>;
-pub type UserBalanceCache = Arc<CacheWithTTL<NonZeroU64, Arc<RwLock<Decimal>>>>; // Could also be an AtomicDecimal
+pub type RpcSecretKeyCache = Cache<RpcSecretKey, AuthorizationChecks>;
+pub type UserBalanceCache = Cache<NonZeroU64, Arc<RwLock<Decimal>>>;
 
 /// The application
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
@@ -144,7 +145,7 @@ pub struct Web3ProxyApp {
     pub internal_provider: Arc<EthersHttpProvider>,
     /// store pending transactions that we've seen so that we don't send duplicates to subscribers
     /// TODO: think about this more. might be worth storing if we sent the transaction or not and using this for automatic retries
-    pub pending_transactions: Arc<CacheWithTTL<TxHash, TxStatus>>,
+    pub pending_transactions: Cache<TxHash, TxStatus>,
     /// rate limit anonymous users
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     /// rate limit authenticated users
@@ -398,17 +399,14 @@ impl Web3ProxyApp {
         // if there is no database of users, there will be no keys and so this will be empty
         // TODO: max_capacity from config
         // TODO: ttl from config
-        let rpc_secret_key_cache = CacheWithTTL::arc_with_capacity(
-            "rpc_secret_key_cache",
-            10_000,
-            Duration::from_secs(600),
-        )
-        .await;
+        let rpc_secret_key_cache = CacheBuilder::new(10_000)
+            .time_to_live(Duration::from_secs(600))
+            .build();
 
         // TODO: TTL left low, this could also be a solution instead of modifiying the cache, that may be disgusting across threads / slow anyways
-        let user_balance_cache =
-            CacheWithTTL::arc_with_capacity("user_balance_cache", 10_000, Duration::from_secs(600))
-                .await;
+        let user_balance_cache = CacheBuilder::new(10_000)
+            .time_to_live(Duration::from_secs(600))
+            .build();
 
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
@@ -502,27 +500,26 @@ impl Web3ProxyApp {
         // TODO: different chains might handle this differently
         // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
         // TODO: this used to be time_to_update, but
-        let pending_transactions = CacheWithTTL::arc_with_capacity(
-            "pending_transactions",
-            10_000,
-            Duration::from_secs(300),
-        )
-        .await;
+        let pending_transactions = CacheBuilder::new(10_000)
+            .time_to_live(Duration::from_secs(300))
+            .build();
 
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
         // TODO: we should emit stats to calculate a more accurate expected cache size
         // TODO: do we actually want a TTL on this?
         // TODO: configurable max item weight instead of using ~0.1%
         // TODO: resize the cache automatically
-        let response_cache = JsonRpcResponseCache::new_with_weights(
-            "response_cache",
-            (top_config.app.response_cache_max_bytes / 16_384) as usize,
-            NonZeroU32::try_from((top_config.app.response_cache_max_bytes / 1024) as u32).unwrap(),
-            top_config.app.response_cache_max_bytes,
-            JsonRpcResponseWeigher,
-            Duration::from_secs(3600),
-        )
-        .await;
+        let response_cache: JsonRpcResponseCache =
+            CacheBuilder::new(top_config.app.response_cache_max_bytes)
+                .weigher(json_rpc_response_weigher)
+                .build();
+        //     (top_config.app.response_cache_max_bytes / 16_384) as usize,
+        //     NonZeroU32::try_from((top_config.app.response_cache_max_bytes / 1024) as u32).unwrap(),
+        //     top_config.app.response_cache_max_bytes,
+        //     JsonRpcResponseWeigher,
+        //     Duration::from_secs(3600),
+        // )
+        // .await;
 
         // TODO: how should we handle hitting this max?
         let max_users = 20_000;
@@ -1160,7 +1157,7 @@ impl Web3ProxyApp {
             .await
         {
             Ok(response_data) => (StatusCode::OK, response_data),
-            Err(err) => err.into_response_parts(),
+            Err(err) => err.as_response_parts(),
         };
 
         let response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
@@ -1699,12 +1696,15 @@ impl Web3ProxyApp {
                     let to_block_num = cache_key.to_block_num();
                     let cache_errors = cache_key.cache_errors();
 
-                    match self
+                    // moka makes us do annoying things with arcs
+                    enum CacheError {
+                        NotCached(JsonRpcResponseEnum<Arc<RawValue>>),
+                        Error(Arc<Web3ProxyError>),
+                    }
+
+                    let x = self
                         .jsonrpc_response_cache
-                        .get_value_or_guard_async(cache_key.hash()).await
-                    {
-                        Ok(x) => x,
-                        Err(x) => {
+                        .try_get_with::<_, Mutex<CacheError>>(cache_key.hash(), async {
                             let response_data = timeout(
                                 duration,
                                 self.balanced_rpcs
@@ -1716,16 +1716,32 @@ impl Web3ProxyApp {
                                         to_block_num.as_ref(),
                                     )
                                 )
-                                .await?;
+                                .await
+                                .map_err(|x| Mutex::new(CacheError::Error(Arc::new(Web3ProxyError::from(x)))))?;
 
-                            let response_data: JsonRpcResponseEnum<Arc<RawValue>> = response_data.try_into()?;
+                            // TODO: i think response data should be Arc<JsonRpcResponseEnum<Box<RawValue>>>, but that's more work
+                            let response_data: JsonRpcResponseEnum<Arc<RawValue>> = response_data.try_into()
+                                .map_err(|x| Mutex::new(CacheError::Error(Arc::new(x))))?;
 
-                            if matches!(response_data, JsonRpcResponseEnum::Result { .. }) || cache_errors {
-                                // TODO: convert the Box<RawValue> to an Arc<RawValue>?
-                                x.insert(response_data.clone());
+                            // TODO: read max size from the config
+                            if response_data.num_bytes() as u64 > self.config.response_cache_max_bytes / 1000 {
+                                Err(Mutex::new(CacheError::NotCached(response_data)))
+                            } else if matches!(response_data, JsonRpcResponseEnum::Result { .. }) || cache_errors {
+                                Ok(response_data)
+                            } else {
+                                Err(Mutex::new(CacheError::NotCached(response_data)))
                             }
+                        }).await;
 
-                            response_data
+                    match x {
+                        Ok(x) => x,
+                        Err(arc_err) => {
+                            let locked = arc_err.lock();
+
+                            match &*locked {
+                                CacheError::Error(err) => return Err(Web3ProxyError::Arc(err.clone())),
+                                CacheError::NotCached(x) => x.clone(),
+                            }
                         }
                     }
                 } else {

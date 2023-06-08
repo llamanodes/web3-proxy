@@ -330,7 +330,7 @@ async fn handle_socket_payload(
     let (authorization, semaphore) = match authorization.check_again(&app).await {
         Ok((a, s)) => (a, s),
         Err(err) => {
-            let (_, err) = err.into_response_parts();
+            let (_, err) = err.as_response_parts();
 
             let err = JsonRpcForwardedResponse::from_response_data(err, Default::default());
 
@@ -437,7 +437,7 @@ async fn handle_socket_payload(
     let response_str = match response {
         Ok(x) => serde_json::to_string(&x).expect("to_string should always work here"),
         Err(err) => {
-            let (_, response_data) = err.into_response_parts();
+            let (_, response_data) = err.as_response_parts();
 
             let response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
 
