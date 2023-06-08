@@ -136,14 +136,14 @@ impl StatBuffer {
                     }
                 }
                 _ = db_save_interval.tick() => {
-                    info!("DB save internal tick");
+                    trace!("DB save internal tick");
                     let count = self.save_relational_stats().await;
                     if count > 0 {
                         trace!("Saved {} stats to the relational db", count);
                     }
                 }
                 _ = tsdb_save_interval.tick() => {
-                    info!("TSDB save internal tick");
+                    trace!("TSDB save internal tick");
                     let count = self.save_tsdb_stats(&bucket).await;
                     if count > 0 {
                         trace!("Saved {} stats to the tsdb", count);
