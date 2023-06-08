@@ -20,7 +20,7 @@ use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
-use log::{error, info, warn};
+use log::{debug, error, info, trace, warn};
 use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::EntityTrait;
 use migration::sea_orm::QueryFilter;
@@ -191,7 +191,7 @@ pub async fn query_user_stats<'a>(
         |> sort(columns: ["_time", "_measurement", "archive_needed", "chain_id", "error_response", "method", "rpc_secret_key_id"], desc: true)
     "#);
 
-    debug!("Raw query to db is: {:?}", query);
+    debug!("Raw query to db is: {:#?}", query);
     let query = Query::new(query.to_string());
     trace!("Query to db is: {:?}", query);
 
