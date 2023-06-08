@@ -167,6 +167,23 @@ pub async fn query_user_stats<'a>(
         StatType::Detailed => "".to_string(),
     };
 
+    let join_candidates = match stat_response_type {
+        StatType::Aggregated => f!(
+            r#"{:?}"#,
+            vec!["_time", "_measurement", "chain_id", "rpc_secret_key_id"]
+        ),
+        StatType::Detailed => f!(
+            r#"{:?}"#,
+            vec![
+                "_time",
+                "_measurement",
+                "method",
+                "chain_id",
+                "rpc_secret_key_id"
+            ]
+        ),
+    };
+
     let query = f!(r#"
     base = from(bucket: "{bucket}")
         |> range(start: {query_start}, stop: {query_stop})
@@ -174,8 +191,8 @@ pub async fn query_user_stats<'a>(
         |> filter(fn: (r) => r["_measurement"] == "{measurement}")
         {filter_chain_id}
         {drop_method}
-
-    base
+        
+    cumsum = base 
         |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
         |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
         |> drop(columns: ["balance"])
@@ -186,7 +203,21 @@ pub async fn query_user_stats<'a>(
         |> sort(columns: ["frontend_requests"], desc: true)
         |> limit(n: 1)
         |> group()
-        |> sort(columns: ["_time", "_measurement", "archive_needed", "chain_id", "error_response", "method", "rpc_secret_key_id"], desc: true)
+        
+    balance = base
+        |> toFloat()
+        |> aggregateWindow(every: {query_window_seconds}s, fn: mean, createEmpty: false)
+        |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+        |> group(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"])
+        |> mean(column: "balance")
+        |> group()
+        |> sort(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"], desc: true)
+
+    join(
+        tables: {{cumsum, balance}},
+        on: {join_candidates}
+    )
+        |> sort(columns: ["_time", "_measurement", "chain_id", "method", "rpc_secret_key_id"], desc: true)
     "#);
 
     debug!("Raw query to db is: {:#?}", query);

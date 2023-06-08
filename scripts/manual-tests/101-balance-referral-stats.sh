@@ -128,3 +128,9 @@ curl \
 curl \
 -H "Authorization: Bearer 01H2D5CAQJF7P80222P4ZAFQ26" \
 -X GET "127.0.0.1:8544/user/referral/stats/shared-codes"
+
+
+# Finally also get some stats
+curl -X GET \
+-H "Authorization: Bearer 01H2D5DN564M4Q2T6PETEZY83Q" \
+"http://localhost:8544/user/stats/detailed?query_start=1686236378&query_window_seconds=3600"
