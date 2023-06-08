@@ -54,6 +54,7 @@ pub async fn serve(
     debug!("response_cache size: {}", response_cache_size);
 
     let response_cache: ResponseCache = CacheBuilder::new(response_cache_size as u64)
+        .name("frontend_response")
         .time_to_live(Duration::from_secs(1))
         .build();
 

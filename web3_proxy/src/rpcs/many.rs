@@ -98,6 +98,7 @@ impl Web3Rpcs {
         // TODO: actual weighter on this
         // TODO: time_to_idle instead?
         let blocks_by_hash: BlocksByHashCache = CacheBuilder::new(1_000)
+            .name("blocks_by_hash")
             .time_to_idle(Duration::from_secs(30 * 60))
             .build();
 
@@ -105,6 +106,7 @@ impl Web3Rpcs {
         // TODO: limits from config
         // TODO: time_to_idle instead?
         let blocks_by_number = CacheBuilder::new(1_000)
+            .name("blocks_by_number")
             .time_to_idle(Duration::from_secs(30 * 60))
             .build();
 

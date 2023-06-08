@@ -400,11 +400,13 @@ impl Web3ProxyApp {
         // TODO: max_capacity from config
         // TODO: ttl from config
         let rpc_secret_key_cache = CacheBuilder::new(10_000)
+            .name("rpc_secret_key")
             .time_to_live(Duration::from_secs(600))
             .build();
 
         // TODO: TTL left low, this could also be a solution instead of modifiying the cache, that may be disgusting across threads / slow anyways
         let user_balance_cache = CacheBuilder::new(10_000)
+            .name("user_balance")
             .time_to_live(Duration::from_secs(600))
             .build();
 
@@ -501,6 +503,7 @@ impl Web3ProxyApp {
         // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
         // TODO: this used to be time_to_update, but
         let pending_transactions = CacheBuilder::new(10_000)
+            .name("pending_transactions")
             .time_to_live(Duration::from_secs(300))
             .build();
 

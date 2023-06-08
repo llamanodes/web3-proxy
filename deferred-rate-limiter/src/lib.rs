@@ -48,6 +48,7 @@ where
         // TODO: prefix instead of a static str
         let local_cache = CacheBuilder::new(cache_size.try_into().unwrap())
             .time_to_live(Duration::from_secs(ttl))
+            .name(&format!("DeferredRateLimiter-{}", prefix))
             .build();
 
         Self {

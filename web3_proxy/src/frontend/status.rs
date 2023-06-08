@@ -168,14 +168,12 @@ impl<'a, K, V> Serialize for MokaCacheSerializer<'a, K, V> {
     where
         S: serde::Serializer,
     {
-        let mut state = serializer.serialize_struct("MokaCache", 2)?;
-
-        self.0.weighted_size();
+        let mut state = serializer.serialize_struct("MokaCache", 3)?;
 
         state.serialize_field("entry_count", &self.0.entry_count())?;
+        state.serialize_field("name", &self.0.name())?;
+        state.serialize_field("weighted_size", &self.0.weighted_size())?;
 
-        todo!();
-
-        // state.end()
+        state.end()
     }
 }
