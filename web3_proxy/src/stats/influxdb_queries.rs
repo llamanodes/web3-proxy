@@ -146,7 +146,7 @@ pub async fn query_user_stats<'a>(
         .clone()
         .context("No influxdb bucket was provided")?; // "web3_proxy";
 
-    info!("Bucket is {:?}", bucket);
+    trace!("Bucket is {:?}", bucket);
     let mut filter_chain_id = "".to_string();
     if chain_id != 0 {
         filter_chain_id = f!(r#"|> filter(fn: (r) => r["chain_id"] == "{chain_id}")"#);
@@ -154,14 +154,15 @@ pub async fn query_user_stats<'a>(
 
     // Fetch and request for balance
 
-    info!(
+    trace!(
         "Query start and stop are: {:?} {:?}",
-        query_start, query_stop
+        query_start,
+        query_stop
     );
     // info!("Query column parameters are: {:?}", stats_column);
-    info!("Query measurement is: {:?}", measurement);
-    info!("Filters are: {:?}", filter_chain_id); // filter_field
-    info!("window seconds are: {:?}", query_window_seconds);
+    trace!("Query measurement is: {:?}", measurement);
+    trace!("Filters are: {:?}", filter_chain_id); // filter_field
+    trace!("window seconds are: {:?}", query_window_seconds);
 
     let drop_method = match stat_response_type {
         StatType::Aggregated => f!(r#"|> drop(columns: ["method"])"#),
@@ -190,9 +191,9 @@ pub async fn query_user_stats<'a>(
         |> sort(columns: ["_time", "_measurement", "archive_needed", "chain_id", "error_response", "method", "rpc_secret_key_id"], desc: true)
     "#);
 
-    info!("Raw query to db is: {:?}", query);
+    debug!("Raw query to db is: {:?}", query);
     let query = Query::new(query.to_string());
-    info!("Query to db is: {:?}", query);
+    trace!("Query to db is: {:?}", query);
 
     // Make the query and collect all data
     let raw_influx_responses: Vec<FluxRecord> = influxdb_client

@@ -314,7 +314,7 @@ pub async fn user_login_post(
             debug!("Refferal code is: {:?}", payload.referral_code);
             if let Some(referral_code) = payload.referral_code.as_ref() {
                 // If it is not inside, also check in the database
-                warn!("Using register referral code:  {:?}", referral_code);
+                trace!("Using register referral code:  {:?}", referral_code);
                 let user_referrer = referrer::Entity::find()
                     .filter(referrer::Column::ReferralCode.eq(referral_code))
                     .one(db_replica.as_ref())
@@ -345,7 +345,7 @@ pub async fn user_login_post(
             // First, optionally catch a referral code from the parameters if there is any
             if let Some(referral_code) = payload.referral_code.as_ref() {
                 // If it is not inside, also check in the database
-                warn!("Using referral code: {:?}", referral_code);
+                trace!("Using referral code: {:?}", referral_code);
                 let user_referrer = referrer::Entity::find()
                     .filter(referrer::Column::ReferralCode.eq(referral_code))
                     .one(db_replica.as_ref())

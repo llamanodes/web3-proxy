@@ -145,7 +145,7 @@ pub async fn get_subusers(
         .all(db_replica.as_ref())
         .await?;
 
-    warn!("Subusers are: {:?}", subusers);
+    trace!("Subusers are: {:?}", subusers);
 
     // Now return the list
     let response_json = json!({

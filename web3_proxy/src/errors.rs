@@ -773,7 +773,7 @@ impl Web3ProxyError {
                 )
             }
             Self::RefererRequired => {
-                warn!("referer required");
+                debug!("referer required");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -784,7 +784,7 @@ impl Web3ProxyError {
                 )
             }
             Self::RefererNotAllowed(referer) => {
-                warn!("referer not allowed referer={:?}", referer);
+                debug!("referer not allowed referer={:?}", referer);
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
@@ -898,7 +898,7 @@ impl Web3ProxyError {
                 },
             ),
             Self::UserAgentRequired => {
-                warn!("UserAgentRequired");
+                debug!("UserAgentRequired");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -909,7 +909,7 @@ impl Web3ProxyError {
                 )
             }
             Self::UserAgentNotAllowed(ua) => {
-                warn!("UserAgentNotAllowed ua={}", ua);
+                debug!("UserAgentNotAllowed ua={}", ua);
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
