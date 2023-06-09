@@ -113,8 +113,7 @@ pub async fn user_balance_post(
     // I suppose this is ok / good, so people don't spam this endpoint as it is not "cheap"
     // we rate limit by ip instead of bearer token so transactions are easy to submit from scripts
     // TODO: if ip is a 10. or a 172., allow unlimited
-    // TODO: why is login_is_authorized giving me a 403?!
-    // login_is_authorized(&app, ip).await?;
+    login_is_authorized(&app, ip).await?;
 
     // Get the transaction hash, and the amount that the user wants to top up by.
     // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
