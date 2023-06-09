@@ -549,6 +549,7 @@ impl ConsensusFinder {
 
         let lowest_block_number = lowest_block.number().max(&max_lag_block_number);
 
+        // TODO: should lowest block number be set such that the rpc won't ever go backwards?
         trace!("safe lowest_block_number: {}", lowest_block_number);
 
         let num_known = self.rpc_heads.len();
