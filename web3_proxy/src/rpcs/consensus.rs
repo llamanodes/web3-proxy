@@ -3,27 +3,31 @@ use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
+use anyhow::Context;
+use base64::engine::general_purpose;
 use derive_more::Constructor;
 use ethers::prelude::{H256, U64};
 use hashbrown::{HashMap, HashSet};
+use hdrhistogram::serialization::{Serializer, V2DeflateSerializer};
+use hdrhistogram::Histogram;
 use itertools::{Itertools, MinMaxResult};
-use log::{trace, warn};
+use log::{debug, log_enabled, trace, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{atomic, Arc};
 use tokio::time::Instant;
 
 #[derive(Clone, Serialize)]
-struct RpcData {
+struct ConsensusRpcData {
     head_block_num: U64,
     // TODO: this is too simple. erigon has 4 prune levels (hrct)
     oldest_block_num: U64,
 }
 
-impl RpcData {
+impl ConsensusRpcData {
     fn new(rpc: &Web3Rpc, head: &Web3ProxyBlock) -> Self {
         let head_block_num = *head.number();
 
@@ -45,13 +49,13 @@ impl RpcData {
 
 #[derive(Constructor, Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct RpcRanking {
-    tier: u64,
+    tier: u8,
     backup: bool,
     head_num: Option<U64>,
 }
 
 impl RpcRanking {
-    pub fn add_offset(&self, offset: u64) -> Self {
+    pub fn add_offset(&self, offset: u8) -> Self {
         Self {
             tier: self.tier + offset,
             backup: self.backup,
@@ -66,9 +70,10 @@ impl RpcRanking {
         }
     }
 
-    fn sort_key(&self) -> (u64, bool, Reverse<Option<U64>>) {
+    fn sort_key(&self) -> (bool, u8, Reverse<Option<U64>>) {
         // TODO: add soft_limit here? add peak_ewma here?
-        (self.tier, !self.backup, Reverse(self.head_num))
+        // TODO: should backup or tier be checked first? now that tiers are automated, backups
+        (!self.backup, self.tier, Reverse(self.head_num))
     }
 }
 
@@ -94,9 +99,10 @@ pub enum ShouldWaitForBlock {
 
 /// A collection of Web3Rpcs that are on the same block.
 /// Serialize is so we can print it on our /status endpoint
+/// TODO: one data structure of head_rpcs and other_rpcs that is sorted best first
 #[derive(Clone, Serialize)]
 pub struct ConsensusWeb3Rpcs {
-    pub(crate) tier: u64,
+    pub(crate) tier: u8,
     pub(crate) backups_needed: bool,
 
     // TODO: this is already inside best_rpcs. Don't skip, instead make a shorter serialize
@@ -112,7 +118,7 @@ pub struct ConsensusWeb3Rpcs {
 
     // TODO: make this work. the key needs to be a string. I think we need `serialize_with`
     #[serde(skip_serializing)]
-    rpc_data: HashMap<Arc<Web3Rpc>, RpcData>,
+    rpc_data: HashMap<Arc<Web3Rpc>, ConsensusRpcData>,
 }
 
 impl ConsensusWeb3Rpcs {
@@ -332,26 +338,20 @@ type FirstSeenCache = Cache<H256, Instant>;
 
 /// A ConsensusConnections builder that tracks all connection heads across multiple groups of servers
 pub struct ConsensusFinder {
-    /// backups for all tiers are only used if necessary
-    /// `tiers[0] = only tier 0`
-    /// `tiers[1] = tier 0 and tier 1`
-    /// `tiers[n] = tier 0..=n`
     rpc_heads: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
     /// never serve blocks that are too old
     max_block_age: Option<u64>,
     /// tier 0 will be prefered as long as the distance between it and the other tiers is <= max_tier_lag
     max_block_lag: Option<U64>,
-    /// used to track rpc.head_latency. The same cache should be shared between all ConnectionsGroups
+    /// Block Hash -> First Seen Instant. used to track rpc.head_latency. The same cache should be shared between all ConnectionsGroups
     first_seen: FirstSeenCache,
 }
 
 impl ConsensusFinder {
     pub fn new(max_block_age: Option<u64>, max_block_lag: Option<U64>) -> Self {
         // TODO: what's a good capacity for this? it shouldn't need to be very large
-        // TODO: if we change Web3ProxyBlock to store the instance, i think we could use the block_by_hash cache
         let first_seen = Cache::new(16);
 
-        // TODO: hard coding 0-9 isn't great, but its easier than refactoring this to be smart about config reloading
         let rpc_heads = HashMap::new();
 
         Self {
@@ -433,11 +433,100 @@ impl ConsensusFinder {
         Ok(changed)
     }
 
+    pub async fn update_tiers(
+        &mut self,
+        authorization: &Arc<Authorization>,
+        web3_rpcs: &Web3Rpcs,
+    ) -> Web3ProxyResult<()> {
+        match self.rpc_heads.len() {
+            0 => {}
+            1 => {
+                for rpc in self.rpc_heads.keys() {
+                    rpc.tier.store(0, atomic::Ordering::Relaxed)
+                }
+            }
+            _ => {
+                // iterate first to find bounds
+                let mut min_latency = u64::MAX;
+                let mut max_latency = u64::MIN;
+                let mut weighted_latencies = HashMap::new();
+                for rpc in self.rpc_heads.keys() {
+                    let weighted_latency_seconds = rpc.weighted_peak_ewma_seconds();
+
+                    let weighted_latency_ms = (weighted_latency_seconds * 1000.0).round() as i64;
+
+                    let weighted_latency_ms: u64 = weighted_latency_ms
+                        .try_into()
+                        .context("weighted_latency_ms does not fit in a u64")?;
+
+                    min_latency = min_latency.min(weighted_latency_ms);
+                    max_latency = min_latency.max(weighted_latency_ms);
+
+                    weighted_latencies.insert(rpc, weighted_latency_ms);
+                }
+
+                // // histogram requires high to be at least 2 x low
+                // // using min_latency for low does not work how we want it though
+                // max_latency = max_latency.max(2 * min_latency);
+
+                // create the histogram
+                let mut hist = Histogram::<u32>::new_with_bounds(1, max_latency, 3).unwrap();
+
+                for weighted_latency_ms in weighted_latencies.values() {
+                    hist.record(*weighted_latency_ms)?;
+                }
+
+                // dev logging
+                if log_enabled!(Level::Trace) {
+                    // print the histogram. see docs/histograms.txt for more info
+                    let mut encoder =
+                        base64::write::EncoderWriter::new(Vec::new(), &general_purpose::STANDARD);
+
+                    V2DeflateSerializer::new()
+                        .serialize(&hist, &mut encoder)
+                        .unwrap();
+
+                    let encoded = encoder.finish().unwrap();
+
+                    let encoded = String::from_utf8(encoded).unwrap();
+
+                    trace!("weighted_latencies: {}", encoded);
+                }
+
+                // TODO: get someone who is better at math to do something smarter
+                // this is not a very good use of stddev, but it works for now
+                let stddev = hist.stdev();
+
+                for (rpc, weighted_latency_ms) in weighted_latencies.into_iter() {
+                    let tier = (weighted_latency_ms - min_latency) as f64 / stddev;
+
+                    let tier = tier.floor() as u64;
+
+                    let tier = tier.clamp(u8::MIN.into(), u8::MAX.into()) as u8;
+
+                    // TODO: this should be trace
+                    trace!(
+                        "{} - weighted_latency: {}ms, tier {}",
+                        rpc,
+                        weighted_latency_ms,
+                        tier
+                    );
+
+                    rpc.tier.store(tier, atomic::Ordering::Relaxed);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn find_consensus_connections(
         &mut self,
         authorization: &Arc<Authorization>,
         web3_rpcs: &Web3Rpcs,
     ) -> Web3ProxyResult<Option<ConsensusWeb3Rpcs>> {
+        self.update_tiers(authorization, web3_rpcs).await?;
+
         let minmax_block = self.rpc_heads.values().minmax_by_key(|&x| x.number());
 
         let (lowest_block, highest_block) = match minmax_block {
@@ -477,13 +566,14 @@ impl ConsensusFinder {
         let mut backup_consensus = None;
 
         let mut rpc_heads_by_tier: Vec<_> = self.rpc_heads.iter().collect();
-        rpc_heads_by_tier.sort_by_cached_key(|(rpc, _)| rpc.tier);
+        rpc_heads_by_tier.sort_by_cached_key(|(rpc, _)| rpc.tier.load(atomic::Ordering::Relaxed));
 
         let current_tier = rpc_heads_by_tier
             .first()
             .expect("rpc_heads_by_tier should never be empty")
             .0
-            .tier;
+            .tier
+            .load(atomic::Ordering::Relaxed);
 
         // trace!("first_tier: {}", current_tier);
 
@@ -492,7 +582,9 @@ impl ConsensusFinder {
         // loop over all the rpc heads (grouped by tier) and their parents to find consensus
         // TODO: i'm sure theres a lot of shortcuts that could be taken, but this is simplest to implement
         for (rpc, rpc_head) in rpc_heads_by_tier.into_iter() {
-            if current_tier != rpc.tier {
+            let rpc_tier = rpc.tier.load(atomic::Ordering::Relaxed);
+
+            if current_tier != rpc_tier {
                 // we finished processing a tier. check for primary results
                 if let Some(consensus) = self.count_votes(&primary_votes, web3_rpcs) {
                     trace!("found enough votes on tier {}", current_tier);
@@ -600,7 +692,7 @@ impl ConsensusFinder {
 
             let tier = consensus_rpcs
                 .iter()
-                .map(|x| x.tier)
+                .map(|x| x.tier.load(atomic::Ordering::Relaxed))
                 .max()
                 .expect("there should always be a max");
 
@@ -615,7 +707,11 @@ impl ConsensusFinder {
             {
                 let x_head_num = *x_head.number();
 
-                let key: RpcRanking = RpcRanking::new(x.tier, x.backup, Some(x_head_num));
+                let key: RpcRanking = RpcRanking::new(
+                    x.tier.load(atomic::Ordering::Relaxed),
+                    x.backup,
+                    Some(x_head_num),
+                );
 
                 other_rpcs
                     .entry(key)
@@ -627,7 +723,7 @@ impl ConsensusFinder {
             let mut rpc_data = HashMap::with_capacity(self.rpc_heads.len());
 
             for (x, x_head) in self.rpc_heads.iter() {
-                let y = RpcData::new(x, x_head);
+                let y = ConsensusRpcData::new(x, x_head);
 
                 rpc_data.insert(x.clone(), y);
             }
@@ -647,8 +743,11 @@ impl ConsensusFinder {
         None
     }
 
-    pub fn worst_tier(&self) -> Option<u64> {
-        self.rpc_heads.iter().map(|(x, _)| x.tier).max()
+    pub fn worst_tier(&self) -> Option<u8> {
+        self.rpc_heads
+            .iter()
+            .map(|(x, _)| x.tier.load(atomic::Ordering::Relaxed))
+            .max()
     }
 }
 

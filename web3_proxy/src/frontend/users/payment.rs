@@ -13,7 +13,6 @@ use ethbloom::Input as BloomInput;
 use ethers::abi::AbiEncode;
 use ethers::types::{Address, TransactionReceipt, ValueOrArray, H256};
 use hashbrown::HashMap;
-// use http::StatusCode;
 use http::StatusCode;
 use log::{debug, info, trace};
 use migration::sea_orm::prelude::Decimal;
@@ -21,7 +20,6 @@ use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
 use migration::{Expr, OnConflict};
-use num_traits::Pow;
 use payment_contracts::ierc20::IERC20;
 use payment_contracts::payment_factory::{self, PaymentFactory};
 use serde_json::json;

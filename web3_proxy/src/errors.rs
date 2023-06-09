@@ -61,6 +61,7 @@ pub enum Web3ProxyError {
     EthersWsClient(ethers::prelude::WsClientError),
     FlumeRecv(flume::RecvError),
     GasEstimateNotU256,
+    HdrRecord(hdrhistogram::errors::RecordError),
     Headers(headers::Error),
     HeaderToString(ToStrError),
     Hyper(hyper::Error),
@@ -333,6 +334,17 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
                         message: Cow::Borrowed("gas estimate result is not an U256"),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::HdrRecord(err) => {
+                warn!("HdrRecord {:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: format!("{}", err).into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },

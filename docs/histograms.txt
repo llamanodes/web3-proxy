@@ -1,0 +1,5 @@
+[2023-06-09T18:45:50Z WARN  web3_proxy::rpcs::consensus] TODO: find the troughs in the histogram: HISTFAAAADV4nC3GoQ0AIAxE0eNAkRAEwbELQxE2QGG7aEeoaL95fz0ZACq8HKbwb/U5bGXystMAZl8EMw==
+
+Paste the HIST data here: <https://hdrhistogram.github.io/HdrHistogramJSDemo/decoding-demo.html>
+
+Save the "Decoded histogram data" to a file and upload it here: <http://hdrhistogram.github.io/HdrHistogram/plotFiles.html>

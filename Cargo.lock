@@ -2440,6 +2440,7 @@ checksum = "7f19b9f54f7c7f55e31401bb647626ce0cf0f67b0004982ce815b3ee72a02aa8"
 dependencies = [
  "base64 0.13.1",
  "byteorder",
+ "crossbeam-channel",
  "flate2",
  "nom",
  "num-traits",
@@ -6719,6 +6720,7 @@ dependencies = [
  "axum",
  "axum-client-ip",
  "axum-macros",
+ "base64 0.21.2",
  "chrono",
  "console-subscriber",
  "counter",
@@ -6737,6 +6739,7 @@ dependencies = [
  "glob",
  "handlebars",
  "hashbrown 0.14.0",
+ "hdrhistogram",
  "hostname",
  "http",
  "hyper",

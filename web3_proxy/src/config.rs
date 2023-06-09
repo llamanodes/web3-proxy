@@ -256,9 +256,6 @@ pub struct Web3RpcConfig {
     /// only use this rpc if everything else is lagging too far. this allows us to ignore fast but very low limit rpcs
     #[serde(default)]
     pub backup: bool,
-    /// All else equal, a server with a lower tier receives all requests
-    #[serde(default = "default_tier")]
-    pub tier: u64,
     /// Subscribe to the firehose of pending transactions
     /// Don't do this with free rpcs
     #[serde(default)]
@@ -266,10 +263,6 @@ pub struct Web3RpcConfig {
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
-}
-
-fn default_tier() -> u64 {
-    0
 }
 
 impl Web3RpcConfig {

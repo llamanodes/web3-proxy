@@ -310,7 +310,6 @@ mod tests {
                     Web3RpcConfig {
                         http_url: Some(anvil.endpoint()),
                         soft_limit: 100,
-                        tier: 0,
                         ..Default::default()
                     },
                 ),
@@ -319,7 +318,6 @@ mod tests {
                     Web3RpcConfig {
                         ws_url: Some(anvil.ws_endpoint()),
                         soft_limit: 100,
-                        tier: 0,
                         ..Default::default()
                     },
                 ),

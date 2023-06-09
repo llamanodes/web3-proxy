@@ -31,7 +31,7 @@ use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::cmp::{min_by_key, Reverse};
 use std::fmt::{self, Display};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
 use thread_fast_rng::rand::seq::SliceRandom;
 use tokio::select;
@@ -440,7 +440,7 @@ impl Web3Rpcs {
             trace!("{} vs {}", rpc_a, rpc_b);
             // TODO: cached key to save a read lock
             // TODO: ties to the server with the smallest block_data_limit
-            let faster_rpc = min_by_key(rpc_a, rpc_b, |x| x.peak_ewma());
+            let faster_rpc = min_by_key(rpc_a, rpc_b, |x| x.weighted_peak_ewma_seconds());
             trace!("winner: {}", faster_rpc);
 
             // add to the skip list in case this one fails
@@ -1288,20 +1288,21 @@ impl Serialize for Web3Rpcs {
 /// TODO: should this be moved into a `impl Web3Rpc`?
 /// TODO: i think we still have sorts scattered around the code that should use this
 /// TODO: take AsRef or something like that? We don't need an Arc here
-fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (Reverse<U64>, u64, bool, OrderedFloat<f64>) {
+/// TODO: tests on this!
+fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (bool, Reverse<U64>, u8, OrderedFloat<f64>) {
     let head_block = x
         .head_block
         .as_ref()
         .and_then(|x| x.borrow().as_ref().map(|x| *x.number()))
         .unwrap_or_default();
 
-    let tier = x.tier;
+    let tier = x.tier.load(atomic::Ordering::Relaxed);
 
-    let peak_ewma = x.peak_ewma();
+    let peak_ewma = x.weighted_peak_ewma_seconds();
 
     let backup = x.backup;
 
-    (Reverse(head_block), tier, backup, peak_ewma)
+    (!backup, Reverse(head_block), tier, peak_ewma)
 }
 
 mod tests {
@@ -1361,42 +1362,42 @@ mod tests {
         let mut rpcs: Vec<_> = [
             Web3Rpc {
                 name: "a".to_string(),
-                tier: 0,
+                // tier: 0,
                 head_block: Some(tx_a),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "b".to_string(),
-                tier: 0,
+                // tier: 0,
                 head_block: Some(tx_b),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "c".to_string(),
-                tier: 0,
+                // tier: 0,
                 head_block: Some(tx_c),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "d".to_string(),
-                tier: 1,
+                // tier: 1,
                 head_block: Some(tx_d),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "e".to_string(),
-                tier: 1,
+                // tier: 1,
                 head_block: Some(tx_e),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "f".to_string(),
-                tier: 1,
+                // tier: 1,
                 head_block: Some(tx_f),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
@@ -1410,6 +1411,7 @@ mod tests {
 
         let names_in_sort_order: Vec<_> = rpcs.iter().map(|x| x.name.as_str()).collect();
 
+        // TODO: the tier refactor likely broke this
         assert_eq!(names_in_sort_order, ["c", "f", "b", "e", "a", "d"]);
     }
 
@@ -1452,7 +1454,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
-            tier: 0,
+            // tier: 0,
             head_block: Some(tx_synced),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
@@ -1466,7 +1468,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
-            tier: 0,
+            // tier: 0,
             head_block: Some(tx_lagged),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
@@ -1736,7 +1738,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: 64.into(),
-            tier: 1,
+            // tier: 1,
             head_block: Some(tx_pruned),
             ..Default::default()
         };
@@ -1749,7 +1751,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: u64::MAX.into(),
-            tier: 2,
+            // tier: 2,
             head_block: Some(tx_archive),
             ..Default::default()
         };
@@ -1918,7 +1920,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: 64.into(),
-            tier: 0,
+            // tier: 0,
             head_block: Some(tx_mock_geth),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
@@ -1930,7 +1932,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: u64::MAX.into(),
-            tier: 1,
+            // tier: 1,
             head_block: Some(tx_mock_erigon_archive),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
