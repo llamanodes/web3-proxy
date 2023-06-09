@@ -11,7 +11,7 @@ use hashbrown::{HashMap, HashSet};
 use hdrhistogram::serialization::{Serializer, V2DeflateSerializer};
 use hdrhistogram::Histogram;
 use itertools::{Itertools, MinMaxResult};
-use log::{debug, log_enabled, trace, warn, Level};
+use log::{log_enabled, trace, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::{Ordering, Reverse};
@@ -73,6 +73,8 @@ impl RpcRanking {
     fn sort_key(&self) -> (bool, u8, Reverse<Option<U64>>) {
         // TODO: add soft_limit here? add peak_ewma here?
         // TODO: should backup or tier be checked first? now that tiers are automated, backups
+        // TODO: should we include a random number in here?
+        // TODO: should we include peak_ewma_latency or weighted_peak_ewma_latency?
         (!self.backup, self.tier, Reverse(self.head_num))
     }
 }
@@ -433,11 +435,7 @@ impl ConsensusFinder {
         Ok(changed)
     }
 
-    pub async fn update_tiers(
-        &mut self,
-        authorization: &Arc<Authorization>,
-        web3_rpcs: &Web3Rpcs,
-    ) -> Web3ProxyResult<()> {
+    pub async fn update_tiers(&mut self) -> Web3ProxyResult<()> {
         match self.rpc_heads.len() {
             0 => {}
             1 => {
@@ -525,7 +523,7 @@ impl ConsensusFinder {
         authorization: &Arc<Authorization>,
         web3_rpcs: &Web3Rpcs,
     ) -> Web3ProxyResult<Option<ConsensusWeb3Rpcs>> {
-        self.update_tiers(authorization, web3_rpcs).await?;
+        self.update_tiers().await?;
 
         let minmax_block = self.rpc_heads.values().minmax_by_key(|&x| x.number());
 

@@ -22,10 +22,12 @@ use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
+use std::cmp::Reverse;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU64, AtomicU8, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
+use thread_fast_rng::rand::Rng;
 use tokio::sync::watch;
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
 use url::Url;
@@ -216,6 +218,60 @@ impl Web3Rpc {
         };
 
         Ok((new_connection, handle))
+    }
+
+    /// sort by...
+    /// - backups last
+    /// - tier (ascending)
+    /// - block number (descending)
+    /// TODO: tests on this!
+    /// TODO: should tier or block number take priority?
+    /// TODO: should this return a struct that implements sorting traits?
+    fn sort_on(&self, max_block: Option<U64>) -> (bool, u8, Reverse<U64>) {
+        let mut head_block = self
+            .head_block
+            .as_ref()
+            .and_then(|x| x.borrow().as_ref().map(|x| *x.number()))
+            .unwrap_or_default();
+
+        if let Some(max_block) = max_block {
+            head_block = head_block.min(max_block);
+        }
+
+        let tier = self.tier.load(atomic::Ordering::Relaxed);
+
+        let backup = self.backup;
+
+        (!backup, tier, Reverse(head_block))
+    }
+
+    pub fn sort_for_load_balancing_on(
+        &self,
+        max_block: Option<U64>,
+    ) -> ((bool, u8, Reverse<U64>), OrderedFloat<f64>) {
+        let sort_on = self.sort_on(max_block);
+
+        let weighted_peak_ewma_seconds = self.weighted_peak_ewma_seconds();
+
+        let x = (sort_on, weighted_peak_ewma_seconds);
+
+        trace!("sort_for_load_balancing {}: {:?}", self, x);
+
+        x
+    }
+
+    /// like sort_for_load_balancing, but shuffles tiers randomly instead of sorting by weighted_peak_ewma_seconds
+    pub fn shuffle_for_load_balancing_on(
+        &self,
+        max_block: Option<U64>,
+    ) -> ((bool, u8, Reverse<U64>), u32) {
+        let sort_on = self.sort_on(max_block);
+
+        let mut rng = thread_fast_rng::thread_fast_rng();
+
+        let r = rng.gen::<u32>();
+
+        (sort_on, r)
     }
 
     pub fn weighted_peak_ewma_seconds(&self) -> OrderedFloat<f64> {
