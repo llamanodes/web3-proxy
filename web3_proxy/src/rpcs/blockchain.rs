@@ -498,7 +498,7 @@ impl Web3Rpcs {
                         // this is unlikely but possible
                         // TODO: better log that includes all the votes
                         warn!(
-                            "chain rolled back {}/{} {}{}/{}/{} con={} old={} rpc={}@{}. {:#?} -> {:#?}",
+                            "chain rolled back {}/{} {}{}/{}/{} con={} old={} rpc={}@{}",
                             consensus_tier,
                             total_tiers,
                             backups_voted_str,
@@ -509,8 +509,6 @@ impl Web3Rpcs {
                             old_head_block,
                             rpc,
                             rpc_head_str,
-                            old_consensus_connections,
-                            new_consensus_rpcs,
                         );
 
                         if backups_needed {

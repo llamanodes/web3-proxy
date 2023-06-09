@@ -347,84 +347,97 @@ async fn handle_socket_payload(
             let response_id = json_request.id.clone();
 
             // TODO: move this to a seperate function so we can use the try operator
-            let response: Web3ProxyResult<JsonRpcForwardedResponseEnum> =
-                match &json_request.method[..] {
-                    "eth_subscribe" => {
-                        // TODO: how can we subscribe with proxy_mode?
-                        match app
-                            .eth_subscribe(
-                                authorization.clone(),
-                                json_request,
-                                subscription_count,
-                                response_sender.clone(),
-                            )
-                            .await
-                        {
-                            Ok((handle, response)) => {
-                                {
-                                    let mut x = subscriptions.write().await;
-
-                                    let result: &serde_json::value::RawValue = response
-                                        .result
-                                        .as_ref()
-                                        .context("there should be a result here")?;
-
-                                    // TODO: there must be a better way to turn a RawValue
-                                    let k: U64 = serde_json::from_str(result.get())
-                                        .context("subscription ids must be U64s")?;
-
-                                    x.insert(k, handle);
-                                };
-
-                                Ok(response.into())
-                            }
-                            Err(err) => Err(err),
-                        }
-                    }
-                    "eth_unsubscribe" => {
-                        let request_metadata =
-                            RequestMetadata::new(&app, authorization.clone(), &json_request, None)
-                                .await;
-
-                        #[derive(serde::Deserialize)]
-                        struct EthUnsubscribeParams([U64; 1]);
-
-                        match serde_json::from_value(json_request.params) {
-                            Ok::<EthUnsubscribeParams, _>(params) => {
-                                let subscription_id = &params.0[0];
-
-                                // TODO: is this the right response?
-                                let partial_response = {
-                                    let mut x = subscriptions.write().await;
-                                    match x.remove(subscription_id) {
-                                        None => false,
-                                        Some(handle) => {
-                                            handle.abort();
-                                            true
-                                        }
-                                    }
-                                };
-
-                                // TODO: don't create the response here. use a JsonRpcResponseData instead
-                                let response = JsonRpcForwardedResponse::from_value(
-                                    json!(partial_response),
-                                    response_id.clone(),
-                                );
-
-                                request_metadata.add_response(&response);
-
-                                Ok(response.into())
-                            }
-                            Err(err) => Err(Web3ProxyError::BadRequest(
-                                f!("incorrect params given for eth_unsubscribe. {err:?}").into(),
-                            )),
-                        }
-                    }
-                    _ => app
-                        .proxy_web3_rpc(authorization.clone(), json_request.into())
+            let response: Web3ProxyResult<JsonRpcForwardedResponseEnum> = match &json_request.method
+                [..]
+            {
+                "eth_subscribe" => {
+                    // TODO: how can we subscribe with proxy_mode?
+                    match app
+                        .eth_subscribe(
+                            authorization.clone(),
+                            json_request,
+                            subscription_count,
+                            response_sender.clone(),
+                        )
                         .await
-                        .map(|(_, response, _)| response),
-                };
+                    {
+                        Ok((handle, response)) => {
+                            {
+                                let mut x = subscriptions.write().await;
+
+                                let result: &serde_json::value::RawValue = response
+                                    .result
+                                    .as_ref()
+                                    .context("there should be a result here")?;
+
+                                // TODO: there must be a better way to turn a RawValue
+                                let k: U64 = serde_json::from_str(result.get())
+                                    .context("subscription ids must be U64s")?;
+
+                                x.insert(k, handle);
+                            };
+
+                            Ok(response.into())
+                        }
+                        Err(err) => Err(err),
+                    }
+                }
+                "eth_unsubscribe" => {
+                    let request_metadata =
+                        RequestMetadata::new(&app, authorization.clone(), &json_request, None)
+                            .await;
+
+                    let subscription_id: U64 = if json_request.params.is_array() {
+                        if let Some(params) = json_request.params.get(0) {
+                            serde_json::from_value(params.clone()).map_err(|err| {
+                                Web3ProxyError::BadRequest(
+                                    format!("invalid params for eth_unsubscribe: {}", err).into(),
+                                )
+                            })?
+                        } else {
+                            return Err(Web3ProxyError::BadRequest(
+                                f!("no params for eth_unsubscribe").into(),
+                            ));
+                        }
+                    } else if json_request.params.is_string() {
+                        serde_json::from_value(json_request.params).map_err(|err| {
+                            Web3ProxyError::BadRequest(
+                                format!("invalid params for eth_unsubscribe: {}", err).into(),
+                            )
+                        })?
+                    } else {
+                        return Err(Web3ProxyError::BadRequest(
+                            "unexpected params given for eth_unsubscribe".into(),
+                        ));
+                    };
+
+                    // TODO: is this the right response?
+                    let partial_response = {
+                        let mut x = subscriptions.write().await;
+                        match x.remove(&subscription_id) {
+                            None => false,
+                            Some(handle) => {
+                                handle.abort();
+                                true
+                            }
+                        }
+                    };
+
+                    // TODO: don't create the response here. use a JsonRpcResponseData instead
+                    let response = JsonRpcForwardedResponse::from_value(
+                        json!(partial_response),
+                        response_id.clone(),
+                    );
+
+                    request_metadata.add_response(&response);
+
+                    Ok(response.into())
+                }
+                _ => app
+                    .proxy_web3_rpc(authorization.clone(), json_request.into())
+                    .await
+                    .map(|(_, response, _)| response),
+            };
 
             (response_id, response)
         }

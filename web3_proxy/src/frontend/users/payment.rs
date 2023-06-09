@@ -1,5 +1,6 @@
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyResponse};
+use crate::frontend::authorization::login_is_authorized;
 use anyhow::Context;
 use axum::{
     extract::Path,
@@ -7,6 +8,7 @@ use axum::{
     response::IntoResponse,
     Extension, Json, TypedHeader,
 };
+use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use entities::{balance, increase_on_chain_balance_receipt, rpc_key, user};
 use ethbloom::Input as BloomInput;
@@ -105,13 +107,14 @@ pub async fn user_deposits_get(
 #[debug_handler]
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+    InsecureClientIp(ip): InsecureClientIp,
     Path(mut params): Path<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // I suppose this is ok / good, so people don't spam this endpoint as it is not "cheap"
-    // Check that the user is logged-in and authorized
-    // The semaphore keeps a user from submitting tons of transactions in parallel which would DOS our backends
-    let (_, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    // we rate limit by ip instead of bearer token so transactions are easy to submit from scripts
+    // TODO: if ip is a 10. or a 172., allow unlimited
+    // TODO: why is login_is_authorized giving me a 403?!
+    // login_is_authorized(&app, ip).await?;
 
     // Get the transaction hash, and the amount that the user wants to top up by.
     // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
@@ -173,6 +176,7 @@ pub async fn user_balance_post(
 
     // check bloom filter to be sure this transaction contains any relevant logs
     // TODO: This does not work properly right now, get back this eventually
+    // TODO: compare to code in llamanodes/web3-this-then-that
     // if let Some(ValueOrArray::Value(Some(x))) = payment_factory_contract
     //     .payment_received_filter()
     //     .filter
@@ -239,11 +243,8 @@ pub async fn user_balance_post(
             payment_token_amount.set_scale(payment_token_decimals)?;
 
             info!(
-                "Found deposit transaction for: {:?} {:?} {:?} {:?}",
-                &recipient_account.to_fixed_bytes(),
-                recipient_account,
-                payment_token_address,
-                payment_token_amount
+                "Found deposit transaction for: {:?} {:?} {:?}",
+                recipient_account, payment_token_address, payment_token_amount
             );
 
             let recipient = match user::Entity::find()
