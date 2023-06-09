@@ -145,6 +145,7 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
         "private_rpcs": app.private_rpcs,
         "rpc_secret_key_cache": MokaCacheSerializer(&app.rpc_secret_key_cache),
         "user_balance_cache": MokaCacheSerializer(&app.user_balance_cache),
+        "payment_factory_address": app.config.deposit_factory_contract,
         "version": APP_USER_AGENT,
     });
 
