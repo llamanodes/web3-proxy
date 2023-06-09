@@ -470,6 +470,9 @@ impl ConsensusFinder {
                 // create the histogram
                 let mut hist = Histogram::<u32>::new_with_bounds(1, max_latency, 3).unwrap();
 
+                // TODO: resize shouldn't be necessary, but i've seen it error
+                hist.auto(true);
+
                 for weighted_latency_ms in weighted_latencies.values() {
                     hist.record(*weighted_latency_ms)?;
                 }
@@ -550,7 +553,7 @@ impl ConsensusFinder {
 
         let num_known = self.rpc_heads.len();
 
-        if num_known < web3_rpcs.min_head_rpcs {
+        if num_known < web3_rpcs.min_synced_rpcs {
             // this keeps us from serving requests when the proxy first starts
             trace!("not enough servers known");
             return Ok(None);
@@ -671,7 +674,7 @@ impl ConsensusFinder {
                 continue;
             }
             // TODO: different mins for backup vs primary
-            if rpc_names.len() < web3_rpcs.min_head_rpcs {
+            if rpc_names.len() < web3_rpcs.min_synced_rpcs {
                 continue;
             }
 
@@ -683,7 +686,7 @@ impl ConsensusFinder {
                 .filter_map(|x| web3_rpcs.get(x))
                 .collect();
 
-            if consensus_rpcs.len() < web3_rpcs.min_head_rpcs {
+            if consensus_rpcs.len() < web3_rpcs.min_synced_rpcs {
                 continue;
             }
             // consensus found!

@@ -61,7 +61,7 @@ pub struct Web3Rpcs {
     /// blocks on the heaviest chain
     pub(super) blocks_by_number: BlocksByNumberCache,
     /// the number of rpcs required to agree on consensus for the head block (thundering herd protection)
-    pub(super) min_head_rpcs: usize,
+    pub(super) min_synced_rpcs: usize,
     /// the soft limit required to agree on consensus for the head block. (thundering herd protection)
     pub(super) min_sum_soft_limit: u32,
     /// how far behind the highest known block height we can be before we stop serving requests
@@ -121,7 +121,7 @@ impl Web3Rpcs {
             by_name,
             max_block_age,
             max_block_lag,
-            min_head_rpcs,
+            min_synced_rpcs: min_head_rpcs,
             min_sum_soft_limit,
             name,
             pending_transaction_cache,
@@ -254,10 +254,10 @@ impl Web3Rpcs {
 
         let num_rpcs = self.by_name.load().len();
 
-        if num_rpcs < self.min_head_rpcs {
+        if num_rpcs < self.min_synced_rpcs {
             return Err(Web3ProxyError::NotEnoughRpcs {
                 num_known: num_rpcs,
-                min_head_rpcs: self.min_head_rpcs,
+                min_head_rpcs: self.min_synced_rpcs,
             });
         }
 
@@ -277,7 +277,7 @@ impl Web3Rpcs {
     }
 
     pub fn min_head_rpcs(&self) -> usize {
-        self.min_head_rpcs
+        self.min_synced_rpcs
     }
 
     /// subscribe to blocks and transactions from all the backend rpcs.
@@ -570,7 +570,7 @@ impl Web3Rpcs {
                             .cloned(),
                     );
 
-                    if potential_rpcs.len() >= self.min_head_rpcs {
+                    if potential_rpcs.len() >= self.min_synced_rpcs {
                         // we have enough potential rpcs. try to load balance
                         potential_rpcs.sort_by_cached_key(|x| {
                             x.shuffle_for_load_balancing_on(max_block_needed.copied())
@@ -617,7 +617,7 @@ impl Web3Rpcs {
 
                         potential_rpcs.extend(more_rpcs);
 
-                        if potential_rpcs.len() >= self.min_head_rpcs {
+                        if potential_rpcs.len() >= self.min_synced_rpcs {
                             // we have enough potential rpcs. try to load balance
                             potential_rpcs.sort_by_cached_key(|x| {
                                 x.shuffle_for_load_balancing_on(max_block_needed.copied())
@@ -1501,7 +1501,7 @@ mod tests {
             max_block_age: None,
             // TODO: test max_block_lag?
             max_block_lag: None,
-            min_head_rpcs: 1,
+            min_synced_rpcs: 1,
             min_sum_soft_limit: 1,
         };
 
@@ -1777,7 +1777,7 @@ mod tests {
             blocks_by_number: CacheBuilder::new(100)
                 .time_to_live(Duration::from_secs(120))
                 .build(),
-            min_head_rpcs: 1,
+            min_synced_rpcs: 1,
             min_sum_soft_limit: 4_000,
             max_block_age: None,
             max_block_lag: None,
@@ -1957,7 +1957,7 @@ mod tests {
             pending_tx_id_sender,
             blocks_by_hash: Cache::new(10_000),
             blocks_by_number: Cache::new(10_000),
-            min_head_rpcs: 1,
+            min_synced_rpcs: 1,
             min_sum_soft_limit: 1_000,
             max_block_age: None,
             max_block_lag: None,
