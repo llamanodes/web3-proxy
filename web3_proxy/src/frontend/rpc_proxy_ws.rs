@@ -264,7 +264,7 @@ async fn _websocket_handler_with_key(
             ) {
                 (None, None, _) => Err(Web3ProxyError::StatusCode(
                     StatusCode::BAD_REQUEST,
-                    "this page is for rpcs".to_string(),
+                    "this page is for rpcs".into(),
                     None,
                 )),
                 (Some(redirect_public_url), _, None) => {
@@ -277,7 +277,7 @@ async fn _websocket_handler_with_key(
                         // i don't think this is possible
                         Err(Web3ProxyError::StatusCode(
                             StatusCode::UNAUTHORIZED,
-                            "AUTHORIZATION header required".to_string(),
+                            "AUTHORIZATION header required".into(),
                             None,
                         ))
                     } else {
@@ -295,7 +295,7 @@ async fn _websocket_handler_with_key(
                 // any other combinations get a simple error
                 _ => Err(Web3ProxyError::StatusCode(
                     StatusCode::BAD_REQUEST,
-                    "this page is for rpcs".to_string(),
+                    "this page is for rpcs".into(),
                     None,
                 )),
             }

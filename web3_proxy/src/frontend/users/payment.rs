@@ -1,6 +1,7 @@
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::frontend::authorization::login_is_authorized;
+use crate::frontend::users::authentication::register_new_user;
 use anyhow::Context;
 use axum::{
     extract::Path,
@@ -169,7 +170,7 @@ pub async fn user_balance_post(
         PaymentFactory::new(payment_factory_address, app.internal_provider().clone());
 
     debug!(
-        "Payment Factor Filter is: {:?}",
+        "Payment Factory Filter: {:?}",
         payment_factory_contract.payment_received_filter()
     );
 
@@ -251,12 +252,13 @@ pub async fn user_balance_post(
                 .one(&db_conn)
                 .await?
             {
-                Some(x) => Ok(x),
+                Some(x) => x,
                 None => {
-                    // todo!("make their account");
-                    Err(Web3ProxyError::AccessDenied)
+                    let (user, _, _) = register_new_user(&db_conn, recipient_account).await?;
+
+                    user
                 }
-            }?;
+            };
 
             // For now we only accept stablecoins
             // And we hardcode the peg (later we would have to depeg this, for example

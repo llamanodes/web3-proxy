@@ -76,7 +76,7 @@ pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly", "serde"] }
 prettytable = "0.10.0"
 proctitle = "0.1.1"
-rdkafka = { version = "0.31.0" }
+rdkafka = { version = "0.32.2" }
 regex = "1.8.4"
 reqwest = { version = "0.11.18", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
 rmp-serde = "1.1.1"

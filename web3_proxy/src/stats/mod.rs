@@ -605,8 +605,7 @@ impl BufferedRpcQueryStats {
         // ==================
         let sender_latest_balance = match NonZeroU64::try_from(sender_rpc_entity.user_id) {
             Err(_) => Err(Web3ProxyError::BadResponse(
-                "Balance is not positive, although it was previously checked to be as such!"
-                    .to_string(),
+                "Balance is not positive, although it was previously checked to be as such!".into(),
             )),
             // We don't do an get_or_insert, because technically we don't have the most up to date balance
             // Also let's keep things simple in terms of writing and getting. A single place writes it, multiple places can remove / poll it

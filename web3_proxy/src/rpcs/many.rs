@@ -27,7 +27,6 @@ use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
-use std::borrow::Cow;
 use std::cmp::min_by_key;
 use std::fmt::{self, Display};
 use std::sync::atomic::Ordering;
@@ -1079,7 +1078,7 @@ impl Web3Rpcs {
         // TODO: what error code?
         // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
         Err(JsonRpcErrorData {
-            message: Cow::Borrowed("Requested data is not available"),
+            message: "Requested data is not available".into(),
             code: -32043,
             data: None,
         }
