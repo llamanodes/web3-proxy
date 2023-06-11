@@ -49,7 +49,6 @@ use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRa
 use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
-use std::borrow::Cow;
 use std::fmt;
 use std::net::IpAddr;
 use std::num::NonZeroU64;
@@ -1512,15 +1511,13 @@ impl Web3ProxyApp {
                 JsonRpcResponseEnum::from(serde_json::Value::Bool(false))
             }
             "eth_subscribe" => JsonRpcErrorData {
-                message: Cow::Borrowed(
-                    "notifications not supported. eth_subscribe is only available over a websocket",
-                ),
+                message: "notifications not supported. eth_subscribe is only available over a websocket".into(),
                 code: -32601,
                 data: None,
             }
             .into(),
             "eth_unsubscribe" => JsonRpcErrorData {
-                message: Cow::Borrowed("notifications not supported. eth_unsubscribe is only available over a websocket"),
+                message: "notifications not supported. eth_unsubscribe is only available over a websocket".into(),
                 code: -32601,
                 data: None,
             }.into(),
@@ -1547,7 +1544,7 @@ impl Web3ProxyApp {
                             // TODO: what error code?
                             // TODO: use Web3ProxyError::BadRequest
                             JsonRpcErrorData {
-                                message: Cow::Borrowed("Invalid request"),
+                                message: "Invalid request".into(),
                                 code: -32600,
                                 data: None
                             }.into()
@@ -1575,7 +1572,7 @@ impl Web3ProxyApp {
                         // TODO: this needs the correct error code in the response
                         // TODO: Web3ProxyError::BadRequest instead?
                         JsonRpcErrorData {
-                            message: Cow::Borrowed("invalid request"),
+                            message: "invalid request".into(),
                             code: StatusCode::BAD_REQUEST.as_u16().into(),
                             data: None,
                         }.into()
@@ -1583,7 +1580,7 @@ impl Web3ProxyApp {
                 }
             }
             "test" => JsonRpcErrorData {
-                message: Cow::Borrowed("The method test does not exist/is not available."),
+                message: "The method test does not exist/is not available.".into(),
                 code: -32601,
                 data: None,
             }.into(),

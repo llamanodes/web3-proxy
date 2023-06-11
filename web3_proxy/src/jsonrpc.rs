@@ -211,7 +211,7 @@ impl From<&'static str> for JsonRpcErrorData {
     fn from(value: &'static str) -> Self {
         Self {
             code: -32000,
-            message: Cow::Borrowed(value),
+            message: value.into(),
             data: None,
         }
     }
@@ -221,7 +221,7 @@ impl From<String> for JsonRpcErrorData {
     fn from(value: String) -> Self {
         Self {
             code: -32000,
-            message: Cow::Owned(value),
+            message: value.into(),
             data: None,
         }
     }
@@ -273,7 +273,7 @@ impl JsonRpcForwardedResponse {
             result: None,
             error: Some(JsonRpcErrorData {
                 code: code.unwrap_or(-32099),
-                message: Cow::Owned(message),
+                message: message.into(),
                 // TODO: accept data as an argument
                 data: None,
             }),
@@ -319,10 +319,7 @@ impl JsonRpcForwardedResponse {
                     data = err.data.clone();
                 } else if let Some(err) = err.as_serde_error() {
                     // this is not an rpc error. keep it as an error
-                    return Err(Web3ProxyError::BadResponse(format!(
-                        "bad response: {}",
-                        err
-                    )));
+                    return Err(Web3ProxyError::BadResponse(err.to_string().into()));
                 } else {
                     return Err(anyhow::anyhow!("unexpected ethers error! {:?}", err).into());
                 }
@@ -336,7 +333,7 @@ impl JsonRpcForwardedResponse {
             result: None,
             error: Some(JsonRpcErrorData {
                 code,
-                message: Cow::Owned(message),
+                message: message.into(),
                 data,
             }),
         })

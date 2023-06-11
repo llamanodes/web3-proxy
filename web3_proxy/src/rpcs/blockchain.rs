@@ -403,9 +403,11 @@ impl Web3Rpcs {
         let num_active_rpcs = consensus_finder.len();
         let total_rpcs = self.by_name.load().len();
 
+        let new_consensus_rpcs = Arc::new(new_consensus_rpcs);
+
         let old_consensus_head_connections = self
             .watch_consensus_rpcs_sender
-            .send_replace(Some(Arc::new(new_consensus_rpcs)));
+            .send_replace(Some(new_consensus_rpcs.clone()));
 
         let backups_voted_str = if backups_needed { "B " } else { "" };
 
@@ -494,7 +496,7 @@ impl Web3Rpcs {
                     }
                     Ordering::Less => {
                         // this is unlikely but possible
-                        // TODO: better log
+                        // TODO: better log that includes all the votes
                         warn!(
                             "chain rolled back {}/{} {}{}/{}/{} con={} old={} rpc={}@{}",
                             consensus_tier,

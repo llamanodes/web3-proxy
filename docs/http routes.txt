@@ -111,11 +111,12 @@ GET /user/balance
     If valid, displays data about the user's balance and payments as JSON.
 
 POST /user/balance/:txid
-    Not yet implemented. Rate limited by IP.
+    Rate limited by IP.
 
     Checks the ":txid" for a transaction that updates a user's balance.
     The backend will be watching for these transactions, so this should not be needed in the common case.
     However, log susbcriptions are not perfect and so it might sometimes be needed.
+    Any authorized user can call this endpoint for any other user's transaction.
 
 GET /user/keys
     Checks the "AUTHORIZATION" header for a valid bearer token.
@@ -140,10 +141,6 @@ GET /subuser/rpc_keys
 
 GET /user/deposits
     Retrieves the user's deposit history.
-
-GET /user/balance/:tx_hash
-    Accepts a tx_hash and updates the user's balance according to this transaction.
-    Any authorized user can call this endpoint for any other user's transaction.
 
 GET /user/referral
     Fetches a user's referral link.

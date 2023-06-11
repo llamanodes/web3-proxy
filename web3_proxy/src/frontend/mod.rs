@@ -172,7 +172,7 @@ pub async fn serve(
         .route("/user/deposits", get(users::payment::user_deposits_get))
         .route(
             "/user/balance/:tx_hash",
-            get(users::payment::user_balance_post),
+            post(users::payment::user_balance_post),
         )
         .route("/user/keys", get(users::rpc_keys::rpc_keys_get))
         .route("/user/keys", post(users::rpc_keys::rpc_keys_management))

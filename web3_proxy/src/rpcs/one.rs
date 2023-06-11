@@ -22,10 +22,12 @@ use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
+use std::cmp::Reverse;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{self, AtomicU64, AtomicUsize};
+use std::sync::atomic::{self, AtomicU64, AtomicU8, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
+use thread_fast_rng::rand::Rng;
 use tokio::sync::watch;
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
 use url::Url;
@@ -54,8 +56,6 @@ pub struct Web3Rpc {
     pub backup: bool,
     /// TODO: have an enum for this so that "no limit" prints pretty?
     pub(super) block_data_limit: AtomicU64,
-    /// Lower tiers are higher priority when sending requests
-    pub(super) tier: u64,
     /// TODO: change this to a watch channel so that http providers can subscribe and take action on change.
     /// this is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
@@ -64,6 +64,8 @@ pub struct Web3Rpc {
     /// Track peak request latency
     /// This is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) peak_latency: Option<PeakEwmaLatency>,
+    /// Automatically set priority
+    pub(super) tier: AtomicU8,
     /// Track total requests served
     /// TODO: maybe move this to graphana
     pub(super) total_requests: AtomicUsize,
@@ -196,7 +198,6 @@ impl Web3Rpc {
             name,
             peak_latency: Some(peak_latency),
             soft_limit: config.soft_limit,
-            tier: config.tier,
             ws_provider,
             disconnect_watch: Some(disconnect_watch),
             ..Default::default()
@@ -219,7 +220,61 @@ impl Web3Rpc {
         Ok((new_connection, handle))
     }
 
-    pub fn peak_ewma(&self) -> OrderedFloat<f64> {
+    /// sort by...
+    /// - backups last
+    /// - tier (ascending)
+    /// - block number (descending)
+    /// TODO: tests on this!
+    /// TODO: should tier or block number take priority?
+    /// TODO: should this return a struct that implements sorting traits?
+    fn sort_on(&self, max_block: Option<U64>) -> (bool, u8, Reverse<U64>) {
+        let mut head_block = self
+            .head_block
+            .as_ref()
+            .and_then(|x| x.borrow().as_ref().map(|x| *x.number()))
+            .unwrap_or_default();
+
+        if let Some(max_block) = max_block {
+            head_block = head_block.min(max_block);
+        }
+
+        let tier = self.tier.load(atomic::Ordering::Relaxed);
+
+        let backup = self.backup;
+
+        (!backup, tier, Reverse(head_block))
+    }
+
+    pub fn sort_for_load_balancing_on(
+        &self,
+        max_block: Option<U64>,
+    ) -> ((bool, u8, Reverse<U64>), OrderedFloat<f64>) {
+        let sort_on = self.sort_on(max_block);
+
+        let weighted_peak_ewma_seconds = self.weighted_peak_ewma_seconds();
+
+        let x = (sort_on, weighted_peak_ewma_seconds);
+
+        trace!("sort_for_load_balancing {}: {:?}", self, x);
+
+        x
+    }
+
+    /// like sort_for_load_balancing, but shuffles tiers randomly instead of sorting by weighted_peak_ewma_seconds
+    pub fn shuffle_for_load_balancing_on(
+        &self,
+        max_block: Option<U64>,
+    ) -> ((bool, u8, Reverse<U64>), u32) {
+        let sort_on = self.sort_on(max_block);
+
+        let mut rng = thread_fast_rng::thread_fast_rng();
+
+        let r = rng.gen::<u32>();
+
+        (sort_on, r)
+    }
+
+    pub fn weighted_peak_ewma_seconds(&self) -> OrderedFloat<f64> {
         let peak_latency = if let Some(peak_latency) = self.peak_latency.as_ref() {
             peak_latency.latency().as_secs_f64()
         } else {
@@ -538,7 +593,7 @@ impl Web3Rpc {
 
             // TODO: how often? different depending on the chain?
             // TODO: reset this timeout when a new block is seen? we need to keep request_latency updated though
-            let health_sleep_seconds = 10;
+            let health_sleep_seconds = 5;
 
             // health check loop
             let f = async move {
@@ -550,7 +605,7 @@ impl Web3Rpc {
                 while !rpc.should_disconnect() {
                     new_total_requests = rpc.total_requests.load(atomic::Ordering::Relaxed);
 
-                    if new_total_requests - old_total_requests < 10 {
+                    if new_total_requests - old_total_requests < 5 {
                         // TODO: if this fails too many times, reset the connection
                         // TODO: move this into a function and the chaining should be easier
                         if let Err(err) = rpc.healthcheck(error_handler).await {
@@ -900,18 +955,20 @@ impl Web3Rpc {
 
 impl Hash for Web3Rpc {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-        self.display_name.hash(state);
-        self.http_provider.as_ref().map(|x| x.url()).hash(state);
-        // TODO: figure out how to get the url for the provider
-        // TODO: url does NOT include the authorization data. i think created_at should protect us if auth changes without anything else
-        // self.ws_provider.map(|x| x.url()).hash(state);
-        self.automatic_block_limit.hash(state);
+        // do not include automatic block limit because it can change
+        // do not include tier because it can change
         self.backup.hash(state);
+        self.created_at.hash(state);
+        self.display_name.hash(state);
+        self.name.hash(state);
+
+        // TODO: url does NOT include the authorization data. i think created_at should protect us if auth changes without anything else
+        self.http_provider.as_ref().map(|x| x.url()).hash(state);
+        // TODO: figure out how to get the url for the ws provider
+        // self.ws_provider.map(|x| x.url()).hash(state);
+
         // TODO: don't include soft_limit if we change them to be dynamic
         self.soft_limit.hash(state);
-        self.tier.hash(state);
-        self.created_at.hash(state);
     }
 }
 
@@ -988,7 +1045,7 @@ impl Serialize for Web3Rpc {
             &self.peak_latency.as_ref().unwrap().latency().as_millis(),
         )?;
 
-        state.serialize_field("peak_ewma_s", self.peak_ewma().as_ref())?;
+        state.serialize_field("peak_ewma_s", self.weighted_peak_ewma_seconds().as_ref())?;
 
         state.end()
     }
@@ -1047,7 +1104,6 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
-            tier: 0,
             head_block: Some(tx),
             ..Default::default()
         };
@@ -1082,7 +1138,6 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
-            tier: 0,
             head_block: Some(tx),
             ..Default::default()
         };

@@ -23,17 +23,14 @@ use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use migration::sea_orm::DatabaseConnection;
 use moka::future::{Cache, CacheBuilder};
-use ordered_float::OrderedFloat;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
-use std::borrow::Cow;
-use std::cmp::{min_by_key, Reverse};
+use std::cmp::min_by_key;
 use std::fmt::{self, Display};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use thread_fast_rng::rand::seq::SliceRandom;
 use tokio::select;
 use tokio::sync::{broadcast, watch};
 use tokio::time::{sleep, sleep_until, Duration, Instant};
@@ -63,7 +60,7 @@ pub struct Web3Rpcs {
     /// blocks on the heaviest chain
     pub(super) blocks_by_number: BlocksByNumberCache,
     /// the number of rpcs required to agree on consensus for the head block (thundering herd protection)
-    pub(super) min_head_rpcs: usize,
+    pub(super) min_synced_rpcs: usize,
     /// the soft limit required to agree on consensus for the head block. (thundering herd protection)
     pub(super) min_sum_soft_limit: u32,
     /// how far behind the highest known block height we can be before we stop serving requests
@@ -123,7 +120,7 @@ impl Web3Rpcs {
             by_name,
             max_block_age,
             max_block_lag,
-            min_head_rpcs,
+            min_synced_rpcs: min_head_rpcs,
             min_sum_soft_limit,
             name,
             pending_transaction_cache,
@@ -256,10 +253,10 @@ impl Web3Rpcs {
 
         let num_rpcs = self.by_name.load().len();
 
-        if num_rpcs < self.min_head_rpcs {
+        if num_rpcs < self.min_synced_rpcs {
             return Err(Web3ProxyError::NotEnoughRpcs {
                 num_known: num_rpcs,
-                min_head_rpcs: self.min_head_rpcs,
+                min_head_rpcs: self.min_synced_rpcs,
             });
         }
 
@@ -279,7 +276,7 @@ impl Web3Rpcs {
     }
 
     pub fn min_head_rpcs(&self) -> usize {
-        self.min_head_rpcs
+        self.min_synced_rpcs
     }
 
     /// subscribe to blocks and transactions from all the backend rpcs.
@@ -440,7 +437,7 @@ impl Web3Rpcs {
             trace!("{} vs {}", rpc_a, rpc_b);
             // TODO: cached key to save a read lock
             // TODO: ties to the server with the smallest block_data_limit
-            let faster_rpc = min_by_key(rpc_a, rpc_b, |x| x.peak_ewma());
+            let faster_rpc = min_by_key(rpc_a, rpc_b, |x| x.weighted_peak_ewma_seconds());
             trace!("winner: {}", faster_rpc);
 
             // add to the skip list in case this one fails
@@ -523,8 +520,8 @@ impl Web3Rpcs {
                 .cloned()
                 .collect();
 
-            // TODO: include tiers in this?
-            potential_rpcs.shuffle(&mut thread_fast_rng::thread_fast_rng());
+            potential_rpcs
+                .sort_by_cached_key(|x| x.shuffle_for_load_balancing_on(max_block_needed.copied()));
 
             match self
                 ._best_available_rpc(&authorization, error_handler, &potential_rpcs, skip_rpcs)
@@ -572,10 +569,11 @@ impl Web3Rpcs {
                             .cloned(),
                     );
 
-                    potential_rpcs.shuffle(&mut thread_fast_rng::thread_fast_rng());
-
-                    if potential_rpcs.len() >= self.min_head_rpcs {
+                    if potential_rpcs.len() >= self.min_synced_rpcs {
                         // we have enough potential rpcs. try to load balance
+                        potential_rpcs.sort_by_cached_key(|x| {
+                            x.shuffle_for_load_balancing_on(max_block_needed.copied())
+                        });
 
                         match self
                             ._best_available_rpc(
@@ -604,8 +602,7 @@ impl Web3Rpcs {
                     }
 
                     for next_rpcs in consensus_rpcs.other_rpcs.values() {
-                        // we have to collect in order to shuffle
-                        let mut more_rpcs: Vec<_> = next_rpcs
+                        let more_rpcs = next_rpcs
                             .iter()
                             .filter(|rpc| {
                                 consensus_rpcs.rpc_will_work_now(
@@ -615,16 +612,16 @@ impl Web3Rpcs {
                                     rpc,
                                 )
                             })
-                            .cloned()
-                            .collect();
+                            .cloned();
 
-                        // shuffle only the new entries. that way the highest tier still gets preference
-                        more_rpcs.shuffle(&mut thread_fast_rng::thread_fast_rng());
+                        potential_rpcs.extend(more_rpcs);
 
-                        potential_rpcs.extend(more_rpcs.into_iter());
-
-                        if potential_rpcs.len() >= self.min_head_rpcs {
+                        if potential_rpcs.len() >= self.min_synced_rpcs {
                             // we have enough potential rpcs. try to load balance
+                            potential_rpcs.sort_by_cached_key(|x| {
+                                x.shuffle_for_load_balancing_on(max_block_needed.copied())
+                            });
+
                             match self
                                 ._best_available_rpc(
                                     &authorization,
@@ -654,6 +651,10 @@ impl Web3Rpcs {
 
                     if !potential_rpcs.is_empty() {
                         // even after scanning all the tiers, there are not enough rpcs that can serve this request. try anyways
+                        potential_rpcs.sort_by_cached_key(|x| {
+                            x.shuffle_for_load_balancing_on(max_block_needed.copied())
+                        });
+
                         match self
                             ._best_available_rpc(
                                 &authorization,
@@ -760,14 +761,14 @@ impl Web3Rpcs {
         };
 
         // synced connections are all on the same block. sort them by tier with higher soft limits first
-        synced_rpcs.sort_by_cached_key(rpc_sync_status_sort_key);
+        synced_rpcs.sort_by_cached_key(|x| x.sort_for_load_balancing_on(max_block_needed.copied()));
 
         trace!("synced_rpcs: {:#?}", synced_rpcs);
 
         // if there aren't enough synced connections, include more connections
         // TODO: only do this sorting if the synced_rpcs isn't enough
         let mut all_rpcs: Vec<_> = self.by_name.load().values().cloned().collect();
-        all_rpcs.sort_by_cached_key(rpc_sync_status_sort_key);
+        all_rpcs.sort_by_cached_key(|x| x.sort_for_load_balancing_on(max_block_needed.copied()));
 
         trace!("all_rpcs: {:#?}", all_rpcs);
 
@@ -1077,7 +1078,7 @@ impl Web3Rpcs {
         // TODO: what error code?
         // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
         Err(JsonRpcErrorData {
-            message: Cow::Borrowed("Requested data is not available"),
+            message: "Requested data is not available".into(),
             code: -32043,
             data: None,
         }
@@ -1284,26 +1285,6 @@ impl Serialize for Web3Rpcs {
     }
 }
 
-/// sort by block number (descending) and tier (ascending)
-/// TODO: should this be moved into a `impl Web3Rpc`?
-/// TODO: i think we still have sorts scattered around the code that should use this
-/// TODO: take AsRef or something like that? We don't need an Arc here
-fn rpc_sync_status_sort_key(x: &Arc<Web3Rpc>) -> (Reverse<U64>, u64, bool, OrderedFloat<f64>) {
-    let head_block = x
-        .head_block
-        .as_ref()
-        .and_then(|x| x.borrow().as_ref().map(|x| *x.number()))
-        .unwrap_or_default();
-
-    let tier = x.tier;
-
-    let peak_ewma = x.peak_ewma();
-
-    let backup = x.backup;
-
-    (Reverse(head_block), tier, backup, peak_ewma)
-}
-
 mod tests {
     #![allow(unused_imports)]
 
@@ -1326,8 +1307,14 @@ mod tests {
         PeakEwmaLatency::spawn(Duration::from_secs(1), 4, Duration::from_secs(1))
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_sort_connections_by_sync_status() {
+        let _ = env_logger::builder()
+            .filter_level(LevelFilter::Error)
+            .filter_module("web3_proxy", LevelFilter::Trace)
+            .is_test(true)
+            .try_init();
+
         let block_0 = Block {
             number: Some(0.into()),
             hash: Some(H256::random()),
@@ -1361,42 +1348,42 @@ mod tests {
         let mut rpcs: Vec<_> = [
             Web3Rpc {
                 name: "a".to_string(),
-                tier: 0,
+                tier: 0.into(),
                 head_block: Some(tx_a),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "b".to_string(),
-                tier: 0,
+                tier: 0.into(),
                 head_block: Some(tx_b),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "c".to_string(),
-                tier: 0,
+                tier: 0.into(),
                 head_block: Some(tx_c),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "d".to_string(),
-                tier: 1,
+                tier: 1.into(),
                 head_block: Some(tx_d),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "e".to_string(),
-                tier: 1,
+                tier: 1.into(),
                 head_block: Some(tx_e),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "f".to_string(),
-                tier: 1,
+                tier: 1.into(),
                 head_block: Some(tx_f),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
@@ -1406,11 +1393,11 @@ mod tests {
         .map(Arc::new)
         .collect();
 
-        rpcs.sort_by_cached_key(rpc_sync_status_sort_key);
+        rpcs.sort_by_cached_key(|x| x.sort_for_load_balancing_on(None));
 
         let names_in_sort_order: Vec<_> = rpcs.iter().map(|x| x.name.as_str()).collect();
 
-        assert_eq!(names_in_sort_order, ["c", "f", "b", "e", "a", "d"]);
+        assert_eq!(names_in_sort_order, ["c", "b", "a", "f", "e", "d"]);
     }
 
     #[tokio::test]
@@ -1452,7 +1439,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
-            tier: 0,
+            // tier: 0,
             head_block: Some(tx_synced),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
@@ -1466,7 +1453,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
-            tier: 0,
+            // tier: 0,
             head_block: Some(tx_lagged),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
@@ -1513,7 +1500,7 @@ mod tests {
             max_block_age: None,
             // TODO: test max_block_lag?
             max_block_lag: None,
-            min_head_rpcs: 1,
+            min_synced_rpcs: 1,
             min_sum_soft_limit: 1,
         };
 
@@ -1736,7 +1723,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: 64.into(),
-            tier: 1,
+            // tier: 1,
             head_block: Some(tx_pruned),
             ..Default::default()
         };
@@ -1749,7 +1736,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: u64::MAX.into(),
-            tier: 2,
+            // tier: 2,
             head_block: Some(tx_archive),
             ..Default::default()
         };
@@ -1789,7 +1776,7 @@ mod tests {
             blocks_by_number: CacheBuilder::new(100)
                 .time_to_live(Duration::from_secs(120))
                 .build(),
-            min_head_rpcs: 1,
+            min_synced_rpcs: 1,
             min_sum_soft_limit: 4_000,
             max_block_age: None,
             max_block_lag: None,
@@ -1918,7 +1905,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: 64.into(),
-            tier: 0,
+            // tier: 0,
             head_block: Some(tx_mock_geth),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
@@ -1930,7 +1917,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: u64::MAX.into(),
-            tier: 1,
+            // tier: 1,
             head_block: Some(tx_mock_erigon_archive),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
@@ -1969,7 +1956,7 @@ mod tests {
             pending_tx_id_sender,
             blocks_by_hash: Cache::new(10_000),
             blocks_by_number: Cache::new(10_000),
-            min_head_rpcs: 1,
+            min_synced_rpcs: 1,
             min_sum_soft_limit: 1_000,
             max_block_age: None,
             max_block_lag: None,

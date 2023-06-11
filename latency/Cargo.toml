@@ -9,7 +9,7 @@ edition = "2021"
 ewma = "0.1.1"
 flume = "0.10.14"
 log = "0.4.18"
-serde = { version = "1.0.163", features = [] }
+serde = { version = "1.0.164", features = [] }
 tokio = { version = "1.28.2", features = ["full"] }
 
 [dev-dependencies]

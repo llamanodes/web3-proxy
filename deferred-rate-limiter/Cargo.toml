@@ -10,5 +10,5 @@ redis-rate-limiter = { path = "../redis-rate-limiter" }
 anyhow = "1.0.71"
 hashbrown = "0.14.0"
 log = "0.4.18"
-moka = { version = "0.11.1", features = ["future"] }
+moka = { version = "0.11.2", features = ["future"] }
 tokio = "1.28.2"

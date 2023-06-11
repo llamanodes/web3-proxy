@@ -49,7 +49,7 @@ pub enum Web3ProxyError {
     BadRequest(Cow<'static, str>),
     #[error(ignore)]
     #[from(ignore)]
-    BadResponse(String),
+    BadResponse(Cow<'static, str>),
     BadRouting,
     Contract(ContractError<EthersHttpProvider>),
     Database(DbErr),
@@ -61,6 +61,7 @@ pub enum Web3ProxyError {
     EthersWsClient(ethers::prelude::WsClientError),
     FlumeRecv(flume::RecvError),
     GasEstimateNotU256,
+    HdrRecord(hdrhistogram::errors::RecordError),
     Headers(headers::Error),
     HeaderToString(ToStrError),
     Hyper(hyper::Error),
@@ -133,7 +134,7 @@ pub enum Web3ProxyError {
     SerdeJson(serde_json::Error),
     /// simple way to return an error message to the user and an anyhow to our logs
     #[display(fmt = "{}, {}, {:?}", _0, _1, _2)]
-    StatusCode(StatusCode, String, Option<anyhow::Error>),
+    StatusCode(StatusCode, Cow<'static, str>, Option<anyhow::Error>),
     /// TODO: what should be attached to the timout?
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
@@ -152,7 +153,7 @@ pub enum Web3ProxyError {
     WebsocketOnly,
     #[display(fmt = "{:?}, {}", _0, _1)]
     #[error(ignore)]
-    WithContext(Option<Box<Web3ProxyError>>, String),
+    WithContext(Option<Box<Web3ProxyError>>, Cow<'static, str>),
 }
 
 impl Web3ProxyError {
@@ -164,7 +165,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Owned(err.to_string()),
+                        message: err.to_string().into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -176,7 +177,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("FORBIDDEN"),
+                        message: "FORBIDDEN".into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
                         data: None,
                     },
@@ -188,7 +189,7 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
                         // TODO: is it safe to expose all of our anyhow strings?
-                        message: Cow::Owned(err.to_string()),
+                        message: err.to_string().into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -203,7 +204,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("bad request: {}", err)),
+                        message: format!("bad request: {}", err).into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -215,7 +216,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("bad response: {}", err)),
+                        message: format!("bad response: {}", err).into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -226,7 +227,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("bad routing"),
+                        message: "bad routing".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -237,7 +238,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("database error!"),
+                        message: "database error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -248,7 +249,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("contract error: {}", err)),
+                        message: format!("contract error: {}", err).into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -259,7 +260,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("decimal error: {}", err)),
+                        message: format!("decimal error: {}", err).into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -273,10 +274,11 @@ impl Web3ProxyError {
                 (
                     StatusCode::UNAUTHORIZED,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!(
+                        message: format!(
                             "both the primary and eip191 verification failed: {:#?}; {:#?}",
                             err_1, err_191
-                        )),
+                        )
+                        .into(),
                         code: StatusCode::UNAUTHORIZED.as_u16().into(),
                         data: None,
                     },
@@ -287,7 +289,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("ether http client error"),
+                        message: "ether http client error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -298,7 +300,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("ether provider error"),
+                        message: "ether provider error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -309,7 +311,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("ether ws client error"),
+                        message: "ether ws client error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -320,7 +322,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("flume recv error!"),
+                        message: "flume recv error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -332,7 +334,18 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("gas estimate result is not an U256"),
+                        message: "gas estimate result is not an U256".into(),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::HdrRecord(err) => {
+                warn!("HdrRecord {:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: err.to_string().into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -343,7 +356,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("{}", err)),
+                        message: err.to_string().into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -355,7 +368,7 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
                         // TODO: is it safe to expose these error strings?
-                        message: Cow::Owned(err.to_string()),
+                        message: err.to_string().into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -367,7 +380,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("influxdb2 error!"),
+                        message: "influxdb2 error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -378,10 +391,11 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!(
+                        message: format!(
                             "Invalid blocks bounds requested. min ({}) > max ({})",
                             min, max
-                        )),
+                        )
+                        .into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -392,7 +406,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Owned(err.to_string()),
+                        message: err.to_string().into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -403,7 +417,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("IP ({}) is not allowed!", ip)),
+                        message: format!("IP ({}) is not allowed!", ip).into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
                         data: None,
                     },
@@ -414,7 +428,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("{}", err)),
+                        message: err.to_string().into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -425,7 +439,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("invalid message eip given"),
+                        message: "invalid message eip given".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -436,7 +450,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::UNAUTHORIZED,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("invalid invite code"),
+                        message: "invalid invite code".into(),
                         code: StatusCode::UNAUTHORIZED.as_u16().into(),
                         data: None,
                     },
@@ -448,7 +462,7 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
                         // TODO: is it safe to expose our io error strings?
-                        message: Cow::Owned(err.to_string()),
+                        message: err.to_string().into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -459,7 +473,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::UNAUTHORIZED,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("invalid referral code"),
+                        message: "invalid referral code".into(),
                         code: StatusCode::UNAUTHORIZED.as_u16().into(),
                         data: None,
                     },
@@ -470,7 +484,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("invalid referer!"),
+                        message: "invalid referer!".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -481,7 +495,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("invalid signature length"),
+                        message: "invalid signature length".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -492,7 +506,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("invalid user agent!"),
+                        message: "invalid user agent!".into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
                         data: None,
                     },
@@ -503,7 +517,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("UserKey was not a ULID or UUID"),
+                        message: "UserKey was not a ULID or UUID".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -514,7 +528,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("UserTier is not valid!"),
+                        message: "UserTier is not valid!".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -533,7 +547,7 @@ impl Web3ProxyError {
                     code,
                     JsonRpcErrorData {
                         // TODO: different messages of cancelled or not?
-                        message: Cow::Borrowed("Unable to complete request"),
+                        message: "Unable to complete request".into(),
                         code: code.as_u16().into(),
                         data: None,
                     },
@@ -548,7 +562,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("msgpack encode error: {}", err)),
+                        message: format!("msgpack encode error: {}", err).into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -559,7 +573,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("Blocks here must have a number or hash"),
+                        message: "Blocks here must have a number or hash".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -570,7 +584,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_GATEWAY,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("no blocks known"),
+                        message: "no blocks known".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
                         data: None,
                     },
@@ -581,7 +595,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_GATEWAY,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("no consensus head block"),
+                        message: "no consensus head block".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
                         data: None,
                     },
@@ -592,7 +606,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_GATEWAY,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("unable to retry for request handle"),
+                        message: "unable to retry for request handle".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
                         data: None,
                     },
@@ -603,7 +617,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_GATEWAY,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("no servers synced"),
+                        message: "no servers synced".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
                         data: None,
                     },
@@ -617,10 +631,11 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_GATEWAY,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!(
+                        message: format!(
                             "not enough rpcs connected {}/{}",
                             num_known, min_head_rpcs
-                        )),
+                        )
+                        .into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
                         data: None,
                     },
@@ -631,10 +646,11 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_GATEWAY,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!(
+                        message: format!(
                             "not enough soft limit available {}/{}",
                             available, needed
-                        )),
+                        )
+                        .into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
                         data: None,
                     },
@@ -646,7 +662,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::NOT_FOUND,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("not found!"),
+                        message: "not found!".into(),
                         code: StatusCode::NOT_FOUND.as_u16().into(),
                         data: None,
                     },
@@ -657,7 +673,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::NOT_IMPLEMENTED,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("work in progress"),
+                        message: "work in progress".into(),
                         code: StatusCode::NOT_IMPLEMENTED.as_u16().into(),
                         data: None,
                     },
@@ -668,7 +684,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("Origin required"),
+                        message: "Origin required".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -679,7 +695,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("Origin ({}) is not allowed!", origin)),
+                        message: format!("Origin ({}) is not allowed!", origin).into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
                         data: None,
                     },
@@ -690,7 +706,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("parse bytes error!"),
+                        message: "parse bytes error!".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -701,7 +717,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("parse message error!"),
+                        message: "parse message error!".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -712,7 +728,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("unable to parse address"),
+                        message: "unable to parse address".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -723,7 +739,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::PAYMENT_REQUIRED,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("Payment is required and user is not premium"),
+                        message: "Payment is required and user is not premium".into(),
                         code: StatusCode::PAYMENT_REQUIRED.as_u16().into(),
                         data: None,
                     },
@@ -755,7 +771,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::TOO_MANY_REQUESTS,
                     JsonRpcErrorData {
-                        message: Cow::Owned(msg),
+                        message: msg.into(),
                         code: StatusCode::TOO_MANY_REQUESTS.as_u16().into(),
                         data: None,
                     },
@@ -766,7 +782,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("redis error!"),
+                        message: "redis error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -777,7 +793,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("Referer required"),
+                        message: "Referer required".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -788,7 +804,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("Referer ({:?}) is not allowed", referer)),
+                        message: format!("Referer ({:?}) is not allowed", referer).into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
                         data: None,
                     },
@@ -800,7 +816,7 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
                         // TODO: is it safe to expose all of our anyhow strings?
-                        message: Cow::Borrowed("semaphore acquire error"),
+                        message: "semaphore acquire error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -811,7 +827,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("error stat_sender sending response_stat"),
+                        message: "error stat_sender sending response_stat".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -822,7 +838,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("de/serialization error! {}", err)),
+                        message: format!("de/serialization error! {}", err).into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -840,7 +856,7 @@ impl Web3ProxyError {
                 (
                     *status_code,
                     JsonRpcErrorData {
-                        message: err_msg.to_owned().into(),
+                        message: err_msg.clone(),
                         code: code.into(),
                         data: None,
                     },
@@ -892,7 +908,7 @@ impl Web3ProxyError {
             Self::UnknownKey => (
                 StatusCode::UNAUTHORIZED,
                 JsonRpcErrorData {
-                    message: Cow::Borrowed("unknown api key!"),
+                    message: "unknown api key!".into(),
                     code: StatusCode::UNAUTHORIZED.as_u16().into(),
                     data: None,
                 },
@@ -902,7 +918,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("User agent required"),
+                        message: "User agent required".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -913,7 +929,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
-                        message: Cow::Owned(format!("User agent ({}) is not allowed!", ua)),
+                        message: format!("User agent ({}) is not allowed!", ua).into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
                         data: None,
                     },
@@ -925,7 +941,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("user ids should always be non-zero"),
+                        message: "user ids should always be non-zero".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -936,7 +952,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("verification error!"),
+                        message: "verification error!".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -947,7 +963,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("watch recv error!"),
+                        message: "watch recv error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -958,7 +974,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: Cow::Borrowed("watch send error!"),
+                        message: "watch send error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -985,7 +1001,7 @@ impl Web3ProxyError {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         JsonRpcErrorData {
-                            message: msg.to_owned().into(),
+                            message: msg.clone(),
                             code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                             data: None,
                         },
@@ -1026,11 +1042,11 @@ impl IntoResponse for Web3ProxyError {
 }
 
 pub trait Web3ProxyErrorContext<T> {
-    fn web3_context<S: Into<String>>(self, msg: S) -> Result<T, Web3ProxyError>;
+    fn web3_context<S: Into<Cow<'static, str>>>(self, msg: S) -> Result<T, Web3ProxyError>;
 }
 
 impl<T> Web3ProxyErrorContext<T> for Option<T> {
-    fn web3_context<S: Into<String>>(self, msg: S) -> Result<T, Web3ProxyError> {
+    fn web3_context<S: Into<Cow<'static, str>>>(self, msg: S) -> Result<T, Web3ProxyError> {
         self.ok_or(Web3ProxyError::WithContext(None, msg.into()))
     }
 }
@@ -1039,7 +1055,7 @@ impl<T, E> Web3ProxyErrorContext<T> for Result<T, E>
 where
     E: Into<Web3ProxyError>,
 {
-    fn web3_context<S: Into<String>>(self, msg: S) -> Result<T, Web3ProxyError> {
+    fn web3_context<S: Into<Cow<'static, str>>>(self, msg: S) -> Result<T, Web3ProxyError> {
         self.map_err(|err| Web3ProxyError::WithContext(Some(Box::new(err.into())), msg.into()))
     }
 }

@@ -354,23 +354,33 @@ pub async fn admin_login_post(
     // we can't trust that they didn't tamper with the message in some way. like some clients return it hex encoded
     // TODO: checking 0x seems fragile, but I think it will be fine. siwe message text shouldn't ever start with 0x
     let their_msg: Message = if payload.msg.starts_with("0x") {
-        let their_msg_bytes =
-            Bytes::from_str(&payload.msg).web3_context("parsing payload message")?;
+        let their_msg_bytes = Bytes::from_str(&payload.msg).map_err(|err| {
+            Web3ProxyError::BadRequest(
+                format!("error parsing payload message as Bytes: {}", err).into(),
+            )
+        })?;
 
         // TODO: lossy or no?
         String::from_utf8_lossy(their_msg_bytes.as_ref())
             .parse::<siwe::Message>()
-            .web3_context("parsing hex string message")?
+            .map_err(|err| {
+                Web3ProxyError::BadRequest(
+                    format!("error parsing bytes as siwe message: {}", err).into(),
+                )
+            })?
     } else {
-        payload
-            .msg
-            .parse::<siwe::Message>()
-            .web3_context("parsing string message")?
+        payload.msg.parse::<siwe::Message>().map_err(|err| {
+            Web3ProxyError::BadRequest(
+                format!("error parsing string as siwe message: {}", err).into(),
+            )
+        })?
     };
 
     // the only part of the message we will trust is their nonce
     // TODO: this is fragile. have a helper function/struct for redis keys
-    let login_nonce = UserBearerToken::from_str(&their_msg.nonce)?;
+    let login_nonce = UserBearerToken::from_str(&their_msg.nonce).map_err(|err| {
+        Web3ProxyError::BadRequest(format!("error parsing nonce: {}", err).into())
+    })?;
 
     // fetch the message we gave them from our database
     let db_replica = app
