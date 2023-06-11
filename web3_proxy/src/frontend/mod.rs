@@ -159,7 +159,7 @@ pub async fn serve(
         .route(
             // /:rpc_key/:subuser_address/:new_status/:new_role
             "/user/subuser",
-            get(users::subuser::modify_subuser),
+            post(users::subuser::modify_subuser),
         )
         .route("/user/subusers", get(users::subuser::get_subusers))
         .route(
