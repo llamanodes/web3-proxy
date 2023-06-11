@@ -16,13 +16,16 @@ use axum::{
 };
 use entities::sea_orm_active_enums::Role;
 use entities::{rpc_key, secondary_user};
+use ethers::types::{H256, U256};
+use ethers::utils::keccak256;
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
 use log::{debug, error, trace, warn};
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use serde_json::json;
+use rdkafka::message::ToBytes;
+use serde_json::{json, Value};
 use ulid::Ulid;
 
 pub async fn query_user_stats<'a>(
@@ -31,6 +34,9 @@ pub async fn query_user_stats<'a>(
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
+    // Let's start accumulating the cache-key, if there is any. We will use H256 and keccak, a collision is extremely unlikely
+    let mut cache_key: U256 = U256::default();
+
     let (user_id, _semaphore) = match bearer {
         Some(TypedHeader(Authorization(bearer))) => {
             let (user, semaphore) = app.bearer_is_authorized(bearer).await?;
@@ -38,6 +44,11 @@ pub async fn query_user_stats<'a>(
         }
         None => (0, None),
     };
+
+    // Accumulate the user_id into the cache_key
+    cache_key = cache_key
+        .overflowing_add(U256::from(keccak256(user_id.to_be_bytes())))
+        .0;
 
     // Return an error if the bearer is **not** set, but the StatType is Detailed
     if stat_response_type == StatType::Detailed && user_id == 0 {
@@ -61,6 +72,25 @@ pub async fn query_user_stats<'a>(
     let query_stop = get_query_stop_from_params(params)?.timestamp();
     let chain_id = get_chain_id_from_params(app, params)?;
 
+    if query_start >= query_stop {
+        return Err(Web3ProxyError::BadRequest(
+            "query_start cannot be after query_stop".into(),
+        ));
+    }
+
+    cache_key = cache_key
+        .overflowing_add(keccak256(query_window_seconds.to_be_bytes()).into())
+        .0;
+    cache_key = cache_key
+        .overflowing_add(keccak256(query_start.to_be_bytes()).into())
+        .0;
+    cache_key = cache_key
+        .overflowing_add(keccak256(query_stop.to_be_bytes()).into())
+        .0;
+    cache_key = cache_key
+        .overflowing_add(keccak256(chain_id.to_be_bytes()).into())
+        .0;
+
     // Return a bad request if query_start == query_stop, because then the query is empty basically
     if query_start == query_stop {
         return Err(Web3ProxyError::BadRequest(
@@ -73,6 +103,15 @@ pub async fn query_user_stats<'a>(
     } else {
         "opt_in_proxy"
     };
+    cache_key = cache_key
+        .overflowing_add(keccak256(measurement.to_bytes()).into())
+        .0;
+
+    // Return the cache early, now that we have the full cache-key (if cache entry exists)
+    if let Some(cached_response_body) = app.influx_cache.get(&cache_key) {
+        debug!("Accessing Cache for Influx Stats!");
+        return Ok(Json(json!(cached_response_body)).into_response());
+    }
 
     // Include a hashmap to go from rpc_secret_key_id to the rpc_secret_key
     let mut rpc_key_id_to_key = HashMap::new();
@@ -135,6 +174,9 @@ pub async fn query_user_stats<'a>(
             user_rpc_keys
         )
     };
+    // cache_key = cache_key
+    //     .overflowing_add(keccak256(rpc_key_filter.to_bytes()).into())
+    //     .0;
 
     // TODO: Turn into a 500 error if bucket is not found ..
     // Or just unwrap or so
@@ -168,14 +210,14 @@ pub async fn query_user_stats<'a>(
     };
 
     let join_candidates = f!(
-            r#"{:?}"#,
-            vec![
-                "_time",
-                "_measurement",
-                "chain_id",
-                // "rpc_secret_key_id"
-            ]
-        );
+        r#"{:?}"#,
+        vec![
+            "_time",
+            "_measurement",
+            "chain_id",
+            // "rpc_secret_key_id"
+        ]
+    );
 
     let query = f!(r#"
     base = from(bucket: "{bucket}")
@@ -463,23 +505,29 @@ pub async fn query_user_stats<'a>(
 
     // I suppose archive requests could be either gathered by default (then summed up), or retrieved on a second go.
     // Same with error responses ..
-    let mut response_body = HashMap::new();
+    let mut response_body: HashMap<String, Value> = HashMap::new();
     response_body.insert(
-        "num_items",
+        "num_items".into(),
         serde_json::Value::Number(datapoints.len().into()),
     );
-    response_body.insert("result", serde_json::Value::Array(datapoints));
+    response_body.insert("result".into(), serde_json::Value::Array(datapoints));
     response_body.insert(
-        "query_window_seconds",
+        "query_window_seconds".into(),
         serde_json::Value::Number(query_window_seconds.into()),
     );
-    response_body.insert("query_start", serde_json::Value::Number(query_start.into()));
-    response_body.insert("chain_id", serde_json::Value::Number(chain_id.into()));
+    response_body.insert(
+        "query_start".into(),
+        serde_json::Value::Number(query_start.into()),
+    );
+    response_body.insert(
+        "chain_id".into(),
+        serde_json::Value::Number(chain_id.into()),
+    );
 
     if user_id == 0 {
         // 0 means everyone. don't filter on user
     } else {
-        response_body.insert("user_id", serde_json::Value::Number(user_id.into()));
+        response_body.insert("user_id".into(), serde_json::Value::Number(user_id.into()));
     }
 
     // Also optionally add the rpc_key_id:
@@ -487,10 +535,17 @@ pub async fn query_user_stats<'a>(
         let rpc_key_id = rpc_key_id
             .parse::<u64>()
             .map_err(|_| Web3ProxyError::BadRequest("Unable to parse rpc_key_id".into()))?;
-        response_body.insert("rpc_key_id", serde_json::Value::Number(rpc_key_id.into()));
+        response_body.insert(
+            "rpc_key_id".into(),
+            serde_json::Value::Number(rpc_key_id.into()),
+        );
     }
 
     let response = Json(json!(response_body)).into_response();
+
+    // TODO: Add a cache for this response (and the corresponding input as well)
+    // If we got here, we always want to update the cache (we'll never reach it twice though, unless the cache is too old)
+    app.influx_cache.insert(cache_key, response_body).await;
 
     Ok(response)
 }
