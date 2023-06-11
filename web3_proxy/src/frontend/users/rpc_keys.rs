@@ -10,8 +10,8 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use entities;
-use entities::rpc_key;
-use entities::sea_orm_active_enums::TrackingLevel;
+use entities::sea_orm_active_enums::{Role, TrackingLevel};
+use entities::{rpc_key, secondary_user};
 use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
@@ -19,6 +19,7 @@ use itertools::Itertools;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TryIntoModel,
 };
+use migration::LockType;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -41,11 +42,33 @@ pub async fn rpc_keys_get(
         .await
         .web3_context("failed loading user's key")?;
 
+    let secondary_user_entities = secondary_user::Entity::find()
+        .filter(secondary_user::Column::UserId.eq(user.id))
+        .all(db_replica.as_ref())
+        .await?
+        .into_iter()
+        .map(|x| (x.rpc_secret_key_id, x))
+        .collect::<HashMap<u64, secondary_user::Model>>();
+
+    // Now return a list of all subusers (their wallets)
+    let rpc_key_entities: Vec<rpc_key::Model> = rpc_key::Entity::find()
+        .filter(
+            rpc_key::Column::Id.is_in(
+                secondary_user_entities
+                    .iter()
+                    .map(|(x, _)| *x)
+                    .collect::<Vec<_>>(),
+            ),
+        )
+        .all(db_replica.as_ref())
+        .await?;
+
     let response_json = json!({
         "user_id": user.id,
         "user_rpc_keys": uks
             .into_iter()
             .map(|uk| (uk.id, uk))
+            .chain(rpc_key_entities.into_iter().map(|sk| (sk.id, sk)))
             .collect::<HashMap::<_, _>>(),
     });
 
@@ -98,32 +121,67 @@ pub async fn rpc_keys_management(
         .db_replica()
         .web3_context("getting db for user's keys")?;
 
-    let mut uk = if let Some(existing_key_id) = payload.key_id {
-        // get the key and make sure it belongs to the user
-        rpc_key::Entity::find()
-            .filter(rpc_key::Column::UserId.eq(user.id))
-            .filter(rpc_key::Column::Id.eq(existing_key_id))
-            .one(db_replica.as_ref())
-            .await
-            .web3_context("failed loading user's key")?
-            .web3_context("key does not exist or is not controlled by this bearer token")?
-            .into_active_model()
-    } else {
-        // make a new key
-        // TODO: limit to 10 keys?
-        let secret_key = RpcSecretKey::new();
-
-        let log_level = payload
-            .log_level
-            .web3_context("log level must be 'none', 'detailed', or 'aggregated'")?;
-
-        rpc_key::ActiveModel {
-            user_id: sea_orm::Set(user.id),
-            secret_key: sea_orm::Set(secret_key.into()),
-            log_level: sea_orm::Set(log_level),
-            ..Default::default()
+    let mut uk = match payload.key_id {
+        Some(existing_key_id) => {
+            if let Some(x) = rpc_key::Entity::find()
+                .filter(rpc_key::Column::UserId.eq(user.id))
+                .filter(rpc_key::Column::Id.eq(existing_key_id))
+                .one(db_replica.as_ref())
+                .await
+                .web3_context("failed loading user's key")?
+            {
+                Ok(x.into_active_model())
+            } else {
+                // Return early if there is no permissions; otherwise all the code below can work
+                // (1) Check if the key is in the user's control, return early accordingly
+                match secondary_user::Entity::find()
+                    .filter(secondary_user::Column::UserId.eq(user.id))
+                    .filter(secondary_user::Column::RpcSecretKeyId.eq(existing_key_id))
+                    .find_also_related(rpc_key::Entity)
+                    .one(db_replica.as_ref())
+                    .await?
+                {
+                    // Match statement here, check in the user's RPC keys directly if it's not part of the secondary user
+                    Some((secondary_user_entity, Some(rpc_key))) => {
+                        // Check if the secondary user is an admin, return early if not
+                        if secondary_user_entity.role == Role::Owner
+                            || secondary_user_entity.role == Role::Admin
+                        {
+                            Ok(rpc_key.into_active_model())
+                        } else {
+                            Err(Web3ProxyError::AccessDenied)
+                        }
+                    }
+                    Some((x, None)) => Err(Web3ProxyError::BadResponse(
+                        "a subuser record was found, but no corresponding RPC key".into(),
+                    )),
+                    // Match statement here, check in the user's RPC keys directly if it's not part of the secondary user
+                    None => {
+                        // get the key and make sure it belongs to the user
+                        Err(Web3ProxyError::BadRequest(
+                            "key does not exist or is not controlled by this bearer token".into(),
+                        ))
+                    }
+                }
+            }
         }
-    };
+        None => {
+            // make a new key
+            // TODO: limit to 10 keys?
+            let secret_key = RpcSecretKey::new();
+
+            let log_level = payload
+                .log_level
+                .web3_context("log level must be 'none', 'detailed', or 'aggregated'")?;
+
+            Ok(rpc_key::ActiveModel {
+                user_id: sea_orm::Set(user.id),
+                secret_key: sea_orm::Set(secret_key.into()),
+                log_level: sea_orm::Set(log_level),
+                ..Default::default()
+            })
+        }
+    }?;
 
     // TODO: do we need null descriptions? default to empty string should be fine, right?
     if let Some(description) = payload.description {
