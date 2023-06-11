@@ -174,6 +174,8 @@ pub async fn query_user_stats<'a>(
             user_rpc_keys
         )
     };
+
+    // We assume that the rpc-keys do not change that quickly
     // cache_key = cache_key
     //     .overflowing_add(keccak256(rpc_key_filter.to_bytes()).into())
     //     .0;
@@ -543,7 +545,6 @@ pub async fn query_user_stats<'a>(
 
     let response = Json(json!(response_body)).into_response();
 
-    // TODO: Add a cache for this response (and the corresponding input as well)
     // If we got here, we always want to update the cache (we'll never reach it twice though, unless the cache is too old)
     app.influx_cache.insert(cache_key, response_body).await;
 
