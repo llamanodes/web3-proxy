@@ -43,7 +43,6 @@ async-trait = "0.1.68"
 axum = { version = "0.6.18", features = ["headers", "ws"] }
 axum-client-ip = "0.4.1"
 axum-macros = "0.3.7"
-check-if-email-exists = "0.9.0"
 chrono = "0.4.26"
 console-subscriber = { version = "0.1.9", optional = true }
 counter = "0.5.7"

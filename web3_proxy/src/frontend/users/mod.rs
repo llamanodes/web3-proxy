@@ -7,7 +7,7 @@ pub mod stats;
 pub mod subuser;
 
 use crate::app::Web3ProxyApp;
-use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
+use crate::errors::{Web3ProxyErrorContext, Web3ProxyResponse};
 
 use axum::{
     headers::{authorization::Bearer, Authorization},
@@ -15,9 +15,6 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use check_if_email_exists::{
-    check_email, CheckEmailInput, CheckEmailInputProxy, CheckEmailOutput, Reachable,
-};
 use entities;
 use entities::user;
 use migration::sea_orm::{self, ActiveModelTrait};
@@ -62,23 +59,6 @@ pub async fn user_post(
         if x.is_empty() {
             user.email = sea_orm::Set(None);
         } else {
-            // Make a quick check if the e-mail provide is active
-            let check_email_input = CheckEmailInput::new(x.clone());
-            // Verify this input, using async/await syntax.
-            let result = check_email(&check_email_input).await;
-            match result.is_reachable {
-                Reachable::Invalid => {
-                    return Err(Web3ProxyError::BadRequest(
-                        "The e-mail address you provided seems invalid".into(),
-                    ));
-                }
-                // Let's be very chill about the validity of e-mails, and only error if the Syntax / SMPT / MX does not work
-                // Reachable::Safe => {}
-                // Reachable::Unknown => {}
-                // Reachable::Risky => {}
-                _ => {}
-            }
-
             // TODO: do some basic validation
             // TODO: don't set immediatly, send a confirmation email first
             // TODO: compare first? or is sea orm smart enough to do that for us?
