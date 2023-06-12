@@ -26,7 +26,6 @@ use migration::sea_orm::TransactionTrait;
 use serde_json::json;
 use std::sync::Arc;
 use ulid::{self, Ulid};
-use uuid::Uuid;
 
 pub async fn get_keys_as_subuser(
     Extension(app): Extension<Arc<Web3ProxyApp>>,

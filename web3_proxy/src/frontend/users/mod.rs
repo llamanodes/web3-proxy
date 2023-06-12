@@ -15,9 +15,7 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use check_if_email_exists::{
-    check_email, CheckEmailInput, CheckEmailInputProxy, CheckEmailOutput, Reachable,
-};
+use check_if_email_exists::{check_email, CheckEmailInput, Reachable};
 use entities;
 use entities::user;
 use migration::sea_orm::{self, ActiveModelTrait};
@@ -66,17 +64,12 @@ pub async fn user_post(
             let check_email_input = CheckEmailInput::new(x.clone());
             // Verify this input, using async/await syntax.
             let result = check_email(&check_email_input).await;
-            match result.is_reachable {
-                Reachable::Invalid => {
-                    return Err(Web3ProxyError::BadRequest(
-                        "The e-mail address you provided seems invalid".into(),
-                    ));
-                }
-                // Let's be very chill about the validity of e-mails, and only error if the Syntax / SMPT / MX does not work
-                // Reachable::Safe => {}
-                // Reachable::Unknown => {}
-                // Reachable::Risky => {}
-                _ => {}
+
+            // Let's be very chill about the validity of e-mails, and only error if the Syntax / SMPT / MX does not work
+            if let Reachable::Invalid = result.is_reachable {
+                return Err(Web3ProxyError::BadRequest(
+                    "The e-mail address you provided seems invalid".into(),
+                ));
             }
 
             // TODO: do some basic validation

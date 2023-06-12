@@ -19,7 +19,6 @@ use itertools::Itertools;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TryIntoModel,
 };
-use migration::LockType;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
