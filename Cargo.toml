@@ -10,6 +10,7 @@ members = [
   "thread-fast-rng",
   "web3_proxy",
 ]
+resolver = "2"
 
 [profile.release]
 # `debug = true` so that sentry can give us line numbers
