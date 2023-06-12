@@ -1400,7 +1400,7 @@ mod tests {
         assert_eq!(names_in_sort_order, ["c", "b", "a", "f", "e", "d"]);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_server_selection_by_height() {
         // TODO: do this better. can test_env_logger and tokio test be stacked?
         let _ = env_logger::builder()
@@ -1694,7 +1694,7 @@ mod tests {
         assert!(matches!(future_rpc, Ok(OpenRequestResult::NotReady)));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_server_selection_by_archive() {
         // TODO: do this better. can test_env_logger and tokio test be stacked?
         let _ = env_logger::builder()
