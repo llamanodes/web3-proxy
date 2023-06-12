@@ -1502,7 +1502,7 @@ impl Web3ProxyApp {
                     }
                 }
 
-                todo!();
+                response
             }
             "eth_syncing" => {
                 // no stats on this. its cheap
