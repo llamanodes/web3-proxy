@@ -66,7 +66,7 @@ hyper = { version = "0.14.26", features = ["full", "nightly"] }
 ipnet = "2.7.2"
 itertools = "0.10.5"
 listenfd = "1.0.1"
-log = "0.4.18"
+log = "0.4.19"
 mimalloc = { version = "0.1.37", optional = true}
 moka = { version = "0.11.2", features = ["future"] }
 num = "0.4.0"
