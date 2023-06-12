@@ -270,27 +270,15 @@ async fn _websocket_handler_with_key(
                 (Some(redirect_public_url), _, None) => {
                     Ok(Redirect::permanent(redirect_public_url).into_response())
                 }
-                (_, Some(redirect_rpc_key_url), rpc_key_id) => {
+                (_, Some(redirect_rpc_key_url), Some(rpc_key_id)) => {
                     let reg = Handlebars::new();
 
-                    if authorization.checks.rpc_secret_key_id.is_none() {
-                        // i don't think this is possible
-                        Err(Web3ProxyError::StatusCode(
-                            StatusCode::UNAUTHORIZED,
-                            "AUTHORIZATION header required".into(),
-                            None,
-                        ))
-                    } else {
-                        let redirect_rpc_key_url = reg
-                            .render_template(
-                                redirect_rpc_key_url,
-                                &json!({ "rpc_key_id": rpc_key_id }),
-                            )
-                            .expect("templating should always work");
+                    let redirect_rpc_key_url = reg
+                        .render_template(redirect_rpc_key_url, &json!({ "rpc_key_id": rpc_key_id }))
+                        .expect("templating should always work");
 
-                        // this is not a websocket. redirect to a page for this user
-                        Ok(Redirect::permanent(&redirect_rpc_key_url).into_response())
-                    }
+                    // this is not a websocket. redirect to a page for this user
+                    Ok(Redirect::permanent(&redirect_rpc_key_url).into_response())
                 }
                 // any other combinations get a simple error
                 _ => Err(Web3ProxyError::StatusCode(
