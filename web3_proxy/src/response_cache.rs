@@ -231,8 +231,7 @@ impl TryFrom<ProviderError> for JsonRpcErrorData {
     }
 }
 
-// TODO: Change this to a axum::..::Bytes
-pub fn influx_response_weigher<K>(_key: &K, value: &HashMap<String, serde_json::Value>) -> u32 {
+pub fn influx_response_weigher<K>(_key: &K, value: &axum::body::Bytes) -> u32 {
     value.len() as u32
 }
 

@@ -40,10 +40,6 @@ use std::io::Read;
 use std::sync::Arc;
 use ulid::Ulid;
 
-// static RPCS_NOT_OK: Lazy<Bytes> = Lazy::new(|| Bytes::from(":(\n"));
-// static CONTENT_TYPE_JSON: &str = "application/json";
-// static CONTENT_TYPE_PLAIN: &str = "text/plain";
-
 pub async fn query_user_stats<'a>(
     app: &'a Web3ProxyApp,
     influx_cache: &'a InfluxResponseCache,
@@ -102,7 +98,6 @@ pub async fn query_user_stats<'a>(
     measurement.hash(&mut hasher);
     stat_response_type.type_id().hash(&mut hasher);
     let hash = hasher.finish();
-
     debug!("Hash is: {:?}", hash);
 
     // Return the cache early, now that we have the full cache-key (if cache entry exists)
@@ -123,18 +118,8 @@ pub async fn query_user_stats<'a>(
         })
         .await?;
 
-    let response = Json(json!(response_body)).into_response();
-    // From<http::Response<http_body::combinators::box_body::UnsyncBoxBody<axum::body::Bytes, axum::Error>>>
-    // From<http_body::combinators::box_body::UnsyncBoxBody<axum::body::Bytes, axum::Error>>
+    let response = response_body.into_response();
     Ok(response)
-
-    // Ok(Response::builder()
-    //     .status(StatusCode::OK)
-    //     .header("content-type", "application/json")
-    //     .body(Full::from(body))
-    //     .unwrap())
-
-    // Ok(body.into_response())
 }
 
 #[inline]
@@ -148,7 +133,7 @@ async fn _influx_stats(
     measurement: &str,
     stat_response_type: StatType,
     app: &Web3ProxyApp,
-) -> Result<HashMap<String, serde_json::Value>, Web3ProxyError> {
+) -> Result<Bytes, Web3ProxyError> {
     debug!("influx request is not cached");
 
     let db_replica = app
@@ -223,11 +208,6 @@ async fn _influx_stats(
         )
     };
 
-    // We assume that the rpc-keys do not change that quickly
-    // cache_key = cache_key
-    //     .overflowing_add(keccak256(rpc_key_filter.to_bytes()).into())
-    //     .0;
-
     // TODO: Turn into a 500 error if bucket is not found ..
     // Or just unwrap or so
     let bucket = &app
@@ -243,13 +223,11 @@ async fn _influx_stats(
     }
 
     // Fetch and request for balance
-
     trace!(
         "Query start and stop are: {:?} {:?}",
         query_start,
         query_stop
     );
-    // info!("Query column parameters are: {:?}", stats_column);
     trace!("Query measurement is: {:?}", measurement);
     trace!("Filters are: {:?}", filter_chain_id); // filter_field
     trace!("window seconds are: {:?}", query_window_seconds);
@@ -313,10 +291,6 @@ async fn _influx_stats(
         ))?;
 
     // Basically rename all items to be "total",
-    // calculate number of "archive_needed" and "error_responses" through their boolean representations ...
-    // HashMap<String, serde_json::Value>
-    // let mut datapoints = HashMap::new();
-    // TODO: I must be able to probably zip the balance query...
     let datapoints = raw_influx_responses
         .into_iter()
         .map(|x| x.values)
@@ -548,7 +522,6 @@ async fn _influx_stats(
                 }
             });
 
-            // datapoints.insert(out.get("time"), out);
             json!(out)
         })
         .collect::<Vec<_>>();
@@ -591,5 +564,9 @@ async fn _influx_stats(
         );
     }
 
-    Ok(response_body)
+    let response_bytes = Bytes::from(json!(response_body).to_string().into_bytes());
+
+    debug!("Saving stat");
+
+    Ok(response_bytes)
 }
