@@ -112,7 +112,6 @@ pub struct AuthorizationChecks {
 /// Cache data from the database about rpc keys
 pub type RpcSecretKeyCache = Cache<RpcSecretKey, AuthorizationChecks>;
 pub type UserBalanceCache = Cache<NonZeroU64, Arc<RwLock<Decimal>>>;
-pub type InfluxResponseCache = Cache<U256, HashMap<String, Value>>;
 
 /// The application
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
@@ -163,8 +162,6 @@ pub struct Web3ProxyApp {
     pub rpc_secret_key_cache: RpcSecretKeyCache,
     /// cache user balances so we don't have to check downgrade logic every single time
     pub user_balance_cache: UserBalanceCache,
-    /// cache influxdb queries, because these are resource-intensive
-    pub influx_cache: InfluxResponseCache,
     /// concurrent/parallel RPC request limits for authenticated users
     pub user_semaphores: Cache<NonZeroU64, Arc<Semaphore>>,
     /// concurrent/parallel request limits for anonymous users
@@ -412,12 +409,6 @@ impl Web3ProxyApp {
             .time_to_live(Duration::from_secs(600))
             .build();
 
-        // These responses are pretty large, so we will only save up to 1000 at a time. They can live for longer, however
-        let influx_cache = CacheBuilder::new(1_000)
-            .name("user_balance")
-            .time_to_live(Duration::from_secs(3_600))
-            .build();
-
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
         // stats can be saved in mysql, influxdb, both, or none
@@ -650,7 +641,6 @@ impl Web3ProxyApp {
             vredis_pool,
             rpc_secret_key_cache,
             user_balance_cache,
-            influx_cache,
             http_client,
             influxdb_client,
             internal_provider,

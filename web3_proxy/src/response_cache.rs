@@ -1,9 +1,14 @@
 use crate::{errors::Web3ProxyError, jsonrpc::JsonRpcErrorData, rpcs::blockchain::ArcBlock};
+use axum::body::Bytes;
 use derive_more::From;
 use ethers::{providers::ProviderError, types::U64};
 use hashbrown::hash_map::DefaultHashBuilder;
+use hashbrown::HashMap;
 use moka::future::Cache;
+use num_traits::AsPrimitive;
+use rdkafka::message::ToBytes;
 use serde_json::value::RawValue;
+use serde_json::Value;
 use std::{
     hash::{BuildHasher, Hash, Hasher},
     sync::Arc,
@@ -224,6 +229,11 @@ impl TryFrom<ProviderError> for JsonRpcErrorData {
             data,
         })
     }
+}
+
+// TODO: Change this to a axum::..::Bytes
+pub fn influx_response_weigher<K>(_key: &K, value: &HashMap<String, serde_json::Value>) -> u32 {
+    value.len() as u32
 }
 
 pub fn json_rpc_response_weigher<K, R>(_key: &K, value: &JsonRpcResponseEnum<R>) -> u32 {

@@ -11,10 +11,12 @@ pub mod status;
 pub mod users;
 
 use crate::app::Web3ProxyApp;
+use axum::body::Bytes;
 use axum::{
     routing::{get, post, put},
     Extension, Router,
 };
+use hashbrown::HashMap;
 use http::{header::AUTHORIZATION, StatusCode};
 use listenfd::ListenFd;
 use log::{debug, info};
@@ -28,6 +30,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
 use crate::errors::Web3ProxyResult;
+use crate::response_cache::{influx_response_weigher, json_rpc_response_weigher};
 
 /// simple keys for caching responses
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, EnumCount, EnumIter)]
@@ -38,6 +41,8 @@ pub enum ResponseCacheKey {
 }
 
 pub type ResponseCache = Cache<ResponseCacheKey, (StatusCode, &'static str, axum::body::Bytes)>;
+/// cache influxdb queries, because these are resource-intensive
+pub type InfluxResponseCache = Cache<u64, HashMap<String, serde_json::Value>>; // Turn this into a axum::body::Bytes
 
 /// Start the frontend server.
 pub async fn serve(
@@ -56,6 +61,14 @@ pub async fn serve(
     let response_cache: ResponseCache = CacheBuilder::new(response_cache_size as u64)
         .name("frontend_response")
         .time_to_live(Duration::from_secs(1))
+        .build();
+
+    // Move this to the mod.rs (frontend) server, this does not have to live inside the app
+    // These responses are pretty large, so we will only save up to 1000 at a time. They can live for longer, however
+    let influx_cache: InfluxResponseCache = CacheBuilder::new(1_000)
+        .name("influx_cache")
+        .weigher(influx_response_weigher)
+        .time_to_live(Duration::from_secs(3_600))
         .build();
 
     // TODO: read config for if fastest/versus should be available publicly. default off
@@ -235,6 +248,7 @@ pub async fn serve(
         .layer(Extension(proxy_app))
         // frontend caches
         .layer(Extension(Arc::new(response_cache)))
+        .layer(Extension(Arc::new(influx_cache)))
         // 404 for any unknown routes
         .fallback(errors::handler_404);
 

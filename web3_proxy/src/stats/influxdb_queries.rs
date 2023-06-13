@@ -1,5 +1,8 @@
 use super::StatType;
+use crate::errors::Web3ProxyError::BadResponse;
 use crate::errors::Web3ProxyErrorContext;
+use crate::frontend::InfluxResponseCache;
+use crate::response_cache::JsonRpcResponseEnum;
 use crate::{
     app::Web3ProxyApp,
     errors::{Web3ProxyError, Web3ProxyResponse},
@@ -9,6 +12,8 @@ use crate::{
     },
 };
 use anyhow::Context;
+use axum::body::{Bytes, Full, HttpBody};
+use axum::response::Response;
 use axum::{
     headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
@@ -19,24 +24,33 @@ use entities::{rpc_key, secondary_user};
 use ethers::types::{H256, U256};
 use ethers::utils::keccak256;
 use fstrings::{f, format_args_f};
+use hashbrown::hash_map::DefaultHashBuilder;
 use hashbrown::HashMap;
+use http::StatusCode;
 use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
 use log::{debug, error, trace, warn};
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use once_cell::sync::Lazy;
 use rdkafka::message::ToBytes;
 use serde_json::{json, Value};
+use std::any::Any;
+use std::hash::{BuildHasher, Hash, Hasher};
+use std::io::Read;
+use std::sync::Arc;
 use ulid::Ulid;
+
+// static RPCS_NOT_OK: Lazy<Bytes> = Lazy::new(|| Bytes::from(":(\n"));
+// static CONTENT_TYPE_JSON: &str = "application/json";
+// static CONTENT_TYPE_PLAIN: &str = "text/plain";
 
 pub async fn query_user_stats<'a>(
     app: &'a Web3ProxyApp,
+    influx_cache: &'a InfluxResponseCache,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
-    // Let's start accumulating the cache-key, if there is any. We will use H256 and keccak, a collision is extremely unlikely
-    let mut cache_key: U256 = U256::default();
-
     let (user_id, _semaphore) = match bearer {
         Some(TypedHeader(Authorization(bearer))) => {
             let (user, semaphore) = app.bearer_is_authorized(bearer).await?;
@@ -45,27 +59,12 @@ pub async fn query_user_stats<'a>(
         None => (0, None),
     };
 
-    // Accumulate the user_id into the cache_key
-    cache_key = cache_key
-        .overflowing_add(U256::from(keccak256(user_id.to_be_bytes())))
-        .0;
-
     // Return an error if the bearer is **not** set, but the StatType is Detailed
     if stat_response_type == StatType::Detailed && user_id == 0 {
         return Err(Web3ProxyError::BadRequest(
             "Detailed Stats Response requires you to authorize with a bearer token".into(),
         ));
     }
-
-    let db_replica = app
-        .db_replica()
-        .context("query_user_stats needs a db replica")?;
-
-    // TODO: have a getter for this. do we need a connection pool on it?
-    let influxdb_client = app
-        .influxdb_client
-        .as_ref()
-        .context("query_user_stats needs an influxdb client")?;
 
     let query_window_seconds = get_query_window_seconds_from_params(params)?;
     let query_start = get_query_start_from_params(params)?.timestamp();
@@ -77,19 +76,6 @@ pub async fn query_user_stats<'a>(
             "query_start cannot be after query_stop".into(),
         ));
     }
-
-    cache_key = cache_key
-        .overflowing_add(keccak256(query_window_seconds.to_be_bytes()).into())
-        .0;
-    cache_key = cache_key
-        .overflowing_add(keccak256(query_start.to_be_bytes()).into())
-        .0;
-    cache_key = cache_key
-        .overflowing_add(keccak256(query_stop.to_be_bytes()).into())
-        .0;
-    cache_key = cache_key
-        .overflowing_add(keccak256(chain_id.to_be_bytes()).into())
-        .0;
 
     // Return a bad request if query_start == query_stop, because then the query is empty basically
     if query_start == query_stop {
@@ -103,15 +89,77 @@ pub async fn query_user_stats<'a>(
     } else {
         "opt_in_proxy"
     };
-    cache_key = cache_key
-        .overflowing_add(keccak256(measurement.to_bytes()).into())
-        .0;
+
+    // Let's start accumulating the cache-key, if there is any. We will use H256 and keccak, a collision is extremely unlikely
+    let mut hasher = DefaultHashBuilder::default().build_hasher();
+
+    // Accumulate all parameters inside the cache key
+    user_id.hash(&mut hasher);
+    query_window_seconds.hash(&mut hasher);
+    query_start.hash(&mut hasher);
+    query_stop.hash(&mut hasher);
+    chain_id.hash(&mut hasher);
+    measurement.hash(&mut hasher);
+    stat_response_type.type_id().hash(&mut hasher);
+    let hash = hasher.finish();
+
+    debug!("Hash is: {:?}", hash);
 
     // Return the cache early, now that we have the full cache-key (if cache entry exists)
-    if let Some(cached_response_body) = app.influx_cache.get(&cache_key) {
-        debug!("Accessing Cache for Influx Stats!");
-        return Ok(Json(json!(cached_response_body)).into_response());
-    }
+    let response_body = influx_cache
+        .try_get_with(hash, async move {
+            _influx_stats(
+                params,
+                user_id,
+                query_start,
+                query_stop,
+                query_window_seconds,
+                chain_id,
+                measurement,
+                stat_response_type,
+                app,
+            )
+            .await
+        })
+        .await?;
+
+    let response = Json(json!(response_body)).into_response();
+    // From<http::Response<http_body::combinators::box_body::UnsyncBoxBody<axum::body::Bytes, axum::Error>>>
+    // From<http_body::combinators::box_body::UnsyncBoxBody<axum::body::Bytes, axum::Error>>
+    Ok(response)
+
+    // Ok(Response::builder()
+    //     .status(StatusCode::OK)
+    //     .header("content-type", "application/json")
+    //     .body(Full::from(body))
+    //     .unwrap())
+
+    // Ok(body.into_response())
+}
+
+#[inline]
+async fn _influx_stats(
+    params: &HashMap<String, String>,
+    user_id: u64,
+    query_start: i64,
+    query_stop: i64,
+    query_window_seconds: u64,
+    chain_id: u64,
+    measurement: &str,
+    stat_response_type: StatType,
+    app: &Web3ProxyApp,
+) -> Result<HashMap<String, serde_json::Value>, Web3ProxyError> {
+    debug!("influx request is not cached");
+
+    let db_replica = app
+        .db_replica()
+        .context("query_user_stats needs a db replica")?;
+
+    // TODO: have a getter for this. do we need a connection pool on it?
+    let influxdb_client = app
+        .influxdb_client
+        .as_ref()
+        .context("query_user_stats needs an influxdb client")?;
 
     // Include a hashmap to go from rpc_secret_key_id to the rpc_secret_key
     let mut rpc_key_id_to_key = HashMap::new();
@@ -543,10 +591,5 @@ pub async fn query_user_stats<'a>(
         );
     }
 
-    let response = Json(json!(response_body)).into_response();
-
-    // If we got here, we always want to update the cache (we'll never reach it twice though, unless the cache is too old)
-    app.influx_cache.insert(cache_key, response_body).await;
-
-    Ok(response)
+    Ok(response_body)
 }

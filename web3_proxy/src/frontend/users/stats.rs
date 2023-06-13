@@ -1,6 +1,7 @@
 //! Handle registration, logins, and managing account data.
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResponse};
+use crate::frontend::InfluxResponseCache;
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
 };
@@ -126,10 +127,12 @@ pub async fn user_revert_logs_get(
 #[debug_handler]
 pub async fn user_stats_aggregated_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(influx_cache): Extension<Arc<InfluxResponseCache>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
-    let response = query_user_stats(&app, bearer, &params, StatType::Aggregated).await?;
+    let response =
+        query_user_stats(&app, &influx_cache, bearer, &params, StatType::Aggregated).await?;
 
     Ok(response)
 }
@@ -146,10 +149,12 @@ pub async fn user_stats_aggregated_get(
 #[debug_handler]
 pub async fn user_stats_detailed_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(influx_cache): Extension<Arc<InfluxResponseCache>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
-    let response = query_user_stats(&app, bearer, &params, StatType::Detailed).await?;
+    let response =
+        query_user_stats(&app, &influx_cache, bearer, &params, StatType::Detailed).await?;
 
     Ok(response)
 }
