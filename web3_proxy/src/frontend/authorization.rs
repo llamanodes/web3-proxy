@@ -644,7 +644,7 @@ impl Authorization {
     pub fn internal(db_conn: Option<DatabaseConnection>) -> Web3ProxyResult<Self> {
         let authorization_checks = AuthorizationChecks {
             // any error logs on a local (internal) query are likely problems. log them all
-            log_revert_chance: 1.0,
+            log_revert_chance: 100,
             tracking_level: TrackingLevel::Detailed,
             // default for everything else should be fine. we don't have a user_id or ip to give
             ..Default::default()
@@ -1288,7 +1288,8 @@ impl Web3ProxyApp {
                             allowed_referers,
                             allowed_user_agents,
                             tracking_level: rpc_key_model.log_level,
-                            log_revert_chance: rpc_key_model.log_revert_chance,
+                            // TODO: is floating point math going to scale this correctly
+                            log_revert_chance: (rpc_key_model.log_revert_chance * u16::MAX as f64) as u16,
                             max_concurrent_requests: user_tier_model.max_concurrent_requests,
                             max_requests_per_period: user_tier_model.max_requests_per_period,
                             private_txs: rpc_key_model.private_txs,

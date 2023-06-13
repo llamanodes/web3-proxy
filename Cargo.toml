@@ -7,7 +7,6 @@ members = [
   "payment-contracts",
   "rate-counter",
   "redis-rate-limiter",
-  "thread-fast-rng",
   "web3_proxy",
 ]
 resolver = "2"

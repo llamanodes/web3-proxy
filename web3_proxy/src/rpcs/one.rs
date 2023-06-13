@@ -17,6 +17,7 @@ use futures::StreamExt;
 use latency::{EwmaLatency, PeakEwmaLatency};
 use log::{debug, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
+use nanorand::Rng;
 use ordered_float::OrderedFloat;
 use parking_lot::RwLock;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
@@ -28,7 +29,6 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU64, AtomicU8, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
-use thread_fast_rng::rand::Rng;
 use tokio::select;
 use tokio::sync::watch;
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
@@ -270,9 +270,9 @@ impl Web3Rpc {
     ) -> ((bool, u8, Reverse<U64>), u32) {
         let sort_on = self.sort_on(max_block);
 
-        let mut rng = thread_fast_rng::thread_fast_rng();
+        let mut rng = nanorand::tls_rng();
 
-        let r = rng.gen::<u32>();
+        let r = rng.generate::<u32>();
 
         (sort_on, r)
     }
