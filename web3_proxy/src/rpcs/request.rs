@@ -3,7 +3,6 @@ use crate::errors::Web3ProxyResult;
 use crate::frontend::authorization::Authorization;
 use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use anyhow::Context;
-use arc_swap::access::Access;
 use chrono::Utc;
 use derive_more::From;
 use entities::revert_log;

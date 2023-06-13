@@ -29,6 +29,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU64, AtomicU8, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use thread_fast_rng::rand::Rng;
+use tokio::select;
 use tokio::sync::watch;
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
 use url::Url;
@@ -647,9 +648,15 @@ impl Web3Rpc {
             let mut disconnect_watch_rx = disconnect_watch_tx.subscribe();
 
             let f = async move {
-                // TODO: select on this and subscribe_stop_rx
-                disconnect_watch_rx.changed().await?;
                 // TODO: make sure it changed to "true"
+                select! {
+                    x = disconnect_watch_rx.changed() => {
+                        x?;
+                    },
+                    x = subscribe_stop_rx.changed() => {
+                        x?;
+                    },
+                }
                 Ok(())
             };
 
