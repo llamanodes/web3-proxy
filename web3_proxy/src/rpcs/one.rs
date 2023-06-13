@@ -214,7 +214,7 @@ impl Web3Rpc {
             tokio::spawn(async move {
                 // TODO: this needs to be a subscribe_with_reconnect that does a retry with jitter and exponential backoff
                 new_connection
-                    .subscribe(block_map, block_sender, chain_id, tx_id_sender)
+                    .subscribe_with_reconnect(block_map, block_sender, chain_id, tx_id_sender)
                     .await
             })
         };
@@ -566,10 +566,42 @@ impl Web3Rpc {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn subscribe_with_reconnect(
+        self: Arc<Self>,
+        block_map: BlocksByHashCache,
+        block_sender: Option<flume::Sender<BlockAndRpc>>,
+        chain_id: u64,
+        tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
+    ) -> Web3ProxyResult<()> {
+        loop {
+            if let Err(err) = self
+                .clone()
+                .subscribe(
+                    block_map.clone(),
+                    block_sender.clone(),
+                    chain_id,
+                    tx_id_sender.clone(),
+                )
+                .await
+            {
+                warn!("{} subscribe err: {}", self, err)
+            }
+
+            if self.should_disconnect() {
+                break;
+            }
+
+            // TODO: exponential backoff with jitter
+            sleep(Duration::from_secs(30)).await;
+        }
+
+        Ok(())
+    }
+
     /// subscribe to blocks and transactions
     /// This should only exit when the program is exiting.
     /// TODO: should more of these args be on self? chain_id for sure
-    #[allow(clippy::too_many_arguments)]
     async fn subscribe(
         self: Arc<Self>,
         block_map: BlocksByHashCache,
@@ -598,6 +630,23 @@ impl Web3Rpc {
         self.check_provider(chain_id).await?;
 
         let mut futures = vec![];
+
+        // TODO: use this channel instead of self.disconnect_watch
+        let (subscribe_stop_tx, mut subscribe_stop_rx) = watch::channel(false);
+
+        // subscribe to the disconnect watch. the app uses this when shutting down
+        if let Some(disconnect_watch_tx) = self.disconnect_watch.as_ref() {
+            let mut disconnect_watch_rx = disconnect_watch_tx.subscribe();
+
+            let f = async move {
+                // TODO: select on this and subscribe_stop_rx
+                disconnect_watch_rx.changed().await?;
+                // TODO: make sure it changed to "true"
+                Ok(())
+            };
+
+            futures.push(flatten_handle(tokio::spawn(f)));
+        }
 
         // health check that runs if there haven't been any recent requests
         {
@@ -667,10 +716,9 @@ impl Web3Rpc {
 
         debug!("subscriptions on {} exited", self);
 
-        self.disconnect_watch
-            .as_ref()
-            .expect("disconnect_watch should always be set")
-            .send_replace(true);
+        subscribe_stop_tx.send_replace(true);
+
+        // TODO: wait for all of the futures to exit?
 
         Ok(())
     }
