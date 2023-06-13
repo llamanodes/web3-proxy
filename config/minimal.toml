@@ -23,14 +23,12 @@ response_cache_max_bytes = 1_000_000_000
     ws_url = "wss://eth.llamarpc.com/"
     http_url = "https://eth.llamarpc.com/"
     soft_limit = 1_000
-    tier = 0
 
     [balanced_rpcs.llama_public_https]
     disabled = false
     display_name = "LlamaNodes HTTPS"
     http_url = "https://eth.llamarpc.com/"
     soft_limit = 1_000
-    tier = 0
 
     [balanced_rpcs.llama_public_wss]
     # TODO: what should we do if all rpcs are disabled? warn and wait for a config change?
@@ -38,4 +36,3 @@ response_cache_max_bytes = 1_000_000_000
     display_name = "LlamaNodes WSS"
     ws_url = "wss://eth.llamarpc.com/"
     soft_limit = 1_000
-    tier = 0

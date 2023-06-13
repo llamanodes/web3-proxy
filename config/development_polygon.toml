@@ -67,97 +67,83 @@ display_name = "LlamaNodes"
 http_url = "https://polygon.llamarpc.com"
 ws_url = "wss://polygon.llamarpc.com"
 soft_limit = 1_000
-tier = 0
 
 [balanced_rpcs.quicknode]
 disabled = false
 display_name = "Quicknode"
 http_url = "https://rpc-mainnet.matic.quiknode.pro"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.maticvigil]
 disabled = false
 display_name = "Maticvigil"
 http_url = "https://rpc-mainnet.maticvigil.com"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.matic-network]
 disabled = false
 display_name = "Matic Network"
 http_url = "https://rpc-mainnet.matic.network"
 soft_limit = 10
-tier = 1
 
 [balanced_rpcs.chainstack]
 disabled = false
 http_url = "https://matic-mainnet.chainstacklabs.com"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.bware]
 disabled = false
 display_name = "Bware Labs"
 http_url = "https://matic-mainnet-full-rpc.bwarelabs.com"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.bware_archive]
 disabled = false
 display_name = "Bware Labs Archive"
 http_url = "https://matic-mainnet-archive-rpc.bwarelabs.com"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.polygonapi]
 disabled = false
 display_name = "Polygon API"
 http_url = "https://polygonapi.terminet.io/rpc"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.one-rpc]
 disabled = false
 display_name = "1RPC"
 http_url = "https://1rpc.io/matic"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.fastrpc]
 disabled = false
 display_name = "FastRPC"
 http_url = "https://polygon-mainnet.rpcfast.com?api_key=xbhWBI1Wkguk8SNMu1bvvLurPGLXmgwYeC4S6g2H7WdwFigZSmPWVZRxrskEQwIf"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.unifra]
 disabled = false
 display_name = "Unifra"
 http_url = "https://polygon-mainnet-public.unifra.io"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.onfinality]
 disabled = false
 display_name = "Onfinality"
 http_url = "https://polygon.api.onfinality.io/public"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.alchemy]
 disabled = false
 display_name = "Alchemy"
 heept_url = "https://polygon-mainnet.g.alchemy.com/v2/demo"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.blockpi]
 disabled = false
 display_name = "Blockpi"
 http_url = "https://polygon.blockpi.network/v1/rpc/public"
 soft_limit = 100
-tier = 2
 
 [balanced_rpcs.polygon]
 backup = true
@@ -165,14 +151,12 @@ disabled = false
 display_name = "Polygon"
 http_url = "https://polygon-rpc.com"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.pokt]
 disabled = false
 display_name = "Pokt"
 http_url = "https://poly-rpc.gateway.pokt.network"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.ankr]
 backup = true
@@ -180,7 +164,6 @@ disabled = false
 display_name = "Ankr"
 http_url = "https://rpc.ankr.com/polygon"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.blastapi]
 backup = true
@@ -189,24 +172,19 @@ display_name = "Blast"
 http_url = "https://polygon-mainnet.public.blastapi.io"
 hard_limit = 10
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.omnia]
 disabled = true
 display_name = "Omnia"
 http_url = "https://endpoints.omniatech.io/v1/matic/mainnet/public"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.bor]
 disabled = true
 http_url = "https://polygon-bor.publicnode.com"
 soft_limit = 10
-tier = 2
 
 [balanced_rpcs.blxr]
 disabled = false
 http_url = "https://polygon.rpc.blxrbdn.com"
 soft_limit = 10
-tier = 2
-
