@@ -269,12 +269,12 @@ impl Web3Rpc {
     pub fn shuffle_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, u32, Reverse<U64>), u32) {
+    ) -> ((bool, u32, Reverse<U64>), u8) {
         let sort_on = self.sort_on(max_block);
 
         let mut rng = nanorand::tls_rng();
 
-        let r = rng.generate::<u32>();
+        let r = rng.generate::<u8>();
 
         (sort_on, r)
     }
