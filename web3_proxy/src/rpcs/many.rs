@@ -222,9 +222,15 @@ impl Web3Rpcs {
                     self.by_name.store(Arc::new(new_by_name));
 
                     if let Some(old_rpc) = old_rpc {
-                        if old_rpc.head_block.as_ref().unwrap().borrow().is_some() {
+                        if old_rpc
+                            .head_block_sender
+                            .as_ref()
+                            .unwrap()
+                            .borrow()
+                            .is_some()
+                        {
                             let mut new_head_receiver =
-                                rpc.head_block.as_ref().unwrap().subscribe();
+                                rpc.head_block_sender.as_ref().unwrap().subscribe();
                             debug!("waiting for new {} to sync", rpc);
 
                             // TODO: maximum wait time or this could block things for too long
@@ -1367,42 +1373,42 @@ mod tests {
             Web3Rpc {
                 name: "a".to_string(),
                 tier: 0.into(),
-                head_block: Some(tx_a),
+                head_block_sender: Some(tx_a),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "b".to_string(),
                 tier: 0.into(),
-                head_block: Some(tx_b),
+                head_block_sender: Some(tx_b),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "c".to_string(),
                 tier: 0.into(),
-                head_block: Some(tx_c),
+                head_block_sender: Some(tx_c),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "d".to_string(),
                 tier: 1.into(),
-                head_block: Some(tx_d),
+                head_block_sender: Some(tx_d),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "e".to_string(),
                 tier: 1.into(),
-                head_block: Some(tx_e),
+                head_block_sender: Some(tx_e),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "f".to_string(),
                 tier: 1.into(),
-                head_block: Some(tx_f),
+                head_block_sender: Some(tx_f),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
@@ -1458,7 +1464,7 @@ mod tests {
             backup: false,
             block_data_limit: block_data_limit.into(),
             // tier: 0,
-            head_block: Some(tx_synced),
+            head_block_sender: Some(tx_synced),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
@@ -1472,7 +1478,7 @@ mod tests {
             backup: false,
             block_data_limit: block_data_limit.into(),
             // tier: 0,
-            head_block: Some(tx_lagged),
+            head_block_sender: Some(tx_lagged),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
@@ -1742,7 +1748,7 @@ mod tests {
             backup: false,
             block_data_limit: 64.into(),
             // tier: 1,
-            head_block: Some(tx_pruned),
+            head_block_sender: Some(tx_pruned),
             ..Default::default()
         };
 
@@ -1755,7 +1761,7 @@ mod tests {
             backup: false,
             block_data_limit: u64::MAX.into(),
             // tier: 2,
-            head_block: Some(tx_archive),
+            head_block_sender: Some(tx_archive),
             ..Default::default()
         };
 
@@ -1924,7 +1930,7 @@ mod tests {
             backup: false,
             block_data_limit: 64.into(),
             // tier: 0,
-            head_block: Some(tx_mock_geth),
+            head_block_sender: Some(tx_mock_geth),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
@@ -1936,7 +1942,7 @@ mod tests {
             backup: false,
             block_data_limit: u64::MAX.into(),
             // tier: 1,
-            head_block: Some(tx_mock_erigon_archive),
+            head_block_sender: Some(tx_mock_erigon_archive),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
