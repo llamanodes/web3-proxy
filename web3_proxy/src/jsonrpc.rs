@@ -82,10 +82,7 @@ pub enum JsonRpcRequestEnum {
 impl JsonRpcRequestEnum {
     pub fn first_id(&self) -> Option<Box<RawValue>> {
         match self {
-            Self::Batch(x) => match x.first() {
-                Some(x) => Some(x.id.clone()),
-                None => None,
-            },
+            Self::Batch(x) => x.first().map(|x| x.id.clone()),
             Self::Single(x) => Some(x.id.clone()),
         }
     }
