@@ -1015,6 +1015,10 @@ impl Web3ProxyApp {
         // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
 
+        if num_requests == 0 {
+            return Ok((vec![], vec![]));
+        }
+
         // get the head block now so that any requests that need it all use the same block
         // TODO: this still has an edge condition if there is a reorg in the middle of the request!!!
         let head_block_num = self
