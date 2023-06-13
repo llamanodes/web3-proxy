@@ -60,20 +60,21 @@ async fn _proxy_web3_rpc(
     // TODO: do we care about keeping the TypedHeader wrapper?
     let origin = origin.map(|x| x.0);
 
-    let first_id = payload.first_id().map_err(|e| e.into_response())?;
+    let first_id = payload.first_id();
 
     let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode)
         .await
-        .map_err(|e| e.into_response_with_id(first_id.to_owned()))?;
+        .map_err(|e| e.into_response_with_id(first_id.clone()))?;
 
     let authorization = Arc::new(authorization);
 
     // TODO: calculate payload bytes here (before turning into serde_json::Value). that will save serializing later
 
+    // TODO: is first_id the right thing to attach to this error?
     let (status_code, response, rpcs) = app
         .proxy_web3_rpc(authorization, payload)
         .await
-        .map_err(|e| e.into_response_with_id(first_id.to_owned()))?;
+        .map_err(|e| e.into_response_with_id(first_id))?;
 
     let mut response = (status_code, Json(response)).into_response();
 
@@ -220,11 +221,11 @@ async fn _proxy_web3_rpc_with_key(
 ) -> Result<Response, Response> {
     // TODO: DRY w/ proxy_web3_rpc
 
-    let first_id = payload.first_id().map_err(|e| e.into_response())?;
+    let first_id = payload.first_id();
 
     let rpc_key = rpc_key
         .parse()
-        .map_err(|e: Web3ProxyError| e.into_response_with_id(first_id.to_owned()))?;
+        .map_err(|e: Web3ProxyError| e.into_response_with_id(first_id.clone()))?;
 
     let (authorization, _semaphore) = key_is_authorized(
         &app,
@@ -236,7 +237,7 @@ async fn _proxy_web3_rpc_with_key(
         user_agent.map(|x| x.0),
     )
     .await
-    .map_err(|e| e.into_response_with_id(first_id.to_owned()))?;
+    .map_err(|e| e.into_response_with_id(first_id.clone()))?;
 
     let authorization = Arc::new(authorization);
 
@@ -245,7 +246,7 @@ async fn _proxy_web3_rpc_with_key(
     let (status_code, response, rpcs) = app
         .proxy_web3_rpc(authorization, payload)
         .await
-        .map_err(|e| e.into_response_with_id(first_id.to_owned()))?;
+        .map_err(|e| e.into_response_with_id(first_id))?;
 
     let mut response = (status_code, Json(response)).into_response();
 

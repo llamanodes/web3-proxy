@@ -80,15 +80,13 @@ pub enum JsonRpcRequestEnum {
 }
 
 impl JsonRpcRequestEnum {
-    pub fn first_id(&self) -> Web3ProxyResult<Box<RawValue>> {
+    pub fn first_id(&self) -> Option<Box<RawValue>> {
         match self {
             Self::Batch(x) => match x.first() {
-                Some(x) => Ok(x.id.clone()),
-                None => Err(Web3ProxyError::BadRequest(
-                    "no requests in the batch".into(),
-                )),
+                Some(x) => Some(x.id.clone()),
+                None => None,
             },
-            Self::Single(x) => Ok(x.id.clone()),
+            Self::Single(x) => Some(x.id.clone()),
         }
     }
 }
