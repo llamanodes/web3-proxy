@@ -65,7 +65,7 @@ pub async fn serve(
 
     // Move this to the mod.rs (frontend) server, this does not have to live inside the app
     // These responses are pretty large, so we will only save up to 1000 at a time. They can live for longer, however
-    let influx_cache: InfluxResponseCache = CacheBuilder::new(10_000)
+    let influx_cache: InfluxResponseCache = CacheBuilder::new(1_000_000)
         .name("influx_cache")
         .weigher(influx_response_weigher)
         .time_to_live(Duration::from_secs(3_600))
