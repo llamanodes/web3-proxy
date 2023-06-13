@@ -388,6 +388,7 @@ impl Web3ProxyApp {
                 top_config
                     .app
                     .influxdb_bucket
+                    .as_ref()
                     .expect("influxdb_bucket needed when influxdb_host is set");
 
                 let influxdb_client =

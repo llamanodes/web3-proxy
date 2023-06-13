@@ -60,6 +60,7 @@ impl MigrateStatsToV2 {
                 top_config
                     .app
                     .influxdb_bucket
+                    .as_ref()
                     .expect("influxdb_token needed when influxdb_host is set");
 
                 let influxdb_client =
