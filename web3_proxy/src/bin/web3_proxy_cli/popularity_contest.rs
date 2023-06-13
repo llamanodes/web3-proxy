@@ -142,11 +142,11 @@ impl PopularityContestSubCommand {
             "internal",
             "active",
             "lag",
+            "block_data_limit",
             "head_ms",
             "peak_ms",
             "weighted_ms",
             "tier",
-            "block_data_limit",
         ]);
 
         for rpc in rpc_data.into_iter() {
@@ -172,16 +172,16 @@ impl PopularityContestSubCommand {
 
             table.add_row(row![
                 rpc.name,
-                external_request_pct,
+                format!("{:.3}", external_request_pct),
                 rpc.external_requests,
                 rpc.internal_requests,
                 rpc.active_requests,
                 lag,
+                block_data_limit,
                 format!("{:.3}", rpc.head_latency_ms),
-                format!("{:.3}", rpc.peak_latency_ms),
+                rpc.peak_latency_ms,
                 format!("{:.3}", rpc.weighted_latency_ms),
                 tier,
-                block_data_limit,
             ]);
         }
 
