@@ -585,11 +585,19 @@ impl Web3Rpc {
                 )
                 .await
             {
-                warn!("{} subscribe err: {}", self, err)
+                if self.should_disconnect() {
+                    break;
+                }
+
+                warn!("{} subscribe err: {:#?}", self, err)
+            } else if self.should_disconnect() {
+                break;
             }
 
-            if self.should_disconnect() {
-                break;
+            if self.backup {
+                debug!("reconnecting to {} in 30 seconds", self);
+            } else {
+                info!("reconnecting to {} in 30 seconds", self);
             }
 
             // TODO: exponential backoff with jitter
