@@ -1013,8 +1013,11 @@ impl Web3ProxyError {
         (code, JsonRpcResponseEnum::from(err))
     }
 
-    pub fn into_response_with_id(self, id: Box<RawValue>) -> Response {
+    #[inline]
+    pub fn into_response_with_id(self, id: Option<Box<RawValue>>) -> Response {
         let (status_code, response_data) = self.as_response_parts();
+
+        let id = id.unwrap_or_default();
 
         let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
 

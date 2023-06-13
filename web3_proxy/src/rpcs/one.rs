@@ -9,6 +9,7 @@ use crate::frontend::authorization::Authorization;
 use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
+use arc_swap::ArcSwapOption;
 use ethers::prelude::{Bytes, Middleware, TxHash, U64};
 use ethers::types::{Address, Transaction, U256};
 use futures::future::try_join_all;
@@ -16,6 +17,7 @@ use futures::StreamExt;
 use latency::{EwmaLatency, PeakEwmaLatency};
 use log::{debug, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
+use nanorand::Rng;
 use ordered_float::OrderedFloat;
 use parking_lot::RwLock;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
@@ -25,25 +27,28 @@ use serde_json::json;
 use std::cmp::Reverse;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{self, AtomicU64, AtomicU8, AtomicUsize};
+use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
-use thread_fast_rng::rand::Rng;
+use tokio::select;
 use tokio::sync::watch;
-use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
+use tokio::time::{interval, sleep, sleep_until, timeout, Duration, Instant, MissedTickBehavior};
 use url::Url;
 
 /// An active connection to a Web3 RPC server like geth or erigon.
 #[derive(Default)]
 pub struct Web3Rpc {
     pub name: String,
+    pub block_interval: Duration,
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
     /// most all requests prefer use the http_provider
     pub(super) http_provider: Option<EthersHttpProvider>,
+    /// the websocket url is only used for subscriptions
+    pub(super) ws_url: Option<Url>,
     /// the websocket provider is only used for subscriptions
-    pub(super) ws_provider: Option<EthersWsProvider>,
+    pub(super) ws_provider: ArcSwapOption<EthersWsProvider>,
     /// keep track of hard limits
-    /// this is only inside an Option so that the "Default" derive works. it will always be set.
+    /// hard_limit_until is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) hard_limit_until: Option<watch::Sender<Instant>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     /// We do not use the deferred rate limiter because going over limits would cause errors
@@ -56,22 +61,22 @@ pub struct Web3Rpc {
     pub backup: bool,
     /// TODO: have an enum for this so that "no limit" prints pretty?
     pub(super) block_data_limit: AtomicU64,
-    /// TODO: change this to a watch channel so that http providers can subscribe and take action on change.
-    /// this is only inside an Option so that the "Default" derive works. it will always be set.
+    /// head_block is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// Track head block latency
     pub(super) head_latency: RwLock<EwmaLatency>,
     /// Track peak request latency
-    /// This is only inside an Option so that the "Default" derive works. it will always be set.
+    /// peak_latency is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) peak_latency: Option<PeakEwmaLatency>,
     /// Automatically set priority
-    pub(super) tier: AtomicU8,
+    pub(super) tier: AtomicU32,
     /// Track total requests served
     /// TODO: maybe move this to graphana
     pub(super) total_requests: AtomicUsize,
     pub(super) active_requests: AtomicUsize,
-    /// this is only inside an Option so that the "Default" derive works. it will always be set.
+    /// disconnect_watch is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) disconnect_watch: Option<watch::Sender<bool>>,
+    /// created_at is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) created_at: Option<Instant>,
 }
 
@@ -172,12 +177,10 @@ impl Web3Rpc {
             None
         };
 
-        let ws_provider = if let Some(ws_url) = config.ws_url {
+        let ws_url = if let Some(ws_url) = config.ws_url {
             let ws_url = ws_url.parse::<Url>()?;
 
-            Some(connect_ws(ws_url, usize::MAX).await?)
-
-            // TODO: check the provider is on the right chain
+            Some(ws_url)
         } else {
             None
         };
@@ -188,8 +191,9 @@ impl Web3Rpc {
             automatic_block_limit,
             backup,
             block_data_limit,
+            block_interval,
             created_at: Some(created_at),
-            db_conn: db_conn.clone(),
+            db_conn,
             display_name: config.display_name,
             hard_limit,
             hard_limit_until: Some(hard_limit_until),
@@ -198,7 +202,7 @@ impl Web3Rpc {
             name,
             peak_latency: Some(peak_latency),
             soft_limit: config.soft_limit,
-            ws_provider,
+            ws_url,
             disconnect_watch: Some(disconnect_watch),
             ..Default::default()
         };
@@ -211,8 +215,9 @@ impl Web3Rpc {
         let handle = {
             let new_connection = new_connection.clone();
             tokio::spawn(async move {
+                // TODO: this needs to be a subscribe_with_reconnect that does a retry with jitter and exponential backoff
                 new_connection
-                    .subscribe(block_map, block_sender, chain_id, tx_id_sender)
+                    .subscribe_with_reconnect(block_map, block_sender, chain_id, tx_id_sender)
                     .await
             })
         };
@@ -227,7 +232,7 @@ impl Web3Rpc {
     /// TODO: tests on this!
     /// TODO: should tier or block number take priority?
     /// TODO: should this return a struct that implements sorting traits?
-    fn sort_on(&self, max_block: Option<U64>) -> (bool, u8, Reverse<U64>) {
+    fn sort_on(&self, max_block: Option<U64>) -> (bool, u32, Reverse<U64>) {
         let mut head_block = self
             .head_block
             .as_ref()
@@ -248,7 +253,7 @@ impl Web3Rpc {
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, u8, Reverse<U64>), OrderedFloat<f64>) {
+    ) -> ((bool, u32, Reverse<U64>), OrderedFloat<f64>) {
         let sort_on = self.sort_on(max_block);
 
         let weighted_peak_ewma_seconds = self.weighted_peak_ewma_seconds();
@@ -264,12 +269,12 @@ impl Web3Rpc {
     pub fn shuffle_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, u8, Reverse<U64>), u32) {
+    ) -> ((bool, u32, Reverse<U64>), u8) {
         let sort_on = self.sort_on(max_block);
 
-        let mut rng = thread_fast_rng::thread_fast_rng();
+        let mut rng = nanorand::tls_rng();
 
-        let r = rng.gen::<u32>();
+        let r = rng.generate::<u8>();
 
         (sort_on, r)
     }
@@ -410,6 +415,7 @@ impl Web3Rpc {
     }
 
     /// query the web3 provider to confirm it is on the expected chain with the expected data available
+    /// TODO: this currently checks only the http if both http and ws are set. it should check both and make sure they match
     async fn check_provider(self: &Arc<Self>, chain_id: u64) -> Web3ProxyResult<()> {
         // check the server's chain_id here
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
@@ -563,10 +569,50 @@ impl Web3Rpc {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn subscribe_with_reconnect(
+        self: Arc<Self>,
+        block_map: BlocksByHashCache,
+        block_sender: Option<flume::Sender<BlockAndRpc>>,
+        chain_id: u64,
+        tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
+    ) -> Web3ProxyResult<()> {
+        loop {
+            if let Err(err) = self
+                .clone()
+                .subscribe(
+                    block_map.clone(),
+                    block_sender.clone(),
+                    chain_id,
+                    tx_id_sender.clone(),
+                )
+                .await
+            {
+                if self.should_disconnect() {
+                    break;
+                }
+
+                warn!("{} subscribe err: {:#?}", self, err)
+            } else if self.should_disconnect() {
+                break;
+            }
+
+            if self.backup {
+                debug!("reconnecting to {} in 30 seconds", self);
+            } else {
+                info!("reconnecting to {} in 30 seconds", self);
+            }
+
+            // TODO: exponential backoff with jitter
+            sleep(Duration::from_secs(30)).await;
+        }
+
+        Ok(())
+    }
+
     /// subscribe to blocks and transactions
     /// This should only exit when the program is exiting.
     /// TODO: should more of these args be on self? chain_id for sure
-    #[allow(clippy::too_many_arguments)]
     async fn subscribe(
         self: Arc<Self>,
         block_map: BlocksByHashCache,
@@ -580,11 +626,44 @@ impl Web3Rpc {
             Some(RequestErrorHandler::ErrorLevel)
         };
 
+        if let Some(url) = self.ws_url.clone() {
+            debug!("starting websocket provider on {}", self);
+
+            let x = connect_ws(url, usize::MAX).await?;
+
+            let x = Arc::new(x);
+
+            self.ws_provider.store(Some(x));
+        }
+
         debug!("starting subscriptions on {}", self);
 
         self.check_provider(chain_id).await?;
 
         let mut futures = vec![];
+
+        // TODO: use this channel instead of self.disconnect_watch
+        let (subscribe_stop_tx, mut subscribe_stop_rx) = watch::channel(false);
+
+        // subscribe to the disconnect watch. the app uses this when shutting down
+        if let Some(disconnect_watch_tx) = self.disconnect_watch.as_ref() {
+            let mut disconnect_watch_rx = disconnect_watch_tx.subscribe();
+
+            let f = async move {
+                // TODO: make sure it changed to "true"
+                select! {
+                    x = disconnect_watch_rx.changed() => {
+                        x?;
+                    },
+                    x = subscribe_stop_rx.changed() => {
+                        x?;
+                    },
+                }
+                Ok(())
+            };
+
+            futures.push(flatten_handle(tokio::spawn(f)));
+        }
 
         // health check that runs if there haven't been any recent requests
         {
@@ -595,14 +674,16 @@ impl Web3Rpc {
             // TODO: reset this timeout when a new block is seen? we need to keep request_latency updated though
             let health_sleep_seconds = 5;
 
+            let subscribe_stop_rx = subscribe_stop_tx.subscribe();
+
             // health check loop
             let f = async move {
                 // TODO: benchmark this and lock contention
                 let mut old_total_requests = 0;
                 let mut new_total_requests;
 
-                // TODO: errors here should not cause the loop to exit!
-                while !rpc.should_disconnect() {
+                // errors here should not cause the loop to exit!
+                while !(*subscribe_stop_rx.borrow()) {
                     new_total_requests = rpc.total_requests.load(atomic::Ordering::Relaxed);
 
                     if new_total_requests - old_total_requests < 5 {
@@ -629,11 +710,24 @@ impl Web3Rpc {
         }
 
         // subscribe to new heads
-        if let Some(block_sender) = &block_sender {
-            // TODO: do we need this to be abortable?
-            let f = self
-                .clone()
-                .subscribe_new_heads(block_sender.clone(), block_map.clone());
+        if let Some(block_sender) = block_sender.clone() {
+            let clone = self.clone();
+            let subscribe_stop_rx = subscribe_stop_tx.subscribe();
+
+            let f = async move {
+                let x = clone
+                    .subscribe_new_heads(block_sender.clone(), block_map.clone(), subscribe_stop_rx)
+                    .await;
+
+                // error or success, we clear the block when subscribe_new_heads exits
+                clone
+                    .send_head_block_result(Ok(None), &block_sender, &block_map)
+                    .await?;
+
+                x
+            };
+
+            // TODO: if
 
             futures.push(flatten_handle(tokio::spawn(f)));
         }
@@ -641,8 +735,11 @@ impl Web3Rpc {
         // subscribe pending transactions
         // TODO: make this opt-in. its a lot of bandwidth
         if let Some(tx_id_sender) = tx_id_sender {
-            // TODO: do we need this to be abortable?
-            let f = self.clone().subscribe_pending_transactions(tx_id_sender);
+            let subscribe_stop_rx = subscribe_stop_tx.subscribe();
+
+            let f = self
+                .clone()
+                .subscribe_pending_transactions(tx_id_sender, subscribe_stop_rx);
 
             futures.push(flatten_handle(tokio::spawn(f)));
         }
@@ -654,19 +751,19 @@ impl Web3Rpc {
 
         debug!("subscriptions on {} exited", self);
 
-        self.disconnect_watch
-            .as_ref()
-            .expect("disconnect_watch should always be set")
-            .send_replace(true);
+        subscribe_stop_tx.send_replace(true);
+
+        // TODO: wait for all of the futures to exit?
 
         Ok(())
     }
 
     /// Subscribe to new blocks.
     async fn subscribe_new_heads(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         block_sender: flume::Sender<BlockAndRpc>,
         block_map: BlocksByHashCache,
+        subscribe_stop_rx: watch::Receiver<bool>,
     ) -> Web3ProxyResult<()> {
         debug!("subscribing to new heads on {}", self);
 
@@ -674,7 +771,7 @@ impl Web3Rpc {
         let error_handler = None;
         let authorization = Default::default();
 
-        if let Some(ws_provider) = self.ws_provider.as_ref() {
+        if let Some(ws_provider) = self.ws_provider.load().as_ref() {
             // todo: move subscribe_blocks onto the request handle
             let active_request_handle = self
                 .wait_for_request_handle(&authorization, None, error_handler)
@@ -686,7 +783,7 @@ impl Web3Rpc {
             // there is a very small race condition here where the stream could send us a new block right now
             // but all seeing the same block twice won't break anything
             // TODO: how does this get wrapped in an arc? does ethers handle that?
-            // TODO: can we force this to use the websocket?
+            // TODO: send this request to the ws_provider instead of the http_provider
             let latest_block: Result<Option<ArcBlock>, _> = self
                 .authorized_request(
                     "eth_getBlockByNumber",
@@ -700,7 +797,7 @@ impl Web3Rpc {
                 .await?;
 
             while let Some(block) = blocks.next().await {
-                if self.should_disconnect() {
+                if *subscribe_stop_rx.borrow() {
                     break;
                 }
 
@@ -709,25 +806,30 @@ impl Web3Rpc {
                 self.send_head_block_result(Ok(Some(block)), &block_sender, &block_map)
                     .await?;
             }
-        } else if let Some(http_provider) = self.http_provider.as_ref() {
+        } else if self.http_provider.is_some() {
             // there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
-            let mut blocks = http_provider.watch_blocks().await?;
+            // TODO: is 1/2 the block time okay?
+            let mut i = interval(self.block_interval / 2);
+            i.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-            while let Some(block_hash) = blocks.next().await {
-                if self.should_disconnect() {
+            loop {
+                if *subscribe_stop_rx.borrow() {
                     break;
                 }
 
-                let block = if let Some(block) = block_map.get(&block_hash) {
-                    block.block
-                } else if let Some(block) = http_provider.get_block(block_hash).await? {
-                    Arc::new(block)
-                } else {
-                    continue;
-                };
+                let block_result = self
+                    .authorized_request::<_, Option<ArcBlock>>(
+                        "eth_getBlockByNumber",
+                        &("latest", false),
+                        &authorization,
+                        Some(Level::Warn.into()),
+                    )
+                    .await;
 
-                self.send_head_block_result(Ok(Some(block)), &block_sender, &block_map)
+                self.send_head_block_result(block_result, &block_sender, &block_map)
                     .await?;
+
+                i.tick().await;
             }
         } else {
             unimplemented!("no ws or http provider!")
@@ -737,7 +839,7 @@ impl Web3Rpc {
         self.send_head_block_result(Ok(None), &block_sender, &block_map)
             .await?;
 
-        if self.should_disconnect() {
+        if *subscribe_stop_rx.borrow() {
             Ok(())
         } else {
             Err(anyhow!("new_heads subscription exited. reconnect needed").into())
@@ -748,9 +850,9 @@ impl Web3Rpc {
     async fn subscribe_pending_transactions(
         self: Arc<Self>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
+        mut subscribe_stop_rx: watch::Receiver<bool>,
     ) -> Web3ProxyResult<()> {
-        // TODO: make this subscription optional
-        self.wait_for_disconnect().await?;
+        subscribe_stop_rx.changed().await?;
 
         /*
         trace!("watching pending transactions on {}", self);
@@ -795,7 +897,7 @@ impl Web3Rpc {
         }
         */
 
-        if self.should_disconnect() {
+        if *subscribe_stop_rx.borrow() {
             Ok(())
         } else {
             Err(anyhow!("pending_transactions subscription exited. reconnect needed").into())
@@ -907,20 +1009,6 @@ impl Web3Rpc {
             OpenRequestHandle::new(authorization.clone(), self.clone(), error_handler).await;
 
         Ok(handle.into())
-    }
-
-    async fn wait_for_disconnect(&self) -> Result<(), tokio::sync::watch::error::RecvError> {
-        let mut disconnect_subscription = self.disconnect_watch.as_ref().unwrap().subscribe();
-
-        loop {
-            if *disconnect_subscription.borrow_and_update() {
-                // disconnect watch is set to "true"
-                return Ok(());
-            }
-
-            // wait for disconnect_subscription to change
-            disconnect_subscription.changed().await?;
-        }
     }
 
     pub async fn internal_request<P: JsonRpcParams, R: JsonRpcResultData>(

@@ -3,6 +3,8 @@ perf.data
 perf.data.old
 
 /bin/
+/config/devel*
+/config/production*
 /data/
 /docker-compose*
 /Dockerfile

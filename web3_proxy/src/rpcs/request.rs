@@ -11,10 +11,10 @@ use ethers::providers::ProviderError;
 use ethers::types::{Address, Bytes};
 use log::{debug, error, trace, warn, Level};
 use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
+use nanorand::Rng;
 use serde_json::json;
 use std::sync::atomic;
 use std::sync::Arc;
-use thread_fast_rng::rand::Rng;
 use tokio::time::{Duration, Instant};
 
 #[derive(Debug, From)]
@@ -193,7 +193,7 @@ impl OpenRequestHandle {
         // TODO: replace ethers-rs providers with our own that handles "id" being null
         let response: Result<R, _> = if let Some(ref p) = self.rpc.http_provider {
             p.request(method, params).await
-        } else if let Some(ref p) = self.rpc.ws_provider {
+        } else if let Some(p) = self.rpc.ws_provider.load().as_ref() {
             p.request(method, params).await
         } else {
             return Err(ProviderError::CustomError(
@@ -225,15 +225,13 @@ impl OpenRequestHandle {
                 } else if self.authorization.db_conn.is_some() {
                     let log_revert_chance = self.authorization.checks.log_revert_chance;
 
-                    if log_revert_chance == 0.0 {
+                    if log_revert_chance == 0 {
                         // trace!(%method, "no chance. skipping save on revert");
                         RequestErrorHandler::TraceLevel
-                    } else if log_revert_chance == 1.0 {
+                    } else if log_revert_chance == u16::MAX {
                         // trace!(%method, "gaurenteed chance. SAVING on revert");
                         self.error_handler
-                    } else if thread_fast_rng::thread_fast_rng().gen_range(0.0f64..=1.0)
-                        < log_revert_chance
-                    {
+                    } else if nanorand::tls_rng().generate_range(0u16..u16::MAX) < log_revert_chance {
                         // trace!(%method, "missed chance. skipping save on revert");
                         RequestErrorHandler::TraceLevel
                     } else {

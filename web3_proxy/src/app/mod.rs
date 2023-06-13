@@ -101,8 +101,8 @@ pub struct AuthorizationChecks {
     pub tracking_level: TrackingLevel,
     /// Chance to save reverting eth_call, eth_estimateGas, and eth_sendRawTransaction to the database.
     /// depending on the caller, errors might be expected. this keeps us from bloating our database
-    /// TODO: f32 would be fine
-    pub log_revert_chance: f64,
+    /// u16::MAX == 100%
+    pub log_revert_chance: u16,
     /// if true, transactions are broadcast only to private mempools.
     /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
     pub private_txs: bool,
@@ -1025,6 +1025,10 @@ impl Web3ProxyApp {
         // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
 
+        if num_requests == 0 {
+            return Ok((vec![], vec![]));
+        }
+
         // get the head block now so that any requests that need it all use the same block
         // TODO: this still has an edge condition if there is a reorg in the middle of the request!!!
         let head_block_num = self
@@ -1512,7 +1516,7 @@ impl Web3ProxyApp {
                     }
                 }
 
-                todo!();
+                response
             }
             "eth_syncing" => {
                 // no stats on this. its cheap

@@ -29,7 +29,10 @@ services:
       DOCKER_INFLUXDB_INIT_BUCKET: web3_proxy
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: web3_proxy_auth_token
     ports:
-      - 127.0.0.1:8086:8086
+      - mode: host
+        protocol: tcp
+        published: 8086
+        target: 8086
     volumes:
       - ./data/influxdb/data:/var/lib/influxdb2
       - ./data/influxdb/config:/etc/influxdb2
@@ -84,10 +87,11 @@ services:
     extends:
       file: docker-compose.common.yml
       service: web3-proxy
-    command: --config /config.toml --workers 48 proxyd
     volumes:
       - ./config/production-eth.toml:/config.toml
       - ./data/scratch:/scratch
+      - /etc/ssl/certs/:/etc/ssl/certs/:ro
+      - /usr/local/share/ca-certificates/:/usr/local/share/ca-certificates/:ro
     ports:
       - mode: host
         protocol: tcp

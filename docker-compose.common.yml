@@ -8,9 +8,8 @@ services:
     # rust's tokio crate expects a SIGINT https://tokio.rs/tokio/topics/shutdown
     stop_signal: SIGINT
     environment:
-      #RUST_LOG: "info,web3_proxy=debug"
-      RUST_LOG: info,ethers_providers::rpc=off
+      RUST_LOG: "info,ethers_providers::rpc=off,web3_proxy=debug"
 
   volatile_redis:
     image: redis:6.0-alpine
-    command: [ "redis-server", "--save", "60", "1" ]
+    command: [ "redis-server" ]

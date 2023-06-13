@@ -12,9 +12,8 @@ use axum::{
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use entities::{balance, increase_on_chain_balance_receipt, rpc_key, user};
-use ethbloom::Input as BloomInput;
 use ethers::abi::AbiEncode;
-use ethers::types::{Address, TransactionReceipt, ValueOrArray, H256};
+use ethers::types::{Address, TransactionReceipt, H256};
 use hashbrown::HashMap;
 use http::StatusCode;
 use log::{debug, info, trace};

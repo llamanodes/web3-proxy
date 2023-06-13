@@ -26,7 +26,6 @@ use migration::sea_orm::TransactionTrait;
 use serde_json::json;
 use std::sync::Arc;
 use ulid::{self, Ulid};
-use uuid::Uuid;
 
 pub async fn get_keys_as_subuser(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -105,18 +104,18 @@ pub async fn get_subusers(
         .db_replica()
         .context("getting replica db for user's revert logs")?;
 
-    let rpc_key: Ulid = params
-        .remove("rpc_key")
+    let rpc_key: u64 = params
+        .remove("key_id")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
             "You have not provided the 'rpc_key' whose access to modify".into(),
         ))?
         .parse()
-        .context(format!("unable to parse rpc_key {:?}", params))?;
+        .context(format!("unable to parse key_id {:?}", params))?;
 
     // Get the rpc key id
     let rpc_key = rpc_key::Entity::find()
-        .filter(rpc_key::Column::SecretKey.eq(Uuid::from(rpc_key)))
+        .filter(rpc_key::Column::Id.eq(rpc_key))
         .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
@@ -182,15 +181,14 @@ pub async fn modify_subuser(
     trace!("Parameters are: {:?}", params);
 
     // Then, distinguish the endpoint to modify
-    let rpc_key_to_modify: Ulid = params
-        .remove("rpc_key")
+    let rpc_key_to_modify: u64 = params
+        .remove("key_id")
         // TODO: map_err so this becomes a 500. routing must be bad
         .ok_or(Web3ProxyError::BadRequest(
             "You have not provided the 'rpc_key' whose access to modify".into(),
         ))?
-        .parse::<Ulid>()
-        .context(format!("unable to parse rpc_key {:?}", params))?;
-    // let rpc_key_to_modify: Uuid = ulid::serde::ulid_as_uuid::deserialize(rpc_key_to_modify)?;
+        .parse()
+        .context(format!("unable to get the key_id {:?}", params))?;
 
     let subuser_address: Address = params
         .remove("subuser_address")
@@ -247,7 +245,7 @@ pub async fn modify_subuser(
         .await?;
 
     let rpc_key_entity = rpc_key::Entity::find()
-        .filter(rpc_key::Column::SecretKey.eq(Uuid::from(rpc_key_to_modify)))
+        .filter(rpc_key::Column::Id.eq(rpc_key_to_modify))
         .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
