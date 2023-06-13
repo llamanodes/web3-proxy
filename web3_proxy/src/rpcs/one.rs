@@ -9,6 +9,7 @@ use crate::frontend::authorization::Authorization;
 use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
+use arc_swap::ArcSwapOption;
 use ethers::prelude::{Bytes, Middleware, TxHash, U64};
 use ethers::types::{Address, Transaction, U256};
 use futures::future::try_join_all;
@@ -40,10 +41,12 @@ pub struct Web3Rpc {
     pub db_conn: Option<DatabaseConnection>,
     /// most all requests prefer use the http_provider
     pub(super) http_provider: Option<EthersHttpProvider>,
+    /// the websocket url is only used for subscriptions
+    pub(super) ws_url: Option<Url>,
     /// the websocket provider is only used for subscriptions
-    pub(super) ws_provider: Option<EthersWsProvider>,
+    pub(super) ws_provider: ArcSwapOption<EthersWsProvider>,
     /// keep track of hard limits
-    /// this is only inside an Option so that the "Default" derive works. it will always be set.
+    /// hard_limit_until is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) hard_limit_until: Option<watch::Sender<Instant>>,
     /// rate limits are stored in a central redis so that multiple proxies can share their rate limits
     /// We do not use the deferred rate limiter because going over limits would cause errors
@@ -56,13 +59,12 @@ pub struct Web3Rpc {
     pub backup: bool,
     /// TODO: have an enum for this so that "no limit" prints pretty?
     pub(super) block_data_limit: AtomicU64,
-    /// TODO: change this to a watch channel so that http providers can subscribe and take action on change.
-    /// this is only inside an Option so that the "Default" derive works. it will always be set.
+    /// head_block is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// Track head block latency
     pub(super) head_latency: RwLock<EwmaLatency>,
     /// Track peak request latency
-    /// This is only inside an Option so that the "Default" derive works. it will always be set.
+    /// peak_latency is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) peak_latency: Option<PeakEwmaLatency>,
     /// Automatically set priority
     pub(super) tier: AtomicU8,
@@ -70,8 +72,9 @@ pub struct Web3Rpc {
     /// TODO: maybe move this to graphana
     pub(super) total_requests: AtomicUsize,
     pub(super) active_requests: AtomicUsize,
-    /// this is only inside an Option so that the "Default" derive works. it will always be set.
+    /// disconnect_watch is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) disconnect_watch: Option<watch::Sender<bool>>,
+    /// created_at is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) created_at: Option<Instant>,
 }
 
@@ -172,12 +175,10 @@ impl Web3Rpc {
             None
         };
 
-        let ws_provider = if let Some(ws_url) = config.ws_url {
+        let ws_url = if let Some(ws_url) = config.ws_url {
             let ws_url = ws_url.parse::<Url>()?;
 
-            Some(connect_ws(ws_url, usize::MAX).await?)
-
-            // TODO: check the provider is on the right chain
+            Some(ws_url)
         } else {
             None
         };
@@ -189,7 +190,7 @@ impl Web3Rpc {
             backup,
             block_data_limit,
             created_at: Some(created_at),
-            db_conn: db_conn.clone(),
+            db_conn,
             display_name: config.display_name,
             hard_limit,
             hard_limit_until: Some(hard_limit_until),
@@ -198,7 +199,7 @@ impl Web3Rpc {
             name,
             peak_latency: Some(peak_latency),
             soft_limit: config.soft_limit,
-            ws_provider,
+            ws_url,
             disconnect_watch: Some(disconnect_watch),
             ..Default::default()
         };
@@ -211,6 +212,7 @@ impl Web3Rpc {
         let handle = {
             let new_connection = new_connection.clone();
             tokio::spawn(async move {
+                // TODO: this needs to be a subscribe_with_reconnect that does a retry with jitter and exponential backoff
                 new_connection
                     .subscribe(block_map, block_sender, chain_id, tx_id_sender)
                     .await
@@ -410,6 +412,7 @@ impl Web3Rpc {
     }
 
     /// query the web3 provider to confirm it is on the expected chain with the expected data available
+    /// TODO: this currently checks only the http if both http and ws are set. it should check both and make sure they match
     async fn check_provider(self: &Arc<Self>, chain_id: u64) -> Web3ProxyResult<()> {
         // check the server's chain_id here
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
@@ -580,6 +583,16 @@ impl Web3Rpc {
             Some(RequestErrorHandler::ErrorLevel)
         };
 
+        if let Some(url) = self.ws_url.clone() {
+            debug!("starting websocket provider on {}", self);
+
+            let x = connect_ws(url, usize::MAX).await?;
+
+            let x = Arc::new(x);
+
+            self.ws_provider.store(Some(x));
+        }
+
         debug!("starting subscriptions on {}", self);
 
         self.check_provider(chain_id).await?;
@@ -674,7 +687,7 @@ impl Web3Rpc {
         let error_handler = None;
         let authorization = Default::default();
 
-        if let Some(ws_provider) = self.ws_provider.as_ref() {
+        if let Some(ws_provider) = self.ws_provider.load().as_ref() {
             // todo: move subscribe_blocks onto the request handle
             let active_request_handle = self
                 .wait_for_request_handle(&authorization, None, error_handler)
@@ -686,7 +699,7 @@ impl Web3Rpc {
             // there is a very small race condition here where the stream could send us a new block right now
             // but all seeing the same block twice won't break anything
             // TODO: how does this get wrapped in an arc? does ethers handle that?
-            // TODO: can we force this to use the websocket?
+            // TODO: send this request to the ws_provider instead of the http_provider
             let latest_block: Result<Option<ArcBlock>, _> = self
                 .authorized_request(
                     "eth_getBlockByNumber",
