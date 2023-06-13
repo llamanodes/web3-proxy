@@ -672,14 +672,16 @@ impl Web3Rpc {
             // TODO: reset this timeout when a new block is seen? we need to keep request_latency updated though
             let health_sleep_seconds = 5;
 
+            let subscribe_stop_rx = subscribe_stop_tx.subscribe();
+
             // health check loop
             let f = async move {
                 // TODO: benchmark this and lock contention
                 let mut old_total_requests = 0;
                 let mut new_total_requests;
 
-                // TODO: errors here should not cause the loop to exit!
-                while !rpc.should_disconnect() {
+                // errors here should not cause the loop to exit!
+                while !(*subscribe_stop_rx.borrow()) {
                     new_total_requests = rpc.total_requests.load(atomic::Ordering::Relaxed);
 
                     if new_total_requests - old_total_requests < 5 {
@@ -706,11 +708,24 @@ impl Web3Rpc {
         }
 
         // subscribe to new heads
-        if let Some(block_sender) = &block_sender {
-            // TODO: do we need this to be abortable?
-            let f = self
-                .clone()
-                .subscribe_new_heads(block_sender.clone(), block_map.clone());
+        if let Some(block_sender) = block_sender.clone() {
+            let clone = self.clone();
+            let subscribe_stop_rx = subscribe_stop_tx.subscribe();
+
+            let f = async move {
+                let x = clone
+                    .subscribe_new_heads(block_sender.clone(), block_map.clone(), subscribe_stop_rx)
+                    .await;
+
+                // error or success, we clear the block when subscribe_new_heads exits
+                clone
+                    .send_head_block_result(Ok(None), &block_sender, &block_map)
+                    .await?;
+
+                x
+            };
+
+            // TODO: if
 
             futures.push(flatten_handle(tokio::spawn(f)));
         }
@@ -718,8 +733,11 @@ impl Web3Rpc {
         // subscribe pending transactions
         // TODO: make this opt-in. its a lot of bandwidth
         if let Some(tx_id_sender) = tx_id_sender {
-            // TODO: do we need this to be abortable?
-            let f = self.clone().subscribe_pending_transactions(tx_id_sender);
+            let subscribe_stop_rx = subscribe_stop_tx.subscribe();
+
+            let f = self
+                .clone()
+                .subscribe_pending_transactions(tx_id_sender, subscribe_stop_rx);
 
             futures.push(flatten_handle(tokio::spawn(f)));
         }
@@ -740,9 +758,10 @@ impl Web3Rpc {
 
     /// Subscribe to new blocks.
     async fn subscribe_new_heads(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         block_sender: flume::Sender<BlockAndRpc>,
         block_map: BlocksByHashCache,
+        subscribe_stop_rx: watch::Receiver<bool>,
     ) -> Web3ProxyResult<()> {
         debug!("subscribing to new heads on {}", self);
 
@@ -776,7 +795,7 @@ impl Web3Rpc {
                 .await?;
 
             while let Some(block) = blocks.next().await {
-                if self.should_disconnect() {
+                if *subscribe_stop_rx.borrow() {
                     break;
                 }
 
@@ -790,7 +809,7 @@ impl Web3Rpc {
             let mut blocks = http_provider.watch_blocks().await?;
 
             while let Some(block_hash) = blocks.next().await {
-                if self.should_disconnect() {
+                if *subscribe_stop_rx.borrow() {
                     break;
                 }
 
@@ -813,7 +832,7 @@ impl Web3Rpc {
         self.send_head_block_result(Ok(None), &block_sender, &block_map)
             .await?;
 
-        if self.should_disconnect() {
+        if *subscribe_stop_rx.borrow() {
             Ok(())
         } else {
             Err(anyhow!("new_heads subscription exited. reconnect needed").into())
@@ -824,9 +843,9 @@ impl Web3Rpc {
     async fn subscribe_pending_transactions(
         self: Arc<Self>,
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
+        mut subscribe_stop_rx: watch::Receiver<bool>,
     ) -> Web3ProxyResult<()> {
-        // TODO: make this subscription optional
-        self.wait_for_disconnect().await?;
+        subscribe_stop_rx.changed().await?;
 
         /*
         trace!("watching pending transactions on {}", self);
@@ -871,7 +890,7 @@ impl Web3Rpc {
         }
         */
 
-        if self.should_disconnect() {
+        if *subscribe_stop_rx.borrow() {
             Ok(())
         } else {
             Err(anyhow!("pending_transactions subscription exited. reconnect needed").into())
@@ -983,20 +1002,6 @@ impl Web3Rpc {
             OpenRequestHandle::new(authorization.clone(), self.clone(), error_handler).await;
 
         Ok(handle.into())
-    }
-
-    async fn wait_for_disconnect(&self) -> Result<(), tokio::sync::watch::error::RecvError> {
-        let mut disconnect_subscription = self.disconnect_watch.as_ref().unwrap().subscribe();
-
-        loop {
-            if *disconnect_subscription.borrow_and_update() {
-                // disconnect watch is set to "true"
-                return Ok(());
-            }
-
-            // wait for disconnect_subscription to change
-            disconnect_subscription.changed().await?;
-        }
     }
 
     pub async fn internal_request<P: JsonRpcParams, R: JsonRpcResultData>(
