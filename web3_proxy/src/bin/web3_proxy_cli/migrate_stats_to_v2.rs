@@ -57,6 +57,11 @@ impl MigrateStatsToV2 {
                     .clone()
                     .expect("influxdb_token needed when influxdb_host is set");
 
+                top_config
+                    .app
+                    .influxdb_bucket
+                    .expect("influxdb_token needed when influxdb_host is set");
+
                 let influxdb_client =
                     influxdb2::Client::new(influxdb_host, influxdb_org, influxdb_token);
 

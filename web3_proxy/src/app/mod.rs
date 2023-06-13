@@ -378,11 +378,17 @@ impl Web3ProxyApp {
                     .influxdb_org
                     .clone()
                     .expect("influxdb_org needed when influxdb_host is set");
+
                 let influxdb_token = top_config
                     .app
                     .influxdb_token
                     .clone()
                     .expect("influxdb_token needed when influxdb_host is set");
+
+                top_config
+                    .app
+                    .influxdb_bucket
+                    .expect("influxdb_bucket needed when influxdb_host is set");
 
                 let influxdb_client =
                     influxdb2::Client::new(influxdb_host, influxdb_org, influxdb_token);
