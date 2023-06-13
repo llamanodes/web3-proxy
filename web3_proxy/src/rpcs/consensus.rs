@@ -465,7 +465,7 @@ impl ConsensusFinder {
 
                 // // histogram requires high to be at least 2 x low
                 // // using min_latency for low does not work how we want it though
-                // max_latency = max_latency.max(2 * min_latency);
+                max_latency = max_latency.max(1000);
 
                 // create the histogram
                 let mut hist = Histogram::<u32>::new_with_bounds(1, max_latency, 3).unwrap();

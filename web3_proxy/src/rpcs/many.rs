@@ -923,12 +923,30 @@ impl Web3Rpcs {
                             let rate_limit_substrings = ["limit", "exceeded", "quota usage"];
                             for rate_limit_substr in rate_limit_substrings {
                                 if error_msg.contains(rate_limit_substr) {
-                                    warn!(
-                                        "rate limited ({}) by {}",
-                                        error_msg,
-                                        skip_rpcs.last().unwrap()
-                                    );
-                                    continue;
+                                    if rate_limit_substr.contains("result on length") {
+                                        // this error contains "limit" but is not a rate limit error
+                                        // TODO: make the expected limit configurable
+                                        // TODO: parse the rate_limit_substr and only continue if it is < expected limit
+                                        if rate_limit_substr.contains("exceeding limit 2000000") {
+                                            // they hit our expected limit. return the error now
+                                            return Err(error.into());
+                                        } else {
+                                            // they hit a limit lower than what we expect
+                                            warn!(
+                                                "unexpected result limit ({}) by {}",
+                                                error_msg,
+                                                skip_rpcs.last().unwrap()
+                                            );
+                                            continue;
+                                        }
+                                    } else {
+                                        warn!(
+                                            "rate limited ({}) by {}",
+                                            error_msg,
+                                            skip_rpcs.last().unwrap()
+                                        );
+                                        continue;
+                                    }
                                 }
                             }
 

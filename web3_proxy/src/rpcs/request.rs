@@ -193,7 +193,7 @@ impl OpenRequestHandle {
         // TODO: replace ethers-rs providers with our own that handles "id" being null
         let response: Result<R, _> = if let Some(ref p) = self.rpc.http_provider {
             p.request(method, params).await
-        } else if let Some(ref p) = self.rpc.ws_provider {
+        } else if let Some(p) = self.rpc.ws_provider.load().as_ref() {
             p.request(method, params).await
         } else {
             return Err(ProviderError::CustomError(
