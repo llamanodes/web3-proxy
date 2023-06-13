@@ -49,15 +49,15 @@ impl ConsensusRpcData {
 
 #[derive(Constructor, Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct RpcRanking {
-    tier: u8,
+    tier: u32,
     backup: bool,
     head_num: Option<U64>,
 }
 
 impl RpcRanking {
-    pub fn add_offset(&self, offset: u8) -> Self {
+    pub fn add_offset(&self, offset: u32) -> Self {
         Self {
-            tier: self.tier + offset,
+            tier: self.tier.saturating_add(offset),
             backup: self.backup,
             head_num: self.head_num,
         }
@@ -70,7 +70,7 @@ impl RpcRanking {
         }
     }
 
-    fn sort_key(&self) -> (bool, u8, Reverse<Option<U64>>) {
+    fn sort_key(&self) -> (bool, u32, Reverse<Option<U64>>) {
         // TODO: add soft_limit here? add peak_ewma here?
         // TODO: should backup or tier be checked first? now that tiers are automated, backups
         // TODO: should we include a random number in here?
@@ -104,7 +104,7 @@ pub enum ShouldWaitForBlock {
 /// TODO: one data structure of head_rpcs and other_rpcs that is sorted best first
 #[derive(Clone, Serialize)]
 pub struct ConsensusWeb3Rpcs {
-    pub(crate) tier: u8,
+    pub(crate) tier: u32,
     pub(crate) backups_needed: bool,
 
     // TODO: this is already inside best_rpcs. Don't skip, instead make a shorter serialize
@@ -494,16 +494,13 @@ impl ConsensusFinder {
                     trace!("weighted_latencies: {}", encoded);
                 }
 
-                // TODO: get someone who is better at math to do something smarter
-                // this is not a very good use of stddev, but it works for now
-                let stddev = hist.stdev();
+                // TODO: get someone who is better at math to do something smarter. maybe involving stddev?
+                let divisor = 30f64.max(min_latency as f64 / 2.0);
 
                 for (rpc, weighted_latency_ms) in weighted_latencies.into_iter() {
-                    let tier = (weighted_latency_ms - min_latency) as f64 / stddev;
+                    let tier = (weighted_latency_ms - min_latency) as f64 / divisor;
 
-                    let tier = tier.floor() as u64;
-
-                    let tier = tier.clamp(u8::MIN.into(), u8::MAX.into()) as u8;
+                    let tier = tier.floor() as u32;
 
                     // TODO: this should be trace
                     trace!(
@@ -745,7 +742,7 @@ impl ConsensusFinder {
         None
     }
 
-    pub fn worst_tier(&self) -> Option<u8> {
+    pub fn worst_tier(&self) -> Option<u32> {
         self.rpc_heads
             .iter()
             .map(|(x, _)| x.tier.load(atomic::Ordering::Relaxed))

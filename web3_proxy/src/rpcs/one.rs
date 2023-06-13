@@ -27,7 +27,7 @@ use serde_json::json;
 use std::cmp::Reverse;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{self, AtomicU64, AtomicU8, AtomicUsize};
+use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::select;
 use tokio::sync::watch;
@@ -68,7 +68,7 @@ pub struct Web3Rpc {
     /// peak_latency is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) peak_latency: Option<PeakEwmaLatency>,
     /// Automatically set priority
-    pub(super) tier: AtomicU8,
+    pub(super) tier: AtomicU32,
     /// Track total requests served
     /// TODO: maybe move this to graphana
     pub(super) total_requests: AtomicUsize,
@@ -230,7 +230,7 @@ impl Web3Rpc {
     /// TODO: tests on this!
     /// TODO: should tier or block number take priority?
     /// TODO: should this return a struct that implements sorting traits?
-    fn sort_on(&self, max_block: Option<U64>) -> (bool, u8, Reverse<U64>) {
+    fn sort_on(&self, max_block: Option<U64>) -> (bool, u32, Reverse<U64>) {
         let mut head_block = self
             .head_block
             .as_ref()
@@ -251,7 +251,7 @@ impl Web3Rpc {
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, u8, Reverse<U64>), OrderedFloat<f64>) {
+    ) -> ((bool, u32, Reverse<U64>), OrderedFloat<f64>) {
         let sort_on = self.sort_on(max_block);
 
         let weighted_peak_ewma_seconds = self.weighted_peak_ewma_seconds();
@@ -267,7 +267,7 @@ impl Web3Rpc {
     pub fn shuffle_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, u8, Reverse<U64>), u32) {
+    ) -> ((bool, u32, Reverse<U64>), u32) {
         let sort_on = self.sort_on(max_block);
 
         let mut rng = nanorand::tls_rng();
