@@ -173,9 +173,9 @@ pub async fn query_user_stats<'a>(
 
         for (idx, user_key) in user_rpc_keys.iter().enumerate() {
             if idx == 0 {
-                filter_subquery += &f!(r#"r["rpc_secret_key_id"] == "{}""#, user_key);
+                filter_subquery += &f!(r#"r.rpc_secret_key_id == "{}""#, user_key);
             } else {
-                filter_subquery += &f!(r#"or r["rpc_secret_key_id"] == "{}""#, user_key);
+                filter_subquery += &f!(r#"or r.rpc_secret_key_id == "{}""#, user_key);
             }
         }
 
@@ -193,7 +193,7 @@ pub async fn query_user_stats<'a>(
     trace!("Bucket is {:?}", bucket);
     let mut filter_chain_id = "".to_string();
     if chain_id != 0 {
-        filter_chain_id = f!(r#"|> filter(fn: (r) => r["chain_id"] == "{chain_id}")"#);
+        filter_chain_id = f!(r#"|> filter(fn: (r) => r.chain_id == "{chain_id}")"#);
     }
 
     // Fetch and request for balance
@@ -224,16 +224,21 @@ pub async fn query_user_stats<'a>(
         ]
     );
 
+    // let rpc_key_exists_filter = match stat_response_type {
+    //     StatType::Aggregated => "".to_string(),
+    //     StatType::Detailed => r#"|> filter(fn: (r) => exists r["rpc_secret_key_id"])"#,
+    // };
+
     let query = f!(r#"
     base = () => from(bucket: "{bucket}")
         |> range(start: {query_start}, stop: {query_stop})
-        |> filter(fn: (r) => r["_measurement"] == "{measurement}")
+        |> filter(fn: (r) => r._measurement == "{measurement}")
         {filter_chain_id}
         {rpc_key_filter}
         {drop_method}
         
     cumsum = base()
-        |> filter(fn: (r) => r["_field"] == "backend_requests" or r["_field"] == "cache_hits" or r["_field"] == "cache_misses" or r["_field"] == "frontend_requests" or r["_field"] == "no_servers" or r["_field"] == "sum_credits_used" or r["_field"] == "sum_request_bytes" or r["_field"] == "sum_response_bytes" or r["_field"] == "sum_response_millis")
+        |> filter(fn: (r) => r._field == "backend_requests" or r._field == "cache_hits" or r._field == "cache_misses" or r._field == "frontend_requests" or r._field == "no_servers" or r._field == "sum_credits_used" or r._field == "sum_request_bytes" or r._field == "sum_response_bytes" or r._field == "sum_response_millis")
         |> group(columns: ["_field", "_measurement", "archive_needed", "chain_id", "error_response", "method", "rpc_secret_key_id"])
         |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
         |> drop(columns: ["_start", "_stop"])
