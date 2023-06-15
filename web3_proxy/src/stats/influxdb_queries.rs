@@ -208,6 +208,7 @@ pub async fn query_user_stats<'a>(
     trace!("Filters are: {:?}", filter_chain_id); // filter_field
     trace!("window seconds are: {:?}", query_window_seconds);
 
+    // TODO: I could further also do "and" to every filter, apparently that's faster (according to GPT)
     let drop_method = match stat_response_type {
         StatType::Aggregated => f!(r#"|> drop(columns: ["method"])"#),
         StatType::Detailed => "".to_string(),
@@ -226,13 +227,13 @@ pub async fn query_user_stats<'a>(
     let query = f!(r#"
     base = from(bucket: "{bucket}")
         |> range(start: {query_start}, stop: {query_stop})
-        {drop_method}
-        {rpc_key_filter}
-        {filter_chain_id}
         |> filter(fn: (r) => r["_measurement"] == "{measurement}")
+        {filter_chain_id}
+        {rpc_key_filter}
+        {drop_method}
         
     cumsum = base
-        |> filter(fn: (r) => r["_field"] != "balance")
+        |> filter(fn: (r) => r["_field"] == "backend_requests" or r["_field"] == "cache_hits" or r["_field"] == "cache_misses" or r["_field"] == "frontend_requests" or r["_field"] == "no_servers" or r["_field"] == "sum_credits_used" or r["_field"] == "sum_request_bytes" or r["_field"] == "sum_response_bytes" or r["_field"] == "sum_response_millis")
         |> group(columns: ["_field", "_measurement", "archive_needed", "chain_id", "error_response", "method", "rpc_secret_key_id"])
         |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
         |> drop(columns: ["_start", "_stop"])
