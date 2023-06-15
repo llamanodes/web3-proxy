@@ -169,14 +169,18 @@ pub async fn query_user_stats<'a>(
         }
 
         // Iterate, pop and add to string
-        f!(
-            r#"|> filter(fn: (r) => contains(value: r["rpc_secret_key_id"], set: {:?}))"#,
-            user_rpc_keys
-        )
+        let mut filter_subquery = "".to_string();
+
+        for (idx, user_key) in user_rpc_keys.iter().enumerate() {
+            if idx == 0 {
+                filter_subquery += &f!(r#"r["rpc_secret_key_id"] == "{}""#, user_key);
+            } else {
+                filter_subquery += &f!(r#"or r["rpc_secret_key_id"] == "{}""#, user_key);
+            }
+        }
+
+        f!(r#"|> filter(fn: (r) => {})"#, filter_subquery)
     };
-    // cache_key = cache_key
-    //     .overflowing_add(keccak256(rpc_key_filter.to_bytes()).into())
-    //     .0;
 
     // TODO: Turn into a 500 error if bucket is not found ..
     // Or just unwrap or so
