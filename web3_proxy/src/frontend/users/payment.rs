@@ -13,7 +13,7 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use entities::{balance, increase_on_chain_balance_receipt, rpc_key, user};
 use ethers::abi::AbiEncode;
-use ethers::types::{Address, TransactionReceipt, H256};
+use ethers::types::{Address, TransactionReceipt, TxHash, H256};
 use hashbrown::HashMap;
 use http::StatusCode;
 use log::{debug, info, trace};
@@ -101,9 +101,6 @@ pub async fn user_deposits_get(
 }
 
 /// `POST /user/balance/:tx_hash` -- Manually process a confirmed txid to update a user's balance.
-///
-/// We will subscribe to events to watch for any user deposits, but sometimes events can be missed.
-/// TODO: change this. just have a /tx/:txhash that is open to anyone. rate limit like we rate limit /login
 #[debug_handler]
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -115,8 +112,7 @@ pub async fn user_balance_post(
     // TODO: if ip is a 10. or a 172., allow unlimited
     login_is_authorized(&app, ip).await?;
 
-    // Get the transaction hash, and the amount that the user wants to top up by.
-    // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
+    // Get the transaction hash
     let tx_hash: H256 = params
         .remove("tx_hash")
         .ok_or(Web3ProxyError::BadRequest(
@@ -129,34 +125,50 @@ pub async fn user_balance_post(
 
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
 
-    // Return early if the tx was already added
-    if increase_on_chain_balance_receipt::Entity::find()
-        .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
-        .one(&db_conn)
-        .await?
-        .is_some()
-    {
-        // TODO: double check that the transaction is still seen as "confirmed" if it is NOT, we need to remove credits!
-
-        // this will be status code 200, not 204
-        let response = Json(json!({
-            "result": "success",
-            "message": "this transaction was already in the database",
-        }))
-        .into_response();
-
-        return Ok(response);
-    };
-
     // get the transaction receipt
     let transaction_receipt = app
         .internal_request::<_, Option<TransactionReceipt>>("eth_getTransactionReceipt", (tx_hash,))
-        .await?
-        .ok_or(Web3ProxyError::BadRequest(
-            format!("transaction receipt not found for {}", tx_hash,).into(),
-        ))?;
+        .await?;
 
-    trace!("Transaction receipt: {:#?}", transaction_receipt);
+    // Return early if the tx was already added
+    if let Some(x) = increase_on_chain_balance_receipt::Entity::find()
+        .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
+        .filter(increase_on_chain_balance_receipt::Column::ChainId.eq(app.config.chain_id))
+        .one(&db_conn)
+        .await?
+    {
+        if transaction_receipt.is_some() {
+            // this will be status code 200 OK, not 201 CREATED
+            return Ok(Json(json!({
+                "result": "success",
+                "message": "this transaction was already in the database",
+            }))
+            .into_response());
+        }
+
+        // we have a database entry for this transaction, but the receipt wasn't found. it must have been uncled
+
+        let block_hash = ();
+
+        todo!("delete any transactions in this block");
+
+        return Ok(Json(json!({
+            "result": "success",
+            "message": "this transaction was deleted from the database",
+        }))
+        .into_response());
+    };
+
+    // require the receipt
+    let transaction_receipt = transaction_receipt.ok_or(Web3ProxyError::BadRequest(
+        format!(
+            "receipt not found for {}. Please wait for the transaction to confirm",
+            tx_hash
+        )
+        .into(),
+    ))?;
+
+    debug!("Transaction receipt: {:#?}", transaction_receipt);
 
     // TODO: if the transaction doesn't have enough confirmations yet, add it to a queue to try again later
 
@@ -168,41 +180,18 @@ pub async fn user_balance_post(
     let payment_factory_contract =
         PaymentFactory::new(payment_factory_address, app.internal_provider().clone());
 
-    debug!(
+    trace!(
         "Payment Factory Filter: {:?}",
         payment_factory_contract.payment_received_filter()
     );
 
-    // check bloom filter to be sure this transaction contains any relevant logs
-    // TODO: This does not work properly right now, get back this eventually
-    // TODO: compare to code in llamanodes/web3-this-then-that
-    // if let Some(ValueOrArray::Value(Some(x))) = payment_factory_contract
-    //     .payment_received_filter()
-    //     .filter
-    //     .topics[0]
-    // {
-    //     debug!("Bloom input bytes is: {:?}", x);
-    //     debug!("Bloom input bytes is: {:?}", x.as_fixed_bytes());
-    //     debug!("Bloom input as hex is: {:?}", hex!(x));
-    //     let bloom_input = BloomInput::Raw(hex!(x));
-    //     debug!(
-    //         "Transaction receipt logs_bloom: {:?}",
-    //         transaction_receipt.logs_bloom
-    //     );
-    //
-    //     // do a quick check that this transaction contains the required log
-    //     if !transaction_receipt.logs_bloom.contains_input(x) {
-    //         return Err(Web3ProxyError::BadRequest("no matching logs found".into()));
-    //     }
-    // }
+    // TODO: check bloom filters
+
+    // save all or nothing
+    let txn = db_conn.begin().await?;
 
     // the transaction might contain multiple relevant logs. collect them all
     let mut response_data = vec![];
-
-    // all or nothing
-    let txn = db_conn.begin().await?;
-
-    // parse the logs from the transaction receipt
     for log in transaction_receipt.logs {
         if let Some(true) = log.removed {
             todo!("delete this transaction from the database");
@@ -338,4 +327,28 @@ pub async fn user_balance_post(
     let response = (StatusCode::CREATED, Json(json!(response_data))).into_response();
 
     Ok(response)
+}
+
+/// `POST /user/balance_uncle/:uncle_hash` -- Manually process an uncle block to potentially update a user's balance.
+#[debug_handler]
+pub async fn user_balance_uncle_post(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    InsecureClientIp(ip): InsecureClientIp,
+    Path(mut params): Path<HashMap<String, String>>,
+) -> Web3ProxyResponse {
+    login_is_authorized(&app, ip).await?;
+
+    // Get the transaction hash, and the amount that the user wants to top up by.
+    // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
+    let tx_hash: H256 = params
+        .remove("tx_hash")
+        .ok_or(Web3ProxyError::BadRequest(
+            "You have not provided a tx_hash".into(),
+        ))?
+        .parse()
+        .map_err(|err| {
+            Web3ProxyError::BadRequest(format!("unable to parse tx_hash: {}", err).into())
+        })?;
+
+    todo!();
 }
