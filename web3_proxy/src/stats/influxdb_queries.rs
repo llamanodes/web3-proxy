@@ -225,14 +225,14 @@ pub async fn query_user_stats<'a>(
     );
 
     let query = f!(r#"
-    base = from(bucket: "{bucket}")
+    base = () => from(bucket: "{bucket}")
         |> range(start: {query_start}, stop: {query_stop})
         |> filter(fn: (r) => r["_measurement"] == "{measurement}")
         {filter_chain_id}
         {rpc_key_filter}
         {drop_method}
         
-    cumsum = base
+    cumsum = base()
         |> filter(fn: (r) => r["_field"] == "backend_requests" or r["_field"] == "cache_hits" or r["_field"] == "cache_misses" or r["_field"] == "frontend_requests" or r["_field"] == "no_servers" or r["_field"] == "sum_credits_used" or r["_field"] == "sum_request_bytes" or r["_field"] == "sum_response_bytes" or r["_field"] == "sum_response_millis")
         |> group(columns: ["_field", "_measurement", "archive_needed", "chain_id", "error_response", "method", "rpc_secret_key_id"])
         |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
@@ -240,12 +240,12 @@ pub async fn query_user_stats<'a>(
         |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
         |> group()
         
-    balance = base
+    balance = base()
         |> filter(fn: (r) => r["_field"] == "balance")
         |> group(columns: ["_field", "_measurement", "chain_id"])
         |> aggregateWindow(every: {query_window_seconds}s, fn: mean, createEmpty: false)
         |> drop(columns: ["_start", "_stop"])
-        |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+        |> rename(columns: {{_value: "balance"}})
         |> group()
 
     join(
