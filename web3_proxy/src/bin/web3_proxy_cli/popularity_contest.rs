@@ -1,13 +1,11 @@
-use std::{cmp::Reverse, collections::BTreeMap, str::FromStr};
-
-// show what nodes are used most often
 use argh::FromArgs;
 use ethers::types::U64;
-use log::trace;
+use ordered_float::OrderedFloat;
 use prettytable::{row, Table};
+use std::{cmp::Reverse, str::FromStr};
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// Second subcommand.
+/// show what nodes are used most often
 #[argh(subcommand, name = "popularity_contest")]
 pub struct PopularityContestSubCommand {
     #[argh(positional)]
@@ -19,14 +17,16 @@ pub struct PopularityContestSubCommand {
 #[derive(Debug)]
 struct BackendRpcData<'a> {
     name: &'a str,
-    // tier: u64,
-    // backup: bool,
-    // block_data_limit: u64,
+    tier: u64,
+    backup: bool,
+    block_data_limit: u64,
     head_block: u64,
-    requests: u64,
+    active_requests: u64,
+    internal_requests: u64,
+    external_requests: u64,
     head_latency_ms: f64,
     peak_latency_ms: f64,
-    peak_ewma_ms: f64,
+    weighted_latency_ms: f64,
 }
 
 impl PopularityContestSubCommand {
@@ -48,10 +48,9 @@ impl PopularityContestSubCommand {
             .as_array()
             .unwrap();
 
-        let mut by_tier = BTreeMap::<u64, Vec<_>>::new();
-        let mut tier_requests = BTreeMap::<u64, u64>::new();
-        let mut total_requests = 0;
         let mut highest_block = 0;
+        let mut rpc_data = vec![];
+        let mut total_external_requests = 0;
 
         for conn in conns {
             let conn = conn.as_object().unwrap();
@@ -60,19 +59,31 @@ impl PopularityContestSubCommand {
                 .get("display_name")
                 .unwrap_or_else(|| conn.get("name").unwrap())
                 .as_str()
-                .unwrap();
+                .unwrap_or("unknown");
 
             let tier = conn.get("tier").unwrap().as_u64().unwrap();
 
-            // let backup = conn.get("backup").unwrap().as_bool().unwrap();
+            let backup = conn.get("backup").unwrap().as_bool().unwrap();
 
-            // let block_data_limit = conn
-            //     .get("block_data_limit")
-            //     .unwrap()
-            //     .as_u64()
-            //     .unwrap_or(u64::MAX);
+            let block_data_limit = conn
+                .get("block_data_limit")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(u64::MAX);
 
-            let requests = conn.get("total_requests").unwrap().as_u64().unwrap();
+            let internal_requests = conn
+                .get("internal_requests")
+                .and_then(|x| x.as_u64())
+                .unwrap_or_default();
+
+            let external_requests = conn
+                .get("external_requests")
+                .and_then(|x| x.as_u64())
+                .unwrap_or_default();
+
+            let active_requests = conn
+                .get("active_requests")
+                .and_then(|x| x.as_u64())
+                .unwrap_or_default();
 
             let head_block = conn
                 .get("head_block")
@@ -88,85 +99,90 @@ impl PopularityContestSubCommand {
 
             let peak_latency_ms = conn
                 .get("peak_latency_ms")
-                .unwrap_or(&serde_json::Value::Null)
-                .as_f64()
+                .and_then(|x| x.as_f64())
                 .unwrap_or_default();
 
-            let peak_ewma_ms = conn
-                .get("peak_ewma_s")
-                .unwrap_or(&serde_json::Value::Null)
-                .as_f64()
-                .unwrap_or_default()
-                * 1000.0;
+            let weighted_latency_ms = conn
+                .get("weighted_latency_ms")
+                .and_then(|x| x.as_f64())
+                .unwrap_or_default();
 
-            let rpc_data = BackendRpcData {
+            let x = BackendRpcData {
                 name,
-                // tier,
-                // backup,
-                // block_data_limit,
-                requests,
+                tier,
+                backup,
+                block_data_limit,
+                active_requests,
+                internal_requests,
+                external_requests,
                 head_block,
                 head_latency_ms,
                 peak_latency_ms,
-                peak_ewma_ms,
+                weighted_latency_ms,
             };
 
-            total_requests += rpc_data.requests;
+            total_external_requests += x.external_requests;
 
-            *tier_requests.entry(tier).or_default() += rpc_data.requests;
-
-            by_tier.entry(tier).or_default().push(rpc_data);
+            rpc_data.push(x);
         }
 
-        trace!("tier_requests: {:#?}", tier_requests);
-        trace!("by_tier: {:#?}", by_tier);
+        rpc_data.sort_by_key(|x| {
+            (
+                Reverse(x.external_requests),
+                OrderedFloat(x.weighted_latency_ms),
+            )
+        });
 
         let mut table = Table::new();
 
         table.add_row(row![
             "name",
+            "external %",
+            "external",
+            "internal",
+            "active",
+            "lag",
+            "block_data_limit",
+            "head_ms",
+            "peak_ms",
+            "weighted_ms",
             "tier",
-            "rpc_requests",
-            "tier_request_pct",
-            "total_pct",
-            "head_lag",
-            "head_latency_ms",
-            "peak_latency_ms",
-            "peak_ewma_ms",
         ]);
 
-        let total_requests = total_requests as f32;
+        for rpc in rpc_data.into_iter() {
+            let external_request_pct = if total_external_requests == 0 {
+                0.0
+            } else {
+                (rpc.external_requests as f32) / (total_external_requests as f32) * 100.0
+            };
 
-        for (tier, rpcs) in by_tier.iter_mut() {
-            let t = (*tier_requests.get(tier).unwrap()) as f32;
+            let block_data_limit = if rpc.block_data_limit == u64::MAX {
+                "archive".to_string()
+            } else {
+                format!("{}", rpc.block_data_limit)
+            };
 
-            rpcs.sort_by_cached_key(|x| Reverse(x.requests));
+            let tier = if rpc.backup {
+                format!("{}B", rpc.tier)
+            } else {
+                rpc.tier.to_string()
+            };
 
-            for rpc in rpcs.iter() {
-                let tier_request_pct = if t == 0.0 {
-                    0.0
-                } else {
-                    (rpc.requests as f32) / t * 100.0
-                };
+            let lag = highest_block - rpc.head_block;
 
-                let total_request_pct = if total_requests == 0.0 {
-                    0.0
-                } else {
-                    (rpc.requests as f32) / total_requests * 100.0
-                };
-
-                table.add_row(row![
-                    rpc.name,
-                    tier,
-                    rpc.requests,
-                    tier_request_pct,
-                    total_request_pct,
-                    highest_block - rpc.head_block,
-                    format!("{:.3}", rpc.head_latency_ms),
-                    format!("{:.3}", rpc.peak_latency_ms),
-                    format!("{:.3}", rpc.peak_ewma_ms),
-                ]);
-            }
+            table.add_row(row![
+                rpc.name,
+                format!("{:.3}", external_request_pct),
+                rpc.external_requests,
+                rpc.internal_requests,
+                rpc.active_requests,
+                lag,
+                block_data_limit,
+                format!("{:.3}", rpc.head_latency_ms),
+                rpc.peak_latency_ms,
+                format!("{:.3}", rpc.weighted_latency_ms),
+                tier,
+            ]);
         }
 
         table.printstd();

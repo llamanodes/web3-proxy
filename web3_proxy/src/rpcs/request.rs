@@ -1,6 +1,6 @@
 use super::one::Web3Rpc;
 use crate::errors::Web3ProxyResult;
-use crate::frontend::authorization::Authorization;
+use crate::frontend::authorization::{Authorization, AuthorizationType};
 use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use anyhow::Context;
 use chrono::Utc;
@@ -181,9 +181,18 @@ impl OpenRequestHandle {
         // trace!(rpc=%self.rpc, %method, "request");
         trace!("requesting from {}", self.rpc);
 
-        self.rpc
-            .total_requests
-            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        match self.authorization.authorization_type {
+            AuthorizationType::Frontend => {
+                self.rpc
+                    .external_requests
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            AuthorizationType::Internal => {
+                self.rpc
+                    .internal_requests
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
 
         // we used to fetch_add the active_request count here, but sometimes a request is made without going through this function (like with subscriptions)
 
@@ -231,7 +240,8 @@ impl OpenRequestHandle {
                     } else if log_revert_chance == u16::MAX {
                         // trace!(%method, "gaurenteed chance. SAVING on revert");
                         self.error_handler
-                    } else if nanorand::tls_rng().generate_range(0u16..u16::MAX) < log_revert_chance {
+                    } else if nanorand::tls_rng().generate_range(0u16..u16::MAX) < log_revert_chance
+                    {
                         // trace!(%method, "missed chance. skipping save on revert");
                         RequestErrorHandler::TraceLevel
                     } else {

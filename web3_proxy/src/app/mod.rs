@@ -381,11 +381,18 @@ impl Web3ProxyApp {
                     .influxdb_org
                     .clone()
                     .expect("influxdb_org needed when influxdb_host is set");
+
                 let influxdb_token = top_config
                     .app
                     .influxdb_token
                     .clone()
                     .expect("influxdb_token needed when influxdb_host is set");
+
+                top_config
+                    .app
+                    .influxdb_bucket
+                    .as_ref()
+                    .expect("influxdb_bucket needed when influxdb_host is set");
 
                 let influxdb_client =
                     influxdb2::Client::new(influxdb_host, influxdb_org, influxdb_token);
@@ -518,19 +525,14 @@ impl Web3ProxyApp {
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
         // TODO: we should emit stats to calculate a more accurate expected cache size
         // TODO: do we actually want a TTL on this?
-        // TODO: configurable max item weight instead of using ~0.1%
+        // TODO: configurable max item weight
         // TODO: resize the cache automatically
-        let response_cache: JsonRpcResponseCache =
+        let jsonrpc_response_cache: JsonRpcResponseCache =
             CacheBuilder::new(top_config.app.response_cache_max_bytes)
+                .name("jsonrpc_response_cache")
+                .time_to_idle(Duration::from_secs(3600))
                 .weigher(json_rpc_response_weigher)
                 .build();
-        //     (top_config.app.response_cache_max_bytes / 16_384) as usize,
-        //     NonZeroU32::try_from((top_config.app.response_cache_max_bytes / 1024) as u32).unwrap(),
-        //     top_config.app.response_cache_max_bytes,
-        //     JsonRpcResponseWeigher,
-        //     Duration::from_secs(3600),
-        // )
-        // .await;
 
         // TODO: how should we handle hitting this max?
         let max_users = 20_000;
@@ -655,7 +657,7 @@ impl Web3ProxyApp {
             influxdb_client,
             internal_provider,
             ip_semaphores,
-            jsonrpc_response_cache: response_cache,
+            jsonrpc_response_cache,
             kafka_producer,
             login_rate_limiter,
             pending_transactions,

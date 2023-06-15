@@ -71,8 +71,10 @@ pub struct Web3Rpc {
     /// Automatically set priority
     pub(super) tier: AtomicU32,
     /// Track total requests served
-    /// TODO: maybe move this to graphana
-    pub(super) total_requests: AtomicUsize,
+    pub(super) internal_requests: AtomicUsize,
+    /// Track total requests served
+    pub(super) external_requests: AtomicUsize,
+    /// Track in-flight requests
     pub(super) active_requests: AtomicUsize,
     /// disconnect_watch is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) disconnect_watch: Option<watch::Sender<bool>>,
@@ -449,69 +451,74 @@ impl Web3Rpc {
     pub(crate) async fn send_head_block_result(
         self: &Arc<Self>,
         new_head_block: Web3ProxyResult<Option<ArcBlock>>,
-        block_sender: &flume::Sender<BlockAndRpc>,
+        block_and_rpc_sender: &flume::Sender<BlockAndRpc>,
         block_map: &BlocksByHashCache,
     ) -> Web3ProxyResult<()> {
+        let head_block_sender = self.head_block.as_ref().unwrap();
+
         let new_head_block = match new_head_block {
-            Ok(None) => {
-                let head_block_tx = self.head_block.as_ref().unwrap();
+            Ok(x) => {
+                let x = x.and_then(Web3ProxyBlock::try_new);
 
-                if head_block_tx.borrow().is_none() {
-                    // we previously sent a None. return early
-                    return Ok(());
-                }
+                match x {
+                    None => {
+                        if head_block_sender.borrow().is_none() {
+                            // we previously sent a None. return early
+                            return Ok(());
+                        }
 
-                let age = self.created_at.unwrap().elapsed().as_millis();
+                        let age = self.created_at.unwrap().elapsed().as_millis();
 
-                debug!("clearing head block on {} ({}ms old)!", self, age);
+                        debug!("clearing head block on {} ({}ms old)!", self, age);
 
-                head_block_tx.send_replace(None);
+                        // send an empty block to take this server out of rotation
+                        head_block_sender.send_replace(None);
 
-                None
-            }
-            Ok(Some(new_head_block)) => {
-                let new_head_block = Web3ProxyBlock::try_new(new_head_block)
-                    .expect("blocks from newHeads subscriptions should also convert");
+                        // TODO: clear self.block_data_limit?
 
-                let new_hash = *new_head_block.hash();
+                        None
+                    }
+                    Some(new_head_block) => {
+                        let new_hash = *new_head_block.hash();
 
-                // if we already have this block saved, set new_head_block to that arc. otherwise store this copy
-                let new_head_block = block_map
-                    .get_with_by_ref(&new_hash, async move { new_head_block })
-                    .await;
+                        // if we already have this block saved, set new_head_block to that arc. otherwise store this copy
+                        let new_head_block = block_map
+                            .get_with_by_ref(&new_hash, async move { new_head_block })
+                            .await;
 
-                // save the block so we don't send the same one multiple times
-                // also save so that archive checks can know how far back to query
-                self.head_block
-                    .as_ref()
-                    .unwrap()
-                    .send_replace(Some(new_head_block.clone()));
+                        // we are synced! yey!
+                        head_block_sender.send_replace(Some(new_head_block.clone()));
 
-                if self.block_data_limit() == U64::zero() {
-                    if let Err(err) = self.check_block_data_limit().await {
-                        warn!(
-                            "failed checking block limit after {} finished syncing. {:?}",
-                            self, err
-                        );
+                        if self.block_data_limit() == U64::zero() {
+                            if let Err(err) = self.check_block_data_limit().await {
+                                warn!(
+                                    "failed checking block limit after {} finished syncing. {:?}",
+                                    self, err
+                                );
+                            }
+                        }
+
+                        Some(new_head_block)
                     }
                 }
-
-                Some(new_head_block)
             }
             Err(err) => {
                 warn!("unable to get block from {}. err={:?}", self, err);
 
-                self.head_block.as_ref().unwrap().send_replace(None);
+                // send an empty block to take this server out of rotation
+                head_block_sender.send_replace(None);
+
+                // TODO: clear self.block_data_limit?
 
                 None
             }
         };
 
-        // send an empty block to take this server out of rotation
-        block_sender
+        // tell web3rpcs about this rpc having this block
+        block_and_rpc_sender
             .send_async((new_head_block, self.clone()))
             .await
-            .context("block_sender")?;
+            .context("block_and_rpc_sender failed sending")?;
 
         Ok(())
     }
@@ -684,7 +691,8 @@ impl Web3Rpc {
 
                 // errors here should not cause the loop to exit!
                 while !(*subscribe_stop_rx.borrow()) {
-                    new_total_requests = rpc.total_requests.load(atomic::Ordering::Relaxed);
+                    new_total_requests = rpc.internal_requests.load(atomic::Ordering::Relaxed)
+                        + rpc.external_requests.load(atomic::Ordering::Relaxed);
 
                     if new_total_requests - old_total_requests < 5 {
                         // TODO: if this fails too many times, reset the connection
@@ -1086,7 +1094,7 @@ impl Serialize for Web3Rpc {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Rpc", 12)?;
+        let mut state = serializer.serialize_struct("Web3Rpc", 13)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
@@ -1117,8 +1125,13 @@ impl Serialize for Web3Rpc {
         }
 
         state.serialize_field(
-            "total_requests",
-            &self.total_requests.load(atomic::Ordering::Acquire),
+            "external_requests",
+            &self.external_requests.load(atomic::Ordering::Relaxed),
+        )?;
+
+        state.serialize_field(
+            "internal_requests",
+            &self.internal_requests.load(atomic::Ordering::Relaxed),
         )?;
 
         state.serialize_field(
@@ -1133,7 +1146,10 @@ impl Serialize for Web3Rpc {
             &self.peak_latency.as_ref().unwrap().latency().as_millis(),
         )?;
 
-        state.serialize_field("peak_ewma_s", self.weighted_peak_ewma_seconds().as_ref())?;
+        {
+            let weighted_latency_ms = self.weighted_peak_ewma_seconds() * 1000.0;
+            state.serialize_field("weighted_latency_ms", weighted_latency_ms.as_ref())?;
+        }
 
         state.end()
     }
