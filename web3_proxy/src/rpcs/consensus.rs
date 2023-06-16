@@ -500,7 +500,7 @@ impl ConsensusFinder {
                 for (rpc, weighted_latency_ms) in weighted_latencies.into_iter() {
                     let tier = (weighted_latency_ms - min_latency) as f64 / divisor;
 
-                    let tier = tier.floor() as u32;
+                    let tier = (tier.floor() as u32).saturating_add(1);
 
                     // TODO: this should be trace
                     trace!(

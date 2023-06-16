@@ -470,8 +470,8 @@ impl Web3Rpcs {
 
         let watch_consensus_head_sender = self.watch_consensus_head_sender.as_ref().unwrap();
         let consensus_tier = new_consensus_rpcs.tier;
-        // TODO: think more about this unwrap
-        let total_tiers = consensus_finder.worst_tier().unwrap_or(10);
+        // TODO: think more about the default for total_tiers
+        let total_tiers = consensus_finder.worst_tier().unwrap_or_default();
         let backups_needed = new_consensus_rpcs.backups_needed;
         let consensus_head_block = new_consensus_rpcs.head_block.clone();
         let num_consensus_rpcs = new_consensus_rpcs.num_consensus_rpcs();
