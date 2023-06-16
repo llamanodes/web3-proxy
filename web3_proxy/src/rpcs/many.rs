@@ -933,11 +933,11 @@ impl Web3Rpcs {
                             let rate_limit_substrings = ["limit", "exceeded", "quota usage"];
                             for rate_limit_substr in rate_limit_substrings {
                                 if error_msg.contains(rate_limit_substr) {
-                                    if rate_limit_substr.contains("result on length") {
+                                    if error_msg.contains("result on length") {
                                         // this error contains "limit" but is not a rate limit error
                                         // TODO: make the expected limit configurable
                                         // TODO: parse the rate_limit_substr and only continue if it is < expected limit
-                                        if rate_limit_substr.contains("exceeding limit 2000000") {
+                                        if error_msg.contains("exceeding limit 2000000") {
                                             // they hit our expected limit. return the error now
                                             return Err(error.into());
                                         } else {
