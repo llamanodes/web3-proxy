@@ -48,7 +48,7 @@ impl ProxydSubCommand {
 }
 
 async fn run(
-    mut top_config: TopConfig,
+    top_config: TopConfig,
     top_config_path: Option<PathBuf>,
     frontend_port: u16,
     prometheus_port: u16,
@@ -87,13 +87,18 @@ async fn run(
     if let Some(top_config_path) = top_config_path {
         let config_sender = spawned_app.new_top_config_sender;
         {
+            let mut current_config = config_sender.borrow().clone();
+
             thread::spawn(move || loop {
                 match fs::read_to_string(&top_config_path) {
-                    Ok(new_top_config) => match toml::from_str(&new_top_config) {
+                    Ok(new_top_config) => match toml::from_str::<TopConfig>(&new_top_config) {
                         Ok(new_top_config) => {
-                            if new_top_config != top_config {
-                                top_config = new_top_config;
-                                config_sender.send(top_config.clone()).unwrap();
+                            if new_top_config != current_config {
+                                // TODO: print the differences
+                                // TODO: first run seems to always see differences. why?
+                                info!("config @ {:?} changed", top_config_path);
+                                config_sender.send(new_top_config.clone()).unwrap();
+                                current_config = new_top_config;
                             }
                         }
                         Err(err) => {

@@ -665,9 +665,6 @@ impl Web3ProxyApp {
 
         let (new_top_config_sender, mut new_top_config_receiver) = watch::channel(top_config);
 
-        // make sure we don't see the first run as changed
-        new_top_config_receiver.borrow_and_update();
-
         {
             let app = app.clone();
             let config_handle = tokio::spawn(async move {
@@ -676,8 +673,6 @@ impl Web3ProxyApp {
                         .changed()
                         .await
                         .context("failed awaiting top_config change")?;
-
-                    info!("config changed");
 
                     let new_top_config = new_top_config_receiver.borrow_and_update().to_owned();
 
