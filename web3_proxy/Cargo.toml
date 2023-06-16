@@ -22,6 +22,7 @@ migration = { path = "../migration" }
 payment-contracts = { path = "../payment-contracts" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 
+ethers = { git = "https://github.com/llamanodes/ethers-rs/", rev = "eb68f5d60850008cd302762bd3a5a4bdcfecc713", default-features = false, features = ["rustls", "ws"] }
 influxdb2 = { git = "https://github.com/llamanodes/influxdb2", features = ["rustls"], rev = "1e5577e14150797584f5ed0ea7aba0bd68f0a678" }
 influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/", rev = "1e5577e14150797584f5ed0ea7aba0bd68f0a678"}
 
@@ -50,7 +51,6 @@ counter = "0.5.7"
 derive_more = "0.99.17"
 env_logger = "0.10.0"
 ethbloom = "0.13.0"
-ethers = { version = "2.0.7", default-features = false, features = ["rustls", "ws"] }
 ewma = "0.1.1"
 fdlimit = "0.2.1"
 flume = "0.10.14"

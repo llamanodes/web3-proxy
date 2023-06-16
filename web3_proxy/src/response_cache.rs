@@ -226,60 +226,65 @@ impl TryFrom<ProviderError> for JsonRpcErrorData {
     }
 }
 
-pub fn json_rpc_response_weigher<K, R>(_key: &K, value: &JsonRpcResponseEnum<R>) -> u32 {
-    value.num_bytes()
+/// The inner u32 is the maximum weight per item
+#[derive(Copy, Clone)]
+pub struct JsonRpcResponseWeigher(pub u32);
+
+impl JsonRpcResponseWeigher {
+    pub fn weigh<K, R>(&self, _key: &K, value: &JsonRpcResponseEnum<R>) -> u32 {
+        let x = value.num_bytes();
+
+        if x > self.0 {
+            // return max. the item may start to be inserted into the cache, but it will be immediatly removed
+            u32::MAX
+        } else {
+            x
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::JsonRpcResponseEnum;
-    use crate::response_cache::json_rpc_response_weigher;
+    use crate::response_cache::JsonRpcResponseWeigher;
+    use moka::future::{Cache, CacheBuilder, ConcurrentCacheExt};
     use serde_json::value::RawValue;
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     #[tokio::test(start_paused = true)]
     async fn test_json_rpc_query_weigher() {
         let max_item_weight = 200;
         let weight_capacity = 1_000;
 
-        // let test_cache: Cache<u32, JsonRpcResponseEnum<Arc<RawValue>>> =
-        //     CacheBuilder::new(weight_capacity)
-        //         .weigher(json_rpc_response_weigher)
-        //         .time_to_live(Duration::from_secs(2))
-        //         .build();
+        let weigher = JsonRpcResponseWeigher(max_item_weight);
 
         let small_data: JsonRpcResponseEnum<Arc<RawValue>> = JsonRpcResponseEnum::Result {
             value: Box::<RawValue>::default().into(),
             num_bytes: max_item_weight / 2,
         };
 
-        assert_eq!(
-            json_rpc_response_weigher(&(), &small_data),
-            max_item_weight / 2
-        );
+        assert_eq!(weigher.weigh(&(), &small_data), max_item_weight / 2);
 
         let max_sized_data: JsonRpcResponseEnum<Arc<RawValue>> = JsonRpcResponseEnum::Result {
             value: Box::<RawValue>::default().into(),
             num_bytes: max_item_weight,
         };
 
-        assert_eq!(
-            json_rpc_response_weigher(&(), &max_sized_data),
-            max_item_weight
-        );
+        assert_eq!(weigher.weigh(&(), &max_sized_data), max_item_weight);
 
         let oversized_data: JsonRpcResponseEnum<Arc<RawValue>> = JsonRpcResponseEnum::Result {
             value: Box::<RawValue>::default().into(),
             num_bytes: max_item_weight * 2,
         };
 
-        assert_eq!(
-            json_rpc_response_weigher(&(), &oversized_data),
-            max_item_weight * 2
-        );
+        assert_eq!(weigher.weigh(&(), &oversized_data), u32::MAX);
 
-        // TODO: helper for inserts that does size checking
-        /*
+        let test_cache: Cache<u32, JsonRpcResponseEnum<Arc<RawValue>>> =
+            CacheBuilder::new(weight_capacity)
+                .weigher(move |k, v| weigher.weigh(k, v))
+                .time_to_live(Duration::from_secs(2))
+                .build();
+
         test_cache.insert(0, small_data).await;
 
         test_cache.get(&0).unwrap();
@@ -289,12 +294,18 @@ mod tests {
         test_cache.get(&0).unwrap();
         test_cache.get(&1).unwrap();
 
-        // TODO: this will currently work! need to wrap moka cache in a checked insert
         test_cache.insert(2, oversized_data).await;
 
         test_cache.get(&0).unwrap();
         test_cache.get(&1).unwrap();
+
+        // oversized data will be in the cache temporarily (it should just be an arc though, so that should be fine)
+        test_cache.get(&2).unwrap();
+
+        // sync should do necessary cleanup
+        test_cache.sync();
+
+        // now it should be empty
         assert!(test_cache.get(&2).is_none());
-        */
     }
 }

@@ -13,7 +13,7 @@ use crate::jsonrpc::{
 };
 use crate::relational_db::{get_db, get_migrated_db, DatabaseConnection, DatabaseReplica};
 use crate::response_cache::{
-    json_rpc_response_weigher, JsonRpcQueryCacheKey, JsonRpcResponseCache, JsonRpcResponseEnum,
+    JsonRpcQueryCacheKey, JsonRpcResponseCache, JsonRpcResponseEnum, JsonRpcResponseWeigher,
 };
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::consensus::ConsensusWeb3Rpcs;
@@ -43,7 +43,6 @@ use log::{error, info, trace, warn, Level};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{DatabaseTransaction, EntityTrait, PaginatorTrait, TransactionTrait};
 use moka::future::{Cache, CacheBuilder};
-use parking_lot::Mutex;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use serde::Serialize;
@@ -516,13 +515,15 @@ impl Web3ProxyApp {
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
         // TODO: we should emit stats to calculate a more accurate expected cache size
         // TODO: do we actually want a TTL on this?
-        // TODO: configurable max item weight
-        // TODO: resize the cache automatically
+        // TODO: configurable max item weight insted of hard coding to .1% of the cache?
+        let jsonrpc_weigher =
+            JsonRpcResponseWeigher((top_config.app.response_cache_max_bytes / 1000) as u32);
+
         let jsonrpc_response_cache: JsonRpcResponseCache =
             CacheBuilder::new(top_config.app.response_cache_max_bytes)
                 .name("jsonrpc_response_cache")
                 .time_to_idle(Duration::from_secs(3600))
-                .weigher(json_rpc_response_weigher)
+                .weigher(move |k, v| jsonrpc_weigher.weigh(k, v))
                 .build();
 
         // TODO: how should we handle hitting this max?
@@ -1703,17 +1704,13 @@ impl Web3ProxyApp {
                 if let Some(cache_key) = cache_key {
                     let from_block_num = cache_key.from_block_num();
                     let to_block_num = cache_key.to_block_num();
-                    let cache_errors = cache_key.cache_errors();
+                    let cache_jsonrpc_errors = cache_key.cache_errors();
 
-                    // moka makes us do annoying things with arcs
-                    enum CacheError {
-                        NotCached(JsonRpcResponseEnum<Arc<RawValue>>),
-                        Error(Arc<Web3ProxyError>),
-                    }
+                    // TODO: try to fetch out of s3
 
-                    let x = self
+                    self
                         .jsonrpc_response_cache
-                        .try_get_with::<_, Mutex<CacheError>>(cache_key.hash(), async {
+                        .try_get_with::<_, Web3ProxyError>(cache_key.hash(), async {
                             let response_data = timeout(
                                 duration,
                                 self.balanced_rpcs
@@ -1725,34 +1722,20 @@ impl Web3ProxyApp {
                                         to_block_num.as_ref(),
                                     )
                                 )
-                                .await
-                                .map_err(|x| Mutex::new(CacheError::Error(Arc::new(Web3ProxyError::from(x)))))?;
+                                .await?;
 
-                            // TODO: i think response data should be Arc<JsonRpcResponseEnum<Box<RawValue>>>, but that's more work
-                            let response_data: JsonRpcResponseEnum<Arc<RawValue>> = response_data.try_into()
-                                .map_err(|x| Mutex::new(CacheError::Error(Arc::new(x))))?;
-
-                            // TODO: read max size from the config
-                            if response_data.num_bytes() as u64 > self.config.response_cache_max_bytes / 1000 {
-                                Err(Mutex::new(CacheError::NotCached(response_data)))
-                            } else if matches!(response_data, JsonRpcResponseEnum::Result { .. }) || cache_errors {
-                                Ok(response_data)
+                            if !cache_jsonrpc_errors && let Err(err) = response_data {
+                                // if we are not supposed to cache jsonrpc errors,
+                                // then we must not convert Provider errors into a JsonRpcResponseEnum
+                                // return all the errors now. moka will not cache Err results
+                                Err(err)
                             } else {
-                                Err(Mutex::new(CacheError::NotCached(response_data)))
-                            }
-                        }).await;
+                                let response_data: JsonRpcResponseEnum<Arc<RawValue>> = response_data.try_into()?;
 
-                    match x {
-                        Ok(x) => x,
-                        Err(arc_err) => {
-                            let locked = arc_err.lock();
-
-                            match &*locked {
-                                CacheError::Error(err) => return Err(Web3ProxyError::Arc(err.clone())),
-                                CacheError::NotCached(x) => x.clone(),
+                                // TODO: response data should maybe be Arc<JsonRpcResponseEnum<Box<RawValue>>>, but that's more work
+                                Ok(response_data)
                             }
-                        }
-                    }
+                        }).await?
                 } else {
                     let x = timeout(
                         duration,

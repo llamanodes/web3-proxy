@@ -314,7 +314,10 @@ impl JsonRpcForwardedResponse {
                     data = err.data.clone();
                 } else if let Some(err) = err.as_serde_error() {
                     // this is not an rpc error. keep it as an error
-                    return Err(Web3ProxyError::BadResponse(err.to_string().into()));
+                    // TODO: ankr gives us "rate limited" but ethers fails to parse because it tries to require id even though its optional
+                    return Err(Web3ProxyError::BadResponse(
+                        format!("parse error: {}", err).into(),
+                    ));
                 } else {
                     return Err(anyhow::anyhow!("unexpected ethers error! {:?}", err).into());
                 }

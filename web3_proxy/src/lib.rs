@@ -1,3 +1,4 @@
+#![feature(let_chains)]
 #![feature(trait_alias)]
 
 pub mod admin_queries;
