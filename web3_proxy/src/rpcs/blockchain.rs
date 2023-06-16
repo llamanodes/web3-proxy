@@ -476,7 +476,7 @@ impl Web3Rpcs {
         let consensus_head_block = new_consensus_rpcs.head_block.clone();
         let num_consensus_rpcs = new_consensus_rpcs.num_consensus_rpcs();
         let num_active_rpcs = consensus_finder.len();
-        let total_rpcs = self.by_name.load().len();
+        let total_rpcs = self.len();
 
         let new_consensus_rpcs = Arc::new(new_consensus_rpcs);
 
