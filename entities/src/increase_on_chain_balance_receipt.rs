@@ -14,7 +14,7 @@ pub struct Model {
     pub amount: Decimal,
     pub deposit_to_user_id: u64,
     pub block_hash: String,
-    pub log_index: u32,
+    pub log_index: u64,
     pub token_address: String,
 }
 

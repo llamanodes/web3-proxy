@@ -190,7 +190,7 @@ pub async fn user_balance_post(
         .block_hash
         .expect("if tx_pending is false, block_hash must be set");
 
-    debug!("Transaction receipt: {:#?}", transaction_receipt);
+    trace!("Transaction receipt: {:#?}", transaction_receipt);
 
     // TODO: if the transaction doesn't have enough confirmations yet, add it to a queue to try again later
     // 1 confirmation should be fine though
@@ -265,7 +265,7 @@ pub async fn user_balance_post(
             payment_token_amount.set_scale(payment_token_decimals)?;
 
             debug!(
-                "Found deposit transaction for: {:?} {:?} {:?}",
+                "Found deposit event for: {:?} {:?} {:?}",
                 recipient_account, payment_token_address, payment_token_amount
             );
 
@@ -313,15 +313,16 @@ pub async fn user_balance_post(
                 .exec(&txn)
                 .await?;
 
-            debug!("Saving tx_hash: {:?}", tx_hash);
+            debug!("Saving log {} of txid {:?}", log_index, tx_hash);
             let receipt = increase_on_chain_balance_receipt::ActiveModel {
-                tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
-                chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
-                // TODO: need a migration that adds log_index
-                // TODO: need a migration that adds payment_token_address. will be useful for stats
+                id: sea_orm::ActiveValue::NotSet,
                 amount: sea_orm::ActiveValue::Set(payment_token_amount),
+                block_hash: sea_orm::ActiveValue::Set(block_hash.encode_hex()),
+                chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
                 deposit_to_user_id: sea_orm::ActiveValue::Set(recipient.id),
-                ..Default::default()
+                log_index: sea_orm::ActiveValue::Set(log_index),
+                token_address: sea_orm::ActiveValue::Set(payment_token_address.encode_hex()),
+                tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
             };
             trace!("Trying to insert receipt {:?}", receipt);
 

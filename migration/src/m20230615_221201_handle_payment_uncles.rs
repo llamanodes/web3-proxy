@@ -18,7 +18,7 @@ impl MigrationTrait for Migration {
                     )
                     .add_column(
                         ColumnDef::new(IncreaseOnChainBalanceReceipt::LogIndex)
-                            .integer()
+                            .big_integer()
                             .unsigned()
                             .not_null(),
                     )
