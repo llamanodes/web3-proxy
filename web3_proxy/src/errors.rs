@@ -15,7 +15,7 @@ use derive_more::{Display, Error, From};
 use ethers::prelude::ContractError;
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
@@ -97,6 +97,7 @@ pub enum Web3ProxyError {
     NoBlockNumberOrHash,
     NoBlocksKnown,
     NoConsensusHeadBlock,
+    NoDatabase,
     NoHandleReady,
     NoServersSynced,
     #[display(fmt = "{}/{}", num_known, min_head_rpcs)]
@@ -201,7 +202,7 @@ impl Web3ProxyError {
                 return err.as_response_parts::<R>();
             }
             Self::BadRequest(err) => {
-                debug!("BAD_REQUEST: {}", err);
+                trace!("BAD_REQUEST: {}", err);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -268,9 +269,10 @@ impl Web3ProxyError {
                 )
             }
             Self::EipVerificationFailed(err_1, err_191) => {
-                info!(
+                trace!(
                     "EipVerificationFailed err_1={:#?} err2={:#?}",
-                    err_1, err_191
+                    err_1,
+                    err_191
                 );
                 (
                     StatusCode::UNAUTHORIZED,
@@ -331,7 +333,7 @@ impl Web3ProxyError {
             }
             // Self::JsonRpcForwardedError(x) => (StatusCode::OK, x),
             Self::GasEstimateNotU256 => {
-                warn!("GasEstimateNotU256");
+                trace!("GasEstimateNotU256");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
@@ -353,7 +355,7 @@ impl Web3ProxyError {
                 )
             }
             Self::Headers(err) => {
-                warn!("HeadersError {:?}", err);
+                trace!("HeadersError {:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -388,7 +390,7 @@ impl Web3ProxyError {
                 )
             }
             Self::InvalidBlockBounds { min, max } => {
-                debug!("InvalidBlockBounds min={} max={}", min, max);
+                trace!("InvalidBlockBounds min={} max={}", min, max);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -414,7 +416,7 @@ impl Web3ProxyError {
                 )
             }
             Self::IpNotAllowed(ip) => {
-                debug!("IpNotAllowed ip={})", ip);
+                trace!("IpNotAllowed ip={})", ip);
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
@@ -425,7 +427,7 @@ impl Web3ProxyError {
                 )
             }
             Self::InvalidHeaderValue(err) => {
-                debug!("InvalidHeaderValue err={:?}", err);
+                trace!("InvalidHeaderValue err={:?}", err);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -436,7 +438,7 @@ impl Web3ProxyError {
                 )
             }
             Self::InvalidEip => {
-                debug!("InvalidEip");
+                trace!("InvalidEip");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -447,7 +449,7 @@ impl Web3ProxyError {
                 )
             }
             Self::InvalidInviteCode => {
-                debug!("InvalidInviteCode");
+                trace!("InvalidInviteCode");
                 (
                     StatusCode::UNAUTHORIZED,
                     JsonRpcErrorData {
@@ -470,7 +472,7 @@ impl Web3ProxyError {
                 )
             }
             Self::UnknownReferralCode => {
-                debug!("UnknownReferralCode");
+                trace!("UnknownReferralCode");
                 (
                     StatusCode::UNAUTHORIZED,
                     JsonRpcErrorData {
@@ -481,7 +483,7 @@ impl Web3ProxyError {
                 )
             }
             Self::InvalidReferer => {
-                debug!("InvalidReferer");
+                trace!("InvalidReferer");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -492,7 +494,7 @@ impl Web3ProxyError {
                 )
             }
             Self::InvalidSignatureLength => {
-                debug!("InvalidSignatureLength");
+                trace!("InvalidSignatureLength");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -503,7 +505,7 @@ impl Web3ProxyError {
                 )
             }
             Self::InvalidUserAgent => {
-                debug!("InvalidUserAgent");
+                trace!("InvalidUserAgent");
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
@@ -514,7 +516,7 @@ impl Web3ProxyError {
                 )
             }
             Self::InvalidUserKey => {
-                warn!("InvalidUserKey");
+                trace!("InvalidUserKey");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -598,6 +600,17 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "no consensus head block".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::NoDatabase => {
+                error!("no database configured");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: "no database configured!".into(),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
                 )
@@ -790,7 +803,7 @@ impl Web3ProxyError {
                 )
             }
             Self::RefererRequired => {
-                debug!("referer required");
+                trace!("referer required");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -801,7 +814,7 @@ impl Web3ProxyError {
                 )
             }
             Self::RefererNotAllowed(referer) => {
-                debug!("referer not allowed referer={:?}", referer);
+                trace!("referer not allowed referer={:?}", referer);
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
@@ -915,7 +928,7 @@ impl Web3ProxyError {
                 },
             ),
             Self::UserAgentRequired => {
-                debug!("UserAgentRequired");
+                trace!("UserAgentRequired");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -926,7 +939,7 @@ impl Web3ProxyError {
                 )
             }
             Self::UserAgentNotAllowed(ua) => {
-                debug!("UserAgentNotAllowed ua={}", ua);
+                trace!("UserAgentNotAllowed ua={}", ua);
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {

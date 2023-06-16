@@ -29,7 +29,6 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
-use tokio::select;
 use tokio::sync::watch;
 use tokio::time::{interval, sleep, sleep_until, timeout, Duration, Instant, MissedTickBehavior};
 use url::Url;
@@ -96,7 +95,7 @@ impl Web3Rpc {
         redis_pool: Option<RedisPool>,
         block_interval: Duration,
         block_map: BlocksByHashCache,
-        block_sender: Option<flume::Sender<BlockAndRpc>>,
+        block_and_rpc_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         let created_at = Instant::now();
@@ -132,8 +131,8 @@ impl Web3Rpc {
         let backup = config.backup;
 
         let block_data_limit: AtomicU64 = config.block_data_limit.unwrap_or_default().into();
-        let automatic_block_limit =
-            (block_data_limit.load(atomic::Ordering::Acquire) == 0) && block_sender.is_some();
+        let automatic_block_limit = (block_data_limit.load(atomic::Ordering::Acquire) == 0)
+            && block_and_rpc_sender.is_some();
 
         // have a sender for tracking hard limit anywhere. we use this in case we
         // and track on servers that have a configured hard limit
@@ -219,7 +218,12 @@ impl Web3Rpc {
             tokio::spawn(async move {
                 // TODO: this needs to be a subscribe_with_reconnect that does a retry with jitter and exponential backoff
                 new_connection
-                    .subscribe_with_reconnect(block_map, block_sender, chain_id, tx_id_sender)
+                    .subscribe_with_reconnect(
+                        block_map,
+                        block_and_rpc_sender,
+                        chain_id,
+                        tx_id_sender,
+                    )
                     .await
             })
         };
@@ -580,7 +584,7 @@ impl Web3Rpc {
     async fn subscribe_with_reconnect(
         self: Arc<Self>,
         block_map: BlocksByHashCache,
-        block_sender: Option<flume::Sender<BlockAndRpc>>,
+        block_and_rpc_sender: Option<flume::Sender<BlockAndRpc>>,
         chain_id: u64,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> Web3ProxyResult<()> {
@@ -589,7 +593,7 @@ impl Web3Rpc {
                 .clone()
                 .subscribe(
                     block_map.clone(),
-                    block_sender.clone(),
+                    block_and_rpc_sender.clone(),
                     chain_id,
                     tx_id_sender.clone(),
                 )
@@ -623,7 +627,7 @@ impl Web3Rpc {
     async fn subscribe(
         self: Arc<Self>,
         block_map: BlocksByHashCache,
-        block_sender: Option<flume::Sender<BlockAndRpc>>,
+        block_and_rpc_sender: Option<flume::Sender<BlockAndRpc>>,
         chain_id: u64,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> Web3ProxyResult<()> {
@@ -632,6 +636,10 @@ impl Web3Rpc {
         } else {
             Some(RequestErrorHandler::ErrorLevel)
         };
+
+        if self.should_disconnect() {
+            return Ok(());
+        }
 
         if let Some(url) = self.ws_url.clone() {
             debug!("starting websocket provider on {}", self);
@@ -643,6 +651,10 @@ impl Web3Rpc {
             self.ws_provider.store(Some(x));
         }
 
+        if self.should_disconnect() {
+            return Ok(());
+        }
+
         debug!("starting subscriptions on {}", self);
 
         self.check_provider(chain_id).await?;
@@ -650,21 +662,21 @@ impl Web3Rpc {
         let mut futures = vec![];
 
         // TODO: use this channel instead of self.disconnect_watch
-        let (subscribe_stop_tx, mut subscribe_stop_rx) = watch::channel(false);
+        let (subscribe_stop_tx, subscribe_stop_rx) = watch::channel(false);
 
-        // subscribe to the disconnect watch. the app uses this when shutting down
+        // subscribe to the disconnect watch. the app uses this when shutting down or when configs change
         if let Some(disconnect_watch_tx) = self.disconnect_watch.as_ref() {
+            let clone = self.clone();
             let mut disconnect_watch_rx = disconnect_watch_tx.subscribe();
 
             let f = async move {
-                // TODO: make sure it changed to "true"
-                select! {
-                    x = disconnect_watch_rx.changed() => {
-                        x?;
-                    },
-                    x = subscribe_stop_rx.changed() => {
-                        x?;
-                    },
+                loop {
+                    if *disconnect_watch_rx.borrow_and_update() {
+                        info!("disconnect triggered on {}", clone);
+                        break;
+                    }
+
+                    disconnect_watch_rx.changed().await?;
                 }
                 Ok(())
             };
@@ -680,8 +692,6 @@ impl Web3Rpc {
             // TODO: how often? different depending on the chain?
             // TODO: reset this timeout when a new block is seen? we need to keep request_latency updated though
             let health_sleep_seconds = 5;
-
-            let subscribe_stop_rx = subscribe_stop_tx.subscribe();
 
             // health check loop
             let f = async move {
@@ -718,18 +728,22 @@ impl Web3Rpc {
         }
 
         // subscribe to new heads
-        if let Some(block_sender) = block_sender.clone() {
+        if let Some(block_and_rpc_sender) = block_and_rpc_sender.clone() {
             let clone = self.clone();
             let subscribe_stop_rx = subscribe_stop_tx.subscribe();
 
             let f = async move {
                 let x = clone
-                    .subscribe_new_heads(block_sender.clone(), block_map.clone(), subscribe_stop_rx)
+                    .subscribe_new_heads(
+                        block_and_rpc_sender.clone(),
+                        block_map.clone(),
+                        subscribe_stop_rx,
+                    )
                     .await;
 
                 // error or success, we clear the block when subscribe_new_heads exits
                 clone
-                    .send_head_block_result(Ok(None), &block_sender, &block_map)
+                    .send_head_block_result(Ok(None), &block_and_rpc_sender, &block_map)
                     .await?;
 
                 x
@@ -762,6 +776,9 @@ impl Web3Rpc {
         subscribe_stop_tx.send_replace(true);
 
         // TODO: wait for all of the futures to exit?
+
+        // TODO: tell ethers to disconnect?
+        self.ws_provider.store(None);
 
         Ok(())
     }
@@ -806,6 +823,7 @@ impl Web3Rpc {
 
             while let Some(block) = blocks.next().await {
                 if *subscribe_stop_rx.borrow() {
+                    trace!("stopping ws block subscription on {}", self);
                     break;
                 }
 
@@ -822,6 +840,7 @@ impl Web3Rpc {
 
             loop {
                 if *subscribe_stop_rx.borrow() {
+                    trace!("stopping http block subscription on {}", self);
                     break;
                 }
 
@@ -848,6 +867,7 @@ impl Web3Rpc {
             .await?;
 
         if *subscribe_stop_rx.borrow() {
+            debug!("new heads subscription exited");
             Ok(())
         } else {
             Err(anyhow!("new_heads subscription exited. reconnect needed").into())
@@ -860,7 +880,14 @@ impl Web3Rpc {
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
         mut subscribe_stop_rx: watch::Receiver<bool>,
     ) -> Web3ProxyResult<()> {
-        subscribe_stop_rx.changed().await?;
+        // TODO: check that it actually changed to true
+        loop {
+            if *subscribe_stop_rx.borrow_and_update() {
+                break;
+            }
+
+            subscribe_stop_rx.changed().await?;
+        }
 
         /*
         trace!("watching pending transactions on {}", self);
@@ -1174,7 +1201,6 @@ impl fmt::Debug for Web3Rpc {
 
 impl fmt::Display for Web3Rpc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: filter basic auth and api keys
         write!(f, "{}", &self.name)
     }
 }

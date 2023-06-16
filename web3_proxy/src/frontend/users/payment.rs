@@ -1,6 +1,8 @@
 use crate::app::Web3ProxyApp;
-use crate::errors::{Web3ProxyError, Web3ProxyResponse};
-use crate::frontend::authorization::login_is_authorized;
+use crate::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
+use crate::frontend::authorization::{
+    login_is_authorized, Authorization as Web3ProxyAuthorization,
+};
 use crate::frontend::users::authentication::register_new_user;
 use anyhow::Context;
 use axum::{
@@ -13,13 +15,14 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use entities::{balance, increase_on_chain_balance_receipt, rpc_key, user};
 use ethers::abi::AbiEncode;
-use ethers::types::{Address, TransactionReceipt, H256};
-use hashbrown::HashMap;
+use ethers::types::{Address, Block, TransactionReceipt, TxHash, H256};
+use hashbrown::{HashMap, HashSet};
 use http::StatusCode;
 use log::{debug, info, trace};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+    self, ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, IntoActiveModel, ModelTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
 use migration::{Expr, OnConflict};
 use payment_contracts::ierc20::IERC20;
@@ -100,10 +103,7 @@ pub async fn user_deposits_get(
     Ok(Json(response).into_response())
 }
 
-/// `POST /user/balance/:tx_hash` -- Manually process a confirmed txid to update a user's balance.
-///
-/// We will subscribe to events to watch for any user deposits, but sometimes events can be missed.
-/// TODO: change this. just have a /tx/:txhash that is open to anyone. rate limit like we rate limit /login
+/// `POST /user/balance/:tx_hash` -- Process a confirmed txid to update a user's balance.
 #[debug_handler]
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -113,10 +113,9 @@ pub async fn user_balance_post(
     // I suppose this is ok / good, so people don't spam this endpoint as it is not "cheap"
     // we rate limit by ip instead of bearer token so transactions are easy to submit from scripts
     // TODO: if ip is a 10. or a 172., allow unlimited
-    login_is_authorized(&app, ip).await?;
+    let authorization = login_is_authorized(&app, ip).await?;
 
-    // Get the transaction hash, and the amount that the user wants to top up by.
-    // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
+    // Get the transaction hash
     let tx_hash: H256 = params
         .remove("tx_hash")
         .ok_or(Web3ProxyError::BadRequest(
@@ -129,36 +128,89 @@ pub async fn user_balance_post(
 
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
 
-    // Return early if the tx was already added
-    if increase_on_chain_balance_receipt::Entity::find()
-        .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
-        .one(&db_conn)
-        .await?
-        .is_some()
-    {
-        // TODO: double check that the transaction is still seen as "confirmed" if it is NOT, we need to remove credits!
-
-        // this will be status code 200, not 204
-        let response = Json(json!({
-            "result": "success",
-            "message": "this transaction was already in the database",
-        }))
-        .into_response();
-
-        return Ok(response);
-    };
+    let authorization = Arc::new(authorization);
 
     // get the transaction receipt
     let transaction_receipt = app
-        .internal_request::<_, Option<TransactionReceipt>>("eth_getTransactionReceipt", (tx_hash,))
-        .await?
-        .ok_or(Web3ProxyError::BadRequest(
-            format!("transaction receipt not found for {}", tx_hash,).into(),
-        ))?;
+        .authorized_request::<_, Option<TransactionReceipt>>(
+            "eth_getTransactionReceipt",
+            (tx_hash,),
+            authorization.clone(),
+        )
+        .await?;
+
+    // check for uncles
+    let mut find_uncles = increase_on_chain_balance_receipt::Entity::find()
+        // .lock_exclusive()
+        .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
+        .filter(increase_on_chain_balance_receipt::Column::ChainId.eq(app.config.chain_id));
+
+    let tx_pending =
+        if let Some(block_hash) = transaction_receipt.as_ref().and_then(|x| x.block_hash) {
+            // check for uncles
+            // this transaction is confirmed
+            // any rows in the db with a block hash that doesn't match the receipt should be deleted
+            find_uncles = find_uncles.filter(
+                increase_on_chain_balance_receipt::Column::BlockHash.ne(block_hash.encode_hex()),
+            );
+
+            false
+        } else {
+            // no block_hash to check
+            // this transaction is not confirmed
+            // any rows in the db should be deleted
+            true
+        };
+
+    let uncle_hashes = find_uncles.all(&db_conn).await?;
+
+    let uncle_hashes: HashSet<_> = uncle_hashes
+        .into_iter()
+        .map(|x| serde_json::from_str(x.block_hash.as_str()).unwrap())
+        .collect();
+
+    for uncle_hash in uncle_hashes.into_iter() {
+        if let Some(x) = handle_uncle_block(&app, &authorization, uncle_hash).await? {
+            info!("balance changes from uncle: {:#?}", x);
+        }
+    }
+
+    if tx_pending {
+        // the transaction isn't confirmed. return early
+        // TODO: BadRequest, or something else?
+        return Err(Web3ProxyError::BadRequest(
+            "this transaction has not confirmed yet. Please try again later.".into(),
+        ));
+    }
+
+    let transaction_receipt =
+        transaction_receipt.expect("if tx_pending is false, transaction_receipt must be set");
+
+    let block_hash = transaction_receipt
+        .block_hash
+        .expect("if tx_pending is false, block_hash must be set");
 
     trace!("Transaction receipt: {:#?}", transaction_receipt);
 
     // TODO: if the transaction doesn't have enough confirmations yet, add it to a queue to try again later
+    // 1 confirmation should be fine though
+
+    let txn = db_conn.begin().await?;
+
+    // if the transaction is already saved, return early
+    if increase_on_chain_balance_receipt::Entity::find()
+        .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
+        .filter(increase_on_chain_balance_receipt::Column::ChainId.eq(app.config.chain_id))
+        .filter(increase_on_chain_balance_receipt::Column::BlockHash.eq(block_hash.encode_hex()))
+        .one(&txn)
+        .await?
+        .is_some()
+    {
+        return Ok(Json(json!({
+            "result": "tx_hash already saved",
+        }))
+        .into_response());
+    };
 
     let payment_factory_address = app
         .config
@@ -168,47 +220,17 @@ pub async fn user_balance_post(
     let payment_factory_contract =
         PaymentFactory::new(payment_factory_address, app.internal_provider().clone());
 
-    debug!(
-        "Payment Factory Filter: {:?}",
-        payment_factory_contract.payment_received_filter()
-    );
-
-    // check bloom filter to be sure this transaction contains any relevant logs
-    // TODO: This does not work properly right now, get back this eventually
-    // TODO: compare to code in llamanodes/web3-this-then-that
-    // if let Some(ValueOrArray::Value(Some(x))) = payment_factory_contract
-    //     .payment_received_filter()
-    //     .filter
-    //     .topics[0]
-    // {
-    //     debug!("Bloom input bytes is: {:?}", x);
-    //     debug!("Bloom input bytes is: {:?}", x.as_fixed_bytes());
-    //     debug!("Bloom input as hex is: {:?}", hex!(x));
-    //     let bloom_input = BloomInput::Raw(hex!(x));
-    //     debug!(
-    //         "Transaction receipt logs_bloom: {:?}",
-    //         transaction_receipt.logs_bloom
-    //     );
-    //
-    //     // do a quick check that this transaction contains the required log
-    //     if !transaction_receipt.logs_bloom.contains_input(x) {
-    //         return Err(Web3ProxyError::BadRequest("no matching logs found".into()));
-    //     }
-    // }
+    // TODO: check bloom filters
 
     // the transaction might contain multiple relevant logs. collect them all
     let mut response_data = vec![];
-
-    // all or nothing
-    let txn = db_conn.begin().await?;
-
-    // parse the logs from the transaction receipt
     for log in transaction_receipt.logs {
         if let Some(true) = log.removed {
-            todo!("delete this transaction from the database");
+            // TODO: do we need to make sure this row is deleted? it should be handled by `handle_uncle_block`
+            continue;
         }
 
-        // Create a new transaction that will be used for joint transaction
+        // Parse the log into an event
         if let Ok(event) = payment_factory_contract
             .decode_event::<payment_factory::PaymentReceivedFilter>(
                 "PaymentReceived",
@@ -228,7 +250,8 @@ pub async fn user_balance_post(
 
             let log_index = log
                 .log_index
-                .context("no log_index. transaction must not be confirmed")?;
+                .context("no log_index. transaction must not be confirmed")?
+                .as_u64();
 
             // the internal provider will handle caching of requests
             let payment_token = IERC20::new(payment_token_address, app.internal_provider().clone());
@@ -241,31 +264,33 @@ pub async fn user_balance_post(
             // Setting the scale already does the decimal shift, no need to divide a second time
             payment_token_amount.set_scale(payment_token_decimals)?;
 
-            info!(
-                "Found deposit transaction for: {:?} {:?} {:?}",
+            debug!(
+                "Found deposit event for: {:?} {:?} {:?}",
                 recipient_account, payment_token_address, payment_token_amount
             );
 
             let recipient = match user::Entity::find()
                 .filter(user::Column::Address.eq(recipient_account.to_fixed_bytes().as_slice()))
-                .one(&db_conn)
+                .one(&txn)
                 .await?
             {
                 Some(x) => x,
                 None => {
-                    let (user, _, _) = register_new_user(&db_conn, recipient_account).await?;
+                    let (user, _, _) = register_new_user(&txn, recipient_account).await?;
 
                     user
                 }
             };
 
-            // For now we only accept stablecoins
-            // And we hardcode the peg (later we would have to depeg this, for example
+            // For now we only accept stablecoins. This will need conversions if we accept other tokens.
             // 1$ = Decimal(1) for any stablecoin
             // TODO: Let's assume that people don't buy too much at _once_, we do support >$1M which should be fine for now
-            debug!(
+            // TODO: double check. why >$1M? Decimal type in the database?
+            trace!(
                 "Arithmetic is: {:?} / 10 ^ {:?} = {:?}",
-                payment_token_wei, payment_token_decimals, payment_token_amount
+                payment_token_wei,
+                payment_token_decimals,
+                payment_token_amount
             );
 
             // create or update the balance
@@ -275,7 +300,7 @@ pub async fn user_balance_post(
                 user_id: sea_orm::Set(recipient.id),
                 ..Default::default()
             };
-            info!("Trying to insert into balance entry: {:?}", balance_entry);
+            trace!("Trying to insert into balance entry: {:?}", balance_entry);
             balance::Entity::insert(balance_entry)
                 .on_conflict(
                     OnConflict::new()
@@ -288,17 +313,18 @@ pub async fn user_balance_post(
                 .exec(&txn)
                 .await?;
 
-            debug!("Saving tx_hash: {:?}", tx_hash);
+            debug!("Saving log {} of txid {:?}", log_index, tx_hash);
             let receipt = increase_on_chain_balance_receipt::ActiveModel {
-                tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
-                chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
-                // TODO: need a migration that adds log_index
-                // TODO: need a migration that adds payment_token_address. will be useful for stats
+                id: sea_orm::ActiveValue::NotSet,
                 amount: sea_orm::ActiveValue::Set(payment_token_amount),
+                block_hash: sea_orm::ActiveValue::Set(block_hash.encode_hex()),
+                chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
                 deposit_to_user_id: sea_orm::ActiveValue::Set(recipient.id),
-                ..Default::default()
+                log_index: sea_orm::ActiveValue::Set(log_index),
+                token_address: sea_orm::ActiveValue::Set(payment_token_address.encode_hex()),
+                tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
             };
-            info!("Trying to insert receipt {:?}", receipt);
+            trace!("Trying to insert receipt {:?}", receipt);
 
             receipt.save(&txn).await?;
 
@@ -323,19 +349,118 @@ pub async fn user_balance_post(
 
             let x = json!({
                 "tx_hash": tx_hash,
+                "block_hash": block_hash,
                 "log_index": log_index,
                 "token": payment_token_address,
                 "amount": payment_token_amount,
             });
+
+            debug!("deposit data: {:#?}", x);
 
             response_data.push(x);
         }
     }
 
     txn.commit().await?;
-    debug!("Saved to db");
 
     let response = (StatusCode::CREATED, Json(json!(response_data))).into_response();
 
     Ok(response)
+}
+
+/// `POST /user/balance_uncle/:uncle_hash` -- Process an uncle block to potentially update a user's balance.
+#[debug_handler]
+pub async fn user_balance_uncle_post(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    InsecureClientIp(ip): InsecureClientIp,
+    Path(mut params): Path<HashMap<String, String>>,
+) -> Web3ProxyResponse {
+    let authorization = login_is_authorized(&app, ip).await?;
+
+    // Get the transaction hash, and the amount that the user wants to top up by.
+    // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
+    let uncle_hash: H256 = params
+        .remove("uncle_hash")
+        .ok_or(Web3ProxyError::BadRequest(
+            "You have not provided a uncle_hash".into(),
+        ))?
+        .parse()
+        .map_err(|err| {
+            Web3ProxyError::BadRequest(format!("unable to parse uncle_hash: {}", err).into())
+        })?;
+
+    let authorization = Arc::new(authorization);
+
+    if let Some(x) = handle_uncle_block(&app, &authorization, uncle_hash).await? {
+        Ok(Json(x).into_response())
+    } else {
+        // TODO: is BadRequest the right error to use?
+        Err(Web3ProxyError::BadRequest("block is not an uncle".into()))
+    }
+}
+
+pub async fn handle_uncle_block(
+    app: &Arc<Web3ProxyApp>,
+    authorization: &Arc<Web3ProxyAuthorization>,
+    uncle_hash: H256,
+) -> Web3ProxyResult<Option<HashMap<u64, Decimal>>> {
+    info!("handling uncle: {:?}", uncle_hash);
+
+    // cancel if uncle_hash is actually a confirmed block
+    if app
+        .authorized_request::<_, Option<Block<TxHash>>>(
+            "eth_getBlockByHash",
+            (uncle_hash, false),
+            authorization.clone(),
+        )
+        .await
+        .context("eth_getBlockByHash failed")?
+        .is_some()
+    {
+        return Ok(None);
+    }
+
+    // user_id -> balance that we need to subtract
+    let mut reversed_balances: HashMap<u64, Decimal> = HashMap::new();
+
+    let txn = app.db_transaction().await?;
+
+    // delete any deposit txids with uncle_hash
+    for reversed_deposit in increase_on_chain_balance_receipt::Entity::find()
+        .lock_exclusive()
+        .filter(increase_on_chain_balance_receipt::Column::BlockHash.eq(uncle_hash.encode_hex()))
+        .all(&txn)
+        .await?
+    {
+        let reversed_balance = reversed_balances
+            .entry(reversed_deposit.deposit_to_user_id)
+            .or_default();
+
+        *reversed_balance += reversed_deposit.amount;
+
+        // TODO: instead of delete, mark as uncled? seems like it would bloat the db unnecessarily. a stat should be enough
+        reversed_deposit.delete(&txn).await?;
+    }
+
+    debug!("removing balances: {:#?}", reversed_balances);
+
+    for (user_id, reversed_balance) in reversed_balances.iter() {
+        if let Some(user_balance) = balance::Entity::find()
+            .lock_exclusive()
+            .filter(balance::Column::Id.eq(*user_id))
+            .one(&txn)
+            .await?
+        {
+            let mut user_balance = user_balance.into_active_model();
+
+            user_balance.total_deposits =
+                ActiveValue::Set(user_balance.total_deposits.as_ref() - reversed_balance);
+
+            user_balance.update(&txn).await?;
+        }
+    }
+
+    txn.commit().await?;
+
+    Ok(Some(reversed_balances))
 }

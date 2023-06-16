@@ -339,8 +339,6 @@ async fn handle_socket_payload(
 
                                 let key: U64 = serde_json::from_str(subscription_id.get()).unwrap();
 
-                                info!("key: {}", key);
-
                                 x.insert(key, handle);
                             }
 
@@ -372,8 +370,6 @@ async fn handle_socket_payload(
                                 }
                             }
                         };
-
-                    info!("key: {}", subscription_id);
 
                     // TODO: is this the right response?
                     let partial_response = {

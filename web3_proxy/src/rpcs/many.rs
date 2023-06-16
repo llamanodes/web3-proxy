@@ -217,26 +217,36 @@ impl Web3Rpcs {
                     // web3 connection worked
                     let mut new_by_name = (*self.by_name.load_full()).clone();
 
+                    // make sure that any new requests use the new connection
                     let old_rpc = new_by_name.insert(rpc.name.clone(), rpc.clone());
 
+                    // update the arc swap
                     self.by_name.store(Arc::new(new_by_name));
 
+                    // clean up the old rpc
                     if let Some(old_rpc) = old_rpc {
+                        trace!("old_rpc: {}", old_rpc);
+
+                        // if the old rpc was synced, wait for the new one to sync
                         if old_rpc.head_block.as_ref().unwrap().borrow().is_some() {
                             let mut new_head_receiver =
                                 rpc.head_block.as_ref().unwrap().subscribe();
-                            debug!("waiting for new {} to sync", rpc);
+                            trace!("waiting for new {} connection to sync", rpc);
 
-                            // TODO: maximum wait time or this could block things for too long
+                            // TODO: maximum wait time
                             while new_head_receiver.borrow_and_update().is_none() {
-                                new_head_receiver.changed().await?;
+                                if new_head_receiver.changed().await.is_err() {
+                                    break;
+                                };
                             }
+                        }
 
-                            // TODO: tell ethers to disconnect? is there a function for that?
+                        // tell the old rpc to disconnect
+                        if let Some(ref disconnect_sender) = old_rpc.disconnect_watch {
+                            trace!("telling {} to disconnect", old_rpc);
+                            disconnect_sender.send_replace(true);
                         }
                     }
-
-                    // TODO: what should we do with the new handle? make sure error logs aren't dropped
                 }
                 Ok(Err(err)) => {
                     // if we got an error here, the app can continue on
@@ -923,11 +933,11 @@ impl Web3Rpcs {
                             let rate_limit_substrings = ["limit", "exceeded", "quota usage"];
                             for rate_limit_substr in rate_limit_substrings {
                                 if error_msg.contains(rate_limit_substr) {
-                                    if rate_limit_substr.contains("result on length") {
+                                    if error_msg.contains("result on length") {
                                         // this error contains "limit" but is not a rate limit error
                                         // TODO: make the expected limit configurable
                                         // TODO: parse the rate_limit_substr and only continue if it is < expected limit
-                                        if rate_limit_substr.contains("exceeding limit 2000000") {
+                                        if error_msg.contains("exceeding limit 2000000") {
                                             // they hit our expected limit. return the error now
                                             return Err(error.into());
                                         } else {

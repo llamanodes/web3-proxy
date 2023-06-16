@@ -1022,8 +1022,10 @@ impl Web3ProxyApp {
         )?;
 
         // no semaphore is needed here because login rate limits are low
-        // TODO: are we sure do we want a semaphore here?
+        // TODO: are we sure do not we want a semaphore here?
         let semaphore = None;
+
+        // TODO: if ip is on the local network, always allow?
 
         if let Some(rate_limiter) = &self.login_rate_limiter {
             match rate_limiter.throttle_label(&ip.to_string(), None, 1).await {

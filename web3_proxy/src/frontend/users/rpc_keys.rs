@@ -151,7 +151,7 @@ pub async fn rpc_keys_management(
                             Err(Web3ProxyError::AccessDenied)
                         }
                     }
-                    Some((x, None)) => Err(Web3ProxyError::BadResponse(
+                    Some((_, None)) => Err(Web3ProxyError::BadResponse(
                         "a subuser record was found, but no corresponding RPC key".into(),
                     )),
                     // Match statement here, check in the user's RPC keys directly if it's not part of the secondary user

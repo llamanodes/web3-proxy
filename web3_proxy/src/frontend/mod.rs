@@ -174,6 +174,10 @@ pub async fn serve(
             "/user/balance/:tx_hash",
             post(users::payment::user_balance_post),
         )
+        .route(
+            "/user/balance_uncle/:uncle_hash",
+            post(users::payment::user_balance_uncle_post),
+        )
         .route("/user/keys", get(users::rpc_keys::rpc_keys_get))
         .route("/user/keys", post(users::rpc_keys::rpc_keys_management))
         .route("/user/keys", put(users::rpc_keys::rpc_keys_management))

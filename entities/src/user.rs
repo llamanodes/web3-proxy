@@ -23,6 +23,8 @@ pub enum Relation {
     Login,
     #[sea_orm(has_many = "super::rpc_key::Entity")]
     RpcKey,
+    #[sea_orm(has_many = "super::increase_on_chain_balance_receipt::Entity")]
+    IncreaseOnChainBalanceReceipt,
     #[sea_orm(has_many = "super::secondary_user::Entity")]
     SecondaryUser,
     #[sea_orm(
@@ -44,6 +46,12 @@ impl Related<super::login::Entity> for Entity {
 impl Related<super::rpc_key::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::RpcKey.def()
+    }
+}
+
+impl Related<super::increase_on_chain_balance_receipt::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IncreaseOnChainBalanceReceipt.def()
     }
 }
 
