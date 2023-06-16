@@ -358,12 +358,12 @@ mod tests {
         let proxy_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
         let anvil_result = anvil_provider
-            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", true))
+            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
             .unwrap()
             .unwrap();
         let proxy_result = proxy_provider
-            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", true))
+            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
             .unwrap()
             .unwrap();
@@ -378,12 +378,12 @@ mod tests {
             .unwrap();
 
         let anvil_result = anvil_provider
-            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", true))
+            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
             .unwrap()
             .unwrap();
         let proxy_result = proxy_provider
-            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", true))
+            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
             .unwrap()
             .unwrap();
