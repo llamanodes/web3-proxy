@@ -823,7 +823,7 @@ impl Web3Rpc {
 
             while let Some(block) = blocks.next().await {
                 if *subscribe_stop_rx.borrow() {
-                    debug!("stopping ws block subscription on {}", self);
+                    trace!("stopping ws block subscription on {}", self);
                     break;
                 }
 
@@ -840,7 +840,7 @@ impl Web3Rpc {
 
             loop {
                 if *subscribe_stop_rx.borrow() {
-                    debug!("stopping http block subscription on {}", self);
+                    trace!("stopping http block subscription on {}", self);
                     break;
                 }
 

@@ -26,7 +26,6 @@ pub struct Model {
     pub sum_credits_used: Decimal,
 }
 
-// TODO: there used to be a relation here to rpc_key
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(

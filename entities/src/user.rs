@@ -19,7 +19,6 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    // TODO: generating entities wanted to remove Login, RpcKey, and Secondary User. are indexes missing?
     #[sea_orm(has_many = "super::login::Entity")]
     Login,
     #[sea_orm(has_many = "super::rpc_key::Entity")]
