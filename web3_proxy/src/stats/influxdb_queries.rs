@@ -255,6 +255,7 @@ pub async fn query_user_stats<'a>(
         ));
     }
 
+
     debug!("Raw query to db is: {:#?}", query);
     let query = Query::new(query.to_string());
     trace!("Query to db is: {:?}", query);
