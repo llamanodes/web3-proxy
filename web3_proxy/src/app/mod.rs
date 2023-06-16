@@ -669,16 +669,16 @@ impl Web3ProxyApp {
             let app = app.clone();
             let config_handle = tokio::spawn(async move {
                 loop {
-                    new_top_config_receiver
-                        .changed()
-                        .await
-                        .context("failed awaiting top_config change")?;
-
                     let new_top_config = new_top_config_receiver.borrow_and_update().to_owned();
 
                     if let Err(err) = app.apply_top_config(new_top_config).await {
                         error!("unable to apply config! {:?}", err);
                     };
+
+                    new_top_config_receiver
+                        .changed()
+                        .await
+                        .context("failed awaiting top_config change")?;
                 }
             });
 
@@ -686,7 +686,7 @@ impl Web3ProxyApp {
         }
 
         if important_background_handles.is_empty() {
-            info!("no important background handles");
+            trace!("no important background handles");
 
             let f = tokio::spawn(async move {
                 let _ = background_shutdown_receiver.recv().await;
