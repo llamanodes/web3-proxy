@@ -26,22 +26,8 @@ pub struct Model {
     pub sum_credits_used: Decimal,
 }
 
+// TODO: there used to be a relation here to rpc_key
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::rpc_key::Entity",
-        from = "Column::RpcKeyId",
-        to = "super::rpc_key::Column::Id",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    RpcKey,
-}
-
-impl Related<super::rpc_key::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::RpcKey.def()
-    }
-}
+pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}

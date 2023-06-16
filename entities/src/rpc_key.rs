@@ -36,8 +36,9 @@ pub enum Relation {
     RevertLog,
     #[sea_orm(has_many = "super::rpc_accounting::Entity")]
     RpcAccounting,
-    #[sea_orm(has_many = "super::rpc_accounting_v2::Entity")]
-    RpcAccountingV2,
+    // TODO: where did this go? is it attached to the user instead now?
+    // #[sea_orm(has_many = "super::rpc_accounting_v2::Entity")]
+    // RpcAccountingV2,
     #[sea_orm(has_many = "super::secondary_user::Entity")]
     SecondaryUser,
     #[sea_orm(
@@ -59,12 +60,6 @@ impl Related<super::revert_log::Entity> for Entity {
 impl Related<super::rpc_accounting::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::RpcAccounting.def()
-    }
-}
-
-impl Related<super::rpc_accounting_v2::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::RpcAccountingV2.def()
     }
 }
 

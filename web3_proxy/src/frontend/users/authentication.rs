@@ -21,7 +21,7 @@ use http::StatusCode;
 use log::{debug, trace, warn};
 use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
+    self, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
     QueryFilter, TransactionTrait,
 };
 use serde_json::json;
@@ -143,13 +143,11 @@ pub async fn user_login_get(
     Ok(message.into_response())
 }
 
+/// you MUST commit the `txn` after calling this function!
 pub async fn register_new_user(
-    db_conn: &DatabaseConnection,
+    txn: &DatabaseTransaction,
     address: Address,
 ) -> anyhow::Result<(user::Model, rpc_key::Model, balance::Model)> {
-    // all or nothing
-    let txn = db_conn.begin().await?;
-
     // the only thing we need from them is an address
     // everything else is optional
     // TODO: different invite codes should allow different levels
@@ -160,7 +158,7 @@ pub async fn register_new_user(
         ..Default::default()
     };
 
-    let new_user = new_user.insert(&txn).await?;
+    let new_user = new_user.insert(txn).await?;
 
     // create the user's first api key
     let rpc_secret_key = RpcSecretKey::new();
@@ -173,7 +171,7 @@ pub async fn register_new_user(
     };
 
     let user_rpc_key = user_rpc_key
-        .insert(&txn)
+        .insert(txn)
         .await
         .web3_context("Failed saving new user key")?;
 
@@ -183,10 +181,7 @@ pub async fn register_new_user(
         ..Default::default()
     };
 
-    let user_balance = user_balance.insert(&txn).await?;
-
-    // save the user and key and balance to the database
-    txn.commit().await?;
+    let user_balance = user_balance.insert(txn).await?;
 
     Ok((new_user, user_rpc_key, user_balance))
 }
@@ -312,10 +307,14 @@ pub async fn user_login_post(
                 }
             }
 
-            let (caller, caller_key, _) =
-                register_new_user(&db_conn, our_msg.address.into()).await?;
+            let txn = db_conn.begin().await?;
+
+            let (caller, caller_key, _) = register_new_user(&txn, our_msg.address.into()).await?;
+
+            txn.commit().await?;
 
             let txn = db_conn.begin().await?;
+
             // First, optionally catch a referral code from the parameters if there is any
             debug!("Refferal code is: {:?}", payload.referral_code);
             if let Some(referral_code) = payload.referral_code.as_ref() {
@@ -323,7 +322,7 @@ pub async fn user_login_post(
                 trace!("Using register referral code:  {:?}", referral_code);
                 let user_referrer = referrer::Entity::find()
                     .filter(referrer::Column::ReferralCode.eq(referral_code))
-                    .one(db_replica.as_ref())
+                    .one(&txn)
                     .await?
                     .ok_or(Web3ProxyError::UnknownReferralCode)?;
 
@@ -354,7 +353,7 @@ pub async fn user_login_post(
                 trace!("Using referral code: {:?}", referral_code);
                 let user_referrer = referrer::Entity::find()
                     .filter(referrer::Column::ReferralCode.eq(referral_code))
-                    .one(db_replica.as_ref())
+                    .one(&txn)
                     .await?
                     .ok_or(Web3ProxyError::BadRequest(
                         format!(
@@ -382,7 +381,7 @@ pub async fn user_login_post(
             // the user is already registered
             let user_rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(caller.id))
-                .all(db_replica.as_ref())
+                .all(&db_conn)
                 .await
                 .web3_context("failed loading user's key")?;
 

@@ -97,6 +97,7 @@ pub enum Web3ProxyError {
     NoBlockNumberOrHash,
     NoBlocksKnown,
     NoConsensusHeadBlock,
+    NoDatabase,
     NoHandleReady,
     NoServersSynced,
     #[display(fmt = "{}/{}", num_known, min_head_rpcs)]
@@ -598,6 +599,17 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "no consensus head block".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::NoDatabase => {
+                error!("no database configured");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: "no database configured!".into(),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
                 )

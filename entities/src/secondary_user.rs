@@ -11,20 +11,12 @@ pub struct Model {
     pub id: u64,
     pub user_id: u64,
     pub description: Option<String>,
-    pub rpc_secret_key_id: u64,
     pub role: Role,
+    pub rpc_secret_key_id: u64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::user::Entity",
-        from = "Column::UserId",
-        to = "super::user::Column::Id",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    User,
     #[sea_orm(
         belongs_to = "super::rpc_key::Entity",
         from = "Column::RpcSecretKeyId",
@@ -33,17 +25,25 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     RpcKey,
-}
-
-impl Related<super::user::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::User.def()
-    }
+    #[sea_orm(
+        belongs_to = "super::user::Entity",
+        from = "Column::UserId",
+        to = "super::user::Column::Id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    User,
 }
 
 impl Related<super::rpc_key::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::RpcKey.def()
+    }
+}
+
+impl Related<super::user::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::User.def()
     }
 }
 

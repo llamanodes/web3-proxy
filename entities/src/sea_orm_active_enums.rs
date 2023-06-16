@@ -3,10 +3,11 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-// TODO: rename to StatLevel? AccountingLevel? What?
+// TODO: rename TrackingLevel to StatLevel? AccountingLevel? What?
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "log_level")]
 pub enum TrackingLevel {
+    /// TODO: rename to minimal
     #[sea_orm(string_value = "none")]
     None,
     #[sea_orm(string_value = "aggregated")]

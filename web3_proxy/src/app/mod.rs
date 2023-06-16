@@ -41,7 +41,7 @@ use hashbrown::{HashMap, HashSet};
 use ipnet::IpNet;
 use log::{error, info, trace, warn, Level};
 use migration::sea_orm::prelude::Decimal;
-use migration::sea_orm::{EntityTrait, PaginatorTrait};
+use migration::sea_orm::{DatabaseTransaction, EntityTrait, PaginatorTrait, TransactionTrait};
 use moka::future::{Cache, CacheBuilder};
 use parking_lot::Mutex;
 use redis_rate_limiter::redis::AsyncCommands;
@@ -1063,10 +1063,22 @@ impl Web3ProxyApp {
     }
 
     /// TODO: i don't think we want or need this. just use app.db_conn, or maybe app.db_conn.clone() or app.db_conn.as_ref()
+    #[inline]
     pub fn db_conn(&self) -> Option<DatabaseConnection> {
         self.db_conn.clone()
     }
 
+    #[inline]
+    pub async fn db_transaction(&self) -> Web3ProxyResult<DatabaseTransaction> {
+        if let Some(ref db_conn) = self.db_conn {
+            let x = db_conn.begin().await?;
+            Ok(x)
+        } else {
+            Err(Web3ProxyError::NoDatabase)
+        }
+    }
+
+    #[inline]
     pub fn db_replica(&self) -> Option<DatabaseReplica> {
         self.db_replica.clone()
     }

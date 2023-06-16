@@ -6,6 +6,7 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // TODO: also alter the index to include the BlockHash? or
         manager
             .alter_table(
                 Table::alter()
@@ -26,6 +27,14 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
+                    .drop_foreign_key(Alias::new("fk-deposit_to_user_id"))
+                    .add_foreign_key(
+                        TableForeignKey::new()
+                            .name("fk-deposit_to_user_id-v2")
+                            .from_col(IncreaseOnChainBalanceReceipt::DepositToUserId)
+                            .to_tbl(User::Table)
+                            .to_col(User::Id),
+                    )
                     .to_owned(),
             )
             .await
@@ -35,7 +44,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Post::Table)
+                    .table(IncreaseOnChainBalanceReceipt::Table)
                     .drop_column(IncreaseOnChainBalanceReceipt::BlockHash)
                     .drop_column(IncreaseOnChainBalanceReceipt::LogIndex)
                     .drop_column(IncreaseOnChainBalanceReceipt::TokenAddress)
@@ -52,4 +61,11 @@ enum IncreaseOnChainBalanceReceipt {
     BlockHash,
     LogIndex,
     TokenAddress,
+    DepositToUserId,
+}
+
+#[derive(Iden)]
+enum User {
+    Table,
+    Id,
 }
