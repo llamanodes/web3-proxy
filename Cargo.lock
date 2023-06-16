@@ -97,15 +97,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ansi_term"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d52a9bb7ec0cf484c551830a7ce27bd20d67eac647e1befb56b0be4ee39a55d2"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "anyhow"
 version = "1.0.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1144,7 +1135,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-core",
- "tracing-subscriber 0.3.17",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1380,16 +1371,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dashmap"
-version = "4.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e77a43b28d0668df09411cb0bc9a8c2adc40f9a048afe863e05fd43251e8e39c"
-dependencies = [
- "cfg-if",
- "num_cpus",
-]
-
-[[package]]
 name = "data-encoding"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1568,12 +1549,6 @@ name = "doc-comment"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
-
-[[package]]
-name = "dotenv"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "dotenvy"
@@ -2105,9 +2080,9 @@ dependencies = [
 
 [[package]]
 name = "fallible-iterator"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
 
 [[package]]
 name = "fast-socks5"
@@ -2945,39 +2920,34 @@ dependencies = [
 
 [[package]]
 name = "influxdb2"
-version = "0.4.0"
-source = "git+https://github.com/llamanodes/influxdb2?rev=6d3cf64d61967f41fafb57b3f4553206a8f3f2a3#6d3cf64d61967f41fafb57b3f4553206a8f3f2a3"
+version = "0.4.2"
+source = "git+https://github.com/llamanodes/influxdb2?rev=1e5577e14150797584f5ed0ea7aba0bd68f0a678#1e5577e14150797584f5ed0ea7aba0bd68f0a678"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.21.2",
  "bytes",
  "chrono",
  "csv",
- "dotenv",
  "fallible-iterator",
  "futures",
  "go-parse-duration",
  "influxdb2-derive",
  "influxdb2-structmap",
- "nom",
- "opentelemetry",
  "ordered-float",
- "parking_lot 0.11.2",
  "reqwest",
+ "secrecy",
  "serde",
  "serde_json",
  "serde_qs",
- "smallvec",
  "snafu",
  "tempfile",
  "tracing",
- "tracing-subscriber 0.2.25",
  "url",
 ]
 
 [[package]]
 name = "influxdb2-derive"
 version = "0.1.1"
-source = "git+https://github.com/llamanodes/influxdb2?rev=6d3cf64d61967f41fafb57b3f4553206a8f3f2a3#6d3cf64d61967f41fafb57b3f4553206a8f3f2a3"
+source = "git+https://github.com/llamanodes/influxdb2?rev=1e5577e14150797584f5ed0ea7aba0bd68f0a678#1e5577e14150797584f5ed0ea7aba0bd68f0a678"
 dependencies = [
  "itertools",
  "proc-macro2",
@@ -2989,7 +2959,7 @@ dependencies = [
 [[package]]
 name = "influxdb2-structmap"
 version = "0.2.0"
-source = "git+https://github.com/llamanodes/influxdb2?rev=6d3cf64d61967f41fafb57b3f4553206a8f3f2a3#6d3cf64d61967f41fafb57b3f4553206a8f3f2a3"
+source = "git+https://github.com/llamanodes/influxdb2?rev=1e5577e14150797584f5ed0ea7aba0bd68f0a678#1e5577e14150797584f5ed0ea7aba0bd68f0a678"
 dependencies = [
  "chrono",
  "num-traits",
@@ -3311,15 +3281,6 @@ name = "match_cfg"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffbee8634e0d45d258acb448e7eaab3fce7a0a467395d4d9f228e3c1f01fb2e4"
-
-[[package]]
-name = "matchers"
-version = "0.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f099785f7595cc4b4553a174ce30dd7589ef93391ff414dbb67f62392b9e0ce1"
-dependencies = [
- "regex-automata",
-]
 
 [[package]]
 name = "matchers"
@@ -3773,26 +3734,6 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
-]
-
-[[package]]
-name = "opentelemetry"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91cea1dfd50064e52db033179952d18c770cbc5dfefc8eba45d619357ba3914"
-dependencies = [
- "async-trait",
- "dashmap",
- "fnv",
- "futures",
- "js-sys",
- "lazy_static",
- "percent-encoding",
- "pin-project",
- "rand",
- "thiserror",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]
@@ -5109,7 +5050,7 @@ dependencies = [
  "regex",
  "sea-schema",
  "tracing",
- "tracing-subscriber 0.3.17",
+ "tracing-subscriber",
  "url",
 ]
 
@@ -5140,7 +5081,7 @@ dependencies = [
  "sea-orm-cli",
  "sea-schema",
  "tracing",
- "tracing-subscriber 0.3.17",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -5263,6 +5204,15 @@ dependencies = [
  "generic-array",
  "pkcs8 0.10.2",
  "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "secrecy"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bd1c54ea06cfd2f6b63219704de0b9b4f72dcc2b8fdef820be6cd799780e91e"
+dependencies = [
  "zeroize",
 ]
 
@@ -5410,7 +5360,7 @@ dependencies = [
  "sentry-backtrace",
  "sentry-core",
  "tracing-core",
- "tracing-subscriber 0.3.17",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -5494,9 +5444,9 @@ dependencies = [
 
 [[package]]
 name = "serde_qs"
-version = "0.10.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cac3f1e2ca2fe333923a1ae72caca910b98ed0630bb35ef6f8c8517d6e81afa"
+checksum = "0431a35568651e363364210c91983c1da5eb29404d9f0928b67d4ebcfa7d330c"
 dependencies = [
  "percent-encoding",
  "serde",
@@ -5688,9 +5638,9 @@ checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
 
 [[package]]
 name = "snafu"
-version = "0.6.10"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eab12d3c261b2308b0d80c26fffb58d17eba81a4be97890101f416b478c79ca7"
+checksum = "cb0656e7e3ffb70f6c39b3c2a86332bb74aa3c679da781642590f3c1118c5045"
 dependencies = [
  "doc-comment",
  "snafu-derive",
@@ -5698,10 +5648,11 @@ dependencies = [
 
 [[package]]
 name = "snafu-derive"
-version = "0.6.10"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1508efa03c362e23817f96cde18abed596a25219a8b2c66e8db33c03543d315b"
+checksum = "475b3bbe5245c26f2d8a6f62d67c1f30eb9fffeccee721c45d162c3ebbdf81b2"
 dependencies = [
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -6210,7 +6161,7 @@ dependencies = [
  "tonic",
  "tower",
  "tracing",
- "tracing-subscriber 0.3.17",
+ "tracing-subscriber",
  "tui",
 ]
 
@@ -6507,7 +6458,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d686ec1c0f384b1277f097b2f279a2ecc11afe8c133c1aabf036a27cb4cd206e"
 dependencies = [
  "tracing",
- "tracing-subscriber 0.3.17",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -6532,44 +6483,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracing-serde"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc6b213177105856957181934e4920de57730fc69bf42c37ee5bb664d406d9e1"
-dependencies = [
- "serde",
- "tracing-core",
-]
-
-[[package]]
-name = "tracing-subscriber"
-version = "0.2.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e0d2eaa99c3c2e41547cfa109e910a68ea03823cccad4a0525dcbc9b01e8c71"
-dependencies = [
- "ansi_term",
- "chrono",
- "lazy_static",
- "matchers 0.0.1",
- "parking_lot 0.11.2",
- "regex",
- "serde",
- "serde_json",
- "sharded-slab",
- "smallvec",
- "thread_local",
- "tracing",
- "tracing-core",
- "tracing-serde",
-]
-
-[[package]]
 name = "tracing-subscriber"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30a651bc37f915e81f087d86e62a18eec5f79550c7faff886f7090b4ea757c77"
 dependencies = [
- "matchers 0.1.0",
+ "matchers",
  "nu-ansi-term",
  "once_cell",
  "regex",
@@ -7075,7 +6994,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
- "tracing-subscriber 0.3.17",
+ "tracing-subscriber",
  "ulid",
  "url",
  "uuid 1.3.4",
