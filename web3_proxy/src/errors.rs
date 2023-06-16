@@ -15,7 +15,7 @@ use derive_more::{Display, Error, From};
 use ethers::prelude::ContractError;
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;

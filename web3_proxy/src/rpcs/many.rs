@@ -225,23 +225,26 @@ impl Web3Rpcs {
 
                     // clean up the old rpc
                     if let Some(old_rpc) = old_rpc {
+                        trace!("old_rpc: {}", old_rpc);
+
                         // if the old rpc was synced, wait for the new one to sync
                         if old_rpc.head_block.as_ref().unwrap().borrow().is_some() {
                             let mut new_head_receiver =
                                 rpc.head_block.as_ref().unwrap().subscribe();
-                            debug!("waiting for new {} to sync", rpc);
+                            trace!("waiting for new {} connection to sync", rpc);
 
                             // TODO: maximum wait time
                             while new_head_receiver.borrow_and_update().is_none() {
-                                new_head_receiver.changed().await?;
+                                if new_head_receiver.changed().await.is_err() {
+                                    break;
+                                };
                             }
                         }
 
                         // tell the old rpc to disconnect
                         if let Some(ref disconnect_sender) = old_rpc.disconnect_watch {
-                            if let Err(err) = disconnect_sender.send(true) {
-                                debug!("failed disconnecting old connection to {}", old_rpc);
-                            }
+                            trace!("telling {} to disconnect", old_rpc);
+                            disconnect_sender.send_replace(true);
                         }
                     }
                 }

@@ -29,7 +29,6 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
-use tokio::select;
 use tokio::sync::watch;
 use tokio::time::{interval, sleep, sleep_until, timeout, Duration, Instant, MissedTickBehavior};
 use url::Url;
@@ -638,6 +637,10 @@ impl Web3Rpc {
             Some(RequestErrorHandler::ErrorLevel)
         };
 
+        if self.should_disconnect() {
+            return Ok(());
+        }
+
         if let Some(url) = self.ws_url.clone() {
             debug!("starting websocket provider on {}", self);
 
@@ -648,6 +651,10 @@ impl Web3Rpc {
             self.ws_provider.store(Some(x));
         }
 
+        if self.should_disconnect() {
+            return Ok(());
+        }
+
         debug!("starting subscriptions on {}", self);
 
         self.check_provider(chain_id).await?;
@@ -655,21 +662,21 @@ impl Web3Rpc {
         let mut futures = vec![];
 
         // TODO: use this channel instead of self.disconnect_watch
-        let (subscribe_stop_tx, mut subscribe_stop_rx) = watch::channel(false);
+        let (subscribe_stop_tx, subscribe_stop_rx) = watch::channel(false);
 
-        // subscribe to the disconnect watch. the app uses this when shutting down
+        // subscribe to the disconnect watch. the app uses this when shutting down or when configs change
         if let Some(disconnect_watch_tx) = self.disconnect_watch.as_ref() {
+            let clone = self.clone();
             let mut disconnect_watch_rx = disconnect_watch_tx.subscribe();
 
             let f = async move {
-                // TODO: make sure it changed to "true"
-                select! {
-                    x = disconnect_watch_rx.changed() => {
-                        x?;
-                    },
-                    x = subscribe_stop_rx.changed() => {
-                        x?;
-                    },
+                loop {
+                    if *disconnect_watch_rx.borrow_and_update() {
+                        info!("disconnect triggered on {}", clone);
+                        break;
+                    }
+
+                    disconnect_watch_rx.changed().await?;
                 }
                 Ok(())
             };
@@ -685,8 +692,6 @@ impl Web3Rpc {
             // TODO: how often? different depending on the chain?
             // TODO: reset this timeout when a new block is seen? we need to keep request_latency updated though
             let health_sleep_seconds = 5;
-
-            let subscribe_stop_rx = subscribe_stop_tx.subscribe();
 
             // health check loop
             let f = async move {
@@ -772,6 +777,9 @@ impl Web3Rpc {
 
         // TODO: wait for all of the futures to exit?
 
+        // TODO: tell ethers to disconnect?
+        self.ws_provider.store(None);
+
         Ok(())
     }
 
@@ -815,6 +823,7 @@ impl Web3Rpc {
 
             while let Some(block) = blocks.next().await {
                 if *subscribe_stop_rx.borrow() {
+                    debug!("stopping ws block subscription on {}", self);
                     break;
                 }
 
@@ -831,6 +840,7 @@ impl Web3Rpc {
 
             loop {
                 if *subscribe_stop_rx.borrow() {
+                    debug!("stopping http block subscription on {}", self);
                     break;
                 }
 
@@ -857,6 +867,7 @@ impl Web3Rpc {
             .await?;
 
         if *subscribe_stop_rx.borrow() {
+            debug!("new heads subscription exited");
             Ok(())
         } else {
             Err(anyhow!("new_heads subscription exited. reconnect needed").into())
@@ -869,7 +880,14 @@ impl Web3Rpc {
         tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
         mut subscribe_stop_rx: watch::Receiver<bool>,
     ) -> Web3ProxyResult<()> {
-        subscribe_stop_rx.changed().await?;
+        // TODO: check that it actually changed to true
+        loop {
+            if *subscribe_stop_rx.borrow_and_update() {
+                break;
+            }
+
+            subscribe_stop_rx.changed().await?;
+        }
 
         /*
         trace!("watching pending transactions on {}", self);
@@ -1183,7 +1201,6 @@ impl fmt::Debug for Web3Rpc {
 
 impl fmt::Display for Web3Rpc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: filter basic auth and api keys
         write!(f, "{}", &self.name)
     }
 }
