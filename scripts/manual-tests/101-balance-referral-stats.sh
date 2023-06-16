@@ -134,3 +134,10 @@ curl \
 curl -X GET \
 -H "Authorization: Bearer 01H2D5DN564M4Q2T6PETEZY83Q" \
 "http://localhost:8544/user/stats/detailed?query_start=1686236378&query_window_seconds=3600"
+
+curl -X GET \
+-H "Authorization: Bearer 01H2D5DN564M4Q2T6PETEZY83Q" \
+"http://localhost:8544/user/stats/aggregate?query_start=1686236378&query_window_seconds=3600"
+
+curl -X GET \
+"http://localhost:8544/user/stats/aggregate?query_start=1686772800&query_window_seconds=3600"
