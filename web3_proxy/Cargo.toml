@@ -84,7 +84,7 @@ regex = "1.8.4"
 reqwest = { version = "0.11.18", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
 rmp-serde = "1.1.1"
 rust_decimal = { version = "1.30.0", features = ["maths"] }
-sentry = { version = "0.31.4", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
+sentry = { version = "0.31.5", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
 serde = { version = "1.0.164", features = [] }
 serde_json = { version = "1.0.97", default-features = false, features = ["alloc", "raw_value"] }
 serde_prometheus = "0.2.2"
