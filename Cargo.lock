@@ -2946,7 +2946,7 @@ dependencies = [
 [[package]]
 name = "influxdb2"
 version = "0.4.0"
-source = "git+https://github.com/llamanodes/influxdb2#9c2e50bee6f00fff99688ac2a39f702bb6a0b5bb"
+source = "git+https://github.com/llamanodes/influxdb2?rev=6d3cf64d61967f41fafb57b3f4553206a8f3f2a3#6d3cf64d61967f41fafb57b3f4553206a8f3f2a3"
 dependencies = [
  "base64 0.13.1",
  "bytes",
@@ -2977,7 +2977,7 @@ dependencies = [
 [[package]]
 name = "influxdb2-derive"
 version = "0.1.1"
-source = "git+https://github.com/llamanodes/influxdb2#9c2e50bee6f00fff99688ac2a39f702bb6a0b5bb"
+source = "git+https://github.com/llamanodes/influxdb2?rev=6d3cf64d61967f41fafb57b3f4553206a8f3f2a3#6d3cf64d61967f41fafb57b3f4553206a8f3f2a3"
 dependencies = [
  "itertools",
  "proc-macro2",
@@ -2989,7 +2989,7 @@ dependencies = [
 [[package]]
 name = "influxdb2-structmap"
 version = "0.2.0"
-source = "git+https://github.com/llamanodes/influxdb2#9c2e50bee6f00fff99688ac2a39f702bb6a0b5bb"
+source = "git+https://github.com/llamanodes/influxdb2?rev=6d3cf64d61967f41fafb57b3f4553206a8f3f2a3#6d3cf64d61967f41fafb57b3f4553206a8f3f2a3"
 dependencies = [
  "chrono",
  "num-traits",

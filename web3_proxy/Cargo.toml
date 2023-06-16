@@ -22,8 +22,8 @@ migration = { path = "../migration" }
 payment-contracts = { path = "../payment-contracts" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 
-influxdb2 = { git = "https://github.com/llamanodes/influxdb2", features = ["rustls"] }
-influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/"}
+influxdb2 = { git = "https://github.com/llamanodes/influxdb2", features = ["rustls"], rev = "6d3cf64d61967f41fafb57b3f4553206a8f3f2a3" }
+influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/", rev = "6d3cf64d61967f41fafb57b3f4553206a8f3f2a3"}
 
 # TODO: regex has several "perf" features that we might want to use
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
