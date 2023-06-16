@@ -669,18 +669,18 @@ impl Web3ProxyApp {
             let app = app.clone();
             let config_handle = tokio::spawn(async move {
                 loop {
-                    let new_top_config = new_top_config_receiver.borrow_and_update().to_owned();
-
-                    if let Err(err) = app.apply_top_config(new_top_config).await {
-                        error!("unable to apply config! {:?}", err);
-                    };
-
                     new_top_config_receiver
                         .changed()
                         .await
                         .context("failed awaiting top_config change")?;
 
                     info!("config changed");
+
+                    let new_top_config = new_top_config_receiver.borrow_and_update().to_owned();
+
+                    if let Err(err) = app.apply_top_config(new_top_config).await {
+                        error!("unable to apply config! {:?}", err);
+                    };
                 }
             });
 

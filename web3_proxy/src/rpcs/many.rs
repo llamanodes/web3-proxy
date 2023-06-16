@@ -217,26 +217,33 @@ impl Web3Rpcs {
                     // web3 connection worked
                     let mut new_by_name = (*self.by_name.load_full()).clone();
 
+                    // make sure that any new requests use the new connection
                     let old_rpc = new_by_name.insert(rpc.name.clone(), rpc.clone());
 
+                    // update the arc swap
                     self.by_name.store(Arc::new(new_by_name));
 
+                    // clean up the old rpc
                     if let Some(old_rpc) = old_rpc {
+                        // if the old rpc was synced, wait for the new one to sync
                         if old_rpc.head_block.as_ref().unwrap().borrow().is_some() {
                             let mut new_head_receiver =
                                 rpc.head_block.as_ref().unwrap().subscribe();
                             debug!("waiting for new {} to sync", rpc);
 
-                            // TODO: maximum wait time or this could block things for too long
+                            // TODO: maximum wait time
                             while new_head_receiver.borrow_and_update().is_none() {
                                 new_head_receiver.changed().await?;
                             }
+                        }
 
-                            // TODO: tell ethers to disconnect? is there a function for that?
+                        // tell the old rpc to disconnect
+                        if let Some(ref disconnect_sender) = old_rpc.disconnect_watch {
+                            if let Err(err) = disconnect_sender.send(true) {
+                                debug!("failed disconnecting old connection to {}", old_rpc);
+                            }
                         }
                     }
-
-                    // TODO: what should we do with the new handle? make sure error logs aren't dropped
                 }
                 Ok(Err(err)) => {
                     // if we got an error here, the app can continue on

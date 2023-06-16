@@ -96,7 +96,7 @@ impl Web3Rpc {
         redis_pool: Option<RedisPool>,
         block_interval: Duration,
         block_map: BlocksByHashCache,
-        block_sender: Option<flume::Sender<BlockAndRpc>>,
+        block_and_rpc_sender: Option<flume::Sender<BlockAndRpc>>,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         let created_at = Instant::now();
@@ -132,8 +132,8 @@ impl Web3Rpc {
         let backup = config.backup;
 
         let block_data_limit: AtomicU64 = config.block_data_limit.unwrap_or_default().into();
-        let automatic_block_limit =
-            (block_data_limit.load(atomic::Ordering::Acquire) == 0) && block_sender.is_some();
+        let automatic_block_limit = (block_data_limit.load(atomic::Ordering::Acquire) == 0)
+            && block_and_rpc_sender.is_some();
 
         // have a sender for tracking hard limit anywhere. we use this in case we
         // and track on servers that have a configured hard limit
@@ -219,7 +219,12 @@ impl Web3Rpc {
             tokio::spawn(async move {
                 // TODO: this needs to be a subscribe_with_reconnect that does a retry with jitter and exponential backoff
                 new_connection
-                    .subscribe_with_reconnect(block_map, block_sender, chain_id, tx_id_sender)
+                    .subscribe_with_reconnect(
+                        block_map,
+                        block_and_rpc_sender,
+                        chain_id,
+                        tx_id_sender,
+                    )
                     .await
             })
         };
@@ -580,7 +585,7 @@ impl Web3Rpc {
     async fn subscribe_with_reconnect(
         self: Arc<Self>,
         block_map: BlocksByHashCache,
-        block_sender: Option<flume::Sender<BlockAndRpc>>,
+        block_and_rpc_sender: Option<flume::Sender<BlockAndRpc>>,
         chain_id: u64,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> Web3ProxyResult<()> {
@@ -589,7 +594,7 @@ impl Web3Rpc {
                 .clone()
                 .subscribe(
                     block_map.clone(),
-                    block_sender.clone(),
+                    block_and_rpc_sender.clone(),
                     chain_id,
                     tx_id_sender.clone(),
                 )
@@ -623,7 +628,7 @@ impl Web3Rpc {
     async fn subscribe(
         self: Arc<Self>,
         block_map: BlocksByHashCache,
-        block_sender: Option<flume::Sender<BlockAndRpc>>,
+        block_and_rpc_sender: Option<flume::Sender<BlockAndRpc>>,
         chain_id: u64,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> Web3ProxyResult<()> {
@@ -718,18 +723,22 @@ impl Web3Rpc {
         }
 
         // subscribe to new heads
-        if let Some(block_sender) = block_sender.clone() {
+        if let Some(block_and_rpc_sender) = block_and_rpc_sender.clone() {
             let clone = self.clone();
             let subscribe_stop_rx = subscribe_stop_tx.subscribe();
 
             let f = async move {
                 let x = clone
-                    .subscribe_new_heads(block_sender.clone(), block_map.clone(), subscribe_stop_rx)
+                    .subscribe_new_heads(
+                        block_and_rpc_sender.clone(),
+                        block_map.clone(),
+                        subscribe_stop_rx,
+                    )
                     .await;
 
                 // error or success, we clear the block when subscribe_new_heads exits
                 clone
-                    .send_head_block_result(Ok(None), &block_sender, &block_map)
+                    .send_head_block_result(Ok(None), &block_and_rpc_sender, &block_map)
                     .await?;
 
                 x

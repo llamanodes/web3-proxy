@@ -349,6 +349,7 @@ pub async fn user_balance_post(
 
             let x = json!({
                 "tx_hash": tx_hash,
+                "block_hash": block_hash,
                 "log_index": log_index,
                 "token": payment_token_address,
                 "amount": payment_token_amount,
@@ -390,9 +391,12 @@ pub async fn user_balance_uncle_post(
 
     let authorization = Arc::new(authorization);
 
-    let x = handle_uncle_block(&app, &authorization, uncle_hash).await?;
-
-    Ok(Json(x).into_response())
+    if let Some(x) = handle_uncle_block(&app, &authorization, uncle_hash).await? {
+        Ok(Json(x).into_response())
+    } else {
+        // TODO: is BadRequest the right error to use?
+        Err(Web3ProxyError::BadRequest("block is not an uncle".into()))
+    }
 }
 
 pub async fn handle_uncle_block(
@@ -400,14 +404,17 @@ pub async fn handle_uncle_block(
     authorization: &Arc<Web3ProxyAuthorization>,
     uncle_hash: H256,
 ) -> Web3ProxyResult<Option<HashMap<u64, Decimal>>> {
+    info!("handling uncle: {:?}", uncle_hash);
+
     // cancel if uncle_hash is actually a confirmed block
     if app
         .authorized_request::<_, Option<Block<TxHash>>>(
             "eth_getBlockByHash",
-            (uncle_hash,),
+            (uncle_hash, false),
             authorization.clone(),
         )
-        .await?
+        .await
+        .context("eth_getBlockByHash failed")?
         .is_some()
     {
         return Ok(None);
@@ -434,6 +441,8 @@ pub async fn handle_uncle_block(
         // TODO: instead of delete, mark as uncled? seems like it would bloat the db unnecessarily. a stat should be enough
         reversed_deposit.delete(&txn).await?;
     }
+
+    debug!("removing balances: {:#?}", reversed_balances);
 
     for (user_id, reversed_balance) in reversed_balances.iter() {
         if let Some(user_balance) = balance::Entity::find()

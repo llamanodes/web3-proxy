@@ -128,6 +128,10 @@ impl Web3ProxyBlock {
             .as_ref()
             .expect("saved blocks must have a number")
     }
+
+    pub fn uncles(&self) -> &[H256] {
+        &self.block.uncles
+    }
 }
 
 impl TryFrom<ArcBlock> for Web3ProxyBlock {
@@ -164,28 +168,87 @@ impl Web3Rpcs {
     pub async fn try_cache_block(
         &self,
         block: Web3ProxyBlock,
-        heaviest_chain: bool,
+        consensus_head: bool,
     ) -> Web3ProxyResult<Web3ProxyBlock> {
+        let block_hash = *block.hash();
+
         // TODO: i think we can rearrange this function to make it faster on the hot path
-        if block.hash().is_zero() {
+        if block_hash.is_zero() {
             debug!("Skipping block without hash!");
             return Ok(block);
         }
 
         // this block is very likely already in block_hashes
-        // TODO: use their get_with
-        let block_hash = *block.hash();
 
-        // TODO: think more about heaviest_chain. would be better to do the check inside this function
-        if heaviest_chain {
-            // this is the only place that writes to block_numbers
-            // multiple inserts should be okay though
-            // TODO: info if there was a fork?
+        if consensus_head {
             let block_num = block.number();
 
-            self.blocks_by_number
-                .get_with_by_ref(block_num, async move { block_hash })
-                .await;
+            // TODO: if there is an existing entry with a different block_hash,
+            // TODO: use entry api to handle changing existing entries
+            self.blocks_by_number.insert(*block_num, block_hash).await;
+
+            for uncle in block.uncles() {
+                self.blocks_by_hash.invalidate(uncle).await;
+                // TODO: save uncles somewhere?
+            }
+
+            // loop to make sure parent hashes match our caches
+            // set the first ancestor to the blocks' parent hash. but keep going up the chain
+            if let Some(parent_num) = block.number().checked_sub(1.into()) {
+                struct Ancestor {
+                    num: U64,
+                    hash: H256,
+                }
+                let mut ancestor = Ancestor {
+                    num: parent_num,
+                    hash: *block.parent_hash(),
+                };
+                loop {
+                    let ancestor_number_to_hash_entry = self
+                        .blocks_by_number
+                        .entry_by_ref(&ancestor.num)
+                        .or_insert(ancestor.hash)
+                        .await;
+
+                    if *ancestor_number_to_hash_entry.value() == ancestor.hash {
+                        // the existing number entry matches. all good
+                        break;
+                    }
+
+                    // oh no! ancestor_number_to_hash_entry is different
+
+                    // remove the uncled entry in blocks_by_hash
+                    // we will look it up later if necessary
+                    self.blocks_by_hash
+                        .invalidate(ancestor_number_to_hash_entry.value())
+                        .await;
+
+                    // TODO: delete any cached entries for eth_getBlockByHash or eth_getBlockByNumber
+
+                    // TODO: race on this drop and insert?
+                    drop(ancestor_number_to_hash_entry);
+
+                    // update the entry in blocks_by_number
+                    self.blocks_by_number
+                        .insert(ancestor.num, ancestor.hash)
+                        .await;
+
+                    // try to check the parent of this ancestor
+                    if let Some(ancestor_block) = self.blocks_by_hash.get(&ancestor.hash) {
+                        match ancestor_block.number().checked_sub(1.into()) {
+                            None => break,
+                            Some(ancestor_parent_num) => {
+                                ancestor = Ancestor {
+                                    num: ancestor_parent_num,
+                                    hash: *ancestor_block.parent_hash(),
+                                }
+                            }
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
         }
 
         let block = self
@@ -208,14 +271,26 @@ impl Web3Rpcs {
         // the cache is set last, so if its here, its everywhere
         // TODO: use try_get_with
         if let Some(block) = self.blocks_by_hash.get(hash) {
-            return Ok(block);
+            // double check that it matches the blocks_by_number cache
+            let cached_hash = self
+                .blocks_by_number
+                .get_with_by_ref(block.number(), async { *hash })
+                .await;
+
+            if cached_hash == *hash {
+                return Ok(block);
+            }
+
+            // hashes don't match! this block must be in the middle of being uncled
+            // TODO: check known uncles
         }
 
         // block not in cache. we need to ask an rpc for it
         let get_block_params = (*hash, false);
 
         let block: Option<ArcBlock> = if let Some(rpc) = rpc {
-            // TODO: request_with_metadata would probably be better
+            // ask a specific rpc
+            // TODO: request_with_metadata would probably be better than authorized_request
             rpc.authorized_request::<_, Option<ArcBlock>>(
                 "eth_getBlockByHash",
                 &get_block_params,
@@ -224,7 +299,8 @@ impl Web3Rpcs {
             )
             .await?
         } else {
-            // TODO: request_with_metadata would probably be better
+            // ask any rpc
+            // TODO: request_with_metadata instead of internal_request
             self.internal_request::<_, Option<ArcBlock>>("eth_getBlockByHash", &get_block_params)
                 .await?
         };
@@ -254,7 +330,6 @@ impl Web3Rpcs {
 
     /// Get the heaviest chain's block from cache or backend rpc
     /// Caution! If a future block is requested, this might wait forever. Be sure to have a timeout outside of this!
-    /// TODO: take a RequestMetadata
     pub async fn cannonical_block(
         &self,
         authorization: &Arc<Authorization>,
