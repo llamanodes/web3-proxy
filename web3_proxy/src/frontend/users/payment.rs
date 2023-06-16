@@ -226,6 +226,7 @@ pub async fn user_balance_post(
     let mut response_data = vec![];
     for log in transaction_receipt.logs {
         if let Some(true) = log.removed {
+            // TODO: do we need to make sure this row is deleted? it should be handled by `handle_uncle_block`
             continue;
         }
 

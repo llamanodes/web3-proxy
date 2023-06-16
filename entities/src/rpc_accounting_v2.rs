@@ -28,6 +28,21 @@ pub struct Model {
 
 // TODO: there used to be a relation here to rpc_key
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::rpc_key::Entity",
+        from = "Column::RpcKeyId",
+        to = "super::rpc_key::Column::Id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    RpcKey,
+}
+
+impl Related<super::rpc_key::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::RpcKey.def()
+    }
+}
 
 impl ActiveModelBehavior for ActiveModel {}
