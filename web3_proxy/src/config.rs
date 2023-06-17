@@ -120,11 +120,8 @@ pub struct AppConfig {
     /// domain in sign-in-with-ethereum messages
     pub login_domain: Option<String>,
 
-    /// do not serve any requests if the best known block is older than this many seconds.
-    pub max_head_block_age: Option<u64>,
-
     /// do not serve any requests if the best known block is behind the best known block by more than this many blocks.
-    pub max_block_lag: Option<U64>,
+    pub max_head_block_lag: Option<U64>,
 
     /// Rate limit for bearer token authenticated entrypoints.
     /// This is separate from the rpc limits.
@@ -233,6 +230,33 @@ fn default_response_cache_max_bytes() -> u64 {
     10u64.pow(8)
 }
 
+/// TODO: we can't query a provider because we need this to create a provider
+pub fn average_block_interval(chain_id: u64) -> Duration {
+    match chain_id {
+        // ethereum
+        1 => Duration::from_secs(12),
+        // ethereum-goerli
+        5 => Duration::from_secs(12),
+        // binance
+        56 => Duration::from_secs(3),
+        // polygon
+        137 => Duration::from_secs(2),
+        // fantom
+        250 => Duration::from_secs(1),
+        // arbitrum
+        42161 => Duration::from_millis(500),
+        // anything else
+        _ => {
+            let default = 10;
+            warn!(
+                "unknown chain_id ({}). defaulting average_block_interval to {} seconds",
+                chain_id, default
+            );
+            Duration::from_secs(default)
+        }
+    }
+}
+
 /// Configuration for a backend web3 RPC server
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct Web3RpcConfig {
@@ -275,6 +299,7 @@ impl Web3RpcConfig {
         db_conn: Option<DatabaseConnection>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
         chain_id: u64,
+        block_interval: Duration,
         http_client: Option<reqwest::Client>,
         blocks_by_hash_cache: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
@@ -283,31 +308,6 @@ impl Web3RpcConfig {
         if !self.extra.is_empty() {
             warn!("unknown Web3RpcConfig fields!: {:?}", self.extra.keys());
         }
-
-        // TODO: get this from config? a helper function? where does this belong?
-        let block_interval = match chain_id {
-            // ethereum
-            1 => Duration::from_secs(12),
-            // ethereum-goerli
-            5 => Duration::from_secs(12),
-            // binance
-            56 => Duration::from_secs(3),
-            // polygon
-            137 => Duration::from_secs(2),
-            // fantom
-            250 => Duration::from_secs(1),
-            // arbitrum
-            42161 => Duration::from_millis(500),
-            // anything else
-            _ => {
-                let default = 10;
-                warn!(
-                    "unknown chain_id ({}). defaulting polling every {} seconds",
-                    chain_id, default
-                );
-                Duration::from_secs(default)
-            }
-        };
 
         Web3Rpc::spawn(
             self,

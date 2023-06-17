@@ -18,6 +18,7 @@ use std::cmp::{Ordering, Reverse};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{atomic, Arc};
+use std::time::Duration;
 use tokio::time::Instant;
 
 #[derive(Clone, Serialize)]
@@ -338,16 +339,16 @@ type FirstSeenCache = Cache<H256, Instant>;
 /// A ConsensusConnections builder that tracks all connection heads across multiple groups of servers
 pub struct ConsensusFinder {
     rpc_heads: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
-    /// never serve blocks that are too old
-    max_head_block_age: Option<u64>,
+    /// no consensus if the best known block is too old
+    max_head_block_age: Option<Duration>,
     /// tier 0 will be prefered as long as the distance between it and the other tiers is <= max_tier_lag
-    max_block_lag: Option<U64>,
+    max_head_block_lag: Option<U64>,
     /// Block Hash -> First Seen Instant. used to track rpc.head_latency. The same cache should be shared between all ConnectionsGroups
     first_seen: FirstSeenCache,
 }
 
 impl ConsensusFinder {
-    pub fn new(max_head_block_age: Option<u64>, max_block_lag: Option<U64>) -> Self {
+    pub fn new(max_head_block_age: Option<Duration>, max_head_block_lag: Option<U64>) -> Self {
         // TODO: what's a good capacity for this? it shouldn't need to be very large
         let first_seen = Cache::new(16);
 
@@ -356,7 +357,7 @@ impl ConsensusFinder {
         Self {
             rpc_heads,
             max_head_block_age,
-            max_block_lag,
+            max_head_block_lag,
             first_seen,
         }
     }
@@ -537,8 +538,8 @@ impl ConsensusFinder {
         trace!("lowest_block_number: {}", lowest_block.number());
 
         // TODO: move this default. should be in config, not here
-        let max_lag_block_number =
-            highest_block_number.saturating_sub(self.max_block_lag.unwrap_or_else(|| U64::from(5)));
+        let max_lag_block_number = highest_block_number
+            .saturating_sub(self.max_head_block_lag.unwrap_or_else(|| U64::from(5)));
 
         trace!("max_lag_block_number: {}", max_lag_block_number);
 

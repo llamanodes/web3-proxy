@@ -4,7 +4,7 @@ use super::consensus::{ConsensusWeb3Rpcs, ShouldWaitForBlock};
 use super::one::Web3Rpc;
 use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
 use crate::app::{flatten_handle, Web3ProxyApp, Web3ProxyJoinHandle};
-use crate::config::{BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
+use crate::config::{average_block_interval, BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
@@ -66,18 +66,19 @@ pub struct Web3Rpcs {
     /// the soft limit required to agree on consensus for the head block. (thundering herd protection)
     pub(super) min_sum_soft_limit: u32,
     /// how far behind the highest known block height we can be before we stop serving requests
-    pub(super) max_block_lag: Option<U64>,
+    pub(super) max_head_block_lag: U64,
     /// how old our consensus head block we can be before we stop serving requests
-    pub(super) max_head_block_age: Option<u64>,
+    /// calculated based on max_head_block_lag and averge block times
+    pub(super) max_head_block_age: Duration,
 }
 
 impl Web3Rpcs {
     /// Spawn durable connections to multiple Web3 providers.
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
+        chain_id: u64,
         db_conn: Option<DatabaseConnection>,
-        max_head_block_age: Option<u64>,
-        max_block_lag: Option<U64>,
+        max_head_block_lag: Option<U64>,
         min_head_rpcs: usize,
         min_sum_soft_limit: u32,
         name: String,
@@ -115,13 +116,20 @@ impl Web3Rpcs {
         // by_name starts empty. self.apply_server_configs will add to it
         let by_name = Default::default();
 
+        let max_head_block_lag = max_head_block_lag.unwrap_or(5.into());
+
+        let max_head_block_age = Duration::from_secs_f32(
+            (max_head_block_lag.as_u64() * 10) as f32
+                * average_block_interval(chain_id).as_secs_f32(),
+        );
+
         let connections = Arc::new(Self {
             block_sender,
             blocks_by_hash,
             blocks_by_number,
             by_name,
             max_head_block_age,
-            max_block_lag,
+            max_head_block_lag,
             min_synced_rpcs: min_head_rpcs,
             min_sum_soft_limit,
             name,
@@ -173,6 +181,10 @@ impl Web3Rpcs {
             });
         }
 
+        let chain_id = app.config.chain_id;
+
+        let block_interval = average_block_interval(chain_id);
+
         // turn configs into connections (in parallel)
         let mut spawn_handles: FuturesUnordered<_> = rpc_configs
             .into_iter()
@@ -194,7 +206,6 @@ impl Web3Rpcs {
 
                 let pending_tx_id_sender = Some(self.pending_tx_id_sender.clone());
                 let blocks_by_hash_cache = self.blocks_by_hash.clone();
-                let chain_id = app.config.chain_id;
 
                 debug!("spawning {}", server_name);
 
@@ -203,6 +214,7 @@ impl Web3Rpcs {
                     db_conn,
                     vredis_pool,
                     chain_id,
+                    block_interval,
                     http_client,
                     blocks_by_hash_cache,
                     block_sender,
@@ -1527,9 +1539,9 @@ mod tests {
                 .time_to_live(Duration::from_secs(60))
                 .build(),
             // TODO: test max_head_block_age?
-            max_head_block_age: None,
-            // TODO: test max_block_lag?
-            max_block_lag: None,
+            max_head_block_age: Duration::from_secs(60),
+            // TODO: test max_head_block_lag?
+            max_head_block_lag: 5.into(),
             min_synced_rpcs: 1,
             min_sum_soft_limit: 1,
         };
@@ -1808,8 +1820,8 @@ mod tests {
                 .build(),
             min_synced_rpcs: 1,
             min_sum_soft_limit: 4_000,
-            max_head_block_age: None,
-            max_block_lag: None,
+            max_head_block_age: Duration::from_secs(60),
+            max_head_block_lag: 5.into(),
         };
 
         let authorization = Arc::new(Authorization::internal(None).unwrap());
@@ -1988,8 +2000,8 @@ mod tests {
             blocks_by_number: Cache::new(10_000),
             min_synced_rpcs: 1,
             min_sum_soft_limit: 1_000,
-            max_head_block_age: None,
-            max_block_lag: None,
+            max_head_block_age: Duration::from_secs(60),
+            max_head_block_lag: 5.into(),
         };
 
         let authorization = Arc::new(Authorization::internal(None).unwrap());

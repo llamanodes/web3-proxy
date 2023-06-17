@@ -14,6 +14,7 @@ use serde::ser::SerializeStruct;
 use serde::Serialize;
 use serde_json::json;
 use std::hash::Hash;
+use std::time::Duration;
 use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
 
@@ -89,23 +90,25 @@ impl Web3ProxyBlock {
         // no need to recalulate lag every time
         // if the head block gets too old, a health check restarts this connection
         // TODO: emit a stat for received_age
-        x.received_age = Some(x.age());
+        x.received_age = Some(x.age().as_secs());
 
         Some(x)
     }
 
-    pub fn age(&self) -> u64 {
+    pub fn age(&self) -> Duration {
         let now = chrono::Utc::now().timestamp();
 
         let block_timestamp = self.block.timestamp.as_u32() as i64;
 
-        if block_timestamp < now {
+        let x = if block_timestamp < now {
             // this server is still syncing from too far away to serve requests
             // u64 is safe because we checked equality above
             (now - block_timestamp) as u64
         } else {
             0
-        }
+        };
+
+        Duration::from_secs(x)
     }
 
     #[inline(always)]
@@ -158,7 +161,7 @@ impl Display for Web3ProxyBlock {
             "{} ({}, {}s old)",
             self.number(),
             self.hash(),
-            self.age()
+            self.age().as_secs()
         )
     }
 }
@@ -402,7 +405,7 @@ impl Web3Rpcs {
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> Web3ProxyResult<()> {
         let mut connection_heads =
-            ConsensusFinder::new(self.max_head_block_age, self.max_block_lag);
+            ConsensusFinder::new(Some(self.max_head_block_age), Some(self.max_head_block_lag));
 
         loop {
             match block_receiver.recv_async().await {
