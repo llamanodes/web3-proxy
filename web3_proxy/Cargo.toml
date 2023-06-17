@@ -23,8 +23,8 @@ payment-contracts = { path = "../payment-contracts" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 
 ethers = { git = "https://github.com/llamanodes/ethers-rs/", rev = "eb68f5d60850008cd302762bd3a5a4bdcfecc713", default-features = false, features = ["rustls", "ws"] }
-influxdb2 = { git = "https://github.com/llamanodes/influxdb2", features = ["rustls"], rev = "1e5577e14150797584f5ed0ea7aba0bd68f0a678" }
-influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/", rev = "1e5577e14150797584f5ed0ea7aba0bd68f0a678"}
+influxdb2 = { git = "https://github.com/llamanodes/influxdb2", features = ["rustls"], rev = "2d125128696a29d7e0b9abc052c928937e7c0579" }
+influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/", rev = "2d125128696a29d7e0b9abc052c928937e7c0579"}
 
 # TODO: regex has several "perf" features that we might want to use
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
