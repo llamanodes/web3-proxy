@@ -27,6 +27,7 @@ use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::num::NonZeroU64;
+use std::str::FromStr;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
 
@@ -881,18 +882,26 @@ impl RpcQueryStats {
         cache_hit: bool,
         method: Option<&str>,
     ) -> Decimal {
-        // for now, always return 0 for cost
-        Decimal::new(0, 1)
-
-        /*
         // some methods should be free. there might be cases where method isn't set (though they should be uncommon)
         // TODO: get this list from config (and add more to it)
         if let Some(method) = method.as_ref() {
-            if ["eth_chainId"].contains(method) {
+            if [
+                "eth_chainId",
+                "eth_syncing",
+                "eth_protocolVersion",
+                "net_version",
+                "net_listening",
+            ]
+            .contains(method)
+            {
                 return 0.into();
             }
         }
 
+        // for now, always return a flat cost
+        return Decimal::from_str("0.000018").unwrap();
+
+        /*
         // TODO: get cost_minimum, cost_free_bytes, cost_per_byte, cache_hit_divisor from config. each chain will be different
         // pays at least $0.000018 / credits per request
         let cost_minimum = Decimal::new(18, 6);
