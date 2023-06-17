@@ -642,7 +642,7 @@ impl Web3Rpc {
         }
 
         if let Some(url) = self.ws_url.clone() {
-            debug!("starting websocket provider on {}", self);
+            trace!("starting websocket provider on {}", self);
 
             let x = connect_ws(url, usize::MAX).await?;
 
@@ -655,7 +655,7 @@ impl Web3Rpc {
             return Ok(());
         }
 
-        debug!("starting subscriptions on {}", self);
+        trace!("starting subscriptions on {}", self);
 
         self.check_provider(chain_id).await?;
 
@@ -790,7 +790,7 @@ impl Web3Rpc {
         block_map: BlocksByHashCache,
         subscribe_stop_rx: watch::Receiver<bool>,
     ) -> Web3ProxyResult<()> {
-        debug!("subscribing to new heads on {}", self);
+        trace!("subscribing to new heads on {}", self);
 
         // TODO: different handler depending on backup or not
         let error_handler = None;

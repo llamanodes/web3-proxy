@@ -58,7 +58,7 @@ pub async fn get_user_id_from_params(
                             .await?;
 
                         // TODO: emit a stat? if this is high something weird might be happening
-                        debug!("cleared expired logins: {:?}", delete_result);
+                        trace!("cleared expired logins: {:?}", delete_result);
 
                         return Err(Web3ProxyError::AccessDenied);
                     }

@@ -427,7 +427,7 @@ pub async fn query_user_stats<'a>(
                                     out.insert("rpc_key", serde_json::Value::String(x.to_string()));
                                 }
                                 None => {
-                                    debug!("rpc_secret_key_id is not included in this query")
+                                    trace!("rpc_secret_key_id is not included in this query")
                                 }
                             }
                         }

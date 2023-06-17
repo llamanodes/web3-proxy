@@ -385,17 +385,17 @@ impl BufferedRpcQueryStats {
             // referral_entity.credits_applied_for_referrer * (Decimal::from(10) checks (atomically using this table only), whether the user has brought in >$100 to the referer
             // In this case, the sender receives $100 as a bonus / gift
             // Apply a 10$ bonus onto the user, if the user has spent 100$
-            debug!(
+            trace!(
                 "Were credits applied so far? {:?} {:?}",
                 referral_entity.credits_applied_for_referee,
                 !referral_entity.credits_applied_for_referee
             );
-            debug!(
+            trace!(
                 "Credits applied for referrer so far? {:?}",
                 referral_entity.credits_applied_for_referrer
             );
-            debug!("Sum credits used? {:?}", self.sum_credits_used);
-            debug!(
+            trace!("Sum credits used? {:?}", self.sum_credits_used);
+            trace!(
                 "Hello: {:?}",
                 (referral_entity.credits_applied_for_referrer * (Decimal::from(10))
                     + self.sum_credits_used)
@@ -406,7 +406,7 @@ impl BufferedRpcQueryStats {
                     + self.sum_credits_used)
                     >= Decimal::from(100)
             {
-                debug!("Adding sender bonus balance");
+                trace!("Adding sender bonus balance");
                 deltas.usage_bonus_to_request_sender_through_referral = Decimal::from(10);
                 deltas.apply_usage_bonus_to_request_sender = true;
             }
@@ -476,9 +476,10 @@ impl BufferedRpcQueryStats {
         };
 
         // In any case, add to the balance
-        debug!(
+        trace!(
             "Delta is: {:?} from credits used {:?}",
-            deltas, self.sum_credits_used
+            deltas,
+            self.sum_credits_used
         );
         let _ = balance::Entity::insert(user_balance)
             .on_conflict(
@@ -507,7 +508,7 @@ impl BufferedRpcQueryStats {
 
         // Do the referrer_entry updates
         if let Some((referral_entity, referrer_code_entity)) = referral_objects {
-            debug!("Positive referrer deposit delta");
+            trace!("Positive referrer deposit delta");
             let referee_entry = referee::ActiveModel {
                 id: sea_orm::Unchanged(referral_entity.id),
                 credits_applied_for_referee: sea_orm::Set(

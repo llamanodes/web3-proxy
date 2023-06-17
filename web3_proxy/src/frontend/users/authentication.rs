@@ -275,7 +275,7 @@ pub async fn user_login_post(
                 .await?;
 
             // TODO: emit a stat? if this is high something weird might be happening
-            debug!("cleared expired pending_logins: {:?}", delete_result);
+            trace!("cleared expired pending_logins: {:?}", delete_result);
 
             return Err(Web3ProxyError::EipVerificationFailed(
                 Box::new(err_1),
@@ -316,7 +316,7 @@ pub async fn user_login_post(
             let txn = db_conn.begin().await?;
 
             // First, optionally catch a referral code from the parameters if there is any
-            debug!("Refferal code is: {:?}", payload.referral_code);
+            trace!("Referal code is: {:?}", payload.referral_code);
             if let Some(referral_code) = payload.referral_code.as_ref() {
                 // If it is not inside, also check in the database
                 trace!("Using register referral code:  {:?}", referral_code);
@@ -453,7 +453,7 @@ pub async fn user_logout_post(
         .exec(&db_conn)
         .await
     {
-        debug!("Failed to delete {}: {}", user_bearer.redis_key(), err);
+        warn!("Failed to delete {}: {}", user_bearer.redis_key(), err);
     }
 
     let now = Utc::now();
@@ -464,7 +464,7 @@ pub async fn user_logout_post(
         .exec(&db_conn)
         .await;
 
-    debug!("Deleted expired logins: {:?}", delete_result);
+    trace!("Deleted expired logins: {:?}", delete_result);
 
     // also delete any expired pending logins
     let delete_result = login::Entity::delete_many()
@@ -472,7 +472,7 @@ pub async fn user_logout_post(
         .exec(&db_conn)
         .await;
 
-    debug!("Deleted expired pending logins: {:?}", delete_result);
+    trace!("Deleted expired pending logins: {:?}", delete_result);
 
     // TODO: what should the response be? probably json something
     Ok("goodbye".into_response())

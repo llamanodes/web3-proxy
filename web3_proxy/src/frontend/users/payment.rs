@@ -264,9 +264,11 @@ pub async fn user_balance_post(
             // Setting the scale already does the decimal shift, no need to divide a second time
             payment_token_amount.set_scale(payment_token_decimals)?;
 
-            debug!(
-                "Found deposit event for: {:?} {:?} {:?}",
-                recipient_account, payment_token_address, payment_token_amount
+            trace!(
+                "found deposit event for: {:?} {:?} {:?}",
+                recipient_account,
+                payment_token_address,
+                payment_token_amount
             );
 
             let recipient = match user::Entity::find()
@@ -313,7 +315,7 @@ pub async fn user_balance_post(
                 .exec(&txn)
                 .await?;
 
-            debug!("Saving log {} of txid {:?}", log_index, tx_hash);
+            trace!("Saving log {} of txid {:?}", log_index, tx_hash);
             let receipt = increase_on_chain_balance_receipt::ActiveModel {
                 id: sea_orm::ActiveValue::NotSet,
                 amount: sea_orm::ActiveValue::Set(payment_token_amount),
