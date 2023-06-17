@@ -4,7 +4,8 @@ use crate::block_number::{block_needed, BlockNeeded};
 use crate::config::{AppConfig, TopConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{
-    Authorization, RequestMetadata, RequestOrMethod, ResponseOrBytes, RpcSecretKey,
+    Authorization, AuthorizationChecks, Balance, RequestMetadata, RequestOrMethod, ResponseOrBytes,
+    RpcSecretKey,
 };
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{
@@ -24,12 +25,10 @@ use crate::rpcs::transactions::TxStatus;
 use crate::stats::{AppStat, StatBuffer};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
-use axum::headers::{Origin, Referer, UserAgent};
 use axum::http::StatusCode;
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimiter;
 use derive_more::From;
-use entities::sea_orm_active_enums::TrackingLevel;
 use entities::user;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U64};
@@ -38,11 +37,10 @@ use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
 use hashbrown::{HashMap, HashSet};
-use ipnet::IpNet;
 use log::{error, info, trace, warn, Level};
-use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{DatabaseTransaction, EntityTrait, PaginatorTrait, TransactionTrait};
 use moka::future::{Cache, CacheBuilder};
+use parking_lot::RwLock;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use serde::Serialize;
@@ -54,7 +52,7 @@ use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::sync::{broadcast, watch, RwLock, Semaphore};
+use tokio::sync::{broadcast, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -67,50 +65,16 @@ pub static APP_USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION")
 );
 
-// aggregate across 1 week
+/// aggregate across 1 week
 pub const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
 
+/// Convenience type
 pub type Web3ProxyJoinHandle<T> = JoinHandle<Web3ProxyResult<T>>;
-
-/// TODO: move this
-#[derive(Clone, Debug, Default, From)]
-pub struct AuthorizationChecks {
-    /// database id of the primary user. 0 if anon
-    /// TODO: do we need this? its on the authorization so probably not
-    /// TODO: `Option<NonZeroU64>`? they are actual zeroes some places in the db now
-    pub user_id: u64,
-    /// the key used (if any)
-    pub rpc_secret_key: Option<RpcSecretKey>,
-    /// database id of the rpc key
-    /// if this is None, then this request is being rate limited by ip
-    pub rpc_secret_key_id: Option<NonZeroU64>,
-    /// if None, allow unlimited queries. inherited from the user_tier
-    pub max_requests_per_period: Option<u64>,
-    // if None, allow unlimited concurrent requests. inherited from the user_tier
-    pub max_concurrent_requests: Option<u32>,
-    /// if None, allow any Origin
-    pub allowed_origins: Option<Vec<Origin>>,
-    /// if None, allow any Referer
-    pub allowed_referers: Option<Vec<Referer>>,
-    /// if None, allow any UserAgent
-    pub allowed_user_agents: Option<Vec<UserAgent>>,
-    /// if None, allow any IP Address
-    pub allowed_ips: Option<Vec<IpNet>>,
-    /// how detailed any rpc account entries should be
-    pub tracking_level: TrackingLevel,
-    /// Chance to save reverting eth_call, eth_estimateGas, and eth_sendRawTransaction to the database.
-    /// depending on the caller, errors might be expected. this keeps us from bloating our database
-    /// u16::MAX == 100%
-    pub log_revert_chance: u16,
-    /// if true, transactions are broadcast only to private mempools.
-    /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
-    pub private_txs: bool,
-    pub proxy_mode: ProxyMode,
-}
 
 /// Cache data from the database about rpc keys
 pub type RpcSecretKeyCache = Cache<RpcSecretKey, AuthorizationChecks>;
-pub type UserBalanceCache = Cache<NonZeroU64, Arc<RwLock<Decimal>>>;
+/// Cache data from the database about user balances
+pub type UserBalanceCache = Cache<NonZeroU64, Arc<RwLock<Balance>>>;
 
 /// The application
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
@@ -193,7 +157,6 @@ pub async fn flatten_handles<T>(
             Ok(Ok(_)) => continue,
         }
     }
-
     Ok(())
 }
 
@@ -208,7 +171,7 @@ pub struct Web3ProxyAppSpawn {
     pub background_handles: FuturesUnordered<Web3ProxyJoinHandle<()>>,
     /// config changes are sent here
     pub new_top_config_sender: watch::Sender<TopConfig>,
-    /// watch this to know when to start the app
+    /// watch this to know when the app is ready to serve requests
     pub consensus_connections_watcher: watch::Receiver<Option<Arc<ConsensusWeb3Rpcs>>>,
 }
 

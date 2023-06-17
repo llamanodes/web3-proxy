@@ -201,7 +201,6 @@ impl MigrateStatsToV2 {
                         start_instant: Instant::now(),
                         stat_sender: Some(stat_sender.clone()),
                         request_ulid,
-                        latest_balance,
                     };
 
                     if let Some(x) = request_metadata.try_send_stat()? {

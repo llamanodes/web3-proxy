@@ -1331,7 +1331,6 @@ mod tests {
     use log::{trace, LevelFilter};
     use moka::future::CacheBuilder;
     use parking_lot::RwLock;
-    use tokio::sync::RwLock as AsyncRwLock;
 
     #[cfg(test)]
     fn new_peak_latency() -> PeakEwmaLatency {
