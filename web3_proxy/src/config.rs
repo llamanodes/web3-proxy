@@ -121,7 +121,7 @@ pub struct AppConfig {
     pub login_domain: Option<String>,
 
     /// do not serve any requests if the best known block is older than this many seconds.
-    pub max_block_age: Option<u64>,
+    pub max_head_block_age: Option<u64>,
 
     /// do not serve any requests if the best known block is behind the best known block by more than this many blocks.
     pub max_block_lag: Option<U64>,

@@ -196,6 +196,10 @@ impl Web3ProxyApp {
             );
         }
 
+        if top_config.app.max_head_block_age.is_none() {
+            warn!("no max_head_block_age. stale data could be served!");
+        }
+
         if !top_config.extra.is_empty() {
             warn!(
                 "unknown TopConfig fields!: {:?}",
@@ -501,7 +505,7 @@ impl Web3ProxyApp {
 
         let (balanced_rpcs, balanced_handle, consensus_connections_watcher) = Web3Rpcs::spawn(
             db_conn.clone(),
-            top_config.app.max_block_age,
+            top_config.app.max_head_block_age,
             top_config.app.max_block_lag,
             top_config.app.min_synced_rpcs,
             top_config.app.min_sum_soft_limit,
@@ -526,7 +530,7 @@ impl Web3ProxyApp {
             // let (private_rpcs, private_rpcs_handle) = Web3Rpcs::spawn(
             let (private_rpcs, private_handle, _) = Web3Rpcs::spawn(
                 db_conn.clone(),
-                // private rpcs don't get subscriptions, so no need for max_block_age or max_block_lag
+                // private rpcs don't get subscriptions, so no need for max_head_block_age or max_block_lag
                 None,
                 None,
                 0,
@@ -558,7 +562,7 @@ impl Web3ProxyApp {
             // TODO: do something with the spawn handle
             let (bundler_4337_rpcs, bundler_4337_rpcs_handle, _) = Web3Rpcs::spawn(
                 db_conn.clone(),
-                // bundler_4337_rpcs don't get subscriptions, so no need for max_block_age or max_block_lag
+                // bundler_4337_rpcs don't get subscriptions, so no need for max_head_block_age or max_block_lag
                 None,
                 None,
                 0,

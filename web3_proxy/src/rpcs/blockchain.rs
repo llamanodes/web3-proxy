@@ -401,7 +401,8 @@ impl Web3Rpcs {
         // Geth's subscriptions have the same potential for skipping blocks.
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> Web3ProxyResult<()> {
-        let mut connection_heads = ConsensusFinder::new(self.max_block_age, self.max_block_lag);
+        let mut connection_heads =
+            ConsensusFinder::new(self.max_head_block_age, self.max_block_lag);
 
         loop {
             match block_receiver.recv_async().await {

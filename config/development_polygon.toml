@@ -23,6 +23,8 @@ min_sum_soft_limit = 1_000
 # only mark a block as the head block if the number of servers with it is great than or equal to min_synced_rpcs
 min_synced_rpcs = 1
 
+max_head_block_age = 30
+
 # redis is optional. it is used for rate limits set by `hard_limit`
 # TODO: how do we find the optimal redis_max_connections? too high actually ends up being slower
 volatile_redis_max_connections = 20

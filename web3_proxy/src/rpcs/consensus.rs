@@ -339,7 +339,7 @@ type FirstSeenCache = Cache<H256, Instant>;
 pub struct ConsensusFinder {
     rpc_heads: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
     /// never serve blocks that are too old
-    max_block_age: Option<u64>,
+    max_head_block_age: Option<u64>,
     /// tier 0 will be prefered as long as the distance between it and the other tiers is <= max_tier_lag
     max_block_lag: Option<U64>,
     /// Block Hash -> First Seen Instant. used to track rpc.head_latency. The same cache should be shared between all ConnectionsGroups
@@ -347,7 +347,7 @@ pub struct ConsensusFinder {
 }
 
 impl ConsensusFinder {
-    pub fn new(max_block_age: Option<u64>, max_block_lag: Option<U64>) -> Self {
+    pub fn new(max_head_block_age: Option<u64>, max_block_lag: Option<U64>) -> Self {
         // TODO: what's a good capacity for this? it shouldn't need to be very large
         let first_seen = Cache::new(16);
 
@@ -355,7 +355,7 @@ impl ConsensusFinder {
 
         Self {
             rpc_heads,
-            max_block_age,
+            max_head_block_age,
             max_block_lag,
             first_seen,
         }
@@ -406,7 +406,7 @@ impl ConsensusFinder {
                     .await
                     .web3_context("failed caching block")?;
 
-                if let Some(max_age) = self.max_block_age {
+                if let Some(max_age) = self.max_head_block_age {
                     if rpc_head_block.age() > max_age {
                         trace!("rpc_head_block from {} is too old! {}", rpc, rpc_head_block);
                         return Ok(self.remove(&rpc).is_some());
@@ -536,6 +536,7 @@ impl ConsensusFinder {
 
         trace!("lowest_block_number: {}", lowest_block.number());
 
+        // TODO: move this default. should be in config, not here
         let max_lag_block_number =
             highest_block_number.saturating_sub(self.max_block_lag.unwrap_or_else(|| U64::from(5)));
 

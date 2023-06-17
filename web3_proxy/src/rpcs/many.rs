@@ -68,7 +68,7 @@ pub struct Web3Rpcs {
     /// how far behind the highest known block height we can be before we stop serving requests
     pub(super) max_block_lag: Option<U64>,
     /// how old our consensus head block we can be before we stop serving requests
-    pub(super) max_block_age: Option<u64>,
+    pub(super) max_head_block_age: Option<u64>,
 }
 
 impl Web3Rpcs {
@@ -76,7 +76,7 @@ impl Web3Rpcs {
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         db_conn: Option<DatabaseConnection>,
-        max_block_age: Option<u64>,
+        max_head_block_age: Option<u64>,
         max_block_lag: Option<U64>,
         min_head_rpcs: usize,
         min_sum_soft_limit: u32,
@@ -120,7 +120,7 @@ impl Web3Rpcs {
             blocks_by_hash,
             blocks_by_number,
             by_name,
-            max_block_age,
+            max_head_block_age,
             max_block_lag,
             min_synced_rpcs: min_head_rpcs,
             min_sum_soft_limit,
@@ -1526,8 +1526,8 @@ mod tests {
             blocks_by_number: CacheBuilder::new(100)
                 .time_to_live(Duration::from_secs(60))
                 .build(),
-            // TODO: test max_block_age?
-            max_block_age: None,
+            // TODO: test max_head_block_age?
+            max_head_block_age: None,
             // TODO: test max_block_lag?
             max_block_lag: None,
             min_synced_rpcs: 1,
@@ -1808,7 +1808,7 @@ mod tests {
                 .build(),
             min_synced_rpcs: 1,
             min_sum_soft_limit: 4_000,
-            max_block_age: None,
+            max_head_block_age: None,
             max_block_lag: None,
         };
 
@@ -1988,7 +1988,7 @@ mod tests {
             blocks_by_number: Cache::new(10_000),
             min_synced_rpcs: 1,
             min_sum_soft_limit: 1_000,
-            max_block_age: None,
+            max_head_block_age: None,
             max_block_lag: None,
         };
 
