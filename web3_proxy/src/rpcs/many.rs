@@ -118,10 +118,8 @@ impl Web3Rpcs {
 
         let max_head_block_lag = max_head_block_lag.unwrap_or(5.into());
 
-        let max_head_block_age = Duration::from_secs_f32(
-            (max_head_block_lag.as_u64() * 10) as f32
-                * average_block_interval(chain_id).as_secs_f32(),
-        );
+        let max_head_block_age =
+            average_block_interval(chain_id).mul_f32((max_head_block_lag.as_u64() * 10) as f32);
 
         let connections = Arc::new(Self {
             block_sender,
