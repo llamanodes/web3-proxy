@@ -27,7 +27,6 @@ use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::num::NonZeroU64;
-use std::str::FromStr;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
 
@@ -235,8 +234,6 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         db_conn: &DatabaseConnection,
         key: &RpcQueryKey,
-        rpc_secret_key_cache: &RpcSecretKeyCache,
-        user_balance_cache: &UserBalanceCache,
     ) -> Web3ProxyResult<()> {
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
@@ -691,14 +688,7 @@ impl BufferedRpcQueryStats {
         }
 
         // First of all, save the statistics to the database:
-        self._save_db_stats(
-            chain_id,
-            db_conn,
-            &key,
-            rpc_secret_key_cache,
-            user_balance_cache,
-        )
-        .await?;
+        self._save_db_stats(chain_id, db_conn, &key).await?;
 
         // Return early if no credits were used, or if user is anonymous
         if self.sum_credits_used == 0.into() {
@@ -733,7 +723,7 @@ impl BufferedRpcQueryStats {
         // do this after commiting the database so that invalidated caches definitely query commited data
         self._update_balance_in_cache(
             &deltas,
-            &db_conn,
+            db_conn,
             &sender_rpc_entity,
             &referral_objects,
             rpc_secret_key_cache,
