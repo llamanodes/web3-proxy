@@ -4,6 +4,7 @@ use crate::frontend::authorization::Authorization;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
 use crate::response_cache::JsonRpcResponseEnum;
 use crate::rpcs::provider::EthersHttpProvider;
+use axum::extract::ws::Message;
 use axum::{
     headers,
     http::StatusCode,
@@ -1060,5 +1061,20 @@ where
 {
     fn web3_context<S: Into<Cow<'static, str>>>(self, msg: S) -> Result<T, Web3ProxyError> {
         self.map_err(|err| Web3ProxyError::WithContext(Some(Box::new(err.into())), msg.into()))
+    }
+}
+
+impl Web3ProxyError {
+    pub fn into_message(self, id: Option<Box<RawValue>>) -> Message {
+        let (_, err) = self.as_response_parts();
+
+        let id = id.unwrap_or_default();
+
+        let err = JsonRpcForwardedResponse::from_response_data(err, id);
+
+        let msg = serde_json::to_string(&err).expect("errors should always serialize to json");
+
+        // TODO: what about a binary message?
+        Message::Text(msg)
     }
 }
