@@ -372,7 +372,6 @@ impl RequestMetadata {
     }
 
     /// this may drift slightly if multiple servers are handling the same users, but should be close
-    /// TODO: i think we could use a parking_lot::RwLock instead of a tokio RwLock
     pub async fn latest_balance(&self) -> Option<Decimal> {
         if let Some(x) = self.authorization.as_ref() {
             let x = x.checks.latest_balance.read().remaining();
