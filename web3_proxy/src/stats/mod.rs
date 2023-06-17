@@ -17,7 +17,7 @@ use derive_more::From;
 use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key};
 use influxdb2::models::DataPoint;
-use log::{debug, trace};
+use log::trace;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
@@ -900,7 +900,7 @@ impl RpcQueryStats {
         }
 
         // for now, always return a flat cost
-        return Decimal::from_str("0.000018").unwrap();
+        Decimal::from_str("0.000018").unwrap()
 
         /*
         // TODO: get cost_minimum, cost_free_bytes, cost_per_byte, cache_hit_divisor from config. each chain will be different

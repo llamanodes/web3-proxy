@@ -9,7 +9,7 @@ use axum::{
 use chrono::{NaiveDateTime, Utc};
 use entities::login;
 use hashbrown::HashMap;
-use log::{debug, warn};
+use log::{trace, warn};
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use redis_rate_limiter::{redis::AsyncCommands, RedisConnection};
 

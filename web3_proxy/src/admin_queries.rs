@@ -10,7 +10,7 @@ use axum::{
 use entities::{admin, login, user, user_tier};
 use ethers::prelude::Address;
 use hashbrown::HashMap;
-use log::{debug, info};
+use log::{info, trace};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
