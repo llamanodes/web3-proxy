@@ -55,14 +55,6 @@ pub struct RpcRanking {
 }
 
 impl RpcRanking {
-    pub fn add_offset(&self, offset: u32) -> Self {
-        Self {
-            tier: self.tier.saturating_add(offset),
-            backup: self.backup,
-            head_num: self.head_num,
-        }
-    }
-
     pub fn default_with_backup(backup: bool) -> Self {
         Self {
             backup,
@@ -95,30 +87,33 @@ pub type RankedRpcMap = BTreeMap<RpcRanking, Vec<Arc<Web3Rpc>>>;
 
 pub enum ShouldWaitForBlock {
     Ready,
+    // BackupReady,
     Wait { current: Option<U64> },
+    // WaitForBackup { current: Option<U64> },
     NeverReady,
 }
 
 /// A collection of Web3Rpcs that are on the same block.
 /// Serialize is so we can print it on our /status endpoint
-/// TODO: one data structure of head_rpcs and other_rpcs that is sorted best first
+/// TODO: remove head_block/head_rpcs/tier and replace with one RankedRpcMap
+/// TODO: add `best_rpc(method_data_kind, min_block_needed, max_block_needed, include_backups)`
 #[derive(Clone, Serialize)]
 pub struct ConsensusWeb3Rpcs {
     pub(crate) tier: u32,
     pub(crate) backups_needed: bool,
 
-    // TODO: this is already inside best_rpcs. Don't skip, instead make a shorter serialize
+    // TODO: Don't skip serializing, instead make a shorter serialize
     #[serde(skip_serializing)]
     pub(crate) head_block: Web3ProxyBlock,
 
-    // TODO: smaller serialize
+    // TODO: make a shorter serialize
     pub(crate) head_rpcs: Vec<Arc<Web3Rpc>>,
 
-    // TODO: make this work. the key needs to be a string. I think we need `serialize_with`
+    // TODO: make serializing work. the key needs to be a string. I think we need `serialize_with`
     #[serde(skip_serializing)]
     pub(crate) other_rpcs: RankedRpcMap,
 
-    // TODO: make this work. the key needs to be a string. I think we need `serialize_with`
+    // TODO: make serializing work. the key needs to be a string. I think we need `serialize_with`
     #[serde(skip_serializing)]
     rpc_data: HashMap<Arc<Web3Rpc>, ConsensusRpcData>,
 }
@@ -129,7 +124,9 @@ impl ConsensusWeb3Rpcs {
         self.head_rpcs.len()
     }
 
-    /// will tell you if you should wait for a block
+    /// will tell you if waiting will eventually  should wait for a block
+    /// TODO: return if backup will be needed to serve the request
+    /// TODO: serve now if a backup server has the data
     /// TODO: also include method (or maybe an enum representing the different prune types)
     pub fn should_wait_for_block(
         &self,
