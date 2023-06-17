@@ -233,12 +233,12 @@ impl Web3Rpc {
 
     /// sort by...
     /// - backups last
-    /// - block number (descending)
     /// - tier (ascending)
+    /// - block number (descending)
     /// TODO: tests on this!
-    /// TODO: should tier or block number take priority? it depends on the request. need to make sure filtering is right and then it should work tier before block_number
+    /// TODO: should tier or block number take priority?
     /// TODO: should this return a struct that implements sorting traits?
-    fn sort_on(&self, max_block: Option<U64>) -> (bool, Reverse<U64>, u32) {
+    fn sort_on(&self, max_block: Option<U64>) -> (bool, u32, Reverse<U64>) {
         let mut head_block = self
             .head_block
             .as_ref()
@@ -253,13 +253,13 @@ impl Web3Rpc {
 
         let backup = self.backup;
 
-        (!backup, Reverse(head_block), tier)
+        (!backup, tier, Reverse(head_block))
     }
 
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, Reverse<U64>, u32), OrderedFloat<f64>) {
+    ) -> ((bool, u32, Reverse<U64>), OrderedFloat<f64>) {
         let sort_on = self.sort_on(max_block);
 
         let weighted_peak_ewma_seconds = self.weighted_peak_ewma_seconds();
@@ -275,7 +275,7 @@ impl Web3Rpc {
     pub fn shuffle_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, Reverse<U64>, u32), u8) {
+    ) -> ((bool, u32, Reverse<U64>), u8) {
         let sort_on = self.sort_on(max_block);
 
         let mut rng = nanorand::tls_rng();
