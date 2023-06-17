@@ -1,7 +1,7 @@
 //! Utilities for authorization of logged in and anonymous users.
 
 use super::rpc_proxy_ws::ProxyMode;
-use crate::app::{AuthorizationChecks, Web3ProxyApp, APP_USER_AGENT};
+use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::one::Web3Rpc;
@@ -25,6 +25,7 @@ use ipnet::IpNet;
 use log::{error, trace, warn};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use parking_lot::RwLock;
 use rdkafka::message::{Header as KafkaHeader, OwnedHeaders as KafkaOwnedHeaders, OwnedMessage};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
@@ -37,7 +38,7 @@ use std::num::NonZeroU64;
 use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64, AtomicUsize};
 use std::time::Duration;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
-use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use ulid::Ulid;
@@ -69,6 +70,56 @@ pub enum AuthorizationType {
     Frontend,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct Balance {
+    pub total_deposit: Decimal,
+    pub total_spend: Decimal,
+}
+
+impl Balance {
+    pub fn remaining(&self) -> Decimal {
+        self.total_deposit - self.total_spend
+    }
+}
+
+/// TODO: move this
+#[derive(Clone, Debug, Default, From)]
+pub struct AuthorizationChecks {
+    /// database id of the primary user. 0 if anon
+    /// TODO: do we need this? its on the authorization so probably not
+    /// TODO: `Option<NonZeroU64>`? they are actual zeroes some places in the db now
+    pub user_id: u64,
+    /// locally cached balance that may drift slightly if the user is on multiple servers
+    pub latest_balance: Arc<RwLock<Balance>>,
+    /// the key used (if any)
+    pub rpc_secret_key: Option<RpcSecretKey>,
+    /// database id of the rpc key
+    /// if this is None, then this request is being rate limited by ip
+    pub rpc_secret_key_id: Option<NonZeroU64>,
+    /// if None, allow unlimited queries. inherited from the user_tier
+    pub max_requests_per_period: Option<u64>,
+    // if None, allow unlimited concurrent requests. inherited from the user_tier
+    pub max_concurrent_requests: Option<u32>,
+    /// if None, allow any Origin
+    pub allowed_origins: Option<Vec<Origin>>,
+    /// if None, allow any Referer
+    pub allowed_referers: Option<Vec<Referer>>,
+    /// if None, allow any UserAgent
+    pub allowed_user_agents: Option<Vec<UserAgent>>,
+    /// if None, allow any IP Address
+    pub allowed_ips: Option<Vec<IpNet>>,
+    /// how detailed any rpc account entries should be
+    pub tracking_level: TrackingLevel,
+    /// Chance to save reverting eth_call, eth_estimateGas, and eth_sendRawTransaction to the database.
+    /// depending on the caller, errors might be expected. this keeps us from bloating our database
+    /// u16::MAX == 100%
+    pub log_revert_chance: u16,
+    /// if true, transactions are broadcast only to private mempools.
+    /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
+    pub private_txs: bool,
+    pub proxy_mode: ProxyMode,
+}
+
 /// TODO: include the authorization checks in this?
 #[derive(Clone, Debug)]
 pub struct Authorization {
@@ -90,6 +141,7 @@ pub struct KafkaDebugLogger {
     num_responses: AtomicUsize,
 }
 
+/// Ulids and Uuids matching the same bits hash the same
 impl Hash for RpcSecretKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         let x = match self {
@@ -281,9 +333,6 @@ pub struct RequestMetadata {
 
     /// Cancel-safe channel for sending stats to the buffer
     pub stat_sender: Option<flume::Sender<AppStat>>,
-
-    /// Latest balance
-    pub latest_balance: Arc<RwLock<Decimal>>,
 }
 
 impl Default for Authorization {
@@ -310,7 +359,6 @@ impl Default for RequestMetadata {
             response_timestamp: Default::default(),
             start_instant: Instant::now(),
             stat_sender: Default::default(),
-            latest_balance: Default::default(),
         }
     }
 }
@@ -321,6 +369,17 @@ impl RequestMetadata {
             .as_ref()
             .map(|x| x.checks.proxy_mode)
             .unwrap_or_default()
+    }
+
+    /// this may drift slightly if multiple servers are handling the same users, but should be close
+    pub async fn latest_balance(&self) -> Option<Decimal> {
+        if let Some(x) = self.authorization.as_ref() {
+            let x = x.checks.latest_balance.read().remaining();
+
+            Some(x)
+        } else {
+            None
+        }
     }
 }
 
@@ -436,36 +495,22 @@ impl RequestMetadata {
             }
         }
 
-        // Get latest balance from cache
-        let latest_balance = match app
-            .balance_checks(authorization.checks.user_id)
-            .await
-            .context("Could not retrieve balance from database or cache!")
-        {
-            Ok(x) => x,
-            Err(err) => {
-                error!("{}", err);
-                Arc::new(RwLock::new(Decimal::default()))
-            }
-        };
-
         let x = Self {
             archive_request: false.into(),
+            authorization: Some(authorization),
             backend_requests: Default::default(),
             error_response: false.into(),
             kafka_debug_logger,
-            no_servers: 0.into(),
-            authorization: Some(authorization),
-            request_bytes,
             method,
+            no_servers: 0.into(),
+            request_bytes,
+            request_ulid,
             response_bytes: 0.into(),
             response_from_backup_rpc: false.into(),
             response_millis: 0.into(),
-            request_ulid,
             response_timestamp: 0.into(),
             start_instant: Instant::now(),
             stat_sender: app.stat_sender.clone(),
-            latest_balance,
         };
 
         Arc::new(x)
@@ -1134,24 +1179,28 @@ impl Web3ProxyApp {
     pub(crate) async fn balance_checks(
         &self,
         user_id: u64,
-    ) -> Web3ProxyResult<Arc<RwLock<Decimal>>> {
+    ) -> Web3ProxyResult<Arc<RwLock<Balance>>> {
         match NonZeroU64::try_from(user_id) {
-            Err(_) => Ok(Arc::new(RwLock::new(Decimal::default()))),
+            Err(_) => Ok(Arc::new(Default::default())),
             Ok(x) => self
                 .user_balance_cache
-                .try_get_with_by_ref(&x, async move {
+                .try_get_with(x, async move {
                     let db_replica = self
                         .db_replica()
                         .web3_context("Getting database connection")?;
 
-                    let balance: Decimal = match balance::Entity::find()
+                    let balance = match balance::Entity::find()
                         .filter(balance::Column::UserId.eq(user_id))
                         .one(db_replica.as_ref())
                         .await?
                     {
-                        Some(x) => x.total_deposits - x.total_spent_outside_free_tier,
-                        None => Decimal::default(),
+                        Some(x) => Balance {
+                            total_deposit: x.total_deposits,
+                            total_spend: x.total_spent_outside_free_tier,
+                        },
+                        None => Default::default(),
                     };
+
                     Ok(Arc::new(RwLock::new(balance)))
                 })
                 .await
@@ -1248,54 +1297,62 @@ impl Web3ProxyApp {
                         let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
                             .one(db_replica.as_ref())
                             .await?
-                            .context("user model was not found, but every rpc_key should have a user")?;
+                            .context(
+                                "user model was not found, but every rpc_key should have a user",
+                            )?;
 
-                        let balance = match balance::Entity::find()
-                            .filter(balance::Column::UserId.eq(user_model.id))
-                            .one(db_replica.as_ref())
-                            .await? {
-                            Some(x) => x.total_deposits - x.total_spent_outside_free_tier,
-                            None => Decimal::default()
-                        };
+                        let mut user_tier_model = user_tier::Entity::find_by_id(
+                            user_model.user_tier_id,
+                        )
+                        .one(db_replica.as_ref())
+                        .await?
+                        .context(
+                            "related user tier not found, but every user should have a tier",
+                        )?;
 
-                        let mut user_tier_model =
-                            user_tier::Entity::find_by_id(user_model.user_tier_id)
-                                .one(db_replica.as_ref())
-                                .await?
-                                .context("related user tier not found, but every user should have a tier")?;
+                        let latest_balance = self.balance_checks(rpc_key_model.user_id).await?;
 
                         // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
                         // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
-                        if user_tier_model.title == "Premium" && balance < Decimal::new(1, 1) {
-                            // Find the equivalent downgraded user tier, and modify limits from there
-                            if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
+                        if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
+                            let balance = latest_balance.read().clone();
+
+                            // only consider the user premium if they have paid at least $10 and have a balance > $.01
+                            // otherwise, set user_tier_model to the downograded tier
+                            if balance.total_deposit < Decimal::from(10)
+                                || balance.remaining() < Decimal::new(1, 2)
+                            {
                                 user_tier_model =
                                     user_tier::Entity::find_by_id(downgrade_user_tier)
                                         .one(db_replica.as_ref())
                                         .await?
-                                        .context("finding the downgrade user tier for premium did not work for premium")?;
-                            } else {
-                                return Err(Web3ProxyError::InvalidUserTier);
+                                        .context(format!(
+                                            "downgrade user tier ({}) is missing!",
+                                            downgrade_user_tier
+                                        ))?;
                             }
                         }
 
-                        let rpc_key_id = Some(rpc_key_model.id.try_into().context("db ids are never 0")?);
+                        let rpc_key_id =
+                            Some(rpc_key_model.id.try_into().context("db ids are never 0")?);
 
                         Ok(AuthorizationChecks {
-                            user_id: rpc_key_model.user_id,
-                            rpc_secret_key: Some(rpc_secret_key),
-                            rpc_secret_key_id: rpc_key_id,
                             allowed_ips,
                             allowed_origins,
                             allowed_referers,
                             allowed_user_agents,
-                            tracking_level: rpc_key_model.log_level,
-                            // TODO: is floating point math going to scale this correctly
-                            log_revert_chance: (rpc_key_model.log_revert_chance * u16::MAX as f64) as u16,
+                            latest_balance,
+                            // TODO: is floating point math going to scale this correctly?
+                            log_revert_chance: (rpc_key_model.log_revert_chance * u16::MAX as f64)
+                                as u16,
                             max_concurrent_requests: user_tier_model.max_concurrent_requests,
                             max_requests_per_period: user_tier_model.max_requests_per_period,
                             private_txs: rpc_key_model.private_txs,
                             proxy_mode,
+                            rpc_secret_key: Some(rpc_secret_key),
+                            rpc_secret_key_id: rpc_key_id,
+                            tracking_level: rpc_key_model.log_level,
+                            user_id: rpc_key_model.user_id,
                         })
                     }
                     None => Ok(AuthorizationChecks::default()),
@@ -1316,7 +1373,6 @@ impl Web3ProxyApp {
         user_agent: Option<UserAgent>,
     ) -> Web3ProxyResult<RateLimitResult> {
         let authorization_checks = self.authorization_checks(proxy_mode, rpc_key).await?;
-        let balance = self.balance_checks(authorization_checks.user_id).await?;
 
         // if no rpc_key_id matching the given rpc was found, then we can't rate limit by key
         if authorization_checks.rpc_secret_key_id.is_none() {

@@ -105,17 +105,20 @@ pub async fn user_used_referral_stats(
     let mut out: Vec<Info> = Vec::new();
     for x in referrals.into_iter() {
         let (referral_record, referrer_record) = (x.0, x.1.context("each referral entity should have a referral code associated with it, but this is not the case!")?);
-        // The foreign key is never optional
-        let referring_user = user::Entity::find_by_id(referrer_record.user_id)
-            .one(db_replica.as_ref())
-            .await?
-            .context("Database error, no foreign key found for referring user")?;
+
+        // // The foreign key is never optional
+        // let referring_user = user::Entity::find_by_id(referrer_record.user_id)
+        //     .one(db_replica.as_ref())
+        //     .await?
+        //     .context("Database error, no foreign key found for referring user")?;
+
         let tmp = Info {
             credits_applied_for_referee: referral_record.credits_applied_for_referee,
             credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
             referral_start_date: referral_record.referral_start_date,
             used_referral_code: referrer_record.referral_code,
         };
+
         // Start inserting json's into this
         out.push(tmp);
     }

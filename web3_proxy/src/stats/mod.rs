@@ -27,9 +27,9 @@ use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::num::NonZeroU64;
+use std::str::FromStr;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 
@@ -57,26 +57,26 @@ pub struct RpcQueryStats {
     pub response_timestamp: i64,
     /// Credits used signifies how how much money was used up
     pub credits_used: Decimal,
-    /// Last credits used
-    pub latest_balance: Arc<RwLock<Decimal>>,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
 pub struct RpcQueryKey {
-    /// unix epoch time
-    /// for the time series db, this is (close to) the time that the response was sent
-    /// for the account database, this is rounded to the week
+    /// unix epoch time.
+    /// for the time series db, this is (close to) the time that the response was sent.
+    /// for the account database, this is rounded to the week.
     response_timestamp: i64,
-    /// true if an archive server was needed to serve the request
+    /// true if an archive server was needed to serve the request.
     archive_needed: bool,
-    /// true if the response was some sort of JSONRPC error
+    /// true if the response was some sort of JSONRPC error.
     error_response: bool,
-    /// method tracking is opt-in
+    /// method tracking is opt-in.
     method: Option<String>,
-    /// origin tracking is opt-in
+    /// origin tracking is opt-in.
     origin: Option<Origin>,
-    /// None if the public url was used
+    /// None if the public url was used.
     rpc_secret_key_id: Option<NonZeroU64>,
+    /// None if the public url was used.
+    rpc_key_user_id: Option<NonZeroU64>,
 }
 
 /// round the unix epoch time to the start of a period
@@ -126,6 +126,7 @@ impl RpcQueryStats {
             error_response: self.error_response,
             method,
             rpc_secret_key_id,
+            rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
             origin,
         }
     }
@@ -146,6 +147,7 @@ impl RpcQueryStats {
             error_response: self.error_response,
             method,
             rpc_secret_key_id,
+            rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
             origin,
         }
     }
@@ -177,6 +179,7 @@ impl RpcQueryStats {
             error_response: self.error_response,
             method,
             rpc_secret_key_id: self.authorization.checks.rpc_secret_key_id,
+            rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
             origin,
         };
 
@@ -225,11 +228,6 @@ impl BufferedRpcQueryStats {
         self.sum_response_bytes += stat.response_bytes;
         self.sum_response_millis += stat.response_millis;
         self.sum_credits_used += stat.credits_used;
-
-        // Also record the latest balance for this user ..
-        // Also subtract the used balance from the cache so we
-        // TODO: We are already using the cache. We could also inject the cache into save_tsdb
-        self.latest_balance = stat.latest_balance;
     }
 
     async fn _save_db_stats(
@@ -241,8 +239,6 @@ impl BufferedRpcQueryStats {
         user_balance_cache: &UserBalanceCache,
     ) -> Web3ProxyResult<()> {
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
-
-        // TODO: Could add last balance here (can take the element from the cache, and RpcQueryKey::AuthorizationCheck)
 
         // =============================== //
         //       UPDATE STATISTICS         //
@@ -587,14 +583,14 @@ impl BufferedRpcQueryStats {
         Ok(())
     }
 
-    /// Update & Invalidate cache if user is below 10$ credits (premium downgrade condition)
+    /// Update & Invalidate cache if user is credits are low (premium downgrade condition)
     /// Reduce credits if there was no issue
     /// This is not atomic, so this may be an issue because it's not sequentially consistent across threads
-    /// It is a good-enough approximation though, and if the TTL for the balance cache is high enough, this should be ok
+    /// It is a good-enough approximation though, and if the TTL for the balance cache is low enough, this should be ok
     async fn _update_balance_in_cache(
         &self,
         deltas: &Deltas,
-        txn: &DatabaseTransaction,
+        db_conn: &DatabaseConnection,
         sender_rpc_entity: &rpc_key::Model,
         referral_objects: &Option<(referee::Model, referrer::Model)>,
         rpc_secret_key_cache: &RpcSecretKeyCache,
@@ -603,46 +599,53 @@ impl BufferedRpcQueryStats {
         // ==================
         // Modify sender balance
         // ==================
-        let sender_latest_balance = match NonZeroU64::try_from(sender_rpc_entity.user_id) {
-            Err(_) => Err(Web3ProxyError::BadResponse(
-                "Balance is not positive, although it was previously checked to be as such!".into(),
-            )),
-            // We don't do an get_or_insert, because technically we don't have the most up to date balance
-            // Also let's keep things simple in terms of writing and getting. A single place writes it, multiple places can remove / poll it
-            Ok(x) => Ok(user_balance_cache.get(&x)),
-        }?;
-        let sender_latest_balance = match sender_latest_balance {
+        let user_id = NonZeroU64::try_from(sender_rpc_entity.user_id)
+            .expect("database ids are always nonzero");
+
+        // We don't do an get_or_insert, because technically we don't have the most up to date balance
+        // Also let's keep things simple in terms of writing and getting. A single place writes it, multiple places can remove / poll it
+        let latest_balance = match user_balance_cache.get(&user_id) {
             Some(x) => x,
-            // If not in cache, nothing to update theoretically
+            // If not in cache, nothing to update
             None => return Ok(()),
         };
-        let mut latest_balance = sender_latest_balance.write().await;
-        let balance_before = *latest_balance;
-        // Now modify the balance
-        // TODO: Double check this (perhaps while testing...)
-        *latest_balance = *latest_balance - deltas.balance_spent_including_free_credits
-            + deltas.usage_bonus_to_request_sender_through_referral;
-        if *latest_balance < Decimal::from(0) {
-            *latest_balance = Decimal::from(0);
-        }
 
-        // Also check if the referrer is premium (thought above 10$ will always be treated as premium at least)
-        // Should only refresh cache if the premium threshold is crossed
-        if balance_before > Decimal::from(0) && *latest_balance == Decimal::from(0) {
+        let (balance_before, latest_balance) = {
+            let mut latest_balance = latest_balance.write();
+
+            let balance_before = latest_balance.clone();
+
+            // Now modify the balance
+            latest_balance.total_deposit += deltas.usage_bonus_to_request_sender_through_referral;
+            latest_balance.total_spend += deltas.balance_spent_including_free_credits;
+
+            (balance_before, latest_balance.clone())
+        };
+
+        // we only start subtracting once the user is first upgraded to a premium user
+        // consider the user premium if total_deposit > premium threshold
+        // If the balance is getting low, clear the cache
+        // TODO: configurable amount for "premium"
+        // TODO: configurable amount for "low"
+        // we check balance_before because this current request would have been handled with limits matching the balance at the start of the request
+        if balance_before.total_deposit > Decimal::from(10)
+            && latest_balance.remaining() <= Decimal::from(1)
+        {
             let rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(sender_rpc_entity.user_id))
-                .all(txn)
+                .all(db_conn)
                 .await?;
 
+            // clear the user from the cache
+            if let Ok(user_id) = NonZeroU64::try_from(sender_rpc_entity.user_id) {
+                user_balance_cache.invalidate(&user_id).await;
+            }
+
+            // clear all keys owned by this user from the cache
             for rpc_key_entity in rpc_keys {
-                // TODO: Not sure which one was inserted, just delete both ...
                 rpc_secret_key_cache
                     .invalidate(&rpc_key_entity.secret_key.into())
                     .await;
-            }
-
-            if let Ok(non_zero_user_id) = NonZeroU64::try_from(sender_rpc_entity.user_id) {
-                user_balance_cache.invalidate(&non_zero_user_id).await;
             }
         }
 
@@ -651,7 +654,8 @@ impl BufferedRpcQueryStats {
         // ==================
         // We ignore this for performance reasons right now
         // We would have to load all the RPC keys of the referrer to de-activate them
-        // Instead, it's fine if they wait for 60 seconds until their tier reloads
+        // Instead, it's fine if they wait for 60 seconds until their cache expires
+        // If they are getting low, they will refresh themselves if necessary and then they will see
         // // If the referrer object is empty, we don't care about the cache, becase this will be fetched in a next request from the database
         // if let Some((referral_entity, _)) = referral_objects {
         //     if let Ok(referrer_user_id) = NonZeroU64::try_from(referral_entity.user_id) {
@@ -710,7 +714,7 @@ impl BufferedRpcQueryStats {
         let (sender_rpc_entity, _sender_balance, referral_objects) =
             self._get_relevant_entities(rpc_secret_key_id, &txn).await?;
 
-        // Compute Changes in balance for user and referrer, incl. referral logic   //
+        // Compute Changes in balance for user and referrer, incl. referral logic
         let (deltas, referral_objects): (Deltas, Option<(referee::Model, referrer::Model)>) = self
             ._compute_balance_deltas(_sender_balance, referral_objects)
             .await?;
@@ -719,21 +723,22 @@ impl BufferedRpcQueryStats {
         self._update_balances_in_db(&deltas, &txn, &sender_rpc_entity, &referral_objects)
             .await?;
 
-        // Update balanaces in the cache
+        // Finally commit the transaction in the database
+        txn.commit()
+            .await
+            .context("Failed to update referral and balance updates")?;
+
+        // Update balanaces in the cache.
+        // do this after commiting the database so that invalidated caches definitely query commited data
         self._update_balance_in_cache(
             &deltas,
-            &txn,
+            &db_conn,
             &sender_rpc_entity,
             &referral_objects,
             rpc_secret_key_cache,
             user_balance_cache,
         )
         .await?;
-
-        // Finally commit the transaction in the database
-        txn.commit()
-            .await
-            .context("Failed to update referral and balance updates")?;
 
         Ok(())
     }
@@ -757,10 +762,7 @@ impl BufferedRpcQueryStats {
         }
 
         // Read the latest balance ...
-        let balance;
-        {
-            balance = *(self.latest_balance.read().await);
-        }
+        let remaining = self.latest_balance.read().remaining();
 
         builder = builder
             .tag("archive_needed", key.archive_needed.to_string())
@@ -784,7 +786,7 @@ impl BufferedRpcQueryStats {
             )
             .field(
                 "balance",
-                balance.to_f64().context("number is really (too) large")?,
+                remaining.to_f64().context("number is really (too) large")?,
             );
 
         // .round() as i64
@@ -864,8 +866,6 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
             response_millis,
             response_timestamp,
             credits_used,
-            // To we need to clone it here ... (?)
-            latest_balance: metadata.latest_balance.clone(),
         };
 
         Ok(x)
@@ -882,18 +882,26 @@ impl RpcQueryStats {
         cache_hit: bool,
         method: Option<&str>,
     ) -> Decimal {
-        // for now, always return 0 for cost
-        Decimal::new(0, 1)
-
-        /*
         // some methods should be free. there might be cases where method isn't set (though they should be uncommon)
         // TODO: get this list from config (and add more to it)
         if let Some(method) = method.as_ref() {
-            if ["eth_chainId"].contains(method) {
+            if [
+                "eth_chainId",
+                "eth_syncing",
+                "eth_protocolVersion",
+                "net_version",
+                "net_listening",
+            ]
+            .contains(method)
+            {
                 return 0.into();
             }
         }
 
+        // for now, always return a flat cost
+        return Decimal::from_str("0.000018").unwrap();
+
+        /*
         // TODO: get cost_minimum, cost_free_bytes, cost_per_byte, cache_hit_divisor from config. each chain will be different
         // pays at least $0.000018 / credits per request
         let cost_minimum = Decimal::new(18, 6);

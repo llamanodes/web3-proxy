@@ -348,11 +348,12 @@ pub async fn user_balance_post(
             }
 
             let x = json!({
-                "tx_hash": tx_hash,
+                "amount": payment_token_amount,
                 "block_hash": block_hash,
                 "log_index": log_index,
+                "recipient_account": recipient_account,
                 "token": payment_token_address,
-                "amount": payment_token_amount,
+                "tx_hash": tx_hash,
             });
 
             debug!("deposit data: {:#?}", x);
