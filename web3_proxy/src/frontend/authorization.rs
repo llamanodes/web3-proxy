@@ -1181,7 +1181,7 @@ impl Web3ProxyApp {
         user_id: u64,
     ) -> Web3ProxyResult<Arc<RwLock<Balance>>> {
         match NonZeroU64::try_from(user_id) {
-            Err(_) => Ok(Arc::new(RwLock::new(Default::default()))),
+            Err(_) => Ok(Arc::new(Default::default())),
             Ok(x) => self
                 .user_balance_cache
                 .try_get_with(x, async move {
