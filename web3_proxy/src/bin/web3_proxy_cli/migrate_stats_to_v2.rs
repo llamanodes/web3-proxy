@@ -4,7 +4,6 @@ use entities::{rpc_accounting, rpc_key};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use log::{error, info};
-use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::QueryOrder;
 use migration::sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, UpdateResult,
@@ -13,7 +12,7 @@ use migration::{Expr, Value};
 use parking_lot::Mutex;
 use std::num::NonZeroU64;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast};
 use tokio::time::Instant;
 use ulid::Ulid;
 use web3_proxy::app::BILLING_PERIOD_SECONDS;
@@ -176,8 +175,6 @@ impl MigrateStatsToV2 {
                         .collect();
 
                     let request_ulid = Ulid::new();
-
-                    let latest_balance = Arc::new(RwLock::new(Decimal::default()));
 
                     // Create RequestMetadata
                     let request_metadata = RequestMetadata {
