@@ -1437,7 +1437,8 @@ mod tests {
 
         let names_in_sort_order: Vec<_> = rpcs.iter().map(|x| x.name.as_str()).collect();
 
-        assert_eq!(names_in_sort_order, ["c", "b", "a", "f", "e", "d"]);
+        // TODO: if we prioritize tier over block_num, this is:["c", "b", "a", "f", "e", "d"]
+        assert_eq!(names_in_sort_order, ["c", "f", "b", "e", "a", "d"]);
     }
 
     #[tokio::test(start_paused = true)]
