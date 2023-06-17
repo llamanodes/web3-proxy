@@ -899,10 +899,8 @@ impl RpcQueryStats {
             }
         }
 
-        // for now, always return a flat cost
-        Decimal::from_str("0.000018").unwrap()
+        // TODO: finalize cost calculation
 
-        /*
         // TODO: get cost_minimum, cost_free_bytes, cost_per_byte, cache_hit_divisor from config. each chain will be different
         // pays at least $0.000018 / credits per request
         let cost_minimum = Decimal::new(18, 6);
@@ -927,6 +925,5 @@ impl RpcQueryStats {
         }
 
         cost
-        */
     }
 }
