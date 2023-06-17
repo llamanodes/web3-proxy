@@ -423,12 +423,14 @@ pub async fn query_user_stats<'a>(
                 } else if key == "rpc_secret_key_id" {
                     match value {
                         influxdb2_structmap::value::Value::String(inner) => {
-                            out.insert(
-                                "rpc_key",
-                                serde_json::Value::String(
-                                    rpc_key_id_to_key.get(&inner).unwrap().to_string(),
-                                ),
-                            );
+                            match rpc_key_id_to_key.get(&inner) {
+                                Some(x) => {
+                                    out.insert("rpc_key", serde_json::Value::String(x.to_string()));
+                                }
+                                None => {
+                                    debug!("rpc_secret_key_id is not included in this query")
+                                }
+                            }
                         }
                         _ => {
                             error!("rpc_secret_key_id should always be a String!");
