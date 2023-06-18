@@ -134,7 +134,8 @@ pub async fn admin_increase_balance(
                 .to_owned(),
         )
         .exec(&db_conn)
-        .await?;
+        .await
+        .web3_context("admin is increasing balance")?;
 
     let response = (StatusCode::OK, Json(out)).into_response();
 

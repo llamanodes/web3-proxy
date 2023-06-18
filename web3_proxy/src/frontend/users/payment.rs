@@ -1,5 +1,5 @@
 use crate::app::Web3ProxyApp;
-use crate::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse, Web3ProxyResult};
 use crate::frontend::authorization::{
     login_is_authorized, Authorization as Web3ProxyAuthorization,
 };
@@ -313,7 +313,8 @@ pub async fn user_balance_post(
                         .to_owned(),
                 )
                 .exec(&txn)
-                .await?;
+                .await
+                .web3_context("increasing balance")?;
 
             trace!("Saving log {} of txid {:?}", log_index, tx_hash);
             let receipt = increase_on_chain_balance_receipt::ActiveModel {

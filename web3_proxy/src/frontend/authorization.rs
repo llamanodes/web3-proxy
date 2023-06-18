@@ -1227,7 +1227,8 @@ impl Web3ProxyApp {
                                             .to_owned(),
                                     )
                                     .exec(&db_conn)
-                                    .await?;
+                                    .await
+                                    .web3_context("creating empty balance row for existing user")?;
 
                                 continue;
                             }
