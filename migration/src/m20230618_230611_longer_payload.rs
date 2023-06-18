@@ -10,8 +10,8 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(AdminTrail::Table)
-                    .modify_column(ColumnDef::new(Post::Endpoint).text().not_null())
-                    .modify_column(ColumnDef::new(Post::Payload).text().not_null())
+                    .modify_column(ColumnDef::new(AdminTrail::Endpoint).text().not_null())
+                    .modify_column(ColumnDef::new(AdminTrail::Payload).text().not_null())
                     .to_owned(),
             )
             .await
@@ -21,9 +21,9 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Post::AdminTrail)
-                    .modify_column(ColumnDef::new(Post::Endpoint).string().not_null())
-                    .modify_column(ColumnDef::new(Post::Payload).string().not_null())
+                    .table(AdminTrail::Table)
+                    .modify_column(ColumnDef::new(AdminTrail::Endpoint).string().not_null())
+                    .modify_column(ColumnDef::new(AdminTrail::Payload).string().not_null())
                     .to_owned(),
             )
             .await
