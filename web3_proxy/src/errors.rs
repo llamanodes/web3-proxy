@@ -22,7 +22,6 @@ use reqwest::header::ToStrError;
 use rust_decimal::Error as DecimalError;
 use serde::Serialize;
 use serde_json::value::RawValue;
-use std::error::Error;
 use std::sync::Arc;
 use std::{borrow::Cow, net::IpAddr};
 use tokio::{sync::AcquireError, task::JoinError, time::Instant};
