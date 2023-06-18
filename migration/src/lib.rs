@@ -30,6 +30,7 @@ mod m20230512_220213_allow_null_rpc_key_id_in_stats_v2;
 mod m20230514_114803_admin_add_credits;
 mod m20230607_221917_total_deposits;
 mod m20230615_221201_handle_payment_uncles;
+mod m20230618_230611_longer_payload;
 
 pub struct Migrator;
 
@@ -67,6 +68,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20230514_114803_admin_add_credits::Migration),
             Box::new(m20230607_221917_total_deposits::Migration),
             Box::new(m20230615_221201_handle_payment_uncles::Migration),
+            Box::new(m20230618_230611_longer_payload::Migration),
         ]
     }
 }
