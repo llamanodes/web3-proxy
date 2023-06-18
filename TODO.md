@@ -430,7 +430,7 @@ These are not yet ordered. There might be duplicates. We might not actually need
 - [ ] cli for adding rpc keys to an existing user
 - [ ] rename "private" to "mev protected" to avoid confusion about private transactions being public once they are mined
 - [ ] allow restricting an rpc key to specific chains
-- [-] writes to request_latency should be handled by a background task so they don't slow down the request
+- [-] writes to median_request_latency should be handled by a background task so they don't slow down the request
 - [ ] keep re-broadcasting transactions until they are confirmed
 - [ ] if mev protection is disabled, we should send to *both* balanced_rpcs *and* private_rps
 - [x] if mev protection is enabled, we should sent to *only* private_rpcs

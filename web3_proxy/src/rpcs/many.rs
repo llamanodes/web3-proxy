@@ -460,7 +460,7 @@ impl Web3Rpcs {
             trace!("{} vs {}", rpc_a, rpc_b);
             // TODO: cached key to save a read lock
             // TODO: ties to the server with the smallest block_data_limit
-            let faster_rpc = min_by_key(rpc_a, rpc_b, |x| x.weighted_peak_ewma_seconds());
+            let faster_rpc = min_by_key(rpc_a, rpc_b, |x| x.weighted_peak_latency());
             trace!("winner: {}", faster_rpc);
 
             // add to the skip list in case this one fails

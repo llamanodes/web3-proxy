@@ -18,7 +18,6 @@ use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
 use log::{debug, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use nanorand::Rng;
-use ordered_float::OrderedFloat;
 use parking_lot::RwLock;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
@@ -64,7 +63,7 @@ pub struct Web3Rpc {
     pub(super) head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// Track head block latency.
     /// RwLock is fine because this isn't updated often and is for monitoring. It is not used on the hot path.
-    pub(super) head_latency_ms: RwLock<EwmaLatency>,
+    pub(super) head_delay: RwLock<EwmaLatency>,
     /// Track peak request latency
     /// peak_latency is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) peak_latency: Option<PeakEwmaLatency>,
@@ -76,7 +75,7 @@ pub struct Web3Rpc {
     pub(super) external_requests: AtomicUsize,
     /// Track time used by external requests served
     /// request_ms_histogram is only inside an Option so that the "Default" derive works. it will always be set.
-    pub(super) request_latency: Option<RollingQuantileLatency>,
+    pub(super) median_latency: Option<RollingQuantileLatency>,
     /// Track in-flight requests
     pub(super) active_requests: AtomicUsize,
     /// disconnect_watch is only inside an Option so that the "Default" derive works. it will always be set.
@@ -172,7 +171,7 @@ impl Web3Rpc {
             Duration::from_secs(1),
         );
 
-        let request_latency = RollingQuantileLatency::spawn_median(1_000).await;
+        let median_request_latency = RollingQuantileLatency::spawn_median(1_000).await;
 
         let http_provider = if let Some(http_url) = config.http_url {
             let http_url = http_url.parse::<Url>()?;
@@ -208,7 +207,7 @@ impl Web3Rpc {
             http_provider,
             name,
             peak_latency: Some(peak_latency),
-            request_latency: Some(request_latency),
+            median_latency: Some(median_request_latency),
             soft_limit: config.soft_limit,
             ws_url,
             disconnect_watch: Some(disconnect_watch),
@@ -266,19 +265,19 @@ impl Web3Rpc {
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, u32, Reverse<U64>), OrderedFloat<f64>) {
+    ) -> ((bool, u32, Reverse<U64>), Duration) {
         let sort_on = self.sort_on(max_block);
 
-        let weighted_peak_ewma_seconds = self.weighted_peak_ewma_seconds();
+        let weighted_peak_latency = self.weighted_peak_latency();
 
-        let x = (sort_on, weighted_peak_ewma_seconds);
+        let x = (sort_on, weighted_peak_latency);
 
         trace!("sort_for_load_balancing {}: {:?}", self, x);
 
         x
     }
 
-    /// like sort_for_load_balancing, but shuffles tiers randomly instead of sorting by weighted_peak_ewma_seconds
+    /// like sort_for_load_balancing, but shuffles tiers randomly instead of sorting by weighted_peak_latency
     pub fn shuffle_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
@@ -292,17 +291,17 @@ impl Web3Rpc {
         (sort_on, r)
     }
 
-    pub fn weighted_peak_ewma_seconds(&self) -> OrderedFloat<f64> {
+    pub fn weighted_peak_latency(&self) -> Duration {
         let peak_latency = if let Some(peak_latency) = self.peak_latency.as_ref() {
-            peak_latency.latency().as_secs_f64()
+            peak_latency.latency()
         } else {
-            1.0
+            Duration::from_secs(1)
         };
 
         // TODO: what ordering?
-        let active_requests = self.active_requests.load(atomic::Ordering::Acquire) as f64 + 1.0;
+        let active_requests = self.active_requests.load(atomic::Ordering::Acquire) as f32 + 1.0;
 
-        OrderedFloat(peak_latency * active_requests)
+        peak_latency.mul_f32(active_requests)
     }
 
     // TODO: would be great if rpcs exposed this. see https://github.com/ledgerwatch/erigon/issues/6391
@@ -697,7 +696,7 @@ impl Web3Rpc {
             let rpc = self.clone();
 
             // TODO: how often? different depending on the chain?
-            // TODO: reset this timeout when a new block is seen? we need to keep request_latency updated though
+            // TODO: reset this timeout when a new block is seen? we need to keep median_request_latency updated though
             let health_sleep_seconds = 5;
 
             // health check loop
@@ -1173,29 +1172,30 @@ impl Serialize for Web3Rpc {
             &self.active_requests.load(atomic::Ordering::Relaxed),
         )?;
 
-        state.serialize_field(
-            "head_latency_ms",
-            &self.head_latency_ms.read().duration().as_millis(),
-        )?;
-
-        state.serialize_field(
-            "request_latency_ms",
-            &self
-                .request_latency
-                .as_ref()
-                .unwrap()
-                .duration()
-                .as_millis(),
-        )?;
-
-        state.serialize_field(
-            "peak_latency_ms",
-            &self.peak_latency.as_ref().unwrap().latency().as_millis(),
-        )?;
+        {
+            let head_delay_ms = self.head_delay.read().latency().as_secs_f32() * 1000.0;
+            state.serialize_field("head_delay_ms", &(head_delay_ms))?;
+        }
 
         {
-            let weighted_latency_ms = self.weighted_peak_ewma_seconds() * 1000.0;
-            state.serialize_field("weighted_latency_ms", weighted_latency_ms.as_ref())?;
+            let median_latency_ms = self
+                .median_latency
+                .as_ref()
+                .unwrap()
+                .latency()
+                .as_secs_f32()
+                * 1000.0;
+            state.serialize_field("median_latency_ms", &(median_latency_ms))?;
+        }
+
+        {
+            let peak_latency_ms =
+                self.peak_latency.as_ref().unwrap().latency().as_secs_f32() * 1000.0;
+            state.serialize_field("peak_latency_ms", &peak_latency_ms)?;
+        }
+        {
+            let weighted_latency_ms = self.weighted_peak_latency().as_secs_f32() * 1000.0;
+            state.serialize_field("weighted_latency_ms", &weighted_latency_ms)?;
         }
 
         state.end()

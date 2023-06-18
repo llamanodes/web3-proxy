@@ -69,7 +69,7 @@ impl RollingQuantileLatency {
 
     /// Current median.
     #[inline]
-    pub fn duration(&self) -> Duration {
+    pub fn latency(&self) -> Duration {
         Duration::from_secs_f32(self.seconds())
     }
 }

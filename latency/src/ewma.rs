@@ -40,7 +40,7 @@ impl EwmaLatency {
 
     /// Current EWMA value in seconds
     #[inline]
-    pub fn duration(&self) -> Duration {
+    pub fn latency(&self) -> Duration {
         let x = self.seconds.get();
 
         Duration::from_secs_f32(x)

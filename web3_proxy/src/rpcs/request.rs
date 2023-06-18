@@ -383,7 +383,7 @@ impl OpenRequestHandle {
 
         self.rpc.peak_latency.as_ref().unwrap().report(latency);
         self.rpc
-            .request_latency
+            .median_latency
             .as_ref()
             .unwrap()
             .record(latency)

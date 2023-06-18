@@ -495,9 +495,11 @@ impl Web3ProxyApp {
         // create semaphores for concurrent connection limits
         // TODO: how can we implement time til idle?
         // TODO: what should tti be for semaphores?
-        let bearer_token_semaphores = Cache::new(max_users);
-        let ip_semaphores = Cache::new(max_users);
-        let user_semaphores = Cache::new(max_users);
+        let bearer_token_semaphores = CacheBuilder::new(max_users)
+            .name("bearer_token_semaphores")
+            .build();
+        let ip_semaphores = CacheBuilder::new(max_users).name("ip_semaphores").build();
+        let user_semaphores = CacheBuilder::new(max_users).name("user_semaphores").build();
 
         let chain_id = top_config.app.chain_id;
 

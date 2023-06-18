@@ -342,7 +342,7 @@ pub struct ConsensusFinder {
     max_head_block_age: Option<Duration>,
     /// tier 0 will be prefered as long as the distance between it and the other tiers is <= max_tier_lag
     max_head_block_lag: Option<U64>,
-    /// Block Hash -> First Seen Instant. used to track rpc.head_latency. The same cache should be shared between all ConnectionsGroups
+    /// Block Hash -> First Seen Instant. used to track rpc.head_delay. The same cache should be shared between all ConnectionsGroups
     first_seen: FirstSeenCache,
 }
 
@@ -383,9 +383,7 @@ impl ConsensusFinder {
         let latency = first_seen.elapsed();
 
         // record the time behind the fastest node
-        rpc.head_latency_ms
-            .write()
-            .record_secs(latency.as_secs_f32());
+        rpc.head_delay.write().record_secs(latency.as_secs_f32());
 
         // update the local mapping of rpc -> block
         self.rpc_heads.insert(rpc, block)
@@ -450,7 +448,7 @@ impl ConsensusFinder {
                 let mut median_latencies_sec = HashMap::new();
                 for rpc in self.rpc_heads.keys() {
                     let median_latency_sec = rpc
-                        .request_latency
+                        .median_latency
                         .as_ref()
                         .map(|x| x.seconds())
                         .unwrap_or_default();

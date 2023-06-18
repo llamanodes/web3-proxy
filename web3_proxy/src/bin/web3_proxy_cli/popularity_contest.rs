@@ -24,7 +24,7 @@ struct BackendRpcData<'a> {
     active_requests: u64,
     internal_requests: u64,
     external_requests: u64,
-    head_latency_ms: f64,
+    head_delay_ms: f64,
     peak_latency_ms: f64,
     weighted_latency_ms: f64,
 }
@@ -95,7 +95,7 @@ impl PopularityContestSubCommand {
 
             highest_block = highest_block.max(head_block);
 
-            let head_latency_ms = conn.get("head_latency_ms").unwrap().as_f64().unwrap();
+            let head_delay_ms = conn.get("head_delay_ms").unwrap().as_f64().unwrap();
 
             let peak_latency_ms = conn
                 .get("peak_latency_ms")
@@ -116,7 +116,7 @@ impl PopularityContestSubCommand {
                 internal_requests,
                 external_requests,
                 head_block,
-                head_latency_ms,
+                head_delay_ms,
                 peak_latency_ms,
                 weighted_latency_ms,
             };
@@ -178,7 +178,7 @@ impl PopularityContestSubCommand {
                 rpc.active_requests,
                 lag,
                 block_data_limit,
-                format!("{:.3}", rpc.head_latency_ms),
+                format!("{:.3}", rpc.head_delay_ms),
                 rpc.peak_latency_ms,
                 format!("{:.3}", rpc.weighted_latency_ms),
                 tier,
