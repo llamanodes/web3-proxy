@@ -205,7 +205,7 @@ impl Web3Rpcs {
                 let pending_tx_id_sender = Some(self.pending_tx_id_sender.clone());
                 let blocks_by_hash_cache = self.blocks_by_hash.clone();
 
-                debug!("spawning {}", server_name);
+                debug!("spawning tasks for {}", server_name);
 
                 let handle = tokio::spawn(server_config.spawn(
                     server_name,
