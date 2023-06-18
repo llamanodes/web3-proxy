@@ -25,7 +25,7 @@ use ipnet::IpNet;
 use log::{error, trace, warn};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{self, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use migration::OnConflict;
+use migration::{Expr, OnConflict};
 use parking_lot::RwLock;
 use rdkafka::message::{Header as KafkaHeader, OwnedHeaders as KafkaOwnedHeaders, OwnedMessage};
 use rdkafka::producer::{FutureProducer, FutureRecord};
@@ -1212,12 +1212,20 @@ impl Web3ProxyApp {
                                     self.db_conn().web3_context("Getting database connection")?;
 
                                 let balance_entry = balance::ActiveModel {
+                                    id: sea_orm::NotSet,
                                     user_id: sea_orm::Set(user_id),
                                     ..Default::default()
                                 };
 
                                 balance::Entity::insert(balance_entry)
-                                    .on_conflict(OnConflict::new().to_owned())
+                                    .on_conflict(
+                                        OnConflict::new()
+                                            .values([(
+                                                balance::Column::TotalDeposits,
+                                                Expr::col(balance::Column::TotalDeposits).add(0),
+                                            )])
+                                            .to_owned(),
+                                    )
                                     .exec(&db_conn)
                                     .await?;
 
