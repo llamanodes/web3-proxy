@@ -3,7 +3,6 @@ use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
-use anyhow::Context;
 use base64::engine::general_purpose;
 use derive_more::Constructor;
 use ethers::prelude::{H256, U64};
@@ -384,7 +383,9 @@ impl ConsensusFinder {
         let latency = first_seen.elapsed();
 
         // record the time behind the fastest node
-        rpc.head_latency.write().record(latency);
+        rpc.head_latency_ms
+            .write()
+            .record_secs(latency.as_secs_f32());
 
         // update the local mapping of rpc -> block
         self.rpc_heads.insert(rpc, block)
@@ -438,51 +439,57 @@ impl ConsensusFinder {
             0 => {}
             1 => {
                 for rpc in self.rpc_heads.keys() {
-                    rpc.tier.store(0, atomic::Ordering::Relaxed)
+                    rpc.tier.store(1, atomic::Ordering::Relaxed)
                 }
             }
             _ => {
                 // iterate first to find bounds
-                let mut min_latency = u64::MAX;
-                let mut max_latency = u64::MIN;
-                let mut weighted_latencies = HashMap::new();
+                // min_latency_sec is actual min_median_latency_sec
+                let mut min_median_latency_sec = f32::MAX;
+                let mut max_median_latency_sec = f32::MIN;
+                let mut median_latencies_sec = HashMap::new();
                 for rpc in self.rpc_heads.keys() {
-                    let weighted_latency_seconds = rpc.weighted_peak_ewma_seconds();
+                    let median_latency_sec = rpc
+                        .request_latency
+                        .as_ref()
+                        .map(|x| x.seconds())
+                        .unwrap_or_default();
 
-                    let weighted_latency_ms = (weighted_latency_seconds * 1000.0).round() as i64;
+                    min_median_latency_sec = min_median_latency_sec.min(median_latency_sec);
+                    max_median_latency_sec = min_median_latency_sec.max(median_latency_sec);
 
-                    let weighted_latency_ms: u64 = weighted_latency_ms
-                        .try_into()
-                        .context("weighted_latency_ms does not fit in a u64")?;
-
-                    min_latency = min_latency.min(weighted_latency_ms);
-                    max_latency = min_latency.max(weighted_latency_ms);
-
-                    weighted_latencies.insert(rpc, weighted_latency_ms);
+                    median_latencies_sec.insert(rpc, median_latency_sec);
                 }
 
-                // // histogram requires high to be at least 2 x low
-                // // using min_latency for low does not work how we want it though
-                max_latency = max_latency.max(1000);
-
-                // create the histogram
-                let mut hist = Histogram::<u32>::new_with_bounds(1, max_latency, 3).unwrap();
-
-                // TODO: resize shouldn't be necessary, but i've seen it error
-                hist.auto(true);
-
-                for weighted_latency_ms in weighted_latencies.values() {
-                    hist.record(*weighted_latency_ms)?;
-                }
-
-                // dev logging
+                // dev logging of a histogram
                 if log_enabled!(Level::Trace) {
+                    // convert to ms because the histogram needs ints
+                    let max_median_latency_ms = (max_median_latency_sec * 1000.0).ceil() as u64;
+
+                    // create the histogram
+                    // histogram requires high to be at least 2 x low
+                    // using min_latency for low does not work how we want it though
+                    // so just set the default range = 1ms..1s
+                    let hist_low = 1;
+                    let hist_high = max_median_latency_ms.max(1_000);
+                    let mut hist_ms =
+                        Histogram::<u32>::new_with_bounds(hist_low, hist_high, 3).unwrap();
+
+                    // TODO: resize shouldn't be necessary, but i've seen it error
+                    hist_ms.auto(true);
+
+                    for median_sec in median_latencies_sec.values() {
+                        let median_ms = (median_sec * 1000.0).round() as u64;
+
+                        hist_ms.record(median_ms)?;
+                    }
+
                     // print the histogram. see docs/histograms.txt for more info
                     let mut encoder =
                         base64::write::EncoderWriter::new(Vec::new(), &general_purpose::STANDARD);
 
                     V2DeflateSerializer::new()
-                        .serialize(&hist, &mut encoder)
+                        .serialize(&hist_ms, &mut encoder)
                         .unwrap();
 
                     let encoded = encoder.finish().unwrap();
@@ -493,20 +500,16 @@ impl ConsensusFinder {
                 }
 
                 // TODO: get someone who is better at math to do something smarter. maybe involving stddev?
-                let divisor = 30f64.max(min_latency as f64 / 2.0);
+                // bucket sizes of the larger of 30ms or 1/2 the lowest latency
+                let tier_sec_size = 30f32.max(min_median_latency_sec / 2.0);
 
-                for (rpc, weighted_latency_ms) in weighted_latencies.into_iter() {
-                    let tier = (weighted_latency_ms - min_latency) as f64 / divisor;
+                for (rpc, median_latency_sec) in median_latencies_sec.into_iter() {
+                    let tier = (median_latency_sec - min_median_latency_sec) / tier_sec_size;
 
+                    // start tiers at 1
                     let tier = (tier.floor() as u32).saturating_add(1);
 
-                    // TODO: this should be trace
-                    trace!(
-                        "{} - weighted_latency: {}ms, tier {}",
-                        rpc,
-                        weighted_latency_ms,
-                        tier
-                    );
+                    trace!("{} - p50_sec: {}, tier {}", rpc, median_latency_sec, tier);
 
                     rpc.tier.store(tier, atomic::Ordering::Relaxed);
                 }

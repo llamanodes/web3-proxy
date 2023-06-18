@@ -14,7 +14,7 @@ use ethers::prelude::{Bytes, Middleware, TxHash, U64};
 use ethers::types::{Address, Transaction, U256};
 use futures::future::try_join_all;
 use futures::StreamExt;
-use latency::{EwmaLatency, PeakEwmaLatency};
+use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
 use log::{debug, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use nanorand::Rng;
@@ -62,17 +62,21 @@ pub struct Web3Rpc {
     pub(super) block_data_limit: AtomicU64,
     /// head_block is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
-    /// Track head block latency
-    pub(super) head_latency: RwLock<EwmaLatency>,
+    /// Track head block latency.
+    /// RwLock is fine because this isn't updated often and is for monitoring. It is not used on the hot path.
+    pub(super) head_latency_ms: RwLock<EwmaLatency>,
     /// Track peak request latency
     /// peak_latency is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) peak_latency: Option<PeakEwmaLatency>,
     /// Automatically set priority
     pub(super) tier: AtomicU32,
-    /// Track total requests served
+    /// Track total internal requests served
     pub(super) internal_requests: AtomicUsize,
-    /// Track total requests served
+    /// Track total external requests served
     pub(super) external_requests: AtomicUsize,
+    /// Track time used by external requests served
+    /// request_ms_histogram is only inside an Option so that the "Default" derive works. it will always be set.
+    pub(super) request_latency: Option<RollingQuantileLatency>,
     /// Track in-flight requests
     pub(super) active_requests: AtomicUsize,
     /// disconnect_watch is only inside an Option so that the "Default" derive works. it will always be set.
@@ -168,6 +172,8 @@ impl Web3Rpc {
             Duration::from_secs(1),
         );
 
+        let request_latency = RollingQuantileLatency::spawn_median(1_000).await;
+
         let http_provider = if let Some(http_url) = config.http_url {
             let http_url = http_url.parse::<Url>()?;
 
@@ -202,6 +208,7 @@ impl Web3Rpc {
             http_provider,
             name,
             peak_latency: Some(peak_latency),
+            request_latency: Some(request_latency),
             soft_limit: config.soft_limit,
             ws_url,
             disconnect_watch: Some(disconnect_watch),
@@ -1121,7 +1128,7 @@ impl Serialize for Web3Rpc {
         S: Serializer,
     {
         // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Web3Rpc", 13)?;
+        let mut state = serializer.serialize_struct("Web3Rpc", 14)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
@@ -1166,7 +1173,20 @@ impl Serialize for Web3Rpc {
             &self.active_requests.load(atomic::Ordering::Relaxed),
         )?;
 
-        state.serialize_field("head_latency_ms", &self.head_latency.read().value())?;
+        state.serialize_field(
+            "head_latency_ms",
+            &self.head_latency_ms.read().duration().as_millis(),
+        )?;
+
+        state.serialize_field(
+            "request_latency_ms",
+            &self
+                .request_latency
+                .as_ref()
+                .unwrap()
+                .duration()
+                .as_millis(),
+        )?;
 
         state.serialize_field(
             "peak_latency_ms",
