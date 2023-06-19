@@ -1676,7 +1676,7 @@ dependencies = [
 
 [[package]]
 name = "entities"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "ethers",
  "sea-orm",
@@ -3330,7 +3330,7 @@ dependencies = [
 
 [[package]]
 name = "migration"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "sea-orm-migration",
  "tokio",

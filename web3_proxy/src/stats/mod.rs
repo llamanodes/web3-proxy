@@ -14,7 +14,6 @@ use anyhow::{anyhow, Context};
 use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
-use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key};
 use influxdb2::models::DataPoint;
 use log::trace;
@@ -85,7 +84,7 @@ fn round_timestamp(timestamp: i64, period_seconds: i64) -> i64 {
 
 impl RpcQueryStats {
     /// rpc keys can opt into multiple levels of tracking.
-    /// we always need enough to handle billing, so even the "none" level still has some minimal tracking.
+    /// we always need enough to handle billing, so the "none" level was changed to "minimal" tracking.
     /// This "accounting_key" is used in the relational database.
     /// anonymous users are also saved in the relational database so that the host can do their own cost accounting.
     fn accounting_key(&self, period_seconds: i64) -> RpcQueryKey {
@@ -93,29 +92,10 @@ impl RpcQueryStats {
 
         let rpc_secret_key_id = self.authorization.checks.rpc_secret_key_id;
 
-        let (method, origin) = match self.authorization.checks.tracking_level {
-            TrackingLevel::None => {
-                // this RPC key requested no tracking. this is the default
-                // do not store the method or the origin
-                (None, None)
-            }
-            TrackingLevel::Aggregated => {
-                // this RPC key requested tracking aggregated across all methods and origins
-                // TODO: think about this more. do we want the origin or not? grouping free cost per site might be useful. i'd rather not collect things if we don't have a planned purpose though
-                let method = None;
-                let origin = None;
+        let method = self.method.clone();
 
-                (method, origin)
-            }
-            TrackingLevel::Detailed => {
-                // detailed tracking keeps track of the method and origin
-                // depending on the request, the origin might still be None
-                let method = self.method.clone();
-                let origin = self.authorization.origin.clone();
-
-                (method, origin)
-            }
-        };
+        // we used to optionally store origin, but wallets don't set it, so its almost always None
+        let origin = None;
 
         // Depending on method, add some arithmetic around calculating credits_used
         // I think balance should not go here, this looks more like a key thingy
@@ -151,26 +131,12 @@ impl RpcQueryStats {
         }
     }
 
-    /// rpc keys can opt into more detailed tracking
-    fn opt_in_timeseries_key(&self) -> Option<RpcQueryKey> {
+    /// stats for a single key
+    fn owned_timeseries_key(&self) -> Option<RpcQueryKey> {
         // we don't store origin in the timeseries db. its only optionaly used for accounting
         let origin = None;
 
-        // depending on tracking level, we either skip opt-in stats, track without method, or track with method
-        let method = match self.authorization.checks.tracking_level {
-            TrackingLevel::None => {
-                // this RPC key requested no tracking. this is the default.
-                return None;
-            }
-            TrackingLevel::Aggregated => {
-                // this RPC key requested tracking aggregated across all methods
-                None
-            }
-            TrackingLevel::Detailed => {
-                // detailed tracking keeps track of the method
-                self.method.clone()
-            }
-        };
+        let method = self.method.clone();
 
         let key = RpcQueryKey {
             response_timestamp: self.response_timestamp,

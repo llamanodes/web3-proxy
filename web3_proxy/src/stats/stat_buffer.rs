@@ -122,7 +122,7 @@ impl StatBuffer {
 
                                 self.global_timeseries_buffer.entry(global_timeseries_key).or_default().add(stat.clone());
 
-                                if let Some(opt_in_timeseries_key) = stat.opt_in_timeseries_key() {
+                                if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key() {
                                     self.opt_in_timeseries_buffer.entry(opt_in_timeseries_key).or_default().add(stat.clone());
                                 }
                             }

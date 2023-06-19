@@ -14,7 +14,6 @@ use chrono::Utc;
 use core::fmt;
 use deferred_rate_limiter::DeferredRateLimitResult;
 use derive_more::From;
-use entities::sea_orm_active_enums::TrackingLevel;
 use entities::{balance, login, rpc_key, user, user_tier};
 use ethers::types::{Bytes, U64};
 use ethers::utils::keccak256;
@@ -111,8 +110,6 @@ pub struct AuthorizationChecks {
     pub allowed_user_agents: Option<Vec<UserAgent>>,
     /// if None, allow any IP Address
     pub allowed_ips: Option<Vec<IpNet>>,
-    /// how detailed any rpc account entries should be
-    pub tracking_level: TrackingLevel,
     /// Chance to save reverting eth_call, eth_estimateGas, and eth_sendRawTransaction to the database.
     /// depending on the caller, errors might be expected. this keeps us from bloating our database
     /// u16::MAX == 100%
@@ -523,28 +520,6 @@ impl RequestMetadata {
         self.backend_requests.lock().clone()
     }
 
-    pub fn tracking_level(&self) -> TrackingLevel {
-        if let Some(authorization) = self.authorization.as_ref() {
-            authorization.checks.tracking_level.clone()
-        } else {
-            TrackingLevel::None
-        }
-    }
-
-    pub fn opt_in_method(&self) -> Option<String> {
-        match self.tracking_level() {
-            TrackingLevel::None | TrackingLevel::Aggregated => None,
-            TrackingLevel::Detailed => self.method.clone(),
-        }
-    }
-
-    pub fn take_opt_in_method(&mut self) -> Option<String> {
-        match self.tracking_level() {
-            TrackingLevel::None | TrackingLevel::Aggregated => None,
-            TrackingLevel::Detailed => self.method.take(),
-        }
-    }
-
     pub fn try_send_stat(mut self) -> Web3ProxyResult<Option<Self>> {
         if let Some(stat_sender) = self.stat_sender.take() {
             trace!("sending stat! {:?}", self);
@@ -693,7 +668,6 @@ impl Authorization {
         let authorization_checks = AuthorizationChecks {
             // any error logs on a local (internal) query are likely problems. log them all
             log_revert_chance: 100,
-            tracking_level: TrackingLevel::Detailed,
             // default for everything else should be fine. we don't have a user_id or ip to give
             ..Default::default()
         };
@@ -734,7 +708,6 @@ impl Authorization {
         let authorization_checks = AuthorizationChecks {
             max_requests_per_period,
             proxy_mode,
-            tracking_level: TrackingLevel::Detailed,
             ..Default::default()
         };
 
@@ -1383,7 +1356,6 @@ impl Web3ProxyApp {
                             proxy_mode,
                             rpc_secret_key: Some(rpc_secret_key),
                             rpc_secret_key_id: rpc_key_id,
-                            tracking_level: rpc_key_model.log_level,
                             user_id: rpc_key_model.user_id,
                         })
                     }

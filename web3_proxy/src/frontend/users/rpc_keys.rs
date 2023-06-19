@@ -10,7 +10,7 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use entities;
-use entities::sea_orm_active_enums::{Role, TrackingLevel};
+use entities::sea_orm_active_enums::Role;
 use entities::{rpc_key, secondary_user};
 use hashbrown::HashMap;
 use http::HeaderValue;
@@ -100,7 +100,6 @@ pub struct UserKeyManagement {
     allowed_referers: Option<String>,
     allowed_user_agents: Option<String>,
     description: Option<String>,
-    log_level: Option<TrackingLevel>,
     // TODO: enable log_revert_trace: Option<f64>,
     private_txs: Option<bool>,
 }
@@ -169,14 +168,9 @@ pub async fn rpc_keys_management(
             // TODO: limit to 10 keys?
             let secret_key = RpcSecretKey::new();
 
-            let log_level = payload
-                .log_level
-                .web3_context("log level must be 'none', 'detailed', or 'aggregated'")?;
-
             Ok(rpc_key::ActiveModel {
                 user_id: sea_orm::Set(user.id),
                 secret_key: sea_orm::Set(secret_key.into()),
-                log_level: sea_orm::Set(log_level),
                 ..Default::default()
             })
         }
