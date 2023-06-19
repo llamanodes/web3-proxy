@@ -5,3 +5,115 @@
 //! TODO: rate limit on compute units
 //! TODO: pricing on compute units
 //! TODO: script that queries influx and calculates observed relative costs
+
+use log::warn;
+use migration::sea_orm::prelude::Decimal;
+
+pub struct ComputeUnit(Decimal);
+
+impl ComputeUnit {
+    /// costs can vary widely depending on method and chain
+    pub fn new(method: &str, chain_id: u64) -> Self {
+        let cu = match (chain_id, method) {
+            (_, "debug_traceTransaction") => 309,
+            (_, "debug_traceCall") => 309,
+            (_, "debug_traceBlockByHash") => 497,
+            (_, "debug_traceBlockByNumber") => 497,
+            (_, "trace_get") => 17,
+            (_, "trace_block") => 24,
+            (_, "trace_transaction") => 26,
+            (_, "trace_call") => 75,
+            (_, "trace_rawTransaction") => 75,
+            (_, "trace_filter") => 75,
+            (_, "trace_replayTransaction") => 2983,
+            (_, "trace_replayBlockTransactions") => 2983,
+            (_, "net_version") => 0,
+            (_, "eth_chainId") => 0,
+            (_, "eth_syncing") => 0,
+            (_, "eth_protocolVersion") => 0,
+            (_, "net_listening") => 0,
+            (_, "eth_uninstallFilter") => 10,
+            (_, "eth_accounts") => 10,
+            (_, "eth_blockNumber") => 10,
+            (_, "eth_subscribe") => 10,
+            (_, "eth_unsubscribe") => 10,
+            (_, "eth_feeHistory") => 10,
+            (_, "eth_maxPriorityFeePerGas") => 10,
+            (_, "eth_createAccessList") => 10,
+            (_, "eth_getTransactionReceipt") => 15,
+            (_, "eth_getUncleByBlockHashAndIndex") => 15,
+            (_, "eth_getUncleByBlockNumberAndIndex") => 15,
+            (_, "eth_getTransactionByBlockHashAndIndex") => 15,
+            (_, "eth_getTransactionByBlockNumberAndIndex") => 15,
+            (_, "eth_getUncleCountByBlockHash") => 15,
+            (_, "eth_getUncleCountByBlockNumber") => 15,
+            (_, "web3_clientVersion") => 15,
+            (_, "web3_sha3") => 15,
+            (_, "eth_getBlockByNumber") => 16,
+            (_, "eth_getStorageAt") => 17,
+            (_, "eth_getTransactionByHash") => 17,
+            (_, "eth_gasPrice") => 19,
+            (_, "eth_getBalance") => 19,
+            (_, "eth_getCode") => 19,
+            (_, "eth_getFilterChanges") => 20,
+            (_, "eth_newBlockFilter") => 20,
+            (_, "eth_newFilter") => 20,
+            (_, "eth_newPendingTransactionFilter") => 20,
+            (_, "eth_getBlockTransactionCountByHash") => 20,
+            (_, "eth_getBlockTransactionCountByNumber") => 20,
+            (_, "eth_getProof") => 21,
+            (_, "eth_getBlockByHash") => 21,
+            (_, "erigon_forks") => 24,
+            (_, "erigon_getHeaderByHash") => 24,
+            (_, "erigon_getHeaderByNumber") => 24,
+            (_, "erigon_getLogsByHash") => 24,
+            (_, "erigon_issuance") => 24,
+            (_, "eth_getTransactionCount") => 26,
+            (_, "eth_call") => 26,
+            (_, "eth_getFilterLogs") => 75,
+            (_, "eth_getLogs") => 75,
+            (_, "eth_estimateGas") => 87,
+            (_, "eth_sendRawTransaction") => 250,
+            (_, "eth_getBlockReceipts") => 500,
+            (137, "bor_getAuthor") => 10,
+            (137, "bor_getCurrentProposer") => 10,
+            (137, "bor_getCurrentValidators") => 10,
+            (137, "bor_getRootHash") => 10,
+            (137, "bor_getSignersAtHash") => 10,
+            (1101, "zkevm_batchNumber") => 0,
+            (1101, "zkevm_batchNumberByBlockNumber") => 0,
+            (1101, "zkevm_consolidatedBlockNumber") => 0,
+            (1101, "zkevm_getBatchByNumber") => 0,
+            (1101, "zkevm_getBroadcastURI") => 0,
+            (1101, "zkevm_isBlockConsolidated") => 0,
+            (1101, "zkevm_isBlockVirtualized") => 0,
+            (1101, "zkevm_verifiedBatchNumber") => 0,
+            (1101, "zkevm_virtualBatchNumber") => 0,
+            (_, "eth_sendUserOperation") => 1000,
+            (_, "eth_estimateUserOperationGas") => 500,
+            (_, "eth_getUserOperationByHash") => 17,
+            (_, "eth_getUserOperationReceipt") => 15,
+            (_, "eth_supportedEntryPoints") => 5,
+            (_, method) => {
+                warn!("unknown method {}", method);
+                10
+            }
+        };
+
+        let cu = Decimal::from(cu);
+
+        Self(cu)
+    }
+
+    /// notifications and subscription responses cost per-byte
+    pub fn subscription_response<D: Into<Decimal>>(num_bytes: D) -> Self {
+        let cu = num_bytes.into() * Decimal::new(4, 2);
+
+        Self(cu)
+    }
+
+    /// requesting an unimplemented function costs
+    pub fn unimplemented() -> Self {
+        Self(2.into())
+    }
+}
