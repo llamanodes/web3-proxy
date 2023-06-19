@@ -10,7 +10,7 @@ use hashbrown::{HashMap, HashSet};
 use hdrhistogram::serialization::{Serializer, V2DeflateSerializer};
 use hdrhistogram::Histogram;
 use itertools::{Itertools, MinMaxResult};
-use log::{debug, log_enabled, trace, warn, Level};
+use log::{log_enabled, trace, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::{Ordering, Reverse};

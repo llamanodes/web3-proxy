@@ -18,50 +18,61 @@ pub struct RollingQuantileLatency {
 }
 
 /// Task to be spawned per-RollingMedianLatency for calculating the value
-#[derive(Debug)]
 struct RollingQuantileLatencyTask {
     /// Receive to update each request duration
     latency_rx: flume::Receiver<f32>,
     /// Current estimate and update time
     seconds: Arc<AtomicF32>,
     /// quantile value.
-    /// WARNING! should be between 0 and 1.
-    q: f32,
-    /// Rolling window size.
-    window_size: usize,
+    quantile: RollingQuantile<f32>,
 }
 
 impl RollingQuantileLatencyTask {
-    /// Run the loop for updating latency.
-    async fn run(self) {
-        let mut q = RollingQuantile::new(self.q, self.window_size).unwrap();
+    fn new(
+        latency_rx: flume::Receiver<f32>,
+        seconds: Arc<AtomicF32>,
+        q: f32,
+        window_size: usize,
+    ) -> Self {
+        let quantile = RollingQuantile::new(q, window_size).unwrap();
 
+        Self {
+            latency_rx,
+            seconds,
+            quantile,
+        }
+    }
+
+    /// Run the loop for updating latency.
+    async fn run(mut self) {
         while let Ok(rtt) = self.latency_rx.recv_async().await {
-            self.update(&mut q, rtt);
+            self.update(rtt);
         }
     }
 
     /// Update the estimate object atomically.
-    fn update(&self, q: &mut RollingQuantile<f32>, rtt: f32) {
-        q.update(rtt);
+    fn update(&mut self, rtt: f32) {
+        self.quantile.update(rtt);
 
         self.seconds
-            .store(q.get(), portable_atomic::Ordering::Relaxed);
+            .store(self.quantile.get(), portable_atomic::Ordering::Relaxed);
     }
 }
 
 impl RollingQuantileLatency {
     #[inline]
-    pub async fn record(&self, duration: Duration) {
-        self.record_secs(duration.as_secs_f32()).await
+    pub fn record(&self, duration: Duration) {
+        self.record_secs(duration.as_secs_f32())
     }
 
+    /// if the channel is full (unlikely), entries will be silently dropped
     #[inline]
-    pub async fn record_secs(&self, secs: f32) {
-        self.latency_tx.send_async(secs).await.unwrap()
+    pub fn record_secs(&self, secs: f32) {
+        // self.latency_tx.send_async(secs).await.unwrap()
+        let _ = self.latency_tx.try_send(secs);
     }
 
-    /// Current median.
+    /// Current .
     #[inline]
     pub fn seconds(&self) -> f32 {
         self.seconds.load(portable_atomic::Ordering::Relaxed)
@@ -81,12 +92,12 @@ impl RollingQuantileLatency {
 
         let seconds = Arc::new(AtomicF32::new(0.0));
 
-        let task = RollingQuantileLatencyTask {
+        let task = RollingQuantileLatencyTask::new(
             latency_rx,
-            seconds: seconds.clone(),
-            q: quantile_value,
+            seconds.clone(),
+            quantile_value,
             window_size,
-        };
+        );
 
         let join_handle = tokio::spawn(task.run());
 

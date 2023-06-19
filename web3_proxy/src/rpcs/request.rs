@@ -381,13 +381,9 @@ impl OpenRequestHandle {
             }
         }
 
+        // TODO: benchmark spawning both of these
         self.rpc.peak_latency.as_ref().unwrap().report(latency);
-        self.rpc
-            .median_latency
-            .as_ref()
-            .unwrap()
-            .record(latency)
-            .await;
+        self.rpc.median_latency.as_ref().unwrap().record(latency);
 
         response
     }

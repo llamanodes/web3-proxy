@@ -29,6 +29,7 @@ impl EwmaLatency {
 
     #[inline]
     pub fn record_secs(&mut self, secs: f32) {
+        // TODO: we could change this to use a channel like the peak_ewma and rolling_quantile code, but this is fine if it updates on insert instead of async
         self.seconds.update(secs);
     }
 
