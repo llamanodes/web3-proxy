@@ -10,7 +10,7 @@ use hashbrown::{HashMap, HashSet};
 use hdrhistogram::serialization::{Serializer, V2DeflateSerializer};
 use hdrhistogram::Histogram;
 use itertools::{Itertools, MinMaxResult};
-use log::{log_enabled, trace, warn, Level};
+use log::{debug, log_enabled, trace, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::{Ordering, Reverse};
@@ -497,9 +497,17 @@ impl ConsensusFinder {
                     trace!("weighted_latencies: {}", encoded);
                 }
 
-                // TODO: get someone who is better at math to do something smarter. maybe involving stddev?
-                // bucket sizes of the larger of 30ms or 1/2 the lowest latency
-                let tier_sec_size = 30f32.max(min_median_latency_sec / 2.0);
+                trace!("median_latencies_sec: {:#?}", median_latencies_sec);
+
+                trace!("min_median_latency_sec: {}", min_median_latency_sec);
+
+                // TODO: get someone who is better at math to do something smarter. maybe involving stddev? maybe involving cutting the histogram at the troughs?
+                // bucket sizes of the larger of 20ms or 1/2 the lowest latency
+                // TODO: is 20ms an okay default? make it configurable?
+                // TODO: does keeping the buckets the same size make sense?
+                let tier_sec_size = 0.020f32.max(min_median_latency_sec / 2.0);
+
+                trace!("tier_sec_size: {}", tier_sec_size);
 
                 for (rpc, median_latency_sec) in median_latencies_sec.into_iter() {
                     let tier = (median_latency_sec - min_median_latency_sec) / tier_sec_size;
