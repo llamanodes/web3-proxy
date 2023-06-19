@@ -109,11 +109,21 @@ pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(mut params): Path<HashMap<String, String>>,
+    bearer: Option<TypedHeader<Authorization<Bearer>>>,
 ) -> Web3ProxyResponse {
-    // I suppose this is ok / good, so people don't spam this endpoint as it is not "cheap"
-    // we rate limit by ip instead of bearer token so transactions are easy to submit from scripts
-    // TODO: if ip is a 10. or a 172., allow unlimited
-    let authorization = login_is_authorized(&app, ip).await?;
+    // rate limit by bearer token **OR** IP address
+    let (authorization, _semaphore) = if let Some(TypedHeader(Authorization(bearer))) = bearer {
+        let (_, semaphore) = app.bearer_is_authorized(bearer).await?;
+
+        // TODO: is handling this as internal fine?
+        let authorization = Web3ProxyAuthorization::internal(app.db_conn())?;
+
+        (authorization, Some(semaphore))
+    } else {
+        let authorization = login_is_authorized(&app, ip).await?;
+
+        (authorization, None)
+    };
 
     // Get the transaction hash
     let tx_hash: H256 = params
