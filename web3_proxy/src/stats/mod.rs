@@ -7,6 +7,7 @@ pub mod influxdb_queries;
 
 use self::stat_buffer::BufferedRpcQueryStats;
 use crate::app::{RpcSecretKeyCache, UserBalanceCache};
+use crate::compute_units::ComputeUnit;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::rpcs::one::Web3Rpc;
@@ -25,7 +26,9 @@ use migration::sea_orm::{DatabaseTransaction, QuerySelect};
 use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
+use std::borrow::Cow;
 use std::num::NonZeroU64;
+use std::str::FromStr;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
 
@@ -42,8 +45,9 @@ pub type BackendRequests = Mutex<Vec<Arc<Web3Rpc>>>;
 /// TODO: better name? RpcQueryStatBuilder?
 #[derive(Clone, Debug)]
 pub struct RpcQueryStats {
+    pub chain_id: u64,
     pub authorization: Arc<Authorization>,
-    pub method: Option<String>,
+    pub method: Cow<'static, str>,
     pub archive_request: bool,
     pub error_response: bool,
     pub request_bytes: u64,
@@ -53,8 +57,9 @@ pub struct RpcQueryStats {
     pub response_bytes: u64,
     pub response_millis: u64,
     pub response_timestamp: i64,
-    /// Credits used signifies how how much money was used up
-    pub credits_used: Decimal,
+    /// The cost of the query in USD
+    /// If the user is on a free tier, this is still calculated so we know how much we are giving away.
+    pub compute_unit_cost: Decimal,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
@@ -67,9 +72,9 @@ pub struct RpcQueryKey {
     archive_needed: bool,
     /// true if the response was some sort of JSONRPC error.
     error_response: bool,
-    /// method tracking is opt-in.
-    method: Option<String>,
-    /// origin tracking is opt-in.
+    /// the rpc method used.
+    method: Cow<'static, str>,
+    /// origin tracking was opt-in. Now it is "None"
     origin: Option<Origin>,
     /// None if the public url was used.
     rpc_secret_key_id: Option<NonZeroU64>,
@@ -192,7 +197,7 @@ impl BufferedRpcQueryStats {
         self.sum_request_bytes += stat.request_bytes;
         self.sum_response_bytes += stat.response_bytes;
         self.sum_response_millis += stat.response_millis;
-        self.sum_credits_used += stat.credits_used;
+        self.sum_credits_used += stat.compute_unit_cost;
     }
 
     async fn _save_db_stats(
@@ -714,9 +719,7 @@ impl BufferedRpcQueryStats {
             builder = builder.tag("rpc_secret_key_id", rpc_secret_key_id.to_string());
         }
 
-        if let Some(method) = key.method {
-            builder = builder.tag("method", method);
-        }
+        builder = builder.tag("method", key.method);
 
         // Read the latest balance ...
         let remaining = self.latest_balance.read().remaining();
@@ -803,83 +806,35 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
             x => x,
         };
 
-        let method = metadata.method.take();
+        let method = metadata.method.clone();
+        let chain_id = metadata.chain_id;
 
-        let credits_used = Self::compute_cost(
-            request_bytes,
-            response_bytes,
-            backend_rpcs_used.is_empty(),
-            method.as_deref(),
-        );
+        let cu = ComputeUnit::new(&method, metadata.chain_id);
+
+        // TODO: get from config? a helper function? how should we pick this?
+        let usd_per_cu = match chain_id {
+            137 => Decimal::from_str("0.000000692307692307"),
+            _ => Decimal::from_str("0.000000692307692307"),
+        }?;
+
+        let cache_hit = !backend_rpcs_used.is_empty();
+
+        let compute_unit_cost = cu.cost(cache_hit, usd_per_cu);
 
         let x = Self {
-            authorization,
             archive_request,
-            method,
+            authorization,
             backend_rpcs_used,
-            request_bytes,
+            chain_id,
+            compute_unit_cost,
             error_response,
+            method,
+            request_bytes,
             response_bytes,
             response_millis,
             response_timestamp,
-            credits_used,
         };
 
         Ok(x)
-    }
-}
-
-impl RpcQueryStats {
-    /// Compute cost per request
-    /// All methods cost the same
-    /// The number of bytes are based on input, and output bytes
-    pub fn compute_cost(
-        request_bytes: u64,
-        response_bytes: u64,
-        cache_hit: bool,
-        method: Option<&str>,
-    ) -> Decimal {
-        // some methods should be free. there might be cases where method isn't set (though they should be uncommon)
-        // TODO: get this list from config (and add more to it)
-        if let Some(method) = method.as_ref() {
-            if [
-                "eth_chainId",
-                "eth_syncing",
-                "eth_protocolVersion",
-                "net_version",
-                "net_listening",
-            ]
-            .contains(method)
-            {
-                return 0.into();
-            }
-        }
-
-        // TODO: finalize cost calculation
-
-        // TODO: get cost_minimum, cost_free_bytes, cost_per_byte, cache_hit_divisor from config. each chain will be different
-        // pays at least $0.000018 / credits per request
-        let cost_minimum = Decimal::new(18, 6);
-
-        // 1kb is included on each call
-        let cost_free_bytes = 1024;
-
-        // after that, we add cost per bytes, $0.000000006 / credits per byte
-        // amazon charges $.09/GB outbound
-        // but we also have to cover our RAM and expensive nics on the servers (haproxy/web3-proxy/blockchains)
-        let cost_per_byte = Decimal::new(6, 9);
-
-        let total_bytes = request_bytes + response_bytes;
-
-        let total_chargable_bytes = Decimal::from(total_bytes.saturating_sub(cost_free_bytes));
-
-        let mut cost = cost_minimum + cost_per_byte * total_chargable_bytes;
-
-        // cache hits get a 50% discount
-        if cache_hit {
-            cost /= Decimal::from(2)
-        }
-
-        cost
     }
 }

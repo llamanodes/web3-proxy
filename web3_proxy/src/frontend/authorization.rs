@@ -31,6 +31,7 @@ use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
+use std::borrow::Cow;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::mem;
@@ -296,14 +297,15 @@ pub struct RequestMetadata {
 
     pub authorization: Option<Arc<Authorization>>,
 
+    pub chain_id: u64,
+
     pub request_ulid: Ulid,
 
     /// Size of the JSON request. Does not include headers or things like that.
     pub request_bytes: usize,
 
-    /// users can opt out of method tracking for their personal dashboads
-    /// but we still have to store the method at least temporarily for cost calculations
-    pub method: Option<String>,
+    /// The JSON-RPC request method.
+    pub method: Cow<'static, str>,
 
     /// Instant that the request was received (or at least close to it)
     /// We use Instant and not timestamps to avoid problems with leap seconds and similar issues
@@ -341,12 +343,14 @@ impl Default for Authorization {
     }
 }
 
+/// this is only implemented so that we can use `mem::take`. You probably shouldn't use this.
 impl Default for RequestMetadata {
     fn default() -> Self {
         Self {
             archive_request: Default::default(),
             authorization: Default::default(),
             backend_requests: Default::default(),
+            chain_id: Default::default(),
             error_response: Default::default(),
             kafka_debug_logger: Default::default(),
             method: Default::default(),
@@ -385,19 +389,19 @@ impl RequestMetadata {
 
 #[derive(From)]
 pub enum RequestOrMethod<'a> {
-    Request(&'a JsonRpcRequest),
     /// jsonrpc method (or similar label) and the size that the request should count as (sometimes 0)
     Method(&'a str, usize),
-    RequestSize(usize),
+    Request(&'a JsonRpcRequest),
 }
 
 impl<'a> RequestOrMethod<'a> {
-    fn method(&self) -> Option<&str> {
-        match self {
-            Self::Request(x) => Some(&x.method),
-            Self::Method(x, _) => Some(x),
-            _ => None,
-        }
+    fn method(&self) -> Cow<'static, str> {
+        let x = match self {
+            Self::Request(x) => x.method.to_string(),
+            Self::Method(x, _) => x.to_string(),
+        };
+
+        x.into()
     }
 
     fn jsonrpc_request(&self) -> Option<&JsonRpcRequest> {
@@ -411,18 +415,13 @@ impl<'a> RequestOrMethod<'a> {
         match self {
             RequestOrMethod::Method(_, num_bytes) => *num_bytes,
             RequestOrMethod::Request(x) => x.num_bytes(),
-            RequestOrMethod::RequestSize(num_bytes) => *num_bytes,
         }
     }
 }
 
 impl<'a> From<&'a str> for RequestOrMethod<'a> {
     fn from(value: &'a str) -> Self {
-        if value.is_empty() {
-            Self::RequestSize(0)
-        } else {
-            Self::Method(value, 0)
-        }
+        Self::Method(value, 0)
     }
 }
 
@@ -463,7 +462,7 @@ impl RequestMetadata {
     ) -> Arc<Self> {
         let request = request.into();
 
-        let method = request.method().map(|x| x.to_string());
+        let method = request.method();
 
         let request_bytes = request.num_bytes();
 
@@ -499,6 +498,7 @@ impl RequestMetadata {
             archive_request: false.into(),
             authorization: Some(authorization),
             backend_requests: Default::default(),
+            chain_id: app.config.chain_id,
             error_response: false.into(),
             kafka_debug_logger,
             method,

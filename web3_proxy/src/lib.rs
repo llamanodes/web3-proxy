@@ -4,6 +4,7 @@
 pub mod admin_queries;
 pub mod app;
 pub mod block_number;
+pub mod compute_units;
 pub mod config;
 pub mod errors;
 pub mod frontend;
