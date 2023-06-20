@@ -27,6 +27,7 @@ use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::borrow::Cow;
+use std::mem;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::atomic::{self, Ordering};
@@ -806,13 +807,10 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
             x => x,
         };
 
-        let method = metadata.method.clone();
-        let chain_id = metadata.chain_id;
-
-        let cu = ComputeUnit::new(&method, chain_id);
+        let cu = ComputeUnit::new(&metadata.method, metadata.chain_id);
 
         // TODO: get from config? a helper function? how should we pick this?
-        let usd_per_cu = match chain_id {
+        let usd_per_cu = match metadata.chain_id {
             137 => Decimal::from_str("0.000000533333333333333"),
             _ => Decimal::from_str("0.000000400000000000000"),
         }?;
@@ -821,11 +819,13 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
 
         let compute_unit_cost = cu.cost(archive_request, cache_hit, usd_per_cu);
 
+        let method = mem::take(&mut metadata.method);
+
         let x = Self {
             archive_request,
             authorization,
             backend_rpcs_used,
-            chain_id,
+            chain_id: metadata.chain_id,
             compute_unit_cost,
             error_response,
             method,
