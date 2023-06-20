@@ -29,7 +29,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::watch;
-use tokio::time::{interval, sleep, sleep_until, timeout, Duration, Instant, MissedTickBehavior};
+use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use url::Url;
 
 /// An active connection to a Web3 RPC server like geth or erigon.
@@ -318,17 +318,16 @@ impl Web3Rpc {
         // TODO: binary search between 90k and max?
         // TODO: start at 0 or 1?
         for block_data_limit in [0, 32, 64, 128, 256, 512, 1024, 90_000, u64::MAX] {
-            let head_block_num_future = self.internal_request::<_, U256>(
-                "eth_blockNumber",
-                &(),
-                // error here are expected, so keep the level low
-                Some(Level::Debug.into()),
-            );
-
-            let head_block_num = timeout(Duration::from_secs(5), head_block_num_future)
+            let head_block_num = self
+                .internal_request::<_, U256>(
+                    "eth_blockNumber",
+                    &(),
+                    // error here are expected, so keep the level low
+                    Some(Level::Debug.into()),
+                    Some(Duration::from_secs(5)),
+                )
                 .await
-                .context("timeout fetching eth_blockNumber")?
-                .context("provider error")?;
+                .context("head_block_num error during check_block_data_limit")?;
 
             let maybe_archive_block = head_block_num.saturating_sub((block_data_limit).into());
 
@@ -349,6 +348,7 @@ impl Web3Rpc {
                     )),
                     // error here are expected, so keep the level low
                     Some(Level::Trace.into()),
+                    Some(Duration::from_secs(5)),
                 )
                 .await;
 
@@ -434,7 +434,12 @@ impl Web3Rpc {
         // TODO: what should the timeout be? should there be a request timeout?
         // trace!("waiting on chain id for {}", self);
         let found_chain_id: U64 = self
-            .internal_request("eth_chainId", &(), Some(Level::Trace.into()))
+            .internal_request(
+                "eth_chainId",
+                &(),
+                Some(Level::Trace.into()),
+                Some(Duration::from_secs(5)),
+            )
             .await?;
 
         trace!("found_chain_id: {:#?}", found_chain_id);
@@ -556,6 +561,7 @@ impl Web3Rpc {
                         "eth_getTransactionByHash",
                         &(txid,),
                         error_handler,
+                        Some(Duration::from_secs(5)),
                     )
                     .await?
                     .context("no transaction")?;
@@ -577,6 +583,7 @@ impl Web3Rpc {
                     "eth_getCode",
                     &(to, block_number),
                     error_handler,
+                    Some(Duration::from_secs(5)),
                 )
                 .await?;
         } else {
@@ -821,6 +828,7 @@ impl Web3Rpc {
                     &("latest", false),
                     &authorization,
                     Some(Level::Warn.into()),
+                    Some(Duration::from_secs(5)),
                 )
                 .await;
 
@@ -839,7 +847,7 @@ impl Web3Rpc {
                     .await?;
             }
         } else if self.http_provider.is_some() {
-            // there is a "watch_blocks" function, but a lot of public nodes do not support the necessary rpc endpoints
+            // there is a "watch_blocks" function, but a lot of public nodes (including llamanodes) do not support the necessary rpc endpoints
             // TODO: is 1/2 the block time okay?
             let mut i = interval(self.block_interval / 2);
             i.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -856,6 +864,7 @@ impl Web3Rpc {
                         &("latest", false),
                         &authorization,
                         Some(Level::Warn.into()),
+                        Some(Duration::from_secs(5)),
                     )
                     .await;
 
@@ -1057,10 +1066,11 @@ impl Web3Rpc {
         method: &str,
         params: &P,
         error_handler: Option<RequestErrorHandler>,
+        max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         let authorization = Default::default();
 
-        self.authorized_request(method, params, &authorization, error_handler)
+        self.authorized_request(method, params, &authorization, error_handler, max_wait)
             .await
     }
 
@@ -1070,10 +1080,11 @@ impl Web3Rpc {
         params: &P,
         authorization: &Arc<Authorization>,
         error_handler: Option<RequestErrorHandler>,
+        max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         // TODO: take max_wait as a function argument?
         let x = self
-            .wait_for_request_handle(authorization, None, error_handler)
+            .wait_for_request_handle(authorization, max_wait, error_handler)
             .await?
             .request::<P, R>(method, params)
             .await?;

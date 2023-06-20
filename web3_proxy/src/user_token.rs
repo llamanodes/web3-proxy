@@ -1,8 +1,7 @@
-use std::str::FromStr;
-
 use axum::headers::authorization::Bearer;
 use migration::sea_orm::prelude::Uuid;
 use serde::Serialize;
+use std::str::FromStr;
 use ulid::Ulid;
 
 /// Key used for caching the user's login

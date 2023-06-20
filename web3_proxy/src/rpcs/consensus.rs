@@ -1,7 +1,8 @@
 use super::blockchain::Web3ProxyBlock;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
-use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
+use super::transactions::TxStatus;
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
 use base64::engine::general_purpose;
 use derive_more::Constructor;
@@ -10,7 +11,7 @@ use hashbrown::{HashMap, HashSet};
 use hdrhistogram::serialization::{Serializer, V2DeflateSerializer};
 use hdrhistogram::Histogram;
 use itertools::{Itertools, MinMaxResult};
-use log::{log_enabled, trace, warn, Level};
+use log::{debug, log_enabled, trace, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::{Ordering, Reverse};
@@ -18,6 +19,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
+use tokio::sync::broadcast;
 use tokio::time::Instant;
 
 #[derive(Clone, Serialize)]
@@ -369,6 +371,229 @@ impl ConsensusFinder {
         self.rpc_heads.is_empty()
     }
 
+    /// `connection_heads` is a mapping of rpc_names to head block hashes.
+    /// self.blockchain_map is a mapping of hashes to the complete ArcBlock.
+    /// TODO: return something?
+    /// TODO: move this onto ConsensusFinder
+    pub(super) async fn refresh(
+        &mut self,
+        web3_rpcs: &Web3Rpcs,
+        authorization: &Arc<Authorization>,
+        rpc: Option<&Arc<Web3Rpc>>,
+        new_block: Option<Web3ProxyBlock>,
+    ) -> Web3ProxyResult<()> {
+        let new_consensus_rpcs = match self
+            .find_consensus_connections(authorization, web3_rpcs)
+            .await
+        {
+            Err(err) => {
+                return Err(err).web3_context("error while finding consensus head block!");
+            }
+            Ok(None) => {
+                return Err(Web3ProxyError::NoConsensusHeadBlock);
+            }
+            Ok(Some(x)) => x,
+        };
+
+        trace!("new_synced_connections: {:#?}", new_consensus_rpcs);
+
+        let watch_consensus_head_sender = web3_rpcs.watch_consensus_head_sender.as_ref().unwrap();
+        let consensus_tier = new_consensus_rpcs.tier;
+        // TODO: think more about the default for total_tiers
+        let total_tiers = self.worst_tier().unwrap_or_default();
+        let backups_needed = new_consensus_rpcs.backups_needed;
+        let consensus_head_block = new_consensus_rpcs.head_block.clone();
+        let num_consensus_rpcs = new_consensus_rpcs.num_consensus_rpcs();
+        let num_active_rpcs = self.len();
+        let total_rpcs = web3_rpcs.len();
+
+        let new_consensus_rpcs = Arc::new(new_consensus_rpcs);
+
+        let old_consensus_head_connections = web3_rpcs
+            .watch_consensus_rpcs_sender
+            .send_replace(Some(new_consensus_rpcs.clone()));
+
+        let backups_voted_str = if backups_needed { "B " } else { "" };
+
+        let rpc_head_str = if let Some(rpc) = rpc.as_ref() {
+            format!(
+                "{}@{}",
+                rpc,
+                new_block
+                    .map(|x| x.to_string())
+                    .unwrap_or_else(|| "None".to_string()),
+            )
+        } else {
+            "None".to_string()
+        };
+
+        match old_consensus_head_connections.as_ref() {
+            None => {
+                debug!(
+                    "first {}/{} {}{}/{}/{} block={}, rpc={}",
+                    consensus_tier,
+                    total_tiers,
+                    backups_voted_str,
+                    num_consensus_rpcs,
+                    num_active_rpcs,
+                    total_rpcs,
+                    consensus_head_block,
+                    rpc_head_str,
+                );
+
+                if backups_needed {
+                    // TODO: what else should be in this error?
+                    warn!("Backup RPCs are in use!");
+                }
+
+                // this should already be cached
+                let consensus_head_block = web3_rpcs
+                    .try_cache_block(consensus_head_block, true)
+                    .await?;
+
+                watch_consensus_head_sender
+                    .send(Some(consensus_head_block))
+                    .or(Err(Web3ProxyError::WatchSendError))
+                    .web3_context(
+                        "watch_consensus_head_sender failed sending first consensus_head_block",
+                    )?;
+            }
+            Some(old_consensus_connections) => {
+                let old_head_block = &old_consensus_connections.head_block;
+
+                match consensus_head_block.number().cmp(old_head_block.number()) {
+                    Ordering::Equal => {
+                        // multiple blocks with the same fork!
+                        if consensus_head_block.hash() == old_head_block.hash() {
+                            // no change in hash. no need to use watch_consensus_head_sender
+                            // TODO: trace level if rpc is backup
+                            debug!(
+                                "con {}/{} {}{}/{}/{} con={} rpc={}",
+                                consensus_tier,
+                                total_tiers,
+                                backups_voted_str,
+                                num_consensus_rpcs,
+                                num_active_rpcs,
+                                total_rpcs,
+                                consensus_head_block,
+                                rpc_head_str,
+                            )
+                        } else {
+                            // hash changed
+
+                            debug!(
+                                "unc {}/{} {}{}/{}/{} con={} old={} rpc={}",
+                                consensus_tier,
+                                total_tiers,
+                                backups_voted_str,
+                                num_consensus_rpcs,
+                                num_active_rpcs,
+                                total_rpcs,
+                                consensus_head_block,
+                                old_head_block,
+                                rpc_head_str,
+                            );
+
+                            let consensus_head_block = web3_rpcs
+                                .try_cache_block(consensus_head_block, true)
+                                .await
+                                .web3_context("save consensus_head_block as heaviest chain")?;
+
+                            watch_consensus_head_sender
+                                .send(Some(consensus_head_block))
+                                .or(Err(Web3ProxyError::WatchSendError))
+                                .web3_context("watch_consensus_head_sender failed sending uncled consensus_head_block")?;
+                        }
+                    }
+                    Ordering::Less => {
+                        // this is unlikely but possible
+                        // TODO: better log that includes all the votes
+                        warn!(
+                            "chain rolled back {}/{} {}{}/{}/{} con={} old={} rpc={}",
+                            consensus_tier,
+                            total_tiers,
+                            backups_voted_str,
+                            num_consensus_rpcs,
+                            num_active_rpcs,
+                            total_rpcs,
+                            consensus_head_block,
+                            old_head_block,
+                            rpc_head_str,
+                        );
+
+                        if backups_needed {
+                            // TODO: what else should be in this error?
+                            warn!("Backup RPCs are in use!");
+                        }
+
+                        // TODO: tell save_block to remove any higher block numbers from the cache. not needed because we have other checks on requested blocks being > head, but still seems like a good idea
+                        let consensus_head_block = web3_rpcs
+                            .try_cache_block(consensus_head_block, true)
+                            .await
+                            .web3_context(
+                                "save_block sending consensus_head_block as heaviest chain",
+                            )?;
+
+                        watch_consensus_head_sender
+                            .send(Some(consensus_head_block))
+                            .or(Err(Web3ProxyError::WatchSendError))
+                            .web3_context("watch_consensus_head_sender failed sending rollback consensus_head_block")?;
+                    }
+                    Ordering::Greater => {
+                        debug!(
+                            "new {}/{} {}{}/{}/{} con={} rpc={}",
+                            consensus_tier,
+                            total_tiers,
+                            backups_voted_str,
+                            num_consensus_rpcs,
+                            num_active_rpcs,
+                            total_rpcs,
+                            consensus_head_block,
+                            rpc_head_str,
+                        );
+
+                        if backups_needed {
+                            // TODO: what else should be in this error?
+                            warn!("Backup RPCs are in use!");
+                        }
+
+                        let consensus_head_block = web3_rpcs
+                            .try_cache_block(consensus_head_block, true)
+                            .await?;
+
+                        watch_consensus_head_sender.send(Some(consensus_head_block))
+                            .or(Err(Web3ProxyError::WatchSendError))
+                            .web3_context("watch_consensus_head_sender failed sending new consensus_head_block")?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(super) async fn process_block_from_rpc(
+        &mut self,
+        web3_rpcs: &Web3Rpcs,
+        authorization: &Arc<Authorization>,
+        new_block: Option<Web3ProxyBlock>,
+        rpc: Arc<Web3Rpc>,
+        _pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
+    ) -> Web3ProxyResult<()> {
+        // TODO: how should we handle an error here?
+        if !self
+            .update_rpc(new_block.clone(), rpc.clone(), web3_rpcs)
+            .await
+            .web3_context("failed to update rpc")?
+        {
+            // nothing changed. no need to scan for a new consensus head
+            return Ok(());
+        }
+
+        self.refresh(web3_rpcs, authorization, Some(&rpc), new_block)
+            .await
+    }
+
     fn remove(&mut self, rpc: &Arc<Web3Rpc>) -> Option<Web3ProxyBlock> {
         self.rpc_heads.remove(rpc)
     }
@@ -590,14 +815,17 @@ impl ConsensusFinder {
                 backup_entry.0.insert(rpc);
                 backup_entry.1 += rpc.soft_limit;
 
+                // we used to specify rpc on this, but it shouldn't be necessary
+                let parent_hash = block_to_check.parent_hash();
                 match web3_rpcs
-                    .block(authorization, block_to_check.parent_hash(), Some(rpc))
+                    .block(authorization, parent_hash, None, None)
                     .await
                 {
                     Ok(parent_block) => block_to_check = parent_block,
                     Err(err) => {
-                        warn!(
-                            "Problem fetching parent block of {:?} during consensus finding: {:#?}",
+                        debug!(
+                            "Problem fetching {:?} (parent of {:?}) during consensus finding: {:#?}",
+                            parent_hash,
                             block_to_check.hash(),
                             err
                         );
