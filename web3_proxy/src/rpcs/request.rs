@@ -381,9 +381,10 @@ impl OpenRequestHandle {
             }
         }
 
-        // TODO: benchmark spawning both of these
-        self.rpc.peak_latency.as_ref().unwrap().report(latency);
-        self.rpc.median_latency.as_ref().unwrap().record(latency);
+        tokio::spawn(async move {
+            self.rpc.peak_latency.as_ref().unwrap().report(latency);
+            self.rpc.median_latency.as_ref().unwrap().record(latency);
+        });
 
         response
     }
