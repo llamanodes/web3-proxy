@@ -809,7 +809,7 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
         let method = metadata.method.clone();
         let chain_id = metadata.chain_id;
 
-        let cu = ComputeUnit::new(&method, metadata.chain_id);
+        let cu = ComputeUnit::new(&method, chain_id);
 
         // TODO: get from config? a helper function? how should we pick this?
         let usd_per_cu = match chain_id {
