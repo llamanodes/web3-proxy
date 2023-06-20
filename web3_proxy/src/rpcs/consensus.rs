@@ -415,10 +415,22 @@ impl ConsensusFinder {
 
         let backups_voted_str = if backups_needed { "B " } else { "" };
 
+        let rpc_head_str = if let Some(rpc) = rpc.as_ref() {
+            format!(
+                "{}@{}",
+                rpc,
+                new_block
+                    .map(|x| x.to_string())
+                    .unwrap_or_else(|| "None".to_string()),
+            )
+        } else {
+            "None".to_string()
+        };
+
         match old_consensus_head_connections.as_ref() {
             None => {
                 debug!(
-                    "first {}/{} {}{}/{}/{} block={}, rpc={:?}",
+                    "first {}/{} {}{}/{}/{} block={}, rpc={}",
                     consensus_tier,
                     total_tiers,
                     backups_voted_str,
@@ -426,7 +438,7 @@ impl ConsensusFinder {
                     num_active_rpcs,
                     total_rpcs,
                     consensus_head_block,
-                    rpc,
+                    rpc_head_str,
                 );
 
                 if backups_needed {
@@ -448,18 +460,6 @@ impl ConsensusFinder {
             }
             Some(old_consensus_connections) => {
                 let old_head_block = &old_consensus_connections.head_block;
-
-                let rpc_head_str = if let Some(rpc) = rpc.as_ref() {
-                    format!(
-                        "{}@{}",
-                        rpc,
-                        new_block
-                            .map(|x| x.to_string())
-                            .unwrap_or_else(|| "None".to_string()),
-                    )
-                } else {
-                    "None".to_string()
-                };
 
                 match consensus_head_block.number().cmp(old_head_block.number()) {
                     Ordering::Equal => {
