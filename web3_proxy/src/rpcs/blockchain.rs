@@ -3,7 +3,7 @@ use super::consensus::ConsensusFinder;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use super::transactions::TxStatus;
-use crate::config::BlockAndRpc;
+use crate::config::{average_block_interval, BlockAndRpc};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
 use derive_more::From;
@@ -410,9 +410,11 @@ impl Web3Rpcs {
         let mut consensus_finder =
             ConsensusFinder::new(Some(self.max_head_block_age), Some(self.max_head_block_lag));
 
+        // TODO: what timeout on block receiver? we want to keep consensus_finder fresh so that server tiers are correct
+        let double_block_time = average_block_interval(self.chain_id).mul_f32(2.0);
+
         loop {
-            // TODO: what timeout on block receiver? we want to keep consensus_finder fresh so that server tiers are correct
-            match timeout(Duration::from_secs(10), block_receiver.recv_async()).await {
+            match timeout(double_block_time, block_receiver.recv_async()).await {
                 Ok(Ok((new_block, rpc))) => {
                     let rpc_name = rpc.name.clone();
 

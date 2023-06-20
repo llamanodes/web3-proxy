@@ -40,6 +40,7 @@ use tokio::time::{sleep, sleep_until, Duration, Instant};
 pub struct Web3Rpcs {
     /// TODO: this should be a Cow
     pub(crate) name: String,
+    pub(crate) chain_id: u64,
     /// if watch_consensus_head_sender is some, Web3Rpc inside self will send blocks here when they get them
     pub(crate) block_sender: flume::Sender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
     /// any requests will be forwarded to one (or more) of these connections
@@ -126,6 +127,7 @@ impl Web3Rpcs {
             blocks_by_hash,
             blocks_by_number,
             by_name,
+            chain_id,
             max_head_block_age,
             max_head_block_lag,
             min_synced_rpcs: min_head_rpcs,
@@ -1518,10 +1520,13 @@ mod tests {
         let (watch_consensus_rpcs_sender, _watch_consensus_rpcs_receiver) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
+        let chain_id = 1;
+
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
             block_sender: block_sender.clone(),
             by_name: RwLock::new(rpcs_by_name),
+            chain_id,
             name: "test".to_string(),
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
@@ -1793,9 +1798,12 @@ mod tests {
         let (watch_consensus_rpcs_sender, _) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
+        let chain_id = 1;
+
         let rpcs = Web3Rpcs {
             block_sender,
             by_name: RwLock::new(rpcs_by_name),
+            chain_id,
             name: "test".to_string(),
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
@@ -1980,10 +1988,13 @@ mod tests {
         let (watch_consensus_rpcs_sender, _) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
+        let chain_id = 1;
+
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
             block_sender,
             by_name: RwLock::new(rpcs_by_name),
+            chain_id,
             name: "test".to_string(),
             watch_consensus_head_sender: Some(watch_consensus_head_sender),
             watch_consensus_rpcs_sender,
