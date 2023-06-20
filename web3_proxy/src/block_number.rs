@@ -76,7 +76,7 @@ pub async fn clean_block_number(
                             serde_json::from_value(block_hash).context("decoding blockHash")?;
 
                         let block = rpcs
-                            .block(authorization, &block_hash, None)
+                            .block(authorization, &block_hash, None, None)
                             .await
                             .context("fetching block number from hash")?;
 

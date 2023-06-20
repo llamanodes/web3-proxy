@@ -1610,7 +1610,7 @@ impl Web3ProxyApp {
 
                         let request_block = self
                             .balanced_rpcs
-                            .block(&authorization, &request_block_hash, None)
+                            .block(&authorization, &request_block_hash, None, None)
                             .await?
                             .block;
 
@@ -1640,7 +1640,7 @@ impl Web3ProxyApp {
 
                         let from_block = self
                             .balanced_rpcs
-                            .block(&authorization, &from_block_hash, None)
+                            .block(&authorization, &from_block_hash, None, None)
                             .await?
                             .block;
 
@@ -1651,7 +1651,7 @@ impl Web3ProxyApp {
 
                         let to_block = self
                             .balanced_rpcs
-                            .block(&authorization, &to_block_hash, None)
+                            .block(&authorization, &to_block_hash, None, None)
                             .await?
                             .block;
 

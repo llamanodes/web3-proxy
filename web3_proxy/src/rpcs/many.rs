@@ -1548,25 +1548,16 @@ mod tests {
 
         let mut consensus_finder = ConsensusFinder::new(None, None);
 
-        // process None so that
-        rpcs.process_block_from_rpc(
-            &authorization,
-            &mut consensus_finder,
-            None,
-            lagged_rpc.clone(),
-            &None,
-        )
-        .await
-        .expect("its lagged, but it should still be seen as consensus if its the first to report");
-        rpcs.process_block_from_rpc(
-            &authorization,
-            &mut consensus_finder,
-            None,
-            head_rpc.clone(),
-            &None,
-        )
-        .await
-        .unwrap();
+        consensus_finder
+            .process_block_from_rpc(&rpcs, &authorization, None, lagged_rpc.clone(), &None)
+            .await
+            .expect(
+                "its lagged, but it should still be seen as consensus if its the first to report",
+            );
+        consensus_finder
+            .process_block_from_rpc(&rpcs, &authorization, None, head_rpc.clone(), &None)
+            .await
+            .unwrap();
 
         // no head block because the rpcs haven't communicated through their channels
         assert!(rpcs.head_block_hash().is_none());
@@ -1607,16 +1598,17 @@ mod tests {
             .await
             .unwrap();
 
-        // TODO: this is fragile
-        rpcs.process_block_from_rpc(
-            &authorization,
-            &mut consensus_finder,
-            Some(lagged_block.clone().try_into().unwrap()),
-            lagged_rpc.clone(),
-            &None,
-        )
-        .await
-        .unwrap();
+        // TODO: calling process_block_from_rpc and send_head_block_result seperate seems very fragile
+        consensus_finder
+            .process_block_from_rpc(
+                &rpcs,
+                &authorization,
+                Some(lagged_block.clone().try_into().unwrap()),
+                lagged_rpc.clone(),
+                &None,
+            )
+            .await
+            .unwrap();
 
         head_rpc
             .send_head_block_result(
@@ -1628,15 +1620,16 @@ mod tests {
             .unwrap();
 
         // TODO: this is fragile
-        rpcs.process_block_from_rpc(
-            &authorization,
-            &mut consensus_finder,
-            Some(lagged_block.clone().try_into().unwrap()),
-            head_rpc.clone(),
-            &None,
-        )
-        .await
-        .unwrap();
+        consensus_finder
+            .process_block_from_rpc(
+                &rpcs,
+                &authorization,
+                Some(lagged_block.clone().try_into().unwrap()),
+                head_rpc.clone(),
+                &None,
+            )
+            .await
+            .unwrap();
 
         // TODO: how do we spawn this and wait for it to process things? subscribe and watch consensus connections?
         // rpcs.process_incoming_blocks(&authorization, block_receiver, pending_tx_sender)
@@ -1660,15 +1653,16 @@ mod tests {
             .unwrap();
 
         // TODO: this is fragile
-        rpcs.process_block_from_rpc(
-            &authorization,
-            &mut consensus_finder,
-            Some(head_block.clone().try_into().unwrap()),
-            head_rpc.clone(),
-            &None,
-        )
-        .await
-        .unwrap();
+        consensus_finder
+            .process_block_from_rpc(
+                &rpcs,
+                &authorization,
+                Some(head_block.clone().try_into().unwrap()),
+                head_rpc.clone(),
+                &None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(rpcs.num_synced_rpcs(), 1);
 
@@ -1827,25 +1821,27 @@ mod tests {
         let mut connection_heads = ConsensusFinder::new(None, None);
 
         // min sum soft limit will require tier 2
-        rpcs.process_block_from_rpc(
-            &authorization,
-            &mut connection_heads,
-            Some(head_block.clone()),
-            pruned_rpc.clone(),
-            &None,
-        )
-        .await
-        .unwrap_err();
+        connection_heads
+            .process_block_from_rpc(
+                &rpcs,
+                &authorization,
+                Some(head_block.clone()),
+                pruned_rpc.clone(),
+                &None,
+            )
+            .await
+            .unwrap_err();
 
-        rpcs.process_block_from_rpc(
-            &authorization,
-            &mut connection_heads,
-            Some(head_block.clone()),
-            archive_rpc.clone(),
-            &None,
-        )
-        .await
-        .unwrap();
+        connection_heads
+            .process_block_from_rpc(
+                &rpcs,
+                &authorization,
+                Some(head_block.clone()),
+                archive_rpc.clone(),
+                &None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(rpcs.num_synced_rpcs(), 2);
 
@@ -2004,27 +2000,29 @@ mod tests {
 
         let authorization = Arc::new(Authorization::internal(None).unwrap());
 
-        let mut connection_heads = ConsensusFinder::new(None, None);
+        let mut consensus_finder = ConsensusFinder::new(None, None);
 
-        rpcs.process_block_from_rpc(
-            &authorization,
-            &mut connection_heads,
-            Some(block_1.clone()),
-            mock_geth.clone(),
-            &None,
-        )
-        .await
-        .unwrap();
+        consensus_finder
+            .process_block_from_rpc(
+                &rpcs,
+                &authorization,
+                Some(block_1.clone()),
+                mock_geth.clone(),
+                &None,
+            )
+            .await
+            .unwrap();
 
-        rpcs.process_block_from_rpc(
-            &authorization,
-            &mut connection_heads,
-            Some(block_2.clone()),
-            mock_erigon_archive.clone(),
-            &None,
-        )
-        .await
-        .unwrap();
+        consensus_finder
+            .process_block_from_rpc(
+                &rpcs,
+                &authorization,
+                Some(block_2.clone()),
+                mock_erigon_archive.clone(),
+                &None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(rpcs.num_synced_rpcs(), 1);
 
