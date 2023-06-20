@@ -423,21 +423,32 @@ impl Web3Rpcs {
                 Ok(Ok((new_block, rpc))) => {
                     let rpc_name = rpc.name.clone();
 
-                    // TODO: timeout on this
-                    if let Err(err) = consensus_finder
-                        .process_block_from_rpc(
+                    // TODO: what timeout on this?
+                    match timeout(
+                        Duration::from_secs(2),
+                        consensus_finder.process_block_from_rpc(
                             self,
                             authorization,
                             new_block,
                             rpc,
                             &pending_tx_sender,
-                        )
-                        .await
+                        ),
+                    )
+                    .await
                     {
-                        warn!(
-                            "error while processing block from rpc {}: {:#?}",
-                            rpc_name, err
-                        );
+                        Ok(Ok(_)) => {}
+                        Ok(Err(err)) => {
+                            error!(
+                                "error while processing block from rpc {}: {:#?}",
+                                rpc_name, err
+                            );
+                        }
+                        Err(timeout) => {
+                            error!(
+                                "timeout while processing block from {}: {:#?}",
+                                rpc_name, timeout
+                            );
+                        }
                     }
                 }
                 Ok(Err(err)) => {
@@ -446,11 +457,20 @@ impl Web3Rpcs {
                     return Err(err.into());
                 }
                 Err(_) => {
-                    if let Err(err) = consensus_finder
-                        .refresh(self, authorization, None, None)
-                        .await
+                    // TODO: what timeout on this?
+                    match timeout(
+                        Duration::from_secs(2),
+                        consensus_finder.refresh(self, authorization, None, None),
+                    )
+                    .await
                     {
-                        warn!("error while refreshing consensus_finder: {:#?}", err);
+                        Ok(Ok(_)) => {}
+                        Ok(Err(err)) => {
+                            error!("error while refreshing consensus finder: {:#?}", err);
+                        }
+                        Err(timeout) => {
+                            error!("timeout while refreshing consensus finder: {:#?}", timeout);
+                        }
                     }
                 }
             }
