@@ -95,6 +95,7 @@ impl ComputeUnit {
             (_, "eth_getUserOperationReceipt") => 15,
             (_, "eth_supportedEntryPoints") => 5,
             (_, method) => {
+                // default to 10 CU for methods that aren't included here
                 warn!("unknown method {}", method);
                 10
             }
@@ -112,8 +113,22 @@ impl ComputeUnit {
         Self(cu)
     }
 
-    /// requesting an unimplemented function costs
+    /// requesting an unimplemented function costs 2 CU
     pub fn unimplemented() -> Self {
         Self(2.into())
+    }
+
+    /// Compute cost per request
+    /// All methods cost the same
+    /// The number of bytes are based on input, and output bytes
+    pub fn cost(&self, cache_hit: bool, usd_per_cu: Decimal) -> Decimal {
+        let mut cost = self.0 * usd_per_cu;
+
+        // cache hits get a 50% discount
+        if cache_hit {
+            cost /= Decimal::from(2)
+        }
+
+        cost
     }
 }

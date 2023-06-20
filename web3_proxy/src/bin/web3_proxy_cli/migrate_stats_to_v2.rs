@@ -12,7 +12,7 @@ use migration::{Expr, Value};
 use parking_lot::Mutex;
 use std::num::NonZeroU64;
 use std::sync::Arc;
-use tokio::sync::{broadcast};
+use tokio::sync::broadcast;
 use tokio::time::Instant;
 use ulid::Ulid;
 use web3_proxy::app::BILLING_PERIOD_SECONDS;
@@ -181,10 +181,15 @@ impl MigrateStatsToV2 {
                         archive_request: x.archive_request.into(),
                         authorization: Some(authorization.clone()),
                         backend_requests: Mutex::new(backend_rpcs),
+                        chain_id: x.chain_id,
                         error_response: x.error_response.into(),
                         // debug data is in kafka, not mysql or influx
                         kafka_debug_logger: None,
-                        method: x.method.clone(),
+                        method: x
+                            .method
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_string())
+                            .into(),
                         // This is not relevant in the new version
                         no_servers: 0.into(),
                         // Get the mean of all the request bytes
