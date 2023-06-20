@@ -8,6 +8,7 @@
 
 use log::warn;
 use migration::sea_orm::prelude::Decimal;
+use std::str::FromStr;
 
 pub struct ComputeUnit(Decimal);
 
@@ -121,12 +122,16 @@ impl ComputeUnit {
     /// Compute cost per request
     /// All methods cost the same
     /// The number of bytes are based on input, and output bytes
-    pub fn cost(&self, cache_hit: bool, usd_per_cu: Decimal) -> Decimal {
+    pub fn cost(&self, archive_request: bool, cache_hit: bool, usd_per_cu: Decimal) -> Decimal {
         let mut cost = self.0 * usd_per_cu;
+
+        if archive_request {
+            cost *= Decimal::from_str("2.5").unwrap();
+        }
 
         // cache hits get a 50% discount
         if cache_hit {
-            cost /= Decimal::from(2)
+            cost *= Decimal::from_str("0.75").unwrap()
         }
 
         cost

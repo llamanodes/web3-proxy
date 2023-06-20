@@ -813,13 +813,13 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
 
         // TODO: get from config? a helper function? how should we pick this?
         let usd_per_cu = match chain_id {
-            137 => Decimal::from_str("0.000000692307692307"),
-            _ => Decimal::from_str("0.000000692307692307"),
+            137 => Decimal::from_str("0.000000533333333333333"),
+            _ => Decimal::from_str("0.000000400000000000000"),
         }?;
 
         let cache_hit = !backend_rpcs_used.is_empty();
 
-        let compute_unit_cost = cu.cost(cache_hit, usd_per_cu);
+        let compute_unit_cost = cu.cost(archive_request, cache_hit, usd_per_cu);
 
         let x = Self {
             archive_request,
