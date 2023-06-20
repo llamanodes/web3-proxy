@@ -138,17 +138,19 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
     // TODO: the hostname is probably not going to change. only get once at the start?
     let body = json!({
         "balanced_rpcs": app.balanced_rpcs,
-        "bearer_token_semaphores": MokaCacheSerializer(&app.bearer_token_semaphores),
         "bundler_4337_rpcs": app.bundler_4337_rpcs,
+        "caches": [
+            MokaCacheSerializer(&app.bearer_token_semaphores),
+            MokaCacheSerializer(&app.ip_semaphores),
+            MokaCacheSerializer(&app.jsonrpc_response_cache),
+            MokaCacheSerializer(&app.rpc_secret_key_cache),
+            MokaCacheSerializer(&app.user_balance_cache),
+            MokaCacheSerializer(&app.user_semaphores),
+        ],
         "chain_id": app.config.chain_id,
         "hostname": app.hostname,
-        "ip_semaphores": MokaCacheSerializer(&app.ip_semaphores),
-        "jsonrpc_response_cache": MokaCacheSerializer(&app.jsonrpc_response_cache),
         "payment_factory_address": app.config.deposit_factory_contract,
         "private_rpcs": app.private_rpcs,
-        "rpc_secret_key_cache": MokaCacheSerializer(&app.rpc_secret_key_cache),
-        "user_balance_cache": MokaCacheSerializer(&app.user_balance_cache),
-        "user_semaphores": MokaCacheSerializer(&app.user_semaphores),
         "version": APP_USER_AGENT,
     });
 
