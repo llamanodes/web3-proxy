@@ -306,9 +306,14 @@ impl Web3Rpcs {
             .await?
         } else {
             // ask any rpc
+            // TODO: retry if "Requested data is not available"
             // TODO: request_with_metadata instead of internal_request
-            self.internal_request::<_, Option<ArcBlock>>("eth_getBlockByHash", &get_block_params)
-                .await?
+            self.internal_request::<_, Option<ArcBlock>>(
+                "eth_getBlockByHash",
+                &get_block_params,
+                max_wait,
+            )
+            .await?
         };
 
         match block {
@@ -387,7 +392,7 @@ impl Web3Rpcs {
         // block number not in cache. we need to ask an rpc for it
         // TODO: this error is too broad
         let response = self
-            .internal_request::<_, Option<ArcBlock>>("eth_getBlockByNumber", &(*num, false))
+            .internal_request::<_, Option<ArcBlock>>("eth_getBlockByNumber", &(*num, false), None)
             .await?
             .ok_or(Web3ProxyError::NoBlocksKnown)?;
 

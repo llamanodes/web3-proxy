@@ -17,7 +17,7 @@ use axum::{
 };
 use http::{header::AUTHORIZATION, StatusCode};
 use listenfd::ListenFd;
-use log::{info};
+use log::info;
 use moka::future::{Cache, CacheBuilder};
 use std::net::SocketAddr;
 use std::sync::Arc;

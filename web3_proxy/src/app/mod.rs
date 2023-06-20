@@ -1071,6 +1071,7 @@ impl Web3ProxyApp {
                         Some(request_metadata),
                         None,
                         None,
+                        Some(Duration::from_secs(30)),
                         Some(Level::Trace.into()),
                         None,
                         true,
@@ -1101,6 +1102,7 @@ impl Web3ProxyApp {
                 Some(request_metadata),
                 None,
                 None,
+                Some(Duration::from_secs(30)),
                 Some(Level::Trace.into()),
                 num_public_rpcs,
                 true,
@@ -1271,6 +1273,7 @@ impl Web3ProxyApp {
                             method,
                             &params,
                             Some(request_metadata),
+                            Some(Duration::from_secs(30)),
                             None,
                             None,
                         )
@@ -1311,6 +1314,7 @@ impl Web3ProxyApp {
                         method,
                         &params,
                         Some(request_metadata),
+                        Some(Duration::from_secs(30)),
                         None,
                         None,
                     )
@@ -1343,6 +1347,7 @@ impl Web3ProxyApp {
                         method,
                         &params,
                         Some(request_metadata),
+                        Some(Duration::from_secs(30)),
                         None,
                         None,
                     )
@@ -1366,6 +1371,7 @@ impl Web3ProxyApp {
                             method,
                             &params,
                             Some(request_metadata),
+                            Some(Duration::from_secs(30)),
                             Some(&U64::one()),
                             None,
                         )
@@ -1666,7 +1672,7 @@ impl Web3ProxyApp {
                 };
 
                 // TODO: different timeouts for different user tiers. get the duration out of the request_metadata
-                let duration = Duration::from_secs(240);
+                let max_wait = Duration::from_secs(240);
 
                 if let Some(cache_key) = cache_key {
                     let from_block_num = cache_key.from_block_num();
@@ -1679,16 +1685,16 @@ impl Web3ProxyApp {
                         .jsonrpc_response_cache
                         .try_get_with::<_, Web3ProxyError>(cache_key.hash(), async {
                             let response_data = timeout(
-                                duration,
+                                max_wait + Duration::from_millis(10),
                                 self.balanced_rpcs
                                     .try_proxy_connection::<_, Arc<RawValue>>(
                                         method,
                                         &params,
                                         Some(request_metadata),
+                                        Some(max_wait),
                                         from_block_num.as_ref(),
                                         to_block_num.as_ref(),
-                                    )
-                                )
+                                    ))
                                 .await?;
 
                             if !cache_jsonrpc_errors && let Err(err) = response_data {
@@ -1705,12 +1711,13 @@ impl Web3ProxyApp {
                         }).await?
                 } else {
                     let x = timeout(
-                        duration,
+                        max_wait + Duration::from_millis(10),
                         self.balanced_rpcs
                         .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             &params,
                             Some(request_metadata),
+                            Some(max_wait),
                             None,
                             None,
                         )

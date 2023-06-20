@@ -517,6 +517,8 @@ impl Web3Rpcs {
         max_wait: Option<Duration>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestResult> {
+        let start = Instant::now();
+
         let mut earliest_retry_at: Option<Instant> = None;
 
         // TODO: pass db_conn to the "default" authorization for revert logging
@@ -563,9 +565,6 @@ impl Web3Rpcs {
                 }
             }
         } else {
-            let stop_trying_at =
-                Instant::now() + max_wait.unwrap_or_else(|| Duration::from_secs(10));
-
             let mut watch_consensus_rpcs = self.watch_consensus_rpcs_sender.subscribe();
 
             let mut potential_rpcs = Vec::with_capacity(self.len());
@@ -705,23 +704,31 @@ impl Web3Rpcs {
 
                     let waiting_for = min_block_needed.max(max_block_needed);
 
-                    match consensus_rpcs.should_wait_for_block(waiting_for, skip_rpcs) {
-                        ShouldWaitForBlock::NeverReady => break,
-                        ShouldWaitForBlock::Ready => {
-                            if Instant::now() > stop_trying_at {
-                                break;
+                    if let Some(max_wait) = max_wait {
+                        match consensus_rpcs.should_wait_for_block(waiting_for, skip_rpcs) {
+                            ShouldWaitForBlock::NeverReady => break,
+                            ShouldWaitForBlock::Ready => {
+                                if start.elapsed() > max_wait {
+                                    break;
+                                }
                             }
+                            ShouldWaitForBlock::Wait { .. } => select! {
+                                _ = watch_consensus_rpcs.changed() => {
+                                    // no need to borrow_and_update because we do that at the top of the loop
+                                },
+                                _ = sleep_until(start + max_wait) => break,
+                            },
                         }
-                        ShouldWaitForBlock::Wait { .. } => select! {
-                            _ = watch_consensus_rpcs.changed() => {},
-                            _ = sleep_until(stop_trying_at) => break,
+                    }
+                } else if let Some(max_wait) = max_wait {
+                    select! {
+                        _ = watch_consensus_rpcs.changed() => {
+                            // no need to borrow_and_update because we do that at the top of the loop
                         },
+                        _ = sleep_until(start + max_wait) => break,
                     }
                 } else {
-                    select! {
-                        _ = watch_consensus_rpcs.changed() => {},
-                        _ = sleep_until(stop_trying_at) => break,
-                    }
+                    break;
                 }
             }
         }
@@ -873,9 +880,10 @@ impl Web3Rpcs {
         &self,
         method: &str,
         params: &P,
+        max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         // TODO: no request_metadata means we won't have stats on this internal request.
-        self.request_with_metadata(method, params, None, None, None)
+        self.request_with_metadata(method, params, None, max_wait, None, None)
             .await
     }
 
@@ -885,6 +893,7 @@ impl Web3Rpcs {
         method: &str,
         params: &P,
         request_metadata: Option<&Arc<RequestMetadata>>,
+        max_wait: Option<Duration>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
     ) -> Web3ProxyResult<R> {
@@ -895,20 +904,24 @@ impl Web3Rpcs {
 
         let start = Instant::now();
 
-        // TODO: get from config or arguments
-        let max_wait = Duration::from_secs(1);
-
+        // set error_handler to Save. this might be overridden depending on the request_metadata.authorization
         let error_handler = Some(RequestErrorHandler::Save);
 
         // TODO: the loop here feels somewhat redundant with the loop in best_available_rpc
-        while start.elapsed() < max_wait {
+        loop {
+            if let Some(max_wait) = max_wait {
+                if start.elapsed() > max_wait {
+                    break;
+                }
+            }
+
             match self
                 .wait_for_best_rpc(
                     request_metadata,
                     &mut skip_rpcs,
                     min_block_needed,
                     max_block_needed,
-                    Some(max_wait),
+                    max_wait,
                     error_handler,
                 )
                 .await?
@@ -1144,19 +1157,22 @@ impl Web3Rpcs {
         request_metadata: Option<&Arc<RequestMetadata>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
+        max_wait: Option<Duration>,
         error_level: Option<RequestErrorHandler>,
         max_sends: Option<usize>,
         include_backups: bool,
     ) -> Web3ProxyResult<Box<RawValue>> {
         let mut watch_consensus_rpcs = self.watch_consensus_rpcs_sender.subscribe();
 
-        // TODO: get from config or function arguments
-        // TODO: think about the max wait here.
-        let max_wait = Duration::from_secs(30);
-
         let start = Instant::now();
 
-        while start.elapsed() < max_wait {
+        loop {
+            if let Some(max_wait) = max_wait {
+                if start.elapsed() > max_wait {
+                    break;
+                }
+            }
+
             match self
                 .all_connections(
                     request_metadata,
@@ -1207,11 +1223,17 @@ impl Web3Rpcs {
                         request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
                     }
 
+                    let max_sleep = if let Some(max_wait) = max_wait {
+                        start + max_wait
+                    } else {
+                        break;
+                    };
+
                     tokio::select! {
-                        _ = sleep_until(start + max_wait) => {
+                        _ = sleep_until(max_sleep) => {
                             // rpcs didn't change and we have waited too long. break to return an error
                             warn!("timeout waiting for try_send_all_synced_connections!");
-                            break
+                            break;
                         },
                         _ = watch_consensus_rpcs.changed() => {
                             // consensus rpcs changed!
@@ -1226,21 +1248,29 @@ impl Web3Rpcs {
                         request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
                     }
 
-                    if start.elapsed() > max_wait {
-                        warn!("All rate limits exceeded. And sleeping would take too long");
+                    if let Some(max_wait) = max_wait {
+                        if start.elapsed() > max_wait {
+                            warn!("All rate limits exceeded. And sleeping would take too long");
+                            break;
+                        }
+
+                        warn!("All rate limits exceeded. Sleeping");
+
+                        // TODO: only make one of these sleep_untils
+
+                        tokio::select! {
+                            _ = sleep_until(start + max_wait) => {break}
+                            _ = sleep_until(retry_at) => {}
+                            _ = watch_consensus_rpcs.changed() => {
+                                watch_consensus_rpcs.borrow_and_update();
+                            }
+                        }
+
+                        continue;
+                    } else {
+                        warn!("All rate limits exceeded.");
                         break;
                     }
-
-                    warn!("All rate limits exceeded. Sleeping");
-
-                    tokio::select! {
-                        _ = sleep_until(retry_at) => {}
-                        _ = watch_consensus_rpcs.changed() => {
-                            watch_consensus_rpcs.borrow_and_update();
-                        }
-                    }
-
-                    continue;
                 }
             }
         }
@@ -1253,6 +1283,7 @@ impl Web3Rpcs {
         method: &str,
         params: &P,
         request_metadata: Option<&Arc<RequestMetadata>>,
+        max_wait: Option<Duration>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
     ) -> Web3ProxyResult<R> {
@@ -1264,6 +1295,7 @@ impl Web3Rpcs {
                     method,
                     params,
                     request_metadata,
+                    max_wait,
                     min_block_needed,
                     max_block_needed,
                 )

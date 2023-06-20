@@ -816,14 +816,16 @@ impl ConsensusFinder {
                 backup_entry.1 += rpc.soft_limit;
 
                 // we used to specify rpc on this, but it shouldn't be necessary
+                let parent_hash = block_to_check.parent_hash();
                 match web3_rpcs
-                    .block(authorization, block_to_check.parent_hash(), None, None)
+                    .block(authorization, parent_hash, None, None)
                     .await
                 {
                     Ok(parent_block) => block_to_check = parent_block,
                     Err(err) => {
-                        warn!(
-                            "Problem fetching parent block of {:?} during consensus finding: {:#?}",
+                        debug!(
+                            "Problem fetching {:?} (parent of {:?}) during consensus finding: {:#?}",
+                            parent_hash,
                             block_to_check.hash(),
                             err
                         );
