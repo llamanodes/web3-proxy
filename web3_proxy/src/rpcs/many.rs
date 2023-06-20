@@ -771,6 +771,11 @@ impl Web3Rpcs {
 
         trace!("max_count: {}", max_count);
 
+        if max_count == 0 {
+            // TODO: return a future that resolves when we know a head block?
+            return Err(None);
+        }
+
         let mut selected_rpcs = Vec::with_capacity(max_count);
 
         let mut tried = HashSet::new();
@@ -781,6 +786,7 @@ impl Web3Rpcs {
             if let Some(synced_rpcs) = synced_rpcs.as_ref() {
                 synced_rpcs.head_rpcs.clone()
             } else {
+                // TODO: make this an Option instead of making an empty vec?
                 vec![]
             }
         };
@@ -802,10 +808,6 @@ impl Web3Rpcs {
             .unwrap_or_default();
 
         for rpc in itertools::chain(synced_rpcs, all_rpcs) {
-            if max_count == 0 {
-                break;
-            }
-
             if tried.contains(&rpc) {
                 continue;
             }
@@ -815,10 +817,11 @@ impl Web3Rpcs {
             tried.insert(rpc.clone());
 
             if !allow_backups && rpc.backup {
-                warn!("{} is a backup. skipping", rpc);
+                trace!("{} is a backup. skipping", rpc);
                 continue;
             }
 
+            // TODO: this has_block_data check is in a few places now. move it onto the rpc
             if let Some(block_needed) = min_block_needed {
                 if !rpc.has_block_data(block_needed) {
                     trace!("{} is missing min_block_needed. skipping", rpc);
@@ -842,8 +845,12 @@ impl Web3Rpcs {
                 }
                 Ok(OpenRequestResult::Handle(handle)) => {
                     trace!("{} is available", rpc);
+                    selected_rpcs.push(handle);
+
                     max_count -= 1;
-                    selected_rpcs.push(handle)
+                    if max_count == 0 {
+                        break;
+                    }
                 }
                 Ok(OpenRequestResult::NotReady) => {
                     warn!("no request handle for {}", rpc)
@@ -889,7 +896,7 @@ impl Web3Rpcs {
         let start = Instant::now();
 
         // TODO: get from config or arguments
-        let max_wait = Duration::from_secs(10);
+        let max_wait = Duration::from_secs(1);
 
         let error_handler = Some(RequestErrorHandler::Save);
 
@@ -901,7 +908,7 @@ impl Web3Rpcs {
                     &mut skip_rpcs,
                     min_block_needed,
                     max_block_needed,
-                    None,
+                    Some(max_wait),
                     error_handler,
                 )
                 .await?
@@ -1144,11 +1151,12 @@ impl Web3Rpcs {
         let mut watch_consensus_rpcs = self.watch_consensus_rpcs_sender.subscribe();
 
         // TODO: get from config or function arguments
-        let max_wait = Duration::from_secs(5);
+        // TODO: think about the max wait here.
+        let max_wait = Duration::from_secs(30);
 
-        let wait_until = Instant::now() + max_wait;
+        let start = Instant::now();
 
-        while Instant::now() < wait_until {
+        while start.elapsed() < max_wait {
             match self
                 .all_connections(
                     request_metadata,
@@ -1200,19 +1208,25 @@ impl Web3Rpcs {
                     }
 
                     tokio::select! {
-                        _ = sleep_until(wait_until) => break,
+                        _ = sleep_until(start + max_wait) => {
+                            // rpcs didn't change and we have waited too long. break to return an error
+                            warn!("timeout waiting for try_send_all_synced_connections!");
+                            break
+                        },
                         _ = watch_consensus_rpcs.changed() => {
+                            // consensus rpcs changed!
                             watch_consensus_rpcs.borrow_and_update();
+                            // continue to try again
+                            continue;
                         }
                     }
-                    continue;
                 }
                 Err(Some(retry_at)) => {
                     if let Some(request_metadata) = &request_metadata {
                         request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
                     }
 
-                    if retry_at > wait_until {
+                    if start.elapsed() > max_wait {
                         warn!("All rate limits exceeded. And sleeping would take too long");
                         break;
                     }

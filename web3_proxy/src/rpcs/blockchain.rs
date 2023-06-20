@@ -8,7 +8,7 @@ use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
-use log::{debug, trace, warn};
+use log::{debug, error, trace, warn};
 use moka::future::Cache;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
@@ -436,7 +436,8 @@ impl Web3Rpcs {
                     }
                 }
                 Ok(Err(err)) => {
-                    warn!("block_receiver exited! {:#?}", err);
+                    // TODO: panic is probably too much, but getting here is definitely not good
+                    error!("block_receiver on {} exited! {:#?}", self, err);
                     return Err(err.into());
                 }
                 Err(_) => {

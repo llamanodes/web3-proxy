@@ -817,12 +817,7 @@ impl ConsensusFinder {
 
                 // we used to specify rpc on this, but it shouldn't be necessary
                 match web3_rpcs
-                    .block(
-                        authorization,
-                        block_to_check.parent_hash(),
-                        None,
-                        Some(Duration::from_millis(100)),
-                    )
+                    .block(authorization, block_to_check.parent_hash(), None, None)
                     .await
                 {
                     Ok(parent_block) => block_to_check = parent_block,
