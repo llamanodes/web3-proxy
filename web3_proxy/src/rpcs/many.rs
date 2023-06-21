@@ -1327,7 +1327,7 @@ impl Serialize for Web3Rpcs {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Web3Rpcs", 8)?;
+        let mut state = serializer.serialize_struct("Web3Rpcs", 6)?;
 
         {
             let by_name = self.by_name.read();
@@ -1347,14 +1347,13 @@ impl Serialize for Web3Rpcs {
             }
         }
 
-        state.serialize_field("blocks_by_hash", &MokaCacheSerializer(&self.blocks_by_hash))?;
         state.serialize_field(
-            "blocks_by_number",
-            &MokaCacheSerializer(&self.blocks_by_number),
-        )?;
-        state.serialize_field(
-            "pending_transaction_cache",
-            &MokaCacheSerializer(&self.pending_transaction_cache),
+            "caches",
+            &[
+                MokaCacheSerializer(&self.blocks_by_hash),
+                MokaCacheSerializer(&self.blocks_by_number),
+                MokaCacheSerializer(&self.pending_transaction_cache),
+            ],
         )?;
 
         state.serialize_field("block_sender_len", &self.block_sender.len())?;
