@@ -14,6 +14,7 @@ use entities::{referee, referrer, user};
 use ethers::types::Address;
 use hashbrown::HashMap;
 use http::StatusCode;
+use log::warn;
 use migration::sea_orm;
 use migration::sea_orm::prelude::{DateTime, Decimal};
 use migration::sea_orm::ActiveModelTrait;
@@ -176,22 +177,27 @@ pub async fn user_shared_referral_stats(
 
     let mut out: Vec<Info> = Vec::new();
     let mut used_referral_code = "".to_owned(); // This is only for safety purposes, because of the condition above we always know that there is at least one record
-    for x in referrals.into_iter() {
-        let (referrer, referral_record) = (x.0, x.1.context("each referral code should have a referee associated with it (that's what we query), but this is not the case!")?);
-        used_referral_code = referrer.referral_code;
-        // The foreign key is never optional
-        let referred_user = user::Entity::find_by_id(referral_record.user_id)
-            .one(db_replica.as_ref())
-            .await?
-            .context("Database error, no foreign key found for referring user")?;
-        let tmp = Info {
-            credits_applied_for_referee: referral_record.credits_applied_for_referee,
-            credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
-            referral_start_date: referral_record.referral_start_date,
-            referred_address: Address::from_slice(&referred_user.address),
-        };
-        // Start inserting json's into this
-        out.push(tmp);
+    for (referrer, referral_record) in referrals.into_iter() {
+        if let Some(referral_record) = referral_record {
+            used_referral_code = referrer.referral_code;
+            // The foreign key is never optional
+            let referred_user = user::Entity::find_by_id(referral_record.user_id)
+                .one(db_replica.as_ref())
+                .await?
+                .context("Database error, no foreign key found for referring user")?;
+
+            let info = Info {
+                credits_applied_for_referee: referral_record.credits_applied_for_referee,
+                credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
+                referral_start_date: referral_record.referral_start_date,
+                referred_address: Address::from_slice(&referred_user.address),
+            };
+
+            // Start inserting json's into this
+            out.push(info);
+        } else {
+            warn!("no referral record for referrer: {:#?}", referrer);
+        }
     }
 
     // Turn this into a response
