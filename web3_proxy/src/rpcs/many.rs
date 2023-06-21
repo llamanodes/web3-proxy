@@ -1349,11 +1349,11 @@ impl Serialize for Web3Rpcs {
 
         state.serialize_field(
             "caches",
-            &[
+            &(
                 MokaCacheSerializer(&self.blocks_by_hash),
                 MokaCacheSerializer(&self.blocks_by_number),
                 MokaCacheSerializer(&self.pending_transaction_cache),
-            ],
+            ),
         )?;
 
         state.serialize_field("block_sender_len", &self.block_sender.len())?;
