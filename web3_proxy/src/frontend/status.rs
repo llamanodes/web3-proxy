@@ -9,9 +9,12 @@ use axum::{
     body::{Bytes, Full},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Extension,
+    Extension, Json,
 };
+use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
+use hashbrown::HashMap;
+use http::HeaderMap;
 use log::trace;
 use moka::future::Cache;
 use once_cell::sync::Lazy;
@@ -27,6 +30,44 @@ static BACKUPS_NEEDED_FALSE: Lazy<Bytes> = Lazy::new(|| Bytes::from("false\n"));
 
 static CONTENT_TYPE_JSON: &str = "application/json";
 static CONTENT_TYPE_PLAIN: &str = "text/plain";
+
+#[debug_handler]
+pub async fn debug_request(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    ip: InsecureClientIp,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let (_, _, status) = _status(app).await;
+
+    let status: serde_json::Value = serde_json::from_slice(&status).unwrap();
+
+    let headers: HashMap<_, _> = headers
+        .into_iter()
+        .filter_map(|(k, v)| {
+            if let Some(k) = k {
+                let k = k.to_string();
+
+                let v = if let Ok(v) = std::str::from_utf8(v.as_bytes()) {
+                    v.to_string()
+                } else {
+                    format!("{:?}", v)
+                };
+
+                Some((k, v))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let x = json!({
+        "ip": format!("{:?}", ip),
+        "status": status,
+        "headers": headers,
+    });
+
+    Json(x)
+}
 
 /// Health check page for load balancers to use.
 #[debug_handler]
