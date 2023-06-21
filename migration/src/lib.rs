@@ -70,7 +70,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20230607_221917_total_deposits::Migration),
             Box::new(m20230615_221201_handle_payment_uncles::Migration),
             Box::new(m20230618_230611_longer_payload::Migration),
-            Box::new(m20230619_172237_default_tracking::Migraiton),
+            Box::new(m20230619_172237_default_tracking::Migration),
         ]
     }
 }
