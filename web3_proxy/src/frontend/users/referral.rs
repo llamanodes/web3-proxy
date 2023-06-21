@@ -196,6 +196,7 @@ pub async fn user_shared_referral_stats(
             // Start inserting json's into this
             out.push(info);
         } else {
+            // TODO: i don't think we want a warn. i think we want to change the query to return the data differently
             warn!("no referral record for referrer: {:#?}", referrer);
         }
     }
