@@ -157,9 +157,6 @@ pub async fn user_shared_referral_stats(
 
     let (referrer_record, referral_records) = query_result.into_iter().next().unwrap();
 
-    let mut used_referral_code = None;
-    let mut referral_info = vec![];
-
     // collect info about each referral
     #[derive(Debug, Serialize)]
     struct Info {
@@ -169,6 +166,8 @@ pub async fn user_shared_referral_stats(
         referred_address: Address,
     }
 
+    let mut used_referral_code = None;
+    let mut referral_info = vec![];
     for referral_record in referral_records.into_iter() {
         used_referral_code = Some(referrer_record.referral_code.as_str());
 
