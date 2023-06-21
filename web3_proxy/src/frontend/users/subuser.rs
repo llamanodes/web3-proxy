@@ -68,17 +68,19 @@ pub async fn get_keys_as_subuser(
 
     // Now return the list
     let response_json = json!({
-        "subuser": format!("{:?}", Address::from_slice(&subuser.address)),
+        "subuser": Address::from_slice(&subuser.address),
         "rpc_keys": rpc_key_entities
             .into_iter()
             .flat_map(|(rpc_key, rpc_owner)| {
                 match rpc_owner {
                     Some(inner_rpc_owner) => {
-                        let mut tmp = HashMap::new();
-                        tmp.insert("rpc-key", serde_json::Value::String(Ulid::from(rpc_key.secret_key).to_string()));
-                        tmp.insert("rpc-owner", serde_json::Value::String(format!("{:?}", Address::from_slice(&inner_rpc_owner.address))));
-                        tmp.insert("role", serde_json::Value::String(format!("{:?}", secondary_user_entities.get(&rpc_key.id).unwrap().role))); // .to_string() returns ugly "'...'"
-                        Some(tmp)
+                        let x = json!({
+                            "rpc-key": Ulid::from(rpc_key.secret_key),
+                            "rpc-owner": Address::from_slice(&inner_rpc_owner.address),
+                            // TODO: prettier serialize for role
+                            "role": format!("{:?}", secondary_user_entities.get(&rpc_key.id).unwrap().role),
+                        });
+                        Some(x)
                     },
                     None => {
                         // error!("Found RPC secret key with no user!".to_owned());
@@ -148,16 +150,16 @@ pub async fn get_subusers(
 
     // Now return the list
     let response_json = json!({
-        "caller": format!("{:?}", Address::from_slice(&user.address)),
+        "caller": Address::from_slice(&user.address),
         "rpc_key": rpc_key,
         "subusers": subusers
             .into_iter()
             .map(|subuser| {
-                let mut tmp = HashMap::new();
-                // .encode_hex()
-                tmp.insert("address", serde_json::Value::String(format!("{:?}", Address::from_slice(&subuser.address))));
-                tmp.insert("role", serde_json::Value::String(format!("{:?}", secondary_user_entities.get(&subuser.id).unwrap().role)));
-                json!(tmp)
+                json!({
+                    "address": Address::from_slice(&subuser.address),
+                    // TODO: prettier serialize for role
+                    "role": format!("{:?}", secondary_user_entities.get(&subuser.id).unwrap().role),
+                })
             })
             .collect::<Vec::<_>>(),
     });

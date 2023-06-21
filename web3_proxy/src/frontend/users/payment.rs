@@ -82,23 +82,21 @@ pub async fn user_deposits_get(
         .await?;
 
     // Return the response, all except the user ...
-    let mut response = HashMap::new();
     let receipts = receipts
         .into_iter()
         .map(|x| {
-            let mut out = HashMap::new();
-            out.insert("amount", serde_json::Value::String(x.amount.to_string()));
-            out.insert("chain_id", serde_json::Value::Number(x.chain_id.into()));
-            out.insert("tx_hash", serde_json::Value::String(x.tx_hash));
-            // TODO: log_index
-            out
+            json!({
+                "amount": x.amount,
+                "chain_id": x.chain_id,
+                "tx_hash": x.tx_hash,
+            })
         })
         .collect::<Vec<_>>();
-    response.insert(
-        "user",
-        json!(format!("{:?}", Address::from_slice(&user.address))),
-    );
-    response.insert("deposits", json!(receipts));
+
+    let response = json!({
+        "user": Address::from_slice(&user.address),
+        "deposits": receipts,
+    });
 
     Ok(Json(response).into_response())
 }

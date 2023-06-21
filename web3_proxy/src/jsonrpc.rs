@@ -36,9 +36,7 @@ impl JsonRpcId {
     pub fn to_raw_value(self) -> Box<RawValue> {
         // TODO: is this a good way to do this? we should probably use references
         match self {
-            Self::None => {
-                to_raw_value(&json!(None::<Option<()>>)).expect("null id should always work")
-            }
+            Self::None => Default::default(),
             Self::Number(x) => {
                 serde_json::from_value(json!(x)).expect("number id should always work")
             }
