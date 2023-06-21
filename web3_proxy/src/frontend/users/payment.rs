@@ -105,7 +105,7 @@ pub async fn user_deposits_get(
 #[debug_handler]
 pub async fn user_balance_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    InsecureClientIp(ip): InsecureClientIp,
+    ip: Option<InsecureClientIp>,
     Path(mut params): Path<HashMap<String, String>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
 ) -> Web3ProxyResponse {
@@ -117,10 +117,12 @@ pub async fn user_balance_post(
         let authorization = Web3ProxyAuthorization::internal(app.db_conn())?;
 
         (authorization, Some(semaphore))
-    } else {
+    } else if let Some(InsecureClientIp(ip)) = ip {
         let authorization = login_is_authorized(&app, ip).await?;
 
         (authorization, None)
+    } else {
+        return Err(Web3ProxyError::AccessDenied);
     };
 
     // Get the transaction hash
