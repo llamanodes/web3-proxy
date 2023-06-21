@@ -14,7 +14,6 @@ use entities::{referee, referrer, user};
 use ethers::types::Address;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::warn;
 use migration::sea_orm;
 use migration::sea_orm::prelude::{DateTime, Decimal};
 use migration::sea_orm::ActiveModelTrait;
@@ -148,25 +147,20 @@ pub async fn user_shared_referral_stats(
         .context("getting replica db for user's revert logs")?;
 
     // Get all referral records associated with this user
-    let referrals = referrer::Entity::find()
+    let query_result = referrer::Entity::find()
         .filter(referrer::Column::UserId.eq(user.id))
-        .find_also_related(referee::Entity)
+        .find_with_related(referee::Entity)
         .all(db_replica.as_ref())
         .await?;
 
-    // Return early if the user does not have any referred entities
-    if referrals.is_empty() {
-        let response_json = json!({
-        "referrals": [],
-        "used_referral_code": None::<()>,
-        "user": user,
-        });
+    debug_assert_eq!(query_result.len(), 1);
 
-        let response = (StatusCode::OK, Json(response_json)).into_response();
-        return Ok(response);
-    }
+    let (referrer_record, referral_records) = query_result.into_iter().next().unwrap();
 
-    // For each related referral person, find the corresponding user-address
+    let mut used_referral_code = None;
+    let mut referral_info = vec![];
+
+    // collect info about each referral
     #[derive(Debug, Serialize)]
     struct Info {
         credits_applied_for_referee: bool,
@@ -175,35 +169,29 @@ pub async fn user_shared_referral_stats(
         referred_address: Address,
     }
 
-    let mut out: Vec<Info> = Vec::new();
-    let mut used_referral_code = "".to_owned(); // This is only for safety purposes, because of the condition above we always know that there is at least one record
-    for (referrer, referral_record) in referrals.into_iter() {
-        if let Some(referral_record) = referral_record {
-            used_referral_code = referrer.referral_code;
-            // The foreign key is never optional
-            let referred_user = user::Entity::find_by_id(referral_record.user_id)
-                .one(db_replica.as_ref())
-                .await?
-                .context("Database error, no foreign key found for referring user")?;
+    for referral_record in referral_records.into_iter() {
+        used_referral_code = Some(referrer_record.referral_code.as_str());
 
-            let info = Info {
-                credits_applied_for_referee: referral_record.credits_applied_for_referee,
-                credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
-                referral_start_date: referral_record.referral_start_date,
-                referred_address: Address::from_slice(&referred_user.address),
-            };
+        // The foreign key is never optional
+        let referred_user = user::Entity::find_by_id(referral_record.user_id)
+            .one(db_replica.as_ref())
+            .await?
+            .context("Database error, no foreign key found for referring user")?;
 
-            // Start inserting json's into this
-            out.push(info);
-        } else {
-            // TODO: i don't think we want a warn. i think we want to change the query to return the data differently
-            warn!("no referral record for referrer: {:#?}", referrer);
-        }
+        let info = Info {
+            credits_applied_for_referee: referral_record.credits_applied_for_referee,
+            credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
+            referral_start_date: referral_record.referral_start_date,
+            referred_address: Address::from_slice(&referred_user.address),
+        };
+
+        // Start inserting json's into this
+        referral_info.push(info);
     }
 
     // Turn this into a response
     let response_json = json!({
-        "referrals": out,
+        "referrals": referral_info,
         "used_referral_code": used_referral_code,
         "user": user,
     });
