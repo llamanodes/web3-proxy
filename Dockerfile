@@ -51,7 +51,7 @@ RUN apt-get update && \
 # copy the application
 COPY . .
 
-ENV WEB3_PROXY_FEATURES "rdkafka-src"
+ENV WEB3_PROXY_FEATURES "rdkafka-src,connectinfo"
 
 # test the application with cargo-nextest
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
