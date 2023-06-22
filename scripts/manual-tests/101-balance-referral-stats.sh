@@ -141,3 +141,7 @@ curl -X GET \
 
 curl -X GET \
 "http://localhost:8544/user/stats/aggregate?query_start=1686772800&query_window_seconds=3600"
+
+curl \
+-H "Authorization: Bearer 01H2D5DN564M4Q2T6PETEZY83Q" \
+-X GET "127.0.0.1:8544/user/referral/stats/used-codes"
