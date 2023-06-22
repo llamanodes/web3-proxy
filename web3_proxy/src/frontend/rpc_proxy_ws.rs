@@ -28,9 +28,10 @@ use futures::{
 };
 use handlebars::Handlebars;
 use hashbrown::HashMap;
-use http::StatusCode;
+use http::{HeaderMap, StatusCode};
 use log::{info, trace};
 use serde_json::json;
+use std::net::IpAddr;
 use std::str::from_utf8_mut;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -61,11 +62,11 @@ impl Default for ProxyMode {
 #[debug_handler]
 pub async fn websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Web3ProxyResponse {
-    _websocket_handler(ProxyMode::Best, app, ip, origin, ws_upgrade).await
+    _websocket_handler(ProxyMode::Best, app, &ip, origin.as_deref(), ws_upgrade).await
 }
 
 /// Public entrypoint for WebSocket JSON-RPC requests that uses all synced servers.
@@ -73,13 +74,20 @@ pub async fn websocket_handler(
 #[debug_handler]
 pub async fn fastest_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Web3ProxyResponse {
     // TODO: get the fastest number from the url params (default to 0/all)
     // TODO: config to disable this
-    _websocket_handler(ProxyMode::Fastest(0), app, ip, origin, ws_upgrade).await
+    _websocket_handler(
+        ProxyMode::Fastest(0),
+        app,
+        &ip,
+        origin.as_deref(),
+        ws_upgrade,
+    )
+    .await
 }
 
 /// Public entrypoint for WebSocket JSON-RPC requests that uses all synced servers.
@@ -87,23 +95,21 @@ pub async fn fastest_websocket_handler(
 #[debug_handler]
 pub async fn versus_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Web3ProxyResponse {
     // TODO: config to disable this
-    _websocket_handler(ProxyMode::Versus, app, ip, origin, ws_upgrade).await
+    _websocket_handler(ProxyMode::Versus, app, &ip, origin.as_deref(), ws_upgrade).await
 }
 
 async fn _websocket_handler(
     proxy_mode: ProxyMode,
     app: Arc<Web3ProxyApp>,
-    InsecureClientIp(ip): InsecureClientIp,
-    origin: Option<TypedHeader<Origin>>,
+    ip: &IpAddr,
+    origin: Option<&Origin>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Web3ProxyResponse {
-    let origin = origin.map(|x| x.0);
-
     let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode).await?;
 
     let authorization = Arc::new(authorization);
@@ -129,7 +135,7 @@ async fn _websocket_handler(
 #[debug_handler]
 pub async fn websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -139,43 +145,60 @@ pub async fn websocket_handler_with_key(
     _websocket_handler_with_key(
         ProxyMode::Best,
         app,
-        ip,
+        &ip,
         rpc_key,
-        origin,
-        referer,
-        user_agent,
+        origin.as_deref(),
+        referer.as_deref(),
+        user_agent.as_deref(),
         ws_upgrade,
     )
     .await
 }
 
 #[debug_handler]
+#[allow(clippy::too_many_arguments)]
 pub async fn debug_websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
+    headers: HeaderMap,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Web3ProxyResponse {
-    _websocket_handler_with_key(
+    let mut response = _websocket_handler_with_key(
         ProxyMode::Debug,
         app,
-        ip,
+        &ip,
         rpc_key,
-        origin,
-        referer,
-        user_agent,
+        origin.as_deref(),
+        referer.as_deref(),
+        user_agent.as_deref(),
         ws_upgrade,
     )
-    .await
+    .await?;
+
+    // add some headers that might be useful while debugging
+    let response_headers = response.headers_mut();
+
+    if let Some(x) = headers.get("x-amzn-trace-id").cloned() {
+        response_headers.insert("x-amzn-trace-id", x);
+    }
+
+    if let Some(x) = headers.get("x-balance-id").cloned() {
+        response_headers.insert("x-balance-id", x);
+    }
+
+    response_headers.insert("client-ip", ip.to_string().parse().unwrap());
+
+    Ok(response)
 }
 
 #[debug_handler]
 pub async fn fastest_websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -186,11 +209,11 @@ pub async fn fastest_websocket_handler_with_key(
     _websocket_handler_with_key(
         ProxyMode::Fastest(0),
         app,
-        ip,
+        &ip,
         rpc_key,
-        origin,
-        referer,
-        user_agent,
+        origin.as_deref(),
+        referer.as_deref(),
+        user_agent.as_deref(),
         ws_upgrade,
     )
     .await
@@ -199,7 +222,7 @@ pub async fn fastest_websocket_handler_with_key(
 #[debug_handler]
 pub async fn versus_websocket_handler_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -209,11 +232,11 @@ pub async fn versus_websocket_handler_with_key(
     _websocket_handler_with_key(
         ProxyMode::Versus,
         app,
-        ip,
+        &ip,
         rpc_key,
-        origin,
-        referer,
-        user_agent,
+        origin.as_deref(),
+        referer.as_deref(),
+        user_agent.as_deref(),
         ws_upgrade,
     )
     .await
@@ -223,25 +246,17 @@ pub async fn versus_websocket_handler_with_key(
 async fn _websocket_handler_with_key(
     proxy_mode: ProxyMode,
     app: Arc<Web3ProxyApp>,
-    InsecureClientIp(ip): InsecureClientIp,
+    ip: &IpAddr,
     rpc_key: String,
-    origin: Option<TypedHeader<Origin>>,
-    referer: Option<TypedHeader<Referer>>,
-    user_agent: Option<TypedHeader<UserAgent>>,
+    origin: Option<&Origin>,
+    referer: Option<&Referer>,
+    user_agent: Option<&UserAgent>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Web3ProxyResponse {
     let rpc_key = rpc_key.parse()?;
 
-    let (authorization, _semaphore) = key_is_authorized(
-        &app,
-        rpc_key,
-        ip,
-        origin.map(|x| x.0),
-        proxy_mode,
-        referer.map(|x| x.0),
-        user_agent.map(|x| x.0),
-    )
-    .await?;
+    let (authorization, _semaphore) =
+        key_is_authorized(&app, &rpc_key, ip, origin, proxy_mode, referer, user_agent).await?;
 
     trace!("websocket_handler_with_key {:?}", authorization);
 
