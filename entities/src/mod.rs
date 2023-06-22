@@ -18,5 +18,6 @@ pub mod rpc_key;
 pub mod sea_orm_active_enums;
 pub mod secondary_user;
 pub mod serialization;
+pub mod stripe_increase_balance_receipt;
 pub mod user;
 pub mod user_tier;
