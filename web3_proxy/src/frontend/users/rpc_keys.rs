@@ -2,7 +2,6 @@
 use super::super::authorization::RpcSecretKey;
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
-use anyhow::Context;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::{
     headers::{authorization::Bearer, Authorization},
@@ -23,8 +22,6 @@ use migration::sea_orm::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
-use ulid::Ulid;
-use uuid::Uuid;
 
 /// `GET /user/keys` -- Use a bearer token to get the user's api keys and their settings.
 #[debug_handler]
@@ -41,10 +38,10 @@ pub async fn rpc_keys_get(
     // This is basically completely copied from sea-orm. Not optimal, but it keeps the format identical to before (while adding the final key)
     // We could also pack the below stuff into it's subfield, but then we would destroy the format. Both options are fine for now though
     #[derive(Serialize)]
-    struct ReturnType {
+    struct ReturnType<'a> {
         id: u64,
         user_id: u64,
-        secret_key: Ulid,
+        secret_key: RpcSecretKey,
         description: Option<String>,
         private_txs: bool,
         active: bool,
@@ -54,7 +51,8 @@ pub async fn rpc_keys_get(
         allowed_user_agents: Option<String>,
         log_revert_chance: f64,
         // Addition
-        role: Role,
+        // role is optional only to handle an inconsistent database. it should always be set
+        role: Option<&'a Role>,
     }
 
     let uks: Vec<ReturnType> = rpc_key::Entity::find()
@@ -75,7 +73,7 @@ pub async fn rpc_keys_get(
             allowed_referers: x.allowed_referers,
             allowed_user_agents: x.allowed_user_agents,
             log_revert_chance: x.log_revert_chance,
-            role: Role::Owner,
+            role: Some(&Role::Owner),
         })
         .collect::<Vec<_>>();
 
@@ -90,12 +88,7 @@ pub async fn rpc_keys_get(
     // Now return a list of all subusers (their wallets)
     let secondary_rpc_key_entities: Vec<ReturnType> = rpc_key::Entity::find()
         .filter(
-            rpc_key::Column::Id.is_in(
-                secondary_user_entities
-                    .iter()
-                    .map(|(x, _)| *x)
-                    .collect::<Vec<_>>(),
-            ),
+            rpc_key::Column::Id.is_in(secondary_user_entities.keys().copied().collect::<Vec<_>>()),
         )
         .all(db_replica.as_ref())
         .await?
@@ -112,14 +105,7 @@ pub async fn rpc_keys_get(
             allowed_referers: x.allowed_referers,
             allowed_user_agents: x.allowed_user_agents,
             log_revert_chance: x.log_revert_chance,
-            role: secondary_user_entities
-                .get(&x.id)
-                .web3_context(
-                    "secondary user entity is not in secondary user list, but it must be!",
-                )
-                .unwrap()
-                .role
-                .clone(),
+            role: secondary_user_entities.get(&x.id).map(|x| &x.role),
         })
         .collect::<Vec<_>>();
 
