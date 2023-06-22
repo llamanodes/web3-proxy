@@ -65,7 +65,7 @@ hostname = "0.3.1"
 http = "0.2.9"
 hyper = { version = "0.14.26", features = ["full", "nightly"] }
 ipnet = "2.7.2"
-itertools = "0.10.5"
+itertools = "0.11.0"
 listenfd = "1.0.1"
 log = "0.4.19"
 mimalloc = { version = "0.1.37", optional = true}
@@ -87,7 +87,7 @@ rust_decimal = { version = "1.30.0", features = ["maths"] }
 sentry = { version = "0.31.5", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "reqwest", "rustls", "log", "sentry-log"] }
 serde = { version = "1.0.164", features = [] }
 serde_json = { version = "1.0.97", default-features = false, features = ["alloc", "raw_value"] }
-serde_prometheus = "0.2.2"
+serde_prometheus = "0.2.3"
 siwe = "0.5.2"
 strum = { version = "0.25.0", features = ["derive"] }
 time = "0.3.22"
