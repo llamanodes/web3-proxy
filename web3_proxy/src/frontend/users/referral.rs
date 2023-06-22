@@ -167,7 +167,7 @@ pub async fn user_shared_referral_stats(
 
     if let Some((referrer_record, referral_records)) = query_result.into_iter().next() {
         for referral_record in referral_records.into_iter() {
-            used_referral_code = Some(referrer_record.referral_code.as_str());
+            used_referral_code = Some(referrer_record.referral_code.clone());
 
             // The foreign key is never optional
             let referred_user = user::Entity::find_by_id(referral_record.user_id)
