@@ -6,6 +6,7 @@ use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
 };
+use serde_json::json;
 
 /// change a user's admin status. eiter they are an admin, or they aren't
 #[derive(FromArgs, PartialEq, Eq, Debug)]
@@ -35,7 +36,7 @@ impl ChangeAdminStatusSubCommand {
             .await?
             .context(format!("No user with this id found {:?}", address))?;
 
-        debug!("user: {}", serde_json::to_string_pretty(&user)?);
+        debug!("user: {:#}", json!(&user));
 
         // Check if there is a record in the database
         match admin::Entity::find()

@@ -7,6 +7,7 @@ use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
+use serde_json::json;
 
 /// change a user's tier.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
@@ -33,7 +34,7 @@ impl ChangeUserTierByAddressSubCommand {
             .context("No user found with that key")?;
 
         // TODO: don't serialize the rpc key
-        debug!("user: {:#?}", user);
+        debug!("user: {:#}", json!(&user));
 
         // use the title to get the user tier
         let user_tier = user_tier::Entity::find()
@@ -42,7 +43,7 @@ impl ChangeUserTierByAddressSubCommand {
             .await?
             .context("No user tier found with that name")?;
 
-        debug!("user_tier: {:#?}", user_tier);
+        debug!("user_tier: {:#}", json!(&user_tier));
 
         if user.user_tier_id == user_tier.id {
             info!("user already has that tier");

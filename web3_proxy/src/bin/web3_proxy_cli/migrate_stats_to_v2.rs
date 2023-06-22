@@ -250,7 +250,6 @@ impl MigrateStatsToV2 {
 
         // Wait for any tasks that are on-going
         while let Some(x) = important_background_handles.next().await {
-            info!("Returned item is: {:?}", x);
             match x {
                 Err(e) => {
                     error!("{:?}", e);
@@ -261,8 +260,6 @@ impl MigrateStatsToV2 {
                 Ok(Ok(_)) => {
                     // TODO: how can we know which handle exited?
                     info!("a background handle exited");
-                    // Pop it in this case?
-                    continue;
                 }
             }
         }

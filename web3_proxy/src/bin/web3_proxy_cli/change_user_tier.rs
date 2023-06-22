@@ -6,6 +6,7 @@ use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
+use serde_json::json;
 
 /// change a user's tier.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
@@ -34,7 +35,7 @@ impl ChangeUserTierSubCommand {
             .await?
             .context("No user tier found with that name")?;
 
-        debug!("initial user_tier: {:#?}", user_tier);
+        debug!("initial user_tier: {:#}", json!(&user_tier));
 
         let mut user_tier = user_tier.into_active_model();
 

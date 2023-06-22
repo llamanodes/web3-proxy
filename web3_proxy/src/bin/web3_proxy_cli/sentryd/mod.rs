@@ -142,10 +142,7 @@ impl SentrydSubCommand {
                         );
 
                         if let Some(ref pagerduty_async) = pagerduty_async {
-                            info!(
-                                "sending to pagerduty: {:#}",
-                                serde_json::to_string_pretty(&alert)?
-                            );
+                            info!("sending to pagerduty: {:#}", json!(&alert));
 
                             if let Err(err) =
                                 pagerduty_async.event(Event::AlertTrigger(alert)).await
