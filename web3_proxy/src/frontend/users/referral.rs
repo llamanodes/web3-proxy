@@ -153,10 +153,6 @@ pub async fn user_shared_referral_stats(
         .all(db_replica.as_ref())
         .await?;
 
-    debug_assert_eq!(query_result.len(), 1);
-
-    let (referrer_record, referral_records) = query_result.into_iter().next().unwrap();
-
     // collect info about each referral
     #[derive(Debug, Serialize)]
     struct Info {
@@ -168,24 +164,27 @@ pub async fn user_shared_referral_stats(
 
     let mut used_referral_code = None;
     let mut referral_info = vec![];
-    for referral_record in referral_records.into_iter() {
-        used_referral_code = Some(referrer_record.referral_code.as_str());
 
-        // The foreign key is never optional
-        let referred_user = user::Entity::find_by_id(referral_record.user_id)
-            .one(db_replica.as_ref())
-            .await?
-            .context("Database error, no foreign key found for referring user")?;
+    if let Some((referrer_record, referral_records)) = query_result.into_iter().next() {
+        for referral_record in referral_records.into_iter() {
+            used_referral_code = Some(referrer_record.referral_code.as_str());
 
-        let info = Info {
-            credits_applied_for_referee: referral_record.credits_applied_for_referee,
-            credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
-            referral_start_date: referral_record.referral_start_date,
-            referred_address: Address::from_slice(&referred_user.address),
-        };
+            // The foreign key is never optional
+            let referred_user = user::Entity::find_by_id(referral_record.user_id)
+                .one(db_replica.as_ref())
+                .await?
+                .context("Database error, no foreign key found for referring user")?;
 
-        // Start inserting json's into this
-        referral_info.push(info);
+            let info = Info {
+                credits_applied_for_referee: referral_record.credits_applied_for_referee,
+                credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
+                referral_start_date: referral_record.referral_start_date,
+                referred_address: Address::from_slice(&referred_user.address),
+            };
+
+            // Start inserting json's into this
+            referral_info.push(info);
+        }
     }
 
     // Turn this into a response
