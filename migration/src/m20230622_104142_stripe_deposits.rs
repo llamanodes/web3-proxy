@@ -11,10 +11,9 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table(StripeIncreaseBalanceReceipt::Table)
-                    .if_not_exists()
                     .col(
                         ColumnDef::new(StripeIncreaseBalanceReceipt::Id)
-                            .big_integer()
+                            .big_unsigned()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
@@ -59,12 +58,6 @@ impl MigrationTrait for Migration {
                             .timestamp()
                             .not_null(),
                     )
-                    .col(
-                        // We definitely need an e-mail, otherwise there is no way we can keep track of what user to deposit to
-                        ColumnDef::new(StripeIncreaseBalanceReceipt::ReceiptEmail)
-                            .string()
-                            .not_null(),
-                    )
                     .to_owned(),
             )
             .await
@@ -100,5 +93,4 @@ enum StripeIncreaseBalanceReceipt {
     DepositToUserId,
     Description,
     DateCreated,
-    ReceiptEmail,
 }

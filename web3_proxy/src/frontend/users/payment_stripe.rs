@@ -85,6 +85,12 @@ pub async fn user_balance_stripe_post(
         return Err(Web3ProxyError::AccessDenied);
     };
 
+    let recipient_user_id: u64 = params
+        .remove("user_id")
+        .ok_or(Web3ProxyError::BadRouting)?
+        .parse()
+        .or(Err(Web3ProxyError::ParseAddressError))?;
+
     // Get the payload, and the header
     let payload = params.remove("data").ok_or(Web3ProxyError::BadRequest(
         "You have not provided a 'data' for the Stripe payload".into(),
@@ -123,7 +129,9 @@ pub async fn user_balance_stripe_post(
     let db_conn = app.db_conn().context("query_user_stats needs a db")?;
 
     if stripe_increase_balance_receipt::Entity::find()
-        .filter(stripe_increase_balance_receipt::Column::Id.eq(intent.id.as_str()))
+        .filter(
+            stripe_increase_balance_receipt::Column::StripePaymentIntendId.eq(intent.id.as_str()),
+        )
         .one(&db_conn)
         .await?
         .is_some()
@@ -131,29 +139,14 @@ pub async fn user_balance_stripe_post(
         return Ok("Payment was already recorded".into_response());
     };
 
-    let recipient_email = match intent.receipt_email {
-        Some(x) => x,
-        None => {
-            error!("Please check this! This payment did not provide any e-mail");
-            return Err(Web3ProxyError::BadRequest(
-                "Please check this! This payment did not provide any e-mail".into(),
-            ));
-        }
-    };
-
-    let recipient = user::Entity::find()
-        .filter(user::Column::Email.eq(&recipient_email))
+    let recipient: Option<user::Model> = user::Entity::find()
+        .filter(user::Column::Id.eq(recipient_user_id))
         .one(&db_conn)
         .await?;
 
-    // Filter for the intent.id one, and return false if it already exists
-
     // we do a fixed 2 decimal points because we only accept USD for now
     let amount = Decimal::new(intent.amount, 2);
-    let recipient_id = match &recipient {
-        Some(x) => Some(x.id),
-        None => None,
-    };
+    let recipient_id: Option<u64> = recipient.as_ref().map_or(None, |x| Some(x.id));
     let insert_receipt_model = stripe_increase_balance_receipt::ActiveModel {
         id: Default::default(),
         deposit_to_user_id: sea_orm::Set(recipient_id),
@@ -163,7 +156,6 @@ pub async fn user_balance_stripe_post(
         status: sea_orm::Set(intent.status.to_string()),
         description: sea_orm::Set(intent.description),
         date_created: Default::default(),
-        receipt_email: sea_orm::Set(recipient_email.clone()),
     };
 
     // In all these cases, we should record the transaction, but not increase the balance
@@ -175,8 +167,8 @@ pub async fn user_balance_stripe_post(
         // but not increase balance (this should be refunded)
         // TODO: I suppose we could send a refund request right away from here
         error!(
-            "Please refund this transaction! {} {}",
-            intent.currency, &recipient_email
+            "Please refund this transaction! Currency: {} - Recipient: {} - StripePaymentIntendId {}",
+            intent.currency, &recipient_user_id, intent.id
         );
         let _ = insert_receipt_model.save(&txn);
         txn.commit().await?;

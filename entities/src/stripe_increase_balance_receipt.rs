@@ -7,7 +7,7 @@ use serde::Serialize;
 #[sea_orm(table_name = "stripe_increase_balance_receipt")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i32,
+    pub id: u64,
     pub deposit_to_user_id: Option<u64>,
     pub stripe_payment_intend_id: String,
     #[sea_orm(column_type = "Decimal(Some((20, 10)))")]
@@ -16,7 +16,6 @@ pub struct Model {
     pub status: String,
     pub description: Option<String>,
     pub date_created: DateTimeUtc,
-    pub receipt_email: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
