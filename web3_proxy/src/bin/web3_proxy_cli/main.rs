@@ -25,6 +25,7 @@ use argh::FromArgs;
 use ethers::types::U256;
 use pagerduty_rs::eventsv2async::EventsV2 as PagerdutyAsyncEventsV2;
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
+use sentry::types::Dsn;
 use std::{
     fs, panic,
     path::Path,
@@ -32,6 +33,7 @@ use std::{
 };
 use tokio::runtime;
 use tracing::{info, warn};
+use tracing_subscriber::{prelude::*, EnvFilter};
 use web3_proxy::pagerduty::panic_handler;
 use web3_proxy::{
     app::APP_USER_AGENT,
@@ -66,7 +68,7 @@ pub struct Web3ProxyCli {
 
     /// if no config, what sentry url should the client should connect to
     #[argh(option)]
-    pub sentry_url: Option<String>,
+    pub sentry_url: Option<Dsn>,
 
     /// this one cli can do multiple things
     #[argh(subcommand)]
@@ -126,11 +128,11 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    // if RUST_LOG isn't set, configure a default
-    // TODO: is there a better way to do this?
+    // TODO: can we run tokio_console and have our normal logs?
     #[cfg(feature = "tokio_console")]
     console_subscriber::init();
 
+    // if RUST_LOG isn't set, configure a default
     #[cfg(not(feature = "tokio_console"))]
     let rust_log = match std::env::var("RUST_LOG") {
         Ok(x) => x,
@@ -213,45 +215,36 @@ fn main() -> anyhow::Result<()> {
         (None, None)
     };
 
-    {
-        todo!("set up tracing");
-        // let logger = env_logger::builder().parse_filters(&rust_log).build();
+    // set up sentry connection
+    // this guard does nothing is sentry_url is None
+    let _sentry_guard = sentry::init(sentry::ClientOptions {
+        dsn: cli_config.sentry_url.clone(),
+        release: sentry::release_name!(),
+        // Enable capturing of traces
+        // TODO: make this configurable!
+        traces_sample_rate: 0.01,
+        ..Default::default()
+    });
 
-        // let max_level = logger.filter();
+    tracing_subscriber::fmt()
+        // create a subscriber that uses the RUST_LOG env var for filtering levels
+        .with_env_filter(EnvFilter::builder().parse(rust_log)?)
+        // .with_env_filter(EnvFilter::from_default_env())
+        // print a pretty output to the terminal
+        // TODO: this might be too verbose. have a config setting for this, too
+        .pretty()
+        // the root subscriber is ready
+        .finish()
+        // attach tracing layer.
+        .with(sentry_tracing::layer())
+        // register as the default global subscriber
+        .init();
 
-        // // connect to sentry for error reporting
-        // // if no sentry, only log to stdout
-        // let _sentry_guard = if let Some(sentry_url) = cli_config.sentry_url.clone() {
-        //     let logger = sentry::integrations::log::SentryLogger::with_dest(logger);
-
-        //     log::set_boxed_logger(Box::new(logger)).unwrap();
-
-        //     let guard = sentry::init((
-        //         sentry_url,
-        //         sentry::ClientOptions {
-        //             release: sentry::release_name!(),
-        //             // TODO: Set this a to lower value (from config) in production
-        //             traces_sample_rate: 1.0,
-        //             ..Default::default()
-        //         },
-        //     ));
-
-        //     Some(guard)
-        // } else {
-        //     log::set_boxed_logger(Box::new(logger)).unwrap();
-
-        //     None
-        // };
-
-        // log::set_max_level(max_level);
-
-        // info!("RUST_LOG={}", rust_log);
-    }
-
-    info!("{}", APP_USER_AGENT);
+    info!(%APP_USER_AGENT);
 
     // optionally connect to pagerduty
     // TODO: fix this nested result
+    // TODO: get this out of the config file instead of the environment
     let (pagerduty_async, pagerduty_sync) = if let Ok(pagerduty_key) =
         std::env::var("PAGERDUTY_INTEGRATION_KEY")
     {
