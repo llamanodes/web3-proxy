@@ -5,11 +5,11 @@ use argh::FromArgs;
 use ethers::prelude::{Address, TxHash, H256};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
-use log::warn;
 use migration::sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::warn;
 
 pub type BlockAndRpc = (Option<Web3ProxyBlock>, Arc<Web3Rpc>);
 pub type TxHashAndRpc = (TxHash, Arc<Web3Rpc>);

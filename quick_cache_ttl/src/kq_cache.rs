@@ -1,4 +1,4 @@
-use log::{log_enabled, trace};
+use tracing::{enabled, Level, trace};
 use quick_cache::sync::KQCache;
 use quick_cache::{PlaceholderGuard, Weighter};
 use serde::ser::SerializeStruct;
@@ -201,7 +201,7 @@ impl<
         while let Ok((expire_at, key, qey)) = self.rx.recv_async().await {
             let now = Instant::now();
             if expire_at > now {
-                if log_enabled!(log::Level::Trace) {
+                if enabled!(Level::TRACE) {
                     trace!(
                         "{}, {:?}, {:?} sleeping for {}ms.",
                         self.name,
@@ -246,7 +246,7 @@ impl<
         if weight <= self.cache.max_item_weight {
             self.inner.insert(val);
 
-            if log_enabled!(log::Level::Trace) {
+            if enabled!(Level::TRACE) {
                 trace!(
                     "{}, {:?}, {:?} expiring in {}s",
                     self.cache.name,

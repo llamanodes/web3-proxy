@@ -18,7 +18,6 @@ use ethers::abi::AbiEncode;
 use ethers::types::{Address, Block, TransactionReceipt, TxHash, H256};
 use hashbrown::{HashMap, HashSet};
 use http::StatusCode;
-use log::{debug, info, trace};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, IntoActiveModel, ModelTrait,
@@ -30,6 +29,7 @@ use payment_contracts::payment_factory::{self, PaymentFactory};
 use serde_json::json;
 use std::num::NonZeroU64;
 use std::sync::Arc;
+use tracing::{debug, info, trace};
 
 /// Implements any logic related to payments
 /// Removed this mainly from "user" as this was getting clogged

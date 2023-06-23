@@ -3,7 +3,6 @@ use anyhow::Context;
 use argh::FromArgs;
 use entities::{rpc_accounting, rpc_key, user};
 use ethers::types::Address;
-use log::info;
 use migration::{
     sea_orm::{
         self,
@@ -14,6 +13,7 @@ use migration::{
 };
 use serde::Serialize;
 use serde_json::json;
+use tracing::info;
 
 /// count requests
 #[derive(FromArgs, PartialEq, Debug, Eq)]

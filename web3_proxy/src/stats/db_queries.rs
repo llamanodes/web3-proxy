@@ -14,7 +14,6 @@ use axum::{
 };
 use entities::{rpc_accounting, rpc_key};
 use hashbrown::HashMap;
-use log::warn;
 use migration::sea_orm::{
     ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Select,
 };
@@ -22,6 +21,7 @@ use migration::{Condition, Expr, SimpleExpr};
 use redis_rate_limiter::redis;
 use redis_rate_limiter::redis::AsyncCommands;
 use serde_json::json;
+use tracing::warn;
 
 pub fn filter_query_window_seconds(
     query_window_seconds: u64,

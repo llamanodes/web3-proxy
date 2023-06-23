@@ -6,7 +6,6 @@ use derive_more::From;
 use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
-use log::{error, info, trace};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
 use parking_lot::RwLock;
@@ -14,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time::interval;
+use tracing::{error, info, trace};
 
 #[derive(Debug, Default)]
 pub struct BufferedRpcQueryStats {

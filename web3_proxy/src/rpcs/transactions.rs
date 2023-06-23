@@ -5,9 +5,9 @@ use super::request::OpenRequestResult;
 use crate::errors::Web3ProxyResult;
 use crate::frontend::authorization::Authorization;
 use ethers::prelude::{ProviderError, Transaction, TxHash};
-use log::{debug, trace, Level};
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tracing::{debug, trace, Level};
 
 // TODO: think more about TxState
 #[derive(Clone)]
@@ -30,7 +30,7 @@ impl Web3Rpcs {
         // TODO: if one rpc fails, try another?
         // TODO: try_request_handle, or wait_for_request_handle? I think we want wait here
         let tx: Transaction = match rpc
-            .try_request_handle(authorization, Some(Level::Warn.into()))
+            .try_request_handle(authorization, Some(Level::WARN.into()))
             .await
         {
             Ok(OpenRequestResult::Handle(handle)) => {

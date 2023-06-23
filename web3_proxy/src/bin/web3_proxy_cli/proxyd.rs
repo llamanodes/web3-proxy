@@ -1,12 +1,12 @@
 #![forbid(unsafe_code)]
 use argh::FromArgs;
 use futures::StreamExt;
-use log::{error, info, trace, warn};
 use num::Zero;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{fs, thread};
 use tokio::sync::broadcast;
+use tracing::{error, info, trace, warn};
 use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use web3_proxy::config::TopConfig;
 use web3_proxy::{frontend, prometheus};
@@ -280,7 +280,8 @@ mod tests {
             "info,ethers_providers::rpc=off,web3_proxy=debug",
         );
 
-        let _ = env_logger::builder().is_test(true).try_init();
+        // TODO: how should we do test logging setup with tracing?
+        // let _ = env_logger::builder().is_test(true).try_init();
 
         let anvil = Anvil::new().spawn();
 

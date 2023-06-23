@@ -17,7 +17,6 @@ use axum::{
 };
 use http::{header::AUTHORIZATION, StatusCode};
 use listenfd::ListenFd;
-use log::info;
 use moka::future::{Cache, CacheBuilder};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -26,6 +25,7 @@ use strum::{EnumCount, EnumIter};
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
+use tracing::info;
 
 use crate::errors::Web3ProxyResult;
 

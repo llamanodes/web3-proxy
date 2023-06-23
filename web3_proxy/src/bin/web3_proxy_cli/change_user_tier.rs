@@ -1,12 +1,12 @@
 use anyhow::Context;
 use argh::FromArgs;
 use entities::user_tier;
-use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
 use serde_json::json;
+use tracing::{debug, info};
 
 /// change a user's tier.
 #[derive(FromArgs, PartialEq, Eq, Debug)]

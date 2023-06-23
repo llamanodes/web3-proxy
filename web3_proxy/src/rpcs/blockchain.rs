@@ -8,7 +8,6 @@ use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
-use log::{debug, error, trace};
 use moka::future::Cache;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
@@ -18,6 +17,7 @@ use std::time::Duration;
 use std::{fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::time::timeout;
+use tracing::{debug, error, trace};
 
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;

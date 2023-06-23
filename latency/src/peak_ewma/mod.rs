@@ -2,9 +2,9 @@ mod rtt_estimate;
 
 use std::sync::Arc;
 
-use log::{error, log_enabled, trace};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
+use tracing::{enabled, error, trace, Level};
 
 use self::rtt_estimate::AtomicRttEstimate;
 use crate::util::nanos::nanos;
@@ -59,7 +59,7 @@ impl PeakEwmaLatency {
         let now = Instant::now();
 
         if estimate.update_at > now {
-            if log_enabled!(log::Level::Trace) {
+            if enabled!(Level::TRACE) {
                 trace!(
                     "update_at is {}ns in the future",
                     estimate.update_at.duration_since(now).as_nanos()

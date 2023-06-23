@@ -1,10 +1,10 @@
 use derive_more::From;
-use log::{debug, info, warn};
 use migration::sea_orm::{self, ConnectionTrait, Database};
 use migration::sea_query::table::ColumnDef;
 use migration::{Alias, DbErr, Migrator, MigratorTrait, Table};
 use std::time::Duration;
 use tokio::time::sleep;
+use tracing::{debug, info, warn};
 
 pub use migration::sea_orm::DatabaseConnection;
 

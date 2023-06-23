@@ -3,7 +3,6 @@ use argh::FromArgs;
 use entities::{rpc_key, user};
 use glob::glob;
 use hashbrown::HashMap;
-use log::{info, warn};
 use migration::sea_orm::ActiveValue::NotSet;
 use migration::sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter,
@@ -11,6 +10,7 @@ use migration::sea_orm::{
 };
 use std::path::{Path, PathBuf};
 use std::{fs::File, io::BufReader};
+use tracing::{info, warn};
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 /// Import users from another database.

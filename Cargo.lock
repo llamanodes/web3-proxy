@@ -110,6 +110,9 @@ name = "arc-swap"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bddcadddf5e9015d310179a59bb28c4d4b9920ad0f11e8e14dbadf654890c9a6"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "archery"
@@ -495,6 +498,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -523,6 +527,7 @@ dependencies = [
  "rustversion",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -1141,6 +1146,7 @@ dependencies = [
  "futures",
  "hdrhistogram",
  "humantime",
+ "parking_lot 0.12.1",
  "prost-types",
  "serde",
  "serde_json",
@@ -1445,6 +1451,7 @@ dependencies = [
  "moka",
  "redis-rate-limiter",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1710,19 +1717,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "env_logger"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85cdab6a89accf66733ad5a1693a4dcced6aeff64602b634530dd73c1f3ee9f0"
-dependencies = [
- "humantime",
- "is-terminal",
- "log",
- "regex",
- "termcolor",
 ]
 
 [[package]]
@@ -2318,7 +2312,6 @@ dependencies = [
  "futures-core",
  "futures-task",
  "futures-util",
- "num_cpus",
 ]
 
 [[package]]
@@ -3184,6 +3177,7 @@ dependencies = [
  "portable-atomic",
  "serde",
  "tokio",
+ "tracing",
  "watermill",
 ]
 
@@ -5317,9 +5311,9 @@ dependencies = [
  "sentry-backtrace",
  "sentry-contexts",
  "sentry-core",
- "sentry-log",
  "sentry-panic",
  "sentry-tracing",
+ "serde_json",
  "tokio",
  "ureq",
  "webpki-roots 0.22.6",
@@ -5373,16 +5367,6 @@ dependencies = [
  "sentry-types",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "sentry-log"
-version = "0.31.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2558fc4a85326e6063711b45ce82ed6b18cdacd0732580c1567da914ac1df33e"
-dependencies = [
- "log",
- "sentry-core",
 ]
 
 [[package]]
@@ -6558,6 +6542,7 @@ dependencies = [
  "matchers",
  "nu-ansi-term",
  "once_cell",
+ "parking_lot 0.12.1",
  "regex",
  "sharded-slab",
  "smallvec",
@@ -7016,7 +7001,6 @@ dependencies = [
  "deferred-rate-limiter",
  "derive_more",
  "entities",
- "env_logger",
  "ethbloom",
  "ethers",
  "ewma",
@@ -7039,7 +7023,6 @@ dependencies = [
  "itertools 0.11.0",
  "latency",
  "listenfd",
- "log",
  "migration",
  "mimalloc",
  "moka",
@@ -7060,6 +7043,7 @@ dependencies = [
  "rmp-serde",
  "rust_decimal",
  "sentry",
+ "sentry-tracing",
  "serde",
  "serde_json",
  "serde_prometheus",

@@ -15,12 +15,12 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use hashbrown::HashMap;
 use http::HeaderMap;
-use log::trace;
 use moka::future::Cache;
 use once_cell::sync::Lazy;
 use serde::{ser::SerializeStruct, Serialize};
 use serde_json::json;
 use std::sync::Arc;
+use tracing::trace;
 
 static HEALTH_OK: Lazy<Bytes> = Lazy::new(|| Bytes::from("OK\n"));
 static HEALTH_NOT_OK: Lazy<Bytes> = Lazy::new(|| Bytes::from(":(\n"));

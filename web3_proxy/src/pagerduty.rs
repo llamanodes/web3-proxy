@@ -1,6 +1,5 @@
 use crate::config::TopConfig;
 use gethostname::gethostname;
-use log::{debug, error, warn};
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
 use pagerduty_rs::types::{AlertTrigger, AlertTriggerPayload, Event};
 use serde::Serialize;
@@ -11,6 +10,7 @@ use std::{
     panic::PanicInfo,
 };
 use time::OffsetDateTime;
+use tracing::{debug, error, warn};
 
 /*
 

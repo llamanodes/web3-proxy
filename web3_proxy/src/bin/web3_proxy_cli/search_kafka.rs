@@ -2,13 +2,13 @@ use anyhow::Context;
 use argh::FromArgs;
 use entities::rpc_key;
 use futures::TryStreamExt;
-use log::info;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use rdkafka::{
     consumer::{Consumer, StreamConsumer},
     ClientConfig, Message,
 };
 use std::num::NonZeroU64;
+use tracing::info;
 use uuid::Uuid;
 use web3_proxy::{config::TopConfig, frontend::authorization::RpcSecretKey, relational_db::get_db};
 

@@ -23,7 +23,6 @@ mod user_import;
 use anyhow::Context;
 use argh::FromArgs;
 use ethers::types::U256;
-use log::{info, warn};
 use pagerduty_rs::eventsv2async::EventsV2 as PagerdutyAsyncEventsV2;
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
 use std::{
@@ -32,6 +31,7 @@ use std::{
     sync::atomic::{self, AtomicUsize},
 };
 use tokio::runtime;
+use tracing::{info, warn};
 use web3_proxy::pagerduty::panic_handler;
 use web3_proxy::{
     app::APP_USER_AGENT,
@@ -214,37 +214,38 @@ fn main() -> anyhow::Result<()> {
     };
 
     {
-        let logger = env_logger::builder().parse_filters(&rust_log).build();
+        todo!("set up tracing");
+        // let logger = env_logger::builder().parse_filters(&rust_log).build();
 
-        let max_level = logger.filter();
+        // let max_level = logger.filter();
 
-        // connect to sentry for error reporting
-        // if no sentry, only log to stdout
-        let _sentry_guard = if let Some(sentry_url) = cli_config.sentry_url.clone() {
-            let logger = sentry::integrations::log::SentryLogger::with_dest(logger);
+        // // connect to sentry for error reporting
+        // // if no sentry, only log to stdout
+        // let _sentry_guard = if let Some(sentry_url) = cli_config.sentry_url.clone() {
+        //     let logger = sentry::integrations::log::SentryLogger::with_dest(logger);
 
-            log::set_boxed_logger(Box::new(logger)).unwrap();
+        //     log::set_boxed_logger(Box::new(logger)).unwrap();
 
-            let guard = sentry::init((
-                sentry_url,
-                sentry::ClientOptions {
-                    release: sentry::release_name!(),
-                    // TODO: Set this a to lower value (from config) in production
-                    traces_sample_rate: 1.0,
-                    ..Default::default()
-                },
-            ));
+        //     let guard = sentry::init((
+        //         sentry_url,
+        //         sentry::ClientOptions {
+        //             release: sentry::release_name!(),
+        //             // TODO: Set this a to lower value (from config) in production
+        //             traces_sample_rate: 1.0,
+        //             ..Default::default()
+        //         },
+        //     ));
 
-            Some(guard)
-        } else {
-            log::set_boxed_logger(Box::new(logger)).unwrap();
+        //     Some(guard)
+        // } else {
+        //     log::set_boxed_logger(Box::new(logger)).unwrap();
 
-            None
-        };
+        //     None
+        // };
 
-        log::set_max_level(max_level);
+        // log::set_max_level(max_level);
 
-        info!("RUST_LOG={}", rust_log);
+        // info!("RUST_LOG={}", rust_log);
     }
 
     info!("{}", APP_USER_AGENT);

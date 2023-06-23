@@ -15,7 +15,6 @@ use ethers::types::{Address, Transaction, U256};
 use futures::future::try_join_all;
 use futures::StreamExt;
 use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
-use log::{debug, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use nanorand::Rng;
 use parking_lot::RwLock;
@@ -30,6 +29,7 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::watch;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
+use tracing::{debug, info, trace, warn, Level};
 use url::Url;
 
 /// An active connection to a Web3 RPC server like geth or erigon.
@@ -323,7 +323,7 @@ impl Web3Rpc {
                     "eth_blockNumber",
                     &(),
                     // error here are expected, so keep the level low
-                    Some(Level::Debug.into()),
+                    Some(Level::DEBUG.into()),
                     Some(Duration::from_secs(5)),
                 )
                 .await
@@ -347,7 +347,7 @@ impl Web3Rpc {
                         maybe_archive_block,
                     )),
                     // error here are expected, so keep the level low
-                    Some(Level::Trace.into()),
+                    Some(Level::TRACE.into()),
                     Some(Duration::from_secs(5)),
                 )
                 .await;
@@ -437,7 +437,7 @@ impl Web3Rpc {
             .internal_request(
                 "eth_chainId",
                 &(),
-                Some(Level::Trace.into()),
+                Some(Level::TRACE.into()),
                 Some(Duration::from_secs(5)),
             )
             .await?;
@@ -827,7 +827,7 @@ impl Web3Rpc {
                     "eth_getBlockByNumber",
                     &("latest", false),
                     &authorization,
-                    Some(Level::Warn.into()),
+                    Some(Level::WARN.into()),
                     Some(Duration::from_secs(5)),
                 )
                 .await;
@@ -863,7 +863,7 @@ impl Web3Rpc {
                         "eth_getBlockByNumber",
                         &("latest", false),
                         &authorization,
-                        Some(Level::Warn.into()),
+                        Some(Level::WARN.into()),
                         Some(Duration::from_secs(5)),
                     )
                     .await;

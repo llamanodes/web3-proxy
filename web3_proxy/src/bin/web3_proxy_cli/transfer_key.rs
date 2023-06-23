@@ -2,12 +2,12 @@ use anyhow::Context;
 use argh::FromArgs;
 use entities::{rpc_key, user};
 use ethers::types::Address;
-use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
 use sea_orm::prelude::Uuid;
+use tracing::{debug, info};
 use web3_proxy::frontend::authorization::RpcSecretKey;
 
 /// change a key's owner.
