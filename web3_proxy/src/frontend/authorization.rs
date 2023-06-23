@@ -31,6 +31,7 @@ use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
@@ -46,10 +47,27 @@ use ulid::Ulid;
 use uuid::Uuid;
 
 /// This lets us use UUID and ULID while we transition to only ULIDs
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize)]
 pub enum RpcSecretKey {
     Ulid(Ulid),
     Uuid(Uuid),
+}
+
+/// always serialize as a ULID.
+impl Serialize for RpcSecretKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Ulid(x) => x.serialize(serializer),
+            Self::Uuid(x) => {
+                let x: Ulid = x.to_owned().into();
+
+                x.serialize(serializer)
+            }
+        }
+    }
 }
 
 /// TODO: should this have IpAddr and Origin or AuthorizationChecks?
