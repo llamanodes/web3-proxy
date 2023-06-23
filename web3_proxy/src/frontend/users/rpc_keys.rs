@@ -21,7 +21,6 @@ use migration::sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use ulid::Ulid;
 use std::sync::Arc;
 
 /// `GET /user/keys` -- Use a bearer token to get the user's api keys and their settings.
@@ -42,7 +41,7 @@ pub async fn rpc_keys_get(
     struct ReturnType<'a> {
         id: u64,
         user_id: u64,
-        secret_key: Ulid,
+        secret_key: RpcSecretKey,
         description: Option<String>,
         private_txs: bool,
         active: bool,
