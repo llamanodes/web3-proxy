@@ -2,10 +2,10 @@ use axum::headers::HeaderName;
 use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response};
 use axum::{routing::get, Extension, Router};
-use log::info;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tracing::info;
 
 use crate::app::Web3ProxyApp;
 use crate::errors::Web3ProxyResult;

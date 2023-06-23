@@ -9,9 +9,9 @@ use axum::{
 use chrono::{NaiveDateTime, Utc};
 use entities::login;
 use hashbrown::HashMap;
-use log::{trace, warn};
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use redis_rate_limiter::{redis::AsyncCommands, RedisConnection};
+use tracing::{trace, warn};
 
 /// get the attached address for the given bearer token.
 /// First checks redis. Then checks the database.

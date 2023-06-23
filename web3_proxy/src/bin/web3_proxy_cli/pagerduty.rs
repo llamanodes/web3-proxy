@@ -1,7 +1,7 @@
 use argh::FromArgs;
-use log::{error, info};
 use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
 use serde_json::json;
+use tracing::{error, info};
 use web3_proxy::{
     config::TopConfig,
     pagerduty::{pagerduty_alert, pagerduty_alert_for_config},

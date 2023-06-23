@@ -2,11 +2,11 @@ use anyhow::Context;
 use argh::FromArgs;
 use entities::{admin, login, user};
 use ethers::types::Address;
-use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
 };
 use serde_json::json;
+use tracing::{debug, info};
 
 /// change a user's admin status. eiter they are an admin, or they aren't
 #[derive(FromArgs, PartialEq, Eq, Debug)]

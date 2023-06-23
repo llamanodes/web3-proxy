@@ -2,12 +2,12 @@ use anyhow::Context;
 use argh::FromArgs;
 use entities::user;
 use ethers::types::Address;
-use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
 use serde_json::json;
+use tracing::{debug, info};
 
 /// change a user's address.
 #[derive(FromArgs, PartialEq, Eq, Debug)]

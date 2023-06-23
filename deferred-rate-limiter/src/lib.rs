@@ -1,5 +1,4 @@
 //#![warn(missing_docs)]
-use log::error;
 use moka::future::{Cache, CacheBuilder};
 use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
 use std::cmp::Eq;
@@ -9,6 +8,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{atomic::AtomicU64, Arc};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
+use tracing::error;
 
 /// A local cache that sits in front of a RedisRateLimiter
 /// Generic accross the key so it is simple to use with IPs or user keys

@@ -1,9 +1,9 @@
 use argh::FromArgs;
 use entities::{rpc_key, user};
-use log::info;
 use migration::sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
 use std::fs::{self, create_dir_all};
 use std::path::Path;
+use tracing::info;
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 /// Export users from the database.

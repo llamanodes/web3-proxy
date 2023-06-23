@@ -14,12 +14,12 @@ use futures::future::AbortHandle;
 use futures::future::Abortable;
 use futures::stream::StreamExt;
 use http::StatusCode;
-use log::{error, trace};
 use serde_json::json;
 use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
 use tokio::time::Instant;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
+use tracing::{error, trace};
 
 impl Web3ProxyApp {
     pub async fn eth_subscribe<'a>(

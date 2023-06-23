@@ -5,11 +5,12 @@ use argh::FromArgs;
 use ethers::prelude::{Address, TxHash, H256};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
-use log::warn;
 use migration::sea_orm::DatabaseConnection;
+use sentry::types::Dsn;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::warn;
 
 pub type BlockAndRpc = (Option<Web3ProxyBlock>, Arc<Web3Rpc>);
 pub type TxHashAndRpc = (TxHash, Arc<Web3Rpc>);
@@ -165,7 +166,7 @@ pub struct AppConfig {
     pub redirect_rpc_key_url: Option<String>,
 
     /// Optionally send errors to <https://sentry.io>
-    pub sentry_url: Option<String>,
+    pub sentry_url: Option<Dsn>,
 
     /// Track rate limits in a redis (or compatible backend)
     /// It is okay if this data is lost.

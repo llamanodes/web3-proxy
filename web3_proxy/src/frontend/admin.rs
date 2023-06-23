@@ -24,7 +24,6 @@ use entities::{
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::{debug, info, warn};
 use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -36,6 +35,7 @@ use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
+use tracing::{debug, info, warn};
 use ulid::Ulid;
 
 /// `GET /admin/increase_balance` -- As an admin, modify a user's user-tier

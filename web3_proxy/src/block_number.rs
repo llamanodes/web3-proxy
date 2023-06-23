@@ -5,9 +5,9 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
-use log::{trace, warn};
 use serde_json::json;
 use std::sync::Arc;
+use tracing::{trace, warn};
 
 use crate::{frontend::authorization::Authorization, rpcs::many::Web3Rpcs};
 

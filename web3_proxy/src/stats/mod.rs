@@ -17,7 +17,6 @@ use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key};
 use influxdb2::models::DataPoint;
-use log::trace;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
@@ -32,6 +31,7 @@ use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
+use tracing::trace;
 
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 

@@ -11,7 +11,6 @@ use hashbrown::{HashMap, HashSet};
 use hdrhistogram::serialization::{Serializer, V2DeflateSerializer};
 use hdrhistogram::Histogram;
 use itertools::{Itertools, MinMaxResult};
-use log::{debug, log_enabled, trace, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::{Ordering, Reverse};
@@ -21,6 +20,7 @@ use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time::Instant;
+use tracing::{debug, enabled, trace, warn, Level};
 
 #[derive(Clone, Serialize)]
 struct ConsensusRpcData {
@@ -685,7 +685,7 @@ impl ConsensusFinder {
                 }
 
                 // dev logging of a histogram
-                if log_enabled!(Level::Trace) {
+                if enabled!(Level::TRACE) {
                     // convert to ms because the histogram needs ints
                     let max_median_latency_ms = (max_median_latency_sec * 1000.0).ceil() as u64;
 

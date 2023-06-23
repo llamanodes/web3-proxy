@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering;
 
-use log::trace;
 use tokio::time::{Duration, Instant};
+use tracing::trace;
 
 use crate::util::atomic_f32_pair::AtomicF32Pair;
 use crate::util::nanos::{nanos, NANOS_PER_MILLI};

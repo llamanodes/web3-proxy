@@ -21,7 +21,6 @@ use futures::TryFutureExt;
 use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
-use log::{error, trace, warn};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{self, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use migration::{Expr, OnConflict};
@@ -43,6 +42,7 @@ use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
+use tracing::{error, trace, warn};
 use ulid::Ulid;
 use uuid::Uuid;
 

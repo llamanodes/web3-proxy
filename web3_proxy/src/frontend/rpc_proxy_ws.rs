@@ -29,13 +29,13 @@ use futures::{
 use handlebars::Handlebars;
 use hashbrown::HashMap;
 use http::{HeaderMap, StatusCode};
-use log::{info, trace};
 use serde_json::json;
 use std::net::IpAddr;
 use std::str::from_utf8_mut;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock};
+use tracing::{info, trace};
 
 /// How to select backend servers for a request
 #[derive(Copy, Clone, Debug)]
