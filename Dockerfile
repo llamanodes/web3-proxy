@@ -87,7 +87,7 @@ ENTRYPOINT ["web3_proxy_cli"]
 CMD [ "--config", "/web3-proxy.toml", "proxyd" ]
 
 # TODO: lower log level when done with prototyping
-ENV RUST_LOG "warn,ethers_providers::rpc=off,web3_proxy=debug,web3_proxy_cli=debug"
+ENV RUST_LOG "warn,ethers_providers::rpc=off,web3_proxy=debug,web3_proxy::rpcs::consensus=info,web3_proxy_cli=debug"
 
 COPY --from=builder /usr/local/bin/* /usr/local/bin/
 

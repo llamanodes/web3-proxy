@@ -158,6 +158,7 @@ fn main() -> anyhow::Result<()> {
                     "ethers_providers=error",
                     "quick_cache_ttl=info",
                     "redis_rate_limit=debug",
+                    "web3_proxy::rpcs::consensus=info",
                     // "web3_proxy::stats::influxdb_queries=trace",
                     "web3_proxy=debug",
                     "web3_proxy_cli=debug",
