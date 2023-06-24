@@ -38,7 +38,7 @@ use time::{Duration, OffsetDateTime};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
 
-/// `GET /admin/increase_balance` -- As an admin, modify a user's user-tier
+/// `POST /admin/increase_balance` -- As an admin, modify a user's user-tier
 ///
 /// - user_address that is to credited balance
 /// - user_role_tier that is supposed to be adapted
@@ -49,17 +49,16 @@ pub async fn admin_increase_balance(
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     let (caller, _) = app.bearer_is_authorized(bearer).await?;
+
     let caller_id = caller.id;
 
     // Establish connections
-    let db_conn = app
-        .db_conn()
-        .context("query_admin_modify_user needs a db")?;
+    let txn = app.db_transaction().await?;
 
     // Check if the caller is an admin (if not, return early)
     let admin_entry: admin::Model = admin::Entity::find()
         .filter(admin::Column::UserId.eq(caller_id))
-        .one(&db_conn)
+        .one(&txn)
         .await?
         .ok_or(Web3ProxyError::AccessDenied)?;
 
@@ -73,14 +72,16 @@ pub async fn admin_increase_balance(
         .map_err(|_| {
             Web3ProxyError::BadRequest("Unable to parse user_address as an Address".into())
         })?;
+
     let user_address_bytes: Vec<u8> = user_address.to_fixed_bytes().into();
+
     let note: String = params
         .get("note")
         .ok_or_else(|| Web3ProxyError::BadRequest("Unable to find 'note' key in request".into()))?
         .parse::<String>()
         .map_err(|_| Web3ProxyError::BadRequest("Unable to parse 'note' as a String".into()))?;
+
     // Get the amount from params
-    // Decimal::from_str
     let amount: Decimal = params
         .get("amount")
         .ok_or_else(|| {
@@ -95,7 +96,7 @@ pub async fn admin_increase_balance(
 
     let user_entry: user::Model = user::Entity::find()
         .filter(user::Column::Address.eq(user_address_bytes.clone()))
-        .one(&db_conn)
+        .one(&txn)
         .await?
         .ok_or(Web3ProxyError::BadRequest(
             "No user with this id found".into(),
@@ -108,14 +109,7 @@ pub async fn admin_increase_balance(
         note: sea_orm::Set(note),
         ..Default::default()
     };
-    increase_balance_receipt.save(&db_conn).await?;
-
-    let mut out = HashMap::new();
-    out.insert(
-        "user",
-        serde_json::Value::String(format!("{:?}", user_address)),
-    );
-    out.insert("amount", serde_json::Value::String(amount.to_string()));
+    increase_balance_receipt.save(&txn).await?;
 
     // update balance
     let balance_entry = balance::ActiveModel {
@@ -133,16 +127,21 @@ pub async fn admin_increase_balance(
                 )])
                 .to_owned(),
         )
-        .exec(&db_conn)
+        .exec(&txn)
         .await
         .web3_context("admin is increasing balance")?;
 
-    let response = (StatusCode::OK, Json(out)).into_response();
+    txn.commit().await?;
 
-    Ok(response)
+    let out = json!({
+        "user": user_address,
+        "amount": amount.to_string(),
+    });
+
+    Ok(Json(out).into_response())
 }
 
-/// `GET /admin/modify_role` -- As an admin, modify a user's user-tier
+/// `POST /admin/modify_role` -- As an admin, modify a user's user-tier
 ///
 /// - user_address that is to be modified
 /// - user_role_tier that is supposed to be adapted

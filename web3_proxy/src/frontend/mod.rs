@@ -212,9 +212,9 @@ pub async fn serve(
         )
         .route(
             "/admin/increase_balance",
-            get(admin::admin_increase_balance),
+            post(admin::admin_increase_balance),
         )
-        .route("/admin/modify_role", get(admin::admin_change_user_roles))
+        .route("/admin/modify_role", post(admin::admin_change_user_roles))
         .route(
             "/admin/imitate-login/:admin_address/:user_address",
             get(admin::admin_login_get),
