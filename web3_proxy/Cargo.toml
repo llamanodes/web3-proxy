@@ -22,9 +22,10 @@ migration = { path = "../migration" }
 payment-contracts = { path = "../payment-contracts" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 
-ethers = { git = "https://github.com/llamanodes/ethers-rs/", rev = "eb68f5d60850008cd302762bd3a5a4bdcfecc713", default-features = false, features = ["rustls", "ws"] }
+#ethers = { git = "https://github.com/llamanodes/ethers-rs/", rev = "eb68f5d60850008cd302762bd3a5a4bdcfecc713", default-features = false, features = ["rustls", "ws"] }
 influxdb2 = { git = "https://github.com/llamanodes/influxdb2", features = ["rustls"], rev = "2d125128696a29d7e0b9abc052c928937e7c0579" }
 influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/", rev = "2d125128696a29d7e0b9abc052c928937e7c0579"}
+#siwe = { git = "https://github.com/llamanodes/siwe-rs", rev = "bef5449b5dd8beb4e9fc697f09cd6dd11ba8f6e6", features = ["ethers", "serde"] }
 
 # TODO: regex has several "perf" features that we might want to use
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
@@ -33,6 +34,7 @@ influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/", rev = 
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 # TODO: rdkafka has a tracing feature
 # TODO: axum has a tracing feature
+# TODO: siwe ha a ethers feature that is blocked by 
 
 # TODO: hdrhistogram for automated tiers
 
@@ -50,6 +52,7 @@ console-subscriber = { version = "0.1.9", features = ["env-filter", "parking_lot
 counter = "0.5.7"
 derive_more = { version = "0.99.17", features = ["nightly"] }
 ethbloom = { version = "0.13.0", features = ["serialize"] }
+ethers = { version = "2.0.7", default-features = false, features = ["rustls", "ws"] }
 ewma = "0.1.1"
 fdlimit = "0.2.1"
 flume = "0.10.14"
