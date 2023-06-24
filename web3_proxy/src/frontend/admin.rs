@@ -7,7 +7,6 @@ use crate::errors::Web3ProxyResponse;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::user_token::UserBearerToken;
 use crate::PostLogin;
-use anyhow::Context;
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -73,8 +72,6 @@ pub async fn admin_increase_balance(
             Web3ProxyError::BadRequest("Unable to parse user_address as an Address".into())
         })?;
 
-    let user_address_bytes: Vec<u8> = user_address.to_fixed_bytes().into();
-
     let note: String = params
         .get("note")
         .ok_or_else(|| Web3ProxyError::BadRequest("Unable to find 'note' key in request".into()))?
@@ -95,11 +92,11 @@ pub async fn admin_increase_balance(
         })?;
 
     let user_entry: user::Model = user::Entity::find()
-        .filter(user::Column::Address.eq(user_address_bytes.clone()))
+        .filter(user::Column::Address.eq(user_address.as_bytes()))
         .one(&txn)
         .await?
         .ok_or(Web3ProxyError::BadRequest(
-            "No user with this id found".into(),
+            format!("No user found with {:?}", user_address).into(),
         ))?;
 
     let increase_balance_receipt = admin_increase_balance_receipt::ActiveModel {
@@ -200,7 +197,7 @@ pub async fn admin_login_get(
         })?;
 
     // Fetch the user_address parameter from the login string ... (as who we want to be logging in ...)
-    let user_address: Vec<u8> = params
+    let user_address: Address = params
         .get("user_address")
         .ok_or_else(|| {
             Web3ProxyError::BadRequest("Unable to find user_address key in request".into())
@@ -208,9 +205,7 @@ pub async fn admin_login_get(
         .parse::<Address>()
         .map_err(|_err| {
             Web3ProxyError::BadRequest("Unable to parse user_address as an Address".into())
-        })?
-        .to_fixed_bytes()
-        .into();
+        })?;
 
     // We want to login to llamanodes.com
     let login_domain = app
@@ -228,8 +223,8 @@ pub async fn admin_login_get(
         // TODO: don't unwrap
         // TODO: accept a login_domain from the request?
         domain: login_domain.parse().unwrap(),
-        // In the case of the admin, the admin needs to sign the message, so we include this logic ...
-        address: admin_address.to_fixed_bytes(), // user_address.to_fixed_bytes(),
+        // the admin needs to sign the message, not the imitated user
+        address: admin_address.to_fixed_bytes(),
         // TODO: config for statement
         statement: Some("🦙🦙🦙🦙🦙".to_string()),
         // TODO: don't unwrap
@@ -243,8 +238,6 @@ pub async fn admin_login_get(
         request_id: None,
         resources: vec![],
     };
-
-    let admin_address: Vec<u8> = admin_address.to_fixed_bytes().into();
 
     let db_conn = app.db_conn().web3_context("login requires a database")?;
     let db_replica = app
@@ -264,7 +257,7 @@ pub async fn admin_login_get(
     // Get the user that we want to imitate from the read-only database (their id ...)
     // TODO: Only get the id, not the whole user object ...
     let user = user::Entity::find()
-        .filter(user::Column::Address.eq(user_address))
+        .filter(user::Column::Address.eq(user_address.as_bytes()))
         .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
@@ -273,9 +266,8 @@ pub async fn admin_login_get(
 
     // TODO: Gotta check if encoding messes up things maybe ...
     info!("Admin address is: {:?}", admin_address);
-    info!("Encoded admin address is: {:?}", admin_address);
     let admin = user::Entity::find()
-        .filter(user::Column::Address.eq(admin_address))
+        .filter(user::Column::Address.eq(admin_address.as_bytes()))
         .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
@@ -287,7 +279,7 @@ pub async fn admin_login_get(
         caller: sea_orm::Set(admin.id),
         imitating_user: sea_orm::Set(Some(user.id)),
         endpoint: sea_orm::Set("admin_login_get".to_string()),
-        payload: sea_orm::Set(format!("{:?}", params)),
+        payload: sea_orm::Set(format!("{}", json!(params))),
         ..Default::default()
     };
     trail

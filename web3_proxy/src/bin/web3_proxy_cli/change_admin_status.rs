@@ -26,15 +26,12 @@ impl ChangeAdminStatusSubCommand {
         let address: Address = self.address.parse()?;
         let should_be_admin: bool = self.should_be_admin;
 
-        // we keep "address" around for use in logs
-        let address_vec: Vec<u8> = address.to_fixed_bytes().into();
-
         // Find user in database
         let user = user::Entity::find()
-            .filter(user::Column::Address.eq(address_vec))
+            .filter(user::Column::Address.eq(address.as_bytes()))
             .one(db_conn)
             .await?
-            .context(format!("No user with this id found {:?}", address))?;
+            .context(format!("No user with this address found {:?}", address))?;
 
         debug!("user: {:#}", json!(&user));
 
@@ -59,7 +56,7 @@ impl ChangeAdminStatusSubCommand {
                 info!("granted admin status");
             }
             _ => {
-                info!("no change needed for: {:#?}", user);
+                info!("no change needed for: {:#}", json!(user));
                 // Since no change happened, we do not want to delete active logins. Return now.
                 return Ok(());
             }

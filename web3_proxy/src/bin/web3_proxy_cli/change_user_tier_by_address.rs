@@ -24,11 +24,9 @@ pub struct ChangeUserTierByAddressSubCommand {
 
 impl ChangeUserTierByAddressSubCommand {
     pub async fn main(self, db_conn: &DatabaseConnection) -> anyhow::Result<()> {
-        let address: Vec<u8> = self.user_address.to_fixed_bytes().into();
-
         // use the address to get the user
         let user = user::Entity::find()
-            .filter(user::Column::Address.eq(address))
+            .filter(user::Column::Address.eq(self.user_address.as_bytes()))
             .one(db_conn)
             .await?
             .context("No user found with that key")?;

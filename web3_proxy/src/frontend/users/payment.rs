@@ -282,7 +282,7 @@ pub async fn user_balance_post(
             );
 
             let recipient = match user::Entity::find()
-                .filter(user::Column::Address.eq(recipient_account.to_fixed_bytes().as_slice()))
+                .filter(user::Column::Address.eq(recipient_account.as_bytes()))
                 .one(&txn)
                 .await?
             {

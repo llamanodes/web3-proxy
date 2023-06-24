@@ -16,7 +16,7 @@ pub struct CreateKeySubCommand {
     /// If a string is given, it will be converted to hex and potentially truncated.
     /// Users from strings are only for testing since they won't be able to log in.
     #[argh(positional)]
-    address: String,
+    address: Address,
 
     /// the user's api ULID or UUID key.
     /// If none given, one will be created.
@@ -30,27 +30,9 @@ pub struct CreateKeySubCommand {
 
 impl CreateKeySubCommand {
     pub async fn main(self, db: &sea_orm::DatabaseConnection) -> anyhow::Result<()> {
-        // TODO: would be nice to use the fixed array instead of a Vec in the entities
-        // take a simple String. If it starts with 0x, parse as address. otherwise convert ascii to hex
-        let address: Vec<u8> = if self.address.starts_with("0x") {
-            let address = self.address.parse::<Address>()?;
-
-            address.to_fixed_bytes().into()
-        } else {
-            // TODO: allow ENS
-            // left pad and truncate the string
-            let address = &format!("{:\x00>20}", self.address)[0..20];
-
-            // convert the string to bytes
-            let bytes = address.as_bytes();
-
-            // convert the slice to a Vec
-            bytes.try_into().expect("Bytes can always be a Vec<u8>")
-        };
-
         // TODO: get existing or create a new one
         let u = user::Entity::find()
-            .filter(user::Column::Address.eq(address))
+            .filter(user::Column::Address.eq(self.address.as_bytes()))
             .one(db)
             .await?
             .context("No user found with that address")?;

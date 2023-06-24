@@ -26,7 +26,7 @@ pub async fn query_admin_modify_usertier<'a>(
     params: &'a HashMap<String, String>,
 ) -> Web3ProxyResponse {
     // Quickly return if any of the input tokens are bad
-    let user_address: Vec<u8> = params
+    let user_address = params
         .get("user_address")
         .ok_or_else(|| {
             Web3ProxyError::BadRequest("Unable to find user_address key in request".into())
@@ -34,9 +34,7 @@ pub async fn query_admin_modify_usertier<'a>(
         .parse::<Address>()
         .map_err(|_| {
             Web3ProxyError::BadRequest("Unable to parse user_address as an Address".into())
-        })?
-        .to_fixed_bytes()
-        .into();
+        })?;
     let user_tier_title = params.get("user_tier_title").ok_or_else(|| {
         Web3ProxyError::BadRequest("Unable to get the user_tier_title key from the request".into())
     })?;
@@ -78,7 +76,7 @@ pub async fn query_admin_modify_usertier<'a>(
 
     // Fetch the admin, and the user
     let user: user::Model = user::Entity::find()
-        .filter(user::Column::Address.eq(user_address))
+        .filter(user::Column::Address.eq(user_address.as_bytes()))
         .one(&db_conn)
         .await?
         .ok_or(Web3ProxyError::BadRequest(

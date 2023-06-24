@@ -125,7 +125,7 @@ impl UserImportSubCommand {
         for import_u in us.into_iter() {
             // first, check if a user already exists with this address
             if let Some(existing_u) = user::Entity::find()
-                .filter(user::Column::Address.eq(import_u.address.clone()))
+                .filter(user::Column::Address.eq(import_u.address))
                 .one(db_conn)
                 .await?
             {
