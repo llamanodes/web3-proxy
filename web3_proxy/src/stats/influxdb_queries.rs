@@ -20,9 +20,9 @@ use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
-use log::{debug, error, trace, warn};
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
+use tracing::{debug, error, trace, warn};
 use ulid::Ulid;
 
 pub async fn query_user_stats<'a>(

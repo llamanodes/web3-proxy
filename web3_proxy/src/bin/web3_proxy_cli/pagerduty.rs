@@ -1,6 +1,7 @@
 use argh::FromArgs;
-use log::{error, info};
 use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
+use serde_json::json;
+use tracing::{error, info};
 use web3_proxy::{
     config::TopConfig,
     pagerduty::{pagerduty_alert, pagerduty_alert_for_config},
@@ -68,18 +69,15 @@ impl PagerdutySubCommand {
             });
 
         if let Some(pagerduty_async) = pagerduty_async {
-            info!(
-                "sending to pagerduty: {}",
-                serde_json::to_string_pretty(&event)?
-            );
+            info!("sending to pagerduty: {:#}", json!(&event));
 
             if let Err(err) = pagerduty_async.event(Event::AlertTrigger(event)).await {
                 error!("Failed sending to pagerduty: {}", err);
             }
         } else {
             info!(
-                "would send to pagerduty if PAGERDUTY_INTEGRATION_KEY were set: {}",
-                serde_json::to_string_pretty(&event)?
+                "would send to pagerduty if PAGERDUTY_INTEGRATION_KEY were set: {:#}",
+                json!(&event)
             );
         }
 

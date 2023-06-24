@@ -2,11 +2,12 @@ use anyhow::Context;
 use argh::FromArgs;
 use entities::user;
 use ethers::types::Address;
-use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
+use serde_json::json;
+use tracing::{debug, info};
 
 /// change a user's address.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
@@ -35,7 +36,7 @@ impl ChangeUserAddressSubCommand {
             .await?
             .context("No user found with that address")?;
 
-        debug!("initial user: {:#?}", u);
+        debug!("initial user: {:#}", json!(&u));
 
         if u.address == new_address {
             info!("user already has this address");

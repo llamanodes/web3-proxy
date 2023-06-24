@@ -1,3 +1,4 @@
+#![feature(build_hasher_simple_hash_one)]
 #![feature(let_chains)]
 #![feature(trait_alias)]
 

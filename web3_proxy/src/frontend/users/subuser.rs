@@ -15,7 +15,6 @@ use entities::{balance, rpc_key, secondary_user, user};
 use ethers::types::Address;
 use hashbrown::HashMap;
 use http::StatusCode;
-use log::trace;
 use migration::sea_orm;
 use migration::sea_orm::ActiveModelTrait;
 use migration::sea_orm::ColumnTrait;
@@ -25,6 +24,7 @@ use migration::sea_orm::QueryFilter;
 use migration::sea_orm::TransactionTrait;
 use serde_json::json;
 use std::sync::Arc;
+use tracing::trace;
 use ulid::{self, Ulid};
 
 pub async fn get_keys_as_subuser(

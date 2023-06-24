@@ -3,7 +3,6 @@ use argh::FromArgs;
 use entities::{rpc_accounting, rpc_key};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use log::{error, info};
 use migration::sea_orm::QueryOrder;
 use migration::sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, UpdateResult,
@@ -14,6 +13,7 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::time::Instant;
+use tracing::{error, info};
 use ulid::Ulid;
 use web3_proxy::app::BILLING_PERIOD_SECONDS;
 use web3_proxy::config::TopConfig;
@@ -250,7 +250,6 @@ impl MigrateStatsToV2 {
 
         // Wait for any tasks that are on-going
         while let Some(x) = important_background_handles.next().await {
-            info!("Returned item is: {:?}", x);
             match x {
                 Err(e) => {
                     error!("{:?}", e);
@@ -261,8 +260,6 @@ impl MigrateStatsToV2 {
                 Ok(Ok(_)) => {
                     // TODO: how can we know which handle exited?
                     info!("a background handle exited");
-                    // Pop it in this case?
-                    continue;
                 }
             }
         }

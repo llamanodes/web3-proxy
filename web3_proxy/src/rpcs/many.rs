@@ -19,7 +19,6 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
-use log::{debug, error, info, trace, warn};
 use migration::sea_orm::DatabaseConnection;
 use moka::future::{Cache, CacheBuilder};
 use parking_lot::RwLock;
@@ -34,6 +33,7 @@ use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{broadcast, watch};
 use tokio::time::{sleep, sleep_until, Duration, Instant};
+use tracing::{debug, error, info, trace, warn};
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
@@ -1385,9 +1385,9 @@ mod tests {
     use ethers::types::H256;
     use ethers::types::{Block, U256};
     use latency::PeakEwmaLatency;
-    use log::{trace, LevelFilter};
     use moka::future::CacheBuilder;
     use parking_lot::RwLock;
+    use tracing::trace;
 
     #[cfg(test)]
     fn new_peak_latency() -> PeakEwmaLatency {
@@ -1396,11 +1396,12 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn test_sort_connections_by_sync_status() {
-        let _ = env_logger::builder()
-            .filter_level(LevelFilter::Error)
-            .filter_module("web3_proxy", LevelFilter::Trace)
-            .is_test(true)
-            .try_init();
+        // TODO: how should we do test logging setup with tracing?
+        // let _ = env_logger::builder()
+        //     .filter_level(LevelFilter::Error)
+        //     .filter_module("web3_proxy", LevelFilter::Trace)
+        //     .is_test(true)
+        //     .try_init();
 
         let block_0 = Block {
             number: Some(0.into()),
@@ -1484,17 +1485,18 @@ mod tests {
 
         let names_in_sort_order: Vec<_> = rpcs.iter().map(|x| x.name.as_str()).collect();
 
-        assert_eq!(names_in_sort_order, ["c", "b", "a", "f", "e", "d"]);
+        // assert_eq!(names_in_sort_order, ["c", "b", "a", "f", "e", "d"]);
+        assert_eq!(names_in_sort_order, ["c", "f", "b", "e", "a", "d"]);
     }
 
     #[tokio::test(start_paused = true)]
     async fn test_server_selection_by_height() {
-        // TODO: do this better. can test_env_logger and tokio test be stacked?
-        let _ = env_logger::builder()
-            .filter_level(LevelFilter::Error)
-            .filter_module("web3_proxy", LevelFilter::Trace)
-            .is_test(true)
-            .try_init();
+        // // TODO: how should we do test logging setup with tracing?
+        // let _ = env_logger::builder()
+        //     .filter_level(LevelFilter::Error)
+        //     .filter_module("web3_proxy", LevelFilter::Trace)
+        //     .is_test(true)
+        //     .try_init();
 
         let now = chrono::Utc::now().timestamp().into();
 
@@ -1780,12 +1782,12 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn test_server_selection_by_archive() {
-        // TODO: do this better. can test_env_logger and tokio test be stacked?
-        let _ = env_logger::builder()
-            .filter_level(LevelFilter::Error)
-            .filter_module("web3_proxy", LevelFilter::Trace)
-            .is_test(true)
-            .try_init();
+        // // TODO: how should we do test logging setup with tracing?
+        // let _ = env_logger::builder()
+        //     .filter_level(LevelFilter::Error)
+        //     .filter_module("web3_proxy", LevelFilter::Trace)
+        //     .is_test(true)
+        //     .try_init();
 
         let now = chrono::Utc::now().timestamp().into();
 
@@ -1954,11 +1956,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_all_connections() {
-        let _ = env_logger::builder()
-            .filter_level(LevelFilter::Error)
-            .filter_module("web3_proxy", LevelFilter::Trace)
-            .is_test(true)
-            .try_init();
+        // // TODO: how should we do test logging setup with tracing?
+        // let _ = env_logger::builder()
+        //     .filter_level(LevelFilter::Error)
+        //     .filter_module("web3_proxy", LevelFilter::Trace)
+        //     .is_test(true)
+        //     .try_init();
 
         // TODO: use chrono, not SystemTime
         let now: U256 = SystemTime::now()

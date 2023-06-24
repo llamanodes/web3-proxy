@@ -9,13 +9,13 @@ use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::ProviderError;
 use ethers::types::{Address, Bytes};
-use log::{debug, error, trace, warn, Level};
 use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
 use nanorand::Rng;
 use serde_json::json;
 use std::sync::atomic;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
+use tracing::{debug, error, trace, warn, Level};
 
 #[derive(Debug, From)]
 pub enum OpenRequestResult {
@@ -69,10 +69,10 @@ struct EthCallFirstParams {
 impl From<Level> for RequestErrorHandler {
     fn from(level: Level) -> Self {
         match level {
-            Level::Trace => RequestErrorHandler::TraceLevel,
-            Level::Debug => RequestErrorHandler::DebugLevel,
-            Level::Error => RequestErrorHandler::ErrorLevel,
-            Level::Warn => RequestErrorHandler::WarnLevel,
+            Level::TRACE => RequestErrorHandler::TraceLevel,
+            Level::DEBUG => RequestErrorHandler::DebugLevel,
+            Level::ERROR => RequestErrorHandler::ErrorLevel,
+            Level::WARN => RequestErrorHandler::WarnLevel,
             _ => unimplemented!("unexpected tracing Level"),
         }
     }

@@ -19,7 +19,7 @@ use itertools::Itertools;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TryIntoModel,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -35,11 +35,47 @@ pub async fn rpc_keys_get(
         .db_replica()
         .web3_context("db_replica is required to fetch a user's keys")?;
 
-    let uks = rpc_key::Entity::find()
+    // This is basically completely copied from sea-orm. Not optimal, but it keeps the format identical to before (while adding the final key)
+    // We could also pack the below stuff into it's subfield, but then we would destroy the format. Both options are fine for now though
+    #[derive(Serialize)]
+    struct ReturnType<'a> {
+        id: u64,
+        user_id: u64,
+        secret_key: RpcSecretKey,
+        description: Option<String>,
+        private_txs: bool,
+        active: bool,
+        allowed_ips: Option<String>,
+        allowed_origins: Option<String>,
+        allowed_referers: Option<String>,
+        allowed_user_agents: Option<String>,
+        log_revert_chance: f64,
+        // Addition
+        // role is optional only to handle an inconsistent database. it should always be set
+        role: Option<&'a Role>,
+    }
+
+    let uks: Vec<ReturnType> = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(user.id))
         .all(db_replica.as_ref())
         .await
-        .web3_context("failed loading user's key")?;
+        .web3_context("failed loading user's key")?
+        .into_iter()
+        .map(|x| ReturnType {
+            id: x.id,
+            user_id: x.user_id,
+            secret_key: x.secret_key.into(),
+            description: x.description,
+            private_txs: x.private_txs,
+            active: x.active,
+            allowed_ips: x.allowed_ips,
+            allowed_origins: x.allowed_origins,
+            allowed_referers: x.allowed_referers,
+            allowed_user_agents: x.allowed_user_agents,
+            log_revert_chance: x.log_revert_chance,
+            role: Some(&Role::Owner),
+        })
+        .collect::<Vec<_>>();
 
     let secondary_user_entities = secondary_user::Entity::find()
         .filter(secondary_user::Column::UserId.eq(user.id))
@@ -50,25 +86,36 @@ pub async fn rpc_keys_get(
         .collect::<HashMap<u64, secondary_user::Model>>();
 
     // Now return a list of all subusers (their wallets)
-    let rpc_key_entities: Vec<rpc_key::Model> = rpc_key::Entity::find()
+    let secondary_rpc_key_entities: Vec<ReturnType> = rpc_key::Entity::find()
         .filter(
-            rpc_key::Column::Id.is_in(
-                secondary_user_entities
-                    .iter()
-                    .map(|(x, _)| *x)
-                    .collect::<Vec<_>>(),
-            ),
+            rpc_key::Column::Id.is_in(secondary_user_entities.keys().copied().collect::<Vec<_>>()),
         )
         .all(db_replica.as_ref())
-        .await?;
+        .await?
+        .into_iter()
+        .map(|x| ReturnType {
+            id: x.id,
+            user_id: x.user_id,
+            secret_key: x.secret_key.into(),
+            description: x.description,
+            private_txs: x.private_txs,
+            active: x.active,
+            allowed_ips: x.allowed_ips,
+            allowed_origins: x.allowed_origins,
+            allowed_referers: x.allowed_referers,
+            allowed_user_agents: x.allowed_user_agents,
+            log_revert_chance: x.log_revert_chance,
+            role: secondary_user_entities.get(&x.id).map(|x| &x.role),
+        })
+        .collect::<Vec<_>>();
 
     let response_json = json!({
         "user_id": user.id,
         "user_rpc_keys": uks
             .into_iter()
             .map(|uk| (uk.id, uk))
-            .chain(rpc_key_entities.into_iter().map(|sk| (sk.id, sk)))
-            .collect::<HashMap::<_, _>>(),
+            .chain(secondary_rpc_key_entities.into_iter().map(|sk| (sk.id, sk)))
+            .collect::<HashMap::<_, _>>()
     });
 
     Ok(Json(response_json).into_response())

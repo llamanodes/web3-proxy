@@ -21,7 +21,6 @@ use futures::TryFutureExt;
 use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
-use log::{error, trace, warn};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{self, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use migration::{Expr, OnConflict};
@@ -31,6 +30,7 @@ use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
@@ -42,14 +42,32 @@ use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
+use tracing::{error, trace, warn};
 use ulid::Ulid;
 use uuid::Uuid;
 
 /// This lets us use UUID and ULID while we transition to only ULIDs
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize)]
 pub enum RpcSecretKey {
     Ulid(Ulid),
     Uuid(Uuid),
+}
+
+/// always serialize as a ULID.
+impl Serialize for RpcSecretKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Ulid(x) => x.serialize(serializer),
+            Self::Uuid(x) => {
+                let x: Ulid = x.to_owned().into();
+
+                x.serialize(serializer)
+            }
+        }
+    }
 }
 
 /// TODO: should this have IpAddr and Origin or AuthorizationChecks?
@@ -678,10 +696,10 @@ impl Authorization {
         Self::try_new(
             authorization_checks,
             db_conn,
-            ip,
+            &ip,
             None,
             None,
-            user_agent,
+            user_agent.as_ref(),
             AuthorizationType::Internal,
         )
     }
@@ -689,15 +707,15 @@ impl Authorization {
     pub fn external(
         allowed_origin_requests_per_period: &HashMap<String, u64>,
         db_conn: Option<DatabaseConnection>,
-        ip: IpAddr,
-        origin: Option<Origin>,
+        ip: &IpAddr,
+        origin: Option<&Origin>,
         proxy_mode: ProxyMode,
-        referer: Option<Referer>,
-        user_agent: Option<UserAgent>,
+        referer: Option<&Referer>,
+        user_agent: Option<&UserAgent>,
     ) -> Web3ProxyResult<Self> {
         // some origins can override max_requests_per_period for anon users
+        // TODO: i don't like the `to_string` here
         let max_requests_per_period = origin
-            .as_ref()
             .map(|origin| {
                 allowed_origin_requests_per_period
                     .get(&origin.to_string())
@@ -726,54 +744,54 @@ impl Authorization {
     pub fn try_new(
         authorization_checks: AuthorizationChecks,
         db_conn: Option<DatabaseConnection>,
-        ip: IpAddr,
-        origin: Option<Origin>,
-        referer: Option<Referer>,
-        user_agent: Option<UserAgent>,
+        ip: &IpAddr,
+        origin: Option<&Origin>,
+        referer: Option<&Referer>,
+        user_agent: Option<&UserAgent>,
         authorization_type: AuthorizationType,
     ) -> Web3ProxyResult<Self> {
         // check ip
         match &authorization_checks.allowed_ips {
             None => {}
             Some(allowed_ips) => {
-                if !allowed_ips.iter().any(|x| x.contains(&ip)) {
-                    return Err(Web3ProxyError::IpNotAllowed(ip));
+                if !allowed_ips.iter().any(|x| x.contains(ip)) {
+                    return Err(Web3ProxyError::IpNotAllowed(ip.to_owned()));
                 }
             }
         }
 
         // check origin
-        match (&origin, &authorization_checks.allowed_origins) {
+        match (origin, &authorization_checks.allowed_origins) {
             (None, None) => {}
             (Some(_), None) => {}
             (None, Some(_)) => return Err(Web3ProxyError::OriginRequired),
             (Some(origin), Some(allowed_origins)) => {
                 if !allowed_origins.contains(origin) {
-                    return Err(Web3ProxyError::OriginNotAllowed(origin.clone()));
+                    return Err(Web3ProxyError::OriginNotAllowed(origin.to_owned()));
                 }
             }
         }
 
         // check referer
-        match (&referer, &authorization_checks.allowed_referers) {
+        match (referer, &authorization_checks.allowed_referers) {
             (None, None) => {}
             (Some(_), None) => {}
             (None, Some(_)) => return Err(Web3ProxyError::RefererRequired),
             (Some(referer), Some(allowed_referers)) => {
                 if !allowed_referers.contains(referer) {
-                    return Err(Web3ProxyError::RefererNotAllowed(referer.clone()));
+                    return Err(Web3ProxyError::RefererNotAllowed(referer.to_owned()));
                 }
             }
         }
 
         // check user_agent
-        match (&user_agent, &authorization_checks.allowed_user_agents) {
+        match (user_agent, &authorization_checks.allowed_user_agents) {
             (None, None) => {}
             (Some(_), None) => {}
             (None, Some(_)) => return Err(Web3ProxyError::UserAgentRequired),
             (Some(user_agent), Some(allowed_user_agents)) => {
                 if !allowed_user_agents.contains(user_agent) {
-                    return Err(Web3ProxyError::UserAgentNotAllowed(user_agent.clone()));
+                    return Err(Web3ProxyError::UserAgentNotAllowed(user_agent.to_owned()));
                 }
             }
         }
@@ -781,10 +799,10 @@ impl Authorization {
         Ok(Self {
             checks: authorization_checks,
             db_conn,
-            ip,
-            origin,
-            referer,
-            user_agent,
+            ip: *ip,
+            origin: origin.cloned(),
+            referer: referer.cloned(),
+            user_agent: user_agent.cloned(),
             authorization_type,
         })
     }
@@ -809,8 +827,8 @@ pub async fn login_is_authorized(app: &Web3ProxyApp, ip: IpAddr) -> Web3ProxyRes
 /// keep the semaphore alive until the user's request is entirely complete
 pub async fn ip_is_authorized(
     app: &Arc<Web3ProxyApp>,
-    ip: IpAddr,
-    origin: Option<Origin>,
+    ip: &IpAddr,
+    origin: Option<&Origin>,
     proxy_mode: ProxyMode,
 ) -> Web3ProxyResult<(Authorization, Option<OwnedSemaphorePermit>)> {
     // TODO: i think we could write an `impl From` for this
@@ -836,6 +854,8 @@ pub async fn ip_is_authorized(
     // in the background, add the ip to a recent_users map
     if app.config.public_recent_ips_salt.is_some() {
         let app = app.clone();
+        let ip = *ip;
+
         let f = async move {
             let now = Utc::now().timestamp();
 
@@ -875,12 +895,12 @@ pub async fn ip_is_authorized(
 /// keep the semaphore alive until the user's request is entirely complete
 pub async fn key_is_authorized(
     app: &Arc<Web3ProxyApp>,
-    rpc_key: RpcSecretKey,
-    ip: IpAddr,
-    origin: Option<Origin>,
+    rpc_key: &RpcSecretKey,
+    ip: &IpAddr,
+    origin: Option<&Origin>,
     proxy_mode: ProxyMode,
-    referer: Option<Referer>,
-    user_agent: Option<UserAgent>,
+    referer: Option<&Referer>,
+    user_agent: Option<&UserAgent>,
 ) -> Web3ProxyResult<(Authorization, Option<OwnedSemaphorePermit>)> {
     // check the rate limits. error if over the limit
     // TODO: i think this should be in an "impl From" or "impl Into"
@@ -1035,7 +1055,7 @@ impl Web3ProxyApp {
         let authorization = Authorization::external(
             &self.config.allowed_origin_requests_per_period,
             self.db_conn(),
-            ip,
+            &ip,
             None,
             proxy_mode,
             None,
@@ -1084,8 +1104,8 @@ impl Web3ProxyApp {
     pub async fn rate_limit_by_ip(
         &self,
         allowed_origin_requests_per_period: &HashMap<String, u64>,
-        ip: IpAddr,
-        origin: Option<Origin>,
+        ip: &IpAddr,
+        origin: Option<&Origin>,
         proxy_mode: ProxyMode,
     ) -> Web3ProxyResult<RateLimitResult> {
         if ip.is_loopback() {
@@ -1109,12 +1129,12 @@ impl Web3ProxyApp {
 
         if let Some(rate_limiter) = &self.frontend_ip_rate_limiter {
             match rate_limiter
-                .throttle(ip, authorization.checks.max_requests_per_period, 1)
+                .throttle(*ip, authorization.checks.max_requests_per_period, 1)
                 .await
             {
                 Ok(DeferredRateLimitResult::Allowed) => {
                     // rate limit allowed us. check concurrent request limits
-                    let semaphore = self.ip_semaphore(&ip).await?;
+                    let semaphore = self.ip_semaphore(ip).await?;
 
                     Ok(RateLimitResult::Allowed(authorization, semaphore))
                 }
@@ -1134,14 +1154,14 @@ impl Web3ProxyApp {
                     error!("rate limiter is unhappy. allowing ip. err={:?}", err);
 
                     // at least we can still check the semaphore
-                    let semaphore = self.ip_semaphore(&ip).await?;
+                    let semaphore = self.ip_semaphore(ip).await?;
 
                     Ok(RateLimitResult::Allowed(authorization, semaphore))
                 }
             }
         } else {
             // no redis, but we can still check the ip semaphore
-            let semaphore = self.ip_semaphore(&ip).await?;
+            let semaphore = self.ip_semaphore(ip).await?;
 
             // TODO: if no redis, rate limit with a local cache? "warn!" probably isn't right
             Ok(RateLimitResult::Allowed(authorization, semaphore))
@@ -1217,10 +1237,10 @@ impl Web3ProxyApp {
     pub(crate) async fn authorization_checks(
         &self,
         proxy_mode: ProxyMode,
-        rpc_secret_key: RpcSecretKey,
+        rpc_secret_key: &RpcSecretKey,
     ) -> Web3ProxyResult<AuthorizationChecks> {
         self.rpc_secret_key_cache
-            .try_get_with_by_ref(&rpc_secret_key, async move {
+            .try_get_with_by_ref(rpc_secret_key, async move {
                 // trace!(?rpc_secret_key, "user cache miss");
 
                 let db_replica = self
@@ -1231,7 +1251,7 @@ impl Web3ProxyApp {
                 // TODO: join on secondary users
                 // TODO: join on user tier
                 match rpc_key::Entity::find()
-                    .filter(rpc_key::Column::SecretKey.eq(<Uuid>::from(rpc_secret_key)))
+                    .filter(rpc_key::Column::SecretKey.eq(<Uuid>::from(*rpc_secret_key)))
                     .filter(rpc_key::Column::Active.eq(true))
                     .one(db_replica.as_ref())
                     .await?
@@ -1354,7 +1374,7 @@ impl Web3ProxyApp {
                             max_requests_per_period: user_tier_model.max_requests_per_period,
                             private_txs: rpc_key_model.private_txs,
                             proxy_mode,
-                            rpc_secret_key: Some(rpc_secret_key),
+                            rpc_secret_key: Some(*rpc_secret_key),
                             rpc_secret_key_id: rpc_key_id,
                             user_id: rpc_key_model.user_id,
                         })
@@ -1369,12 +1389,12 @@ impl Web3ProxyApp {
     /// Authorized the ip/origin/referer/useragent and rate limit and concurrency
     pub async fn rate_limit_by_rpc_key(
         &self,
-        ip: IpAddr,
-        origin: Option<Origin>,
+        ip: &IpAddr,
+        origin: Option<&Origin>,
         proxy_mode: ProxyMode,
-        referer: Option<Referer>,
-        rpc_key: RpcSecretKey,
-        user_agent: Option<UserAgent>,
+        referer: Option<&Referer>,
+        rpc_key: &RpcSecretKey,
+        user_agent: Option<&UserAgent>,
     ) -> Web3ProxyResult<RateLimitResult> {
         let authorization_checks = self.authorization_checks(proxy_mode, rpc_key).await?;
 
@@ -1455,19 +1475,19 @@ impl Authorization {
         app: &Arc<Web3ProxyApp>,
     ) -> Web3ProxyResult<(Arc<Self>, Option<OwnedSemaphorePermit>)> {
         // TODO: we could probably do this without clones. but this is easy
-        let (a, s) = if let Some(rpc_secret_key) = self.checks.rpc_secret_key {
+        let (a, s) = if let Some(ref rpc_secret_key) = self.checks.rpc_secret_key {
             key_is_authorized(
                 app,
                 rpc_secret_key,
-                self.ip,
-                self.origin.clone(),
+                &self.ip,
+                self.origin.as_ref(),
                 self.checks.proxy_mode,
-                self.referer.clone(),
-                self.user_agent.clone(),
+                self.referer.as_ref(),
+                self.user_agent.as_ref(),
             )
             .await?
         } else {
-            ip_is_authorized(app, self.ip, self.origin.clone(), self.checks.proxy_mode).await?
+            ip_is_authorized(app, &self.ip, self.origin.as_ref(), self.checks.proxy_mode).await?
         };
 
         let a = Arc::new(a);

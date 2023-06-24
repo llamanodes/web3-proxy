@@ -7,12 +7,12 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     Future,
 };
-use log::{error, info};
 use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
 use serde_json::json;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, MissedTickBehavior};
+use tracing::{debug, error, info, warn, Level};
 use web3_proxy::{config::TopConfig, pagerduty::pagerduty_alert};
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
@@ -53,7 +53,7 @@ pub struct SentrydError {
     /// The class/type of the event, for example ping failure or cpu load
     class: String,
     /// Errors will send a pagerduty alert. others just give log messages
-    level: log::Level,
+    level: Level,
     /// A short summary that should be mostly static
     summary: String,
     /// Lots of detail about the error
@@ -64,7 +64,7 @@ pub struct SentrydError {
 #[derive(Clone)]
 pub struct SentrydErrorBuilder {
     class: String,
-    level: log::Level,
+    level: Level,
 }
 
 impl SentrydErrorBuilder {
@@ -125,9 +125,9 @@ impl SentrydSubCommand {
                 }
 
                 while let Some(err) = error_receiver.recv().await {
-                    log::log!(err.level, "check failed: {:#?}", err);
+                    if matches!(err.level, Level::ERROR) {
+                        warn!("check failed: {:#?}", err);
 
-                    if matches!(err.level, log::Level::Error) {
                         let alert = pagerduty_alert(
                             Some(chain_id),
                             Some(err.class),
@@ -142,10 +142,7 @@ impl SentrydSubCommand {
                         );
 
                         if let Some(ref pagerduty_async) = pagerduty_async {
-                            info!(
-                                "sending to pagerduty: {:#}",
-                                serde_json::to_string_pretty(&alert)?
-                            );
+                            info!("sending to pagerduty: {:#}", json!(&alert));
 
                             if let Err(err) =
                                 pagerduty_async.event(Event::AlertTrigger(alert)).await
@@ -153,6 +150,8 @@ impl SentrydSubCommand {
                                 error!("Failed sending to pagerduty: {:#?}", err);
                             }
                         }
+                    } else {
+                        debug!("check failed ({:?}): {:#?}", err.level, err);
                     }
                 }
 
@@ -181,7 +180,7 @@ impl SentrydSubCommand {
             let loop_f = a_loop(
                 "main /health",
                 seconds,
-                log::Level::Error,
+                Level::ERROR,
                 error_sender,
                 move |error_builder| simple::main(error_builder, url.clone(), timeout),
             );
@@ -206,7 +205,7 @@ impl SentrydSubCommand {
             let loop_f = a_loop(
                 "other /health",
                 seconds,
-                log::Level::Warn,
+                Level::WARN,
                 error_sender,
                 move |error_builder| simple::main(error_builder, url.clone(), timeout),
             );
@@ -228,7 +227,7 @@ impl SentrydSubCommand {
             let loop_f = a_loop(
                 "head block comparison",
                 seconds,
-                log::Level::Error,
+                Level::ERROR,
                 error_sender,
                 move |error_builder| {
                     compare::main(
@@ -257,7 +256,7 @@ impl SentrydSubCommand {
 async fn a_loop<T>(
     class: &str,
     seconds: u64,
-    error_level: log::Level,
+    error_level: Level,
     error_sender: mpsc::Sender<SentrydError>,
     f: impl Fn(SentrydErrorBuilder) -> T,
 ) -> anyhow::Result<()>

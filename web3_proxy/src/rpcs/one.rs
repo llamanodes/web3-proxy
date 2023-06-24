@@ -15,7 +15,6 @@ use ethers::types::{Address, Transaction, U256};
 use futures::future::try_join_all;
 use futures::StreamExt;
 use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
-use log::{debug, info, trace, warn, Level};
 use migration::sea_orm::DatabaseConnection;
 use nanorand::Rng;
 use parking_lot::RwLock;
@@ -30,6 +29,7 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::watch;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
+use tracing::{debug, info, trace, warn, Level};
 use url::Url;
 
 /// An active connection to a Web3 RPC server like geth or erigon.
@@ -244,7 +244,7 @@ impl Web3Rpc {
     /// TODO: tests on this!
     /// TODO: should tier or block number take priority?
     /// TODO: should this return a struct that implements sorting traits?
-    fn sort_on(&self, max_block: Option<U64>) -> (bool, u32, Reverse<U64>) {
+    fn sort_on(&self, max_block: Option<U64>) -> (bool, Reverse<U64>, u32) {
         let mut head_block = self
             .head_block
             .as_ref()
@@ -259,13 +259,13 @@ impl Web3Rpc {
 
         let backup = self.backup;
 
-        (!backup, tier, Reverse(head_block))
+        (!backup, Reverse(head_block), tier)
     }
 
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, u32, Reverse<U64>), Duration) {
+    ) -> ((bool, Reverse<U64>, u32), Duration) {
         let sort_on = self.sort_on(max_block);
 
         let weighted_peak_latency = self.weighted_peak_latency();
@@ -281,7 +281,7 @@ impl Web3Rpc {
     pub fn shuffle_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, u32, Reverse<U64>), u8) {
+    ) -> ((bool, Reverse<U64>, u32), u8) {
         let sort_on = self.sort_on(max_block);
 
         let mut rng = nanorand::tls_rng();
@@ -323,7 +323,7 @@ impl Web3Rpc {
                     "eth_blockNumber",
                     &(),
                     // error here are expected, so keep the level low
-                    Some(Level::Debug.into()),
+                    Some(Level::DEBUG.into()),
                     Some(Duration::from_secs(5)),
                 )
                 .await
@@ -347,7 +347,7 @@ impl Web3Rpc {
                         maybe_archive_block,
                     )),
                     // error here are expected, so keep the level low
-                    Some(Level::Trace.into()),
+                    Some(Level::TRACE.into()),
                     Some(Duration::from_secs(5)),
                 )
                 .await;
@@ -437,7 +437,7 @@ impl Web3Rpc {
             .internal_request(
                 "eth_chainId",
                 &(),
-                Some(Level::Trace.into()),
+                Some(Level::TRACE.into()),
                 Some(Duration::from_secs(5)),
             )
             .await?;
@@ -827,7 +827,7 @@ impl Web3Rpc {
                     "eth_getBlockByNumber",
                     &("latest", false),
                     &authorization,
-                    Some(Level::Warn.into()),
+                    Some(Level::WARN.into()),
                     Some(Duration::from_secs(5)),
                 )
                 .await;
@@ -863,7 +863,7 @@ impl Web3Rpc {
                         "eth_getBlockByNumber",
                         &("latest", false),
                         &authorization,
-                        Some(Level::Warn.into()),
+                        Some(Level::WARN.into()),
                         Some(Duration::from_secs(5)),
                     )
                     .await;

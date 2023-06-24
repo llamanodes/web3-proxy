@@ -15,7 +15,6 @@ use derive_more::{Display, Error, From};
 use ethers::prelude::ContractError;
 use http::header::InvalidHeaderValue;
 use ipnet::AddrParseError;
-use log::{debug, error, trace, warn};
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
 use reqwest::header::ToStrError;
@@ -25,6 +24,7 @@ use serde_json::value::RawValue;
 use std::sync::Arc;
 use std::{borrow::Cow, net::IpAddr};
 use tokio::{sync::AcquireError, task::JoinError, time::Instant};
+use tracing::{debug, error, trace, warn};
 
 pub type Web3ProxyResult<T> = Result<T, Web3ProxyError>;
 // TODO: take "IntoResponse" instead of Response?

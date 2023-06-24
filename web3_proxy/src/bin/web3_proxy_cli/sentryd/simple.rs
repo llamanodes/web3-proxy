@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use super::{SentrydErrorBuilder, SentrydResult};
 use anyhow::Context;
-use log::{debug, trace};
 use tokio::time::Instant;
+use tracing::{debug, trace};
 
 /// GET the url and return an error if it wasn't a success
 pub async fn main(

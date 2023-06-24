@@ -11,7 +11,6 @@ use hashbrown::{HashMap, HashSet};
 use hdrhistogram::serialization::{Serializer, V2DeflateSerializer};
 use hdrhistogram::Histogram;
 use itertools::{Itertools, MinMaxResult};
-use log::{debug, log_enabled, trace, warn, Level};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::{Ordering, Reverse};
@@ -21,6 +20,7 @@ use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time::Instant;
+use tracing::{debug, enabled, info, trace, warn, Level};
 
 #[derive(Clone, Serialize)]
 struct ConsensusRpcData {
@@ -64,12 +64,12 @@ impl RpcRanking {
         }
     }
 
-    fn sort_key(&self) -> (bool, u32, Reverse<Option<U64>>) {
+    fn sort_key(&self) -> (bool, Reverse<Option<U64>>, u32) {
         // TODO: add soft_limit here? add peak_ewma here?
         // TODO: should backup or tier be checked first? now that tiers are automated, backups
         // TODO: should we include a random number in here?
         // TODO: should we include peak_ewma_latency or weighted_peak_ewma_latency?
-        (!self.backup, self.tier, Reverse(self.head_num))
+        (!self.backup, Reverse(self.head_num), self.tier)
     }
 }
 
@@ -540,7 +540,7 @@ impl ConsensusFinder {
                             .web3_context("watch_consensus_head_sender failed sending rollback consensus_head_block")?;
                     }
                     Ordering::Greater => {
-                        debug!(
+                        info!(
                             "new {}/{} {}{}/{}/{} con={} rpc={}",
                             consensus_tier,
                             total_tiers,
@@ -685,7 +685,7 @@ impl ConsensusFinder {
                 }
 
                 // dev logging of a histogram
-                if log_enabled!(Level::Trace) {
+                if enabled!(Level::TRACE) {
                     // convert to ms because the histogram needs ints
                     let max_median_latency_ms = (max_median_latency_sec * 1000.0).ceil() as u64;
 
@@ -855,12 +855,8 @@ impl ConsensusFinder {
             .into_iter()
             .map(|(block, (rpc_names, sum_soft_limit))| (block, sum_soft_limit, rpc_names))
             .collect();
-        votes.sort_by_cached_key(|(block, sum_soft_limit, rpc_names)| {
-            (
-                Reverse(*block.number()),
-                Reverse(*sum_soft_limit),
-                Reverse(rpc_names.len()),
-            )
+        votes.sort_by_key(|(block, sum_soft_limit, _)| {
+            (Reverse(*block.number()), Reverse(*sum_soft_limit))
         });
 
         // return the first result that exceededs confgured minimums (if any)

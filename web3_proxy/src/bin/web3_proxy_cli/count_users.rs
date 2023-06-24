@@ -1,7 +1,7 @@
 use argh::FromArgs;
 use entities::user;
-use log::info;
 use migration::sea_orm::{self, EntityTrait, PaginatorTrait};
+use tracing::info;
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 /// Create a new user and api key

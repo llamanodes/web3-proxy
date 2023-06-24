@@ -5,14 +5,14 @@ use argh::FromArgs;
 use chrono::Utc;
 use ethers::types::U64;
 use ethers::types::{Block, TxHash};
-use log::info;
-use log::warn;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::time::sleep;
 use tokio::time::Duration;
+use tracing::info;
+use tracing::warn;
 
 #[derive(Debug, FromArgs)]
 /// Command line interface for admins to interact with web3_proxy
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "wait_for_sync=debug");
     }
 
-    env_logger::init();
+    // todo!("set up tracing");
 
     // this probably won't matter for us in docker, but better safe than sorry
     fdlimit::raise_fd_limit();

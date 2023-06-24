@@ -11,7 +11,9 @@ use axum::TypedHeader;
 use axum::{response::IntoResponse, Extension, Json};
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
+use http::HeaderMap;
 use itertools::Itertools;
+use std::net::IpAddr;
 use std::sync::Arc;
 
 /// POST /rpc -- Public entrypoint for HTTP JSON-RPC requests. Web3 wallets use this.
@@ -20,46 +22,42 @@ use std::sync::Arc;
 #[debug_handler]
 pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> Result<Response, Response> {
-    _proxy_web3_rpc(app, ip, origin, payload, ProxyMode::Best).await
+    _proxy_web3_rpc(app, &ip, origin.as_deref(), payload, ProxyMode::Best).await
 }
 
 #[debug_handler]
 pub async fn fastest_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> Result<Response, Response> {
     // TODO: read the fastest number from params
     // TODO: check that the app allows this without authentication
-    _proxy_web3_rpc(app, ip, origin, payload, ProxyMode::Fastest(0)).await
+    _proxy_web3_rpc(app, &ip, origin.as_deref(), payload, ProxyMode::Fastest(0)).await
 }
 
 #[debug_handler]
 pub async fn versus_proxy_web3_rpc(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> Result<Response, Response> {
-    _proxy_web3_rpc(app, ip, origin, payload, ProxyMode::Versus).await
+    _proxy_web3_rpc(app, &ip, origin.as_deref(), payload, ProxyMode::Versus).await
 }
 
 async fn _proxy_web3_rpc(
     app: Arc<Web3ProxyApp>,
-    InsecureClientIp(ip): InsecureClientIp,
-    origin: Option<TypedHeader<Origin>>,
+    ip: &IpAddr,
+    origin: Option<&Origin>,
     payload: JsonRpcRequestEnum,
     proxy_mode: ProxyMode,
 ) -> Result<Response, Response> {
-    // TODO: benchmark spawning this
-    // TODO: do we care about keeping the TypedHeader wrapper?
-    let origin = origin.map(|x| x.0);
-
     let first_id = payload.first_id();
 
     let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode)
@@ -78,7 +76,8 @@ async fn _proxy_web3_rpc(
 
     let mut response = (status_code, Json(response)).into_response();
 
-    let headers = response.headers_mut();
+    // TODO: DRY this up. same for public and private queries
+    let response_headers = response.headers_mut();
 
     // TODO: this might be slow. think about this more
     // TODO: special string if no rpcs were used (cache hit)?
@@ -94,12 +93,12 @@ async fn _proxy_web3_rpc(
         })
         .join(",");
 
-    headers.insert(
+    response_headers.insert(
         "X-W3P-BACKEND-RPCS",
         rpcs.parse().expect("W3P-BACKEND-RPCS should always parse"),
     );
 
-    headers.insert(
+    response_headers.insert(
         "X-W3P-BACKUP-RPC",
         backup_used
             .to_string()
@@ -117,7 +116,7 @@ async fn _proxy_web3_rpc(
 #[debug_handler]
 pub async fn proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
@@ -126,10 +125,10 @@ pub async fn proxy_web3_rpc_with_key(
 ) -> Result<Response, Response> {
     _proxy_web3_rpc_with_key(
         app,
-        ip,
-        origin,
-        referer,
-        user_agent,
+        &ip,
+        origin.as_deref(),
+        referer.as_deref(),
+        user_agent.as_deref(),
         rpc_key,
         payload,
         ProxyMode::Best,
@@ -138,34 +137,54 @@ pub async fn proxy_web3_rpc_with_key(
 }
 
 // TODO: if a /debug/ request gets rejected by an invalid request, there won't be any kafka log
-// TODO:
 #[debug_handler]
+#[allow(clippy::too_many_arguments)]
 pub async fn debug_proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
+    request_headers: HeaderMap,
     Path(rpc_key): Path<String>,
     Json(payload): Json<JsonRpcRequestEnum>,
 ) -> Result<Response, Response> {
-    _proxy_web3_rpc_with_key(
+    let mut response = match _proxy_web3_rpc_with_key(
         app,
-        ip,
-        origin,
-        referer,
-        user_agent,
+        &ip,
+        origin.as_deref(),
+        referer.as_deref(),
+        user_agent.as_deref(),
         rpc_key,
         payload,
         ProxyMode::Debug,
     )
     .await
+    {
+        Ok(r) => r,
+        Err(r) => r,
+    };
+
+    // add some headers that might be useful while debugging
+    let response_headers = response.headers_mut();
+
+    if let Some(x) = request_headers.get("x-amzn-trace-id").cloned() {
+        response_headers.insert("x-amzn-trace-id", x);
+    }
+
+    if let Some(x) = request_headers.get("x-balance-id").cloned() {
+        response_headers.insert("x-balance-id", x);
+    }
+
+    response_headers.insert("client-ip", ip.to_string().parse().unwrap());
+
+    Ok(response)
 }
 
 #[debug_handler]
 pub async fn fastest_proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
@@ -174,10 +193,10 @@ pub async fn fastest_proxy_web3_rpc_with_key(
 ) -> Result<Response, Response> {
     _proxy_web3_rpc_with_key(
         app,
-        ip,
-        origin,
-        referer,
-        user_agent,
+        &ip,
+        origin.as_deref(),
+        referer.as_deref(),
+        user_agent.as_deref(),
         rpc_key,
         payload,
         ProxyMode::Fastest(0),
@@ -188,7 +207,7 @@ pub async fn fastest_proxy_web3_rpc_with_key(
 #[debug_handler]
 pub async fn versus_proxy_web3_rpc_with_key(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
@@ -197,10 +216,10 @@ pub async fn versus_proxy_web3_rpc_with_key(
 ) -> Result<Response, Response> {
     _proxy_web3_rpc_with_key(
         app,
-        ip,
-        origin,
-        referer,
-        user_agent,
+        &ip,
+        origin.as_deref(),
+        referer.as_deref(),
+        user_agent.as_deref(),
         rpc_key,
         payload,
         ProxyMode::Versus,
@@ -211,10 +230,10 @@ pub async fn versus_proxy_web3_rpc_with_key(
 #[allow(clippy::too_many_arguments)]
 async fn _proxy_web3_rpc_with_key(
     app: Arc<Web3ProxyApp>,
-    InsecureClientIp(ip): InsecureClientIp,
-    origin: Option<TypedHeader<Origin>>,
-    referer: Option<TypedHeader<Referer>>,
-    user_agent: Option<TypedHeader<UserAgent>>,
+    ip: &IpAddr,
+    origin: Option<&Origin>,
+    referer: Option<&Referer>,
+    user_agent: Option<&UserAgent>,
     rpc_key: String,
     payload: JsonRpcRequestEnum,
     proxy_mode: ProxyMode,
@@ -227,17 +246,10 @@ async fn _proxy_web3_rpc_with_key(
         .parse()
         .map_err(|e: Web3ProxyError| e.into_response_with_id(first_id.clone()))?;
 
-    let (authorization, _semaphore) = key_is_authorized(
-        &app,
-        rpc_key,
-        ip,
-        origin.map(|x| x.0),
-        proxy_mode,
-        referer.map(|x| x.0),
-        user_agent.map(|x| x.0),
-    )
-    .await
-    .map_err(|e| e.into_response_with_id(first_id.clone()))?;
+    let (authorization, _semaphore) =
+        key_is_authorized(&app, &rpc_key, ip, origin, proxy_mode, referer, user_agent)
+            .await
+            .map_err(|e| e.into_response_with_id(first_id.clone()))?;
 
     let authorization = Arc::new(authorization);
 

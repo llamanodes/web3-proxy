@@ -1,11 +1,12 @@
 use anyhow::Context;
 use argh::FromArgs;
 use entities::{rpc_key, user, user_tier};
-use log::{debug, info};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
+use serde_json::json;
+use tracing::{debug, info};
 use uuid::Uuid;
 use web3_proxy::frontend::authorization::RpcSecretKey;
 
@@ -34,7 +35,7 @@ impl ChangeUserTierByKeySubCommand {
             .await?
             .context("No user tier found with that name")?;
 
-        debug!("user_tier: {:#?}", user_tier);
+        debug!("user_tier: {:#}", json!(&user_tier));
 
         // use the rpc secret key to get the user
         let user = user::Entity::find()
@@ -44,7 +45,7 @@ impl ChangeUserTierByKeySubCommand {
             .await?
             .context("No user found with that key")?;
 
-        debug!("user: {:#?}", user);
+        debug!("user: {:#}", json!(&user));
 
         if user.user_tier_id == user_tier.id {
             info!("user already has that tier");

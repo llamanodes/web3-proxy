@@ -37,7 +37,6 @@ use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
 use hashbrown::{HashMap, HashSet};
-use log::{error, info, trace, warn, Level};
 use migration::sea_orm::{DatabaseTransaction, EntityTrait, PaginatorTrait, TransactionTrait};
 use moka::future::{Cache, CacheBuilder};
 use parking_lot::RwLock;
@@ -55,6 +54,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
+use tracing::{error, info, trace, warn, Level};
 
 // TODO: make this customizable?
 // TODO: include GIT_REF in here. i had trouble getting https://docs.rs/vergen/latest/vergen/ to work with a workspace. also .git is in .dockerignore
@@ -1072,7 +1072,7 @@ impl Web3ProxyApp {
                         None,
                         None,
                         Some(Duration::from_secs(30)),
-                        Some(Level::Trace.into()),
+                        Some(Level::TRACE.into()),
                         None,
                         true,
                     )
@@ -1103,7 +1103,7 @@ impl Web3ProxyApp {
                 None,
                 None,
                 Some(Duration::from_secs(30)),
-                Some(Level::Trace.into()),
+                Some(Level::TRACE.into()),
                 num_public_rpcs,
                 true,
             )

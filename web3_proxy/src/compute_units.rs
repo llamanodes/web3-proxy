@@ -6,9 +6,9 @@
 //! TODO: pricing on compute units
 //! TODO: script that queries influx and calculates observed relative costs
 
-use log::warn;
 use migration::sea_orm::prelude::Decimal;
 use std::str::FromStr;
+use tracing::warn;
 
 pub struct ComputeUnit(Decimal);
 
