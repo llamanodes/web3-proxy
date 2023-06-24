@@ -29,7 +29,7 @@ use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
-use tracing::{trace, warn};
+use tracing::{error, trace, warn};
 use ulid::Ulid;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
@@ -38,8 +38,7 @@ use ulid::Ulid;
 ///   - eip191_bytes
 ///   - eip191_hash
 ///   - eip4361 (default)
-///
-/// Coming soon: eip1271
+///   - eip1271
 ///
 /// This is the initial entrypoint for logging in. Take the response from this endpoint and give it to your user's wallet for singing. POST the response to `/user/login`.
 ///
@@ -102,6 +101,13 @@ pub async fn user_login_get(
     };
 
     let db_conn = app.db_conn().web3_context("login requires a database")?;
+
+    // delete ALL expired rows.
+    let now = Utc::now();
+    let _ = pending_login::Entity::delete_many()
+        .filter(pending_login::Column::ExpiresAt.lte(now))
+        .exec(&db_conn)
+        .await?;
 
     // massage types to fit in the database. sea-orm does not make this very elegant
     let uuid = Uuid::from_u128(nonce.into());
@@ -234,11 +240,8 @@ pub async fn user_login_post(
         .db_replica()
         .web3_context("Getting database connection")?;
 
-    // massage type for the db
-    let login_nonce_uuid: Uuid = login_nonce.clone().into();
-
     let user_pending_login = pending_login::Entity::find()
-        .filter(pending_login::Column::Nonce.eq(login_nonce_uuid))
+        .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce.clone())))
         .one(db_replica.as_ref())
         .await
         .web3_context("database error while finding pending_login")?
@@ -249,40 +252,17 @@ pub async fn user_login_post(
         .parse()
         .web3_context("parsing siwe message")?;
 
-    // default options are fine. the message includes timestamp and domain and nonce
-    let verify_config = VerificationOpts::default();
+    // mostly default options are fine. the message includes timestamp and domain and nonce
+    let verify_config = VerificationOpts {
+        rpc_provider: Some(app.internal_provider.clone()),
+        ..Default::default()
+    };
 
     // Check with both verify and verify_eip191
-    if let Err(err_1) = our_msg
+    our_msg
         .verify(&their_sig, &verify_config)
         .await
-        .web3_context("verifying signature against our local message")
-    {
-        // verification method 1 failed. try eip191
-        if let Err(err_191) = our_msg
-            .verify_eip191(&their_sig)
-            .web3_context("verifying eip191 signature against our local message")
-        {
-            let db_conn = app
-                .db_conn()
-                .web3_context("deleting expired pending logins requires a db")?;
-
-            // delete ALL expired rows.
-            let now = Utc::now();
-            let delete_result = pending_login::Entity::delete_many()
-                .filter(pending_login::Column::ExpiresAt.lte(now))
-                .exec(&db_conn)
-                .await?;
-
-            // TODO: emit a stat? if this is high something weird might be happening
-            trace!("cleared expired pending_logins: {:?}", delete_result);
-
-            return Err(Web3ProxyError::EipVerificationFailed(
-                Box::new(err_1),
-                Box::new(err_191),
-            ));
-        }
-    }
+        .web3_context("verifying signature against our local message")?;
 
     // TODO: limit columns or load whole user?
     let caller = user::Entity::find()
@@ -356,11 +336,7 @@ pub async fn user_login_post(
                     .one(&txn)
                     .await?
                     .ok_or(Web3ProxyError::BadRequest(
-                        format!(
-                            "The referral_link you provided does not exist {}",
-                            referral_code
-                        )
-                        .into(),
+                        "The referral_link you provided does not exist".into(),
                     ))?;
 
                 // Create a new item in the database,
@@ -430,7 +406,7 @@ pub async fn user_login_post(
         .delete(&db_conn)
         .await
     {
-        warn!("Failed to delete nonce:{}: {}", login_nonce.0, err);
+        error!("Failed to delete nonce:{}: {}", login_nonce, err);
     }
 
     Ok(response)

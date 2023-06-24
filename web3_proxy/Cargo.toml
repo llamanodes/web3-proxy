@@ -25,7 +25,7 @@ redis-rate-limiter = { path = "../redis-rate-limiter" }
 #ethers = { git = "https://github.com/llamanodes/ethers-rs/", rev = "eb68f5d60850008cd302762bd3a5a4bdcfecc713", default-features = false, features = ["rustls", "ws"] }
 influxdb2 = { git = "https://github.com/llamanodes/influxdb2", features = ["rustls"], rev = "2d125128696a29d7e0b9abc052c928937e7c0579" }
 influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/", rev = "2d125128696a29d7e0b9abc052c928937e7c0579"}
-#siwe = { git = "https://github.com/llamanodes/siwe-rs", rev = "bef5449b5dd8beb4e9fc697f09cd6dd11ba8f6e6", features = ["ethers", "serde"] }
+siwe = { git = "https://github.com/llamanodes/siwe-rs", rev = "013be5204ff1c85778ce21619f4b677a003db8a1", features = ["ethers", "serde"] }
 
 # TODO: regex has several "perf" features that we might want to use
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude
@@ -89,7 +89,6 @@ sentry-tracing = "0.31.5"
 serde = { version = "1.0.164" }
 serde_json = { version = "1.0.99", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
-siwe = { version = "0.5.2", features = ["serde"] }
 strum = { version = "0.25.0", features = ["derive"] }
 time = { version = "0.3.22", features = ["serde-well-known"] }
 tokio = { version = "1.28.2", features = ["full", "tracing"] }

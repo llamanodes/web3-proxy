@@ -252,6 +252,16 @@ pub async fn admin_login_get(
         .db_replica()
         .web3_context("login requires a replica database")?;
 
+    // delete ALL expired rows.
+    let now = Utc::now();
+    let delete_result = pending_login::Entity::delete_many()
+        .filter(pending_login::Column::ExpiresAt.lte(now))
+        .exec(&db_conn)
+        .await?;
+
+    // TODO: emit a stat? if this is high something weird might be happening
+    debug!("cleared expired pending_logins: {:?}", delete_result);
+
     // Get the user that we want to imitate from the read-only database (their id ...)
     // TODO: Only get the id, not the whole user object ...
     let user = user::Entity::find()
@@ -404,39 +414,16 @@ pub async fn admin_login_post(
         .parse()
         .web3_context("parsing siwe message")?;
 
-    // default options are fine. the message includes timestamp and domain and nonce
-    let verify_config = VerificationOpts::default();
+    // mostly default options are fine. the message includes timestamp and domain and nonce
+    let verify_config = VerificationOpts {
+        rpc_provider: Some(app.internal_provider.clone()),
+        ..Default::default()
+    };
 
-    let db_conn = app
-        .db_conn()
-        .web3_context("deleting expired pending logins requires a db")?;
-
-    if let Err(err_1) = our_msg
+    our_msg
         .verify(&their_sig, &verify_config)
         .await
-        .web3_context("verifying signature against our local message")
-    {
-        // verification method 1 failed. try eip191
-        if let Err(err_191) = our_msg
-            .verify_eip191(&their_sig)
-            .web3_context("verifying eip191 signature against our local message")
-        {
-            // delete ALL expired rows.
-            let now = Utc::now();
-            let delete_result = pending_login::Entity::delete_many()
-                .filter(pending_login::Column::ExpiresAt.lte(now))
-                .exec(&db_conn)
-                .await?;
-
-            // TODO: emit a stat? if this is high something weird might be happening
-            debug!("cleared expired pending_logins: {:?}", delete_result);
-
-            return Err(Web3ProxyError::EipVerificationFailed(
-                Box::new(err_1),
-                Box::new(err_191),
-            ));
-        }
-    }
+        .web3_context("verifying signature against our local message")?;
 
     let imitating_user_id = user_pending_login
         .imitating_user
@@ -455,6 +442,10 @@ pub async fn admin_login_post(
         .one(db_replica.as_ref())
         .await?
         .web3_context("admin address was not found!")?;
+
+    let db_conn = app
+        .db_conn()
+        .web3_context("deleting expired pending logins requires a db")?;
 
     // Add a message that the admin has logged in
     // Note that the admin is trying to log in as this user
@@ -500,9 +491,7 @@ pub async fn admin_login_post(
     // add bearer to the database
 
     // expire in 2 days, because this is more critical (and shouldn't need to be done so long!)
-    let expires_at = Utc::now()
-        .checked_add_signed(chrono::Duration::days(2))
-        .unwrap();
+    let expires_at = Utc::now() + chrono::Duration::days(2);
 
     // TODO: Here, the bearer token should include a message
     // TODO: Above, make sure that the calling address is an admin!

@@ -21,6 +21,7 @@ use reqwest::header::ToStrError;
 use rust_decimal::Error as DecimalError;
 use serde::Serialize;
 use serde_json::value::RawValue;
+use siwe::VerificationError;
 use std::sync::Arc;
 use std::{borrow::Cow, net::IpAddr};
 use tokio::{sync::AcquireError, task::JoinError, time::Instant};
@@ -54,8 +55,6 @@ pub enum Web3ProxyError {
     Contract(ContractError<EthersHttpProvider>),
     Database(DbErr),
     Decimal(DecimalError),
-    #[display(fmt = "{:#?}, {:#?}", _0, _1)]
-    EipVerificationFailed(Box<Web3ProxyError>, Box<Web3ProxyError>),
     EthersHttpClient(ethers::prelude::HttpClientError),
     EthersProvider(ethers::prelude::ProviderError),
     EthersWsClient(ethers::prelude::WsClientError),
@@ -133,6 +132,7 @@ pub enum Web3ProxyError {
     SemaphoreAcquireError(AcquireError),
     SendAppStatError(flume::SendError<crate::stats::AppStat>),
     SerdeJson(serde_json::Error),
+    SiweVerification(VerificationError),
     /// simple way to return an error message to the user and an anyhow to our logs
     #[display(fmt = "{}, {}, {:?}", _0, _1, _2)]
     StatusCode(StatusCode, Cow<'static, str>, Option<anyhow::Error>),
@@ -148,7 +148,6 @@ pub enum Web3ProxyError {
     UserAgentNotAllowed(headers::UserAgent),
     UserIdZero,
     PaymentRequired,
-    VerificationError(siwe::VerificationError),
     WatchRecvError(tokio::sync::watch::error::RecvError),
     WatchSendError,
     WebsocketOnly,
@@ -267,20 +266,12 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::EipVerificationFailed(err_1, err_191) => {
-                trace!(
-                    "EipVerificationFailed err_1={:#?} err2={:#?}",
-                    err_1,
-                    err_191
-                );
+            Self::SiweVerification(err) => {
+                trace!("Siwe Verification err={:#?}", err,);
                 (
                     StatusCode::UNAUTHORIZED,
                     JsonRpcErrorData {
-                        message: format!(
-                            "both the primary and eip191 verification failed: {:#?}; {:#?}",
-                            err_1, err_191
-                        )
-                        .into(),
+                        message: format!("siwe verification error: {:#?}", err).into(),
                         code: StatusCode::UNAUTHORIZED.as_u16().into(),
                         data: None,
                     },
@@ -955,17 +946,6 @@ impl Web3ProxyError {
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
                         message: "user ids should always be non-zero".into(),
-                        code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
-                    },
-                )
-            }
-            Self::VerificationError(err) => {
-                trace!("VerificationError err={:#?}", err);
-                (
-                    StatusCode::BAD_REQUEST,
-                    JsonRpcErrorData {
-                        message: "verification error!".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
