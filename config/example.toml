@@ -47,6 +47,8 @@ redirect_rpc_key_url = "https://llamanodes.com/dashboard/keys?key={{rpc_key_id}}
 # sentry is optional. it is used for browsing error logs
 # sentry_url = "https://SENTRY_KEY_A.ingest.sentry.io/SENTRY_KEY_B"
 
+stripe_api_key = ""
+
 # public limits are when no key is used. these are instead grouped by ip
 # 0 = block all public requests
 public_max_concurrent_requests = 3

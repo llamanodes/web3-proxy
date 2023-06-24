@@ -19,7 +19,7 @@ use entities::{
 use ethers::abi::AbiEncode;
 use ethers::types::{Address, Block, TransactionReceipt, TxHash, H256};
 use hashbrown::{HashMap, HashSet};
-use http::StatusCode;
+use http::{HeaderMap, StatusCode};
 use log::{debug, error, info, trace};
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
@@ -34,9 +34,9 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 use stripe::Webhook;
 
-/// `GET /user/stripe/deposits` -- Use a bearer token to get the user's balance and spend.
+/// `GET /user/balance/stripe` -- Use a bearer token to get the user's balance and spend.
 ///
-/// - shows a list of all deposits, including their chain-id, amount and tx-hash
+/// - shows a list of all stripe deposits, all fields from entity
 #[debug_handler]
 pub async fn user_stripe_deposits_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -61,11 +61,13 @@ pub async fn user_stripe_deposits_get(
     Ok(Json(response).into_response())
 }
 
-/// `POST /user/balance/stripe/` -- Process a confirmed txid to update a user's balance.
+/// `POST /user/balance/stripe/` -- Process a stripe transaction;
+/// this endpoint is called from the webhook with the user_id parameter in the request
 #[debug_handler]
 pub async fn user_balance_stripe_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: Option<InsecureClientIp>,
+    ip: InsecureClientIp,
+    headers: HeaderMap,
     Path(mut params): Path<HashMap<String, String>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
 ) -> Web3ProxyResponse {
@@ -77,12 +79,10 @@ pub async fn user_balance_stripe_post(
         let authorization = Web3ProxyAuthorization::internal(app.db_conn())?;
 
         (authorization, Some(semaphore))
-    } else if let Some(InsecureClientIp(ip)) = ip {
-        let authorization = login_is_authorized(&app, ip).await?;
-
-        (authorization, None)
     } else {
-        return Err(Web3ProxyError::AccessDenied);
+        let InsecureClientIp(ip) = ip;
+        let authorization = login_is_authorized(&app, ip).await?;
+        (authorization, None)
     };
 
     let recipient_user_id: u64 = params
@@ -97,19 +97,23 @@ pub async fn user_balance_stripe_post(
     ))?;
 
     // TODO Get this from the header
-    let signature = params
-        .remove("STRIPE_SIGNATURE")
+    let signature = headers
+        .get("STRIPE_SIGNATURE")
         .ok_or(Web3ProxyError::BadRequest(
             "You have not provided a 'STRIPE_SIGNATURE' for the Stripe payload".into(),
-        ))?;
+        ))?
+        .to_str()
+        .web3_context("Could not parse stripe signature as byte-string")?;
 
     // Now parse the payload and signature
     // TODO: Move env variable elsewhere
     let event = Webhook::construct_event(
         &payload,
         &signature,
-        std::env::var("STRIPE_API_KEY")
-            .expect("STRIPE_API_KEY must be set.")
+        app.config
+            .stripe_api_key
+            .clone()
+            .web3_context("Stripe API key not found in config!")?
             .as_str(),
     )
     .context(Web3ProxyError::BadRequest(
@@ -122,7 +126,7 @@ pub async fn user_balance_stripe_post(
     };
     debug!("Found PaymentIntent Event: {:?}", intent);
 
-    if intent.status.to_string() != "succeeded" {
+    if intent.status.as_str() != "succeeded" {
         return Ok("Received Webhook".into_response());
     }
 
