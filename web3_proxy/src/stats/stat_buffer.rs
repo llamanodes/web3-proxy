@@ -27,6 +27,7 @@ pub struct BufferedRpcQueryStats {
     pub sum_response_bytes: u64,
     pub sum_response_millis: u64,
     pub sum_credits_used: Decimal,
+    pub sum_cu_used: Decimal,
     /// The user's balance at this point in time. Multiple queries might be modifying it at once.
     pub latest_balance: Arc<RwLock<Balance>>,
 }
