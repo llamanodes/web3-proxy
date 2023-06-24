@@ -1954,15 +1954,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn test_all_connections() {
-        // // TODO: how should we do test logging setup with tracing?
-        // let _ = env_logger::builder()
-        //     .filter_level(LevelFilter::Error)
-        //     .filter_module("web3_proxy", LevelFilter::Trace)
-        //     .is_test(true)
-        //     .try_init();
-
         // TODO: use chrono, not SystemTime
         let now: U256 = SystemTime::now()
             .duration_since(UNIX_EPOCH)

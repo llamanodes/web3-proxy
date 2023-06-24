@@ -258,6 +258,7 @@ mod tests {
     };
     use hashbrown::HashMap;
     use std::env;
+    use tokio::task::JoinHandle;
 
     use web3_proxy::{
         config::{AppConfig, Web3RpcConfig},
@@ -266,26 +267,17 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn it_works() {
         // TODO: move basic setup into a test fixture
         let path = env::var("PATH").unwrap();
 
-        println!("path: {}", path);
+        info!("path: {}", path);
 
-        // TODO: how should we handle logs in this?
-        // TODO: option for super verbose logs
-        std::env::set_var(
-            "RUST_LOG",
-            "info,ethers_providers::rpc=off,web3_proxy=debug",
-        );
-
-        // TODO: how should we do test logging setup with tracing?
-        // let _ = env_logger::builder().is_test(true).try_init();
-
+        // todo: fork polygon so we can test our payment contracts
         let anvil = Anvil::new().spawn();
 
-        println!("Anvil running at `{}`", anvil.endpoint());
+        info!("Anvil running at `{}`", anvil.endpoint());
 
         let anvil_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
@@ -306,8 +298,6 @@ mod tests {
                 min_synced_rpcs: 1,
                 public_requests_per_period: Some(1_000_000),
                 response_cache_max_bytes: 10_u64.pow(7),
-                redirect_public_url: Some("example.com/".to_string()),
-                redirect_rpc_key_url: Some("example.com/{{rpc_key_id}}".to_string()),
                 ..Default::default()
             },
             balanced_rpcs: HashMap::from([
@@ -328,6 +318,7 @@ mod tests {
                     },
                 ),
                 (
+                    // TODO: i don't think "both" is working
                     "anvil_both".to_string(),
                     Web3RpcConfig {
                         http_url: Some(anvil.endpoint()),
@@ -345,7 +336,7 @@ mod tests {
 
         // spawn another thread for running the app
         // TODO: allow launching into the local tokio runtime instead of creating a new one?
-        let handle = {
+        let app_handle = {
             let frontend_port = 0;
             let prometheus_port = 0;
             let shutdown_sender = shutdown_sender.clone();
@@ -400,11 +391,12 @@ mod tests {
 
         assert_eq!(first_block_num, second_block_num - 1);
 
+        // TODO: how do we make fixtures run this at the end?
         // tell the test app to shut down
         shutdown_sender.send(()).unwrap();
 
-        println!("waiting for shutdown...");
+        info!("waiting for shutdown...");
         // TODO: panic if a timeout is reached
-        handle.await.unwrap().unwrap();
+        app_handle.await.unwrap().unwrap();
     }
 }
