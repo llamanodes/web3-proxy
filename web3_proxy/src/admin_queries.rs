@@ -54,7 +54,7 @@ pub async fn query_admin_modify_usertier<'a>(
     let caller_id =
         get_user_id_from_params(&mut redis_conn, db_conn, db_replica, bearer, params).await?;
 
-    trace!("Caller id is: {:?}", caller_id);
+    trace!(%caller_id, "query_admin_modify_usertier");
 
     // Check if the caller is an admin (i.e. if he is in an admin table)
     let _admin: admin::Model = admin::Entity::find()

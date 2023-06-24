@@ -63,9 +63,9 @@ pub async fn user_login_get(
 
     let nonce = Ulid::new();
 
-    let issued_at = OffsetDateTime::now_utc();
+    let now = OffsetDateTime::now_utc();
 
-    let expiration_time = issued_at.add(Duration::new(expire_seconds as i64, 0));
+    let expiration_time = now.add(Duration::new(expire_seconds as i64, 0));
 
     // TODO: allow ENS names here?
     let user_address: Address = params
@@ -93,7 +93,7 @@ pub async fn user_login_get(
         version: siwe::Version::V1,
         chain_id: app.config.chain_id,
         expiration_time: Some(expiration_time.into()),
-        issued_at: issued_at.into(),
+        issued_at: now.into(),
         nonce: nonce.to_string(),
         not_before: None,
         request_id: None,
@@ -102,15 +102,20 @@ pub async fn user_login_get(
 
     let db_conn = app.db_conn()?;
 
-    // delete ALL expired rows.
-    let now = Utc::now();
-    let _ = pending_login::Entity::delete_many()
-        .filter(pending_login::Column::ExpiresAt.lte(now))
+    // delete any expired logins
+    let expired_logins = login::Entity::delete_many()
+        .filter(login::Column::ExpiresAt.lte(now))
         .exec(db_conn)
-        .await?;
+        .await;
+    trace!(?expired_logins, "deleted");
 
-    // massage types to fit in the database. sea-orm does not make this very elegant
-    let uuid = Uuid::from_u128(nonce.into());
+    // delete any expired pending logins
+    let expired_pending_logins = pending_login::Entity::delete_many()
+        .filter(login::Column::ExpiresAt.lte(now))
+        .exec(db_conn)
+        .await;
+    trace!(?expired_pending_logins, "deleted");
+
     // we add 1 to expire_seconds just to be sure the database has the key for the full expiration_time
     let expires_at = Utc
         .timestamp_opt(expiration_time.unix_timestamp() + 1, 0)
@@ -120,7 +125,7 @@ pub async fn user_login_get(
     // add a row to the database for this user
     let user_pending_login = pending_login::ActiveModel {
         id: sea_orm::NotSet,
-        nonce: sea_orm::Set(uuid),
+        nonce: sea_orm::Set(nonce.into()),
         message: sea_orm::Set(message.to_string()),
         expires_at: sea_orm::Set(expires_at),
         imitating_user: sea_orm::Set(None),
@@ -388,7 +393,7 @@ pub async fn user_login_post(
 
     let user_login = login::ActiveModel {
         id: sea_orm::NotSet,
-        bearer_token: sea_orm::Set(user_bearer_token.uuid()),
+        bearer_token: sea_orm::Set(user_bearer_token.into()),
         user_id: sea_orm::Set(caller.id),
         expires_at: sea_orm::Set(expires_at),
         read_only: sea_orm::Set(false),
@@ -423,24 +428,6 @@ pub async fn user_logout_post(
     {
         warn!("Failed to delete {}: {}", user_bearer.redis_key(), err);
     }
-
-    let now = Utc::now();
-
-    // also delete any expired logins
-    let delete_result = login::Entity::delete_many()
-        .filter(login::Column::ExpiresAt.lte(now))
-        .exec(db_conn)
-        .await;
-
-    trace!("Deleted expired logins: {:?}", delete_result);
-
-    // also delete any expired pending logins
-    let delete_result = login::Entity::delete_many()
-        .filter(login::Column::ExpiresAt.lte(now))
-        .exec(db_conn)
-        .await;
-
-    trace!("Deleted expired pending logins: {:?}", delete_result);
 
     // TODO: what should the response be? probably json something
     Ok("goodbye".into_response())

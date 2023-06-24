@@ -47,7 +47,7 @@ pub async fn admin_increase_balance(
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
-    let (caller, _) = app.bearer_is_authorized(bearer).await?;
+    let (caller, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     let caller_id = caller.id;
 
@@ -59,7 +59,10 @@ pub async fn admin_increase_balance(
         .filter(admin::Column::UserId.eq(caller_id))
         .one(&txn)
         .await?
-        .ok_or(Web3ProxyError::AccessDenied)?;
+        .ok_or_else(|| {
+            warn!(%caller_id, "not an admin");
+            Web3ProxyError::AccessDenied
+        })?;
 
     // Get the user from params
     let user_address: Address = params
@@ -72,6 +75,7 @@ pub async fn admin_increase_balance(
             Web3ProxyError::BadRequest("Unable to parse user_address as an Address".into())
         })?;
 
+    // Get the note from params
     let note: String = params
         .get("note")
         .ok_or_else(|| Web3ProxyError::BadRequest("Unable to find 'note' key in request".into()))?
@@ -311,11 +315,11 @@ pub async fn admin_imitate_login_get(
     Ok(message.into_response())
 }
 
-/// `POST /admin/login` - Admin login by posting a signed "siwe" message
+/// `POST /admin/imitate-login` - Admin login by posting a signed "siwe" message
 /// It is recommended to save the returned bearer token in a cookie.
 /// The bearer token can be used to authenticate other admin requests
 #[debug_handler]
-pub async fn admin_login_post(
+pub async fn admin_imitate_login_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     InsecureClientIp(ip): InsecureClientIp,
     Json(payload): Json<PostLogin>,
@@ -478,45 +482,4 @@ pub async fn admin_login_post(
     }
 
     Ok(response)
-}
-
-// TODO: This is basically an exact copy of the user endpoint, I should probabl refactor this code ...
-/// `POST /admin/imitate-logout` - Forget the bearer token in the `Authentication` header.
-#[debug_handler]
-pub async fn admin_logout_post(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> Web3ProxyResponse {
-    let user_bearer = UserBearerToken::try_from(bearer)?;
-
-    let db_conn = app.db_conn()?;
-
-    if let Err(err) = login::Entity::delete_many()
-        .filter(login::Column::BearerToken.eq(user_bearer.uuid()))
-        .exec(db_conn)
-        .await
-    {
-        debug!("Failed to delete {}: {}", user_bearer.redis_key(), err);
-    }
-
-    let now = Utc::now();
-
-    // also delete any expired logins
-    let delete_result = login::Entity::delete_many()
-        .filter(login::Column::ExpiresAt.lte(now))
-        .exec(db_conn)
-        .await;
-
-    debug!("Deleted expired logins: {:?}", delete_result);
-
-    // also delete any expired pending logins
-    let delete_result = login::Entity::delete_many()
-        .filter(login::Column::ExpiresAt.lte(now))
-        .exec(db_conn)
-        .await;
-
-    debug!("Deleted expired pending logins: {:?}", delete_result);
-
-    // TODO: what should the response be? probably json something
-    Ok("goodbye".into_response())
 }

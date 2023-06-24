@@ -216,15 +216,17 @@ pub async fn serve(
         )
         .route("/admin/modify_role", post(admin::admin_change_user_roles))
         .route(
-            "/admin/imitate-login/:admin_address/:user_address",
+            "/admin/imitate_login/:admin_address/:user_address",
             get(admin::admin_imitate_login_get),
         )
         .route(
-            "/admin/imitate-login/:admin_address/:user_address/:message_eip",
+            "/admin/imitate_login/:admin_address/:user_address/:message_eip",
             get(admin::admin_imitate_login_get),
         )
-        .route("/admin/imitate-login", post(admin::admin_login_post))
-        .route("/admin/imitate-logout", post(admin::admin_logout_post))
+        .route(
+            "/admin/imitate_login",
+            post(admin::admin_imitate_login_post),
+        )
         //
         // Axum layers
         // layers are ordered bottom up
