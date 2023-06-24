@@ -736,21 +736,16 @@ impl BufferedRpcQueryStats {
             .field("sum_request_bytes", self.sum_request_bytes as i64)
             .field("sum_response_millis", self.sum_response_millis as i64)
             .field("sum_response_bytes", self.sum_response_bytes as i64)
-            // TODO: will this be enough of a range
-            // I guess Decimal can be a f64
-            // TODO: This should prob be a float, i should change the query if we want float-precision for this (which would be important...)
             .field(
                 "sum_credits_used",
                 self.sum_credits_used
                     .to_f64()
-                    .context("number is really (too) large")?,
+                    .context("sum_credits_used is really (too) large")?,
             )
             .field(
                 "balance",
-                remaining.to_f64().context("number is really (too) large")?,
+                remaining.to_f64().context("balance is really (too) large")?,
             );
-
-        // .round() as i64
 
         builder = builder.timestamp(key.response_timestamp);
 

@@ -1340,6 +1340,7 @@ impl Web3ProxyApp {
                             if balance.total_deposit < Decimal::from(10)
                                 || balance.remaining() < Decimal::new(1, 2)
                             {
+                                // TODO: include boolean to mark that the user is downgraded
                                 user_tier_model =
                                     user_tier::Entity::find_by_id(downgrade_user_tier)
                                         .one(db_replica.as_ref())

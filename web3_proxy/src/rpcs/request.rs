@@ -1,5 +1,5 @@
 use super::one::Web3Rpc;
-use crate::errors::Web3ProxyResult;
+use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, AuthorizationType};
 use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use anyhow::Context;
@@ -118,11 +118,10 @@ impl Authorization {
         let rl = rl
             .save(db_conn)
             .await
-            .context("Failed saving new revert log")?;
+            .web3_context("Failed saving new revert log")?;
 
-        // TODO: what log level?
-        // TODO: better format
-        trace!("revert_log: {:?}", rl);
+        // TODO: what log level and format?
+        trace!(revert_log=?rl);
 
         // TODO: return something useful
         Ok(())

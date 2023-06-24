@@ -217,11 +217,11 @@ pub async fn serve(
         .route("/admin/modify_role", post(admin::admin_change_user_roles))
         .route(
             "/admin/imitate-login/:admin_address/:user_address",
-            get(admin::admin_login_get),
+            get(admin::admin_imitate_login_get),
         )
         .route(
             "/admin/imitate-login/:admin_address/:user_address/:message_eip",
-            get(admin::admin_login_get),
+            get(admin::admin_imitate_login_get),
         )
         .route("/admin/imitate-login", post(admin::admin_login_post))
         .route("/admin/imitate-logout", post(admin::admin_logout_post))

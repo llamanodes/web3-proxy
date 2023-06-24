@@ -158,7 +158,7 @@ pub async fn admin_change_user_roles(
 /// - user_address that is to be logged in by
 /// We assume that the admin has already logged in, and has a bearer token ...
 #[debug_handler]
-pub async fn admin_login_get(
+pub async fn admin_imitate_login_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(mut params): Path<HashMap<String, String>>,
@@ -229,15 +229,11 @@ pub async fn admin_login_get(
     let db_conn = app.db_conn()?;
     let db_replica = app.db_replica()?;
 
-    // delete ALL expired rows.
-    let now = Utc::now();
-    let delete_result = pending_login::Entity::delete_many()
-        .filter(pending_login::Column::ExpiresAt.lte(now))
-        .exec(db_conn)
-        .await?;
-
-    // TODO: emit a stat? if this is high something weird might be happening
-    debug!("cleared expired pending_logins: {:?}", delete_result);
+    let admin = user::Entity::find()
+        .filter(user::Column::Address.eq(admin_address.as_bytes()))
+        .one(db_replica.as_ref())
+        .await?
+        .ok_or(Web3ProxyError::AccessDenied)?;
 
     // Get the user that we want to imitate from the read-only database (their id ...)
     // TODO: Only get the id, not the whole user object ...
@@ -249,24 +245,25 @@ pub async fn admin_login_get(
             "Could not find user in db".into(),
         ))?;
 
-    // TODO: Gotta check if encoding messes up things maybe ...
-    info!("Admin address is: {:?}", admin_address);
-    let admin = user::Entity::find()
-        .filter(user::Column::Address.eq(admin_address.as_bytes()))
-        .one(db_replica.as_ref())
-        .await?
-        .ok_or(Web3ProxyError::BadRequest(
-            "Could not find admin in db".into(),
-        ))?;
+    info!(admin=?admin.address, user=?user.address, "admin is imitating another user");
+
+    // delete ALL expired rows.
+    let now = Utc::now();
+    let delete_result = pending_login::Entity::delete_many()
+        .filter(pending_login::Column::ExpiresAt.lte(now))
+        .exec(db_conn)
+        .await?;
+    debug!("cleared expired pending_logins: {:?}", delete_result);
 
     // Note that the admin is trying to log in as this user
     let trail = admin_trail::ActiveModel {
         caller: sea_orm::Set(admin.id),
         imitating_user: sea_orm::Set(Some(user.id)),
-        endpoint: sea_orm::Set("admin_login_get".to_string()),
+        endpoint: sea_orm::Set("admin_imitate_login_get".to_string()),
         payload: sea_orm::Set(format!("{}", json!(params))),
         ..Default::default()
     };
+
     trail
         .save(db_conn)
         .await
@@ -275,8 +272,6 @@ pub async fn admin_login_get(
     // Can there be two login-sessions at the same time?
     // I supposed if the user logs in, the admin would be logged out and vice versa
 
-    // massage types to fit in the database. sea-orm does not make this very elegant
-    let uuid = Uuid::from_u128(nonce.into());
     // we add 1 to expire_seconds just to be sure the database has the key for the full expiration_time
     let expires_at = Utc
         .timestamp_opt(expiration_time.unix_timestamp() + 1, 0)
@@ -286,7 +281,7 @@ pub async fn admin_login_get(
     // add a row to the database for this user
     let user_pending_login = pending_login::ActiveModel {
         id: sea_orm::NotSet,
-        nonce: sea_orm::Set(uuid),
+        nonce: sea_orm::Set(nonce.into()),
         message: sea_orm::Set(message.to_string()),
         expires_at: sea_orm::Set(expires_at),
         imitating_user: sea_orm::Set(Some(user.id)),
@@ -316,9 +311,9 @@ pub async fn admin_login_get(
     Ok(message.into_response())
 }
 
-/// `POST /admin/login` - Register or login by posting a signed "siwe" message
+/// `POST /admin/login` - Admin login by posting a signed "siwe" message
 /// It is recommended to save the returned bearer token in a cookie.
-/// The bearer token can be used to authenticate other requests, such as getting user user's tats or modifying the user's profile
+/// The bearer token can be used to authenticate other admin requests
 #[debug_handler]
 pub async fn admin_login_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -372,12 +367,8 @@ pub async fn admin_login_post(
     // fetch the message we gave them from our database
     let db_replica = app.db_replica()?;
 
-    // massage type for the db
-    let login_nonce_uuid: Uuid = login_nonce.clone().into();
-
-    // TODO: Here we will need to re-find the parameter where the admin wants to log-in as the user ...
     let user_pending_login = pending_login::Entity::find()
-        .filter(pending_login::Column::Nonce.eq(login_nonce_uuid))
+        .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce.clone())))
         .one(db_replica.as_ref())
         .await
         .web3_context("database error while finding pending_login")?

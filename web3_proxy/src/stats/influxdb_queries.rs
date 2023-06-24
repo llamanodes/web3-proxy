@@ -147,7 +147,7 @@ pub async fn query_user_stats<'a>(
         .config
         .influxdb_bucket
         .clone()
-        .context("No influxdb bucket was provided")?; // "web3_proxy";
+        .context("No influxdb bucket was provided")?;
 
     trace!("Bucket is {:?}", bucket);
     let mut filter_chain_id = "".to_string();
