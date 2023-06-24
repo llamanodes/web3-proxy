@@ -20,7 +20,7 @@ use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time::Instant;
-use tracing::{debug, enabled, trace, warn, Level};
+use tracing::{debug, enabled, info, trace, warn, Level};
 
 #[derive(Clone, Serialize)]
 struct ConsensusRpcData {
