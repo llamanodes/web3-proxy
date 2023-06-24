@@ -540,7 +540,7 @@ impl ConsensusFinder {
                             .web3_context("watch_consensus_head_sender failed sending rollback consensus_head_block")?;
                     }
                     Ordering::Greater => {
-                        debug!(
+                        info!(
                             "new {}/{} {}{}/{}/{} con={} rpc={}",
                             consensus_tier,
                             total_tiers,
