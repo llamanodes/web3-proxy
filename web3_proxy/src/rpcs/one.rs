@@ -244,7 +244,7 @@ impl Web3Rpc {
     /// TODO: tests on this!
     /// TODO: should tier or block number take priority?
     /// TODO: should this return a struct that implements sorting traits?
-    fn sort_on(&self, max_block: Option<U64>) -> (bool, u32, Reverse<U64>) {
+    fn sort_on(&self, max_block: Option<U64>) -> (bool, Reverse<U64>, u32) {
         let mut head_block = self
             .head_block
             .as_ref()
@@ -259,13 +259,13 @@ impl Web3Rpc {
 
         let backup = self.backup;
 
-        (!backup, tier, Reverse(head_block))
+        (!backup, Reverse(head_block), tier)
     }
 
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, u32, Reverse<U64>), Duration) {
+    ) -> ((bool, Reverse<U64>, u32), Duration) {
         let sort_on = self.sort_on(max_block);
 
         let weighted_peak_latency = self.weighted_peak_latency();
@@ -281,7 +281,7 @@ impl Web3Rpc {
     pub fn shuffle_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, u32, Reverse<U64>), u8) {
+    ) -> ((bool, Reverse<U64>, u32), u8) {
         let sort_on = self.sort_on(max_block);
 
         let mut rng = nanorand::tls_rng();
