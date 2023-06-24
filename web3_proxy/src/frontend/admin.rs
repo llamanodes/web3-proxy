@@ -175,17 +175,7 @@ pub async fn admin_login_get(
     let issued_at = OffsetDateTime::now_utc();
     let expiration_time = issued_at.add(Duration::new(expire_seconds as i64, 0));
 
-    // The admin user is the one that basically logs in, on behalf of the user
-    // This will generate a login id for the admin, which we will be caching ...
-    // I suppose with this, the admin can be logged in to one session at a time
-    // let (caller, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
-
-    // Finally, check if the user is an admin. If he is, return "true" as the third triplet.
-    // TODO: consider wrapping the output in a struct, instead of a triplet
-    // TODO: Could try to merge this into the above query ...
-    // This query will fail if it's not the admin...
-
-    // get the admin field ...
+    // get the admin's address
     let admin_address: Address = params
         .get("admin_address")
         .ok_or_else(|| {
@@ -196,7 +186,7 @@ pub async fn admin_login_get(
             Web3ProxyError::BadRequest("Unable to parse admin_address as an Address".into())
         })?;
 
-    // Fetch the user_address parameter from the login string ... (as who we want to be logging in ...)
+    // get the address who we want to be logging in as
     let user_address: Address = params
         .get("user_address")
         .ok_or_else(|| {
@@ -208,29 +198,26 @@ pub async fn admin_login_get(
         })?;
 
     // We want to login to llamanodes.com
-    let login_domain = app
+    let domain = app
         .config
         .login_domain
         .as_deref()
         .unwrap_or("llamanodes.com");
 
-    // Also there must basically be a token, that says that one admin logins _as a user_.
-    // I'm not yet fully sure how to handle with that logic specifically ...
+    let message_domain = domain.parse()?;
+    // TODO: don't unwrap
+    let message_uri = format!("https://{}/", domain).parse().unwrap();
+
     // TODO: get most of these from the app config
-    // TODO: Let's check again who the message needs to be signed by;
-    // if the message does not have to be signed by the user, include the user ...
     let message = Message {
-        // TODO: don't unwrap
-        // TODO: accept a login_domain from the request?
-        domain: login_domain.parse().unwrap(),
+        domain: message_domain,
         // the admin needs to sign the message, not the imitated user
         address: admin_address.to_fixed_bytes(),
         // TODO: config for statement
-        statement: Some("🦙🦙🦙🦙🦙".to_string()),
-        // TODO: don't unwrap
-        uri: format!("https://{}/", login_domain).parse().unwrap(),
+        statement: Some("👑👑👑👑👑".to_string()),
+        uri: message_uri,
         version: siwe::Version::V1,
-        chain_id: 1,
+        chain_id: app.config.chain_id,
         expiration_time: Some(expiration_time.into()),
         issued_at: issued_at.into(),
         nonce: nonce.to_string(),
@@ -239,16 +226,14 @@ pub async fn admin_login_get(
         resources: vec![],
     };
 
-    let db_conn = app.db_conn().web3_context("login requires a database")?;
-    let db_replica = app
-        .db_replica()
-        .web3_context("login requires a replica database")?;
+    let db_conn = app.db_conn()?;
+    let db_replica = app.db_replica()?;
 
     // delete ALL expired rows.
     let now = Utc::now();
     let delete_result = pending_login::Entity::delete_many()
         .filter(pending_login::Column::ExpiresAt.lte(now))
-        .exec(&db_conn)
+        .exec(db_conn)
         .await?;
 
     // TODO: emit a stat? if this is high something weird might be happening
@@ -283,7 +268,7 @@ pub async fn admin_login_get(
         ..Default::default()
     };
     trail
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving user's pending_login")?;
 
@@ -308,7 +293,7 @@ pub async fn admin_login_get(
     };
 
     user_pending_login
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving an admin trail pre login")?;
 
@@ -385,9 +370,7 @@ pub async fn admin_login_post(
     })?;
 
     // fetch the message we gave them from our database
-    let db_replica = app
-        .db_replica()
-        .web3_context("Getting database connection")?;
+    let db_replica = app.db_replica()?;
 
     // massage type for the db
     let login_nonce_uuid: Uuid = login_nonce.clone().into();
@@ -434,9 +417,7 @@ pub async fn admin_login_post(
         .await?
         .web3_context("admin address was not found!")?;
 
-    let db_conn = app
-        .db_conn()
-        .web3_context("deleting expired pending logins requires a db")?;
+    let db_conn = app.db_conn()?;
 
     // Add a message that the admin has logged in
     // Note that the admin is trying to log in as this user
@@ -448,7 +429,7 @@ pub async fn admin_login_post(
         ..Default::default()
     };
     trail
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving an admin trail post login")?;
 
@@ -497,15 +478,11 @@ pub async fn admin_login_post(
     };
 
     user_login
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving user login")?;
 
-    if let Err(err) = user_pending_login
-        .into_active_model()
-        .delete(&db_conn)
-        .await
-    {
+    if let Err(err) = user_pending_login.into_active_model().delete(db_conn).await {
         warn!("Failed to delete nonce:{}: {}", login_nonce.0, err);
     }
 
@@ -521,13 +498,11 @@ pub async fn admin_logout_post(
 ) -> Web3ProxyResponse {
     let user_bearer = UserBearerToken::try_from(bearer)?;
 
-    let db_conn = app
-        .db_conn()
-        .web3_context("database needed for user logout")?;
+    let db_conn = app.db_conn()?;
 
     if let Err(err) = login::Entity::delete_many()
         .filter(login::Column::BearerToken.eq(user_bearer.uuid()))
-        .exec(&db_conn)
+        .exec(db_conn)
         .await
     {
         debug!("Failed to delete {}: {}", user_bearer.redis_key(), err);
@@ -538,7 +513,7 @@ pub async fn admin_logout_post(
     // also delete any expired logins
     let delete_result = login::Entity::delete_many()
         .filter(login::Column::ExpiresAt.lte(now))
-        .exec(&db_conn)
+        .exec(db_conn)
         .await;
 
     debug!("Deleted expired logins: {:?}", delete_result);
@@ -546,7 +521,7 @@ pub async fn admin_logout_post(
     // also delete any expired pending logins
     let delete_result = login::Entity::delete_many()
         .filter(login::Column::ExpiresAt.lte(now))
-        .exec(&db_conn)
+        .exec(db_conn)
         .await;
 
     debug!("Deleted expired pending logins: {:?}", delete_result);

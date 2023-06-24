@@ -46,9 +46,7 @@ pub async fn query_user_stats<'a>(
         ));
     }
 
-    let db_replica = app
-        .db_replica()
-        .context("query_user_stats needs a db replica")?;
+    let db_replica = app.db_replica()?;
 
     // TODO: have a getter for this. do we need a connection pool on it?
     let influxdb_client = app

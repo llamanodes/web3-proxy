@@ -515,7 +515,7 @@ impl Web3ProxyApp {
             Some(watch_consensus_head_sender),
         )
         .await
-        .context("spawning balanced rpcs")?;
+        .web3_context("spawning balanced rpcs")?;
 
         app_handles.push(balanced_handle);
 
@@ -546,7 +546,7 @@ impl Web3ProxyApp {
                 None,
             )
             .await
-            .context("spawning private_rpcs")?;
+            .web3_context("spawning private_rpcs")?;
 
             app_handles.push(private_handle);
 
@@ -573,7 +573,7 @@ impl Web3ProxyApp {
                 None,
             )
             .await
-            .context("spawning bundler_4337_rpcs")?;
+            .web3_context("spawning bundler_4337_rpcs")?;
 
             app_handles.push(bundler_4337_rpcs_handle);
 
@@ -646,7 +646,7 @@ impl Web3ProxyApp {
                     new_top_config_receiver
                         .changed()
                         .await
-                        .context("failed awaiting top_config change")?;
+                        .web3_context("failed awaiting top_config change")?;
                 }
             });
 
@@ -682,14 +682,14 @@ impl Web3ProxyApp {
         self.balanced_rpcs
             .apply_server_configs(self, new_top_config.balanced_rpcs)
             .await
-            .context("updating balanced rpcs")?;
+            .web3_context("updating balanced rpcs")?;
 
         if let Some(private_rpc_configs) = new_top_config.private_rpcs {
             if let Some(ref private_rpcs) = self.private_rpcs {
                 private_rpcs
                     .apply_server_configs(self, private_rpc_configs)
                     .await
-                    .context("updating private_rpcs")?;
+                    .web3_context("updating private_rpcs")?;
             } else {
                 // TODO: maybe we should have private_rpcs just be empty instead of being None
                 todo!("handle toggling private_rpcs")
@@ -701,7 +701,7 @@ impl Web3ProxyApp {
                 bundler_4337_rpcs
                     .apply_server_configs(self, bundler_4337_rpc_configs)
                     .await
-                    .context("updating bundler_4337_rpcs")?;
+                    .web3_context("updating bundler_4337_rpcs")?;
             } else {
                 // TODO: maybe we should have bundler_4337_rpcs just be empty instead of being None
                 todo!("handle toggling bundler_4337_rpcs")
@@ -731,8 +731,8 @@ impl Web3ProxyApp {
         #[derive(Default, Serialize)]
         struct UserCount(i64);
 
-        let user_count: UserCount = if let Some(db) = self.db_conn() {
-            match user::Entity::find().count(&db).await {
+        let user_count: UserCount = if let Ok(db) = self.db_conn() {
+            match user::Entity::find().count(db).await {
                 Ok(user_count) => UserCount(user_count as i64),
                 Err(err) => {
                     warn!("unable to count users: {:?}", err);
@@ -767,7 +767,7 @@ impl Web3ProxyApp {
             RecentCounts,
             RecentCounts,
         ) = match self.redis_conn().await {
-            Ok(Some(mut redis_conn)) => {
+            Ok(mut redis_conn) => {
                 // TODO: delete any hash entries where
                 const ONE_MINUTE: i64 = 60;
                 const ONE_HOUR: i64 = ONE_MINUTE * 60;
@@ -857,11 +857,6 @@ impl Web3ProxyApp {
                     }
                 }
             }
-            Ok(None) => (
-                RecentCounts::default(),
-                RecentCounts::default(),
-                RecentCounts::default(),
-            ),
             Err(err) => {
                 warn!("unable to connect to redis while counting users: {:?}", err);
                 (
@@ -898,7 +893,7 @@ impl Web3ProxyApp {
         method: &str,
         params: P,
     ) -> Web3ProxyResult<R> {
-        let db_conn = self.db_conn();
+        let db_conn = self.db_conn().ok().cloned();
 
         let authorization = Arc::new(Authorization::internal(db_conn)?);
 
@@ -1021,10 +1016,9 @@ impl Web3ProxyApp {
         Ok((collected, collected_rpcs))
     }
 
-    /// TODO: i don't think we want or need this. just use app.db_conn, or maybe app.db_conn.clone() or app.db_conn.as_ref()
     #[inline]
-    pub fn db_conn(&self) -> Option<DatabaseConnection> {
-        self.db_conn.clone()
+    pub fn db_conn(&self) -> Web3ProxyResult<&DatabaseConnection> {
+        self.db_conn.as_ref().ok_or(Web3ProxyError::NoDatabase)
     }
 
     #[inline]
@@ -1038,18 +1032,18 @@ impl Web3ProxyApp {
     }
 
     #[inline]
-    pub fn db_replica(&self) -> Option<DatabaseReplica> {
-        self.db_replica.clone()
+    pub fn db_replica(&self) -> Web3ProxyResult<&DatabaseReplica> {
+        self.db_replica.as_ref().ok_or(Web3ProxyError::NoDatabase)
     }
 
-    pub async fn redis_conn(&self) -> anyhow::Result<Option<redis_rate_limiter::RedisConnection>> {
+    pub async fn redis_conn(&self) -> Web3ProxyResult<redis_rate_limiter::RedisConnection> {
         match self.vredis_pool.as_ref() {
-            // TODO: don't do an error. return None
-            None => Ok(None),
+            None => Err(Web3ProxyError::NoDatabase),
             Some(redis_pool) => {
-                let redis_conn = redis_pool.get().await?;
+                // TODO: add a From for this
+                let redis_conn = redis_pool.get().await.context("redis pool error")?;
 
-                Ok(Some(redis_conn))
+                Ok(redis_conn)
             }
         }
     }
@@ -1458,7 +1452,7 @@ impl Web3ProxyApp {
 
                         let f = async move {
                             match app.redis_conn().await {
-                                Ok(Some(mut redis_conn)) => {
+                                Ok(mut redis_conn) => {
                                     let hashed_tx_hash =
                                         Bytes::from(keccak256(salted_tx_hash.as_bytes()));
 
@@ -1469,7 +1463,7 @@ impl Web3ProxyApp {
                                         .zadd(recent_tx_hash_key, hashed_tx_hash.to_string(), now)
                                         .await?;
                                 }
-                                Ok(None) => {}
+                                Err(Web3ProxyError::NoDatabase) => {},
                                 Err(err) => {
                                     warn!(
                                         "unable to save stats for eth_sendRawTransaction: {:?}",

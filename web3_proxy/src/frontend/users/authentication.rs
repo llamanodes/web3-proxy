@@ -74,24 +74,24 @@ pub async fn user_login_get(
         .parse()
         .or(Err(Web3ProxyError::ParseAddressError))?;
 
-    let login_domain = app
+    let domain = app
         .config
         .login_domain
         .clone()
         .unwrap_or_else(|| "llamanodes.com".to_string());
 
+    let message_domain = domain.parse().unwrap();
+    let message_uri = format!("https://{}/", domain).parse().unwrap();
+
     // TODO: get most of these from the app config
     let message = Message {
-        // TODO: don't unwrap
-        // TODO: accept a login_domain from the request?
-        domain: login_domain.parse().unwrap(),
+        domain: message_domain,
         address: user_address.to_fixed_bytes(),
         // TODO: config for statement
         statement: Some("🦙🦙🦙🦙🦙".to_string()),
-        // TODO: don't unwrap
-        uri: format!("https://{}/", login_domain).parse().unwrap(),
+        uri: message_uri,
         version: siwe::Version::V1,
-        chain_id: 1,
+        chain_id: app.config.chain_id,
         expiration_time: Some(expiration_time.into()),
         issued_at: issued_at.into(),
         nonce: nonce.to_string(),
@@ -100,13 +100,13 @@ pub async fn user_login_get(
         resources: vec![],
     };
 
-    let db_conn = app.db_conn().web3_context("login requires a database")?;
+    let db_conn = app.db_conn()?;
 
     // delete ALL expired rows.
     let now = Utc::now();
     let _ = pending_login::Entity::delete_many()
         .filter(pending_login::Column::ExpiresAt.lte(now))
-        .exec(&db_conn)
+        .exec(db_conn)
         .await?;
 
     // massage types to fit in the database. sea-orm does not make this very elegant
@@ -127,7 +127,7 @@ pub async fn user_login_get(
     };
 
     user_pending_login
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving user's pending_login")?;
 
@@ -236,9 +236,7 @@ pub async fn user_login_post(
     let login_nonce = UserBearerToken::from_str(&their_msg.nonce)?;
 
     // fetch the message we gave them from our database
-    let db_replica = app
-        .db_replica()
-        .web3_context("Getting database connection")?;
+    let db_replica = app.db_replica()?;
 
     let user_pending_login = pending_login::Entity::find()
         .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce.clone())))
@@ -270,7 +268,7 @@ pub async fn user_login_post(
         .one(db_replica.as_ref())
         .await?;
 
-    let db_conn = app.db_conn().web3_context("login requires a db")?;
+    let db_conn = app.db_conn()?;
 
     let (caller, user_rpc_keys, status_code) = match caller {
         None => {
@@ -357,7 +355,7 @@ pub async fn user_login_post(
             // the user is already registered
             let user_rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(caller.id))
-                .all(&db_conn)
+                .all(db_conn)
                 .await
                 .web3_context("failed loading user's key")?;
 
@@ -397,15 +395,11 @@ pub async fn user_login_post(
     };
 
     user_login
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving user login")?;
 
-    if let Err(err) = user_pending_login
-        .into_active_model()
-        .delete(&db_conn)
-        .await
-    {
+    if let Err(err) = user_pending_login.into_active_model().delete(db_conn).await {
         error!("Failed to delete nonce:{}: {}", login_nonce, err);
     }
 
@@ -420,13 +414,11 @@ pub async fn user_logout_post(
 ) -> Web3ProxyResponse {
     let user_bearer = UserBearerToken::try_from(bearer)?;
 
-    let db_conn = app
-        .db_conn()
-        .web3_context("database needed for user logout")?;
+    let db_conn = app.db_conn()?;
 
     if let Err(err) = login::Entity::delete_many()
         .filter(login::Column::BearerToken.eq(user_bearer.uuid()))
-        .exec(&db_conn)
+        .exec(db_conn)
         .await
     {
         warn!("Failed to delete {}: {}", user_bearer.redis_key(), err);
@@ -437,7 +429,7 @@ pub async fn user_logout_post(
     // also delete any expired logins
     let delete_result = login::Entity::delete_many()
         .filter(login::Column::ExpiresAt.lte(now))
-        .exec(&db_conn)
+        .exec(db_conn)
         .await;
 
     trace!("Deleted expired logins: {:?}", delete_result);
@@ -445,7 +437,7 @@ pub async fn user_logout_post(
     // also delete any expired pending logins
     let delete_result = login::Entity::delete_many()
         .filter(login::Column::ExpiresAt.lte(now))
-        .exec(&db_conn)
+        .exec(db_conn)
         .await;
 
     trace!("Deleted expired pending logins: {:?}", delete_result);

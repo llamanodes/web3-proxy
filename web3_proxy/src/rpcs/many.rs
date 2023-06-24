@@ -194,7 +194,7 @@ impl Web3Rpcs {
                     return None;
                 }
 
-                let db_conn = app.db_conn();
+                let db_conn = app.db_conn().ok().cloned();
                 let http_client = app.http_client.clone();
                 let vredis_pool = app.vredis_pool.clone();
 

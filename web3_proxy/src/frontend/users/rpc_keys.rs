@@ -31,9 +31,7 @@ pub async fn rpc_keys_get(
 ) -> Web3ProxyResponse {
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app
-        .db_replica()
-        .web3_context("db_replica is required to fetch a user's keys")?;
+    let db_replica = app.db_replica()?;
 
     // This is basically completely copied from sea-orm. Not optimal, but it keeps the format identical to before (while adding the final key)
     // We could also pack the below stuff into it's subfield, but then we would destroy the format. Both options are fine for now though
@@ -162,9 +160,7 @@ pub async fn rpc_keys_management(
 
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app
-        .db_replica()
-        .web3_context("getting db for user's keys")?;
+    let db_replica = app.db_replica()?;
 
     let mut uk = match payload.key_id {
         Some(existing_key_id) => {
@@ -342,9 +338,9 @@ pub async fn rpc_keys_management(
     }
 
     let uk = if uk.is_changed() {
-        let db_conn = app.db_conn().web3_context("login requires a db")?;
+        let db_conn = app.db_conn()?;
 
-        uk.save(&db_conn)
+        uk.save(db_conn)
             .await
             .web3_context("Failed saving user key")?
     } else {

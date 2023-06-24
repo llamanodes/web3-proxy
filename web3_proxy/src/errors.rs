@@ -14,9 +14,11 @@ use axum::{
 use derive_more::{Display, Error, From};
 use ethers::prelude::ContractError;
 use http::header::InvalidHeaderValue;
+use http::uri::InvalidUri;
 use ipnet::AddrParseError;
 use migration::sea_orm::DbErr;
 use redis_rate_limiter::redis::RedisError;
+use redis_rate_limiter::RedisPoolError;
 use reqwest::header::ToStrError;
 use rust_decimal::Error as DecimalError;
 use serde::Serialize;
@@ -63,6 +65,7 @@ pub enum Web3ProxyError {
     HdrRecord(hdrhistogram::errors::RecordError),
     Headers(headers::Error),
     HeaderToString(ToStrError),
+    HttpUri(InvalidUri),
     Hyper(hyper::Error),
     InfluxDb2Request(influxdb2::RequestError),
     #[display(fmt = "{} > {}", min, max)]
@@ -112,6 +115,7 @@ pub enum Web3ProxyError {
     },
     NotFound,
     NotImplemented,
+    NoVolatileRedisDatabase,
     OriginRequired,
     #[error(ignore)]
     #[from(ignore)]
@@ -124,6 +128,7 @@ pub enum Web3ProxyError {
     #[display(fmt = "{:?}, {:?}", _0, _1)]
     RateLimited(Authorization, Option<Instant>),
     Redis(RedisError),
+    RedisDeadpool(RedisPoolError),
     RefererRequired,
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
@@ -355,6 +360,17 @@ impl Web3ProxyError {
                     },
                 )
             }
+            Self::HttpUri(err) => {
+                trace!("HttpUri {:#?}", err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcErrorData {
+                        message: err.to_string().into(),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
             Self::Hyper(err) => {
                 warn!("hyper err={:#?}", err);
                 (
@@ -451,6 +467,18 @@ impl Web3ProxyError {
             }
             Self::Io(err) => {
                 warn!("std io err={:#?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        // TODO: is it safe to expose our io error strings?
+                        message: err.to_string().into(),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::RedisDeadpool(err) => {
+                error!("redis deadpool err={:#?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
@@ -612,6 +640,17 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "unable to retry for request handle".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::NoVolatileRedisDatabase => {
+                error!("no volatile redis database configured");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: "no volatile redis database configured!".into(),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
                 )
