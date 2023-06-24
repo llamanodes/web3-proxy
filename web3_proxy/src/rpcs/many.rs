@@ -1954,7 +1954,8 @@ mod tests {
         }
     }
 
-    #[test_log::test(tokio::test)]
+    // TODO: #[test_log::test(tokio::test)]
+    #[tokio::test]
     async fn test_all_connections() {
         // TODO: use chrono, not SystemTime
         let now: U256 = SystemTime::now()
