@@ -67,14 +67,14 @@ pub async fn query_user_stats<'a>(
             if user_balance.total_spent_outside_free_tier - user_balance.total_deposits
                 < Decimal::from(0)
             {
-                debug!("User has 0 balance");
-                return Err(Web3ProxyError::AccessDeniedLowBalance);
+                trace!("User has 0 balance");
+                return Err(Web3ProxyError::PaymentRequired);
             }
             // Otherwise make the user pass
         }
         None => {
-            debug!("User does not have a balance record, implying that he has no balance. Users must have a balance to access their stats dashboards");
-            return Err(Web3ProxyError::AccessDeniedLowBalance);
+            trace!("User does not have a balance record, implying that he has no balance. Users must have a balance to access their stats dashboards");
+            return Err(Web3ProxyError::PaymentRequired);
         }
     }
 
@@ -99,7 +99,7 @@ pub async fn query_user_stats<'a>(
         {
             Some(secondary_user_record) => {
                 if secondary_user_record.role == Role::Collaborator {
-                    debug!("Subuser is only a collaborator, collaborators cannot see stats");
+                    trace!("Subuser is only a collaborator, collaborators cannot see stats");
                     return Err(Web3ProxyError::AccessDenied);
                 }
             }
