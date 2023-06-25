@@ -269,7 +269,7 @@ mod tests {
     };
     use tokio::{
         sync::broadcast::error::SendError,
-        task::{yield_now, JoinHandle},
+        task::JoinHandle,
         time::{sleep, Instant},
     };
     use web3_proxy::{
@@ -279,8 +279,8 @@ mod tests {
 
     // TODO: put it in a thread?
     struct TestApp {
+        _anvil: AnvilInstance,
         handle: Mutex<Option<JoinHandle<anyhow::Result<()>>>>,
-        anvil: AnvilInstance,
         anvil_provider: Provider<Http>,
         proxy_provider: Provider<Http>,
         shutdown_sender: broadcast::Sender<()>,
@@ -366,10 +366,10 @@ mod tests {
 
             Self {
                 handle: Mutex::new(Some(handle)),
-                anvil,
                 anvil_provider,
                 proxy_provider,
                 shutdown_sender,
+                _anvil: anvil,
             }
         }
 
