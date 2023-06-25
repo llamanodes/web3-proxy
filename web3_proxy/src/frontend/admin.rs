@@ -28,6 +28,7 @@ use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use migration::{Expr, OnConflict};
+use serde::Deserialize;
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
@@ -37,6 +38,13 @@ use time::{Duration, OffsetDateTime};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
 
+#[derive(Deserialize)]
+pub struct AdminIncreaseBalancePost {
+    user_address: Address,
+    note: Option<String>,
+    amount: Decimal,
+}
+
 /// `POST /admin/increase_balance` -- As an admin, modify a user's user-tier
 ///
 /// - user_address that is to credited balance
@@ -45,7 +53,7 @@ use ulid::Ulid;
 pub async fn admin_increase_balance(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-    Query(params): Query<HashMap<String, String>>,
+    Json(payload): Json<AdminIncreaseBalancePost>,
 ) -> Web3ProxyResponse {
     let (caller, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
@@ -64,58 +72,26 @@ pub async fn admin_increase_balance(
             Web3ProxyError::AccessDenied
         })?;
 
-    // Get the user from params
-    let user_address: Address = params
-        .get("user_address")
-        .ok_or_else(|| {
-            Web3ProxyError::BadRequest("Unable to find user_address key in request".into())
-        })?
-        .parse::<Address>()
-        .map_err(|_| {
-            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".into())
-        })?;
-
-    // Get the note from params
-    let note: String = params
-        .get("note")
-        .ok_or_else(|| Web3ProxyError::BadRequest("Unable to find 'note' key in request".into()))?
-        .parse::<String>()
-        .map_err(|_| Web3ProxyError::BadRequest("Unable to parse 'note' as a String".into()))?;
-
-    // Get the amount from params
-    let amount: Decimal = params
-        .get("amount")
-        .ok_or_else(|| {
-            Web3ProxyError::BadRequest("Unable to get the amount key from the request".into())
-        })
-        .map(|x| Decimal::from_str(x))?
-        .map_err(|err| {
-            Web3ProxyError::BadRequest(
-                format!("Unable to parse amount from the request {:?}", err).into(),
-            )
-        })?;
-
     let user_entry: user::Model = user::Entity::find()
-        .filter(user::Column::Address.eq(user_address.as_bytes()))
+        .filter(user::Column::Address.eq(payload.user_address.as_bytes()))
         .one(&txn)
         .await?
         .ok_or(Web3ProxyError::BadRequest(
-            format!("No user found with {:?}", user_address).into(),
+            format!("No user found with {:?}", payload.user_address).into(),
         ))?;
 
     let increase_balance_receipt = admin_increase_balance_receipt::ActiveModel {
-        amount: sea_orm::Set(amount),
+        amount: sea_orm::Set(payload.amount),
         admin_id: sea_orm::Set(admin_entry.id),
         deposit_to_user_id: sea_orm::Set(user_entry.id),
-        note: sea_orm::Set(note),
+        note: sea_orm::Set(payload.note.unwrap_or_default()),
         ..Default::default()
     };
     increase_balance_receipt.save(&txn).await?;
 
     // update balance
     let balance_entry = balance::ActiveModel {
-        id: sea_orm::NotSet,
-        total_deposits: sea_orm::Set(amount),
+        total_deposits: sea_orm::Set(payload.amount),
         user_id: sea_orm::Set(user_entry.id),
         ..Default::default()
     };
@@ -124,7 +100,7 @@ pub async fn admin_increase_balance(
             OnConflict::new()
                 .values([(
                     balance::Column::TotalDeposits,
-                    Expr::col(balance::Column::TotalDeposits).add(amount),
+                    Expr::col(balance::Column::TotalDeposits).add(payload.amount),
                 )])
                 .to_owned(),
         )
@@ -135,8 +111,8 @@ pub async fn admin_increase_balance(
     txn.commit().await?;
 
     let out = json!({
-        "user": user_address,
-        "amount": amount.to_string(),
+        "user": payload.user_address,
+        "amount": payload.amount,
     });
 
     Ok(Json(out).into_response())
@@ -146,6 +122,8 @@ pub async fn admin_increase_balance(
 ///
 /// - user_address that is to be modified
 /// - user_role_tier that is supposed to be adapted
+///
+/// TODO: JSON post data instead of query params
 #[debug_handler]
 pub async fn admin_change_user_roles(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
