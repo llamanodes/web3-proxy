@@ -420,7 +420,7 @@ mod tests {
 
         // mine a block
         let _: U256 = anvil_provider
-            .request("evm_mine", None::<()>)
+            .request("evm_mine", ())
             .await
             .unwrap();
 
