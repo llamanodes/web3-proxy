@@ -1192,6 +1192,7 @@ impl Web3ProxyApp {
                                     total_deposit: x.total_deposits,
                                     total_spend: x.total_spent_outside_free_tier,
                                 };
+                                trace!("Balance for cache retrieved from database is {:?}", x);
 
                                 return Ok(Arc::new(RwLock::new(x)));
                             }
