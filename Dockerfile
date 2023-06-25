@@ -4,11 +4,20 @@ WORKDIR /app
 ENV CARGO_TERM_COLOR always
 
 # install rustup dependencies
+# also install web3-proxy system dependencies. most things are rust-only, but not everything
 RUN apt-get update && \
     apt-get install --yes \
     build-essential \
+    cmake \
     curl \
     git \
+    liblz4-dev \
+    libpthread-stubs0-dev \
+    libsasl2-dev \
+    libssl-dev \
+    libzstd-dev \
+    make \
+    pkg-config \
     && \
     rm -rf /var/lib/apt/lists/*
 
@@ -33,20 +42,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # TODO: do this in a seperate FROM and COPY it in
 ENV PATH /root/.foundry/bin:$PATH
 RUN curl -L https://foundry.paradigm.xyz | bash && foundryup
-
-# install web3-proxy system dependencies. most things are rust-only, but not everything
-RUN apt-get update && \
-    apt-get install --yes \
-    cmake \
-    liblz4-dev \
-    libpthread-stubs0-dev \
-    libsasl2-dev \
-    libssl-dev \
-    libzstd-dev \
-    make \
-    pkg-config \
-    && \
-    rm -rf /var/lib/apt/lists/*
 
 # copy the application
 COPY . .
