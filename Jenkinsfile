@@ -22,32 +22,32 @@ pipeline {
     stages {
         stage('build and push') {
             parallel {
-                stage('build and push amd64_epyc2 image') {
-                    agent {
-                        label 'amd64_epyc2'
-                    }
-                    environment {
-                        ARCH="amd64_epyc2"
-                    }
-                    steps {
-                        script {
-                            buildAndPush()
-                        }
-                    }
-                }
-                stage('build and push amd64_epyc3 image') {
-                    agent {
-                        label 'amd64_epyc3'
-                    }
-                    environment {
-                        ARCH="amd64_epyc3"
-                    }
-                    steps {
-                        script {
-                            buildAndPush()
-                        }
-                    }
-                }
+                // stage('build and push amd64_epyc2 image') {
+                //     agent {
+                //         label 'amd64_epyc2'
+                //     }
+                //     environment {
+                //         ARCH="amd64_epyc2"
+                //     }
+                //     steps {
+                //         script {
+                //             myBuildandPush.buildAndPush()
+                //         }
+                //     }
+                // }
+                // stage('build and push amd64_epyc3 image') {
+                //     agent {
+                //         label 'amd64_epyc3'
+                //     }
+                //     environment {
+                //         ARCH="amd64_epyc3"
+                //     }
+                //     steps {
+                //         script {
+                //             myBuildandPush.buildAndPush()
+                //         }
+                //     }
+                // }
                 stage('Build and push arm64_graviton2 image') {
                     agent {
                         label 'arm64_graviton2'
@@ -57,20 +57,35 @@ pipeline {
                     }
                     steps {
                         script {
-                            buildAndPush()
+                            myBuildandPush.buildAndPush()
                         }
                     }
                 }
-                stage('Build and push intel_xeon3 image') {
-                    agent {
-                        label 'intel_xeon3'
-                    }
+                // stage('Build and push intel_xeon3 image') {
+                //     agent {
+                //         label 'intel_xeon3'
+                //     }
+                //     environment {
+                //         ARCH="intel_xeon3"
+                //     }
+                //     steps {
+                //         script {
+                //             myBuildandPush.buildAndPush()
+                //         }
+                //     }
+                // }
+            }
+        }
+        stage('push latest') {
+            parallel {
+                stage('maybe push latest_arm64_graviton2 tag') {
+                    agent any
                     environment {
-                        ARCH="intel_xeon3"
+                        ARCH="arm64_graviton2"
                     }
                     steps {
                         script {
-                            buildAndPush()
+                            myPushLatest.maybePushLatest()
                         }
                     }
                 }
