@@ -57,55 +57,57 @@ pub async fn query_user_stats<'a>(
 
     // In any case, we don't allow stats if the target user does not have a balance
     // No subuser, we can check the balance directly
-    match balance::Entity::find()
-        .filter(balance::Column::UserId.eq(user_id))
-        .one(db_replica.as_ref())
-        .await?
-    {
-        // TODO: We should add the threshold that determines if a user is premium into app.config or so
-        Some(user_balance) => {
-            if user_balance.total_spent_outside_free_tier - user_balance.total_deposits
-                < Decimal::from(0)
-            {
-                trace!("User has 0 balance");
-                return Err(Web3ProxyError::PaymentRequired);
-            }
-            // Otherwise make the user pass
-        }
-        None => {
-            trace!("User does not have a balance record, implying that he has no balance. Users must have a balance to access their stats dashboards");
-            return Err(Web3ProxyError::PaymentRequired);
-        }
-    }
-
-    // (Possible) subuser relation
-    // Check if the caller is a proper subuser (there is a subuser record)
-    // Check if the subuser has more than collaborator status
-    if user_id != caller_user_id {
-        // Find all rpc-keys related to the caller user
-        let user_rpc_keys: Vec<u64> = rpc_key::Entity::find()
-            .filter(rpc_key::Column::UserId.eq(user_id))
-            .all(db_replica.as_ref())
-            .await?
-            .into_iter()
-            .map(|x| x.id)
-            .collect::<Vec<_>>();
-
-        match secondary_user::Entity::find()
-            .filter(secondary_user::Column::UserId.eq(caller_user_id))
-            .filter(secondary_user::Column::RpcSecretKeyId.is_in(user_rpc_keys))
+    if user_id != 0 {
+        match balance::Entity::find()
+            .filter(balance::Column::UserId.eq(user_id))
             .one(db_replica.as_ref())
             .await?
         {
-            Some(secondary_user_record) => {
-                if secondary_user_record.role == Role::Collaborator {
-                    trace!("Subuser is only a collaborator, collaborators cannot see stats");
-                    return Err(Web3ProxyError::AccessDenied);
+            // TODO: We should add the threshold that determines if a user is premium into app.config or so
+            Some(user_balance) => {
+                if user_balance.total_spent_outside_free_tier - user_balance.total_deposits
+                    < Decimal::from(0)
+                {
+                    trace!("User has 0 balance");
+                    return Err(Web3ProxyError::PaymentRequired);
                 }
+                // Otherwise make the user pass
             }
             None => {
-                // Then we must do an access denied
-                return Err(Web3ProxyError::AccessDeniedNoSubuser);
+                trace!("User does not have a balance record, implying that he has no balance. Users must have a balance to access their stats dashboards");
+                return Err(Web3ProxyError::PaymentRequired);
+            }
+        }
+
+        // (Possible) subuser relation
+        // Check if the caller is a proper subuser (there is a subuser record)
+        // Check if the subuser has more than collaborator status
+        if user_id != caller_user_id {
+            // Find all rpc-keys related to the caller user
+            let user_rpc_keys: Vec<u64> = rpc_key::Entity::find()
+                .filter(rpc_key::Column::UserId.eq(user_id))
+                .all(db_replica.as_ref())
+                .await?
+                .into_iter()
+                .map(|x| x.id)
+                .collect::<Vec<_>>();
+
+            match secondary_user::Entity::find()
+                .filter(secondary_user::Column::UserId.eq(caller_user_id))
+                .filter(secondary_user::Column::RpcSecretKeyId.is_in(user_rpc_keys))
+                .one(db_replica.as_ref())
+                .await?
+            {
+                Some(secondary_user_record) => {
+                    if secondary_user_record.role == Role::Collaborator {
+                        trace!("Subuser is only a collaborator, collaborators cannot see stats");
+                        return Err(Web3ProxyError::AccessDenied);
+                    }
+                }
+                None => {
+                    // Then we must do an access denied
+                    return Err(Web3ProxyError::AccessDeniedNoSubuser);
+                }
             }
         }
     }
