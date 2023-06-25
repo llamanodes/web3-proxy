@@ -269,7 +269,7 @@ mod tests {
     };
     use tokio::{
         sync::broadcast::error::SendError,
-        task::{yield_now, JoinHandle},
+        task::JoinHandle,
         time::{sleep, Instant},
     };
     use web3_proxy::{
@@ -424,9 +424,6 @@ mod tests {
             .await
             .unwrap();
 
-        // TODO: local doesn't need this, but jenkins seems to
-        sleep(Duration::from_millis(10)).await;
-
         // make sure the block advanced
         let anvil_result = anvil_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
@@ -438,13 +435,28 @@ mod tests {
 
         assert_eq!(first_block_num, second_block_num - 1);
 
-        let proxy_result = proxy_provider
-            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
-            .await
-            .unwrap()
-            .unwrap();
+        let mut proxy_result;
+        let start = Instant::now();
+        loop {
+            if start.elapsed() > Duration::from_secs(1) {
+                panic!("took too long to sync!");
+            }
 
-        assert_eq!(anvil_result, proxy_result);
+            proxy_result = proxy_provider
+                .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
+                .await
+                .unwrap();
+
+            if let Some(ref proxy_result) = proxy_result {
+                if proxy_result.number != Some(first_block_num) {
+                    break;
+                }
+            }
+
+            sleep(Duration::from_millis(10)).await;
+        }
+
+        assert_eq!(anvil_result, proxy_result.unwrap());
 
         x.wait().await;
     }

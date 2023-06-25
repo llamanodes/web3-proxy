@@ -56,7 +56,7 @@ ENV WEB3_PROXY_FEATURES "rdkafka-src,connectinfo"
 # test the application with cargo-nextest
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
-    cargo nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features
+    RUST_LOG=web3_proxy=trace,info cargo nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features
 
 # build the application
 # using a "release" profile (which install does by default) is **very** important
