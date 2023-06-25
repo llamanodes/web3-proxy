@@ -725,6 +725,8 @@ impl BufferedRpcQueryStats {
         // Read the latest balance ...
         let remaining = self.latest_balance.read().remaining();
 
+        trace!("Remaining balance for influx is {:?}", remaining);
+
         builder = builder
             .tag("archive_needed", key.archive_needed.to_string())
             .tag("error_response", key.error_response.to_string())
@@ -744,12 +746,16 @@ impl BufferedRpcQueryStats {
             )
             .field(
                 "balance",
-                remaining.to_f64().context("balance is really (too) large")?,
+                remaining
+                    .to_f64()
+                    .context("balance is really (too) large")?,
             );
 
         builder = builder.timestamp(key.response_timestamp);
 
         let point = builder.build()?;
+
+        trace!("Datapoint saving to Influx is {:?}", point);
 
         Ok(point)
     }
