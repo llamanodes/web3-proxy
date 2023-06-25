@@ -44,6 +44,8 @@ impl From<Web3ProxyError> for Web3ProxyResult<()> {
 pub enum Web3ProxyError {
     Abi(ethers::abi::Error),
     AccessDenied,
+    AccessDeniedLowBalance,
+    AccessDeniedNoSubuser,
     #[error(ignore)]
     Anyhow(anyhow::Error),
     Arc(Arc<Self>),
@@ -183,6 +185,28 @@ impl Web3ProxyError {
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
                         message: "FORBIDDEN".into(),
+                        code: StatusCode::FORBIDDEN.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::AccessDeniedLowBalance => {
+                trace!("access denied due to low balance");
+                (
+                    StatusCode::FORBIDDEN,
+                    JsonRpcErrorData {
+                        message: "FORBIDDEN: LOW BALANCE".into(),
+                        code: StatusCode::FORBIDDEN.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::AccessDeniedNoSubuser => {
+                trace!("access denied not a subuser");
+                (
+                    StatusCode::FORBIDDEN,
+                    JsonRpcErrorData {
+                        message: "FORBIDDEN: NOT A SUBUSER".into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
                         data: None,
                     },

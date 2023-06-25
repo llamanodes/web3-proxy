@@ -15,12 +15,13 @@ use axum::{
     Json, TypedHeader,
 };
 use entities::sea_orm_active_enums::Role;
-use entities::{rpc_key, secondary_user};
+use entities::{balance, rpc_key, secondary_user};
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use rust_decimal::Decimal;
 use serde_json::json;
 use tracing::{debug, error, trace, warn};
 use ulid::Ulid;
@@ -28,10 +29,10 @@ use ulid::Ulid;
 pub async fn query_user_stats<'a>(
     app: &'a Web3ProxyApp,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
-    params: &'a HashMap<String, String>,
+    mut params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
-    let (user_id, _semaphore) = match bearer {
+    let (caller_user_id, _semaphore) = match bearer {
         Some(TypedHeader(Authorization(bearer))) => {
             let (user, semaphore) = app.bearer_is_authorized(bearer).await?;
             (user.id, Some(semaphore))
@@ -40,13 +41,74 @@ pub async fn query_user_stats<'a>(
     };
 
     // Return an error if the bearer is **not** set, but the StatType is Detailed
-    if stat_response_type == StatType::Detailed && user_id == 0 {
+    if stat_response_type == StatType::Detailed && caller_user_id == 0 {
         return Err(Web3ProxyError::BadRequest(
             "Detailed Stats Response requires you to authorize with a bearer token".into(),
         ));
     }
 
+    // Read the (optional) user-id from the request, this is the logic for subusers
+    let user_id: u64 = params
+        .get("user_id")
+        .and_then(|x| x.parse::<u64>().ok())
+        .unwrap_or_else(|| caller_user_id);
+
     let db_replica = app.db_replica()?;
+
+    // In any case, we don't allow stats if the target user does not have a balance
+    // No subuser, we can check the balance directly
+    match balance::Entity::find()
+        .filter(balance::Column::UserId.eq(user_id))
+        .one(db_replica.as_ref())
+        .await?
+    {
+        // TODO: We should add the threshold that determines if a user is premium into app.config or so
+        Some(user_balance) => {
+            if user_balance.total_spent_outside_free_tier - user_balance.total_deposits
+                < Decimal::from(0)
+            {
+                debug!("User has 0 balance");
+                return Err(Web3ProxyError::AccessDeniedLowBalance);
+            }
+            // Otherwise make the user pass
+        }
+        None => {
+            debug!("User does not have a balance record, implying that he has no balance. Users must have a balance to access their stats dashboards");
+            return Err(Web3ProxyError::AccessDeniedLowBalance);
+        }
+    }
+
+    // (Possible) subuser relation
+    // Check if the caller is a proper subuser (there is a subuser record)
+    // Check if the subuser has more than collaborator status
+    if user_id != caller_user_id {
+        // Find all rpc-keys related to the caller user
+        let user_rpc_keys: Vec<u64> = rpc_key::Entity::find()
+            .filter(rpc_key::Column::UserId.eq(user_id))
+            .all(db_replica.as_ref())
+            .await?
+            .into_iter()
+            .map(|x| x.id)
+            .collect::<Vec<_>>();
+
+        match secondary_user::Entity::find()
+            .filter(secondary_user::Column::UserId.eq(caller_user_id))
+            .filter(secondary_user::Column::RpcSecretKeyId.is_in(user_rpc_keys))
+            .one(db_replica.as_ref())
+            .await?
+        {
+            Some(secondary_user_record) => {
+                if secondary_user_record.role == Role::Collaborator {
+                    debug!("Subuser is only a collaborator, collaborators cannot see stats");
+                    return Err(Web3ProxyError::AccessDenied);
+                }
+            }
+            None => {
+                // Then we must do an access denied
+                return Err(Web3ProxyError::AccessDeniedNoSubuser);
+            }
+        }
+    }
 
     // TODO: have a getter for this. do we need a connection pool on it?
     let influxdb_client = app
