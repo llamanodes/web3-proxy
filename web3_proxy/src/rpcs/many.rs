@@ -1376,8 +1376,6 @@ impl Serialize for Web3Rpcs {
 mod tests {
     #![allow(unused_imports)]
 
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     use super::*;
     use crate::rpcs::blockchain::Web3ProxyBlock;
     use crate::rpcs::consensus::ConsensusFinder;
@@ -1387,6 +1385,7 @@ mod tests {
     use latency::PeakEwmaLatency;
     use moka::future::CacheBuilder;
     use parking_lot::RwLock;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tracing::trace;
 
     #[cfg(test)]
@@ -1394,6 +1393,7 @@ mod tests {
         PeakEwmaLatency::spawn(Duration::from_secs(1), 4, Duration::from_secs(1))
     }
 
+    // TODO: logging
     #[tokio::test(start_paused = true)]
     async fn test_sort_connections_by_sync_status() {
         // TODO: how should we do test logging setup with tracing?

@@ -2,7 +2,7 @@ use crate::app::Web3ProxyJoinHandle;
 use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
-use ethers::prelude::{Address, TxHash, H256};
+use ethers::prelude::{Address, TxHash};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
 use migration::sea_orm::DatabaseConnection;
@@ -97,9 +97,6 @@ pub struct AppConfig {
 
     /// Default ERC address for out deposit contract
     pub deposit_factory_contract: Option<Address>,
-
-    /// Default ERC address for out deposit contract
-    pub deposit_topic: Option<H256>,
 
     /// minimum amount to increase eth_estimateGas results
     pub gas_increase_min: Option<U256>,
@@ -275,6 +272,7 @@ pub struct Web3RpcConfig {
     /// block data limit. If None, will be queried
     pub block_data_limit: Option<u64>,
     /// the requests per second at which the server starts slowing down
+    #[serde(default = "default_soft_limit")]
     pub soft_limit: u32,
     /// the requests per second at which the server throws errors (rate limit or otherwise)
     pub hard_limit: Option<u64>,
@@ -288,6 +286,10 @@ pub struct Web3RpcConfig {
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
+}
+
+fn default_soft_limit() -> u32 {
+    10
 }
 
 impl Web3RpcConfig {

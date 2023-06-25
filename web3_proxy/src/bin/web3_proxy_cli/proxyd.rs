@@ -1,8 +1,11 @@
 #![forbid(unsafe_code)]
+
 use argh::FromArgs;
 use futures::StreamExt;
 use num::Zero;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU16;
+use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
 use tokio::sync::broadcast;
@@ -35,11 +38,14 @@ impl ProxydSubCommand {
         let (shutdown_sender, _) = broadcast::channel(1);
         // TODO: i think there is a small race. if config_path changes
 
+        let frontend_port = Arc::new(self.port.into());
+        let prometheus_port = Arc::new(self.prometheus_port.into());
+
         run(
             top_config,
             Some(top_config_path),
-            self.port,
-            self.prometheus_port,
+            frontend_port,
+            prometheus_port,
             num_workers,
             shutdown_sender,
         )
@@ -50,17 +56,14 @@ impl ProxydSubCommand {
 async fn run(
     top_config: TopConfig,
     top_config_path: Option<PathBuf>,
-    frontend_port: u16,
-    prometheus_port: u16,
+    frontend_port: Arc<AtomicU16>,
+    prometheus_port: Arc<AtomicU16>,
     num_workers: usize,
     frontend_shutdown_sender: broadcast::Sender<()>,
 ) -> anyhow::Result<()> {
     // tokio has code for catching ctrl+c so we use that
     // this shutdown sender is currently only used in tests, but we might make a /shutdown endpoint or something
     // we do not need this receiver. new receivers are made by `shutdown_sender.subscribe()`
-
-    let app_frontend_port = frontend_port;
-    let app_prometheus_port = prometheus_port;
 
     // TODO: should we use a watch or broadcast for these?
     // Maybe this one ?
@@ -76,7 +79,8 @@ async fn run(
 
     // start the main app
     let mut spawned_app = Web3ProxyApp::spawn(
-        app_frontend_port,
+        frontend_port,
+        prometheus_port,
         top_config.clone(),
         num_workers,
         app_shutdown_sender.clone(),
@@ -120,7 +124,6 @@ async fn run(
     // start the prometheus metrics port
     let prometheus_handle = tokio::spawn(prometheus::serve(
         spawned_app.app.clone(),
-        app_prometheus_port,
         prometheus_shutdown_receiver,
     ));
 
@@ -128,7 +131,6 @@ async fn run(
 
     // start the frontend port
     let frontend_handle = tokio::spawn(frontend::serve(
-        app_frontend_port,
         spawned_app.app,
         frontend_shutdown_receiver,
         frontend_shutdown_complete_sender,
@@ -252,107 +254,154 @@ async fn run(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use ethers::{
         prelude::{Http, Provider, U256},
+        types::Address,
         utils::Anvil,
     };
     use hashbrown::HashMap;
-    use std::env;
-    use tokio::task::JoinHandle;
-
+    use parking_lot::Mutex;
+    use std::{
+        env,
+        str::FromStr,
+        sync::atomic::{AtomicU16, Ordering},
+    };
+    use tokio::{
+        sync::broadcast::error::SendError,
+        task::JoinHandle,
+        time::{sleep, Instant},
+    };
     use web3_proxy::{
         config::{AppConfig, Web3RpcConfig},
         rpcs::blockchain::ArcBlock,
     };
 
-    use super::*;
+    // TODO: put it in a thread?
+    struct TestApp {
+        handle: Mutex<Option<JoinHandle<anyhow::Result<()>>>>,
+        anvil_provider: Provider<Http>,
+        proxy_provider: Provider<Http>,
+        shutdown_sender: broadcast::Sender<()>,
+    }
 
-    #[test_log::test(tokio::test)]
-    async fn it_works() {
-        // TODO: move basic setup into a test fixture
-        let path = env::var("PATH").unwrap();
+    impl TestApp {
+        async fn spawn() -> Self {
+            // TODO: move basic setup into a test fixture
+            let path = env::var("PATH").unwrap();
 
-        info!("path: {}", path);
+            info!("path: {}", path);
 
-        // todo: fork polygon so we can test our payment contracts
-        let anvil = Anvil::new().spawn();
+            // TODO: configurable rpc and block
+            let anvil = Anvil::new()
+                // .fork("https://polygon.llamarpc.com@44300000")
+                .spawn();
 
-        info!("Anvil running at `{}`", anvil.endpoint());
+            info!("Anvil running at `{}`", anvil.endpoint());
 
-        let anvil_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
+            let anvil_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
-        // mine a block because my code doesn't like being on block 0
-        // TODO: make block 0 okay? is it okay now?
-        let _: U256 = anvil_provider
-            .request("evm_mine", None::<()>)
-            .await
-            .unwrap();
+            // mine a block to test the provider
+            let _: U256 = anvil_provider.request("evm_mine", ()).await.unwrap();
 
-        // make a test TopConfig
-        // TODO: load TopConfig from a file? CliConfig could have `cli_config.load_top_config`. would need to inject our endpoint ports
-        let top_config = TopConfig {
-            app: AppConfig {
-                chain_id: 31337,
-                default_user_max_requests_per_period: Some(6_000_000),
-                min_sum_soft_limit: 1,
-                min_synced_rpcs: 1,
-                public_requests_per_period: Some(1_000_000),
-                response_cache_max_bytes: 10_u64.pow(7),
-                ..Default::default()
-            },
-            balanced_rpcs: HashMap::from([
-                (
-                    "anvil".to_string(),
-                    Web3RpcConfig {
-                        http_url: Some(anvil.endpoint()),
-                        soft_limit: 100,
-                        ..Default::default()
-                    },
-                ),
-                (
-                    "anvil_ws".to_string(),
-                    Web3RpcConfig {
-                        ws_url: Some(anvil.ws_endpoint()),
-                        soft_limit: 100,
-                        ..Default::default()
-                    },
-                ),
-                (
-                    // TODO: i don't think "both" is working
+            // make a test TopConfig
+            // TODO: load TopConfig from a file? CliConfig could have `cli_config.load_top_config`. would need to inject our endpoint ports
+            let top_config = TopConfig {
+                app: AppConfig {
+                    chain_id: 137,
+                    default_user_max_requests_per_period: Some(6_000_000),
+                    deposit_factory_contract: Address::from_str(
+                        "4e3BC2054788De923A04936C6ADdB99A05B0Ea36",
+                    )
+                    .ok(),
+                    min_sum_soft_limit: 1,
+                    min_synced_rpcs: 1,
+                    public_requests_per_period: Some(1_000_000),
+                    response_cache_max_bytes: 10_u64.pow(7),
+                    ..Default::default()
+                },
+                balanced_rpcs: HashMap::from([(
                     "anvil_both".to_string(),
                     Web3RpcConfig {
                         http_url: Some(anvil.endpoint()),
                         ws_url: Some(anvil.ws_endpoint()),
                         ..Default::default()
                     },
-                ),
-            ]),
-            private_rpcs: None,
-            bundler_4337_rpcs: None,
-            extra: Default::default(),
-        };
+                )]),
+                private_rpcs: None,
+                bundler_4337_rpcs: None,
+                extra: Default::default(),
+            };
 
-        let (shutdown_sender, _shutdown_receiver) = broadcast::channel(1);
+            let (shutdown_sender, _shutdown_receiver) = broadcast::channel(1);
 
-        // spawn another thread for running the app
-        // TODO: allow launching into the local tokio runtime instead of creating a new one?
-        let app_handle = {
-            let frontend_port = 0;
-            let prometheus_port = 0;
-            let shutdown_sender = shutdown_sender.clone();
+            let frontend_port_arc = Arc::new(AtomicU16::new(0));
+            let prometheus_port_arc = Arc::new(AtomicU16::new(0));
 
-            tokio::spawn(run(
-                top_config,
-                None,
-                frontend_port,
-                prometheus_port,
-                2,
+            // spawn another thread for running the app
+            // TODO: allow launching into the local tokio runtime instead of creating a new one?
+            let handle = {
+                tokio::spawn(run(
+                    top_config,
+                    None,
+                    frontend_port_arc.clone(),
+                    prometheus_port_arc,
+                    2,
+                    shutdown_sender.clone(),
+                ))
+            };
+
+            let mut frontend_port = frontend_port_arc.load(Ordering::Relaxed);
+            let start = Instant::now();
+            while frontend_port == 0 {
+                if start.elapsed() > Duration::from_secs(1) {
+                    panic!("took too long to start!");
+                }
+
+                sleep(Duration::from_millis(10)).await;
+                frontend_port = frontend_port_arc.load(Ordering::Relaxed);
+            }
+
+            let proxy_endpoint = format!("http://127.0.0.1:{}", frontend_port);
+
+            let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
+
+            Self {
+                handle: Mutex::new(Some(handle)),
+                anvil_provider,
+                proxy_provider,
                 shutdown_sender,
-            ))
-        };
+            }
+        }
 
-        // TODO: do something to the node. query latest block, mine another block, query again
-        let proxy_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
+        fn stop(&self) -> Result<usize, SendError<()>> {
+            self.shutdown_sender.send(())
+        }
+
+        async fn wait(&self) {
+            // TODO: lock+take feels weird, but it works
+            let handle = self.handle.lock().take();
+
+            if let Some(handle) = handle {
+                info!("waiting for the app to stop...");
+                handle.await.unwrap().unwrap();
+            }
+        }
+    }
+
+    impl Drop for TestApp {
+        fn drop(&mut self) {
+            let _ = self.stop();
+        }
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn it_works() {
+        // TODO: move basic setup into a test fixture
+        let x = TestApp::spawn().await;
+
+        let anvil_provider = &x.anvil_provider;
+        let proxy_provider = &x.proxy_provider;
 
         let anvil_result = anvil_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
@@ -391,12 +440,7 @@ mod tests {
 
         assert_eq!(first_block_num, second_block_num - 1);
 
-        // TODO: how do we make fixtures run this at the end?
-        // tell the test app to shut down
-        shutdown_sender.send(()).unwrap();
-
-        info!("waiting for shutdown...");
-        // TODO: panic if a timeout is reached
-        app_handle.await.unwrap().unwrap();
+        // x.stop();
+        // x.wait().await;
     }
 }

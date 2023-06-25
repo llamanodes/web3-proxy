@@ -257,7 +257,7 @@ pub async fn user_login_post(
 
     // mostly default options are fine. the message includes timestamp and domain and nonce
     let verify_config = VerificationOpts {
-        rpc_provider: Some(app.internal_provider.clone()),
+        rpc_provider: Some(app.internal_provider().clone()),
         ..Default::default()
     };
 

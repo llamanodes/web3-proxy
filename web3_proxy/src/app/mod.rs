@@ -39,6 +39,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use hashbrown::{HashMap, HashSet};
 use migration::sea_orm::{DatabaseTransaction, EntityTrait, PaginatorTrait, TransactionTrait};
 use moka::future::{Cache, CacheBuilder};
+use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
@@ -49,6 +50,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::num::NonZeroU64;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::sync::{broadcast, watch, Semaphore};
@@ -81,15 +83,14 @@ pub type UserBalanceCache = Cache<NonZeroU64, Arc<RwLock<Balance>>>;
 pub struct Web3ProxyApp {
     /// Send requests to the best server available
     pub balanced_rpcs: Arc<Web3Rpcs>,
+    /// concurrent/parallel application request limits for authenticated users
+    pub bearer_token_semaphores: Cache<UserBearerToken, Arc<Semaphore>>,
     /// Send 4337 Abstraction Bundler requests to one of these servers
     pub bundler_4337_rpcs: Option<Arc<Web3Rpcs>>,
-    pub http_client: Option<reqwest::Client>,
     /// application config
     /// TODO: this will need a large refactor to handle reloads while running. maybe use a watch::Receiver?
     pub config: AppConfig,
-    /// Send private requests (like eth_sendRawTransaction) to all these servers
-    /// TODO: include another type so that we can use private miner relays that do not use JSONRPC requests
-    pub private_rpcs: Option<Arc<Web3Rpcs>>,
+    pub http_client: Option<reqwest::Client>,
     /// track JSONRPC responses
     pub jsonrpc_response_cache: JsonRpcResponseCache,
     /// rpc clients that subscribe to newHeads use this channel
@@ -104,22 +105,26 @@ pub struct Web3ProxyApp {
     /// Optional read-only database for users and accounting
     pub db_replica: Option<DatabaseReplica>,
     pub hostname: Option<String>,
-    pub internal_provider: Arc<EthersHttpProvider>,
-    /// store pending transactions that we've seen so that we don't send duplicates to subscribers
-    /// TODO: think about this more. might be worth storing if we sent the transaction or not and using this for automatic retries
-    pub pending_transactions: Cache<TxHash, TxStatus>,
+    pub frontend_port: Arc<AtomicU16>,
     /// rate limit anonymous users
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     /// rate limit authenticated users
     pub frontend_registered_user_rate_limiter: Option<DeferredRateLimiter<u64>>,
     /// Optional time series database for making pretty graphs that load quickly
     pub influxdb_client: Option<influxdb2::Client>,
+    /// concurrent/parallel request limits for anonymous users
+    pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>>,
+    pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
     /// rate limit the login endpoint
     /// we do this because each pending login is a row in the database
     pub login_rate_limiter: Option<RedisRateLimiter>,
-    /// volatile cache used for rate limits
-    /// TODO: i think i might just delete this entirely. instead use local-only concurrency limits.
-    pub vredis_pool: Option<RedisPool>,
+    /// store pending transactions that we've seen so that we don't send duplicates to subscribers
+    /// TODO: think about this more. might be worth storing if we sent the transaction or not and using this for automatic retries
+    pub pending_transactions: Cache<TxHash, TxStatus>,
+    /// Send private requests (like eth_sendRawTransaction) to all these servers
+    /// TODO: include another type so that we can use private miner relays that do not use JSONRPC requests
+    pub private_rpcs: Option<Arc<Web3Rpcs>>,
+    pub prometheus_port: Arc<AtomicU16>,
     /// cache authenticated users so that we don't have to query the database on the hot path
     // TODO: should the key be our RpcSecretKey class instead of Ulid?
     pub rpc_secret_key_cache: RpcSecretKeyCache,
@@ -127,13 +132,13 @@ pub struct Web3ProxyApp {
     pub user_balance_cache: UserBalanceCache,
     /// concurrent/parallel RPC request limits for authenticated users
     pub user_semaphores: Cache<NonZeroU64, Arc<Semaphore>>,
-    /// concurrent/parallel request limits for anonymous users
-    pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>>,
-    /// concurrent/parallel application request limits for authenticated users
-    pub bearer_token_semaphores: Cache<UserBearerToken, Arc<Semaphore>>,
-    pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
+    /// volatile cache used for rate limits
+    /// TODO: i think i might just delete this entirely. instead use local-only concurrency limits.
+    pub vredis_pool: Option<RedisPool>,
     /// channel for sending stats in a background task
     pub stat_sender: Option<flume::Sender<AppStat>>,
+
+    internal_provider: OnceCell<Arc<EthersHttpProvider>>,
 }
 
 /// flatten a JoinError into an anyhow error
@@ -178,7 +183,8 @@ pub struct Web3ProxyAppSpawn {
 impl Web3ProxyApp {
     /// The main entrypoint.
     pub async fn spawn(
-        app_frontend_port: u16,
+        frontend_port: Arc<AtomicU16>,
+        prometheus_port: Arc<AtomicU16>,
         top_config: TopConfig,
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
@@ -584,20 +590,6 @@ impl Web3ProxyApp {
             .ok()
             .and_then(|x| x.to_str().map(|x| x.to_string()));
 
-        // TODO: i'm sure theres much better ways to do this, but i don't want to spend time fighting traits right now
-        // TODO: what interval? i don't think we use it
-        // i tried and failed to `impl JsonRpcClient for Web3ProxyApi`
-        // i tried and failed to set up ipc. http is already running, so lets just use that
-        let internal_provider = connect_http(
-            format!("http://127.0.0.1:{}", app_frontend_port)
-                .parse()
-                .unwrap(),
-            http_client.clone(),
-            Duration::from_secs(10),
-        )?;
-
-        let internal_provider = Arc::new(internal_provider);
-
         let app = Self {
             balanced_rpcs,
             bearer_token_semaphores,
@@ -605,15 +597,13 @@ impl Web3ProxyApp {
             config: top_config.app.clone(),
             db_conn,
             db_replica,
+            frontend_port: frontend_port.clone(),
             frontend_ip_rate_limiter,
             frontend_registered_user_rate_limiter,
             hostname,
-            vredis_pool,
-            rpc_secret_key_cache,
-            user_balance_cache,
             http_client,
             influxdb_client,
-            internal_provider,
+            internal_provider: Default::default(),
             ip_semaphores,
             jsonrpc_response_cache,
             kafka_producer,
@@ -621,8 +611,12 @@ impl Web3ProxyApp {
             pending_transactions,
             pending_tx_sender,
             private_rpcs,
+            prometheus_port: prometheus_port.clone(),
+            rpc_secret_key_cache,
             stat_sender,
+            user_balance_cache,
             user_semaphores,
+            vredis_pool,
             watch_consensus_head_receiver,
         };
 
@@ -719,7 +713,28 @@ impl Web3ProxyApp {
     /// this works for now, but I don't like it
     /// TODO: I would much prefer we figure out the traits and `impl JsonRpcClient for Web3ProxyApp`
     pub fn internal_provider(&self) -> &Arc<EthersHttpProvider> {
-        &self.internal_provider
+        self.internal_provider.get_or_init(|| {
+            // TODO: i'm sure theres much better ways to do this, but i don't want to spend time fighting traits right now
+            // TODO: what interval? i don't think we use it
+            // i tried and failed to `impl JsonRpcClient for Web3ProxyApi`
+            // i tried and failed to set up ipc. http is already running, so lets just use that
+            let frontend_port = self.frontend_port.load(Ordering::Relaxed);
+
+            if frontend_port == 0 {
+                panic!("frontend is not running. cannot create provider yet");
+            }
+
+            let internal_provider = connect_http(
+                format!("http://127.0.0.1:{}", frontend_port)
+                    .parse()
+                    .unwrap(),
+                self.http_client.clone(),
+                Duration::from_secs(10),
+            )
+            .unwrap();
+
+            Arc::new(internal_provider)
+        })
     }
 
     pub async fn prometheus_metrics(&self) -> String {
