@@ -425,7 +425,8 @@ mod tests {
             .await
             .unwrap();
 
-        yield_now().await;
+        // TODO: local doesn't need this, but jenkins seems to
+        sleep(Duration::from_millis(10)).await;
 
         // make sure the block advanced
         let anvil_result = anvil_provider
