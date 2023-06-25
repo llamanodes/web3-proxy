@@ -269,7 +269,7 @@ mod tests {
     };
     use tokio::{
         sync::broadcast::error::SendError,
-        task::JoinHandle,
+        task::{yield_now, JoinHandle},
         time::{sleep, Instant},
     };
     use web3_proxy::{
@@ -424,6 +424,8 @@ mod tests {
             .request("evm_mine", None::<()>)
             .await
             .unwrap();
+
+        yield_now().await;
 
         // make sure the block advanced
         let anvil_result = anvil_provider
