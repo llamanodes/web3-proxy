@@ -53,10 +53,14 @@ COPY . .
 
 ENV WEB3_PROXY_FEATURES "rdkafka-src,connectinfo"
 
+FROM builder as build_tests
+
 # test the application with cargo-nextest
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     RUST_LOG=web3_proxy=trace,info cargo nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features
+
+FROM builder as build_app
 
 # build the application
 # using a "release" profile (which install does by default) is **very** important
@@ -89,7 +93,7 @@ CMD [ "--config", "/web3-proxy.toml", "proxyd" ]
 # TODO: lower log level when done with prototyping
 ENV RUST_LOG "warn,ethers_providers::rpc=off,web3_proxy=debug,web3_proxy::rpcs::consensus=info,web3_proxy_cli=debug"
 
-COPY --from=builder /usr/local/bin/* /usr/local/bin/
+COPY --from=build_app /usr/local/bin/* /usr/local/bin/
 
 # make sure the app works
 RUN web3_proxy_cli --help
