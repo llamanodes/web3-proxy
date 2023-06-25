@@ -315,9 +315,10 @@ pub async fn query_user_stats<'a>(
         ));
     }
 
-    debug!("Raw query to db is: {:#?}", query);
+    // TODO: lower log level
+    debug!("Raw query to db is: {:#}", query);
     let query = Query::new(query.to_string());
-    trace!("Query to db is: {:?}", query);
+    trace!("Query to db is: {:#?}", query);
 
     // Make the query and collect all data
     let raw_influx_responses: Vec<FluxRecord> = influxdb_client
