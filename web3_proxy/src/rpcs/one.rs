@@ -89,7 +89,7 @@ impl Web3Rpc {
     // TODO: have this take a builder (which will have channels attached). or maybe just take the config and give the config public fields
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
-        mut config: Web3RpcConfig,
+        config: Web3RpcConfig,
         name: String,
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
@@ -142,19 +142,9 @@ impl Web3Rpc {
         let (hard_limit_until, _) = watch::channel(Instant::now());
 
         if config.ws_url.is_none() && config.http_url.is_none() {
-            if let Some(url) = config.url {
-                if url.starts_with("ws") {
-                    config.ws_url = Some(url);
-                } else if url.starts_with("http") {
-                    config.http_url = Some(url);
-                } else {
-                    return Err(anyhow!("only ws or http urls are supported"));
-                }
-            } else {
-                return Err(anyhow!(
-                    "either ws_url or http_url are required. it is best to set both"
-                ));
-            }
+            return Err(anyhow!(
+                "either ws_url or http_url are required. it is best to set both. they must both point to the same server!"
+            ));
         }
 
         let (head_block, _) = watch::channel(None);

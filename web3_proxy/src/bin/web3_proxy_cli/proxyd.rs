@@ -258,7 +258,7 @@ mod tests {
     use ethers::{
         prelude::{Http, Provider, U256},
         types::Address,
-        utils::Anvil,
+        utils::{Anvil, AnvilInstance},
     };
     use hashbrown::HashMap;
     use parking_lot::Mutex;
@@ -269,7 +269,7 @@ mod tests {
     };
     use tokio::{
         sync::broadcast::error::SendError,
-        task::JoinHandle,
+        task::{yield_now, JoinHandle},
         time::{sleep, Instant},
     };
     use web3_proxy::{
@@ -280,6 +280,7 @@ mod tests {
     // TODO: put it in a thread?
     struct TestApp {
         handle: Mutex<Option<JoinHandle<anyhow::Result<()>>>>,
+        anvil: AnvilInstance,
         anvil_provider: Provider<Http>,
         proxy_provider: Provider<Http>,
         shutdown_sender: broadcast::Sender<()>,
@@ -301,14 +302,11 @@ mod tests {
 
             let anvil_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
-            // mine a block to test the provider
-            let _: U256 = anvil_provider.request("evm_mine", ()).await.unwrap();
-
             // make a test TopConfig
             // TODO: load TopConfig from a file? CliConfig could have `cli_config.load_top_config`. would need to inject our endpoint ports
             let top_config = TopConfig {
                 app: AppConfig {
-                    chain_id: 137,
+                    chain_id: 31337,
                     default_user_max_requests_per_period: Some(6_000_000),
                     deposit_factory_contract: Address::from_str(
                         "4e3BC2054788De923A04936C6ADdB99A05B0Ea36",
@@ -368,6 +366,7 @@ mod tests {
 
             Self {
                 handle: Mutex::new(Some(handle)),
+                anvil,
                 anvil_provider,
                 proxy_provider,
                 shutdown_sender,
@@ -383,6 +382,8 @@ mod tests {
             let handle = self.handle.lock().take();
 
             if let Some(handle) = handle {
+                let _ = self.stop();
+
                 info!("waiting for the app to stop...");
                 handle.await.unwrap().unwrap();
             }
@@ -418,11 +419,13 @@ mod tests {
 
         let first_block_num = anvil_result.number.unwrap();
 
+        // mine a block
         let _: U256 = anvil_provider
             .request("evm_mine", None::<()>)
             .await
             .unwrap();
 
+        // make sure the block advanced
         let anvil_result = anvil_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
@@ -440,7 +443,6 @@ mod tests {
 
         assert_eq!(first_block_num, second_block_num - 1);
 
-        // x.stop();
-        // x.wait().await;
+        x.wait().await;
     }
 }

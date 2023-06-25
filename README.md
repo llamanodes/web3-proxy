@@ -41,6 +41,12 @@ Start the server with the defaults (listen on `http://localhost:8544` and use `.
 cargo run --release -- proxyd
 ```
 
+Quickly run tests:
+
+```
+RUST_LOG=web3_proxy=trace,info cargo nextest run
+```
+
 ## Common commands
 
 Create a user:

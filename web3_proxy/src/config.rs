@@ -2,6 +2,7 @@ use crate::app::Web3ProxyJoinHandle;
 use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
+use derivative::Derivative;
 use ethers::prelude::{Address, TxHash};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
@@ -256,15 +257,14 @@ pub fn average_block_interval(chain_id: u64) -> Duration {
 }
 
 /// Configuration for a backend web3 RPC server
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Derivative, Deserialize, PartialEq, Eq)]
+#[derivative(Default)]
 pub struct Web3RpcConfig {
     /// simple way to disable a connection without deleting the row
     #[serde(default)]
     pub disabled: bool,
     /// a name used in /status and other user facing messages
     pub display_name: Option<String>,
-    /// (deprecated) rpc url
-    pub url: Option<String>,
     /// while not absolutely required, a ws:// or wss:// connection will be able to subscribe to head blocks
     pub ws_url: Option<String>,
     /// while not absolutely required, a http:// or https:// connection will allow erigon to stream JSON
@@ -272,7 +272,8 @@ pub struct Web3RpcConfig {
     /// block data limit. If None, will be queried
     pub block_data_limit: Option<u64>,
     /// the requests per second at which the server starts slowing down
-    #[serde(default = "default_soft_limit")]
+    #[serde(default)]
+    #[derivative(Default(value = "1"))]
     pub soft_limit: u32,
     /// the requests per second at which the server throws errors (rate limit or otherwise)
     pub hard_limit: Option<u64>,
@@ -286,10 +287,6 @@ pub struct Web3RpcConfig {
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
-}
-
-fn default_soft_limit() -> u32 {
-    10
 }
 
 impl Web3RpcConfig {
