@@ -398,7 +398,6 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn it_works() {
-        // TODO: move basic setup into a test fixture
         let x = TestApp::spawn().await;
 
         let anvil_provider = &x.anvil_provider;
@@ -434,6 +433,11 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+
+        let second_block_num = anvil_result.number.unwrap();
+
+        assert_eq!(first_block_num, second_block_num - 1);
+
         let proxy_result = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
@@ -441,10 +445,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(anvil_result, proxy_result);
-
-        let second_block_num = anvil_result.number.unwrap();
-
-        assert_eq!(first_block_num, second_block_num - 1);
 
         x.wait().await;
     }
