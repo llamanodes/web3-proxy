@@ -36,9 +36,10 @@ pub struct OpenRequestHandle {
 }
 
 /// Depending on the context, RPC errors require different handling.
-#[derive(Copy, Debug, Clone)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum RequestErrorHandler {
     /// Log at the trace level. Use when errors are expected.
+    #[default]
     TraceLevel,
     /// Log at the debug level. Use when errors are expected.
     DebugLevel,
@@ -48,12 +49,6 @@ pub enum RequestErrorHandler {
     WarnLevel,
     /// Potentially save the revert. Users can tune how often this happens
     Save,
-}
-
-impl Default for RequestErrorHandler {
-    fn default() -> Self {
-        Self::TraceLevel
-    }
 }
 
 // TODO: second param could be skipped since we don't need it here
