@@ -8,8 +8,6 @@ use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
-use parking_lot::RwLock;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time::interval;

@@ -31,7 +31,7 @@ use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
-use tracing::{trace, warn};
+use tracing::trace;
 
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 

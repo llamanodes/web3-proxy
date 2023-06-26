@@ -29,7 +29,7 @@ use ulid::Ulid;
 pub async fn query_user_stats<'a>(
     app: &'a Web3ProxyApp,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
-    mut params: &'a HashMap<String, String>,
+    params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
     let (caller_user_id, _semaphore) = match bearer {
@@ -51,7 +51,7 @@ pub async fn query_user_stats<'a>(
     let user_id: u64 = params
         .get("user_id")
         .and_then(|x| x.parse::<u64>().ok())
-        .unwrap_or_else(|| caller_user_id);
+        .unwrap_or(caller_user_id);
 
     let db_replica = app.db_replica()?;
 
