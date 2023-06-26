@@ -31,7 +31,7 @@ use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Arc;
-use tracing::trace;
+use tracing::{trace, warn};
 
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 
@@ -199,6 +199,9 @@ impl BufferedRpcQueryStats {
         self.sum_response_bytes += stat.response_bytes;
         self.sum_response_millis += stat.response_millis;
         self.sum_credits_used += stat.compute_unit_cost;
+
+        let latest_balance = stat.authorization.checks.latest_balance.read();
+        self.latest_balance = latest_balance.clone();
     }
 
     async fn _save_db_stats(
@@ -723,8 +726,7 @@ impl BufferedRpcQueryStats {
         builder = builder.tag("method", key.method);
 
         // Read the latest balance ...
-        let remaining = self.latest_balance.read().remaining();
-
+        let remaining = self.latest_balance.remaining();
         trace!("Remaining balance for influx is {:?}", remaining);
 
         builder = builder
