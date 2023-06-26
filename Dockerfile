@@ -53,7 +53,7 @@ ENV WEB3_PROXY_FEATURES "rdkafka-src,connectinfo"
 FROM builder as build_tests
 
 # test the application with cargo-nextest
-RUN --mount=type=bind,target=. \
+RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     \
