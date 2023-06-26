@@ -2,12 +2,17 @@ FROM debian:bullseye-slim as builder
 
 WORKDIR /app
 ENV CARGO_TERM_COLOR always
+ENV PATH "/root/.foundry/bin:/root/.cargo/bin:${PATH}"
 
 # install rustup dependencies
 # also install web3-proxy system dependencies. most things are rust-only, but not everything
-RUN apt-get update && \
-    apt-get install --yes \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    \
+    apt-get update && \
+    apt-get install --no-install-recommends --yes \
     build-essential \
+    ca-certificates \
     cmake \
     curl \
     git \
@@ -17,51 +22,54 @@ RUN apt-get update && \
     libssl-dev \
     libzstd-dev \
     make \
-    pkg-config \
-    && \
-    rm -rf /var/lib/apt/lists/*
+    pkg-config
+
 
 # install rustup
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
 
-# install the correct version of rust
-# we need nightly for a few features
-COPY rust-toolchain.toml .
-RUN /root/.cargo/bin/rustup update
+# install our desired version of rust
+COPY rust-toolchain.toml ./
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    \
+    rustup update
 
 # a next-generation test runner for Rust projects.
 # We only pay the installation cost once, 
 # it will be cached from the second build onwards
 # TODO: more mount type cache?
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    \
     cargo install cargo-nextest
 
 # foundry is needed to run tests
 # TODO: do this in a seperate FROM and COPY it in
-ENV PATH /root/.foundry/bin:$PATH
-RUN curl -L https://foundry.paradigm.xyz | bash && foundryup
-
-# copy the application
-COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    \
+    curl -L https://foundry.paradigm.xyz | bash && foundryup
 
 ENV WEB3_PROXY_FEATURES "rdkafka-src,connectinfo"
 
 FROM builder as build_tests
 
 # test the application with cargo-nextest
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=bind,target=. \
+    --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
-    RUST_LOG=web3_proxy=trace,info cargo nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features
+    \
+    RUST_LOG=web3_proxy=trace,info cargo nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
+    touch /test_success
 
+# TODO: does this split of build_tests and build_app actually do anything if they both mount the same cache?
 FROM builder as build_app
 
 # build the application
 # using a "release" profile (which install does by default) is **very** important
 # TODO: use the "faster_release" profile which builds with `codegen-units = 1`
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=bind,target=.,rw \
+    --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
+    \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
     --locked \
@@ -88,6 +96,8 @@ CMD [ "--config", "/web3-proxy.toml", "proxyd" ]
 # TODO: lower log level when done with prototyping
 ENV RUST_LOG "warn,ethers_providers::rpc=off,web3_proxy=debug,web3_proxy::rpcs::consensus=info,web3_proxy_cli=debug"
 
+# we copy something from build_tests just so that docker actually builds it
+COPY --from=build_tests /test_success /
 COPY --from=build_app /usr/local/bin/* /usr/local/bin/
 
 # make sure the app works
