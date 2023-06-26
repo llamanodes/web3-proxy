@@ -40,7 +40,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # TODO: more mount type cache?
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     \
-    cargo install cargo-nextest 
+    cargo install --locked cargo-nextest 
 
 # foundry is needed to run tests
 # TODO: do this in a seperate FROM and COPY it in
@@ -57,7 +57,7 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     \
-    RUST_LOG=web3_proxy=trace,info cargo nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
+    RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
     touch /test_success
 
 # TODO: does this split of build_tests and build_app actually do anything if they both mount the same cache?
