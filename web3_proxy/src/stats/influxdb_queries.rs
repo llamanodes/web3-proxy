@@ -65,8 +65,8 @@ pub async fn query_user_stats<'a>(
         {
             // TODO: We should add the threshold that determines if a user is premium into app.config or so
             Some(user_balance) => {
-                if user_balance.total_spent_outside_free_tier - user_balance.total_deposits
-                    < Decimal::from(0)
+                if user_balance.total_deposits - user_balance.total_spent_outside_free_tier
+                    <= Decimal::from(0)
                 {
                     trace!("User has 0 balance");
                     return Err(Web3ProxyError::PaymentRequired);
