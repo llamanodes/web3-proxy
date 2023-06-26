@@ -26,13 +26,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 
 # install rustup
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile=minimal
 
-# install our desired version of rust
+# run a cargo command which install our desired version of rust
 COPY rust-toolchain.toml ./
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     \
-    rustup update
+    cargo check || [ "$?" -eq 101 ]
 
 # a next-generation test runner for Rust projects.
 # We only pay the installation cost once, 
@@ -40,7 +40,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # TODO: more mount type cache?
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     \
-    cargo install cargo-nextest
+    cargo install cargo-nextest 
 
 # foundry is needed to run tests
 # TODO: do this in a seperate FROM and COPY it in
