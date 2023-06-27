@@ -11,7 +11,7 @@ default = ["connectinfo", "deadlock_detection"]
 deadlock_detection = ["parking_lot/deadlock_detection"]
 mimalloc = ["dep:mimalloc"]
 tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
-rdkafka-src = ["rdkafka/cmake-build", "rdkafka/libz", "rdkafka/ssl", "rdkafka/zstd-pkg-config"]
+rdkafka-src = ["rdkafka/cmake-build", "rdkafka/libz", "rdkafka/ssl-vendored", "rdkafka/zstd-pkg-config"]
 connectinfo = []
 
 [dependencies]
@@ -103,6 +103,7 @@ ulid = { version = "1.0.0", features = ["rand", "uuid", "serde"] }
 url = { version = "2.4.0" }
 uuid = { version = "1.4.0", default-features = false, features = ["fast-rng", "v4", "zerocopy"] }
 derivative = "2.2.0"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 test-log = { version = "0.2.12", default-features = false, features = ["trace"] }

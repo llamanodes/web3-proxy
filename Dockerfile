@@ -1,6 +1,7 @@
-FROM debian:bullseye-slim as builder
+FROM debian:bullseye-slim as rust
 
 WORKDIR /app
+ENV CARGO_INCREMENTAL 0
 ENV CARGO_TERM_COLOR always
 ENV PATH "/root/.foundry/bin:/root/.cargo/bin:${PATH}"
 
@@ -19,11 +20,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     liblz4-dev \
     libpthread-stubs0-dev \
     libsasl2-dev \
-    libssl-dev \
     libzstd-dev \
     make \
     pkg-config
-
 
 # install rustup
 RUN --mount=type=cache,target=/usr/local/cargo/git \
@@ -38,36 +37,60 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     \
     cargo check || [ "$?" -eq 101 ]
 
-# a next-generation test runner for Rust projects.
-# We only pay the installation cost once, 
-# it will be cached from the second build onwards
-# TODO: more mount type cache?
+# chef splits up the rust build to hopefully cache better
+# hakari manages a 'workspace-hack' to hopefully build faster
+# nextest runs tests in parallel
+# We only pay the installation cost once, it will be cached from the second build onwards
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     \
-    cargo install --locked cargo-nextest 
+    cargo install --locked cargo-chef cargo-hakari cargo-nextest
 
-# foundry is needed to run tests
-# TODO: do this in a seperate FROM and COPY it in
+# foundry/anvil are needed to run tests
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     \
     curl -L https://foundry.paradigm.xyz | bash && foundryup
 
+# changing our features doesn't change any of the steps above
 ENV WEB3_PROXY_FEATURES "rdkafka-src,connectinfo"
 
-FROM builder as build_tests
+# chef plan
+RUN --mount=type=bind,target=.,rw \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    \
+    cargo chef prepare --recipe-path /recipe.json
+
+FROM rust as build_tests
+
+# chef cook the test app
+RUN --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target,id=build_tests_target \
+    \
+    cargo chef cook --recipe-path /recipe.json
 
 # test the application with cargo-nextest
 RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,sharing=private \
+    --mount=type=cache,target=/app/target,id=build_tests_target \
     \
-    RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
+    cargo hakari generate --diff && \
+    cargo hakari manage-deps --dry-run && \
+    RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --profile ci --features "$WEB3_PROXY_FEATURES" --no-default-features && \
     touch /test_success
 
-FROM builder as build_app
+FROM rust as build_app
+
+# chef cook the app
+RUN --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target,id=build_app_target \
+    \
+    cargo chef cook --release --recipe-path /recipe.json
 
 # build the application
 # using a "release" profile (which install does by default) is **very** important
@@ -75,7 +98,7 @@ FROM builder as build_app
 RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,sharing=private \
+    --mount=type=cache,target=/app/target,id=build_app_target \
     \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
