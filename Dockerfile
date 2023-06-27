@@ -67,7 +67,6 @@ RUN --mount=type=bind,target=.,rw \
     RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
     touch /test_success
 
-# TODO: does this split of build_tests and build_app actually do anything if they both mount the same cache?
 FROM builder as build_app
 
 # build the application
@@ -85,6 +84,10 @@ RUN --mount=type=bind,target=.,rw \
     --path ./web3_proxy \
     --root /usr/local/bin \
     ;
+
+# copy this file so that docker actually creates the build_tests container
+# without this, the runtime container doesn't need build_tests and so docker build skips it
+COPY --from=build_tests /test_success /
 
 #
 # We do not need the Rust toolchain to run the binary!
@@ -105,7 +108,6 @@ CMD [ "--config", "/web3-proxy.toml", "proxyd" ]
 ENV RUST_LOG "warn,ethers_providers::rpc=off,web3_proxy=debug,web3_proxy::rpcs::consensus=info,web3_proxy_cli=debug"
 
 # we copy something from build_tests just so that docker actually builds it
-COPY --from=build_tests /test_success /
 COPY --from=build_app /usr/local/bin/* /usr/local/bin/
 
 # make sure the app works
