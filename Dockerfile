@@ -1,7 +1,6 @@
 FROM debian:bullseye-slim as rust
 
 WORKDIR /app
-ENV CARGO_INCREMENTAL 0
 ENV CARGO_TERM_COLOR always
 ENV PATH "/root/.foundry/bin:/root/.cargo/bin:${PATH}"
 
