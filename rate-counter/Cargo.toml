@@ -5,5 +5,5 @@ authors = ["Bryan Stitt <bryan@llamanodes.com>"]
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.28.2", features = ["time"] }
+tokio = { version = "1.29.0", features = ["time"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

@@ -14,7 +14,6 @@ use itertools::{Itertools, MinMaxResult};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::{Ordering, Reverse};
-use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
@@ -51,9 +50,10 @@ impl ConsensusRpcData {
 
 #[derive(Constructor, Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct RpcRanking {
-    tier: u32,
     backup: bool,
-    head_num: Option<U64>,
+    /// note: the servers in this tier might have blocks higher than this
+    consensus_head_num: Option<U64>,
+    tier: u32,
 }
 
 impl RpcRanking {
@@ -65,11 +65,11 @@ impl RpcRanking {
     }
 
     fn sort_key(&self) -> (bool, Reverse<Option<U64>>, u32) {
-        // TODO: add soft_limit here? add peak_ewma here?
-        // TODO: should backup or tier be checked first? now that tiers are automated, backups
+        // TODO: add sum_soft_limit here? add peak_ewma here?
+        // TODO: should backup or tier be checked first? now that tiers are automated, backups should be more reliable, but still leave them last
+        // while tier might give us better latency, giving requests to a server that is behind by a block will get in the way of it syncing. better to only query synced servers
         // TODO: should we include a random number in here?
-        // TODO: should we include peak_ewma_latency or weighted_peak_ewma_latency?
-        (!self.backup, Reverse(self.head_num), self.tier)
+        (!self.backup, Reverse(self.consensus_head_num), self.tier)
     }
 }
 
@@ -85,8 +85,6 @@ impl PartialOrd for RpcRanking {
     }
 }
 
-pub type RankedRpcMap = BTreeMap<RpcRanking, Vec<Arc<Web3Rpc>>>;
-
 pub enum ShouldWaitForBlock {
     Ready,
     // BackupReady,
@@ -99,31 +97,125 @@ pub enum ShouldWaitForBlock {
 /// Serialize is so we can print it on our /status endpoint
 /// TODO: remove head_block/head_rpcs/tier and replace with one RankedRpcMap
 /// TODO: add `best_rpc(method_data_kind, min_block_needed, max_block_needed, include_backups)`
+/// TODO: make serializing work. the key needs to be a string. I think we need `serialize_with`
 #[derive(Clone, Serialize)]
-pub struct ConsensusWeb3Rpcs {
-    pub(crate) tier: u32,
-    pub(crate) backups_needed: bool,
+pub struct RankedRpcs {
+    pub head_block: Web3ProxyBlock,
+    pub num_synced: usize,
+    pub backups_needed: bool,
 
-    // TODO: Don't skip serializing, instead make a shorter serialize
-    #[serde(skip_serializing)]
-    pub(crate) head_block: Web3ProxyBlock,
-
-    // TODO: make a shorter serialize
-    pub(crate) head_rpcs: Vec<Arc<Web3Rpc>>,
-
-    // TODO: make serializing work. the key needs to be a string. I think we need `serialize_with`
-    #[serde(skip_serializing)]
-    pub(crate) other_rpcs: RankedRpcMap,
+    inner: Vec<Arc<Web3Rpc>>,
 
     // TODO: make serializing work. the key needs to be a string. I think we need `serialize_with`
     #[serde(skip_serializing)]
     rpc_data: HashMap<Arc<Web3Rpc>, ConsensusRpcData>,
 }
 
-impl ConsensusWeb3Rpcs {
+impl RankedRpcs {
+    // /// useful when Web3Rpcs does not track the head block
+    // pub fn from_all(rpcs: &Web3Rpcs) -> Self {
+    //     let inner = vec![(
+    //         RpcRanking::default(),
+    //         rpcs.by_name
+    //             .read()
+    //             .values()
+    //             .cloned()
+    //             .collect::<Vec<Arc<_>>>(),
+    //     )];
+
+    //     todo!()
+    // }
+
+    pub fn from_votes(
+        min_synced_rpcs: usize,
+        min_sum_soft_limit: u32,
+        max_lag_block: U64,
+        votes: HashMap<Web3ProxyBlock, (HashSet<&Arc<Web3Rpc>>, u32)>,
+        heads: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
+    ) -> Option<Self> {
+        // find the blocks that meets our min_sum_soft_limit and min_synced_rpcs
+        let mut votes: Vec<_> = votes
+            .into_iter()
+            .filter_map(|(block, (rpcs, sum_soft_limit))| {
+                if *block.number() < max_lag_block
+                    || sum_soft_limit < min_sum_soft_limit
+                    || rpcs.len() < min_synced_rpcs
+                {
+                    None
+                } else {
+                    Some((block, sum_soft_limit, rpcs))
+                }
+            })
+            .collect();
+
+        // sort the votes
+        votes.sort_by_key(|(block, sum_soft_limit, _)| {
+            (
+                Reverse(*block.number()),
+                // TODO: block total difficulty (if we have it)
+                Reverse(*sum_soft_limit),
+                // TODO: median/peak latency here?
+            )
+        });
+
+        // return the first result that exceededs confgured minimums (if any)
+        if let Some((best_block, _, best_rpcs)) = votes.into_iter().next() {
+            let mut ranked_rpcs: Vec<_> = best_rpcs.into_iter().map(Arc::clone).collect();
+            let mut rpc_data = HashMap::new();
+
+            let backups_needed = ranked_rpcs.iter().any(|x| x.backup);
+            let num_synced = ranked_rpcs.len();
+
+            // TODO: add all the unsynced rpcs
+            for (x, x_head) in heads.iter() {
+                let data = ConsensusRpcData::new(x, x_head);
+
+                rpc_data.insert(x.clone(), data);
+
+                if ranked_rpcs.contains(x) {
+                    continue;
+                }
+
+                if *x_head.number() < max_lag_block {
+                    // server is too far behind
+                    continue;
+                }
+
+                ranked_rpcs.push(x.clone());
+            }
+
+            ranked_rpcs
+                .sort_by_cached_key(|x| x.sort_for_load_balancing_on(Some(*best_block.number())));
+
+            // consensus found!
+            trace!(?ranked_rpcs);
+
+            let consensus = RankedRpcs {
+                backups_needed,
+                head_block: best_block,
+                rpc_data,
+                inner: ranked_rpcs,
+                num_synced,
+            };
+
+            return Some(consensus);
+        }
+
+        None
+    }
+
+    pub fn all(&self) -> &[Arc<Web3Rpc>] {
+        &self.inner
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     #[inline]
     pub fn num_consensus_rpcs(&self) -> usize {
-        self.head_rpcs.len()
+        // TODO! wrong! this is now the total num of rpcs. we should keep the number on the head block saved
+        self.inner.len()
     }
 
     /// will tell you if waiting will eventually  should wait for a block
@@ -135,56 +227,17 @@ impl ConsensusWeb3Rpcs {
         needed_block_num: Option<&U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
     ) -> ShouldWaitForBlock {
-        // TODO: i think checking synced is always a waste of time. though i guess there could be a race
-        if self
-            .head_rpcs
-            .iter()
-            .any(|rpc| self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs))
-        {
-            let head_num = self.head_block.number();
-
-            if Some(head_num) >= needed_block_num {
-                trace!("best (head) block: {}", head_num);
-                return ShouldWaitForBlock::Ready;
+        for rpc in self.inner.iter() {
+            match self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs) {
+                ShouldWaitForBlock::NeverReady => continue,
+                x => return x,
             }
         }
 
-        // all of the head rpcs are skipped
-
-        let mut best_num = None;
-
-        // iterate the other rpc tiers to find the next best block
-        for (next_ranking, next_rpcs) in self.other_rpcs.iter() {
-            if !next_rpcs
-                .iter()
-                .any(|rpc| self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs))
-            {
-                trace!("everything in this ranking ({:?}) is skipped", next_ranking);
-                continue;
-            }
-
-            let next_head_num = next_ranking.head_num.as_ref();
-
-            if next_head_num >= needed_block_num {
-                trace!("best (head) block: {:?}", next_head_num);
-                return ShouldWaitForBlock::Ready;
-            }
-
-            best_num = next_head_num;
-        }
-
-        // TODO: this seems wrong
-        if best_num.is_some() {
-            trace!("best (old) block: {:?}", best_num);
-            ShouldWaitForBlock::Wait {
-                current: best_num.copied(),
-            }
-        } else {
-            trace!("never ready");
-            ShouldWaitForBlock::NeverReady
-        }
+        ShouldWaitForBlock::NeverReady
     }
 
+    /// TODO: change this to take a min and a max
     pub fn has_block_data(&self, rpc: &Web3Rpc, block_num: &U64) -> bool {
         self.rpc_data
             .get(rpc)
@@ -193,15 +246,17 @@ impl ConsensusWeb3Rpcs {
     }
 
     // TODO: take method as a param, too. mark nodes with supported methods (maybe do it optimistically? on)
+    // TODO: move this onto Web3Rpc?
+    // TODO: this needs min and max block on it
     pub fn rpc_will_work_eventually(
         &self,
         rpc: &Arc<Web3Rpc>,
         needed_block_num: Option<&U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
-    ) -> bool {
+    ) -> ShouldWaitForBlock {
         if skip_rpcs.contains(rpc) {
             // if rpc is skipped, it must have already been determined it is unable to serve the request
-            return false;
+            return ShouldWaitForBlock::NeverReady;
         }
 
         if let Some(needed_block_num) = needed_block_num {
@@ -210,26 +265,27 @@ impl ConsensusWeb3Rpcs {
                     Ordering::Less => {
                         trace!("{} is behind. let it catch up", rpc);
                         // TODO: what if this is a pruned rpc that is behind by a lot, and the block is old, too?
-                        return true;
+                        return ShouldWaitForBlock::Wait {
+                            current: Some(rpc_data.head_block_num),
+                        };
                     }
                     Ordering::Greater | Ordering::Equal => {
                         // rpc is synced past the needed block. make sure the block isn't too old for it
                         if self.has_block_data(rpc, needed_block_num) {
                             trace!("{} has {}", rpc, needed_block_num);
-                            return true;
+                            return ShouldWaitForBlock::Ready;
                         } else {
                             trace!("{} does not have {}", rpc, needed_block_num);
-                            return false;
+                            return ShouldWaitForBlock::NeverReady;
                         }
                     }
                 }
             }
-
-            // no rpc data for this rpc. thats not promising
-            false
+            warn!(%rpc, "no rpc data for this rpc. thats not promising");
+            ShouldWaitForBlock::NeverReady
         } else {
             // if no needed_block_num was specified, then this should work
-            true
+            ShouldWaitForBlock::Ready
         }
     }
 
@@ -284,14 +340,10 @@ impl ConsensusWeb3Rpcs {
     // TODO: sum_hard_limit?
 }
 
-impl fmt::Debug for ConsensusWeb3Rpcs {
+impl fmt::Debug for RankedRpcs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: the default formatter takes forever to write. this is too quiet though
-        // TODO: print the actual conns?
-        f.debug_struct("ConsensusWeb3Rpcs")
-            .field("head_block", &self.head_block)
-            .field("num_conns", &self.head_rpcs.len())
-            .finish_non_exhaustive()
+        // TODO: the default formatter takes forever to write. we need to print something though
+        f.debug_struct("RankedRpcs").finish_non_exhaustive()
     }
 }
 
@@ -299,7 +351,7 @@ impl fmt::Debug for ConsensusWeb3Rpcs {
 impl Web3Rpcs {
     // TODO: return a ref?
     pub fn head_block(&self) -> Option<Web3ProxyBlock> {
-        self.watch_consensus_head_sender
+        self.watch_head_block
             .as_ref()
             .and_then(|x| x.borrow().clone())
     }
@@ -315,20 +367,20 @@ impl Web3Rpcs {
     }
 
     pub fn synced(&self) -> bool {
-        let consensus = self.watch_consensus_rpcs_sender.borrow();
+        let consensus = self.watch_ranked_rpcs.borrow();
 
         if let Some(consensus) = consensus.as_ref() {
-            !consensus.head_rpcs.is_empty()
+            !consensus.is_empty()
         } else {
             false
         }
     }
 
     pub fn num_synced_rpcs(&self) -> usize {
-        let consensus = self.watch_consensus_rpcs_sender.borrow();
+        let consensus = self.watch_ranked_rpcs.borrow();
 
         if let Some(consensus) = consensus.as_ref() {
-            consensus.head_rpcs.len()
+            consensus.num_synced
         } else {
             0
         }
@@ -381,26 +433,22 @@ impl ConsensusFinder {
         authorization: &Arc<Authorization>,
         rpc: Option<&Arc<Web3Rpc>>,
         new_block: Option<Web3ProxyBlock>,
-    ) -> Web3ProxyResult<()> {
+    ) -> Web3ProxyResult<bool> {
         let new_consensus_rpcs = match self
             .find_consensus_connections(authorization, web3_rpcs)
             .await
+            .web3_context("error while finding consensus head block!")?
         {
-            Err(err) => {
-                return Err(err).web3_context("error while finding consensus head block!");
-            }
-            Ok(None) => {
-                return Err(Web3ProxyError::NoConsensusHeadBlock);
-            }
-            Ok(Some(x)) => x,
+            None => return Ok(false),
+            Some(x) => x,
         };
 
-        trace!("new_synced_connections: {:#?}", new_consensus_rpcs);
+        trace!(?new_consensus_rpcs);
 
-        let watch_consensus_head_sender = web3_rpcs.watch_consensus_head_sender.as_ref().unwrap();
-        let consensus_tier = new_consensus_rpcs.tier;
-        // TODO: think more about the default for total_tiers
-        let total_tiers = self.worst_tier().unwrap_or_default();
+        let watch_consensus_head_sender = web3_rpcs.watch_head_block.as_ref().unwrap();
+        // TODO: think more about the default for tiers
+        let best_tier = self.best_tier().unwrap_or_default();
+        let worst_tier = self.worst_tier().unwrap_or_default();
         let backups_needed = new_consensus_rpcs.backups_needed;
         let consensus_head_block = new_consensus_rpcs.head_block.clone();
         let num_consensus_rpcs = new_consensus_rpcs.num_consensus_rpcs();
@@ -410,7 +458,7 @@ impl ConsensusFinder {
         let new_consensus_rpcs = Arc::new(new_consensus_rpcs);
 
         let old_consensus_head_connections = web3_rpcs
-            .watch_consensus_rpcs_sender
+            .watch_ranked_rpcs
             .send_replace(Some(new_consensus_rpcs.clone()));
 
         let backups_voted_str = if backups_needed { "B " } else { "" };
@@ -431,8 +479,8 @@ impl ConsensusFinder {
             None => {
                 debug!(
                     "first {}/{} {}{}/{}/{} block={}, rpc={}",
-                    consensus_tier,
-                    total_tiers,
+                    best_tier,
+                    worst_tier,
                     backups_voted_str,
                     num_consensus_rpcs,
                     num_active_rpcs,
@@ -469,8 +517,8 @@ impl ConsensusFinder {
                             // TODO: trace level if rpc is backup
                             debug!(
                                 "con {}/{} {}{}/{}/{} con={} rpc={}",
-                                consensus_tier,
-                                total_tiers,
+                                best_tier,
+                                worst_tier,
                                 backups_voted_str,
                                 num_consensus_rpcs,
                                 num_active_rpcs,
@@ -483,8 +531,8 @@ impl ConsensusFinder {
 
                             debug!(
                                 "unc {}/{} {}{}/{}/{} con={} old={} rpc={}",
-                                consensus_tier,
-                                total_tiers,
+                                best_tier,
+                                worst_tier,
                                 backups_voted_str,
                                 num_consensus_rpcs,
                                 num_active_rpcs,
@@ -510,8 +558,8 @@ impl ConsensusFinder {
                         // TODO: better log that includes all the votes
                         warn!(
                             "chain rolled back {}/{} {}{}/{}/{} con={} old={} rpc={}",
-                            consensus_tier,
-                            total_tiers,
+                            best_tier,
+                            worst_tier,
                             backups_voted_str,
                             num_consensus_rpcs,
                             num_active_rpcs,
@@ -542,8 +590,8 @@ impl ConsensusFinder {
                     Ordering::Greater => {
                         info!(
                             "new {}/{} {}{}/{}/{} con={} rpc={}",
-                            consensus_tier,
-                            total_tiers,
+                            best_tier,
+                            worst_tier,
                             backups_voted_str,
                             num_consensus_rpcs,
                             num_active_rpcs,
@@ -569,7 +617,7 @@ impl ConsensusFinder {
             }
         }
 
-        Ok(())
+        Ok(true)
     }
 
     pub(super) async fn process_block_from_rpc(
@@ -579,7 +627,7 @@ impl ConsensusFinder {
         new_block: Option<Web3ProxyBlock>,
         rpc: Arc<Web3Rpc>,
         _pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
-    ) -> Web3ProxyResult<()> {
+    ) -> Web3ProxyResult<bool> {
         // TODO: how should we handle an error here?
         if !self
             .update_rpc(new_block.clone(), rpc.clone(), web3_rpcs)
@@ -587,7 +635,8 @@ impl ConsensusFinder {
             .web3_context("failed to update rpc")?
         {
             // nothing changed. no need to scan for a new consensus head
-            return Ok(());
+            // TODO: this should this be true if there is an existing consensus?
+            return Ok(false);
         }
 
         self.refresh(web3_rpcs, authorization, Some(&rpc), new_block)
@@ -754,7 +803,7 @@ impl ConsensusFinder {
         &mut self,
         authorization: &Arc<Authorization>,
         web3_rpcs: &Web3Rpcs,
-    ) -> Web3ProxyResult<Option<ConsensusWeb3Rpcs>> {
+    ) -> Web3ProxyResult<Option<RankedRpcs>> {
         self.update_tiers().await?;
 
         let minmax_block = self.rpc_heads.values().minmax_by_key(|&x| x.number());
@@ -801,6 +850,12 @@ impl ConsensusFinder {
             let mut block_to_check = rpc_head.clone();
 
             while block_to_check.number() >= lowest_block_number {
+                if let Some(max_age) = self.max_head_block_age {
+                    if block_to_check.age() > max_age {
+                        break;
+                    }
+                }
+
                 if !rpc.backup {
                     // backup nodes are excluded from the primary voting
                     let entry = primary_votes.entry(block_to_check.clone()).or_default();
@@ -815,7 +870,6 @@ impl ConsensusFinder {
                 backup_entry.0.insert(rpc);
                 backup_entry.1 += rpc.soft_limit;
 
-                // we used to specify rpc on this, but it shouldn't be necessary
                 let parent_hash = block_to_check.parent_hash();
                 // TODO: i flip flop on passing rpc to this or not
                 match web3_rpcs
@@ -837,99 +891,31 @@ impl ConsensusFinder {
         }
 
         // we finished processing all tiers. check for primary results (if anything but the last tier found consensus, we already returned above)
-        if let Some(consensus) = self.count_votes(&primary_votes, web3_rpcs) {
+        if let Some(consensus) = RankedRpcs::from_votes(
+            web3_rpcs.min_synced_rpcs,
+            web3_rpcs.min_sum_soft_limit,
+            max_lag_block_number,
+            primary_votes,
+            self.rpc_heads.clone(),
+        ) {
             return Ok(Some(consensus));
         }
 
         // primary votes didn't work. hopefully backup tiers are synced
-        Ok(self.count_votes(&backup_votes, web3_rpcs))
+        Ok(RankedRpcs::from_votes(
+            web3_rpcs.min_synced_rpcs,
+            web3_rpcs.min_sum_soft_limit,
+            max_lag_block_number,
+            backup_votes,
+            self.rpc_heads.clone(),
+        ))
     }
 
-    // TODO: have min_sum_soft_limit and min_head_rpcs on self instead of on Web3Rpcs
-    fn count_votes(
-        &self,
-        votes: &HashMap<Web3ProxyBlock, (HashSet<&Arc<Web3Rpc>>, u32)>,
-        web3_rpcs: &Web3Rpcs,
-    ) -> Option<ConsensusWeb3Rpcs> {
-        // sort the primary votes ascending by tier and descending by block num
-        let mut votes: Vec<_> = votes
-            .into_iter()
-            .map(|(block, (rpc_names, sum_soft_limit))| (block, sum_soft_limit, rpc_names))
-            .collect();
-        votes.sort_by_key(|(block, sum_soft_limit, _)| {
-            (Reverse(*block.number()), Reverse(*sum_soft_limit))
-        });
-
-        // return the first result that exceededs confgured minimums (if any)
-        for (maybe_head_block, sum_soft_limit, rpc_names) in votes {
-            if *sum_soft_limit < web3_rpcs.min_sum_soft_limit {
-                continue;
-            }
-            // TODO: different mins for backup vs primary
-            if rpc_names.len() < web3_rpcs.min_synced_rpcs {
-                continue;
-            }
-
-            trace!("rpc_names: {:#?}", rpc_names);
-
-            if rpc_names.len() < web3_rpcs.min_synced_rpcs {
-                continue;
-            }
-
-            // consensus found!
-            let consensus_rpcs: Vec<Arc<_>> = rpc_names.iter().map(|x| Arc::clone(x)).collect();
-
-            let tier = consensus_rpcs
-                .iter()
-                .map(|x| x.tier.load(atomic::Ordering::Relaxed))
-                .max()
-                .expect("there should always be a max");
-
-            let backups_needed = consensus_rpcs.iter().any(|x| x.backup);
-
-            let mut other_rpcs = BTreeMap::new();
-
-            for (x, x_head) in self
-                .rpc_heads
-                .iter()
-                .filter(|(k, _)| !consensus_rpcs.contains(k))
-            {
-                let x_head_num = *x_head.number();
-
-                let key: RpcRanking = RpcRanking::new(
-                    x.tier.load(atomic::Ordering::Relaxed),
-                    x.backup,
-                    Some(x_head_num),
-                );
-
-                other_rpcs
-                    .entry(key)
-                    .or_insert_with(Vec::new)
-                    .push(x.clone());
-            }
-
-            // TODO: how should we populate this?
-            let mut rpc_data = HashMap::with_capacity(self.rpc_heads.len());
-
-            for (x, x_head) in self.rpc_heads.iter() {
-                let y = ConsensusRpcData::new(x, x_head);
-
-                rpc_data.insert(x.clone(), y);
-            }
-
-            let consensus = ConsensusWeb3Rpcs {
-                tier,
-                head_block: maybe_head_block.clone(),
-                head_rpcs: consensus_rpcs,
-                other_rpcs,
-                backups_needed,
-                rpc_data,
-            };
-
-            return Some(consensus);
-        }
-
-        None
+    pub fn best_tier(&self) -> Option<u32> {
+        self.rpc_heads
+            .iter()
+            .map(|(x, _)| x.tier.load(atomic::Ordering::Relaxed))
+            .min()
     }
 
     pub fn worst_tier(&self) -> Option<u32> {

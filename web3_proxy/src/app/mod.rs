@@ -17,7 +17,7 @@ use crate::response_cache::{
     JsonRpcQueryCacheKey, JsonRpcResponseCache, JsonRpcResponseEnum, JsonRpcResponseWeigher,
 };
 use crate::rpcs::blockchain::Web3ProxyBlock;
-use crate::rpcs::consensus::ConsensusWeb3Rpcs;
+use crate::rpcs::consensus::RankedRpcs;
 use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::provider::{connect_http, EthersHttpProvider};
@@ -175,9 +175,9 @@ pub struct Web3ProxyAppSpawn {
     /// these are important and must be allowed to finish
     pub background_handles: FuturesUnordered<Web3ProxyJoinHandle<()>>,
     /// config changes are sent here
-    pub new_top_config_sender: watch::Sender<TopConfig>,
+    pub new_top_config: watch::Sender<TopConfig>,
     /// watch this to know when the app is ready to serve requests
-    pub consensus_connections_watcher: watch::Receiver<Option<Arc<ConsensusWeb3Rpcs>>>,
+    pub ranked_rpcs: watch::Receiver<Option<Arc<RankedRpcs>>>,
 }
 
 impl Web3ProxyApp {
@@ -1083,7 +1083,6 @@ impl Web3ProxyApp {
                         Some(Duration::from_secs(30)),
                         Some(Level::TRACE.into()),
                         None,
-                        true,
                     )
                     .await;
 
@@ -1114,7 +1113,6 @@ impl Web3ProxyApp {
                 Some(Duration::from_secs(30)),
                 Some(Level::TRACE.into()),
                 num_public_rpcs,
-                true,
             )
             .await
     }

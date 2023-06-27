@@ -90,7 +90,7 @@ serde_json = { version = "1.0.99", default-features = false, features = ["raw_va
 serde_prometheus = "0.2.3"
 strum = { version = "0.25.0", features = ["derive"] }
 time = { version = "0.3.22" }
-tokio = { version = "1.28.2", features = ["full", "tracing"] }
+tokio = { version = "1.29.0", features = ["full", "tracing"] }
 tokio-console = { version = "0.1.8", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 tokio-uring = { version = "0.4.0", optional = true }
@@ -105,8 +105,12 @@ uuid = { version = "1.4.0", default-features = false, features = ["fast-rng", "v
 derivative = "2.2.0"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
-[dev-dependencies]
+# TODO: why doesn't this work in dev-dependencies
 test-log = { version = "0.2.12", default-features = false, features = ["trace"] }
-tokio = { version = "1.28.2", features = ["full", "test-util"] }
+
+[dev-dependencies]
+env_logger = "0.10"
+test-log = "0.2.12"
+tokio = { version = "1.29.0", features = ["full", "test-util"] }
 tracing = {version = "0.1", default-features = false}
 tracing-subscriber = {version = "0.3", default-features = false, features = ["env-filter", "fmt"]}

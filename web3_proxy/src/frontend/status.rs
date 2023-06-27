@@ -4,7 +4,10 @@
 //! They will eventually move to another port.
 
 use super::{ResponseCache, ResponseCacheKey};
-use crate::app::{Web3ProxyApp, APP_USER_AGENT};
+use crate::{
+    app::{Web3ProxyApp, APP_USER_AGENT},
+    errors::Web3ProxyError,
+};
 use axum::{
     body::{Bytes, Full},
     http::StatusCode,
@@ -19,7 +22,8 @@ use moka::future::Cache;
 use once_cell::sync::Lazy;
 use serde::{ser::SerializeStruct, Serialize};
 use serde_json::json;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
+use tokio::time::timeout;
 use tracing::trace;
 
 static HEALTH_OK: Lazy<Bytes> = Lazy::new(|| Bytes::from("OK\n"));
@@ -74,16 +78,20 @@ pub async fn debug_request(
 pub async fn health(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
-) -> impl IntoResponse {
-    let (code, content_type, body) = cache
-        .get_with(ResponseCacheKey::Health, async move { _health(app).await })
-        .await;
+) -> Result<impl IntoResponse, Web3ProxyError> {
+    let (code, content_type, body) = timeout(
+        Duration::from_secs(3),
+        cache.get_with(ResponseCacheKey::Health, async move { _health(app).await }),
+    )
+    .await?;
 
-    Response::builder()
+    let x = Response::builder()
         .status(code)
         .header("content-type", content_type)
         .body(Full::from(body))
-        .unwrap()
+        .unwrap();
+
+    Ok(x)
 }
 
 // TODO: _health doesn't need to be async, but _quick_cache_ttl needs an async function
@@ -107,18 +115,22 @@ async fn _health(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
 pub async fn backups_needed(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
-) -> impl IntoResponse {
-    let (code, content_type, body) = cache
-        .get_with(ResponseCacheKey::BackupsNeeded, async move {
+) -> Result<impl IntoResponse, Web3ProxyError> {
+    let (code, content_type, body) = timeout(
+        Duration::from_secs(3),
+        cache.get_with(ResponseCacheKey::BackupsNeeded, async move {
             _backups_needed(app).await
-        })
-        .await;
+        }),
+    )
+    .await?;
 
-    Response::builder()
+    let x = Response::builder()
         .status(code)
         .header("content-type", content_type)
         .body(Full::from(body))
-        .unwrap()
+        .unwrap();
+
+    Ok(x)
 }
 
 #[inline]
@@ -126,11 +138,7 @@ async fn _backups_needed(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, B
     trace!("backups_needed is not cached");
 
     let code = {
-        let consensus_rpcs = app
-            .balanced_rpcs
-            .watch_consensus_rpcs_sender
-            .borrow()
-            .clone();
+        let consensus_rpcs = app.balanced_rpcs.watch_ranked_rpcs.borrow().clone();
 
         if let Some(ref consensus_rpcs) = consensus_rpcs {
             if consensus_rpcs.backups_needed {
@@ -158,16 +166,20 @@ async fn _backups_needed(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, B
 pub async fn status(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
-) -> impl IntoResponse {
-    let (code, content_type, body) = cache
-        .get_with(ResponseCacheKey::Status, async move { _status(app).await })
-        .await;
+) -> Result<impl IntoResponse, Web3ProxyError> {
+    let (code, content_type, body) = timeout(
+        Duration::from_secs(3),
+        cache.get_with(ResponseCacheKey::Status, async move { _status(app).await }),
+    )
+    .await?;
 
-    Response::builder()
+    let x = Response::builder()
         .status(code)
         .header("content-type", content_type)
         .body(Full::from(body))
-        .unwrap()
+        .unwrap();
+
+    Ok(x)
 }
 
 // TODO: _status doesn't need to be async, but _quick_cache_ttl needs an async function

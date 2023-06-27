@@ -234,6 +234,7 @@ impl Web3Rpc {
     /// TODO: tests on this!
     /// TODO: should tier or block number take priority?
     /// TODO: should this return a struct that implements sorting traits?
+    /// TODO: move this to consensus.rs
     fn sort_on(&self, max_block: Option<U64>) -> (bool, Reverse<U64>, u32) {
         let mut head_block = self
             .head_block
@@ -252,6 +253,7 @@ impl Web3Rpc {
         (!backup, Reverse(head_block), tier)
     }
 
+    /// TODO: move this to consensus.rs
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
@@ -268,6 +270,7 @@ impl Web3Rpc {
     }
 
     /// like sort_for_load_balancing, but shuffles tiers randomly instead of sorting by weighted_peak_latency
+    /// TODO: move this to consensus.rs
     pub fn shuffle_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
@@ -444,6 +447,7 @@ impl Web3Rpc {
             .into());
         }
 
+        // TODO: only do this for balanced_rpcs. this errors on 4337 rpcs
         self.check_block_data_limit()
             .await
             .context(format!("unable to check_block_data_limit of {}", self))?;

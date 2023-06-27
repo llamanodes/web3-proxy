@@ -351,7 +351,7 @@ impl Web3Rpcs {
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
 
         let mut consensus_head_receiver = self
-            .watch_consensus_head_sender
+            .watch_head_block
             .as_ref()
             .web3_context("need new head subscriptions to fetch cannonical_block")?
             .subscribe();

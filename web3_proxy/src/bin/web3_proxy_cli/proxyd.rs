@@ -89,7 +89,7 @@ async fn run(
 
     // start thread for watching config
     if let Some(top_config_path) = top_config_path {
-        let config_sender = spawned_app.new_top_config_sender;
+        let config_sender = spawned_app.new_top_config;
         {
             let mut current_config = config_sender.borrow().clone();
 

@@ -9,7 +9,7 @@ name = "migration"
 path = "src/lib.rs"
 
 [dependencies]
-tokio = { version = "1.28.2", features = ["full", "tracing"] }
+tokio = { version = "1.29.0", features = ["full", "tracing"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dependencies.sea-orm-migration]
