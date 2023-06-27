@@ -85,11 +85,11 @@ pub async fn user_balance_stripe_post(
         (authorization, None)
     };
 
-    let recipient_user_id: u64 = params
-        .remove("user_id")
-        .ok_or(Web3ProxyError::BadRouting)?
-        .parse()
-        .or(Err(Web3ProxyError::ParseAddressError))?;
+    // let recipient_user_id: u64 = params
+    //     .remove("user_id")
+    //     .ok_or(Web3ProxyError::BadRouting)?
+    //     .parse()
+    //     .or(Err(Web3ProxyError::ParseAddressError))?;
 
     // Get the payload, and the header
     let payload = params.remove("data").ok_or(Web3ProxyError::BadRequest(
@@ -143,8 +143,18 @@ pub async fn user_balance_stripe_post(
         return Ok("Payment was already recorded".into_response());
     };
 
-    let recipient: Option<user::Model> = user::Entity::find()
-        .filter(user::Column::Id.eq(recipient_user_id))
+    // Try to get the recipient_user_id from the data metadata
+    let recipient_user_id = match intent.metadata.get("user_id") {
+        Some(x) => Ok(x.parse::<u64>()),
+        None => Err(Web3ProxyError::BadRequest(
+            "Could not find user_id in the stripe webhook request!".into(),
+        )),
+    }?
+    .context(Web3ProxyError::BadRequest(
+        "Could not parse the stripe webhook request user_id!".into(),
+    ))?;
+
+    let recipient: Option<user::Model> = user::Entity::find_by_id(recipient_user_id)
         .one(&db_conn)
         .await?;
 
