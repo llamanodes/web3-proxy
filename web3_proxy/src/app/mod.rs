@@ -1119,8 +1119,7 @@ impl Web3ProxyApp {
             .await
     }
 
-    ///
-    // TODO: is this a good return type? i think the status code should be one level higher
+    /// proxy request with up to 3 tries.
     async fn proxy_request(
         self: &Arc<Self>,
         request: JsonRpcRequest,
@@ -1137,20 +1136,38 @@ impl Web3ProxyApp {
 
         let response_id = request.id;
 
-        let (code, response_data) = match self
-            ._proxy_request_with_caching(
-                &request.method,
-                request.params,
-                head_block_num,
-                &request_metadata,
-            )
-            .await
-        {
-            Ok(response_data) => (StatusCode::OK, response_data),
-            Err(err) => err.as_response_parts(),
-        };
+        let mut tries = 3;
+        let mut code;
+        let mut response;
+        while tries > 0 {
+            // TODO: make sure this doesn't retry jsonrpc errors
+            let response_data;
+            (code, response_data) = match self
+                ._proxy_request_with_caching(
+                    &request.method,
+                    request.params,
+                    head_block_num,
+                    &request_metadata,
+                )
+                .await
+            {
+                Ok(response_data) => (StatusCode::OK, response_data),
+                Err(err) => err.as_response_parts(),
+            };
 
-        let response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
+            response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
+
+            if code == StatusCode::OK {
+                break;
+            }
+
+            // TODO: emit a stat?
+            // TODO: only log params in development
+            warn!(method=%request.method, params=?request.params, ?response, "request failed");
+            tries -= 1;
+        }
+
+        let response = response.expect("we definitely looped at least once");
 
         // TODO: this serializes twice :/
         request_metadata.add_response(ResponseOrBytes::Response(&response));
