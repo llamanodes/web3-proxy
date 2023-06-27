@@ -10,7 +10,7 @@ use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::sync::broadcast;
-use tokio::time::interval;
+use tokio::time::{interval, sleep};
 use tracing::{error, info, trace};
 
 #[derive(Debug, Default)]
@@ -161,6 +161,9 @@ impl StatBuffer {
                 }
             }
         }
+
+        // TODO: don't just sleep. wait for things to actually finish
+        sleep(Duration::from_secs(10)).await;
 
         let saved_relational = self.save_relational_stats().await;
 

@@ -57,6 +57,7 @@ impl SearchKafkaSubCommand {
             .kafka_urls
             .context("top_config.app.kafka_urls is required")?;
 
+        // TODO: sea-streamer instead of rdkafka?
         let mut consumer = ClientConfig::new();
 
         let security_protocol = &top_config.app.kafka_protocol;
