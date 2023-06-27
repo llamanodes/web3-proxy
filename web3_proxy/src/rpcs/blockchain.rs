@@ -418,6 +418,8 @@ impl Web3Rpcs {
         // TODO: what timeout on block receiver? we want to keep consensus_finder fresh so that server tiers are correct
         let double_block_time = average_block_interval(self.chain_id).mul_f32(2.0);
 
+        let mut had_first_success = false;
+
         loop {
             match timeout(double_block_time, block_receiver.recv_async()).await {
                 Ok(Ok((new_block, rpc))) => {
@@ -436,12 +438,19 @@ impl Web3Rpcs {
                     )
                     .await
                     {
-                        Ok(Ok(_)) => {}
+                        Ok(Ok(_)) => had_first_success = true,
                         Ok(Err(err)) => {
-                            error!(
-                                "error while processing block from rpc {}: {:#?}",
-                                rpc_name, err
-                            );
+                            if had_first_success {
+                                error!(
+                                    "error while processing block from rpc {}: {:#?}",
+                                    rpc_name, err
+                                );
+                            } else {
+                                debug!(
+                                    "startup error while processing block from rpc {}: {:#?}",
+                                    rpc_name, err
+                                );
+                            }
                         }
                         Err(timeout) => {
                             error!(
