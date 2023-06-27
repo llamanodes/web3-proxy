@@ -162,8 +162,20 @@ impl StatBuffer {
             }
         }
 
-        // TODO: don't just sleep. wait for things to actually finish
+        // TODO: wait on all websockets to close
+        // TODO: wait on all pending external requests to finish
         sleep(Duration::from_secs(10)).await;
+
+        // loop {
+        //     // nope. this won't ever be true because we keep making stats for internal requests
+        //     // if stat_receiver.is_disconnected() {
+        //     //     info!("stat_receiver is disconnected");
+        //     //     break;
+        //     // }
+
+        //     // TODO: don't just sleep. watch a channel
+        //     sleep(Duration::from_millis(10)).await;
+        // }
 
         let saved_relational = self.save_relational_stats().await;
 
