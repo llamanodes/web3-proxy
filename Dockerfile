@@ -56,27 +56,26 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
 ENV WEB3_PROXY_FEATURES "rdkafka-src,connectinfo"
 
 # chef plan
-RUN --mount=type=bind,target=.,rw \
-    --mount=type=cache,target=/usr/local/cargo/git \
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     \
-    cargo chef prepare --recipe-path /recipe.json
+    cargo chef prepare --recipe-path recipe.json
 
 FROM rust as build_tests
 
 # chef cook the test app
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,id=build_tests_target \
+    --mount=type=cache,target=/app/target \
     \
-    cargo chef cook --recipe-path /recipe.json
+    cargo chef cook --recipe-path recipe.json
 
 # test the application with cargo-nextest
-RUN --mount=type=bind,target=.,rw \
-    --mount=type=cache,target=/usr/local/cargo/git \
+RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,id=build_tests_target \
+    --mount=type=cache,target=/app/target \
     \
     cargo hakari generate --diff && \
     cargo hakari manage-deps --dry-run && \
@@ -88,17 +87,16 @@ FROM rust as build_app
 # chef cook the app
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,id=build_app_target \
+    --mount=type=cache,target=/app/target \
     \
-    cargo chef cook --release --recipe-path /recipe.json
+    cargo chef cook --release --recipe-path recipe.json
 
 # build the application
 # using a "release" profile (which install does by default) is **very** important
 # TODO: use the "faster_release" profile which builds with `codegen-units = 1`
-RUN --mount=type=bind,target=.,rw \
-    --mount=type=cache,target=/usr/local/cargo/git \
+RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,id=build_app_target \
+    --mount=type=cache,target=/app/target \
     \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
