@@ -1739,7 +1739,7 @@ impl Web3ProxyApp {
                         }).await?
                 } else {
                     let x = timeout(
-                        max_wait + Duration::from_millis(10),
+                        max_wait + Duration::from_millis(100),
                         self.balanced_rpcs
                         .try_proxy_connection::<_, Arc<RawValue>>(
                             method,

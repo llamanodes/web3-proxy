@@ -907,6 +907,8 @@ impl Web3Rpcs {
         // set error_handler to Save. this might be overridden depending on the request_metadata.authorization
         let error_handler = Some(RequestErrorHandler::Save);
 
+        let mut last_provider_error = None;
+
         // TODO: the loop here feels somewhat redundant with the loop in best_available_rpc
         loop {
             if let Some(max_wait) = max_wait {
@@ -969,6 +971,9 @@ impl Web3Rpcs {
                                 Ok(x) => x,
                                 Err(err) => {
                                     warn!(?err, "error from {}", rpc);
+
+                                    last_provider_error = Some(error);
+
                                     continue;
                                 }
                             };
@@ -1116,6 +1121,10 @@ impl Web3Rpcs {
         if let Some(err) = method_not_available_response {
             // this error response is likely the user's fault
             // TODO: emit a stat for unsupported methods. then we can know what there is demand for or if we are missing a feature
+            return Err(err.into());
+        }
+
+        if let Some(err) = last_provider_error {
             return Err(err.into());
         }
 
