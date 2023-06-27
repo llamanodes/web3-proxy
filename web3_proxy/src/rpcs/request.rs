@@ -263,12 +263,12 @@ impl OpenRequestHandle {
             // check for "execution reverted" here
             // TODO: move this info a function on ResponseErrorType
             let response_type = if let ProviderError::JsonRpcClientError(err) = err {
-                // Http and Ws errors are very similar, but different types
+                // JsonRpc and Application errors get rolled into the JsonRpcClientError
                 let msg = err.as_error_response().map(|x| x.message.clone());
 
-                trace!("error message: {:?}", msg);
-
                 if let Some(msg) = msg {
+                    trace!(%msg, "jsonrpc error message");
+
                     if msg.starts_with("execution reverted") {
                         trace!("revert from {}", self.rpc);
                         ResponseTypes::Revert
@@ -316,42 +316,59 @@ impl OpenRequestHandle {
                 RequestErrorHandler::DebugLevel => {
                     // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
                     if matches!(response_type, ResponseTypes::Revert) {
+                        trace!(
+                            rpc=%self.rpc,
+                            %method,
+                            ?params,
+                            ?err,
+                            "revert",
+                        );
+                    } else {
                         debug!(
-                            "bad response from {}! method={} params={:?} err={:?}",
-                            self.rpc, method, params, err
+                            rpc=%self.rpc,
+                            %method,
+                            ?params,
+                            ?err,
+                            "bad response",
                         );
                     }
                 }
                 RequestErrorHandler::TraceLevel => {
                     trace!(
-                        "bad response from {}! method={} params={:?} err={:?}",
-                        self.rpc,
-                        method,
-                        params,
-                        err
+                        rpc=%self.rpc,
+                        %method,
+                        ?params,
+                        ?err,
+                        "bad response",
                     );
                 }
                 RequestErrorHandler::ErrorLevel => {
-                    // TODO: include params if not running in release mode
+                    // TODO: only include params if not running in release mode
                     error!(
-                        "bad response from {}! method={} err={:?}",
-                        self.rpc, method, err
+                        rpc=%self.rpc,
+                        %method,
+                        ?params,
+                        ?err,
+                        "bad response",
                     );
                 }
                 RequestErrorHandler::WarnLevel => {
-                    // TODO: include params if not running in release mode
+                    // TODO: only include params if not running in release mode
                     warn!(
-                        "bad response from {}! method={} err={:?}",
-                        self.rpc, method, err
+                        rpc=%self.rpc,
+                        %method,
+                        ?params,
+                        ?err,
+                        "bad response",
                     );
                 }
                 RequestErrorHandler::Save => {
                     trace!(
-                        "bad response from {}! method={} params={:?} err={:?}",
-                        self.rpc,
-                        method,
-                        params,
-                        err
+                        rpc=%self.rpc,
+                        %method,
+                        ?params,
+                        ?err,
+                        "bad response",
                     );
 
                     // TODO: do not unwrap! (doesn't matter much since we check method as a string above)

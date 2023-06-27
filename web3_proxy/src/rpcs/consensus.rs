@@ -251,7 +251,7 @@ impl ConsensusWeb3Rpcs {
         if let Some(min_block_needed) = min_block_needed {
             if !self.has_block_data(rpc, min_block_needed) {
                 trace!(
-                    "{} is missing min_block_needed ({}). skipping",
+                    "{} is missing min_block_needed ({}). will not work now",
                     rpc,
                     min_block_needed,
                 );
@@ -262,7 +262,7 @@ impl ConsensusWeb3Rpcs {
         if let Some(max_block_needed) = max_block_needed {
             if !self.has_block_data(rpc, max_block_needed) {
                 trace!(
-                    "{} is missing max_block_needed ({}). skipping",
+                    "{} is missing max_block_needed ({}). will not work now",
                     rpc,
                     max_block_needed,
                 );
@@ -273,7 +273,7 @@ impl ConsensusWeb3Rpcs {
         // TODO: this might be a big perf hit. benchmark
         if let Some(x) = rpc.hard_limit_until.as_ref() {
             if *x.borrow() > Instant::now() {
-                trace!("{} is rate limited. skipping", rpc,);
+                trace!("{} is rate limited. will not work now", rpc,);
                 return false;
             }
         }
@@ -786,7 +786,7 @@ impl ConsensusFinder {
 
         if num_known < web3_rpcs.min_synced_rpcs {
             // this keeps us from serving requests when the proxy first starts
-            trace!("not enough servers known");
+            info!(min_synced_rpcs=%web3_rpcs.min_synced_rpcs, "not enough servers known");
             return Ok(None);
         }
 

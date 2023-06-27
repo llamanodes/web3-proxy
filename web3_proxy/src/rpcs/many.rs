@@ -887,7 +887,7 @@ impl Web3Rpcs {
             .await
     }
 
-    /// Track stats
+    /// Make a request with stat tracking.
     pub async fn request_with_metadata<P: JsonRpcParams, R: JsonRpcResultData>(
         &self,
         method: &str,
