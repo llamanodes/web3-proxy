@@ -1,6 +1,9 @@
 use crate::{errors::Web3ProxyError, jsonrpc::JsonRpcErrorData, rpcs::blockchain::ArcBlock};
 use derive_more::From;
-use ethers::{providers::ProviderError, types::U64};
+use ethers::{
+    providers::{HttpClientError, JsonRpcError, ProviderError, WsClientError},
+    types::U64,
+};
 use hashbrown::hash_map::DefaultHashBuilder;
 use moka::future::Cache;
 use serde_json::value::RawValue;
@@ -139,14 +142,15 @@ impl<R> TryFrom<Web3ProxyError> for JsonRpcResponseEnum<R> {
     type Error = Web3ProxyError;
 
     fn try_from(value: Web3ProxyError) -> Result<Self, Self::Error> {
-        match value {
-            Web3ProxyError::EthersProvider(provider_err) => {
-                let err = JsonRpcErrorData::try_from(provider_err)?;
+        if let Web3ProxyError::EthersProvider(ref err) = value {
+            if let Ok(x) = JsonRpcErrorData::try_from(err) {
+                let x = x.into();
 
-                Ok(err.into())
+                return Ok(x);
             }
-            err => Err(err),
         }
+
+        Err(value)
     }
 }
 
@@ -193,36 +197,52 @@ impl<R> From<JsonRpcErrorData> for JsonRpcResponseEnum<R> {
     }
 }
 
-impl TryFrom<ProviderError> for JsonRpcErrorData {
-    type Error = Web3ProxyError;
+impl<'a> From<&'a JsonRpcError> for JsonRpcErrorData {
+    fn from(value: &'a JsonRpcError) -> Self {
+        Self {
+            code: value.code,
+            message: value.message.clone().into(),
+            data: value.data.clone(),
+        }
+    }
+}
 
-    fn try_from(e: ProviderError) -> Result<Self, Self::Error> {
-        // TODO: move turning ClientError into json to a helper function?
-        let code;
-        let message: String;
-        let data;
+impl<'a> TryFrom<&'a ProviderError> for JsonRpcErrorData {
+    type Error = &'a ProviderError;
 
+    fn try_from(e: &'a ProviderError) -> Result<Self, Self::Error> {
         match e {
             ProviderError::JsonRpcClientError(err) => {
                 if let Some(err) = err.as_error_response() {
-                    code = err.code;
-                    message = err.message.clone();
-                    data = err.data.clone();
-                } else if let Some(err) = err.as_serde_error() {
-                    // this is not an rpc error. keep it as an error
-                    return Err(Web3ProxyError::BadResponse(err.to_string().into()));
+                    Ok(err.into())
                 } else {
-                    return Err(anyhow::anyhow!("unexpected ethers error! {:?}", err).into());
+                    Err(e)
                 }
             }
-            e => return Err(e.into()),
+            e => Err(e),
         }
+    }
+}
 
-        Ok(JsonRpcErrorData {
-            code,
-            message: message.into(),
-            data,
-        })
+impl<'a> TryFrom<&'a HttpClientError> for JsonRpcErrorData {
+    type Error = &'a HttpClientError;
+
+    fn try_from(e: &'a HttpClientError) -> Result<Self, Self::Error> {
+        match e {
+            HttpClientError::JsonRpcError(err) => Ok(err.into()),
+            e => Err(e),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a WsClientError> for JsonRpcErrorData {
+    type Error = &'a WsClientError;
+
+    fn try_from(e: &'a WsClientError) -> Result<Self, Self::Error> {
+        match e {
+            WsClientError::JsonRpcError(err) => Ok(err.into()),
+            e => Err(e),
+        }
     }
 }
 

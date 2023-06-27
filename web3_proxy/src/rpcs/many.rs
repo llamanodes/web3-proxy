@@ -946,19 +946,32 @@ impl Web3Rpcs {
                                     .store(is_backup_response, Ordering::Release);
                             }
 
+                            if let Some(request_metadata) = request_metadata {
+                                request_metadata
+                                    .error_response
+                                    .store(false, Ordering::Release);
+                            }
+
                             return Ok(response);
                         }
                         Err(error) => {
                             // trace!(?response, "rpc error");
 
-                            // TODO: separate jsonrpc error and web3 proxy error!
+                            // TODO: separate tracking for jsonrpc error and web3 proxy error!
                             if let Some(request_metadata) = request_metadata {
                                 request_metadata
                                     .error_response
                                     .store(true, Ordering::Release);
                             }
 
-                            let error: JsonRpcErrorData = error.try_into()?;
+                            // TODO: if this is an error, do NOT return. continue to try on another server
+                            let error = match JsonRpcErrorData::try_from(&error) {
+                                Ok(x) => x,
+                                Err(err) => {
+                                    warn!(?err, "error from {}", rpc);
+                                    continue;
+                                }
+                            };
 
                             // some errors should be retried on other nodes
                             let error_msg = error.message.as_ref();

@@ -167,7 +167,7 @@ impl Web3ProxyError {
         // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
             Self::Abi(err) => {
-                warn!("abi error={:?}", err);
+                warn!(?err, "abi error");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
@@ -201,12 +201,12 @@ impl Web3ProxyError {
                 )
             }
             Self::Anyhow(err) => {
-                warn!("anyhow. err={:?}", err);
+                warn!(?err, "anyhow");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
                         // TODO: is it safe to expose all of our anyhow strings?
-                        message: err.to_string().into(),
+                        message: "INTERNAL SERVER ERROR".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -214,10 +214,10 @@ impl Web3ProxyError {
             }
             Self::Arc(err) => {
                 // recurse
-                return err.as_response_parts::<R>();
+                return err.as_response_parts();
             }
             Self::BadRequest(err) => {
-                trace!("BAD_REQUEST: {}", err);
+                trace!(?err, "BAD_REQUEST");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -229,7 +229,7 @@ impl Web3ProxyError {
             }
             Self::BadResponse(err) => {
                 // TODO: think about this one more. ankr gives us this because ethers fails to parse responses without an id
-                debug!("BAD_RESPONSE: {:?}", err);
+                debug!(?err, "BAD_RESPONSE");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
@@ -284,43 +284,52 @@ impl Web3ProxyError {
                 )
             }
             Self::EthersHttpClient(err) => {
-                todo!("how should we handle this error? needs to try into jsonrpcerrordata");
-
-                warn!("EthersHttpClientError err={:#?}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcErrorData {
-                        message: "ether http client error".into(),
-                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
-                    },
-                )
+                if let Ok(err) = JsonRpcErrorData::try_from(err) {
+                    trace!(?err, "EthersHttpClient jsonrpc error");
+                    (StatusCode::OK, err)
+                } else {
+                    warn!(?err, "EthersHttpClient");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        JsonRpcErrorData {
+                            message: "ethers http client error".into(),
+                            code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                            data: None,
+                        },
+                    )
+                }
             }
             Self::EthersProvider(err) => {
-                todo!("how should we handle this error? needs to try into jsonrpcerrordata");
-
-                warn!("EthersProviderError err={:#?}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcErrorData {
-                        message: "ether provider error".into(),
-                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
-                    },
-                )
+                if let Ok(err) = JsonRpcErrorData::try_from(err) {
+                    trace!(?err, "EthersProvider jsonrpc error");
+                    (StatusCode::OK, err)
+                } else {
+                    warn!(?err, "EthersProvider");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        JsonRpcErrorData {
+                            message: "ethers provider error".into(),
+                            code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                            data: None,
+                        },
+                    )
+                }
             }
             Self::EthersWsClient(err) => {
-                todo!("how should we handle this error? needs to try into jsonrpcerrordata");
-
-                warn!("EthersWsClientError err={:#?}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcErrorData {
-                        message: "ether ws client error".into(),
-                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
-                    },
-                )
+                if let Ok(err) = JsonRpcErrorData::try_from(err) {
+                    trace!(?err, "EthersWsClient jsonrpc error");
+                    (StatusCode::OK, err)
+                } else {
+                    warn!(?err, "EthersWsClient");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        JsonRpcErrorData {
+                            message: "ethers ws client error".into(),
+                            code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                            data: None,
+                        },
+                    )
+                }
             }
             Self::FlumeRecv(err) => {
                 warn!("FlumeRecvError err={:#?}", err);
