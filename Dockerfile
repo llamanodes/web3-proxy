@@ -55,12 +55,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
 # changing our features doesn't change any of the steps above
 ENV WEB3_PROXY_FEATURES "rdkafka-src,connectinfo"
 
-# chef plan
+# check hakari and chef prep
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     \
+    cargo hakari generate --diff && \
+    cargo hakari manage-deps --dry-run && \
     cargo chef prepare --recipe-path recipe.json
 
 FROM rust as build_tests
@@ -68,17 +70,15 @@ FROM rust as build_tests
 # chef cook the test app
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target,sharing=private \
     \
     cargo chef cook --recipe-path recipe.json
 
 # test the application with cargo-nextest
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target,sharing=private \
     \
-    cargo hakari generate --diff && \
-    cargo hakari manage-deps --dry-run && \
     RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
     touch /test_success
 
@@ -87,7 +87,7 @@ FROM rust as build_app
 # chef cook the release app
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target,sharing=private \
     \
     cargo chef cook --release --recipe-path recipe.json
 
@@ -96,15 +96,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
 # TODO: use the "faster_release" profile which builds with `codegen-units = 1`
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target,sharing=private \
     \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
     --locked \
     --no-default-features \
     --path ./web3_proxy \
-    --root /usr/local/bin \
-    ;
+    --root /usr/local \
+    && [ -e /usr/local/bin/web3_proxy_cli ];
 
 # copy this file so that docker actually creates the build_tests container
 # without this, the runtime container doesn't need build_tests and so docker build skips it
