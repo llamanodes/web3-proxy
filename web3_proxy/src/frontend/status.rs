@@ -175,6 +175,9 @@ pub async fn status(
 async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
     trace!("status is not cached");
 
+    // TODO: get out of app.balanced_rpcs instead?
+    let head_block = app.watch_consensus_head_receiver.borrow().clone();
+
     // TODO: what else should we include? uptime, cache hit rates, cpu load, memory used
     // TODO: the hostname is probably not going to change. only get once at the start?
     let body = json!({
@@ -189,6 +192,8 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
             MokaCacheSerializer(&app.user_semaphores),
         ],
         "chain_id": app.config.chain_id,
+        "head_block_num": head_block.as_ref().map(|x| x.number()),
+        "head_block_hash": head_block.as_ref().map(|x| x.hash()),
         "hostname": app.hostname,
         "payment_factory_address": app.config.deposit_factory_contract,
         "private_rpcs": app.private_rpcs,
