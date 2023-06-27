@@ -7321,6 +7321,7 @@ dependencies = [
  "subtle",
  "syn 1.0.109",
  "syn 2.0.22",
+ "test-log",
  "time 0.3.22",
  "time-macros",
  "tokio",
