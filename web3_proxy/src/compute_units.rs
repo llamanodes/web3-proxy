@@ -14,7 +14,12 @@ pub struct ComputeUnit(Decimal);
 
 impl ComputeUnit {
     /// costs can vary widely depending on method and chain
-    pub fn new(method: &str, chain_id: u64) -> Self {
+    pub fn new(method: &str, chain_id: u64, response_bytes: u64) -> Self {
+        // TODO: this works, but this is fragile. think of a better way to check the method is a subscription
+        if method.ends_with(')') {
+            return Self::subscription_response(response_bytes);
+        }
+
         let cu = match (chain_id, method) {
             (_, "debug_traceTransaction") => 309,
             (_, "debug_traceCall") => 309,
@@ -96,9 +101,8 @@ impl ComputeUnit {
             (_, "eth_getUserOperationReceipt") => 15,
             (_, "eth_supportedEntryPoints") => 5,
             (_, method) => {
-                // default to 10 CU for methods that aren't included here
                 warn!("unknown method {}", method);
-                10
+                return Self::unimplemented();
             }
         };
 
@@ -123,13 +127,15 @@ impl ComputeUnit {
     /// All methods cost the same
     /// The number of bytes are based on input, and output bytes
     pub fn cost(&self, archive_request: bool, cache_hit: bool, usd_per_cu: Decimal) -> Decimal {
+        // TODO: server errors are free. need to split server and user errors
+
         let mut cost = self.0 * usd_per_cu;
 
         if archive_request {
             cost *= Decimal::from_str("2.5").unwrap();
         }
 
-        // cache hits get a 50% discount
+        // cache hits get a 25% discount
         if cache_hit {
             cost *= Decimal::from_str("0.75").unwrap()
         }
