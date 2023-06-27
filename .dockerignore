@@ -11,10 +11,11 @@ perf.data.old
 /Dockerfile
 /Jenkinsfile
 /bin
-/config/devel*
-/config/production*
+/config/dev*.toml
+/config/prod*.toml
 /data
 /docker-compose*
 /docs
 /redis-cell-server/
+/scripts
 /target
