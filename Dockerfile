@@ -80,7 +80,7 @@ RUN --mount=type=bind,target=.,rw \
     \
     cargo hakari generate --diff && \
     cargo hakari manage-deps --dry-run && \
-    RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --profile ci --features "$WEB3_PROXY_FEATURES" --no-default-features && \
+    RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
     touch /test_success
 
 FROM rust as build_app
