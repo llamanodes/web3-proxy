@@ -26,11 +26,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 
 # install rustup
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile=minimal
+RUN --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile=minimal
 
 # run a cargo command which install our desired version of rust
 COPY rust-toolchain.toml ./
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
     \
     cargo check || [ "$?" -eq 101 ]
 
@@ -38,13 +42,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # We only pay the installation cost once, 
 # it will be cached from the second build onwards
 # TODO: more mount type cache?
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
     \
     cargo install --locked cargo-nextest 
 
 # foundry is needed to run tests
 # TODO: do this in a seperate FROM and COPY it in
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
     \
     curl -L https://foundry.paradigm.xyz | bash && foundryup
 
@@ -54,8 +60,9 @@ FROM builder as build_tests
 
 # test the application with cargo-nextest
 RUN --mount=type=bind,target=.,rw \
+    --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target,id=app_target_tests \
     \
     RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
     touch /test_success
@@ -67,8 +74,9 @@ FROM builder as build_app
 # using a "release" profile (which install does by default) is **very** important
 # TODO: use the "faster_release" profile which builds with `codegen-units = 1`
 RUN --mount=type=bind,target=.,rw \
+    --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target,id=app_target_app \
     \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
