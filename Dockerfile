@@ -84,14 +84,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
 
 FROM rust as build_app
 
-# chef cook the app
+# chef cook the release app
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     \
     cargo chef cook --release --recipe-path recipe.json
 
-# build the application
+# build the release application
 # using a "release" profile (which install does by default) is **very** important
 # TODO: use the "faster_release" profile which builds with `codegen-units = 1`
 RUN --mount=type=cache,target=/usr/local/cargo/git \
