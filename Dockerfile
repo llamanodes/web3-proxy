@@ -1,6 +1,7 @@
 FROM debian:bullseye-slim as rust
 
 WORKDIR /app
+ENV CARGO_UNSTABLE_SPARSE_REGISTRY true
 ENV CARGO_TERM_COLOR always
 ENV PATH "/root/.foundry/bin:/root/.cargo/bin:${PATH}"
 
