@@ -37,14 +37,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     \
     cargo check || [ "$?" -eq 101 ]
 
-# chef splits up the rust build to hopefully cache better
 # hakari manages a 'workspace-hack' to hopefully build faster
 # nextest runs tests in parallel
 # We only pay the installation cost once, it will be cached from the second build onwards
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     \
-    cargo install --locked cargo-chef cargo-hakari cargo-nextest
+    cargo install --locked cargo-hakari cargo-nextest
 
 # foundry/anvil are needed to run tests
 RUN --mount=type=cache,target=/usr/local/cargo/git \
@@ -55,46 +54,26 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
 # changing our features doesn't change any of the steps above
 ENV WEB3_PROXY_FEATURES "rdkafka-src,connectinfo"
 
-# check hakari and chef prep
-COPY . .
-RUN --mount=type=cache,target=/usr/local/cargo/git \
+FROM rust as build_tests
+
+# check hakari and test the application with cargo-nextest
+RUN --mount=type=bind,target=. \
+    --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target,sharing=private \
     \
     cargo hakari generate --diff && \
     cargo hakari manage-deps --dry-run && \
-    cargo chef prepare --recipe-path recipe.json
-
-FROM rust as build_tests
-
-# chef cook the test app
-RUN --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,sharing=private \
-    \
-    cargo chef cook --recipe-path recipe.json
-
-# test the application with cargo-nextest
-RUN --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,sharing=private \
-    \
     RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
     touch /test_success
 
 FROM rust as build_app
 
-# chef cook the release app
-RUN --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,sharing=private \
-    \
-    cargo chef cook --release --recipe-path recipe.json
-
 # build the release application
 # using a "release" profile (which install does by default) is **very** important
-# TODO: use the "faster_release" profile which builds with `codegen-units = 1`
-RUN --mount=type=cache,target=/usr/local/cargo/git \
+# TODO: use the "faster_release" profile which builds with `codegen-units = 1` (but compile is SLOW)
+RUN --mount=type=bind,target=. \
+    --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target,sharing=private \
     \
@@ -103,8 +82,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     --locked \
     --no-default-features \
     --path ./web3_proxy \
-    --root /usr/local \
-    && [ -e /usr/local/bin/web3_proxy_cli ];
+    --root /usr/local && \
+    /usr/local/bin/web3_proxy_cli --help | grep 'Usage: web3_proxy_cli'
 
 # copy this file so that docker actually creates the build_tests container
 # without this, the runtime container doesn't need build_tests and so docker build skips it
