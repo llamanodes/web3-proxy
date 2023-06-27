@@ -62,7 +62,7 @@ FROM builder as build_tests
 RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,id=app_target_tests \
+    --mount=type=cache,target=/app/target,sharing=private \
     \
     RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
     touch /test_success
@@ -76,7 +76,7 @@ FROM builder as build_app
 RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,id=app_target_app \
+    --mount=type=cache,target=/app/target,sharing=private \
     \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
