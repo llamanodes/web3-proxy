@@ -134,7 +134,7 @@ fn main() -> anyhow::Result<()> {
 
     // if RUST_LOG isn't set, configure a default
     #[cfg(not(feature = "tokio_console"))]
-    let rust_log = match std::env::var("RUST_LOG") {
+    let mut rust_log = match std::env::var("RUST_LOG") {
         Ok(x) => x,
         Err(_) => match std::env::var("WEB3_PROXY_TRACE").map(|x| x == "true") {
             Ok(true) => {
@@ -169,6 +169,11 @@ fn main() -> anyhow::Result<()> {
         }
         .join(","),
     };
+
+    if let Ok(extra_rust_log) = std::env::var("EXTRA_RUST_LOG") {
+        rust_log.push(',');
+        rust_log.push_str(&extra_rust_log);
+    }
 
     let mut cli_config: Web3ProxyCli = argh::from_env();
 
