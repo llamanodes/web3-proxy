@@ -1,7 +1,10 @@
 @Library('jenkins_lib@main') _
 
 pipeline {
-    agent any
+    agent {
+        // not strictly required, but we only build graviton2 right now so this keeps the jenkins-agent count down
+        label 'arm64_graviton2'
+    }
     options {
         ansiColor('xterm')
     }
