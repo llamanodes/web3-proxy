@@ -1122,7 +1122,7 @@ impl Web3ProxyApp {
     /// proxy request with up to 3 tries.
     async fn proxy_request(
         self: &Arc<Self>,
-        request: JsonRpcRequest,
+        mut request: JsonRpcRequest,
         authorization: Arc<Authorization>,
         head_block_num: Option<U64>,
     ) -> (StatusCode, JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>) {
@@ -1136,16 +1136,15 @@ impl Web3ProxyApp {
 
         let response_id = request.id;
 
+        // TODO: trace log request.params before we send them to _proxy_request_with_caching which might modify them
+
         let mut tries = 3;
-        let mut code;
-        let mut response;
+        let mut last_code_and_response = None;
         while tries > 0 {
-            // TODO: make sure this doesn't retry jsonrpc errors
-            let response_data;
-            (code, response_data) = match self
+            let (code, response_data) = match self
                 ._proxy_request_with_caching(
                     &request.method,
-                    request.params,
+                    &mut request.params,
                     head_block_num,
                     &request_metadata,
                 )
@@ -1155,7 +1154,7 @@ impl Web3ProxyApp {
                 Err(err) => err.as_response_parts(),
             };
 
-            response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
+            last_code_and_response = Some((code, response_data));
 
             if code == StatusCode::OK {
                 break;
@@ -1163,11 +1162,14 @@ impl Web3ProxyApp {
 
             // TODO: emit a stat?
             // TODO: only log params in development
-            warn!(method=%request.method, params=?request.params, ?response, "request failed");
+            warn!(method=%request.method, params=?request.params, response=?last_code_and_response, "request failed");
+
             tries -= 1;
         }
 
-        let response = response.expect("we definitely looped at least once");
+        let (code, response) = last_code_and_response.expect("there should always be a response");
+
+        let response = JsonRpcForwardedResponse::from_response_data(response, response_id);
 
         // TODO: this serializes twice :/
         request_metadata.add_response(ResponseOrBytes::Response(&response));
@@ -1182,7 +1184,7 @@ impl Web3ProxyApp {
     async fn _proxy_request_with_caching(
         self: &Arc<Self>,
         method: &str,
-        mut params: serde_json::Value,
+        params: &mut serde_json::Value,
         head_block_num: Option<U64>,
         request_metadata: &Arc<RequestMetadata>,
     ) -> Web3ProxyResult<JsonRpcResponseEnum<Arc<RawValue>>> {
@@ -1297,7 +1299,7 @@ impl Web3ProxyApp {
                     let x = bundler_4337_rpcs
                         .try_proxy_connection::<_, Box<RawValue>>(
                             method,
-                            &params,
+                            params,
                             Some(request_metadata),
                             Some(Duration::from_secs(30)),
                             None,
@@ -1338,7 +1340,7 @@ impl Web3ProxyApp {
                     .balanced_rpcs
                     .try_proxy_connection::<_, U256>(
                         method,
-                        &params,
+                        params,
                         Some(request_metadata),
                         Some(Duration::from_secs(30)),
                         None,
@@ -1371,7 +1373,7 @@ impl Web3ProxyApp {
                     .balanced_rpcs
                     .try_proxy_connection::<_, Box<RawValue>>(
                         method,
-                        &params,
+                        params,
                         Some(request_metadata),
                         Some(Duration::from_secs(30)),
                         None,
@@ -1395,7 +1397,7 @@ impl Web3ProxyApp {
                         .balanced_rpcs
                         .try_proxy_connection::<_, Box<RawValue>>(
                             method,
-                            &params,
+                            params,
                             Some(request_metadata),
                             Some(Duration::from_secs(30)),
                             Some(&U64::one()),
@@ -1421,7 +1423,7 @@ impl Web3ProxyApp {
                     self
                         .try_send_protected(
                             method,
-                            &params,
+                            params,
                             request_metadata,
                         )
                 )
@@ -1611,7 +1613,7 @@ impl Web3ProxyApp {
                 let cache_key: Option<JsonRpcQueryCacheKey> = match block_needed(
                     &authorization,
                     method,
-                    &mut params,
+                    params,
                     head_block_num,
                     &self.balanced_rpcs,
                 )
@@ -1621,7 +1623,7 @@ impl Web3ProxyApp {
                         None,
                         None,
                         method,
-                        &params,
+                        params,
                         false,
                     )),
                     BlockNeeded::CacheNever => None,
@@ -1650,7 +1652,7 @@ impl Web3ProxyApp {
                             Some(request_block),
                             None,
                             method,
-                            &params,
+                            params,
                             cache_errors,
                         ))
                     }
@@ -1691,7 +1693,7 @@ impl Web3ProxyApp {
                             Some(from_block),
                             Some(to_block),
                             method,
-                            &params,
+                            params,
                             cache_errors,
                         ))
                     }
@@ -1711,11 +1713,11 @@ impl Web3ProxyApp {
                         .jsonrpc_response_cache
                         .try_get_with::<_, Web3ProxyError>(cache_key.hash(), async {
                             let response_data = timeout(
-                                max_wait + Duration::from_millis(10),
+                                max_wait + Duration::from_millis(100),
                                 self.balanced_rpcs
                                     .try_proxy_connection::<_, Arc<RawValue>>(
                                         method,
-                                        &params,
+                                        params,
                                         Some(request_metadata),
                                         Some(max_wait),
                                         from_block_num.as_ref(),
@@ -1741,7 +1743,7 @@ impl Web3ProxyApp {
                         self.balanced_rpcs
                         .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
-                            &params,
+                            params,
                             Some(request_metadata),
                             Some(max_wait),
                             None,

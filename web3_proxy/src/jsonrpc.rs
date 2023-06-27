@@ -1,7 +1,5 @@
-use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::response_cache::JsonRpcResponseEnum;
 use derive_more::From;
-use ethers::prelude::ProviderError;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -10,7 +8,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::sync::Arc;
 
-pub trait JsonRpcParams = Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static;
+pub trait JsonRpcParams = fmt::Debug + serde::Serialize + Send + Sync + 'static;
 pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + fmt::Debug + Send;
 
 // TODO: &str here instead of String should save a lot of allocations

@@ -250,23 +250,23 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::Database(err) => {
-                error!("database err={:#?}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcErrorData {
-                        message: "database error!".into(),
-                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
-                    },
-                )
-            }
             Self::Contract(err) => {
                 warn!("Contract Error: {:#?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
                         message: format!("contract error: {}", err).into(),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::Database(err) => {
+                error!("database err={:#?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: "database error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -283,18 +283,9 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::SiweVerification(err) => {
-                trace!("Siwe Verification err={:#?}", err,);
-                (
-                    StatusCode::UNAUTHORIZED,
-                    JsonRpcErrorData {
-                        message: format!("siwe verification error: {:#?}", err).into(),
-                        code: StatusCode::UNAUTHORIZED.as_u16().into(),
-                        data: None,
-                    },
-                )
-            }
             Self::EthersHttpClient(err) => {
+                todo!("how should we handle this error? needs to try into jsonrpcerrordata");
+
                 warn!("EthersHttpClientError err={:#?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -306,6 +297,8 @@ impl Web3ProxyError {
                 )
             }
             Self::EthersProvider(err) => {
+                todo!("how should we handle this error? needs to try into jsonrpcerrordata");
+
                 warn!("EthersProviderError err={:#?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -317,6 +310,8 @@ impl Web3ProxyError {
                 )
             }
             Self::EthersWsClient(err) => {
+                todo!("how should we handle this error? needs to try into jsonrpcerrordata");
+
                 warn!("EthersWsClientError err={:#?}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -363,6 +358,17 @@ impl Web3ProxyError {
             }
             Self::Headers(err) => {
                 trace!("HeadersError {:#?}", err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcErrorData {
+                        message: err.to_string().into(),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::HeaderToString(err) => {
+                // trace!(?err, "HeaderToString");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -485,29 +491,6 @@ impl Web3ProxyError {
                         // TODO: is it safe to expose our io error strings?
                         message: err.to_string().into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
-                    },
-                )
-            }
-            Self::RedisDeadpool(err) => {
-                error!("redis deadpool err={:#?}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcErrorData {
-                        // TODO: is it safe to expose our io error strings?
-                        message: err.to_string().into(),
-                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
-                    },
-                )
-            }
-            Self::UnknownReferralCode => {
-                trace!("UnknownReferralCode");
-                (
-                    StatusCode::UNAUTHORIZED,
-                    JsonRpcErrorData {
-                        message: "invalid referral code".into(),
-                        code: StatusCode::UNAUTHORIZED.as_u16().into(),
                         data: None,
                     },
                 )
@@ -794,7 +777,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::PAYMENT_REQUIRED,
                     JsonRpcErrorData {
-                        message: "Payment is required and user is not premium".into(),
+                        message: "Payment is required to activate premium".into(),
                         code: StatusCode::PAYMENT_REQUIRED.as_u16().into(),
                         data: None,
                     },
@@ -838,6 +821,18 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
                         message: "redis error!".into(),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::RedisDeadpool(err) => {
+                error!("redis deadpool err={:#?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        // TODO: is it safe to expose our io error strings?
+                        message: err.to_string().into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -899,6 +894,17 @@ impl Web3ProxyError {
                     },
                 )
             }
+            Self::SiweVerification(err) => {
+                trace!("Siwe Verification err={:#?}", err,);
+                (
+                    StatusCode::UNAUTHORIZED,
+                    JsonRpcErrorData {
+                        message: format!("siwe verification error: {:#?}", err).into(),
+                        code: StatusCode::UNAUTHORIZED.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
             Self::StatusCode(status_code, err_msg, err) => {
                 // different status codes should get different error levels. 500s should warn. 400s should stat
                 let code = status_code.as_u16();
@@ -926,17 +932,6 @@ impl Web3ProxyError {
                     data: None,
                 },
             ),
-            Self::HeaderToString(err) => {
-                // trace!(?err, "HeaderToString");
-                (
-                    StatusCode::BAD_REQUEST,
-                    JsonRpcErrorData {
-                        message: err.to_string().into(),
-                        code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
-                    },
-                )
-            }
             Self::UlidDecode(err) => {
                 // trace!(?err, "UlidDecodeError");
                 (
@@ -959,7 +954,6 @@ impl Web3ProxyError {
                     },
                 )
             }
-            // TODO: stat?
             Self::UnknownKey => (
                 StatusCode::UNAUTHORIZED,
                 JsonRpcErrorData {
@@ -968,13 +962,24 @@ impl Web3ProxyError {
                     data: None,
                 },
             ),
+            Self::UnknownReferralCode => {
+                trace!("UnknownReferralCode");
+                (
+                    StatusCode::UNAUTHORIZED,
+                    JsonRpcErrorData {
+                        message: "invalid referral code".into(),
+                        code: StatusCode::UNAUTHORIZED.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
             Self::UserAgentRequired => {
                 trace!("UserAgentRequired");
                 (
-                    StatusCode::BAD_REQUEST,
+                    StatusCode::UNAUTHORIZED,
                     JsonRpcErrorData {
                         message: "User agent required".into(),
-                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        code: StatusCode::UNAUTHORIZED.as_u16().into(),
                         data: None,
                     },
                 )
