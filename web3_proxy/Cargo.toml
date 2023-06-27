@@ -39,7 +39,7 @@ siwe = { git = "https://github.com/llamanodes/siwe-rs", rev = "013be5204ff1c8577
 # TODO: hdrhistogram for automated tiers
 
 anyhow = { version = "1.0.71", features = ["backtrace"] }
-arc-swap = { version = "1.6.0", features = ["serde"] }
+arc-swap = { version = "1.6.0" }
 argh = "0.1.10"
 async-trait = "0.1.68"
 axum = { version = "0.6.18", features = ["headers", "tracing", "ws"] }
@@ -47,11 +47,11 @@ axum-client-ip = "0.4.1"
 axum-macros = "0.3.7"
 base64 = "0.21.2"
 check-if-email-exists = "0.9.0"
-chrono = { version = "0.4.26", features = ["serde"] }
+chrono = { version = "0.4.26" }
 console-subscriber = { version = "0.1.9", features = ["env-filter", "parking_lot"], optional = true }
 counter = "0.5.7"
 derive_more = { version = "0.99.17", features = ["nightly"] }
-ethbloom = { version = "0.13.0", features = ["serialize"] }
+ethbloom = { version = "0.13.0" }
 ethers = { version = "2.0.7", default-features = false, features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 flume = "0.10.14"
@@ -59,7 +59,7 @@ fstrings = "0.2"
 futures = { version = "0.3.28" }
 glob = "0.3.1"
 handlebars = "4.3.7"
-hashbrown = { version = "0.14.0", features = ["nightly", "serde"] }
+hashbrown = { version = "0.14.0", features = ["serde", "nightly"] }
 hdrhistogram = "7.5.2"
 hostname = "0.3.1"
 http = "0.2.9"
@@ -68,14 +68,14 @@ ipnet = { version = "2.8.0", features = ["json"] }
 itertools = "0.11.0"
 listenfd = "1.0.1"
 mimalloc = { version = "0.1.37", optional = true}
-moka = { version = "0.11.2", default-features = false, features = ["atomic64", "future", "parking_lot", "quanta", "triomphe", "uuid",] }
+moka = { version = "0.11.2", default-features = false, features = ["atomic64", "future", "parking_lot", "quanta", "triomphe"] }
 nanorand = { version = "0.7.0", default-features = false, features = ["std", "tls", "wyrand"] }
-num = { version = "0.4.0", features = ["serde"] }
+num = { version = "0.4.0" }
 num-traits = "0.2.15"
 once_cell = { version = "1.18.0" }
-ordered-float = {version = "3.7.0", features = ["serde"] }
+ordered-float = {version = "3.7.0" }
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "rustls", "sync"] }
-parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly", "serde"] }
+parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 prettytable = "0.10.0"
 proctitle = "0.1.1"
 rdkafka = { version = "0.32.2", features = ["tracing"] }
@@ -89,7 +89,7 @@ serde = { version = "1.0.164" }
 serde_json = { version = "1.0.99", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
 strum = { version = "0.25.0", features = ["derive"] }
-time = { version = "0.3.22", features = ["serde-well-known"] }
+time = { version = "0.3.22" }
 tokio = { version = "1.28.2", features = ["full", "tracing"] }
 tokio-console = { version = "0.1.8", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
@@ -100,8 +100,8 @@ tower-http = { version = "0.4.1", features = ["cors", "sensitive-headers", "trac
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ulid = { version = "1.0.0", features = ["rand", "uuid", "serde"] }
-url = { version = "2.4.0", features = ["serde"] }
-uuid = { version = "1.4.0", default-features = false, features = ["fast-rng", "serde", "v4", "zerocopy"] }
+url = { version = "2.4.0" }
+uuid = { version = "1.4.0", default-features = false, features = ["fast-rng", "v4", "zerocopy"] }
 derivative = "2.2.0"
 
 [dev-dependencies]
