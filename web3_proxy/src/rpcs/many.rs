@@ -664,7 +664,7 @@ impl Web3Rpcs {
 
         let mut selected_rpcs = Vec::with_capacity(max_count);
 
-        // TODO: filter the rpcs here
+        // TODO: filter the rpcs with Ranked.will_work_now
         let mut all_rpcs: Vec<_> = self.by_name.read().values().cloned().collect();
 
         // TODO: this sorts them all even though we probably won't need all of them. think about this more
