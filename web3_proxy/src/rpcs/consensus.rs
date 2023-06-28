@@ -873,7 +873,7 @@ impl ConsensusFinder {
                 let parent_hash = block_to_check.parent_hash();
                 // TODO: i flip flop on passing rpc to this or not
                 match web3_rpcs
-                    .block(authorization, parent_hash, Some(rpc), None)
+                    .block(authorization, parent_hash, Some(rpc), None, None)
                     .await
                 {
                     Ok(parent_block) => block_to_check = parent_block,

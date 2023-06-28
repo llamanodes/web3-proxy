@@ -13,6 +13,7 @@ use axum::{
 };
 use derive_more::{Display, Error, From};
 use ethers::prelude::ContractError;
+use ethers::types::{H256, U64};
 use http::header::InvalidHeaderValue;
 use http::uri::InvalidUri;
 use ipnet::AddrParseError;
@@ -147,7 +148,14 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     Timeout(Option<tokio::time::error::Elapsed>),
     UlidDecode(ulid::DecodeError),
-    UnknownBlockNumber,
+    #[error(ignore)]
+    UnknownBlockHash(H256),
+    #[display(fmt = "known: {known}, unknown: {unknown}")]
+    #[error(ignore)]
+    UnknownBlockNumber {
+        known: U64,
+        unknown: U64,
+    },
     UnknownKey,
     UserAgentRequired,
     #[error(ignore)]
@@ -952,13 +960,28 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::UnknownBlockNumber => {
-                error!("UnknownBlockNumber");
+            Self::UnknownBlockHash(hash) => {
+                debug!(%hash, "UnknownBlockHash");
                 (
-                    StatusCode::BAD_GATEWAY,
+                    StatusCode::OK,
                     JsonRpcErrorData {
-                        message: "no servers synced. unknown eth_blockNumber".into(),
-                        code: StatusCode::BAD_GATEWAY.as_u16().into(),
+                        message: format!("unknown block hash ({})", hash).into(),
+                        code: None,
+                        data: None,
+                    },
+                )
+            }
+            Self::UnknownBlockNumber { known, unknown } => {
+                debug!(%known, %unknown, "UnknownBlockNumber");
+                (
+                    StatusCode::OK,
+                    JsonRpcErrorData {
+                        message: format!(
+                            "unknown block number. known: {}. unknown: {}",
+                            known, unknown
+                        )
+                        .into(),
+                        code: None,
                         data: None,
                     },
                 )
@@ -1039,11 +1062,11 @@ impl Web3ProxyError {
                 )
             }
             Self::WebsocketOnly => {
-                trace!("WebsocketOnly");
+                trace!("WebsocketOnly. redirect_public_url not set");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: "redirect_public_url not set. only websockets work here".into(),
+                        message: "only websockets work here".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },

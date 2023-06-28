@@ -731,19 +731,22 @@ impl Web3Rpcs {
         &self,
         method: &str,
         params: &P,
+        max_tries: Option<usize>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         // TODO: no request_metadata means we won't have stats on this internal request.
-        self.request_with_metadata(method, params, None, max_wait, None, None)
+        self.request_with_metadata(method, params, None, max_tries, max_wait, None, None)
             .await
     }
 
     /// Make a request with stat tracking.
+    #[allow(clippy::too_many_arguments)]
     pub async fn request_with_metadata<P: JsonRpcParams, R: JsonRpcResultData>(
         &self,
         method: &str,
         params: &P,
         request_metadata: Option<&Arc<RequestMetadata>>,
+        mut max_tries: Option<usize>,
         max_wait: Option<Duration>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
@@ -764,8 +767,18 @@ impl Web3Rpcs {
         loop {
             if let Some(max_wait) = max_wait {
                 if start.elapsed() > max_wait {
+                    trace!("max_wait exceeded");
                     break;
                 }
+            }
+            if let Some(max_tries) = max_tries.as_mut() {
+                if *max_tries == 0 {
+                    trace!("max_tries exceeded");
+                    break;
+                }
+
+                // prepare for the next loop
+                *max_tries -= 1;
             }
 
             match self
@@ -1149,11 +1162,13 @@ impl Web3Rpcs {
         Err(Web3ProxyError::NoServersSynced)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn try_proxy_connection<P: JsonRpcParams, R: JsonRpcResultData>(
         &self,
         method: &str,
         params: &P,
         request_metadata: Option<&Arc<RequestMetadata>>,
+        max_tries: Option<usize>,
         max_wait: Option<Duration>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
@@ -1166,6 +1181,7 @@ impl Web3Rpcs {
                     method,
                     params,
                     request_metadata,
+                    max_tries,
                     max_wait,
                     min_block_needed,
                     max_block_needed,

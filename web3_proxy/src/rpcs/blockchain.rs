@@ -270,6 +270,7 @@ impl Web3Rpcs {
         authorization: &Arc<Authorization>,
         hash: &H256,
         rpc: Option<&Arc<Web3Rpc>>,
+        max_tries: Option<usize>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<Web3ProxyBlock> {
         // first, try to get the hash from our cache
@@ -293,7 +294,7 @@ impl Web3Rpcs {
         // block not in cache. we need to ask an rpc for it
         let get_block_params = (*hash, false);
 
-        let block: Option<ArcBlock> = if let Some(rpc) = rpc {
+        let mut block: Option<ArcBlock> = if let Some(rpc) = rpc {
             // ask a specific rpc
             // TODO: request_with_metadata would probably be better than authorized_request
             rpc.authorized_request::<_, Option<ArcBlock>>(
@@ -301,19 +302,26 @@ impl Web3Rpcs {
                 &get_block_params,
                 authorization,
                 None,
+                max_tries,
                 max_wait,
             )
             .await?
         } else {
-            // ask any rpc
+            None
+        };
+
+        if block.is_none() {
+            // try by asking any rpc
             // TODO: retry if "Requested data is not available"
             // TODO: request_with_metadata instead of internal_request
-            self.internal_request::<_, Option<ArcBlock>>(
-                "eth_getBlockByHash",
-                &get_block_params,
-                max_wait,
-            )
-            .await?
+            block = self
+                .internal_request::<_, Option<ArcBlock>>(
+                    "eth_getBlockByHash",
+                    &get_block_params,
+                    max_tries,
+                    max_wait,
+                )
+                .await?;
         };
 
         match block {
@@ -321,8 +329,7 @@ impl Web3Rpcs {
                 let block = self.try_cache_block(block.try_into()?, false).await?;
                 Ok(block)
             }
-            // TODO: better error. some blocks are known, just not this one
-            None => Err(Web3ProxyError::NoBlocksKnown),
+            None => Err(Web3ProxyError::UnknownBlockHash(*hash)),
         }
     }
 
@@ -384,7 +391,9 @@ impl Web3Rpcs {
         if let Some(block_hash) = self.blocks_by_number.get(num) {
             // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
             // TODO: configurable max wait and rpc
-            let block = self.block(authorization, &block_hash, None, None).await?;
+            let block = self
+                .block(authorization, &block_hash, None, Some(3), None)
+                .await?;
 
             return Ok((block, block_depth));
         }
@@ -392,7 +401,12 @@ impl Web3Rpcs {
         // block number not in cache. we need to ask an rpc for it
         // TODO: this error is too broad
         let response = self
-            .internal_request::<_, Option<ArcBlock>>("eth_getBlockByNumber", &(*num, false), None)
+            .internal_request::<_, Option<ArcBlock>>(
+                "eth_getBlockByNumber",
+                &(*num, false),
+                Some(3),
+                None,
+            )
             .await?
             .ok_or(Web3ProxyError::NoBlocksKnown)?;
 

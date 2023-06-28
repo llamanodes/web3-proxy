@@ -55,7 +55,7 @@ use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::sync::{broadcast, watch, Semaphore};
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use tracing::{error, info, trace, warn, Level};
 
 // TODO: make this customizable?
@@ -1136,6 +1136,7 @@ impl Web3ProxyApp {
 
         // TODO: trace log request.params before we send them to _proxy_request_with_caching which might modify them
 
+        // TODO: I think we have sufficient retries elsewhere and this will just slow us down.
         let mut tries = 3;
         let mut last_code_and_response = None;
         while tries > 0 {
@@ -1144,6 +1145,7 @@ impl Web3ProxyApp {
                     &request.method,
                     &mut request.params,
                     head_block_num,
+                    Some(2),
                     &request_metadata,
                 )
                 .await
@@ -1158,11 +1160,14 @@ impl Web3ProxyApp {
                 break;
             }
 
+            tries -= 1;
+
             // TODO: emit a stat?
             // TODO: only log params in development
-            warn!(method=%request.method, params=?request.params, response=?last_code_and_response, "request failed");
+            warn!(method=%request.method, params=%request.params, response=?last_code_and_response, "request failed ({} tries remain)", tries);
 
-            tries -= 1;
+            // TODO: sleep a randomized amount of time?
+            sleep(Duration::from_millis(10)).await;
         }
 
         let (code, response) = last_code_and_response.expect("there should always be a response");
@@ -1184,6 +1189,7 @@ impl Web3ProxyApp {
         method: &str,
         params: &mut serde_json::Value,
         head_block_num: Option<U64>,
+        max_tries: Option<usize>,
         request_metadata: &Arc<RequestMetadata>,
     ) -> Web3ProxyResult<JsonRpcResponseEnum<Arc<RawValue>>> {
         // TODO: don't clone into a new string?
@@ -1299,6 +1305,7 @@ impl Web3ProxyApp {
                             method,
                             params,
                             Some(request_metadata),
+                            max_tries,
                             Some(Duration::from_secs(30)),
                             None,
                             None,
@@ -1340,6 +1347,7 @@ impl Web3ProxyApp {
                         method,
                         params,
                         Some(request_metadata),
+                        max_tries,
                         Some(Duration::from_secs(30)),
                         None,
                         None,
@@ -1373,6 +1381,7 @@ impl Web3ProxyApp {
                         method,
                         params,
                         Some(request_metadata),
+                        max_tries,
                         Some(Duration::from_secs(30)),
                         None,
                         None,
@@ -1397,7 +1406,9 @@ impl Web3ProxyApp {
                             method,
                             params,
                             Some(request_metadata),
+                            max_tries,
                             Some(Duration::from_secs(30)),
+                            // TODO: should this be block 0 instead?
                             Some(&U64::one()),
                             None,
                         )
@@ -1642,7 +1653,7 @@ impl Web3ProxyApp {
 
                         let request_block = self
                             .balanced_rpcs
-                            .block(&authorization, &request_block_hash, None, None)
+                            .block(&authorization, &request_block_hash, None, Some(3), None)
                             .await?
                             .block;
 
@@ -1672,7 +1683,7 @@ impl Web3ProxyApp {
 
                         let from_block = self
                             .balanced_rpcs
-                            .block(&authorization, &from_block_hash, None, None)
+                            .block(&authorization, &from_block_hash, None, Some(3), None)
                             .await?
                             .block;
 
@@ -1683,7 +1694,7 @@ impl Web3ProxyApp {
 
                         let to_block = self
                             .balanced_rpcs
-                            .block(&authorization, &to_block_hash, None, None)
+                            .block(&authorization, &to_block_hash, None, Some(3), None)
                             .await?
                             .block;
 
@@ -1717,6 +1728,7 @@ impl Web3ProxyApp {
                                         method,
                                         params,
                                         Some(request_metadata),
+                                        max_tries,
                                         Some(max_wait),
                                         from_block_num.as_ref(),
                                         to_block_num.as_ref(),
@@ -1743,6 +1755,7 @@ impl Web3ProxyApp {
                             method,
                             params,
                             Some(request_metadata),
+                            max_tries,
                             Some(max_wait),
                             None,
                             None,
