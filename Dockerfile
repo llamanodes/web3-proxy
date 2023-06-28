@@ -60,7 +60,7 @@ FROM rust as build_tests
 RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,sharing=private \
+    --mount=type=cache,target=/app/target,id=build_tests_target \
     \
     cargo hakari generate --diff && \
     cargo hakari manage-deps --dry-run && \
@@ -75,7 +75,7 @@ FROM rust as build_app
 RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,sharing=private \
+    --mount=type=cache,target=/app/target,id=build_app_target \
     \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
