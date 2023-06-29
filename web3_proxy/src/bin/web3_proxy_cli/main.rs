@@ -27,6 +27,7 @@ use pagerduty_rs::eventsv2async::EventsV2 as PagerdutyAsyncEventsV2;
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
 use sentry::types::Dsn;
 use std::{
+    borrow::Cow,
     fs, panic,
     path::Path,
     sync::atomic::{self, AtomicUsize},
@@ -220,21 +221,29 @@ fn main() -> anyhow::Result<()> {
         (None, None)
     };
 
+    let sentry_env = std::env::var("SENTRY_ENV")
+        .map(Cow::from)
+        .unwrap_or("production".into());
+
     // set up sentry connection
     // this guard does nothing is sentry_url is None
     let _sentry_guard = sentry::init(sentry::ClientOptions {
         dsn: cli_config.sentry_url.clone(),
         release: sentry::release_name!(),
+        environment: Some(sentry_env),
         // Enable capturing of traces
         // TODO: make this configurable!
         traces_sample_rate: 0.01,
         ..Default::default()
     });
 
-    let maybe_chain_id = top_config.as_ref().map(|x| x.app.chain_id);
-
     sentry::configure_scope(|scope| {
-        scope.set_tag("chain_id", format!("{:?}", maybe_chain_id));
+        let chain_id = top_config.as_ref().map(|x| x.app.chain_id).unwrap_or(0);
+        scope.set_tag("chain_id", chain_id);
+
+        if let Ok(llama_env) = std::env::var("LLAMA_ENV") {
+            scope.set_tag("llama_env", llama_env);
+        }
     });
 
     tracing_subscriber::fmt()
