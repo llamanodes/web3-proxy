@@ -623,7 +623,7 @@ impl Web3Rpcs {
                 ?skip_rpcs,
                 retry_in_s=?retry_at.duration_since(Instant::now()).as_secs_f32(),
                 "no servers in {} ready!",
-                self,                
+                self,
             );
 
             Ok(OpenRequestResult::RetryAt(retry_at))
@@ -778,7 +778,7 @@ impl Web3Rpcs {
                 }
                 Err(err) => {
                     // TODO: only log params in dev
-                    warn!(rpc=%self, %method, ?params, ?err, "retry-able error");
+                    warn!(rpc=%self, %method, ?params, ?err, %tries, "retry-able error");
                     last_error = Some(err)
                 }
             }
@@ -1047,20 +1047,37 @@ impl Web3Rpcs {
         // TODO: error? warn? debug? trace?
         if head_block_num.is_none() {
             error!(
-                "No servers synced (min {:?}, max {:?}, head {:?}) ({} known)",
-                min_block_needed, max_block_needed, head_block_num, num_conns
+                min=?min_block_needed,
+                max=?max_block_needed,
+                head=?head_block_num,
+                known=num_conns,
+                %method,
+                ?params,
+                "No servers synced",
             );
         } else if head_block_num.as_ref() > needed {
             // we have synced past the needed block
-            // TODO: this is likely caused by rate limits. make the error message better
+            // TODO: only log params in development
             error!(
-                "No archive servers synced (min {:?}, max {:?}, head {:?}) ({} known)",
-                min_block_needed, max_block_needed, head_block_num, num_conns
+                min=?min_block_needed,
+                max=?max_block_needed,
+                head=?head_block_num,
+                known=%num_conns,
+                %method,
+                ?params,
+                "No archive servers synced",
             );
         } else {
+            // TODO: only log params in development
             error!(
-                "Requested data is not available (min {:?}, max {:?}, head {:?}) ({} skipped, {} known)",
-                min_block_needed, max_block_needed, head_block_num, num_skipped, num_conns
+                min=?min_block_needed,
+                max=?max_block_needed,
+                head=?head_block_num,
+                skipped=%num_skipped,
+                known=%num_conns,
+                %method,
+                ?params,
+                "Requested data is not available",
             );
             // TODO: remove this, or move to trace level
             // debug!("{}", serde_json::to_string(&request).unwrap());
