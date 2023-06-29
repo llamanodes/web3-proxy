@@ -25,19 +25,19 @@ use web3_proxy::{
 
 pub struct TestApp {
     /// anvil shuts down when this guard is dropped.
-    anvil: AnvilInstance,
-
-    /// spawn handle for the proxy.
-    handle: Mutex<Option<JoinHandle<anyhow::Result<()>>>>,
-
-    /// tell the app to shut down (use `self.stop()`).
-    shutdown_sender: broadcast::Sender<()>,
+    pub anvil: AnvilInstance,
 
     /// connection to anvil.
     pub anvil_provider: Provider<Http>,
 
+    /// spawn handle for the proxy.
+    pub handle: Mutex<Option<JoinHandle<anyhow::Result<()>>>>,
+
     /// connection to the proxy that is connected to anil.
     pub proxy_provider: Provider<Http>,
+
+    /// tell the app to shut down (use `self.stop()`).
+    shutdown_sender: broadcast::Sender<()>,
 }
 
 impl TestApp {

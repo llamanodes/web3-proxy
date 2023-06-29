@@ -1,6 +1,7 @@
 //! Handle registration, logins, and managing account data.
 pub mod authentication;
 pub mod payment;
+pub mod payment_stripe;
 pub mod referral;
 pub mod rpc_keys;
 pub mod stats;
