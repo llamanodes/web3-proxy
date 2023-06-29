@@ -24,6 +24,8 @@ redis-rate-limiter = { path = "../redis-rate-limiter" }
 #ethers = { git = "https://github.com/llamanodes/ethers-rs/", rev = "eb68f5d60850008cd302762bd3a5a4bdcfecc713", default-features = false, features = ["rustls", "ws"] }
 influxdb2 = { git = "https://github.com/llamanodes/influxdb2", features = ["rustls"], rev = "2d125128696a29d7e0b9abc052c928937e7c0579" }
 influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/", rev = "2d125128696a29d7e0b9abc052c928937e7c0579"}
+
+# TODO: we can't actually use 0.6 because they want a Provider and we have an Arc<Provider>
 siwe = { git = "https://github.com/llamanodes/siwe-rs", rev = "013be5204ff1c85778ce21619f4b677a003db8a1", features = ["ethers", "serde"] }
 
 # TODO: regex has several "perf" features that we might want to use
