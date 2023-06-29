@@ -15,7 +15,7 @@ use serde_json::json;
 use std::sync::atomic;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
-use tracing::{debug, error, trace, warn, Level};
+use tracing::{debug, error, info, trace, warn, Level};
 
 #[derive(Debug, From)]
 pub enum OpenRequestResult {
@@ -43,6 +43,8 @@ pub enum RequestErrorHandler {
     TraceLevel,
     /// Log at the debug level. Use when errors are expected.
     DebugLevel,
+    /// Log at the info level. Use when errors are expected.
+    InfoLevel,
     /// Log at the error level. Use when errors are bad.
     ErrorLevel,
     /// Log at the warn level. Use when errors do not cause problems.
@@ -57,18 +59,18 @@ struct EthCallParams((EthCallFirstParams, Option<serde_json::Value>));
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct EthCallFirstParams {
-    to: Address,
+    to: Option<Address>,
     data: Option<Bytes>,
 }
 
 impl From<Level> for RequestErrorHandler {
     fn from(level: Level) -> Self {
         match level {
-            Level::TRACE => RequestErrorHandler::TraceLevel,
             Level::DEBUG => RequestErrorHandler::DebugLevel,
             Level::ERROR => RequestErrorHandler::ErrorLevel,
+            Level::INFO => RequestErrorHandler::InfoLevel,
+            Level::TRACE => RequestErrorHandler::TraceLevel,
             Level::WARN => RequestErrorHandler::WarnLevel,
-            _ => unimplemented!("unexpected tracing Level"),
         }
     }
 }
@@ -94,12 +96,10 @@ impl Authorization {
         // we intentionally use "now" and not the time the request started
         // why? because we aggregate stats and setting one in the past could cause confusion
         let timestamp = Utc::now();
-        let to: Vec<u8> = params
-            .to
-            .as_bytes()
-            .try_into()
-            .expect("address should always convert to a Vec<u8>");
-        let call_data = params.data.map(|x| format!("{}", x));
+
+        let to = params.to.unwrap_or_else(Address::zero).as_bytes().to_vec();
+
+        let call_data = params.data.map(|x| x.to_string());
 
         let rl = revert_log::ActiveModel {
             rpc_key_id: sea_orm::Set(rpc_key_id),
@@ -333,6 +333,15 @@ impl OpenRequestHandle {
                         );
                     }
                 }
+                RequestErrorHandler::InfoLevel => {
+                    info!(
+                        rpc=%self.rpc,
+                        %method,
+                        ?params,
+                        ?err,
+                        "bad response",
+                    );
+                }
                 RequestErrorHandler::TraceLevel => {
                     trace!(
                         rpc=%self.rpc,
@@ -374,6 +383,7 @@ impl OpenRequestHandle {
                     // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
                     let method: Method = Method::try_from_value(&method.to_string()).unwrap();
 
+                    // TODO: i don't think this prsing is correct
                     match serde_json::from_value::<EthCallParams>(json!(params)) {
                         Ok(params) => {
                             // spawn saving to the database so we don't slow down the request

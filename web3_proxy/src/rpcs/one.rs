@@ -515,7 +515,7 @@ impl Web3Rpc {
                 }
             }
             Err(err) => {
-                warn!("unable to get block from {}. err={:?}", self, err);
+                warn!(?err, "unable to get block from {}", self);
 
                 // send an empty block to take this server out of rotation
                 head_block_sender.send_replace(None);
@@ -646,7 +646,8 @@ impl Web3Rpc {
         let error_handler = if self.backup {
             Some(RequestErrorHandler::DebugLevel)
         } else {
-            Some(RequestErrorHandler::ErrorLevel)
+            // TODO: info level?
+            Some(RequestErrorHandler::InfoLevel)
         };
 
         if self.should_disconnect() {
