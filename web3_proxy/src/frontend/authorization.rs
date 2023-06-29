@@ -4,6 +4,7 @@ use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
+use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
 use crate::user_token::UserBearerToken;
@@ -476,7 +477,7 @@ impl RequestMetadata {
         app: &Web3ProxyApp,
         authorization: Arc<Authorization>,
         request: R,
-        head_block_num: Option<&U64>,
+        head_block: Option<&Web3ProxyBlock>,
     ) -> Arc<Self> {
         let request = request.into();
 
@@ -493,7 +494,7 @@ impl RequestMetadata {
             KafkaDebugLogger::try_new(
                 app,
                 authorization.clone(),
-                head_block_num,
+                head_block.map(|x| x.number()),
                 "web3_proxy:rpc",
                 request_ulid,
             )
@@ -609,7 +610,7 @@ impl Drop for RequestMetadata {
             // turn `&mut self` into `self`
             let x = mem::take(self);
 
-            // warn!("request metadata dropped without stat send! {:?}", self);
+            trace!(?self, "request metadata dropped without stat send");
             let _ = x.try_send_stat();
         }
     }
@@ -859,7 +860,7 @@ pub async fn ip_is_authorized(
         let f = async move {
             let now = Utc::now().timestamp();
 
-            if let Some(mut redis_conn) = app.redis_conn().await? {
+            if let Ok(mut redis_conn) = app.redis_conn().await {
                 let salt = app
                     .config
                     .public_recent_ips_salt
@@ -880,7 +881,7 @@ pub async fn ip_is_authorized(
             Ok::<_, Web3ProxyError>(())
         }
         .map_err(|err| {
-            warn!("background update of recent_users:ip failed: {}", err);
+            warn!(?err, "background update of recent_users:ip failed");
 
             err
         });
@@ -923,7 +924,7 @@ pub async fn key_is_authorized(
         let f = async move {
             let now = Utc::now().timestamp();
 
-            if let Some(mut redis_conn) = app.redis_conn().await? {
+            if let Ok(mut redis_conn) = app.redis_conn().await {
                 let salt = app
                     .config
                     .public_recent_ips_salt
@@ -944,7 +945,7 @@ pub async fn key_is_authorized(
             Ok::<_, Web3ProxyError>(())
         }
         .map_err(|err| {
-            warn!("background update of recent_users:id failed: {}", err);
+            warn!(?err, "background update of recent_users:id failed");
 
             err
         });
@@ -1027,9 +1028,7 @@ impl Web3ProxyApp {
         let semaphore_permit = semaphore.acquire_owned().await?;
 
         // get the attached address from the database for the given auth_token.
-        let db_replica = self
-            .db_replica()
-            .web3_context("checking if bearer token is authorized")?;
+        let db_replica = self.db_replica()?;
 
         let user_bearer_uuid: Uuid = user_bearer_token.into();
 
@@ -1054,7 +1053,7 @@ impl Web3ProxyApp {
         // we don't care about user agent or origin or referer
         let authorization = Authorization::external(
             &self.config.allowed_origin_requests_per_period,
-            self.db_conn(),
+            self.db_conn().ok().cloned(),
             &ip,
             None,
             proxy_mode,
@@ -1110,7 +1109,7 @@ impl Web3ProxyApp {
     ) -> Web3ProxyResult<RateLimitResult> {
         if ip.is_loopback() {
             // TODO: localhost being unlimited should be optional
-            let authorization = Authorization::internal(self.db_conn())?;
+            let authorization = Authorization::internal(self.db_conn().ok().cloned())?;
 
             return Ok(RateLimitResult::Allowed(authorization, None));
         }
@@ -1119,7 +1118,7 @@ impl Web3ProxyApp {
         // they do check origin because we can override rate limits for some origins
         let authorization = Authorization::external(
             allowed_origin_requests_per_period,
-            self.db_conn(),
+            self.db_conn().ok().cloned(),
             ip,
             origin,
             proxy_mode,
@@ -1181,9 +1180,7 @@ impl Web3ProxyApp {
             Ok(x) => self
                 .user_balance_cache
                 .try_get_with(x, async move {
-                    let db_replica = self
-                        .db_replica()
-                        .web3_context("Getting database replica connection")?;
+                    let db_replica = self.db_replica()?;
 
                     loop {
                         match balance::Entity::find()
@@ -1196,13 +1193,13 @@ impl Web3ProxyApp {
                                     total_deposit: x.total_deposits,
                                     total_spend: x.total_spent_outside_free_tier,
                                 };
+                                trace!("Balance for cache retrieved from database is {:?}", x);
 
                                 return Ok(Arc::new(RwLock::new(x)));
                             }
                             None => {
                                 // no balance row. make one now
-                                let db_conn =
-                                    self.db_conn().web3_context("Getting database connection")?;
+                                let db_conn = self.db_conn()?;
 
                                 let balance_entry = balance::ActiveModel {
                                     id: sea_orm::NotSet,
@@ -1219,7 +1216,7 @@ impl Web3ProxyApp {
                                             )])
                                             .to_owned(),
                                     )
-                                    .exec(&db_conn)
+                                    .exec(db_conn)
                                     .await
                                     .web3_context("creating empty balance row for existing user")?;
 
@@ -1243,9 +1240,7 @@ impl Web3ProxyApp {
             .try_get_with_by_ref(rpc_secret_key, async move {
                 // trace!(?rpc_secret_key, "user cache miss");
 
-                let db_replica = self
-                    .db_replica()
-                    .web3_context("Getting database connection")?;
+                let db_replica = self.db_replica()?;
 
                 // TODO: join the user table to this to return the User? we don't always need it
                 // TODO: join on secondary users
@@ -1322,7 +1317,7 @@ impl Web3ProxyApp {
                         let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
                             .one(db_replica.as_ref())
                             .await?
-                            .context(
+                            .web3_context(
                                 "user model was not found, but every rpc_key should have a user",
                             )?;
 
@@ -1331,7 +1326,7 @@ impl Web3ProxyApp {
                         )
                         .one(db_replica.as_ref())
                         .await?
-                        .context(
+                        .web3_context(
                             "related user tier not found, but every user should have a tier",
                         )?;
 
@@ -1347,11 +1342,12 @@ impl Web3ProxyApp {
                             if balance.total_deposit < Decimal::from(10)
                                 || balance.remaining() < Decimal::new(1, 2)
                             {
+                                // TODO: include boolean to mark that the user is downgraded
                                 user_tier_model =
                                     user_tier::Entity::find_by_id(downgrade_user_tier)
                                         .one(db_replica.as_ref())
                                         .await?
-                                        .context(format!(
+                                        .web3_context(format!(
                                             "downgrade user tier ({}) is missing!",
                                             downgrade_user_tier
                                         ))?;
@@ -1411,7 +1407,7 @@ impl Web3ProxyApp {
 
         let authorization = Authorization::try_new(
             authorization_checks,
-            self.db_conn(),
+            self.db_conn().ok().cloned(),
             ip,
             origin,
             referer,

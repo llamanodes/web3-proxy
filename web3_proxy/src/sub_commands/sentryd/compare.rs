@@ -1,3 +1,4 @@
+use crate::jsonrpc::JsonRpcErrorData;
 use anyhow::{anyhow, Context};
 use chrono::{DateTime, Utc};
 use ethers::types::{Block, TxHash, H256};
@@ -5,7 +6,6 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, warn};
-use web3_proxy::jsonrpc::JsonRpcErrorData;
 
 use super::{SentrydErrorBuilder, SentrydResult};
 

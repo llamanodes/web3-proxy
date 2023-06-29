@@ -1,3 +1,4 @@
+use crate::frontend::authorization::RpcSecretKey;
 use anyhow::Context;
 use argh::FromArgs;
 use entities::{rpc_key, user};
@@ -8,7 +9,6 @@ use migration::sea_orm::{
 };
 use sea_orm::prelude::Uuid;
 use tracing::{debug, info};
-use web3_proxy::frontend::authorization::RpcSecretKey;
 
 /// change a key's owner.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
@@ -29,8 +29,6 @@ impl TransferKeySubCommand {
 
         let new_address: Address = self.new_address.parse()?;
 
-        let new_address: Vec<u8> = new_address.to_fixed_bytes().into();
-
         let uk = rpc_key::Entity::find()
             .filter(rpc_key::Column::SecretKey.eq(rpc_secret_key))
             .one(db_conn)
@@ -40,7 +38,7 @@ impl TransferKeySubCommand {
         debug!("user key: {}", serde_json::to_string(&uk)?);
 
         let new_u = user::Entity::find()
-            .filter(user::Column::Address.eq(new_address))
+            .filter(user::Column::Address.eq(new_address.as_bytes()))
             .one(db_conn)
             .await?
             .context("No user found with that key")?;

@@ -4,7 +4,7 @@ use super::provider::{connect_http, connect_ws, EthersHttpProvider, EthersWsProv
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, Web3ProxyJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
-use crate::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
 use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
@@ -89,7 +89,7 @@ impl Web3Rpc {
     // TODO: have this take a builder (which will have channels attached). or maybe just take the config and give the config public fields
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
-        mut config: Web3RpcConfig,
+        config: Web3RpcConfig,
         name: String,
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
@@ -142,19 +142,9 @@ impl Web3Rpc {
         let (hard_limit_until, _) = watch::channel(Instant::now());
 
         if config.ws_url.is_none() && config.http_url.is_none() {
-            if let Some(url) = config.url {
-                if url.starts_with("ws") {
-                    config.ws_url = Some(url);
-                } else if url.starts_with("http") {
-                    config.http_url = Some(url);
-                } else {
-                    return Err(anyhow!("only ws or http urls are supported"));
-                }
-            } else {
-                return Err(anyhow!(
-                    "either ws_url or http_url are required. it is best to set both"
-                ));
-            }
+            return Err(anyhow!(
+                "either ws_url or http_url are required. it is best to set both. they must both point to the same server!"
+            ));
         }
 
         let (head_block, _) = watch::channel(None);
@@ -244,6 +234,7 @@ impl Web3Rpc {
     /// TODO: tests on this!
     /// TODO: should tier or block number take priority?
     /// TODO: should this return a struct that implements sorting traits?
+    /// TODO: move this to consensus.rs
     fn sort_on(&self, max_block: Option<U64>) -> (bool, Reverse<U64>, u32) {
         let mut head_block = self
             .head_block
@@ -262,6 +253,7 @@ impl Web3Rpc {
         (!backup, Reverse(head_block), tier)
     }
 
+    /// TODO: move this to consensus.rs
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
@@ -278,6 +270,7 @@ impl Web3Rpc {
     }
 
     /// like sort_for_load_balancing, but shuffles tiers randomly instead of sorting by weighted_peak_latency
+    /// TODO: move this to consensus.rs
     pub fn shuffle_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
@@ -321,9 +314,10 @@ impl Web3Rpc {
             let head_block_num = self
                 .internal_request::<_, U256>(
                     "eth_blockNumber",
-                    &(),
+                    &[(); 0],
                     // error here are expected, so keep the level low
                     Some(Level::DEBUG.into()),
+                    Some(2),
                     Some(Duration::from_secs(5)),
                 )
                 .await
@@ -348,6 +342,7 @@ impl Web3Rpc {
                     )),
                     // error here are expected, so keep the level low
                     Some(Level::TRACE.into()),
+                    Some(2),
                     Some(Duration::from_secs(5)),
                 )
                 .await;
@@ -436,8 +431,9 @@ impl Web3Rpc {
         let found_chain_id: U64 = self
             .internal_request(
                 "eth_chainId",
-                &(),
+                &[(); 0],
                 Some(Level::TRACE.into()),
+                Some(2),
                 Some(Duration::from_secs(5)),
             )
             .await?;
@@ -454,6 +450,7 @@ impl Web3Rpc {
             .into());
         }
 
+        // TODO: only do this for balanced_rpcs. this errors on 4337 rpcs
         self.check_block_data_limit()
             .await
             .context(format!("unable to check_block_data_limit of {}", self))?;
@@ -518,7 +515,7 @@ impl Web3Rpc {
                 }
             }
             Err(err) => {
-                warn!("unable to get block from {}. err={:?}", self, err);
+                warn!(?err, "unable to get block from {}", self);
 
                 // send an empty block to take this server out of rotation
                 head_block_sender.send_replace(None);
@@ -561,6 +558,7 @@ impl Web3Rpc {
                         "eth_getTransactionByHash",
                         &(txid,),
                         error_handler,
+                        Some(2),
                         Some(Duration::from_secs(5)),
                     )
                     .await?
@@ -583,6 +581,7 @@ impl Web3Rpc {
                     "eth_getCode",
                     &(to, block_number),
                     error_handler,
+                    Some(2),
                     Some(Duration::from_secs(5)),
                 )
                 .await?;
@@ -616,7 +615,7 @@ impl Web3Rpc {
                     break;
                 }
 
-                warn!("{} subscribe err: {:#?}", self, err)
+                warn!(?err, "subscribe err on {}", self);
             } else if self.should_disconnect() {
                 break;
             }
@@ -647,7 +646,8 @@ impl Web3Rpc {
         let error_handler = if self.backup {
             Some(RequestErrorHandler::DebugLevel)
         } else {
-            Some(RequestErrorHandler::ErrorLevel)
+            // TODO: info level?
+            Some(RequestErrorHandler::InfoLevel)
         };
 
         if self.should_disconnect() {
@@ -670,7 +670,9 @@ impl Web3Rpc {
 
         trace!("starting subscriptions on {}", self);
 
-        self.check_provider(chain_id).await?;
+        self.check_provider(chain_id)
+            .await
+            .web3_context("failed check_provider")?;
 
         let mut futures = vec![];
 
@@ -679,18 +681,18 @@ impl Web3Rpc {
 
         // subscribe to the disconnect watch. the app uses this when shutting down or when configs change
         if let Some(disconnect_watch_tx) = self.disconnect_watch.as_ref() {
-            let clone = self.clone();
+            let rpc = self.clone();
             let mut disconnect_watch_rx = disconnect_watch_tx.subscribe();
 
             let f = async move {
                 loop {
                     if *disconnect_watch_rx.borrow_and_update() {
-                        info!("disconnect triggered on {}", clone);
                         break;
                     }
 
                     disconnect_watch_rx.changed().await?;
                 }
+                info!("disconnect triggered on {}", rpc);
                 Ok(())
             };
 
@@ -722,7 +724,8 @@ impl Web3Rpc {
                         // TODO: move this into a function and the chaining should be easier
                         if let Err(err) = rpc.healthcheck(error_handler).await {
                             // TODO: different level depending on the error handler
-                            warn!("health checking {} failed: {:?}", rpc, err);
+                            // TODO: if rate limit error, set "retry_at"
+                            warn!(?err, "health check on {} failed", rpc);
                         }
                     }
 
@@ -781,7 +784,7 @@ impl Web3Rpc {
 
         // try_join on the futures
         if let Err(err) = try_join_all(futures).await {
-            warn!("subscription erred: {:?}", err);
+            warn!(?err, "subscription erred");
         }
 
         debug!("subscriptions on {} exited", self);
@@ -828,6 +831,7 @@ impl Web3Rpc {
                     &("latest", false),
                     &authorization,
                     Some(Level::WARN.into()),
+                    Some(2),
                     Some(Duration::from_secs(5)),
                 )
                 .await;
@@ -864,6 +868,7 @@ impl Web3Rpc {
                         &("latest", false),
                         &authorization,
                         Some(Level::WARN.into()),
+                        Some(2),
                         Some(Duration::from_secs(5)),
                     )
                     .await;
@@ -1036,9 +1041,9 @@ impl Web3Rpc {
                     if !self.backup {
                         let when = retry_at.duration_since(Instant::now());
                         warn!(
-                            "Exhausted rate limit on {}. Retry in {}ms",
+                            retry_ms=%when.as_millis(),
+                            "Exhausted rate limit on {}",
                             self,
-                            when.as_millis()
                         );
                     }
 
@@ -1066,12 +1071,20 @@ impl Web3Rpc {
         method: &str,
         params: &P,
         error_handler: Option<RequestErrorHandler>,
+        max_tries: Option<usize>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         let authorization = Default::default();
 
-        self.authorized_request(method, params, &authorization, error_handler, max_wait)
-            .await
+        self.authorized_request(
+            method,
+            params,
+            &authorization,
+            error_handler,
+            max_tries,
+            max_wait,
+        )
+        .await
     }
 
     pub async fn authorized_request<P: JsonRpcParams, R: JsonRpcResultData>(
@@ -1080,16 +1093,42 @@ impl Web3Rpc {
         params: &P,
         authorization: &Arc<Authorization>,
         error_handler: Option<RequestErrorHandler>,
+        max_tries: Option<usize>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         // TODO: take max_wait as a function argument?
-        let x = self
-            .wait_for_request_handle(authorization, max_wait, error_handler)
-            .await?
-            .request::<P, R>(method, params)
-            .await?;
+        let mut tries = max_tries.unwrap_or(1);
 
-        Ok(x)
+        let mut last_error: Option<Web3ProxyError> = None;
+
+        while tries > 0 {
+            tries -= 1;
+
+            let handle = match self
+                .wait_for_request_handle(authorization, max_wait, error_handler)
+                .await
+            {
+                Ok(x) => x,
+                Err(err) => {
+                    last_error = Some(err);
+                    continue;
+                }
+            };
+
+            match handle.request::<P, R>(method, params).await {
+                Ok(x) => return Ok(x),
+                Err(err) => {
+                    last_error = Some(err.into());
+                    continue;
+                }
+            }
+        }
+
+        if let Some(last_error) = last_error {
+            return Err(last_error);
+        }
+
+        Err(anyhow::anyhow!("authorized_request failed in an unexpected way").into())
     }
 }
 

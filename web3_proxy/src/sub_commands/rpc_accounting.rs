@@ -93,11 +93,11 @@ impl RpcAccountingSubCommand {
 
         // TODO: do this with add_option? try operator is harder to use then
         if let Some(address) = self.address {
-            let address: Vec<u8> = address.parse::<Address>()?.to_fixed_bytes().into();
+            let address = address.parse::<Address>()?;
 
             // TODO: find_with_related
             let u = user::Entity::find()
-                .filter(user::Column::Address.eq(address))
+                .filter(user::Column::Address.eq(address.as_bytes()))
                 .one(db_conn)
                 .await?
                 .context("no user found")?;

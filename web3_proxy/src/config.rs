@@ -2,7 +2,8 @@ use crate::app::Web3ProxyJoinHandle;
 use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
-use ethers::prelude::{Address, TxHash, H256};
+use derivative::Derivative;
+use ethers::prelude::{Address, TxHash};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
 use migration::sea_orm::DatabaseConnection;
@@ -97,9 +98,6 @@ pub struct AppConfig {
 
     /// Default ERC address for out deposit contract
     pub deposit_factory_contract: Option<Address>,
-
-    /// Default ERC address for out deposit contract
-    pub deposit_topic: Option<H256>,
 
     /// minimum amount to increase eth_estimateGas results
     pub gas_increase_min: Option<U256>,
@@ -262,15 +260,14 @@ pub fn average_block_interval(chain_id: u64) -> Duration {
 }
 
 /// Configuration for a backend web3 RPC server
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Derivative, Deserialize, PartialEq, Eq)]
+#[derivative(Default)]
 pub struct Web3RpcConfig {
     /// simple way to disable a connection without deleting the row
     #[serde(default)]
     pub disabled: bool,
     /// a name used in /status and other user facing messages
     pub display_name: Option<String>,
-    /// (deprecated) rpc url
-    pub url: Option<String>,
     /// while not absolutely required, a ws:// or wss:// connection will be able to subscribe to head blocks
     pub ws_url: Option<String>,
     /// while not absolutely required, a http:// or https:// connection will allow erigon to stream JSON
@@ -278,6 +275,8 @@ pub struct Web3RpcConfig {
     /// block data limit. If None, will be queried
     pub block_data_limit: Option<u64>,
     /// the requests per second at which the server starts slowing down
+    #[serde(default)]
+    #[derivative(Default(value = "1"))]
     pub soft_limit: u32,
     /// the requests per second at which the server throws errors (rate limit or otherwise)
     pub hard_limit: Option<u64>,
@@ -310,7 +309,7 @@ impl Web3RpcConfig {
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         if !self.extra.is_empty() {
-            warn!("unknown Web3RpcConfig fields!: {:?}", self.extra.keys());
+            warn!(extra=?self.extra.keys(), "unknown Web3RpcConfig fields!");
         }
 
         Web3Rpc::spawn(

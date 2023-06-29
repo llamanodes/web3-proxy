@@ -1,58 +1,10 @@
-def buildAndPush() {
-    // env.ARCH is the system architecture. some apps can be generic (amd64, arm64),
-    //          but apps that compile for specific hardware (like web3-proxy) will need more specific tags (amd64_epyc2, arm64_graviton2, intel_xeon3, etc.)
-    // env.BRANCH_NAME is set to the git branch name by default
-    // env.REGISTRY is the repository url for this pipeline
-    // env.GIT_SHORT is the git short hash of the currently checked out repo
-    // env.LATEST_BRANCH is the branch name that gets tagged latest
-
-    // TODO: check that this system actually matches the given arch
-    sh '''#!/bin/bash
-        set -eux -o pipefail
-
-        [ -n "$ARCH" ]
-        [ -n "$BRANCH_NAME" ]
-        [ -n "$REGISTRY" ]
-        [ -n "$GIT_SHORT" ]
-        [ -n "$LATEST_BRANCH" ]
-
-        # deterministic mtime on .git keeps Dockerfiles that do 'ADD . .' or similar
-        # without this, the build process always thinks the directory has changes
-        git restore-mtime
-        touch -t "$(git show -s --date=format:'%Y%m%d%H%M.%S' --format=%cd HEAD)" .git
-
-        function buildAndPush {
-            image=$1
-            buildcache=$2
-
-            buildctl build \
-                --frontend=dockerfile.v0 \
-                --local context=. \
-                --local dockerfile=. \
-                --output "type=image,name=${image},push=true" \
-                --export-cache type=s3,region=us-east-2,bucket=llamarpc-buildctl-cache,name=${buildcache} \
-                --import-cache type=s3,region=us-east-2,bucket=llamarpc-buildctl-cache,name=${buildcache} \
-            ;
-        }
-
-        BUILDCACHE="${REGISTRY}:buildcache_${ARCH}"
-
-        # build and push a docker image tagged with the short git commit
-        buildAndPush "${REGISTRY}:git_${GIT_SHORT}_${ARCH}" "${BUILDCACHE}"
-
-        # push an image tagged with the branch
-        # since buildAndPush just ran above, this should be very quick
-        # TODO: maybe replace slashes in the name with dashes or underscores
-        buildAndPush "${REGISTRY}:branch_${BRANCH_NAME}_${ARCH}" "${BUILDCACHE}"
-
-        if [ "${BRANCH_NAME}" = "${LATEST_BRANCH}" ]; then
-            buildAndPush "${REGISTRY}:latest_${ARCH}" "${BUILDCACHE}"
-        fi
-    '''
-}
+@Library('jenkins_lib@main') _
 
 pipeline {
-    agent any
+    agent {
+        // not strictly required, but we only build graviton2 right now so this keeps the jenkins-agent count down
+        label 'arm64_graviton2'
+    }
     options {
         ansiColor('xterm')
     }
@@ -73,32 +25,32 @@ pipeline {
     stages {
         stage('build and push') {
             parallel {
-                stage('build and push amd64_epyc2 image') {
-                    agent {
-                        label 'amd64_epyc2'
-                    }
-                    environment {
-                        ARCH="amd64_epyc2"
-                    }
-                    steps {
-                        script {
-                            buildAndPush()
-                        }
-                    }
-                }
-                stage('build and push amd64_epyc3 image') {
-                    agent {
-                        label 'amd64_epyc3'
-                    }
-                    environment {
-                        ARCH="amd64_epyc3"
-                    }
-                    steps {
-                        script {
-                            buildAndPush()
-                        }
-                    }
-                }
+                // stage('build and push amd64_epyc2 image') {
+                //     agent {
+                //         label 'amd64_epyc2'
+                //     }
+                //     environment {
+                //         ARCH="amd64_epyc2"
+                //     }
+                //     steps {
+                //         script {
+                //             myBuildandPush.buildAndPush()
+                //         }
+                //     }
+                // }
+                // stage('build and push amd64_epyc3 image') {
+                //     agent {
+                //         label 'amd64_epyc3'
+                //     }
+                //     environment {
+                //         ARCH="amd64_epyc3"
+                //     }
+                //     steps {
+                //         script {
+                //             myBuildandPush.buildAndPush()
+                //         }
+                //     }
+                // }
                 stage('Build and push arm64_graviton2 image') {
                     agent {
                         label 'arm64_graviton2'
@@ -108,20 +60,35 @@ pipeline {
                     }
                     steps {
                         script {
-                            buildAndPush()
+                            myBuildandPush.buildAndPush()
                         }
                     }
                 }
-                stage('Build and push intel_xeon3 image') {
-                    agent {
-                        label 'intel_xeon3'
-                    }
+                // stage('Build and push intel_xeon3 image') {
+                //     agent {
+                //         label 'intel_xeon3'
+                //     }
+                //     environment {
+                //         ARCH="intel_xeon3"
+                //     }
+                //     steps {
+                //         script {
+                //             myBuildandPush.buildAndPush()
+                //         }
+                //     }
+                // }
+            }
+        }
+        stage('push latest') {
+            parallel {
+                stage('maybe push latest_arm64_graviton2 tag') {
+                    agent any
                     environment {
-                        ARCH="intel_xeon3"
+                        ARCH="arm64_graviton2"
                     }
                     steps {
                         script {
-                            buildAndPush()
+                            myPushLatest.maybePushLatest()
                         }
                     }
                 }

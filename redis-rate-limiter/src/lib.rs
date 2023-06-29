@@ -6,7 +6,7 @@ use tokio::time::{Duration, Instant};
 pub use deadpool_redis::redis;
 pub use deadpool_redis::{
     Config as RedisConfig, Connection as RedisConnection, Manager as RedisManager,
-    Pool as RedisPool, Runtime as DeadpoolRuntime,
+    Pool as RedisPool, PoolError as RedisPoolError, Runtime as DeadpoolRuntime,
 };
 
 #[derive(Clone)]

@@ -5,7 +5,6 @@ use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
     get_query_window_seconds_from_params, get_user_id_from_params,
 };
-use anyhow::Context;
 use axum::response::IntoResponse;
 use axum::Json;
 use axum::{
@@ -62,19 +61,13 @@ pub async fn query_user_stats<'a>(
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
-    let db_conn = app.db_conn().context("query_user_stats needs a db")?;
-    let db_replica = app
-        .db_replica()
-        .context("query_user_stats needs a db replica")?;
-    let mut redis_conn = app
-        .redis_conn()
-        .await
-        .context("query_user_stats had a redis connection error")?
-        .context("query_user_stats needs a redis")?;
+    let db_conn = app.db_conn()?;
+    let db_replica = app.db_replica()?;
+    let mut redis_conn = app.redis_conn().await?;
 
     // get the user id first. if it is 0, we should use a cache on the app
     let user_id =
-        get_user_id_from_params(&mut redis_conn, &db_conn, &db_replica, bearer, params).await?;
+        get_user_id_from_params(&mut redis_conn, db_conn, db_replica, bearer, params).await?;
     // get the query window seconds now so that we can pick a cache with a good TTL
     // TODO: for now though, just do one cache. its easier
     let query_window_seconds = get_query_window_seconds_from_params(params)?;
@@ -280,7 +273,7 @@ pub async fn query_user_stats<'a>(
             .set_ex::<_, _, ()>(cache_key, cache_body, ttl)
             .await
         {
-            warn!("Redis error while caching query_user_stats: {:?}", err);
+            warn!(?err, "Redis error while caching query_user_stats");
         }
     } else {
         headers.insert(

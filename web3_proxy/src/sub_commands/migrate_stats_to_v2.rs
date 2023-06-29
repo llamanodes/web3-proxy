@@ -1,3 +1,8 @@
+use crate::app::BILLING_PERIOD_SECONDS;
+use crate::config::TopConfig;
+use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
+use crate::rpcs::one::Web3Rpc;
+use crate::stats::StatBuffer;
 use anyhow::{anyhow, Context};
 use argh::FromArgs;
 use entities::{rpc_accounting, rpc_key};
@@ -15,18 +20,13 @@ use tokio::sync::broadcast;
 use tokio::time::Instant;
 use tracing::{error, info};
 use ulid::Ulid;
-use web3_proxy::app::BILLING_PERIOD_SECONDS;
-use web3_proxy::config::TopConfig;
-use web3_proxy::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
-use web3_proxy::rpcs::one::Web3Rpc;
-use web3_proxy::stats::StatBuffer;
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 /// Migrate towards influxdb and rpc_accounting_v2 from rpc_accounting
 #[argh(subcommand, name = "migrate_stats_to_v2")]
-pub struct MigrateStatsToV2 {}
+pub struct MigrateStatsToV2SubCommand {}
 
-impl MigrateStatsToV2 {
+impl MigrateStatsToV2SubCommand {
     pub async fn main(
         self,
         top_config: TopConfig,

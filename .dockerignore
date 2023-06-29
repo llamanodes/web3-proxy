@@ -1,13 +1,21 @@
+.DS_Store
 flamegraph.svg
 perf.data
 perf.data.old
 
-/bin/
-/config/devel*
-/config/production*
-/data/
-/docker-compose*
+/*.md
+/.env
+/.git
+/.gitignore
+/.vscode
 /Dockerfile
 /Jenkinsfile
+/bin
+/config/dev*.toml
+/config/prod*.toml
+/data
+/docker-compose*
+/docs
 /redis-cell-server/
+/scripts
 /target

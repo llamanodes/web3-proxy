@@ -1,7 +1,5 @@
-use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::response_cache::JsonRpcResponseEnum;
 use derive_more::From;
-use ethers::prelude::ProviderError;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -10,7 +8,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::sync::Arc;
 
-pub trait JsonRpcParams = Clone + fmt::Debug + serde::Serialize + Send + Sync + 'static;
+pub trait JsonRpcParams = fmt::Debug + serde::Serialize + Send + Sync + 'static;
 pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + fmt::Debug + Send;
 
 // TODO: &str here instead of String should save a lot of allocations
@@ -294,54 +292,6 @@ impl JsonRpcForwardedResponse {
             id,
             result: Some(partial_response),
             error: None,
-        }
-    }
-
-    // TODO: delete this. its on JsonRpcErrorData
-    pub fn from_ethers_error(e: ProviderError, id: Box<RawValue>) -> Web3ProxyResult<Self> {
-        // TODO: move turning ClientError into json to a helper function?
-        let code;
-        let message: String;
-        let data;
-
-        match e {
-            ProviderError::JsonRpcClientError(err) => {
-                if let Some(err) = err.as_error_response() {
-                    code = err.code;
-                    message = err.message.clone();
-                    data = err.data.clone();
-                } else if let Some(err) = err.as_serde_error() {
-                    // this is not an rpc error. keep it as an error
-                    // TODO: ankr gives us "rate limited" but ethers fails to parse because it tries to require id even though its optional
-                    return Err(Web3ProxyError::BadResponse(
-                        format!("parse error: {}", err).into(),
-                    ));
-                } else {
-                    return Err(anyhow::anyhow!("unexpected ethers error! {:?}", err).into());
-                }
-            }
-            e => return Err(e.into()),
-        }
-
-        Ok(Self {
-            jsonrpc: "2.0",
-            id,
-            result: None,
-            error: Some(JsonRpcErrorData {
-                code,
-                message: message.into(),
-                data,
-            }),
-        })
-    }
-
-    pub fn try_from_response_result(
-        result: Result<Arc<RawValue>, ProviderError>,
-        id: Box<RawValue>,
-    ) -> Web3ProxyResult<Self> {
-        match result {
-            Ok(response) => Ok(Self::from_raw_response(response, id)),
-            Err(e) => Self::from_ethers_error(e, id),
         }
     }
 

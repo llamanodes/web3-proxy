@@ -38,9 +38,10 @@ use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock};
 use tracing::{info, trace};
 
 /// How to select backend servers for a request
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum ProxyMode {
     /// send to the "best" synced server
+    #[default]
     Best,
     /// send to all synced servers and return the fastest non-error response (reverts do not count as errors here)
     Fastest(usize),
@@ -49,12 +50,6 @@ pub enum ProxyMode {
     /// send all requests and responses to kafka
     /// TODO: should this be seperate from best/fastest/versus?
     Debug,
-}
-
-impl Default for ProxyMode {
-    fn default() -> Self {
-        Self::Best
-    }
 }
 
 /// Public entrypoint for WebSocket JSON-RPC requests.

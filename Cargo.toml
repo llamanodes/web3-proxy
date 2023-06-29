@@ -8,6 +8,7 @@ members = [
   "rate-counter",
   "redis-rate-limiter",
   "web3_proxy",
+  "workspace-hack",
 ]
 resolver = "2"
 
@@ -20,3 +21,4 @@ inherits = "release"
 
 # spend longer compiling for a slightly faster binary
 codegen-units = 1
+ 

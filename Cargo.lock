@@ -110,9 +110,6 @@ name = "arc-swap"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bddcadddf5e9015d310179a59bb28c4d4b9920ad0f11e8e14dbadf654890c9a6"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "archery"
@@ -598,12 +595,6 @@ dependencies = [
 
 [[package]]
 name = "base16ct"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349a06037c7bf932dd7e7d1f653678b2038b9ad46a74102f1fc7bd7872678cce"
-
-[[package]]
-name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
@@ -1053,7 +1044,7 @@ dependencies = [
  "digest 0.10.7",
  "getrandom 0.2.10",
  "hmac",
- "k256 0.13.1",
+ "k256",
  "lazy_static",
  "serde",
  "sha2 0.10.7",
@@ -1355,18 +1346,6 @@ dependencies = [
 
 [[package]]
 name = "crypto-bigint"
-version = "0.4.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef2b4b23cddf68b89b8f8069890e8c270d54e2d5fe1b143820234805e4cb17ef"
-dependencies = [
- "generic-array",
- "rand_core 0.6.4",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "crypto-bigint"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf4c2f4e1afd912bc40bfd6fed5d9dc1f288e0ba01bfcc835cc5bc3eb13efe15"
@@ -1478,6 +1457,7 @@ dependencies = [
  "redis-rate-limiter",
  "tokio",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1493,22 +1473,23 @@ dependencies = [
 
 [[package]]
 name = "der"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1a467a65c5e759bce6e65eaf91cc29f466cdc57cb65777bd646872a8a1fd4de"
-dependencies = [
- "const-oid 0.9.3",
- "zeroize",
-]
-
-[[package]]
-name = "der"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c7ed52955ce76b1554f509074bb357d3fb8ac9b51288a65a3fd480d1dfba946"
 dependencies = [
  "const-oid 0.9.3",
  "zeroize",
+]
+
+[[package]]
+name = "derivative"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1618,27 +1599,15 @@ checksum = "68b0cf012f1230e43cd00ebb729c6bb58707ecfa8ad08b52ef3a4ccd2697fc30"
 
 [[package]]
 name = "ecdsa"
-version = "0.14.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413301934810f597c1d19ca71c8710e99a3f1ba28a0d2ebc01551a2daeea3c5c"
-dependencies = [
- "der 0.6.1",
- "elliptic-curve 0.12.3",
- "rfc6979 0.3.1",
- "signature 1.6.4",
-]
-
-[[package]]
-name = "ecdsa"
 version = "0.16.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0997c976637b606099b9985693efa3581e84e41f5c11ba5255f88711058ad428"
 dependencies = [
  "der 0.7.7",
  "digest 0.10.7",
- "elliptic-curve 0.13.5",
- "rfc6979 0.4.0",
- "signature 2.1.0",
+ "elliptic-curve",
+ "rfc6979",
+ "signature",
  "spki 0.7.2",
 ]
 
@@ -1650,38 +1619,19 @@ checksum = "7fcaabb2fef8c910e7f4c7ce9f67a1283a1715879a7c230ca9d6d1ae31f16d91"
 
 [[package]]
 name = "elliptic-curve"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7bb888ab5300a19b8e5bceef25ac745ad065f3c9f7efc6de1b91958110891d3"
-dependencies = [
- "base16ct 0.1.1",
- "crypto-bigint 0.4.9",
- "der 0.6.1",
- "digest 0.10.7",
- "ff 0.12.1",
- "generic-array",
- "group 0.12.1",
- "rand_core 0.6.4",
- "sec1 0.3.0",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "elliptic-curve"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "968405c8fdc9b3bf4df0a6638858cc0b52462836ab6b1c87377785dd09cf1c0b"
 dependencies = [
- "base16ct 0.2.0",
+ "base16ct",
  "crypto-bigint 0.5.2",
  "digest 0.10.7",
- "ff 0.13.0",
+ "ff",
  "generic-array",
- "group 0.13.0",
+ "group",
  "pkcs8 0.10.2",
  "rand_core 0.6.4",
- "sec1 0.7.2",
+ "sec1",
  "subtle",
  "zeroize",
 ]
@@ -1719,7 +1669,7 @@ dependencies = [
  "base64 0.13.1",
  "bytes",
  "hex",
- "k256 0.13.1",
+ "k256",
  "log",
  "rand 0.8.5",
  "rlp",
@@ -1737,6 +1687,7 @@ dependencies = [
  "serde",
  "ulid",
  "uuid 1.4.0",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1749,6 +1700,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85cdab6a89accf66733ad5a1693a4dcced6aeff64602b634530dd73c1f3ee9f0"
+dependencies = [
+ "humantime",
+ "is-terminal",
+ "log",
+ "regex",
+ "termcolor",
 ]
 
 [[package]]
@@ -1954,11 +1918,11 @@ dependencies = [
  "bytes",
  "cargo_metadata 0.15.4",
  "chrono",
- "elliptic-curve 0.13.5",
+ "elliptic-curve",
  "ethabi",
  "generic-array",
  "hex",
- "k256 0.13.1",
+ "k256",
  "num_enum 0.6.1",
  "once_cell",
  "open-fastrlp",
@@ -2062,7 +2026,7 @@ dependencies = [
  "async-trait",
  "coins-bip32",
  "coins-bip39",
- "elliptic-curve 0.13.5",
+ "elliptic-curve",
  "eth-keystore",
  "ethers-core",
  "hex",
@@ -2108,12 +2072,6 @@ name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
-
-[[package]]
-name = "ewma"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f20267f3a8b678b7151c0c508002e79126144a5d47badddec7f31ddc1f4c754"
 
 [[package]]
 name = "eyre"
@@ -2169,16 +2127,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c4c9e43643f5a3be4ca5b67d26b98031ff9db6806c3440ae32e02e3ceac3f1b"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "ff"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d013fc25338cc558c5c2cfbad646908fb23591e2404481826742b651c9af7160"
-dependencies = [
- "rand_core 0.6.4",
- "subtle",
 ]
 
 [[package]]
@@ -2521,22 +2469,11 @@ checksum = "558b88954871f5e5b2af0e62e2e176c8bde7a6c2c4ed41b13d138d96da2e2cbd"
 
 [[package]]
 name = "group"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5dfbfb3a6cfbd390d5c9564ab283a0349b9b9fcd46a706c1eb10e0db70bfbac7"
-dependencies = [
- "ff 0.12.1",
- "rand_core 0.6.4",
- "subtle",
-]
-
-[[package]]
-name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
 dependencies = [
- "ff 0.13.0",
+ "ff",
  "rand_core 0.6.4",
  "subtle",
 ]
@@ -3119,9 +3056,9 @@ dependencies = [
 
 [[package]]
 name = "iri-string"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d0586ad318a04c73acdbad33f67969519b5452c80770c4c72059a686da48a7e"
+checksum = "21859b667d66a4c1dacd9df0863b3efb65785474255face87f5bca39dd8407c0"
 dependencies = [
  "memchr",
  "serde",
@@ -3183,29 +3120,16 @@ dependencies = [
 
 [[package]]
 name = "k256"
-version = "0.11.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72c1e0b51e7ec0a97369623508396067a486bd0cbed95a2659a4b863d28cfc8b"
-dependencies = [
- "cfg-if",
- "ecdsa 0.14.8",
- "elliptic-curve 0.12.3",
- "sha2 0.10.7",
- "sha3",
-]
-
-[[package]]
-name = "k256"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cadb76004ed8e97623117f3df85b17aaa6626ab0b0831e6573f104df16cd1bcc"
 dependencies = [
  "cfg-if",
- "ecdsa 0.16.7",
- "elliptic-curve 0.13.5",
+ "ecdsa",
+ "elliptic-curve",
  "once_cell",
  "sha2 0.10.7",
- "signature 2.1.0",
+ "signature",
 ]
 
 [[package]]
@@ -3265,6 +3189,7 @@ dependencies = [
  "tokio",
  "tracing",
  "watermill",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3341,7 +3266,6 @@ checksum = "c1cc9717a20b1bb222f333e6a92fd32f7d8a18ddc5a3191a11af45dcbf4dcd16"
 dependencies = [
  "autocfg",
  "scopeguard",
- "serde",
 ]
 
 [[package]]
@@ -3438,6 +3362,7 @@ version = "0.32.0"
 dependencies = [
  "sea-orm-migration",
  "tokio",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3628,7 +3553,6 @@ dependencies = [
  "autocfg",
  "num-integer",
  "num-traits",
- "serde",
 ]
 
 [[package]]
@@ -3655,7 +3579,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02e0d21255c828d6f128a1e41534206671e8c3ea0c62f32291e808dc82cff17d"
 dependencies = [
  "num-traits",
- "serde",
 ]
 
 [[package]]
@@ -3689,7 +3612,6 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
- "serde",
 ]
 
 [[package]]
@@ -3833,6 +3755,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
+name = "openssl-src"
+version = "111.26.0+1.1.1u"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "efc62c9f12b22b8f5208c23a7200a442b2e5999f8bdf80233852122b5a4f6f37"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "openssl-sys"
 version = "0.9.90"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3840,6 +3771,7 @@ checksum = "374533b0e45f3a7ced10fcaeccca020e66656bc03dac384f852e4e5a7a8104a6"
 dependencies = [
  "cc",
  "libc",
+ "openssl-src",
  "pkg-config",
  "vcpkg",
 ]
@@ -4031,6 +3963,7 @@ version = "0.1.0"
 dependencies = [
  "ethers",
  "glob",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4237,16 +4170,6 @@ dependencies = [
  "der 0.5.1",
  "spki 0.5.4",
  "zeroize",
-]
-
-[[package]]
-name = "pkcs8"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9eca2c590a5f85da82668fa685c09ce2888b9430e83299debf1f34b65fd4a4ba"
-dependencies = [
- "der 0.6.1",
- "spki 0.6.0",
 ]
 
 [[package]]
@@ -4590,6 +4513,7 @@ name = "rate-counter"
 version = "0.1.0"
 dependencies = [
  "tokio",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4697,6 +4621,7 @@ dependencies = [
  "chrono",
  "deadpool-redis",
  "tokio",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4830,17 +4755,6 @@ name = "retain_mut"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4389f1d5789befaf6029ebd9f7dac4af7f7e3d61b69d4f30e2ac02b57e7712b0"
-
-[[package]]
-name = "rfc6979"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7743f17af12fa0b03b803ba12cd6a8d9483a587e89c69445e3909655c0b9fabb"
-dependencies = [
- "crypto-bigint 0.4.9",
- "hmac",
- "zeroize",
-]
 
 [[package]]
 name = "rfc6979"
@@ -5386,25 +5300,11 @@ checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
 
 [[package]]
 name = "sec1"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3be24c1842290c45df0a7bf069e0c268a747ad05a192f2fd7dcfdbc1cba40928"
-dependencies = [
- "base16ct 0.1.1",
- "der 0.6.1",
- "generic-array",
- "pkcs8 0.9.0",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "sec1"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0aec48e813d6b90b15f0b8948af3c63483992dee44c03e9930b3eebdabe046e"
 dependencies = [
- "base16ct 0.2.0",
+ "base16ct",
  "der 0.7.7",
  "generic-array",
  "pkcs8 0.10.2",
@@ -5789,16 +5689,6 @@ dependencies = [
 
 [[package]]
 name = "signature"
-version = "1.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74233d3b3b2f6d4b006dc19dee745e73e2a6bfb6f93607cd3b02bd5b00797d7c"
-dependencies = [
- "digest 0.10.7",
- "rand_core 0.6.4",
-]
-
-[[package]]
-name = "signature"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e1788eed21689f9cf370582dfc467ef36ed9c707f073528ddafa8d83e3b8500"
@@ -5822,13 +5712,13 @@ checksum = "7bd3e3206899af3f8b12af284fafc038cc1dc2b41d1b89dd17297221c5d225de"
 [[package]]
 name = "siwe"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e6d1f422a568af1e98db37c6d0427c7218459ccac39218fd15a51a34d3933af"
+source = "git+https://github.com/llamanodes/siwe-rs?rev=013be5204ff1c85778ce21619f4b677a003db8a1#013be5204ff1c85778ce21619f4b677a003db8a1"
 dependencies = [
+ "ethers",
  "hex",
  "http",
  "iri-string",
- "k256 0.11.6",
+ "k256",
  "rand 0.8.5",
  "serde",
  "sha3",
@@ -5965,16 +5855,6 @@ checksum = "44d01ac02a6ccf3e07db148d2be087da624fea0221a16152ed01f0496a6b0a27"
 dependencies = [
  "base64ct",
  "der 0.5.1",
-]
-
-[[package]]
-name = "spki"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67cf02bbac7a337dc36e4f5a693db6c21e7863f45070f7064577eb4367a3212b"
-dependencies = [
- "base64ct",
- "der 0.6.1",
 ]
 
 [[package]]
@@ -6276,6 +6156,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be55cf8942feac5c765c2c993422806843c9a9a45d4d5c407ad6dd2ea95eb9b6"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "test-log"
+version = "0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9601d162c1d77e62c1ea0bc8116cd1caf143ce3af947536c3c9052a1677fe0c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -7229,11 +7120,12 @@ dependencies = [
  "console-subscriber",
  "counter",
  "deferred-rate-limiter",
+ "derivative",
  "derive_more",
  "entities",
+ "env_logger",
  "ethbloom",
  "ethers",
- "ewma",
  "fdlimit",
  "flume",
  "fstrings",
@@ -7277,7 +7169,8 @@ dependencies = [
  "serde_prometheus",
  "siwe",
  "strum 0.25.0",
- "time 0.3.20",
+ "test-log",
+ "time 0.1.45",
  "tokio",
  "tokio-console",
  "tokio-stream",
@@ -7290,6 +7183,7 @@ dependencies = [
  "ulid",
  "url",
  "uuid 1.4.0",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -7515,6 +7409,106 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "workspace-hack"
+version = "0.1.0"
+dependencies = [
+ "Inflector",
+ "allocator-api2",
+ "anyhow",
+ "arrayvec",
+ "backtrace",
+ "bitflags 1.3.2",
+ "byteorder",
+ "bytes",
+ "cc",
+ "chrono",
+ "clap",
+ "crossbeam-utils",
+ "derive_more",
+ "digest 0.10.7",
+ "ecdsa",
+ "either",
+ "elliptic-curve",
+ "ethbloom",
+ "ethers",
+ "ethers-contract",
+ "ethers-contract-abigen",
+ "ethers-etherscan",
+ "ethers-middleware",
+ "ethers-providers",
+ "futures",
+ "futures-channel",
+ "futures-core",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+ "generic-array",
+ "getrandom 0.2.10",
+ "hashbrown 0.14.0",
+ "heck 0.4.1",
+ "hyper",
+ "indexmap 1.9.3",
+ "io-lifetimes",
+ "ipnet",
+ "k256",
+ "lazy_static",
+ "libc",
+ "lock_api",
+ "log",
+ "memchr",
+ "num-bigint",
+ "num-integer",
+ "num-iter",
+ "num-traits",
+ "once_cell",
+ "openssl-sys",
+ "parking_lot 0.12.1",
+ "parking_lot_core 0.9.8",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "rdkafka",
+ "rdkafka-sys",
+ "regex",
+ "regex-syntax 0.7.2",
+ "reqwest",
+ "rust_decimal",
+ "rustix",
+ "sea-orm",
+ "sea-query",
+ "sea-query-binder",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.7",
+ "sha3",
+ "signal-hook",
+ "spki 0.7.2",
+ "sqlx",
+ "sqlx-core",
+ "sqlx-macros",
+ "subtle",
+ "syn 1.0.109",
+ "syn 2.0.22",
+ "test-log",
+ "time 0.3.20",
+ "time-macros",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tower",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+ "ulid",
+ "unicode-bidi",
+ "unicode-normalization",
+ "url",
+ "uuid 1.4.0",
+ "zeroize",
 ]
 
 [[package]]

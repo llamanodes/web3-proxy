@@ -51,9 +51,4 @@ mod tests {
         assert!(x.get(&1).is_some());
         assert!(x.get(&0).is_none());
     }
-
-    // #[tokio::test(start_paused = true)]
-    // async fn test_overweight() {
-    //     todo!("wip");
-    // }
 }

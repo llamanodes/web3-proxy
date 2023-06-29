@@ -35,9 +35,7 @@ pub async fn user_referral_link_get(
     // First get the bearer token and check if the user is logged in
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app
-        .db_replica()
-        .context("getting replica db for user's revert logs")?;
+    let db_replica = app.db_replica()?;
 
     // Then get the referral token. If one doesn't exist, create one
     let user_referrer = referrer::Entity::find()
@@ -49,7 +47,7 @@ pub async fn user_referral_link_get(
         Some(x) => (x.referral_code, StatusCode::OK),
         None => {
             // Connect to the database for writes
-            let db_conn = app.db_conn().context("getting db_conn")?;
+            let db_conn = app.db_conn()?;
 
             let referral_code = ReferralCode::default().to_string();
 
@@ -58,7 +56,7 @@ pub async fn user_referral_link_get(
                 referral_code: sea_orm::ActiveValue::Set(referral_code.clone()),
                 ..Default::default()
             };
-            referrer_entry.save(&db_conn).await?;
+            referrer_entry.save(db_conn).await?;
 
             (referral_code, StatusCode::CREATED)
         }
@@ -82,9 +80,7 @@ pub async fn user_used_referral_stats(
     // First get the bearer token and check if the user is logged in
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app
-        .db_replica()
-        .context("getting replica db for user's revert logs")?;
+    let db_replica = app.db_replica()?;
 
     // Get all referral records associated with this user
     let referrals = referee::Entity::find()
@@ -142,9 +138,7 @@ pub async fn user_shared_referral_stats(
     // First get the bearer token and check if the user is logged in
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app
-        .db_replica()
-        .context("getting replica db for user's revert logs")?;
+    let db_replica = app.db_replica()?;
 
     // Get all referral records associated with this user
     let query_result = referrer::Entity::find()

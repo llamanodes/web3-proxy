@@ -79,7 +79,7 @@ impl Web3ProxyApp {
                         &app,
                         authorization.clone(),
                         RequestOrMethod::Method("eth_subscribe(newHeads)", 0),
-                        Some(new_head.number()),
+                        Some(&new_head),
                     )
                     .await;
 
@@ -335,7 +335,9 @@ impl Web3ProxyApp {
                 );
             });
         } else {
-            return Err(Web3ProxyError::NotImplemented);
+            return Err(Web3ProxyError::NotImplemented(
+                subscribe_to.to_owned().into(),
+            ));
         }
 
         // TODO: do something with subscription_join_handle?

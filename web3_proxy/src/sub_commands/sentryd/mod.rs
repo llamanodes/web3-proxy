@@ -1,6 +1,7 @@
 mod compare;
 mod simple;
 
+use crate::{config::TopConfig, pagerduty::pagerduty_alert};
 use anyhow::Context;
 use argh::FromArgs;
 use futures::{
@@ -13,7 +14,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, MissedTickBehavior};
 use tracing::{debug, error, info, warn, Level};
-use web3_proxy::{config::TopConfig, pagerduty::pagerduty_alert};
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 /// Loop healthchecks and send pager duty alerts if any fail
@@ -126,7 +126,7 @@ impl SentrydSubCommand {
 
                 while let Some(err) = error_receiver.recv().await {
                     if matches!(err.level, Level::ERROR) {
-                        warn!("check failed: {:#?}", err);
+                        warn!(?err, "check failed");
 
                         let alert = pagerduty_alert(
                             Some(chain_id),

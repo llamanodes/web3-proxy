@@ -35,9 +35,7 @@ pub async fn get_keys_as_subuser(
     // First, authenticate
     let (subuser, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app
-        .db_replica()
-        .context("getting replica db for user's revert logs")?;
+    let db_replica = app.db_replica()?;
 
     // TODO: JOIN over RPC_KEY, SUBUSER, PRIMARY_USER and return these items
 
@@ -102,9 +100,7 @@ pub async fn get_subusers(
     // First, authenticate
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app
-        .db_replica()
-        .context("getting replica db for user's revert logs")?;
+    let db_replica = app.db_replica()?;
 
     let rpc_key: u64 = params
         .remove("key_id")
@@ -176,9 +172,7 @@ pub async fn modify_subuser(
     // First, authenticate
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app
-        .db_replica()
-        .context("getting replica db for user's revert logs")?;
+    let db_replica = app.db_replica()?;
 
     trace!("Parameters are: {:?}", params);
 
@@ -262,7 +256,7 @@ pub async fn modify_subuser(
     }
 
     // TODO: There is a good chunk of duplicate logic as login-post. Consider refactoring ...
-    let db_conn = app.db_conn().web3_context("login requires a db")?;
+    let db_conn = app.db_conn()?;
     let (subuser, _subuser_rpc_keys, _status_code) = match subuser {
         None => {
             let txn = db_conn.begin().await?;
@@ -344,12 +338,12 @@ pub async fn modify_subuser(
             let mut active_subuser_entry_secondary_user = secondary_user.into_active_model();
             if !keep_subuser {
                 // Remove the user
-                active_subuser_entry_secondary_user.delete(&db_conn).await?;
+                active_subuser_entry_secondary_user.delete(db_conn).await?;
                 action = "removed";
             } else {
                 // Just change the role
                 active_subuser_entry_secondary_user.role = sea_orm::Set(new_role.clone());
-                active_subuser_entry_secondary_user.save(&db_conn).await?;
+                active_subuser_entry_secondary_user.save(db_conn).await?;
                 action = "role modified";
             }
         }

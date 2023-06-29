@@ -18,9 +18,9 @@ use axum::{
 use http::{header::AUTHORIZATION, StatusCode};
 use listenfd::ListenFd;
 use moka::future::{Cache, CacheBuilder};
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{iter::once, time::Duration};
+use std::{net::SocketAddr, sync::atomic::Ordering};
 use strum::{EnumCount, EnumIter};
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
@@ -41,8 +41,7 @@ pub type ResponseCache = Cache<ResponseCacheKey, (StatusCode, &'static str, axum
 
 /// Start the frontend server.
 pub async fn serve(
-    port: u16,
-    proxy_app: Arc<Web3ProxyApp>,
+    app: Arc<Web3ProxyApp>,
     mut shutdown_receiver: broadcast::Receiver<()>,
     shutdown_complete_sender: broadcast::Sender<()>,
 ) -> Web3ProxyResult<()> {
@@ -59,7 +58,7 @@ pub async fn serve(
     // TODO: read config for if fastest/versus should be available publicly. default off
 
     // build our axum Router
-    let app = Router::new()
+    let router = Router::new()
         // TODO: i think these routes could be done a lot better
         //
         // HTTP RPC (POST)
@@ -217,19 +216,21 @@ pub async fn serve(
         )
         .route(
             "/admin/increase_balance",
-            get(admin::admin_increase_balance),
+            post(admin::admin_increase_balance),
         )
-        .route("/admin/modify_role", get(admin::admin_change_user_roles))
+        .route("/admin/modify_role", post(admin::admin_change_user_roles))
         .route(
-            "/admin/imitate-login/:admin_address/:user_address",
-            get(admin::admin_login_get),
+            "/admin/imitate_login/:admin_address/:user_address",
+            get(admin::admin_imitate_login_get),
         )
         .route(
-            "/admin/imitate-login/:admin_address/:user_address/:message_eip",
-            get(admin::admin_login_get),
+            "/admin/imitate_login/:admin_address/:user_address/:message_eip",
+            get(admin::admin_imitate_login_get),
         )
-        .route("/admin/imitate-login", post(admin::admin_login_post))
-        .route("/admin/imitate-logout", post(admin::admin_logout_post))
+        .route(
+            "/admin/imitate_login",
+            post(admin::admin_imitate_login_post),
+        )
         //
         // Axum layers
         // layers are ordered bottom up
@@ -240,7 +241,7 @@ pub async fn serve(
         // handle cors
         .layer(CorsLayer::very_permissive())
         // application state
-        .layer(Extension(proxy_app))
+        .layer(Extension(app.clone()))
         // frontend caches
         .layer(Extension(Arc::new(response_cache)))
         // 404 for any unknown routes
@@ -254,9 +255,8 @@ pub async fn serve(
 
         axum::Server::from_tcp(listener)?
     } else {
-        info!("listening on port {}", port);
         // TODO: allow only listening on localhost? top_config.app.host.parse()?
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        let addr = SocketAddr::from(([0, 0, 0, 0], app.frontend_port.load(Ordering::Relaxed)));
 
         axum::Server::try_bind(&addr)?
     };
@@ -269,20 +269,25 @@ pub async fn serve(
       - forwarded header (new standard)
       - axum::extract::ConnectInfo (if not behind proxy)
     */
-    #[cfg(feature = "connectinfo")]
     let make_service = {
         info!("connectinfo feature enabled");
-        app.into_make_service_with_connect_info::<SocketAddr>()
+        router.into_make_service_with_connect_info::<SocketAddr>()
     };
 
-    #[cfg(not(feature = "connectinfo"))]
-    let make_service = {
-        info!("connectinfo feature disabled");
-        app.into_make_service()
-    };
+    // #[cfg(not(feature = "connectinfo"))]
+    // let make_service = {
+    //     info!("connectinfo feature disabled");
+    //     router.into_make_service()
+    // };
 
-    let server = server_builder
-        .serve(make_service)
+    let server = server_builder.serve(make_service);
+
+    let port = server.local_addr().port();
+    info!("listening on port {}", port);
+
+    app.frontend_port.store(port, Ordering::Relaxed);
+
+    let server = server
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .with_graceful_shutdown(async move {
             let _ = shutdown_receiver.recv().await;

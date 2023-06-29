@@ -45,7 +45,7 @@ pub async fn user_balance_get(
 ) -> Web3ProxyResponse {
     let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica().context("Getting database connection")?;
+    let db_replica = app.db_replica()?;
 
     // Just return the balance for the user
     let user_balance = balance::Entity::find()
@@ -73,7 +73,7 @@ pub async fn user_deposits_get(
 ) -> Web3ProxyResponse {
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica().context("Getting database connection")?;
+    let db_replica = app.db_replica()?;
 
     // Filter by user ...
     let receipts = increase_on_chain_balance_receipt::Entity::find()
@@ -114,7 +114,7 @@ pub async fn user_balance_post(
         let (_, semaphore) = app.bearer_is_authorized(bearer).await?;
 
         // TODO: is handling this as internal fine?
-        let authorization = Web3ProxyAuthorization::internal(app.db_conn())?;
+        let authorization = Web3ProxyAuthorization::internal(app.db_conn().ok().cloned())?;
 
         (authorization, Some(semaphore))
     } else if let Some(InsecureClientIp(ip)) = ip {
@@ -122,7 +122,7 @@ pub async fn user_balance_post(
 
         (authorization, None)
     } else {
-        return Err(Web3ProxyError::AccessDenied);
+        return Err(Web3ProxyError::AccessDenied("no bearer token or ip".into()));
     };
 
     // Get the transaction hash
@@ -136,7 +136,7 @@ pub async fn user_balance_post(
             Web3ProxyError::BadRequest(format!("unable to parse tx_hash: {}", err).into())
         })?;
 
-    let db_conn = app.db_conn().context("query_user_stats needs a db")?;
+    let db_conn = app.db_conn()?;
 
     let authorization = Arc::new(authorization);
 
@@ -172,7 +172,7 @@ pub async fn user_balance_post(
             true
         };
 
-    let uncle_hashes = find_uncles.all(&db_conn).await?;
+    let uncle_hashes = find_uncles.all(db_conn).await?;
 
     let uncle_hashes: HashSet<_> = uncle_hashes
         .into_iter()
@@ -282,7 +282,7 @@ pub async fn user_balance_post(
             );
 
             let recipient = match user::Entity::find()
-                .filter(user::Column::Address.eq(recipient_account.to_fixed_bytes().as_slice()))
+                .filter(user::Column::Address.eq(recipient_account.as_bytes()))
                 .one(&txn)
                 .await?
             {

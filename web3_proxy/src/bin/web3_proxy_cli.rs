@@ -1,25 +1,3 @@
-mod change_admin_status;
-mod change_user_address;
-mod change_user_tier;
-mod change_user_tier_by_address;
-mod change_user_tier_by_key;
-mod check_config;
-mod count_users;
-mod create_key;
-mod create_user;
-mod drop_migration_lock;
-mod list_user_tier;
-mod migrate_stats_to_v2;
-mod pagerduty;
-mod popularity_contest;
-mod proxyd;
-mod rpc_accounting;
-mod search_kafka;
-mod sentryd;
-mod transfer_key;
-mod user_export;
-mod user_import;
-
 use anyhow::Context;
 use argh::FromArgs;
 use ethers::types::U256;
@@ -27,6 +5,7 @@ use pagerduty_rs::eventsv2async::EventsV2 as PagerdutyAsyncEventsV2;
 use pagerduty_rs::eventsv2sync::EventsV2 as PagerdutySyncEventsV2;
 use sentry::types::Dsn;
 use std::{
+    borrow::Cow,
     fs, panic,
     path::Path,
     sync::atomic::{self, AtomicUsize},
@@ -35,6 +14,7 @@ use tokio::runtime;
 use tracing::{info, warn};
 use tracing_subscriber::{prelude::*, EnvFilter};
 use web3_proxy::pagerduty::panic_handler;
+use web3_proxy::sub_commands;
 use web3_proxy::{
     app::APP_USER_AGENT,
     config::TopConfig,
@@ -78,26 +58,26 @@ pub struct Web3ProxyCli {
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand)]
 enum SubCommand {
-    ChangeAdminStatus(change_admin_status::ChangeAdminStatusSubCommand),
-    ChangeUserAddress(change_user_address::ChangeUserAddressSubCommand),
-    ChangeUserTier(change_user_tier::ChangeUserTierSubCommand),
-    ChangeUserTierByAddress(change_user_tier_by_address::ChangeUserTierByAddressSubCommand),
-    ChangeUserTierByKey(change_user_tier_by_key::ChangeUserTierByKeySubCommand),
-    CheckConfig(check_config::CheckConfigSubCommand),
-    CountUsers(count_users::CountUsersSubCommand),
-    CreateKey(create_key::CreateKeySubCommand),
-    CreateUser(create_user::CreateUserSubCommand),
-    DropMigrationLock(drop_migration_lock::DropMigrationLockSubCommand),
-    MigrateStatsToV2(migrate_stats_to_v2::MigrateStatsToV2),
-    Pagerduty(pagerduty::PagerdutySubCommand),
-    PopularityContest(popularity_contest::PopularityContestSubCommand),
-    Proxyd(proxyd::ProxydSubCommand),
-    RpcAccounting(rpc_accounting::RpcAccountingSubCommand),
-    SearchKafka(search_kafka::SearchKafkaSubCommand),
-    Sentryd(sentryd::SentrydSubCommand),
-    TransferKey(transfer_key::TransferKeySubCommand),
-    UserExport(user_export::UserExportSubCommand),
-    UserImport(user_import::UserImportSubCommand),
+    ChangeAdminStatus(sub_commands::ChangeAdminStatusSubCommand),
+    ChangeUserAddress(sub_commands::ChangeUserAddressSubCommand),
+    ChangeUserTier(sub_commands::ChangeUserTierSubCommand),
+    ChangeUserTierByAddress(sub_commands::ChangeUserTierByAddressSubCommand),
+    ChangeUserTierByKey(sub_commands::ChangeUserTierByKeySubCommand),
+    CheckConfig(sub_commands::CheckConfigSubCommand),
+    CountUsers(sub_commands::CountUsersSubCommand),
+    CreateKey(sub_commands::CreateKeySubCommand),
+    CreateUser(sub_commands::CreateUserSubCommand),
+    DropMigrationLock(sub_commands::DropMigrationLockSubCommand),
+    MigrateStatsToV2(sub_commands::MigrateStatsToV2SubCommand),
+    Pagerduty(sub_commands::PagerdutySubCommand),
+    PopularityContest(sub_commands::PopularityContestSubCommand),
+    Proxyd(sub_commands::ProxydSubCommand),
+    RpcAccounting(sub_commands::RpcAccountingSubCommand),
+    SearchKafka(sub_commands::SearchKafkaSubCommand),
+    Sentryd(sub_commands::SentrydSubCommand),
+    TransferKey(sub_commands::TransferKeySubCommand),
+    UserExport(sub_commands::UserExportSubCommand),
+    UserImport(sub_commands::UserImportSubCommand),
     // TODO: sub command to downgrade migrations? sea-orm has this but doing downgrades here would be easier+safer
     // TODO: sub command to add new api keys to an existing user?
     // TODO: sub command to change a user's tier
@@ -134,7 +114,7 @@ fn main() -> anyhow::Result<()> {
 
     // if RUST_LOG isn't set, configure a default
     #[cfg(not(feature = "tokio_console"))]
-    let rust_log = match std::env::var("RUST_LOG") {
+    let mut rust_log = match std::env::var("RUST_LOG") {
         Ok(x) => x,
         Err(_) => match std::env::var("WEB3_PROXY_TRACE").map(|x| x == "true") {
             Ok(true) => {
@@ -169,6 +149,11 @@ fn main() -> anyhow::Result<()> {
         }
         .join(","),
     };
+
+    if let Ok(extra_rust_log) = std::env::var("EXTRA_RUST_LOG") {
+        rust_log.push(',');
+        rust_log.push_str(&extra_rust_log);
+    }
 
     let mut cli_config: Web3ProxyCli = argh::from_env();
 
@@ -215,15 +200,29 @@ fn main() -> anyhow::Result<()> {
         (None, None)
     };
 
+    let sentry_env = std::env::var("SENTRY_ENV")
+        .map(Cow::from)
+        .unwrap_or("production".into());
+
     // set up sentry connection
     // this guard does nothing is sentry_url is None
     let _sentry_guard = sentry::init(sentry::ClientOptions {
         dsn: cli_config.sentry_url.clone(),
         release: sentry::release_name!(),
+        environment: Some(sentry_env),
         // Enable capturing of traces
         // TODO: make this configurable!
-        traces_sample_rate: 0.01,
+        traces_sample_rate: 0.001,
         ..Default::default()
+    });
+
+    sentry::configure_scope(|scope| {
+        let chain_id = top_config.as_ref().map(|x| x.app.chain_id).unwrap_or(0);
+        scope.set_tag("chain_id", chain_id);
+
+        if let Ok(llama_env) = std::env::var("LLAMA_ENV") {
+            scope.set_tag("llama_env", llama_env);
+        }
     });
 
     tracing_subscriber::fmt()

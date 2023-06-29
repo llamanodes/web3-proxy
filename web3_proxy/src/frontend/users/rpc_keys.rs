@@ -31,9 +31,7 @@ pub async fn rpc_keys_get(
 ) -> Web3ProxyResponse {
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app
-        .db_replica()
-        .web3_context("db_replica is required to fetch a user's keys")?;
+    let db_replica = app.db_replica()?;
 
     // This is basically completely copied from sea-orm. Not optimal, but it keeps the format identical to before (while adding the final key)
     // We could also pack the below stuff into it's subfield, but then we would destroy the format. Both options are fine for now though
@@ -130,7 +128,7 @@ pub async fn rpc_keys_delete(
     let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     // TODO: think about how cascading deletes and billing should work
-    Err(Web3ProxyError::NotImplemented)
+    Err(Web3ProxyError::NotImplemented("rpc_keys_delete".into()))
 }
 
 /// the JSON input to the `rpc_keys_management` handler.
@@ -162,9 +160,7 @@ pub async fn rpc_keys_management(
 
     let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app
-        .db_replica()
-        .web3_context("getting db for user's keys")?;
+    let db_replica = app.db_replica()?;
 
     let mut uk = match payload.key_id {
         Some(existing_key_id) => {
@@ -194,7 +190,9 @@ pub async fn rpc_keys_management(
                         {
                             Ok(rpc_key.into_active_model())
                         } else {
-                            Err(Web3ProxyError::AccessDenied)
+                            Err(Web3ProxyError::AccessDenied(
+                                "secondary user is not an admin or owner".into(),
+                            ))
                         }
                     }
                     Some((_, None)) => Err(Web3ProxyError::BadResponse(
@@ -342,9 +340,9 @@ pub async fn rpc_keys_management(
     }
 
     let uk = if uk.is_changed() {
-        let db_conn = app.db_conn().web3_context("login requires a db")?;
+        let db_conn = app.db_conn()?;
 
-        uk.save(&db_conn)
+        uk.save(db_conn)
             .await
             .web3_context("Failed saving user key")?
     } else {

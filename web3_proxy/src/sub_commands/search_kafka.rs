@@ -1,3 +1,4 @@
+use crate::{config::TopConfig, frontend::authorization::RpcSecretKey, relational_db::get_db};
 use anyhow::Context;
 use argh::FromArgs;
 use entities::rpc_key;
@@ -10,7 +11,6 @@ use rdkafka::{
 use std::num::NonZeroU64;
 use tracing::info;
 use uuid::Uuid;
-use web3_proxy::{config::TopConfig, frontend::authorization::RpcSecretKey, relational_db::get_db};
 
 /// Second subcommand.
 #[derive(FromArgs, PartialEq, Debug, Eq)]
@@ -57,6 +57,7 @@ impl SearchKafkaSubCommand {
             .kafka_urls
             .context("top_config.app.kafka_urls is required")?;
 
+        // TODO: sea-streamer instead of rdkafka?
         let mut consumer = ClientConfig::new();
 
         let security_protocol = &top_config.app.kafka_protocol;

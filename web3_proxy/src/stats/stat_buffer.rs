@@ -8,11 +8,9 @@ use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
-use parking_lot::RwLock;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
-use tokio::time::interval;
+use tokio::time::{interval, sleep};
 use tracing::{error, info, trace};
 
 #[derive(Debug, Default)]
@@ -27,8 +25,9 @@ pub struct BufferedRpcQueryStats {
     pub sum_response_bytes: u64,
     pub sum_response_millis: u64,
     pub sum_credits_used: Decimal,
+    pub sum_cu_used: Decimal,
     /// The user's balance at this point in time. Multiple queries might be modifying it at once.
-    pub latest_balance: Arc<RwLock<Balance>>,
+    pub latest_balance: Balance,
 }
 
 #[derive(From)]
@@ -162,6 +161,22 @@ impl StatBuffer {
                 }
             }
         }
+
+        // TODO: wait on all websockets to close
+        // TODO: wait on all pending external requests to finish
+        info!("waiting 10 seconds for remaining stats to arrive");
+        sleep(Duration::from_secs(10)).await;
+
+        // loop {
+        //     // nope. this won't ever be true because we keep making stats for internal requests
+        //     // if stat_receiver.is_disconnected() {
+        //     //     info!("stat_receiver is disconnected");
+        //     //     break;
+        //     // }
+
+        //     // TODO: don't just sleep. watch a channel
+        //     sleep(Duration::from_millis(10)).await;
+        // }
 
         let saved_relational = self.save_relational_stats().await;
 

@@ -29,7 +29,7 @@ use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
-use tracing::{trace, warn};
+use tracing::{error, trace, warn};
 use ulid::Ulid;
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
@@ -38,8 +38,7 @@ use ulid::Ulid;
 ///   - eip191_bytes
 ///   - eip191_hash
 ///   - eip4361 (default)
-///
-/// Coming soon: eip1271
+///   - eip1271
 ///
 /// This is the initial entrypoint for logging in. Take the response from this endpoint and give it to your user's wallet for singing. POST the response to `/user/login`.
 ///
@@ -64,9 +63,9 @@ pub async fn user_login_get(
 
     let nonce = Ulid::new();
 
-    let issued_at = OffsetDateTime::now_utc();
+    let now = OffsetDateTime::now_utc();
 
-    let expiration_time = issued_at.add(Duration::new(expire_seconds as i64, 0));
+    let expiration_time = now.add(Duration::new(expire_seconds as i64, 0));
 
     // TODO: allow ENS names here?
     let user_address: Address = params
@@ -75,36 +74,48 @@ pub async fn user_login_get(
         .parse()
         .or(Err(Web3ProxyError::ParseAddressError))?;
 
-    let login_domain = app
+    let domain = app
         .config
         .login_domain
         .clone()
         .unwrap_or_else(|| "llamanodes.com".to_string());
 
+    let message_domain = domain.parse().unwrap();
+    let message_uri = format!("https://{}/", domain).parse().unwrap();
+
     // TODO: get most of these from the app config
     let message = Message {
-        // TODO: don't unwrap
-        // TODO: accept a login_domain from the request?
-        domain: login_domain.parse().unwrap(),
+        domain: message_domain,
         address: user_address.to_fixed_bytes(),
         // TODO: config for statement
         statement: Some("🦙🦙🦙🦙🦙".to_string()),
-        // TODO: don't unwrap
-        uri: format!("https://{}/", login_domain).parse().unwrap(),
+        uri: message_uri,
         version: siwe::Version::V1,
-        chain_id: 1,
+        chain_id: app.config.chain_id,
         expiration_time: Some(expiration_time.into()),
-        issued_at: issued_at.into(),
+        issued_at: now.into(),
         nonce: nonce.to_string(),
         not_before: None,
         request_id: None,
         resources: vec![],
     };
 
-    let db_conn = app.db_conn().web3_context("login requires a database")?;
+    let db_conn = app.db_conn()?;
 
-    // massage types to fit in the database. sea-orm does not make this very elegant
-    let uuid = Uuid::from_u128(nonce.into());
+    // delete any expired logins
+    let expired_logins = login::Entity::delete_many()
+        .filter(login::Column::ExpiresAt.lte(now))
+        .exec(db_conn)
+        .await;
+    trace!(?expired_logins, "deleted");
+
+    // delete any expired pending logins
+    let expired_pending_logins = pending_login::Entity::delete_many()
+        .filter(login::Column::ExpiresAt.lte(now))
+        .exec(db_conn)
+        .await;
+    trace!(?expired_pending_logins, "deleted");
+
     // we add 1 to expire_seconds just to be sure the database has the key for the full expiration_time
     let expires_at = Utc
         .timestamp_opt(expiration_time.unix_timestamp() + 1, 0)
@@ -114,14 +125,14 @@ pub async fn user_login_get(
     // add a row to the database for this user
     let user_pending_login = pending_login::ActiveModel {
         id: sea_orm::NotSet,
-        nonce: sea_orm::Set(uuid),
+        nonce: sea_orm::Set(nonce.into()),
         message: sea_orm::Set(message.to_string()),
         expires_at: sea_orm::Set(expires_at),
         imitating_user: sea_orm::Set(None),
     };
 
     user_pending_login
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving user's pending_login")?;
 
@@ -230,15 +241,10 @@ pub async fn user_login_post(
     let login_nonce = UserBearerToken::from_str(&their_msg.nonce)?;
 
     // fetch the message we gave them from our database
-    let db_replica = app
-        .db_replica()
-        .web3_context("Getting database connection")?;
-
-    // massage type for the db
-    let login_nonce_uuid: Uuid = login_nonce.clone().into();
+    let db_replica = app.db_replica()?;
 
     let user_pending_login = pending_login::Entity::find()
-        .filter(pending_login::Column::Nonce.eq(login_nonce_uuid))
+        .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce.clone())))
         .one(db_replica.as_ref())
         .await
         .web3_context("database error while finding pending_login")?
@@ -249,40 +255,17 @@ pub async fn user_login_post(
         .parse()
         .web3_context("parsing siwe message")?;
 
-    // default options are fine. the message includes timestamp and domain and nonce
-    let verify_config = VerificationOpts::default();
+    // mostly default options are fine. the message includes timestamp and domain and nonce
+    let verify_config = VerificationOpts {
+        rpc_provider: Some(app.internal_provider().clone()),
+        ..Default::default()
+    };
 
     // Check with both verify and verify_eip191
-    if let Err(err_1) = our_msg
+    our_msg
         .verify(&their_sig, &verify_config)
         .await
-        .web3_context("verifying signature against our local message")
-    {
-        // verification method 1 failed. try eip191
-        if let Err(err_191) = our_msg
-            .verify_eip191(&their_sig)
-            .web3_context("verifying eip191 signature against our local message")
-        {
-            let db_conn = app
-                .db_conn()
-                .web3_context("deleting expired pending logins requires a db")?;
-
-            // delete ALL expired rows.
-            let now = Utc::now();
-            let delete_result = pending_login::Entity::delete_many()
-                .filter(pending_login::Column::ExpiresAt.lte(now))
-                .exec(&db_conn)
-                .await?;
-
-            // TODO: emit a stat? if this is high something weird might be happening
-            trace!("cleared expired pending_logins: {:?}", delete_result);
-
-            return Err(Web3ProxyError::EipVerificationFailed(
-                Box::new(err_1),
-                Box::new(err_191),
-            ));
-        }
-    }
+        .web3_context("verifying signature against our local message")?;
 
     // TODO: limit columns or load whole user?
     let caller = user::Entity::find()
@@ -290,7 +273,7 @@ pub async fn user_login_post(
         .one(db_replica.as_ref())
         .await?;
 
-    let db_conn = app.db_conn().web3_context("login requires a db")?;
+    let db_conn = app.db_conn()?;
 
     let (caller, user_rpc_keys, status_code) = match caller {
         None => {
@@ -356,11 +339,7 @@ pub async fn user_login_post(
                     .one(&txn)
                     .await?
                     .ok_or(Web3ProxyError::BadRequest(
-                        format!(
-                            "The referral_link you provided does not exist {}",
-                            referral_code
-                        )
-                        .into(),
+                        "The referral_link you provided does not exist".into(),
                     ))?;
 
                 // Create a new item in the database,
@@ -381,7 +360,7 @@ pub async fn user_login_post(
             // the user is already registered
             let user_rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(caller.id))
-                .all(&db_conn)
+                .all(db_conn)
                 .await
                 .web3_context("failed loading user's key")?;
 
@@ -414,23 +393,19 @@ pub async fn user_login_post(
 
     let user_login = login::ActiveModel {
         id: sea_orm::NotSet,
-        bearer_token: sea_orm::Set(user_bearer_token.uuid()),
+        bearer_token: sea_orm::Set(user_bearer_token.into()),
         user_id: sea_orm::Set(caller.id),
         expires_at: sea_orm::Set(expires_at),
         read_only: sea_orm::Set(false),
     };
 
     user_login
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving user login")?;
 
-    if let Err(err) = user_pending_login
-        .into_active_model()
-        .delete(&db_conn)
-        .await
-    {
-        warn!("Failed to delete nonce:{}: {}", login_nonce.0, err);
+    if let Err(err) = user_pending_login.into_active_model().delete(db_conn).await {
+        error!("Failed to delete nonce:{}: {}", login_nonce, err);
     }
 
     Ok(response)
@@ -444,35 +419,15 @@ pub async fn user_logout_post(
 ) -> Web3ProxyResponse {
     let user_bearer = UserBearerToken::try_from(bearer)?;
 
-    let db_conn = app
-        .db_conn()
-        .web3_context("database needed for user logout")?;
+    let db_conn = app.db_conn()?;
 
     if let Err(err) = login::Entity::delete_many()
         .filter(login::Column::BearerToken.eq(user_bearer.uuid()))
-        .exec(&db_conn)
+        .exec(db_conn)
         .await
     {
-        warn!("Failed to delete {}: {}", user_bearer.redis_key(), err);
+        warn!(key=%user_bearer.redis_key(), ?err, "Failed to delete from redis");
     }
-
-    let now = Utc::now();
-
-    // also delete any expired logins
-    let delete_result = login::Entity::delete_many()
-        .filter(login::Column::ExpiresAt.lte(now))
-        .exec(&db_conn)
-        .await;
-
-    trace!("Deleted expired logins: {:?}", delete_result);
-
-    // also delete any expired pending logins
-    let delete_result = login::Entity::delete_many()
-        .filter(login::Column::ExpiresAt.lte(now))
-        .exec(&db_conn)
-        .await;
-
-    trace!("Deleted expired pending logins: {:?}", delete_result);
 
     // TODO: what should the response be? probably json something
     Ok("goodbye".into_response())

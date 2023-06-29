@@ -8,7 +8,6 @@ use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::frontend::ResponseCache;
 use crate::user_token::UserBearerToken;
 use crate::PostLogin;
-use anyhow::Context;
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -30,6 +29,7 @@ use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use migration::{Expr, OnConflict};
+use serde::Deserialize;
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
@@ -39,7 +39,14 @@ use time::{Duration, OffsetDateTime};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
 
-/// `GET /admin/increase_balance` -- As an admin, modify a user's user-tier
+#[derive(Deserialize)]
+pub struct AdminIncreaseBalancePost {
+    user_address: Address,
+    note: Option<String>,
+    amount: Decimal,
+}
+
+/// `POST /admin/increase_balance` -- As an admin, modify a user's user-tier
 ///
 /// - user_address that is to credited balance
 /// - user_role_tier that is supposed to be adapted
@@ -47,81 +54,42 @@ use ulid::Ulid;
 pub async fn admin_increase_balance(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-    Query(params): Query<HashMap<String, String>>,
+    Json(payload): Json<AdminIncreaseBalancePost>,
 ) -> Web3ProxyResponse {
-    let (caller, _) = app.bearer_is_authorized(bearer).await?;
+    let (caller, _semaphore) = app.bearer_is_authorized(bearer).await?;
+
     let caller_id = caller.id;
 
     // Establish connections
-    let db_conn = app
-        .db_conn()
-        .context("query_admin_modify_user needs a db")?;
+    let txn = app.db_transaction().await?;
 
     // Check if the caller is an admin (if not, return early)
     let admin_entry: admin::Model = admin::Entity::find()
         .filter(admin::Column::UserId.eq(caller_id))
-        .one(&db_conn)
+        .one(&txn)
         .await?
-        .ok_or(Web3ProxyError::AccessDenied)?;
-
-    // Get the user from params
-    let user_address: Address = params
-        .get("user_address")
-        .ok_or_else(|| {
-            Web3ProxyError::BadRequest("Unable to find user_address key in request".into())
-        })?
-        .parse::<Address>()
-        .map_err(|_| {
-            Web3ProxyError::BadRequest("Unable to parse user_address as an Address".into())
-        })?;
-    let user_address_bytes: Vec<u8> = user_address.to_fixed_bytes().into();
-    let note: String = params
-        .get("note")
-        .ok_or_else(|| Web3ProxyError::BadRequest("Unable to find 'note' key in request".into()))?
-        .parse::<String>()
-        .map_err(|_| Web3ProxyError::BadRequest("Unable to parse 'note' as a String".into()))?;
-    // Get the amount from params
-    // Decimal::from_str
-    let amount: Decimal = params
-        .get("amount")
-        .ok_or_else(|| {
-            Web3ProxyError::BadRequest("Unable to get the amount key from the request".into())
-        })
-        .map(|x| Decimal::from_str(x))?
-        .map_err(|err| {
-            Web3ProxyError::BadRequest(
-                format!("Unable to parse amount from the request {:?}", err).into(),
-            )
-        })?;
+        .ok_or_else(|| Web3ProxyError::AccessDenied("not an admin".into()))?;
 
     let user_entry: user::Model = user::Entity::find()
-        .filter(user::Column::Address.eq(user_address_bytes.clone()))
-        .one(&db_conn)
+        .filter(user::Column::Address.eq(payload.user_address.as_bytes()))
+        .one(&txn)
         .await?
         .ok_or(Web3ProxyError::BadRequest(
-            "No user with this id found".into(),
+            format!("No user found with {:?}", payload.user_address).into(),
         ))?;
 
     let increase_balance_receipt = admin_increase_balance_receipt::ActiveModel {
-        amount: sea_orm::Set(amount),
+        amount: sea_orm::Set(payload.amount),
         admin_id: sea_orm::Set(admin_entry.id),
         deposit_to_user_id: sea_orm::Set(user_entry.id),
-        note: sea_orm::Set(note),
+        note: sea_orm::Set(payload.note.unwrap_or_default()),
         ..Default::default()
     };
-    increase_balance_receipt.save(&db_conn).await?;
-
-    let mut out = HashMap::new();
-    out.insert(
-        "user",
-        serde_json::Value::String(format!("{:?}", user_address)),
-    );
-    out.insert("amount", serde_json::Value::String(amount.to_string()));
+    increase_balance_receipt.save(&txn).await?;
 
     // update balance
     let balance_entry = balance::ActiveModel {
-        id: sea_orm::NotSet,
-        total_deposits: sea_orm::Set(amount),
+        total_deposits: sea_orm::Set(payload.amount),
         user_id: sea_orm::Set(user_entry.id),
         ..Default::default()
     };
@@ -130,23 +98,30 @@ pub async fn admin_increase_balance(
             OnConflict::new()
                 .values([(
                     balance::Column::TotalDeposits,
-                    Expr::col(balance::Column::TotalDeposits).add(amount),
+                    Expr::col(balance::Column::TotalDeposits).add(payload.amount),
                 )])
                 .to_owned(),
         )
-        .exec(&db_conn)
+        .exec(&txn)
         .await
         .web3_context("admin is increasing balance")?;
 
-    let response = (StatusCode::OK, Json(out)).into_response();
+    txn.commit().await?;
 
-    Ok(response)
+    let out = json!({
+        "user": payload.user_address,
+        "amount": payload.amount,
+    });
+
+    Ok(Json(out).into_response())
 }
 
-/// `GET /admin/modify_role` -- As an admin, modify a user's user-tier
+/// `POST /admin/modify_role` -- As an admin, modify a user's user-tier
 ///
 /// - user_address that is to be modified
 /// - user_role_tier that is supposed to be adapted
+///
+/// TODO: JSON post data instead of query params
 #[debug_handler]
 pub async fn admin_change_user_roles(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -163,7 +138,7 @@ pub async fn admin_change_user_roles(
 /// - user_address that is to be logged in by
 /// We assume that the admin has already logged in, and has a bearer token ...
 #[debug_handler]
-pub async fn admin_login_get(
+pub async fn admin_imitate_login_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(mut params): Path<HashMap<String, String>>,
@@ -180,17 +155,7 @@ pub async fn admin_login_get(
     let issued_at = OffsetDateTime::now_utc();
     let expiration_time = issued_at.add(Duration::new(expire_seconds as i64, 0));
 
-    // The admin user is the one that basically logs in, on behalf of the user
-    // This will generate a login id for the admin, which we will be caching ...
-    // I suppose with this, the admin can be logged in to one session at a time
-    // let (caller, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
-
-    // Finally, check if the user is an admin. If he is, return "true" as the third triplet.
-    // TODO: consider wrapping the output in a struct, instead of a triplet
-    // TODO: Could try to merge this into the above query ...
-    // This query will fail if it's not the admin...
-
-    // get the admin field ...
+    // get the admin's address
     let admin_address: Address = params
         .get("admin_address")
         .ok_or_else(|| {
@@ -201,8 +166,8 @@ pub async fn admin_login_get(
             Web3ProxyError::BadRequest("Unable to parse admin_address as an Address".into())
         })?;
 
-    // Fetch the user_address parameter from the login string ... (as who we want to be logging in ...)
-    let user_address: Vec<u8> = params
+    // get the address who we want to be logging in as
+    let user_address: Address = params
         .get("user_address")
         .ok_or_else(|| {
             Web3ProxyError::BadRequest("Unable to find user_address key in request".into())
@@ -210,34 +175,29 @@ pub async fn admin_login_get(
         .parse::<Address>()
         .map_err(|_err| {
             Web3ProxyError::BadRequest("Unable to parse user_address as an Address".into())
-        })?
-        .to_fixed_bytes()
-        .into();
+        })?;
 
     // We want to login to llamanodes.com
-    let login_domain = app
+    let domain = app
         .config
         .login_domain
         .as_deref()
         .unwrap_or("llamanodes.com");
 
-    // Also there must basically be a token, that says that one admin logins _as a user_.
-    // I'm not yet fully sure how to handle with that logic specifically ...
+    let message_domain = domain.parse()?;
+    // TODO: don't unwrap
+    let message_uri = format!("https://{}/", domain).parse().unwrap();
+
     // TODO: get most of these from the app config
-    // TODO: Let's check again who the message needs to be signed by;
-    // if the message does not have to be signed by the user, include the user ...
     let message = Message {
-        // TODO: don't unwrap
-        // TODO: accept a login_domain from the request?
-        domain: login_domain.parse().unwrap(),
-        // In the case of the admin, the admin needs to sign the message, so we include this logic ...
-        address: admin_address.to_fixed_bytes(), // user_address.to_fixed_bytes(),
+        domain: message_domain,
+        // the admin needs to sign the message, not the imitated user
+        address: admin_address.to_fixed_bytes(),
         // TODO: config for statement
-        statement: Some("🦙🦙🦙🦙🦙".to_string()),
-        // TODO: don't unwrap
-        uri: format!("https://{}/", login_domain).parse().unwrap(),
+        statement: Some("👑👑👑👑👑".to_string()),
+        uri: message_uri,
         version: siwe::Version::V1,
-        chain_id: 1,
+        chain_id: app.config.chain_id,
         expiration_time: Some(expiration_time.into()),
         issued_at: issued_at.into(),
         nonce: nonce.to_string(),
@@ -246,52 +206,52 @@ pub async fn admin_login_get(
         resources: vec![],
     };
 
-    let admin_address: Vec<u8> = admin_address.to_fixed_bytes().into();
+    let db_conn = app.db_conn()?;
+    let db_replica = app.db_replica()?;
 
-    let db_conn = app.db_conn().web3_context("login requires a database")?;
-    let db_replica = app
-        .db_replica()
-        .web3_context("login requires a replica database")?;
+    let admin = user::Entity::find()
+        .filter(user::Column::Address.eq(admin_address.as_bytes()))
+        .one(db_replica.as_ref())
+        .await?
+        .ok_or(Web3ProxyError::AccessDenied("not an admin".into()))?;
 
     // Get the user that we want to imitate from the read-only database (their id ...)
     // TODO: Only get the id, not the whole user object ...
     let user = user::Entity::find()
-        .filter(user::Column::Address.eq(user_address))
+        .filter(user::Column::Address.eq(user_address.as_bytes()))
         .one(db_replica.as_ref())
         .await?
         .ok_or(Web3ProxyError::BadRequest(
             "Could not find user in db".into(),
         ))?;
 
-    // TODO: Gotta check if encoding messes up things maybe ...
-    info!("Admin address is: {:?}", admin_address);
-    info!("Encoded admin address is: {:?}", admin_address);
-    let admin = user::Entity::find()
-        .filter(user::Column::Address.eq(admin_address))
-        .one(db_replica.as_ref())
-        .await?
-        .ok_or(Web3ProxyError::BadRequest(
-            "Could not find admin in db".into(),
-        ))?;
+    info!(admin=?admin.address, user=?user.address, "admin is imitating another user");
+
+    // delete ALL expired rows.
+    let now = Utc::now();
+    let delete_result = pending_login::Entity::delete_many()
+        .filter(pending_login::Column::ExpiresAt.lte(now))
+        .exec(db_conn)
+        .await?;
+    debug!("cleared expired pending_logins: {:?}", delete_result);
 
     // Note that the admin is trying to log in as this user
     let trail = admin_trail::ActiveModel {
         caller: sea_orm::Set(admin.id),
         imitating_user: sea_orm::Set(Some(user.id)),
-        endpoint: sea_orm::Set("admin_login_get".to_string()),
-        payload: sea_orm::Set(format!("{:?}", params)),
+        endpoint: sea_orm::Set("admin_imitate_login_get".to_string()),
+        payload: sea_orm::Set(format!("{}", json!(params))),
         ..Default::default()
     };
+
     trail
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving user's pending_login")?;
 
     // Can there be two login-sessions at the same time?
     // I supposed if the user logs in, the admin would be logged out and vice versa
 
-    // massage types to fit in the database. sea-orm does not make this very elegant
-    let uuid = Uuid::from_u128(nonce.into());
     // we add 1 to expire_seconds just to be sure the database has the key for the full expiration_time
     let expires_at = Utc
         .timestamp_opt(expiration_time.unix_timestamp() + 1, 0)
@@ -301,14 +261,14 @@ pub async fn admin_login_get(
     // add a row to the database for this user
     let user_pending_login = pending_login::ActiveModel {
         id: sea_orm::NotSet,
-        nonce: sea_orm::Set(uuid),
+        nonce: sea_orm::Set(nonce.into()),
         message: sea_orm::Set(message.to_string()),
         expires_at: sea_orm::Set(expires_at),
         imitating_user: sea_orm::Set(Some(user.id)),
     };
 
     user_pending_login
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving an admin trail pre login")?;
 
@@ -331,11 +291,11 @@ pub async fn admin_login_get(
     Ok(message.into_response())
 }
 
-/// `POST /admin/login` - Register or login by posting a signed "siwe" message
+/// `POST /admin/imitate-login` - Admin login by posting a signed "siwe" message
 /// It is recommended to save the returned bearer token in a cookie.
-/// The bearer token can be used to authenticate other requests, such as getting user user's tats or modifying the user's profile
+/// The bearer token can be used to authenticate other admin requests
 #[debug_handler]
-pub async fn admin_login_post(
+pub async fn admin_imitate_login_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     InsecureClientIp(ip): InsecureClientIp,
     Json(payload): Json<PostLogin>,
@@ -385,16 +345,10 @@ pub async fn admin_login_post(
     })?;
 
     // fetch the message we gave them from our database
-    let db_replica = app
-        .db_replica()
-        .web3_context("Getting database connection")?;
+    let db_replica = app.db_replica()?;
 
-    // massage type for the db
-    let login_nonce_uuid: Uuid = login_nonce.clone().into();
-
-    // TODO: Here we will need to re-find the parameter where the admin wants to log-in as the user ...
     let user_pending_login = pending_login::Entity::find()
-        .filter(pending_login::Column::Nonce.eq(login_nonce_uuid))
+        .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce.clone())))
         .one(db_replica.as_ref())
         .await
         .web3_context("database error while finding pending_login")?
@@ -405,39 +359,16 @@ pub async fn admin_login_post(
         .parse()
         .web3_context("parsing siwe message")?;
 
-    // default options are fine. the message includes timestamp and domain and nonce
-    let verify_config = VerificationOpts::default();
+    // mostly default options are fine. the message includes timestamp and domain and nonce
+    let verify_config = VerificationOpts {
+        rpc_provider: Some(app.internal_provider().clone()),
+        ..Default::default()
+    };
 
-    let db_conn = app
-        .db_conn()
-        .web3_context("deleting expired pending logins requires a db")?;
-
-    if let Err(err_1) = our_msg
+    our_msg
         .verify(&their_sig, &verify_config)
         .await
-        .web3_context("verifying signature against our local message")
-    {
-        // verification method 1 failed. try eip191
-        if let Err(err_191) = our_msg
-            .verify_eip191(&their_sig)
-            .web3_context("verifying eip191 signature against our local message")
-        {
-            // delete ALL expired rows.
-            let now = Utc::now();
-            let delete_result = pending_login::Entity::delete_many()
-                .filter(pending_login::Column::ExpiresAt.lte(now))
-                .exec(&db_conn)
-                .await?;
-
-            // TODO: emit a stat? if this is high something weird might be happening
-            debug!("cleared expired pending_logins: {:?}", delete_result);
-
-            return Err(Web3ProxyError::EipVerificationFailed(
-                Box::new(err_1),
-                Box::new(err_191),
-            ));
-        }
-    }
+        .web3_context("verifying signature against our local message")?;
 
     let imitating_user_id = user_pending_login
         .imitating_user
@@ -457,6 +388,8 @@ pub async fn admin_login_post(
         .await?
         .web3_context("admin address was not found!")?;
 
+    let db_conn = app.db_conn()?;
+
     // Add a message that the admin has logged in
     // Note that the admin is trying to log in as this user
     let trail = admin_trail::ActiveModel {
@@ -467,7 +400,7 @@ pub async fn admin_login_post(
         ..Default::default()
     };
     trail
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving an admin trail post login")?;
 
@@ -501,9 +434,7 @@ pub async fn admin_login_post(
     // add bearer to the database
 
     // expire in 2 days, because this is more critical (and shouldn't need to be done so long!)
-    let expires_at = Utc::now()
-        .checked_add_signed(chrono::Duration::days(2))
-        .unwrap();
+    let expires_at = Utc::now() + chrono::Duration::days(2);
 
     // TODO: Here, the bearer token should include a message
     // TODO: Above, make sure that the calling address is an admin!
@@ -518,60 +449,13 @@ pub async fn admin_login_post(
     };
 
     user_login
-        .save(&db_conn)
+        .save(db_conn)
         .await
         .web3_context("saving user login")?;
 
-    if let Err(err) = user_pending_login
-        .into_active_model()
-        .delete(&db_conn)
-        .await
-    {
-        warn!("Failed to delete nonce:{}: {}", login_nonce.0, err);
+    if let Err(err) = user_pending_login.into_active_model().delete(db_conn).await {
+        warn!(none=?login_nonce.0, ?err, "Failed to delete nonce");
     }
 
     Ok(response)
-}
-
-// TODO: This is basically an exact copy of the user endpoint, I should probabl refactor this code ...
-/// `POST /admin/imitate-logout` - Forget the bearer token in the `Authentication` header.
-#[debug_handler]
-pub async fn admin_logout_post(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> Web3ProxyResponse {
-    let user_bearer = UserBearerToken::try_from(bearer)?;
-
-    let db_conn = app
-        .db_conn()
-        .web3_context("database needed for user logout")?;
-
-    if let Err(err) = login::Entity::delete_many()
-        .filter(login::Column::BearerToken.eq(user_bearer.uuid()))
-        .exec(&db_conn)
-        .await
-    {
-        debug!("Failed to delete {}: {}", user_bearer.redis_key(), err);
-    }
-
-    let now = Utc::now();
-
-    // also delete any expired logins
-    let delete_result = login::Entity::delete_many()
-        .filter(login::Column::ExpiresAt.lte(now))
-        .exec(&db_conn)
-        .await;
-
-    debug!("Deleted expired logins: {:?}", delete_result);
-
-    // also delete any expired pending logins
-    let delete_result = login::Entity::delete_many()
-        .filter(login::Column::ExpiresAt.lte(now))
-        .exec(&db_conn)
-        .await;
-
-    debug!("Deleted expired pending logins: {:?}", delete_result);
-
-    // TODO: what should the response be? probably json something
-    Ok("goodbye".into_response())
 }

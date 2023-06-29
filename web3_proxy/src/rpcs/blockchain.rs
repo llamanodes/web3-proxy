@@ -17,7 +17,7 @@ use std::time::Duration;
 use std::{fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::time::timeout;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, warn};
 
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
@@ -270,6 +270,7 @@ impl Web3Rpcs {
         authorization: &Arc<Authorization>,
         hash: &H256,
         rpc: Option<&Arc<Web3Rpc>>,
+        max_tries: Option<usize>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<Web3ProxyBlock> {
         // first, try to get the hash from our cache
@@ -293,7 +294,7 @@ impl Web3Rpcs {
         // block not in cache. we need to ask an rpc for it
         let get_block_params = (*hash, false);
 
-        let block: Option<ArcBlock> = if let Some(rpc) = rpc {
+        let mut block: Option<ArcBlock> = if let Some(rpc) = rpc {
             // ask a specific rpc
             // TODO: request_with_metadata would probably be better than authorized_request
             rpc.authorized_request::<_, Option<ArcBlock>>(
@@ -301,19 +302,26 @@ impl Web3Rpcs {
                 &get_block_params,
                 authorization,
                 None,
+                max_tries,
                 max_wait,
             )
             .await?
         } else {
-            // ask any rpc
+            None
+        };
+
+        if block.is_none() {
+            // try by asking any rpc
             // TODO: retry if "Requested data is not available"
             // TODO: request_with_metadata instead of internal_request
-            self.internal_request::<_, Option<ArcBlock>>(
-                "eth_getBlockByHash",
-                &get_block_params,
-                max_wait,
-            )
-            .await?
+            block = self
+                .internal_request::<_, Option<ArcBlock>>(
+                    "eth_getBlockByHash",
+                    &get_block_params,
+                    max_tries,
+                    max_wait,
+                )
+                .await?;
         };
 
         match block {
@@ -321,8 +329,7 @@ impl Web3Rpcs {
                 let block = self.try_cache_block(block.try_into()?, false).await?;
                 Ok(block)
             }
-            // TODO: better error. some blocks are known, just not this one
-            None => Err(Web3ProxyError::NoBlocksKnown),
+            None => Err(Web3ProxyError::UnknownBlockHash(*hash)),
         }
     }
 
@@ -351,7 +358,7 @@ impl Web3Rpcs {
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
 
         let mut consensus_head_receiver = self
-            .watch_consensus_head_sender
+            .watch_head_block
             .as_ref()
             .web3_context("need new head subscriptions to fetch cannonical_block")?
             .subscribe();
@@ -369,7 +376,8 @@ impl Web3Rpcs {
                 break;
             }
 
-            trace!("waiting for future block {} > {}", num, head_block_num);
+            debug!(%head_block_num, %num, "waiting for future block");
+
             consensus_head_receiver.changed().await?;
 
             if let Some(head) = consensus_head_receiver.borrow_and_update().as_ref() {
@@ -384,7 +392,9 @@ impl Web3Rpcs {
         if let Some(block_hash) = self.blocks_by_number.get(num) {
             // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
             // TODO: configurable max wait and rpc
-            let block = self.block(authorization, &block_hash, None, None).await?;
+            let block = self
+                .block(authorization, &block_hash, None, Some(3), None)
+                .await?;
 
             return Ok((block, block_depth));
         }
@@ -392,7 +402,12 @@ impl Web3Rpcs {
         // block number not in cache. we need to ask an rpc for it
         // TODO: this error is too broad
         let response = self
-            .internal_request::<_, Option<ArcBlock>>("eth_getBlockByNumber", &(*num, false), None)
+            .internal_request::<_, Option<ArcBlock>>(
+                "eth_getBlockByNumber",
+                &(*num, false),
+                Some(3),
+                None,
+            )
             .await?
             .ok_or(Web3ProxyError::NoBlocksKnown)?;
 
@@ -418,14 +433,17 @@ impl Web3Rpcs {
         // TODO: what timeout on block receiver? we want to keep consensus_finder fresh so that server tiers are correct
         let double_block_time = average_block_interval(self.chain_id).mul_f32(2.0);
 
+        let mut had_first_success = false;
+
         loop {
             match timeout(double_block_time, block_receiver.recv_async()).await {
                 Ok(Ok((new_block, rpc))) => {
                     let rpc_name = rpc.name.clone();
+                    let rpc_is_backup = rpc.backup;
 
                     // TODO: what timeout on this?
                     match timeout(
-                        Duration::from_secs(2),
+                        Duration::from_secs(1),
                         consensus_finder.process_block_from_rpc(
                             self,
                             authorization,
@@ -436,18 +454,29 @@ impl Web3Rpcs {
                     )
                     .await
                     {
-                        Ok(Ok(_)) => {}
+                        Ok(Ok(_)) => had_first_success = true,
                         Ok(Err(err)) => {
-                            error!(
-                                "error while processing block from rpc {}: {:#?}",
-                                rpc_name, err
-                            );
+                            if had_first_success {
+                                error!(
+                                    "error while processing block from rpc {}: {:#?}",
+                                    rpc_name, err
+                                );
+                            } else {
+                                debug!(
+                                    "startup error while processing block from rpc {}: {:#?}",
+                                    rpc_name, err
+                                );
+                            }
                         }
                         Err(timeout) => {
-                            error!(
-                                "timeout while processing block from {}: {:#?}",
-                                rpc_name, timeout
-                            );
+                            if rpc_is_backup {
+                                debug!(
+                                    ?timeout,
+                                    "timeout while processing block from {}", rpc_name
+                                );
+                            } else {
+                                warn!(?timeout, "timeout while processing block from {}", rpc_name);
+                            }
                         }
                     }
                 }

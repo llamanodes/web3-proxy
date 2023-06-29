@@ -1,5 +1,5 @@
 use super::one::Web3Rpc;
-use crate::errors::Web3ProxyResult;
+use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, AuthorizationType};
 use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use anyhow::Context;
@@ -15,7 +15,7 @@ use serde_json::json;
 use std::sync::atomic;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
-use tracing::{debug, error, trace, warn, Level};
+use tracing::{debug, error, info, trace, warn, Level};
 
 #[derive(Debug, From)]
 pub enum OpenRequestResult {
@@ -36,12 +36,15 @@ pub struct OpenRequestHandle {
 }
 
 /// Depending on the context, RPC errors require different handling.
-#[derive(Copy, Debug, Clone)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum RequestErrorHandler {
     /// Log at the trace level. Use when errors are expected.
+    #[default]
     TraceLevel,
     /// Log at the debug level. Use when errors are expected.
     DebugLevel,
+    /// Log at the info level. Use when errors are expected.
+    InfoLevel,
     /// Log at the error level. Use when errors are bad.
     ErrorLevel,
     /// Log at the warn level. Use when errors do not cause problems.
@@ -50,30 +53,24 @@ pub enum RequestErrorHandler {
     Save,
 }
 
-impl Default for RequestErrorHandler {
-    fn default() -> Self {
-        Self::TraceLevel
-    }
-}
-
 // TODO: second param could be skipped since we don't need it here
 #[derive(serde::Deserialize, serde::Serialize)]
 struct EthCallParams((EthCallFirstParams, Option<serde_json::Value>));
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct EthCallFirstParams {
-    to: Address,
+    to: Option<Address>,
     data: Option<Bytes>,
 }
 
 impl From<Level> for RequestErrorHandler {
     fn from(level: Level) -> Self {
         match level {
-            Level::TRACE => RequestErrorHandler::TraceLevel,
             Level::DEBUG => RequestErrorHandler::DebugLevel,
             Level::ERROR => RequestErrorHandler::ErrorLevel,
+            Level::INFO => RequestErrorHandler::InfoLevel,
+            Level::TRACE => RequestErrorHandler::TraceLevel,
             Level::WARN => RequestErrorHandler::WarnLevel,
-            _ => unimplemented!("unexpected tracing Level"),
         }
     }
 }
@@ -99,12 +96,10 @@ impl Authorization {
         // we intentionally use "now" and not the time the request started
         // why? because we aggregate stats and setting one in the past could cause confusion
         let timestamp = Utc::now();
-        let to: Vec<u8> = params
-            .to
-            .as_bytes()
-            .try_into()
-            .expect("address should always convert to a Vec<u8>");
-        let call_data = params.data.map(|x| format!("{}", x));
+
+        let to = params.to.unwrap_or_else(Address::zero).as_bytes().to_vec();
+
+        let call_data = params.data.map(|x| x.to_string());
 
         let rl = revert_log::ActiveModel {
             rpc_key_id: sea_orm::Set(rpc_key_id),
@@ -118,11 +113,10 @@ impl Authorization {
         let rl = rl
             .save(db_conn)
             .await
-            .context("Failed saving new revert log")?;
+            .web3_context("Failed saving new revert log")?;
 
-        // TODO: what log level?
-        // TODO: better format
-        trace!("revert_log: {:?}", rl);
+        // TODO: what log level and format?
+        trace!(revert_log=?rl);
 
         // TODO: return something useful
         Ok(())
@@ -269,12 +263,12 @@ impl OpenRequestHandle {
             // check for "execution reverted" here
             // TODO: move this info a function on ResponseErrorType
             let response_type = if let ProviderError::JsonRpcClientError(err) = err {
-                // Http and Ws errors are very similar, but different types
+                // JsonRpc and Application errors get rolled into the JsonRpcClientError
                 let msg = err.as_error_response().map(|x| x.message.clone());
 
-                trace!("error message: {:?}", msg);
-
                 if let Some(msg) = msg {
+                    trace!(%msg, "jsonrpc error message");
+
                     if msg.starts_with("execution reverted") {
                         trace!("revert from {}", self.rpc);
                         ResponseTypes::Revert
@@ -322,47 +316,74 @@ impl OpenRequestHandle {
                 RequestErrorHandler::DebugLevel => {
                     // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
                     if matches!(response_type, ResponseTypes::Revert) {
+                        trace!(
+                            rpc=%self.rpc,
+                            %method,
+                            ?params,
+                            ?err,
+                            "revert",
+                        );
+                    } else {
                         debug!(
-                            "bad response from {}! method={} params={:?} err={:?}",
-                            self.rpc, method, params, err
+                            rpc=%self.rpc,
+                            %method,
+                            ?params,
+                            ?err,
+                            "bad response",
                         );
                     }
                 }
+                RequestErrorHandler::InfoLevel => {
+                    info!(
+                        rpc=%self.rpc,
+                        %method,
+                        ?params,
+                        ?err,
+                        "bad response",
+                    );
+                }
                 RequestErrorHandler::TraceLevel => {
                     trace!(
-                        "bad response from {}! method={} params={:?} err={:?}",
-                        self.rpc,
-                        method,
-                        params,
-                        err
+                        rpc=%self.rpc,
+                        %method,
+                        ?params,
+                        ?err,
+                        "bad response",
                     );
                 }
                 RequestErrorHandler::ErrorLevel => {
-                    // TODO: include params if not running in release mode
+                    // TODO: only include params if not running in release mode
                     error!(
-                        "bad response from {}! method={} err={:?}",
-                        self.rpc, method, err
+                        rpc=%self.rpc,
+                        %method,
+                        ?params,
+                        ?err,
+                        "bad response",
                     );
                 }
                 RequestErrorHandler::WarnLevel => {
-                    // TODO: include params if not running in release mode
+                    // TODO: only include params if not running in release mode
                     warn!(
-                        "bad response from {}! method={} err={:?}",
-                        self.rpc, method, err
+                        rpc=%self.rpc,
+                        %method,
+                        ?params,
+                        ?err,
+                        "bad response",
                     );
                 }
                 RequestErrorHandler::Save => {
                     trace!(
-                        "bad response from {}! method={} params={:?} err={:?}",
-                        self.rpc,
-                        method,
-                        params,
-                        err
+                        rpc=%self.rpc,
+                        %method,
+                        ?params,
+                        ?err,
+                        "bad response",
                     );
 
                     // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
                     let method: Method = Method::try_from_value(&method.to_string()).unwrap();
 
+                    // TODO: i don't think this prsing is correct
                     match serde_json::from_value::<EthCallParams>(json!(params)) {
                         Ok(params) => {
                             // spawn saving to the database so we don't slow down the request
@@ -372,8 +393,10 @@ impl OpenRequestHandle {
                         }
                         Err(err) => {
                             warn!(
-                                "failed parsing eth_call params. unable to save revert. {}",
-                                err
+                                %method,
+                                ?params,
+                                ?err,
+                                "failed parsing eth_call params. unable to save revert",
                             );
                         }
                     }

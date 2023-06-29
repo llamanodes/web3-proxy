@@ -15,3 +15,6 @@ rustdocflags = [
     # uuid unstable is needed for zerocopy deserialize
     "--cfg", "uuid_unstable",
 ]
+
+[registries.crates-io]
+protocol = "sparse"

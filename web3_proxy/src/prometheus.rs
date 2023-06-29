@@ -3,6 +3,7 @@ use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response};
 use axum::{routing::get, Extension, Router};
 use std::net::SocketAddr;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::info;
@@ -13,21 +14,29 @@ use crate::errors::Web3ProxyResult;
 /// Run a prometheus metrics server on the given port.
 pub async fn serve(
     app: Arc<Web3ProxyApp>,
-    port: u16,
     mut shutdown_receiver: broadcast::Receiver<()>,
 ) -> Web3ProxyResult<()> {
     // routes should be ordered most to least common
-    let app = Router::new().route("/", get(root)).layer(Extension(app));
+    let router = Router::new()
+        .route("/", get(root))
+        .layer(Extension(app.clone()));
 
+    // note: the port here might be 0
+    let port = app.prometheus_port.load(Ordering::Relaxed);
     // TODO: config for the host?
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    info!("prometheus listening on port {}", port);
 
-    let service = app.into_make_service();
+    let service = router.into_make_service();
 
     // `axum::Server` is a re-export of `hyper::Server`
-    axum::Server::bind(&addr)
-        .serve(service)
+    let server = axum::Server::bind(&addr).serve(service);
+
+    let port = server.local_addr().port();
+    info!("prometheus listening on port {}", port);
+
+    app.prometheus_port.store(port, Ordering::Relaxed);
+
+    server
         .with_graceful_shutdown(async move {
             let _ = shutdown_receiver.recv().await;
         })
