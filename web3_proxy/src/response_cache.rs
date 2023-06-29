@@ -1,8 +1,10 @@
-use crate::{errors::Web3ProxyError, jsonrpc::JsonRpcErrorData, rpcs::blockchain::ArcBlock};
+use crate::{
+    block_number::BlockNumAndHash, errors::Web3ProxyError, jsonrpc::JsonRpcErrorData,
+};
 use derive_more::From;
 use ethers::{
     providers::{HttpClientError, JsonRpcError, ProviderError, WsClientError},
-    types::U64,
+    types::{U64},
 };
 use hashbrown::hash_map::DefaultHashBuilder;
 use moka::future::Cache;
@@ -14,9 +16,10 @@ use std::{
 
 #[derive(Clone, Debug, Eq, From)]
 pub struct JsonRpcQueryCacheKey {
+    /// hashed inputs
     hash: u64,
-    from_block_num: Option<U64>,
-    to_block_num: Option<U64>,
+    from_block: Option<BlockNumAndHash>,
+    to_block: Option<BlockNumAndHash>,
     cache_errors: bool,
 }
 
@@ -24,11 +27,11 @@ impl JsonRpcQueryCacheKey {
     pub fn hash(&self) -> u64 {
         self.hash
     }
-    pub fn from_block_num(&self) -> Option<U64> {
-        self.from_block_num
+    pub fn from_block_num(&self) -> Option<&U64> {
+        self.from_block.as_ref().map(|x| x.num())
     }
-    pub fn to_block_num(&self) -> Option<U64> {
-        self.to_block_num
+    pub fn to_block_num(&self) -> Option<&U64> {
+        self.to_block.as_ref().map(|x| x.num())
     }
     pub fn cache_errors(&self) -> bool {
         self.cache_errors
@@ -50,19 +53,19 @@ impl Hash for JsonRpcQueryCacheKey {
 
 impl JsonRpcQueryCacheKey {
     pub fn new(
-        from_block: Option<ArcBlock>,
-        to_block: Option<ArcBlock>,
+        from_block: Option<BlockNumAndHash>,
+        to_block: Option<BlockNumAndHash>,
         method: &str,
         params: &serde_json::Value,
         cache_errors: bool,
     ) -> Self {
-        let from_block_num = from_block.as_ref().and_then(|x| x.number);
-        let to_block_num = to_block.as_ref().and_then(|x| x.number);
+        let from_block_hash = from_block.as_ref().map(|x| x.hash());
+        let to_block_hash = to_block.as_ref().map(|x| x.hash());
 
         let mut hasher = DefaultHashBuilder::default().build_hasher();
 
-        from_block.as_ref().and_then(|x| x.hash).hash(&mut hasher);
-        to_block.as_ref().and_then(|x| x.hash).hash(&mut hasher);
+        from_block_hash.hash(&mut hasher);
+        to_block_hash.hash(&mut hasher);
 
         method.hash(&mut hasher);
 
@@ -76,8 +79,8 @@ impl JsonRpcQueryCacheKey {
 
         Self {
             hash,
-            from_block_num,
-            to_block_num,
+            from_block,
+            to_block,
             cache_errors,
         }
     }

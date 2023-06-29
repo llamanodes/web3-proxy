@@ -4,6 +4,7 @@ use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
+use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
 use crate::user_token::UserBearerToken;
@@ -476,7 +477,7 @@ impl RequestMetadata {
         app: &Web3ProxyApp,
         authorization: Arc<Authorization>,
         request: R,
-        head_block_num: Option<&U64>,
+        head_block: Option<&Web3ProxyBlock>,
     ) -> Arc<Self> {
         let request = request.into();
 
@@ -493,7 +494,7 @@ impl RequestMetadata {
             KafkaDebugLogger::try_new(
                 app,
                 authorization.clone(),
-                head_block_num,
+                head_block.map(|x| x.number()),
                 "web3_proxy:rpc",
                 request_ulid,
             )

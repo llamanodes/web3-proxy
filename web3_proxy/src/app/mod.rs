@@ -1,6 +1,6 @@
 mod ws;
 
-use crate::block_number::{block_needed, BlockNeeded};
+use crate::block_number::CacheMode;
 use crate::config::{AppConfig, TopConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{
@@ -992,17 +992,18 @@ impl Web3ProxyApp {
 
         // get the head block now so that any requests that need it all use the same block
         // TODO: this still has an edge condition if there is a reorg in the middle of the request!!!
-        let head_block_num = self
+        let head_block: Web3ProxyBlock = self
             .balanced_rpcs
-            .head_block_num()
-            .ok_or(Web3ProxyError::NoServersSynced)?;
+            .head_block()
+            .ok_or(Web3ProxyError::NoServersSynced)?
+            .clone();
 
         // TODO: use streams and buffers so we don't overwhelm our server
         let responses = join_all(
             requests
                 .into_iter()
                 .map(|request| {
-                    self.proxy_request(request, authorization.clone(), Some(head_block_num))
+                    self.proxy_request(request, authorization.clone(), Some(&head_block))
                 })
                 .collect::<Vec<_>>(),
         )
@@ -1122,13 +1123,13 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         mut request: JsonRpcRequest,
         authorization: Arc<Authorization>,
-        head_block_num: Option<U64>,
+        head_block: Option<&Web3ProxyBlock>,
     ) -> (StatusCode, JsonRpcForwardedResponse, Vec<Arc<Web3Rpc>>) {
         let request_metadata = RequestMetadata::new(
             self,
             authorization,
             RequestOrMethod::Request(&request),
-            head_block_num.as_ref(),
+            head_block,
         )
         .await;
 
@@ -1144,7 +1145,7 @@ impl Web3ProxyApp {
                 ._proxy_request_with_caching(
                     &request.method,
                     &mut request.params,
-                    head_block_num,
+                    head_block,
                     Some(2),
                     &request_metadata,
                 )
@@ -1188,7 +1189,7 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         method: &str,
         params: &mut serde_json::Value,
-        head_block_num: Option<U64>,
+        head_block: Option<&Web3ProxyBlock>,
         max_tries: Option<usize>,
         request_metadata: &Arc<RequestMetadata>,
     ) -> Web3ProxyResult<JsonRpcResponseEnum<Arc<RawValue>>> {
@@ -1322,7 +1323,7 @@ impl Web3ProxyApp {
             },
             "eth_accounts" => JsonRpcResponseEnum::from(serde_json::Value::Array(vec![])),
             "eth_blockNumber" => {
-                match head_block_num.or(self.balanced_rpcs.head_block_num()) {
+                match head_block.cloned().or(self.balanced_rpcs.head_block()) {
                     Some(head_block_num) => JsonRpcResponseEnum::from(json!(head_block_num)),
                     None => {
                         // TODO: what does geth do if this happens?
@@ -1612,38 +1613,36 @@ impl Web3ProxyApp {
                 }
 
                 // TODO: if no servers synced, wait for them to be synced? probably better to error and let haproxy retry another server
-                let head_block_num = head_block_num
-                    .or(self.balanced_rpcs.head_block_num())
+                let head_block: Web3ProxyBlock = head_block
+                    .cloned()
+                    .or_else(|| self.balanced_rpcs.head_block())
                     .ok_or(Web3ProxyError::NoServersSynced)?;
 
                 // we do this check before checking caches because it might modify the request params
                 // TODO: add a stat for archive vs full since they should probably cost different
                 // TODO: this cache key can be rather large. is that okay?
-                let cache_key: Option<JsonRpcQueryCacheKey> = match block_needed(
+                let cache_key: Option<JsonRpcQueryCacheKey> = match CacheMode::new(
                     &authorization,
                     method,
                     params,
-                    head_block_num,
+                    &head_block,
                     &self.balanced_rpcs,
                 )
-                .await?
+                .await
                 {
-                    BlockNeeded::CacheSuccessForever => Some(JsonRpcQueryCacheKey::new(
+                    CacheMode::CacheSuccessForever => Some(JsonRpcQueryCacheKey::new(
                         None,
                         None,
                         method,
                         params,
                         false,
                     )),
-                    BlockNeeded::CacheNever => None,
-                    BlockNeeded::Cache {
-                        block_num,
+                    CacheMode::CacheNever => None,
+                    CacheMode::Cache {
+                        block,
                         cache_errors,
                     } => {
-                        let (request_block_hash, block_depth) = self
-                            .balanced_rpcs
-                            .block_hash(&authorization, &block_num)
-                            .await?;
+                        let block_depth = (head_block.number() - block.num()).as_u64();
 
                         if block_depth < self.config.archive_depth {
                             request_metadata
@@ -1651,52 +1650,26 @@ impl Web3ProxyApp {
                                 .store(true, atomic::Ordering::Release);
                         }
 
-                        let request_block = self
-                            .balanced_rpcs
-                            .block(&authorization, &request_block_hash, None, Some(3), None)
-                            .await?
-                            .block;
-
                         Some(JsonRpcQueryCacheKey::new(
-                            Some(request_block),
+                            Some(block),
                             None,
                             method,
                             params,
                             cache_errors,
                         ))
                     }
-                    BlockNeeded::CacheRange {
-                        from_block_num,
-                        to_block_num,
+                    CacheMode::CacheRange {
+                        from_block,
+                        to_block,
                         cache_errors,
                     } => {
-                        let (from_block_hash, block_depth) = self
-                            .balanced_rpcs
-                            .block_hash(&authorization, &from_block_num)
-                            .await?;
+                        let block_depth = (head_block.number() - from_block.num()).as_u64();
 
                         if block_depth < self.config.archive_depth {
                             request_metadata
                                 .archive_request
                                 .store(true, atomic::Ordering::Release);
                         }
-
-                        let from_block = self
-                            .balanced_rpcs
-                            .block(&authorization, &from_block_hash, None, Some(3), None)
-                            .await?
-                            .block;
-
-                        let (to_block_hash, _) = self
-                            .balanced_rpcs
-                            .block_hash(&authorization, &to_block_num)
-                            .await?;
-
-                        let to_block = self
-                            .balanced_rpcs
-                            .block(&authorization, &to_block_hash, None, Some(3), None)
-                            .await?
-                            .block;
 
                         Some(JsonRpcQueryCacheKey::new(
                             Some(from_block),
@@ -1709,11 +1682,11 @@ impl Web3ProxyApp {
                 };
 
                 // TODO: different timeouts for different user tiers. get the duration out of the request_metadata
-                let max_wait = Duration::from_secs(240);
+                let backend_request_timetout = Duration::from_secs(240);
 
                 if let Some(cache_key) = cache_key {
-                    let from_block_num = cache_key.from_block_num();
-                    let to_block_num = cache_key.to_block_num();
+                    let from_block_num = cache_key.from_block_num().copied();
+                    let to_block_num = cache_key.to_block_num().copied();
                     let cache_jsonrpc_errors = cache_key.cache_errors();
 
                     // TODO: try to fetch out of s3
@@ -1722,14 +1695,14 @@ impl Web3ProxyApp {
                         .jsonrpc_response_cache
                         .try_get_with::<_, Web3ProxyError>(cache_key.hash(), async {
                             let response_data = timeout(
-                                max_wait + Duration::from_millis(100),
+                                backend_request_timetout + Duration::from_millis(100),
                                 self.balanced_rpcs
                                     .try_proxy_connection::<_, Arc<RawValue>>(
                                         method,
                                         params,
                                         Some(request_metadata),
                                         max_tries,
-                                        Some(max_wait),
+                                        Some(backend_request_timetout),
                                         from_block_num.as_ref(),
                                         to_block_num.as_ref(),
                                     ))
@@ -1749,14 +1722,14 @@ impl Web3ProxyApp {
                         }).await?
                 } else {
                     let x = timeout(
-                        max_wait + Duration::from_millis(100),
+                        backend_request_timetout + Duration::from_millis(100),
                         self.balanced_rpcs
                         .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             params,
                             Some(request_metadata),
                             max_tries,
-                            Some(max_wait),
+                            Some(backend_request_timetout),
                             None,
                             None,
                         )

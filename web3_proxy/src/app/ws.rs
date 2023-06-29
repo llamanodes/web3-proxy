@@ -79,7 +79,7 @@ impl Web3ProxyApp {
                         &app,
                         authorization.clone(),
                         RequestOrMethod::Method("eth_subscribe(newHeads)", 0),
-                        Some(new_head.number()),
+                        Some(&new_head),
                     )
                     .await;
 

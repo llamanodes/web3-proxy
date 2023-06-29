@@ -965,8 +965,8 @@ impl Web3ProxyError {
                 (
                     StatusCode::OK,
                     JsonRpcErrorData {
-                        message: format!("unknown block hash ({})", hash).into(),
-                        code: None,
+                        message: format!("block {} not found", hash).into(),
+                        code: -32000,
                         data: None,
                     },
                 )
@@ -976,12 +976,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::OK,
                     JsonRpcErrorData {
-                        message: format!(
-                            "unknown block number. known: {}. unknown: {}",
-                            known, unknown
-                        )
-                        .into(),
-                        code: None,
+                        message: format!("block #{} not found. best known is #{}", unknown, known)
+                            .into(),
+                        code: -32000,
                         data: None,
                     },
                 )

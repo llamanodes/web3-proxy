@@ -349,19 +349,20 @@ impl fmt::Debug for RankedRpcs {
 
 // TODO: refs for all of these. borrow on a Sender is cheap enough
 impl Web3Rpcs {
-    // TODO: return a ref?
     pub fn head_block(&self) -> Option<Web3ProxyBlock> {
         self.watch_head_block
             .as_ref()
             .and_then(|x| x.borrow().clone())
     }
 
-    // TODO: return a ref?
+    /// note: you probably want to use `head_block` instead
+    /// TODO: return a ref?
     pub fn head_block_hash(&self) -> Option<H256> {
         self.head_block().map(|x| *x.hash())
     }
 
-    // TODO: return a ref?
+    /// note: you probably want to use `head_block` instead
+    /// TODO: return a ref?
     pub fn head_block_num(&self) -> Option<U64> {
         self.head_block().map(|x| *x.number())
     }

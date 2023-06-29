@@ -17,7 +17,7 @@ use std::time::Duration;
 use std::{fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::time::timeout;
-use tracing::{debug, error, trace};
+use tracing::{debug, error};
 
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
@@ -376,7 +376,8 @@ impl Web3Rpcs {
                 break;
             }
 
-            trace!("waiting for future block {} > {}", num, head_block_num);
+            debug!(%head_block_num, %num, "waiting for future block");
+
             consensus_head_receiver.changed().await?;
 
             if let Some(head) = consensus_head_receiver.borrow_and_update().as_ref() {
