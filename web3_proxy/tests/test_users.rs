@@ -7,6 +7,8 @@ use crate::common::TestApp;
 async fn test_log_in_and_out() {
     let x = TestApp::spawn().await;
 
+    let w = x.wallet(0);
+
     todo!();
 }
 

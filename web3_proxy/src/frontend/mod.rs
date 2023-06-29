@@ -264,17 +264,16 @@ pub async fn serve(
       - forwarded header (new standard)
       - axum::extract::ConnectInfo (if not behind proxy)
     */
-    #[cfg(feature = "connectinfo")]
     let make_service = {
         info!("connectinfo feature enabled");
         router.into_make_service_with_connect_info::<SocketAddr>()
     };
 
-    #[cfg(not(feature = "connectinfo"))]
-    let make_service = {
-        info!("connectinfo feature disabled");
-        router.into_make_service()
-    };
+    // #[cfg(not(feature = "connectinfo"))]
+    // let make_service = {
+    //     info!("connectinfo feature disabled");
+    //     router.into_make_service()
+    // };
 
     let server = server_builder.serve(make_service);
 

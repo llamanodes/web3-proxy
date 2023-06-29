@@ -2,8 +2,12 @@ mod common;
 
 use crate::common::TestApp;
 use ethers::prelude::U256;
+use http::StatusCode;
 use std::time::Duration;
-use tokio::time::{sleep, Instant};
+use tokio::{
+    task::yield_now,
+    time::{sleep, Instant},
+};
 use web3_proxy::rpcs::blockchain::ArcBlock;
 
 #[test_log::test(tokio::test)]
@@ -26,6 +30,17 @@ async fn it_starts_and_stops() {
 
     assert_eq!(anvil_result, proxy_result);
 
+    // check the /health page
+    let proxy_url = x.proxy_provider.url();
+    let health_response = reqwest::get(format!("{}health", proxy_url)).await;
+    dbg!(&health_response);
+    assert_eq!(health_response.unwrap().status(), StatusCode::OK);
+
+    // check the /status page
+    let status_response = reqwest::get(format!("{}status", proxy_url)).await;
+    dbg!(&status_response);
+    assert_eq!(status_response.unwrap().status(), StatusCode::OK);
+
     let first_block_num = anvil_result.number.unwrap();
 
     // mine a block
@@ -42,6 +57,8 @@ async fn it_starts_and_stops() {
 
     assert_eq!(first_block_num, second_block_num - 1);
 
+    yield_now().await;
+
     let mut proxy_result;
     let start = Instant::now();
     loop {
@@ -55,7 +72,7 @@ async fn it_starts_and_stops() {
             .unwrap();
 
         if let Some(ref proxy_result) = proxy_result {
-            if proxy_result.number != Some(first_block_num) {
+            if proxy_result.number == Some(second_block_num) {
                 break;
             }
         }

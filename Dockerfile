@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     curl -L https://foundry.paradigm.xyz | bash && foundryup
 
 # changing our features doesn't change any of the steps above
-ENV WEB3_PROXY_FEATURES "rdkafka-src,connectinfo"
+ENV WEB3_PROXY_FEATURES "rdkafka-src"
 
 FROM rust as build_tests
 
