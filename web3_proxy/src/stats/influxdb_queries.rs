@@ -66,7 +66,6 @@ pub async fn query_user_stats<'a>(
             .one(db_replica.as_ref())
             .await?
         {
-            // TODO: We should add the threshold that determines if a user is premium into app.config. hard coding to $10 works for now
             Some(user_balance) => (
                 user_balance.total_deposits,
                 user_balance.total_spent_outside_free_tier,
@@ -76,8 +75,9 @@ pub async fn query_user_stats<'a>(
 
         let balance_remaining = total_deposits - total_spent;
 
+        // TODO: We should add the threshold that determines if a user is premium into app.config. hard coding to $10 works for now
         if total_deposits < Decimal::from(10) || balance_remaining <= Decimal::from(0) {
-            // we do allow some 0 balance users in
+            // get the user tier so we can see if it is a tier that has downgrades
             let relevant_balance_user_tier_id = if user_id == caller_user.id {
                 caller_user.user_tier_id
             } else {
@@ -88,7 +88,6 @@ pub async fn query_user_stats<'a>(
 
                 user.user_tier_id
             };
-
             let user_tier = user_tier::Entity::find_by_id(relevant_balance_user_tier_id)
                 .one(db_replica.as_ref())
                 .await?

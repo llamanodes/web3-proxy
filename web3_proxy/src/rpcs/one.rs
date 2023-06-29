@@ -314,7 +314,7 @@ impl Web3Rpc {
             let head_block_num = self
                 .internal_request::<_, U256>(
                     "eth_blockNumber",
-                    &None::<()>,
+                    &[(); 0],
                     // error here are expected, so keep the level low
                     Some(Level::DEBUG.into()),
                     Some(2),
@@ -431,7 +431,7 @@ impl Web3Rpc {
         let found_chain_id: U64 = self
             .internal_request(
                 "eth_chainId",
-                &None::<()>,
+                &[(); 0],
                 Some(Level::TRACE.into()),
                 Some(2),
                 Some(Duration::from_secs(5)),
