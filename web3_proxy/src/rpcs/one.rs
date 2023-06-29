@@ -1038,9 +1038,9 @@ impl Web3Rpc {
                     if !self.backup {
                         let when = retry_at.duration_since(Instant::now());
                         warn!(
-                            "Exhausted rate limit on {}. Retry in {}ms",
+                            retry_ms=%when.as_millis(),
+                            "Exhausted rate limit on {}",
                             self,
-                            when.as_millis()
                         );
                     }
 

@@ -17,7 +17,7 @@ use std::time::Duration;
 use std::{fmt::Display, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::time::timeout;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
@@ -439,10 +439,11 @@ impl Web3Rpcs {
             match timeout(double_block_time, block_receiver.recv_async()).await {
                 Ok(Ok((new_block, rpc))) => {
                     let rpc_name = rpc.name.clone();
+                    let rpc_is_backup = rpc.backup;
 
                     // TODO: what timeout on this?
                     match timeout(
-                        Duration::from_secs(2),
+                        Duration::from_secs(1),
                         consensus_finder.process_block_from_rpc(
                             self,
                             authorization,
@@ -468,10 +469,14 @@ impl Web3Rpcs {
                             }
                         }
                         Err(timeout) => {
-                            error!(
-                                "timeout while processing block from {}: {:#?}",
-                                rpc_name, timeout
-                            );
+                            if rpc_is_backup {
+                                debug!(
+                                    ?timeout,
+                                    "timeout while processing block from {}", rpc_name
+                                );
+                            } else {
+                                warn!(?timeout, "timeout while processing block from {}", rpc_name);
+                            }
                         }
                     }
                 }

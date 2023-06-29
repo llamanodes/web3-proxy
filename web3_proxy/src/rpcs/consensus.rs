@@ -872,9 +872,9 @@ impl ConsensusFinder {
                 backup_entry.1 += rpc.soft_limit;
 
                 let parent_hash = block_to_check.parent_hash();
-                // TODO: i flip flop on passing rpc to this or not
+
                 match web3_rpcs
-                    .block(authorization, parent_hash, Some(rpc), None, None)
+                    .block(authorization, parent_hash, Some(rpc), Some(1), None)
                     .await
                 {
                     Ok(parent_block) => block_to_check = parent_block,
