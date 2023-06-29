@@ -1642,7 +1642,7 @@ impl Web3ProxyApp {
                         block,
                         cache_errors,
                     } => {
-                        let block_depth = (head_block.number().saturating_sub(block.num())).as_u64();
+                        let block_depth = (head_block.number().saturating_sub(*block.num())).as_u64();
 
                         if block_depth < self.config.archive_depth {
                             request_metadata
@@ -1663,7 +1663,7 @@ impl Web3ProxyApp {
                         to_block,
                         cache_errors,
                     } => {
-                        let block_depth = (head_block.number().saturating_sub(from_block.num())).as_u64();
+                        let block_depth = (head_block.number().saturating_sub(*from_block.num())).as_u64();
 
                         if block_depth < self.config.archive_depth {
                             request_metadata
