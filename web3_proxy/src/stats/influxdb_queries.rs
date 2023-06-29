@@ -99,10 +99,7 @@ pub async fn query_user_stats<'a>(
             }
         }
 
-        if user_id == caller_user.id {
-            // the user is fetching their own stats
-        } else {
-            // Possible subuser relation
+        if user_id != caller_user.id {
             // check that there is at least on rpc-keys owned by the requested user and related to the caller user
             let user_rpc_key_ids: Vec<u64> = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(user_id))
