@@ -426,7 +426,7 @@ pub async fn user_logout_post(
         .exec(db_conn)
         .await
     {
-        warn!("Failed to delete {}: {}", user_bearer.redis_key(), err);
+        warn!(key=%user_bearer.redis_key(), ?err, "Failed to delete from redis");
     }
 
     // TODO: what should the response be? probably json something

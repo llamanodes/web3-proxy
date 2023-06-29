@@ -112,7 +112,7 @@ pub fn panic_handler(
     let event = Event::AlertTrigger(alert);
 
     if let Err(err) = pagerduty_sync.event(event) {
-        error!("Failed sending alert to pagerduty! {:#?}", err);
+        error!(?err, "Failed sending alert to pagerduty!");
     }
 }
 
@@ -165,7 +165,7 @@ pub fn pagerduty_alert<T: Serialize>(
             .unwrap()
             .into_string()
             .unwrap_or_else(|err| {
-                warn!("unable to handle hostname: {:#?}", err);
+                warn!(?err, "unable to handle hostname");
                 "unknown".to_string()
             })
     });

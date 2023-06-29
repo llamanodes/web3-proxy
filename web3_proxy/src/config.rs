@@ -306,7 +306,7 @@ impl Web3RpcConfig {
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         if !self.extra.is_empty() {
-            warn!("unknown Web3RpcConfig fields!: {:?}", self.extra.keys());
+            warn!(extra=?self.extra.keys(), "unknown Web3RpcConfig fields!");
         }
 
         Web3Rpc::spawn(

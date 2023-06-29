@@ -126,7 +126,7 @@ impl SentrydSubCommand {
 
                 while let Some(err) = error_receiver.recv().await {
                     if matches!(err.level, Level::ERROR) {
-                        warn!("check failed: {:#?}", err);
+                        warn!(?err, "check failed");
 
                         let alert = pagerduty_alert(
                             Some(chain_id),

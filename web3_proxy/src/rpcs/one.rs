@@ -782,7 +782,7 @@ impl Web3Rpc {
 
         // try_join on the futures
         if let Err(err) = try_join_all(futures).await {
-            warn!("subscription erred: {:?}", err);
+            warn!(?err, "subscription erred");
         }
 
         debug!("subscriptions on {} exited", self);

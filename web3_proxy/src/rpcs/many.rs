@@ -620,15 +620,15 @@ impl Web3Rpcs {
         if let Some(retry_at) = earliest_retry_at {
             // TODO: log the server that retry_at came from
             warn!(
-                "no servers in {} ready! Skipped {:?}. Retry in {:?}s",
-                self,
-                skip_rpcs,
-                retry_at.duration_since(Instant::now()).as_secs_f32()
+                ?skip_rpcs,
+                retry_in_s=?retry_at.duration_since(Instant::now()).as_secs_f32(),
+                "no servers in {} ready!",
+                self,                
             );
 
             Ok(OpenRequestResult::RetryAt(retry_at))
         } else {
-            warn!("no servers in {} ready! Skipped {:?}", self, skip_rpcs);
+            warn!(?skip_rpcs, "no servers in {} ready!", self);
 
             Ok(OpenRequestResult::NotReady)
         }
@@ -714,7 +714,7 @@ impl Web3Rpcs {
                     warn!("no request handle for {}", rpc)
                 }
                 Err(err) => {
-                    warn!("error getting request handle for {}. err={:?}", rpc, err)
+                    warn!(?err, "error getting request handle for {}", rpc)
                 }
             }
         }
@@ -902,16 +902,16 @@ impl Web3Rpcs {
                                         } else {
                                             // they hit a limit lower than what we expect
                                             warn!(
-                                                "unexpected result limit ({}) by {}",
-                                                error_msg,
-                                                skip_rpcs.last().unwrap()
+                                                %error_msg,
+                                                "unexpected result limitby {}",
+                                                skip_rpcs.last().unwrap(),
                                             );
                                             continue;
                                         }
                                     } else {
                                         warn!(
-                                            "rate limited ({}) by {}",
-                                            error_msg,
+                                            %error_msg,
+                                            "rate limited by {}",
                                             skip_rpcs.last().unwrap()
                                         );
                                         continue;

@@ -107,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
         match main_loop(&check_url, &compare_url, &client, &counter).await {
             Ok(()) => break,
             Err(err) => {
-                warn!("{:?}", err);
+                warn!(?err, "main_loop");
 
                 if let Some(max_wait) = cli_config.max_wait {
                     if max_wait == 0 || start.elapsed().as_secs() > max_wait {

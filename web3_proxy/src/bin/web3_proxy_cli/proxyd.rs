@@ -217,21 +217,21 @@ async fn run(
     if !frontend_exited {
         if let Err(err) = frontend_shutdown_sender.send(()) {
             // TODO: this is actually expected if the frontend is already shut down
-            warn!("shutdown sender err={:?}", err);
+            warn!(?err, "shutdown sender");
         };
     }
 
     // TODO: Also not there on main branch
     // TODO: wait until the frontend completes
     if let Err(err) = frontend_shutdown_complete_receiver.recv().await {
-        warn!("shutdown completition err={:?}", err);
+        warn!(?err, "shutdown completition");
     } else {
         info!("frontend exited gracefully");
     }
 
     // now that the frontend is complete, tell all the other futures to finish
     if let Err(err) = app_shutdown_sender.send(()) {
-        warn!("backend sender err={:?}", err);
+        warn!(?err, "backend sender");
     };
 
     info!(

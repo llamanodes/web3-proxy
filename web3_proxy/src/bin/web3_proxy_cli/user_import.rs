@@ -10,7 +10,7 @@ use migration::sea_orm::{
 };
 use std::path::{Path, PathBuf};
 use std::{fs::File, io::BufReader};
-use tracing::{info, warn};
+use tracing::{info};
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 /// Import users from another database.
@@ -54,7 +54,7 @@ impl UserImportSubCommand {
                         self.import_user_file(db_conn, path, &mut user_map).await?
                 }
                 Err(e) => {
-                    warn!(
+                    info!(
                         "imported {} users from {} files.",
                         imported_user_count, user_file_count
                     );
@@ -87,7 +87,7 @@ impl UserImportSubCommand {
                         self.import_rpc_key_file(db_conn, path, &user_map).await?
                 }
                 Err(e) => {
-                    warn!(
+                    info!(
                         "imported {} users from {} files.",
                         imported_rpc_key_count, rpc_key_file_count
                     );

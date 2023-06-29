@@ -456,7 +456,7 @@ pub async fn admin_imitate_login_post(
         .web3_context("saving user login")?;
 
     if let Err(err) = user_pending_login.into_active_model().delete(db_conn).await {
-        warn!("Failed to delete nonce:{}: {}", login_nonce.0, err);
+        warn!(none=?login_nonce.0, ?err, "Failed to delete nonce");
     }
 
     Ok(response)

@@ -610,7 +610,7 @@ impl Drop for RequestMetadata {
             // turn `&mut self` into `self`
             let x = mem::take(self);
 
-            // warn!("request metadata dropped without stat send! {:?}", self);
+            trace!(?self, "request metadata dropped without stat send");
             let _ = x.try_send_stat();
         }
     }
@@ -881,7 +881,7 @@ pub async fn ip_is_authorized(
             Ok::<_, Web3ProxyError>(())
         }
         .map_err(|err| {
-            warn!("background update of recent_users:ip failed: {}", err);
+            warn!(?err, "background update of recent_users:ip failed");
 
             err
         });
@@ -945,7 +945,7 @@ pub async fn key_is_authorized(
             Ok::<_, Web3ProxyError>(())
         }
         .map_err(|err| {
-            warn!("background update of recent_users:id failed: {}", err);
+            warn!(?err, "background update of recent_users:id failed");
 
             err
         });

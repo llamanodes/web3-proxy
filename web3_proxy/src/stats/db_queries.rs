@@ -273,7 +273,7 @@ pub async fn query_user_stats<'a>(
             .set_ex::<_, _, ()>(cache_key, cache_body, ttl)
             .await
         {
-            warn!("Redis error while caching query_user_stats: {:?}", err);
+            warn!(?err, "Redis error while caching query_user_stats");
         }
     } else {
         headers.insert(

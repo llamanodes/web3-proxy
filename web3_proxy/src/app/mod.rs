@@ -204,15 +204,15 @@ impl Web3ProxyApp {
 
         if !top_config.extra.is_empty() {
             warn!(
-                "unknown TopConfig fields!: {:?}",
-                top_config.app.extra.keys()
+                extra=?top_config.extra.keys(),
+                "unknown TopConfig fields!",
             );
         }
 
         if !top_config.app.extra.is_empty() {
             warn!(
-                "unknown Web3ProxyAppConfig fields!: {:?}",
-                top_config.app.extra.keys()
+                extra=?top_config.app.extra.keys(),
+                "unknown Web3ProxyAppConfig fields!",
             );
         }
 
@@ -750,7 +750,7 @@ impl Web3ProxyApp {
             match user::Entity::find().count(db).await {
                 Ok(user_count) => UserCount(user_count as i64),
                 Err(err) => {
-                    warn!("unable to count users: {:?}", err);
+                    warn!(?err, "unable to count users");
                     UserCount(-1)
                 }
             }
@@ -863,7 +863,7 @@ impl Web3ProxyApp {
                         (recent_ip_counts, recent_user_id_counts, recent_tx_counts)
                     }
                     Err(err) => {
-                        warn!("unable to count recent users: {}", err);
+                        warn!(?err, "unable to count recent users");
                         (
                             RecentCounts::for_err(),
                             RecentCounts::for_err(),
@@ -873,7 +873,7 @@ impl Web3ProxyApp {
                 }
             }
             Err(err) => {
-                warn!("unable to connect to redis while counting users: {:?}", err);
+                warn!(?err, "unable to connect to redis while counting users");
                 (
                     RecentCounts::for_err(),
                     RecentCounts::for_err(),
@@ -1510,8 +1510,8 @@ impl Web3ProxyApp {
                                 Err(Web3ProxyError::NoDatabase) => {},
                                 Err(err) => {
                                     warn!(
-                                        "unable to save stats for eth_sendRawTransaction: {:?}",
-                                        err
+                                        ?err, 
+                                        "unable to save stats for eth_sendRawTransaction",
                                     )
                                 }
                             }

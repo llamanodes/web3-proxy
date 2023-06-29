@@ -86,7 +86,7 @@ pub async fn get_user_id_from_params(
                     .set_ex::<_, _, ()>(user_redis_key, user_id, ONE_DAY)
                     .await
                 {
-                    warn!("Unable to save user bearer token to redis: {}", err)
+                    warn!(?err, "Unable to save user bearer token to redis")
                 }
             }
 
