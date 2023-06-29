@@ -1330,7 +1330,7 @@ impl Web3ProxyApp {
             "eth_accounts" => JsonRpcResponseEnum::from(serde_json::Value::Array(vec![])),
             "eth_blockNumber" => {
                 match head_block.cloned().or(self.balanced_rpcs.head_block()) {
-                    Some(head_block_num) => JsonRpcResponseEnum::from(json!(head_block_num)),
+                    Some(head_block) => JsonRpcResponseEnum::from(json!(head_block.number())),
                     None => {
                         // TODO: what does geth do if this happens?
                         // TODO: standard not synced error
