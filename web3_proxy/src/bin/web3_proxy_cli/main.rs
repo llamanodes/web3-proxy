@@ -233,7 +233,7 @@ fn main() -> anyhow::Result<()> {
         environment: Some(sentry_env),
         // Enable capturing of traces
         // TODO: make this configurable!
-        traces_sample_rate: 0.01,
+        traces_sample_rate: 0.001,
         ..Default::default()
     });
 
