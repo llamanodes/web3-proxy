@@ -116,7 +116,8 @@ pub enum Web3ProxyError {
         needed: u32,
     },
     NotFound,
-    NotImplemented,
+    #[error(ignore)]
+    NotImplemented(Cow<'static, str>),
     NoVolatileRedisDatabase,
     OriginRequired,
     #[error(ignore)]
@@ -723,12 +724,16 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::NotImplemented => {
-                error!("NotImplemented");
+            Self::NotImplemented(msg) => {
+                warn!("NotImplemented: {}", msg);
                 (
                     StatusCode::NOT_IMPLEMENTED,
                     JsonRpcErrorData {
-                        message: "work in progress".into(),
+                        message: format!(
+                            "{} is not yet implemented. contact us if you need this",
+                            msg
+                        )
+                        .into(),
                         code: StatusCode::NOT_IMPLEMENTED.as_u16().into(),
                         data: None,
                     },

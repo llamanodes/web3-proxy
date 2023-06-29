@@ -128,7 +128,7 @@ pub async fn rpc_keys_delete(
     let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
 
     // TODO: think about how cascading deletes and billing should work
-    Err(Web3ProxyError::NotImplemented)
+    Err(Web3ProxyError::NotImplemented("rpc_keys_delete".into()))
 }
 
 /// the JSON input to the `rpc_keys_management` handler.

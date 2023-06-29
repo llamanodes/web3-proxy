@@ -335,7 +335,9 @@ impl Web3ProxyApp {
                 );
             });
         } else {
-            return Err(Web3ProxyError::NotImplemented);
+            return Err(Web3ProxyError::NotImplemented(
+                subscribe_to.to_owned().into(),
+            ));
         }
 
         // TODO: do something with subscription_join_handle?
