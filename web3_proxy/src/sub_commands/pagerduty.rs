@@ -1,11 +1,11 @@
+use crate::{
+    config::TopConfig,
+    pagerduty::{pagerduty_alert, pagerduty_alert_for_config},
+};
 use argh::FromArgs;
 use pagerduty_rs::{eventsv2async::EventsV2 as PagerdutyAsyncEventsV2, types::Event};
 use serde_json::json;
 use tracing::{error, info};
-use web3_proxy::{
-    config::TopConfig,
-    pagerduty::{pagerduty_alert, pagerduty_alert_for_config},
-};
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 /// Quickly create a pagerduty alert

@@ -1,6 +1,7 @@
 mod compare;
 mod simple;
 
+use crate::{config::TopConfig, pagerduty::pagerduty_alert};
 use anyhow::Context;
 use argh::FromArgs;
 use futures::{
@@ -13,7 +14,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, MissedTickBehavior};
 use tracing::{debug, error, info, warn, Level};
-use web3_proxy::{config::TopConfig, pagerduty::pagerduty_alert};
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 /// Loop healthchecks and send pager duty alerts if any fail

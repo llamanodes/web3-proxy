@@ -17,6 +17,7 @@ pub mod relational_db;
 pub mod response_cache;
 pub mod rpcs;
 pub mod stats;
+pub mod sub_commands;
 pub mod user_token;
 
 use serde::Deserialize;

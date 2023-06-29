@@ -1,7 +1,7 @@
+use crate::config::TopConfig;
 use argh::FromArgs;
 use std::fs;
 use tracing::{error, info, warn};
-use web3_proxy::config::TopConfig;
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 /// Check the config for any problems.

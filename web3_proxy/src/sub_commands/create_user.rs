@@ -1,3 +1,4 @@
+use crate::frontend::authorization::RpcSecretKey;
 use anyhow::Context;
 use argh::FromArgs;
 use entities::{rpc_key, user};
@@ -6,7 +7,6 @@ use migration::sea_orm::{self, ActiveModelTrait, TransactionTrait};
 use tracing::info;
 use ulid::Ulid;
 use uuid::Uuid;
-use web3_proxy::frontend::authorization::RpcSecretKey;
 
 #[derive(FromArgs, PartialEq, Debug, Eq)]
 /// Create a new user and api key

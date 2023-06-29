@@ -1,3 +1,4 @@
+use crate::frontend::authorization::RpcSecretKey;
 use anyhow::Context;
 use argh::FromArgs;
 use entities::{rpc_key, user, user_tier};
@@ -8,7 +9,6 @@ use migration::sea_orm::{
 use serde_json::json;
 use tracing::{debug, info};
 use uuid::Uuid;
-use web3_proxy::frontend::authorization::RpcSecretKey;
 
 /// change a user's tier.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
