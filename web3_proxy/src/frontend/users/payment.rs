@@ -122,7 +122,7 @@ pub async fn user_balance_post(
 
         (authorization, None)
     } else {
-        return Err(Web3ProxyError::AccessDenied);
+        return Err(Web3ProxyError::AccessDenied("no bearer token or ip".into()));
     };
 
     // Get the transaction hash

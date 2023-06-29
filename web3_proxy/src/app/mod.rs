@@ -110,8 +110,6 @@ pub struct Web3ProxyApp {
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     /// rate limit authenticated users
     pub frontend_registered_user_rate_limiter: Option<DeferredRateLimiter<u64>>,
-    /// Optional time series database for making pretty graphs that load quickly
-    pub influxdb_client: Option<influxdb2::Client>,
     /// concurrent/parallel request limits for anonymous users
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>>,
     pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
@@ -138,6 +136,10 @@ pub struct Web3ProxyApp {
     /// channel for sending stats in a background task
     pub stat_sender: Option<flume::Sender<AppStat>>,
 
+    /// Optional time series database for making pretty graphs that load quickly
+    influxdb_client: Option<influxdb2::Client>,
+    /// Simple way to connect ethers Contracsts to the proxy
+    /// TODO: make this more efficient
     internal_provider: OnceCell<Arc<EthersHttpProvider>>,
 }
 
@@ -707,6 +709,10 @@ impl Web3ProxyApp {
 
     pub fn head_block_receiver(&self) -> watch::Receiver<Option<Web3ProxyBlock>> {
         self.watch_consensus_head_receiver.clone()
+    }
+
+    pub fn influxdb_client(&self) -> Web3ProxyResult<&influxdb2::Client> {
+        self.influxdb_client.as_ref().ok_or(Web3ProxyError::NoDatabase)
     }
 
     /// an ethers provider that you can use with ether's abigen.
@@ -1609,7 +1615,7 @@ impl Web3ProxyApp {
             method => {
                 if method.starts_with("admin_") {
                     // TODO: emit a stat? will probably just be noise
-                    return Err(Web3ProxyError::AccessDenied);
+                    return Err(Web3ProxyError::AccessDenied("admin methods are not allowed".into()));
                 }
 
                 // TODO: if no servers synced, wait for them to be synced? probably better to error and let haproxy retry another server

@@ -190,7 +190,9 @@ pub async fn rpc_keys_management(
                         {
                             Ok(rpc_key.into_active_model())
                         } else {
-                            Err(Web3ProxyError::AccessDenied)
+                            Err(Web3ProxyError::AccessDenied(
+                                "secondary user is not an admin or owner".into(),
+                            ))
                         }
                     }
                     Some((_, None)) => Err(Web3ProxyError::BadResponse(

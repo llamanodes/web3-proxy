@@ -57,11 +57,11 @@ pub async fn query_admin_modify_usertier<'a>(
     trace!(%caller_id, "query_admin_modify_usertier");
 
     // Check if the caller is an admin (i.e. if he is in an admin table)
-    let _admin: admin::Model = admin::Entity::find()
+    let _admin = admin::Entity::find()
         .filter(admin::Column::UserId.eq(caller_id))
         .one(db_conn)
         .await?
-        .ok_or(Web3ProxyError::AccessDenied)?;
+        .ok_or(Web3ProxyError::AccessDenied("not an admin".into()))?;
 
     // If we are here, that means an admin was found, and we can safely proceed
 

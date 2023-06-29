@@ -67,10 +67,7 @@ pub async fn admin_increase_balance(
         .filter(admin::Column::UserId.eq(caller_id))
         .one(&txn)
         .await?
-        .ok_or_else(|| {
-            warn!(%caller_id, "not an admin");
-            Web3ProxyError::AccessDenied
-        })?;
+        .ok_or_else(|| Web3ProxyError::AccessDenied("not an admin".into()))?;
 
     let user_entry: user::Model = user::Entity::find()
         .filter(user::Column::Address.eq(payload.user_address.as_bytes()))
@@ -215,7 +212,7 @@ pub async fn admin_imitate_login_get(
         .filter(user::Column::Address.eq(admin_address.as_bytes()))
         .one(db_replica.as_ref())
         .await?
-        .ok_or(Web3ProxyError::AccessDenied)?;
+        .ok_or(Web3ProxyError::AccessDenied("not an admin".into()))?;
 
     // Get the user that we want to imitate from the read-only database (their id ...)
     // TODO: Only get the id, not the whole user object ...

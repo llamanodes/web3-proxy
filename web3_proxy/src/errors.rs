@@ -44,8 +44,9 @@ impl From<Web3ProxyError> for Web3ProxyResult<()> {
 #[derive(Debug, Display, Error, From)]
 pub enum Web3ProxyError {
     Abi(ethers::abi::Error),
-    AccessDenied,
-    AccessDeniedNoSubuser,
+    #[error(ignore)]
+    #[from(ignore)]
+    AccessDenied(Cow<'static, str>),
     #[error(ignore)]
     Anyhow(anyhow::Error),
     Arc(Arc<Self>),
@@ -117,6 +118,7 @@ pub enum Web3ProxyError {
     },
     NotFound,
     #[error(ignore)]
+    #[from(ignore)]
     NotImplemented(Cow<'static, str>),
     NoVolatileRedisDatabase,
     OriginRequired,
@@ -186,24 +188,13 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::AccessDenied => {
+            Self::AccessDenied(msg) => {
                 // TODO: attach something to this trace. probably don't include much in the message though. don't want to leak creds by accident
-                trace!("access denied");
+                trace!(%msg, "access denied");
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
-                        message: "FORBIDDEN".into(),
-                        code: StatusCode::FORBIDDEN.as_u16().into(),
-                        data: None,
-                    },
-                )
-            }
-            Self::AccessDeniedNoSubuser => {
-                trace!("access denied not a subuser");
-                (
-                    StatusCode::FORBIDDEN,
-                    JsonRpcErrorData {
-                        message: "FORBIDDEN: NOT A SUBUSER".into(),
+                        message: format!("FORBIDDEN: {}", msg).into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
                         data: None,
                     },
