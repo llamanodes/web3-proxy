@@ -37,7 +37,6 @@ use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
 use hashbrown::{HashMap, HashSet};
-use influxdb2::Client;
 use migration::sea_orm::{DatabaseTransaction, EntityTrait, PaginatorTrait, TransactionTrait};
 use moka::future::{Cache, CacheBuilder};
 use once_cell::sync::OnceCell;
@@ -712,7 +711,7 @@ impl Web3ProxyApp {
         self.watch_consensus_head_receiver.clone()
     }
 
-    pub fn influxdb_client(&self) -> Web3ProxyResult<&Client> {
+    pub fn influxdb_client(&self) -> Web3ProxyResult<&influxdb2::Client> {
         self.influxdb_client.as_ref().ok_or(Web3ProxyError::NoDatabase)
     }
 
