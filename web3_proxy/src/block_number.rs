@@ -11,7 +11,7 @@ use ethers::{
 };
 use serde_json::json;
 use std::sync::Arc;
-use tracing::{trace, warn, error};
+use tracing::{error, trace, warn};
 
 use crate::{frontend::authorization::Authorization, rpcs::many::Web3Rpcs};
 
@@ -116,17 +116,21 @@ pub async fn clean_block_number(
                         let (block_num, change) =
                             BlockNumber_to_U64(block_number, latest_block.number());
 
-                        let (block_hash, _) = rpcs
-                            .block_hash(authorization, &block_num)
-                            .await
-                            .context("fetching block hash from number")?;
+                        if block_num == *latest_block.number() {
+                            (latest_block.into(), change)
+                        } else {
+                            let (block_hash, _) = rpcs
+                                .block_hash(authorization, &block_num)
+                                .await
+                                .context("fetching block hash from number")?;
 
-                        let block = rpcs
-                            .block(authorization, &block_hash, None, Some(3), None)
-                            .await
-                            .context("fetching block from hash")?;
+                            let block = rpcs
+                                .block(authorization, &block_hash, None, Some(3), None)
+                                .await
+                                .context("fetching block from hash")?;
 
-                        (BlockNumAndHash::from(&block), change)
+                            (BlockNumAndHash::from(&block), change)
+                        }
                     } else if let Ok(block_hash) = serde_json::from_value::<H256>(x.clone()) {
                         let block = rpcs
                             .block(authorization, &block_hash, None, Some(3), None)

@@ -1332,8 +1332,6 @@ impl Web3ProxyApp {
                 match head_block.cloned().or(self.balanced_rpcs.head_block()) {
                     Some(head_block) => JsonRpcResponseEnum::from(json!(head_block.number())),
                     None => {
-                        // TODO: what does geth do if this happens?
-                        // TODO: standard not synced error
                         return Err(Web3ProxyError::NoServersSynced);
                     }
                 }
