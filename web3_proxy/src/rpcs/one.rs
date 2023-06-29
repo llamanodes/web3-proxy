@@ -4,7 +4,7 @@ use super::provider::{connect_http, connect_ws, EthersHttpProvider, EthersWsProv
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, Web3ProxyJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
-use crate::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
 use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
@@ -615,7 +615,7 @@ impl Web3Rpc {
                     break;
                 }
 
-                warn!(rpc=%self, ?err, "subscribe err");
+                warn!(?err, "subscribe err on {}", self);
             } else if self.should_disconnect() {
                 break;
             }
@@ -670,7 +670,9 @@ impl Web3Rpc {
 
         trace!("starting subscriptions on {}", self);
 
-        self.check_provider(chain_id).await?;
+        self.check_provider(chain_id)
+            .await
+            .web3_context("failed check_provider")?;
 
         let mut futures = vec![];
 
@@ -690,7 +692,7 @@ impl Web3Rpc {
 
                     disconnect_watch_rx.changed().await?;
                 }
-                info!(%rpc, "disconnect triggered");
+                info!("disconnect triggered on {}", rpc);
                 Ok(())
             };
 
@@ -723,7 +725,7 @@ impl Web3Rpc {
                         if let Err(err) = rpc.healthcheck(error_handler).await {
                             // TODO: different level depending on the error handler
                             // TODO: if rate limit error, set "retry_at"
-                            warn!(%rpc, ?err, "health check failed");
+                            warn!(?err, "health check on {} failed", rpc);
                         }
                     }
 

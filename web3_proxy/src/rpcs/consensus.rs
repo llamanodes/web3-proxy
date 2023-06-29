@@ -281,7 +281,7 @@ impl RankedRpcs {
                     }
                 }
             }
-            warn!(%rpc, "no rpc data for this rpc. thats not promising");
+            warn!("no rpc data for this {}. thats not promising", rpc);
             ShouldWaitForBlock::NeverReady
         } else {
             // if no needed_block_num was specified, then this should work
