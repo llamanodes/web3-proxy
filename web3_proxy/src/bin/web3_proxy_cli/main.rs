@@ -231,6 +231,12 @@ fn main() -> anyhow::Result<()> {
         ..Default::default()
     });
 
+    let maybe_chain_id = top_config.as_ref().map(|x| x.app.chain_id);
+
+    sentry::configure_scope(|scope| {
+        scope.set_tag("chain_id", format!("{:?}", maybe_chain_id));
+    });
+
     tracing_subscriber::fmt()
         // create a subscriber that uses the RUST_LOG env var for filtering levels
         .with_env_filter(EnvFilter::builder().parse(rust_log)?)

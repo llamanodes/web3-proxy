@@ -383,8 +383,10 @@ impl OpenRequestHandle {
                         }
                         Err(err) => {
                             warn!(
-                                "failed parsing eth_call params. unable to save revert. {}",
-                                err
+                                %method,
+                                ?params,
+                                ?err,
+                                "failed parsing eth_call params. unable to save revert",
                             );
                         }
                     }

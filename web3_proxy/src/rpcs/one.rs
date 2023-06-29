@@ -615,7 +615,7 @@ impl Web3Rpc {
                     break;
                 }
 
-                warn!("{} subscribe err: {:#?}", self, err)
+                warn!(rpc=%self, ?err, "subscribe err");
             } else if self.should_disconnect() {
                 break;
             }
@@ -678,18 +678,18 @@ impl Web3Rpc {
 
         // subscribe to the disconnect watch. the app uses this when shutting down or when configs change
         if let Some(disconnect_watch_tx) = self.disconnect_watch.as_ref() {
-            let clone = self.clone();
+            let rpc = self.clone();
             let mut disconnect_watch_rx = disconnect_watch_tx.subscribe();
 
             let f = async move {
                 loop {
                     if *disconnect_watch_rx.borrow_and_update() {
-                        info!("disconnect triggered on {}", clone);
                         break;
                     }
 
                     disconnect_watch_rx.changed().await?;
                 }
+                info!(%rpc, "disconnect triggered");
                 Ok(())
             };
 
@@ -721,7 +721,8 @@ impl Web3Rpc {
                         // TODO: move this into a function and the chaining should be easier
                         if let Err(err) = rpc.healthcheck(error_handler).await {
                             // TODO: different level depending on the error handler
-                            warn!("health checking {} failed: {:?}", rpc, err);
+                            // TODO: if rate limit error, set "retry_at"
+                            warn!(%rpc, ?err, "health check failed");
                         }
                     }
 

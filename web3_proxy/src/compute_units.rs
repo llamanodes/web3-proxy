@@ -80,6 +80,9 @@ impl ComputeUnit {
             (_, "eth_newBlockFilter") => 20,
             (_, "eth_newFilter") => 20,
             (_, "eth_newPendingTransactionFilter") => 20,
+            (_, "eth_pollSubscriptions") => {
+                return Self::unimplemented();
+            }
             (_, "eth_protocolVersion") => 0,
             (_, "eth_sendRawTransaction") => 250,
             (_, "eth_sendUserOperation") => 1000,

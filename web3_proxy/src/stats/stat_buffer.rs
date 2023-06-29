@@ -164,6 +164,7 @@ impl StatBuffer {
 
         // TODO: wait on all websockets to close
         // TODO: wait on all pending external requests to finish
+        info!("waiting 10 seconds for remaining stats to arrive");
         sleep(Duration::from_secs(10)).await;
 
         // loop {

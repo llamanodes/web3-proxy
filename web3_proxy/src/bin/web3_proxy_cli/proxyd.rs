@@ -127,7 +127,21 @@ async fn run(
         prometheus_shutdown_receiver,
     ));
 
-    let _ = spawned_app.app.head_block_receiver().changed().await;
+    info!("waiting for head block");
+    loop {
+        spawned_app.app.head_block_receiver().changed().await?;
+
+        if spawned_app
+            .app
+            .head_block_receiver()
+            .borrow_and_update()
+            .is_some()
+        {
+            break;
+        } else {
+            info!("no head block yet!");
+        }
+    }
 
     // start the frontend port
     let frontend_handle = tokio::spawn(frontend::serve(
@@ -419,10 +433,7 @@ mod tests {
         let first_block_num = anvil_result.number.unwrap();
 
         // mine a block
-        let _: U256 = anvil_provider
-            .request("evm_mine", ())
-            .await
-            .unwrap();
+        let _: U256 = anvil_provider.request("evm_mine", ()).await.unwrap();
 
         // make sure the block advanced
         let anvil_result = anvil_provider

@@ -478,7 +478,7 @@ impl ConsensusFinder {
 
         match old_consensus_head_connections.as_ref() {
             None => {
-                debug!(
+                info!(
                     "first {}/{} {}{}/{}/{} block={}, rpc={}",
                     best_tier,
                     worst_tier,
@@ -836,7 +836,7 @@ impl ConsensusFinder {
 
         if num_known < web3_rpcs.min_synced_rpcs {
             // this keeps us from serving requests when the proxy first starts
-            info!(min_synced_rpcs=%web3_rpcs.min_synced_rpcs, "not enough servers known");
+            info!(%num_known, min_synced_rpcs=%web3_rpcs.min_synced_rpcs, "not enough servers known");
             return Ok(None);
         }
 

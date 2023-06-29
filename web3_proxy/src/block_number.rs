@@ -263,7 +263,9 @@ impl CacheMode {
                             *x = json!(block_num);
                         }
 
-                        todo!();
+                        let (block_hash, _) = rpcs.block_hash(authorization, &block_num).await?;
+
+                        BlockNumAndHash(block_num, block_hash)
                     } else {
                         warn!("if no from, what should we default? 0 or head?");
                         head_block.into()
@@ -282,7 +284,9 @@ impl CacheMode {
                             *x = json!(block_num);
                         }
 
-                        todo!();
+                        let (block_hash, _) = rpcs.block_hash(authorization, &block_num).await?;
+
+                        BlockNumAndHash(block_num, block_hash)
                     } else {
                         head_block.into()
                     };
