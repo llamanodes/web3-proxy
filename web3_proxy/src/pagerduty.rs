@@ -8,7 +8,7 @@ use std::{
     hash::{Hash, Hasher},
     panic::PanicInfo,
 };
-use time::OffsetDateTime;
+use time_03::OffsetDateTime;
 use tracing::{debug, error, warn};
 
 /*

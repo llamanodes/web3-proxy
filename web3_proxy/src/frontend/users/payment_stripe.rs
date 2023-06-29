@@ -1,12 +1,10 @@
 use crate::app::Web3ProxyApp;
-use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::frontend::authorization::{
     login_is_authorized, Authorization as Web3ProxyAuthorization,
 };
-use crate::frontend::users::authentication::register_new_user;
 use anyhow::Context;
 use axum::{
-    extract::Path,
     headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
     Extension, Json, TypedHeader,
@@ -16,24 +14,19 @@ use axum_macros::debug_handler;
 use entities::{
     balance, increase_on_chain_balance_receipt, rpc_key, stripe_increase_balance_receipt, user,
 };
-use ethers::abi::AbiEncode;
-use ethers::types::{Address, Block, TransactionReceipt, TxHash, H256};
-use hashbrown::{HashMap, HashSet};
-use http::{HeaderMap, StatusCode};
+use ethers::types::Address;
+use http::HeaderMap;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
-    self, ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, IntoActiveModel, ModelTrait,
-    QueryFilter, QuerySelect, TransactionTrait,
+    self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
 use migration::{Expr, OnConflict};
-use payment_contracts::ierc20::IERC20;
-use payment_contracts::payment_factory::{self, PaymentFactory};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use stripe::Webhook;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 /// `GET /user/balance/stripe` -- Use a bearer token to get the user's balance and spend.
 ///
@@ -68,7 +61,7 @@ pub async fn user_stripe_deposits_get(
 pub struct StripePost {
     // email: Option<String>,
     // referral_code: Option<String>,
-    data: serde_json::Value,
+    data: Box<serde_json::value::RawValue>,
 }
 
 /// `POST /user/balance/stripe` -- Process a stripe transaction;
@@ -76,21 +69,20 @@ pub struct StripePost {
 #[debug_handler]
 pub async fn user_balance_stripe_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    ip: InsecureClientIp,
+    InsecureClientIp(ip): InsecureClientIp,
     headers: HeaderMap,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Json(payload): Json<StripePost>,
 ) -> Web3ProxyResponse {
     // rate limit by bearer token **OR** IP address
-    let (authorization, _semaphore) = if let Some(TypedHeader(Authorization(bearer))) = bearer {
+    let (_, _semaphore) = if let Some(TypedHeader(Authorization(bearer))) = bearer {
         let (_, semaphore) = app.bearer_is_authorized(bearer).await?;
 
         // TODO: is handling this as internal fine?
-        let authorization = Web3ProxyAuthorization::internal(app.db_conn())?;
+        let authorization = Web3ProxyAuthorization::internal(app.db_conn().ok().cloned())?;
 
         (authorization, Some(semaphore))
     } else {
-        let InsecureClientIp(ip) = ip;
         let authorization = login_is_authorized(&app, ip).await?;
         (authorization, None)
     };
@@ -101,15 +93,7 @@ pub async fn user_balance_stripe_post(
     //     .parse()
     //     .or(Err(Web3ProxyError::ParseAddressError))?;
 
-    println!("Parameters are: {:?}", payload);
-
-    let payload = serde_json::to_string(&payload.data).map_err(|x| {
-        Web3ProxyError::BadRequest(
-            format!("Could not serialize data field as string {:?}", x).into(),
-        )
-    })?;
-
-    println!("Payload is: {:?}", payload);
+    trace!(?payload);
 
     // Get the payload, and the header
     // let payload = payload.data.get("data").ok_or(Web3ProxyError::BadRequest(
@@ -128,8 +112,8 @@ pub async fn user_balance_stripe_post(
     // Now parse the payload and signature
     // TODO: Move env variable elsewhere
     let event = Webhook::construct_event(
-        &payload,
-        &signature,
+        payload.data.get(),
+        signature,
         app.config
             .stripe_api_key
             .clone()
@@ -156,7 +140,7 @@ pub async fn user_balance_stripe_post(
         .filter(
             stripe_increase_balance_receipt::Column::StripePaymentIntendId.eq(intent.id.as_str()),
         )
-        .one(&db_conn)
+        .one(db_conn)
         .await?
         .is_some()
     {
@@ -175,12 +159,12 @@ pub async fn user_balance_stripe_post(
     ))?;
 
     let recipient: Option<user::Model> = user::Entity::find_by_id(recipient_user_id)
-        .one(&db_conn)
+        .one(db_conn)
         .await?;
 
     // we do a fixed 2 decimal points because we only accept USD for now
     let amount = Decimal::new(intent.amount, 2);
-    let recipient_id: Option<u64> = recipient.as_ref().map_or(None, |x| Some(x.id));
+    let recipient_id: Option<u64> = recipient.as_ref().map(|x| x.id);
     let insert_receipt_model = stripe_increase_balance_receipt::ActiveModel {
         id: Default::default(),
         deposit_to_user_id: sea_orm::Set(recipient_id),
@@ -196,15 +180,15 @@ pub async fn user_balance_stripe_post(
     let txn = db_conn.begin().await?;
 
     // Assert that it's usd
-    if intent.currency.to_string() != "USD" || !recipient.is_some() {
+    if intent.currency.to_string() != "USD" || recipient.is_none() {
         // In this case I should probably still save it to the database,
         // but not increase balance (this should be refunded)
         // TODO: I suppose we could send a refund request right away from here
         error!(
-            "Please refund this transaction! Currency: {} - Recipient: {} - StripePaymentIntendId {}",
-            intent.currency, &recipient_user_id, intent.id
+            currency=%intent.currency, %recipient_user_id, %intent.id,
+            "Please refund this transaction!",
         );
-        let _ = insert_receipt_model.save(&txn);
+        let _ = insert_receipt_model.save(&txn).await;
         txn.commit().await?;
         return Ok("Received Webhook".into_response());
     }
@@ -218,7 +202,7 @@ pub async fn user_balance_stripe_post(
                 user_id: sea_orm::Set(recipient.id),
                 ..Default::default()
             };
-            trace!("Trying to insert into balance entry: {:?}", balance_entry);
+            trace!(?balance_entry, "Trying to insert into balance entry");
             balance::Entity::insert(balance_entry)
                 .on_conflict(
                     OnConflict::new()
@@ -232,7 +216,7 @@ pub async fn user_balance_stripe_post(
                 .await
                 .web3_context("increasing balance")?;
 
-            let _ = insert_receipt_model.save(&txn);
+            let _ = insert_receipt_model.save(&txn).await;
 
             let recipient_rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(recipient.id))
