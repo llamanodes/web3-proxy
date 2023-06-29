@@ -28,6 +28,7 @@ use migration::sea_orm::{
 use migration::{Expr, OnConflict};
 use payment_contracts::ierc20::IERC20;
 use payment_contracts::payment_factory::{self, PaymentFactory};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -61,15 +62,24 @@ pub async fn user_stripe_deposits_get(
     Ok(Json(response).into_response())
 }
 
-/// `POST /user/balance/stripe/` -- Process a stripe transaction;
+// /// the JSON input to the `post_user` handler.
+// /// TODO: what else can we update here? password hash? subscription to newsletter?
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StripePost {
+    // email: Option<String>,
+    // referral_code: Option<String>,
+    data: serde_json::Value,
+}
+
+/// `POST /user/balance/stripe` -- Process a stripe transaction;
 /// this endpoint is called from the webhook with the user_id parameter in the request
 #[debug_handler]
 pub async fn user_balance_stripe_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     ip: InsecureClientIp,
     headers: HeaderMap,
-    Path(mut params): Path<HashMap<String, String>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
+    Json(payload): Json<StripePost>,
 ) -> Web3ProxyResponse {
     // rate limit by bearer token **OR** IP address
     let (authorization, _semaphore) = if let Some(TypedHeader(Authorization(bearer))) = bearer {
@@ -91,10 +101,20 @@ pub async fn user_balance_stripe_post(
     //     .parse()
     //     .or(Err(Web3ProxyError::ParseAddressError))?;
 
+    println!("Parameters are: {:?}", payload);
+
+    let payload = serde_json::to_string(&payload.data).map_err(|x| {
+        Web3ProxyError::BadRequest(
+            format!("Could not serialize data field as string {:?}", x).into(),
+        )
+    })?;
+
+    println!("Payload is: {:?}", payload);
+
     // Get the payload, and the header
-    let payload = params.remove("data").ok_or(Web3ProxyError::BadRequest(
-        "You have not provided a 'data' for the Stripe payload".into(),
-    ))?;
+    // let payload = payload.data.get("data").ok_or(Web3ProxyError::BadRequest(
+    //     "You have not provided a 'data' for the Stripe payload".into(),
+    // ))?;
 
     // TODO Get this from the header
     let signature = headers
