@@ -7,7 +7,7 @@ use tokio::time::{sleep, Instant};
 use web3_proxy::rpcs::blockchain::ArcBlock;
 
 #[test_log::test(tokio::test)]
-async fn it_works() {
+async fn it_starts_and_stops() {
     let x = TestApp::spawn().await;
 
     let anvil_provider = &x.anvil_provider;
@@ -65,5 +65,6 @@ async fn it_works() {
 
     assert_eq!(anvil_result, proxy_result.unwrap());
 
+    // most tests won't need to wait, but we should wait here to be sure all the shutdown logic works properly
     x.wait().await;
 }

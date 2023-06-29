@@ -58,7 +58,8 @@ impl TestApp {
         let anvil_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
         // make a test TopConfig
-        // TODO: load TopConfig from a file? CliConfig could have `cli_config.load_top_config`. would need to inject our endpoint ports
+        // TODO: test influx
+        // TODO: test redis
         let top_config = TopConfig {
             app: AppConfig {
                 chain_id: 31337,
@@ -76,7 +77,7 @@ impl TestApp {
                 ..Default::default()
             },
             balanced_rpcs: HashMap::from([(
-                "anvil_both".to_string(),
+                "anvil".to_string(),
                 Web3RpcConfig {
                     http_url: Some(anvil.endpoint()),
                     ws_url: Some(anvil.ws_endpoint()),
