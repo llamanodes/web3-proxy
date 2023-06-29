@@ -62,7 +62,8 @@ impl TestApp {
         let top_config = TopConfig {
             app: AppConfig {
                 chain_id: 31337,
-                db_url: Some("sqlite://:memory:".into()),
+                // TODO: [make sqlite work](<https://www.sea-ql.org/SeaORM/docs/write-test/sqlite/>)
+                // db_url: Some("sqlite::memory:".into()),
                 default_user_max_requests_per_period: Some(6_000_000),
                 deposit_factory_contract: Address::from_str(
                     "4e3BC2054788De923A04936C6ADdB99A05B0Ea36",
