@@ -73,12 +73,13 @@ impl TestApp {
 
         let anvil_provider = Provider::<Http>::try_from(anvil.endpoint()).unwrap();
 
+        // TODO: instead of starting a db every time, use a connection pool and transactions to begin/rollback
         let db = if setup_db {
             // sqlite doesn't seem to work. our migrations are written for mysql
             // so lets use docker to start mysql
             let password: String = rand::thread_rng()
                 .sample_iter(&Alphanumeric)
-                .take(32)
+                .take(16)
                 .map(char::from)
                 .collect();
 

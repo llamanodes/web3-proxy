@@ -3,7 +3,6 @@ use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::frontend::authorization::{login_is_authorized, RpcSecretKey};
 use crate::user_token::UserBearerToken;
-use crate::{PostLogin, PostLoginQuery};
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -23,6 +22,7 @@ use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
     QueryFilter, TransactionTrait,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
@@ -31,6 +31,24 @@ use std::sync::Arc;
 use time_03::{Duration, OffsetDateTime};
 use tracing::{error, trace, warn};
 use ulid::Ulid;
+
+/// Query params for our `post_login` handler.
+#[derive(Debug, Deserialize)]
+pub struct PostLoginQuery {
+    /// While we are in alpha/beta, we require users to supply an invite code.
+    /// The invite code (if any) is set in the application's config.
+    pub invite_code: Option<String>,
+}
+
+/// JSON body to our `post_login` handler.
+/// Currently only siwe logins that send an address, msg, and sig are allowed.
+/// Email/password and other login methods are planned.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PostLogin {
+    pub sig: String,
+    pub msg: String,
+    pub referral_code: Option<String>,
+}
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
 ///
@@ -103,18 +121,22 @@ pub async fn user_login_get(
     let db_conn = app.db_conn()?;
 
     // delete any expired logins
-    let expired_logins = login::Entity::delete_many()
+    if let Err(err) = login::Entity::delete_many()
         .filter(login::Column::ExpiresAt.lte(now))
         .exec(db_conn)
-        .await;
-    trace!(?expired_logins, "deleted");
+        .await
+    {
+        warn!(?err, "expired_logins");
+    };
 
     // delete any expired pending logins
-    let expired_pending_logins = pending_login::Entity::delete_many()
-        .filter(login::Column::ExpiresAt.lte(now))
+    if let Err(err) = pending_login::Entity::delete_many()
+        .filter(pending_login::Column::ExpiresAt.lte(now))
         .exec(db_conn)
-        .await;
-    trace!(?expired_pending_logins, "deleted");
+        .await
+    {
+        warn!(?err, "expired_pending_logins");
+    };
 
     // we add 1 to expire_seconds just to be sure the database has the key for the full expiration_time
     let expires_at = Utc
@@ -299,7 +321,7 @@ pub async fn user_login_post(
             let txn = db_conn.begin().await?;
 
             // First, optionally catch a referral code from the parameters if there is any
-            trace!("Referal code is: {:?}", payload.referral_code);
+            trace!(?payload.referral_code);
             if let Some(referral_code) = payload.referral_code.as_ref() {
                 // If it is not inside, also check in the database
                 trace!("Using register referral code:  {:?}", referral_code);

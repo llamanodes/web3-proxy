@@ -5,8 +5,8 @@ use crate::admin_queries::query_admin_modify_usertier;
 use crate::app::Web3ProxyApp;
 use crate::errors::Web3ProxyResponse;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
+use crate::frontend::users::authentication::PostLogin;
 use crate::user_token::UserBearerToken;
-use crate::PostLogin;
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -35,7 +35,7 @@ use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 use time_03::{Duration, OffsetDateTime};
-use tracing::{debug, info, warn};
+use tracing::{info, trace, warn};
 use ulid::Ulid;
 
 #[derive(Deserialize)]
@@ -232,7 +232,7 @@ pub async fn admin_imitate_login_get(
         .filter(pending_login::Column::ExpiresAt.lte(now))
         .exec(db_conn)
         .await?;
-    debug!("cleared expired pending_logins: {:?}", delete_result);
+    trace!("cleared expired pending_logins: {:?}", delete_result);
 
     // Note that the admin is trying to log in as this user
     let trail = admin_trail::ActiveModel {

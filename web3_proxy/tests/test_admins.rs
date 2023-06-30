@@ -2,7 +2,7 @@ mod common;
 
 use crate::common::TestApp;
 
-#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
+// #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_admin_imitate_user() {
@@ -11,7 +11,7 @@ async fn test_admin_imitate_user() {
     todo!();
 }
 
-#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
+// #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_admin_grant_credits() {
@@ -20,7 +20,7 @@ async fn test_admin_grant_credits() {
     todo!();
 }
 
-#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
+// #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_admin_change_user_tier() {

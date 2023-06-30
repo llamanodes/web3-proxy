@@ -48,7 +48,8 @@ use ulid::Ulid;
 use uuid::Uuid;
 
 /// This lets us use UUID and ULID while we transition to only ULIDs
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize)]
+/// TODO: custom deserialize that can also go from String to Ulid
+#[derive(Copy, Clone, Debug, Deserialize, Eq, PartialEq)]
 pub enum RpcSecretKey {
     Ulid(Ulid),
     Uuid(Uuid),
