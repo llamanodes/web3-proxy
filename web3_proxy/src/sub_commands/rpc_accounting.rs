@@ -148,23 +148,23 @@ impl RpcAccountingSubCommand {
             .signed_duration_since(stats.first_period_datetime)
             .num_seconds()
             .into();
-        dbg!(query_seconds);
+        info!(%query_seconds);
 
         let avg_request_per_second = (stats.total_frontend_requests / query_seconds).round_dp(2);
-        dbg!(avg_request_per_second);
+        info!(%avg_request_per_second);
 
         let cache_hit_rate = (stats.total_cache_hits / stats.total_frontend_requests
             * Decimal::from(100))
         .round_dp(2);
-        dbg!(cache_hit_rate);
+        info!(%cache_hit_rate);
 
         let avg_response_millis =
             (stats.total_response_millis / stats.total_frontend_requests).round_dp(3);
-        dbg!(avg_response_millis);
+        info!(%avg_response_millis);
 
         let avg_response_bytes =
             (stats.total_response_bytes / stats.total_frontend_requests).round();
-        dbg!(avg_response_bytes);
+        info!(%avg_response_bytes);
 
         Ok(())
     }

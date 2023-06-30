@@ -1,3 +1,4 @@
+use anyhow::Context;
 use derive_more::From;
 use migration::sea_orm::{self, ConnectionTrait, Database};
 use migration::sea_query::table::ColumnDef;
@@ -31,24 +32,28 @@ pub async fn get_db(
 
     let mut db_opt = sea_orm::ConnectOptions::new(db_url);
 
-    // TODO: load all these options from the config file. i think mysql default max is 100
-    // TODO: sqlx logging only in debug. way too verbose for production
+    // TODO: load all these options from the config file. i think docker mysql default max is 100
+    // TODO: sqlx info logging is way too verbose for production.
     db_opt
-        .connect_timeout(Duration::from_secs(30))
+        .acquire_timeout(Duration::from_secs(5))
+        .connect_timeout(Duration::from_secs(5))
         .min_connections(min_connections)
         .max_connections(max_connections)
-        .sqlx_logging(false);
-    // .sqlx_logging_level(log::LevelFilter::Info);
+        .sqlx_logging_level(tracing::log::LevelFilter::Warn)
+        .sqlx_logging(true);
 
     Database::connect(db_opt).await
 }
 
-pub async fn drop_migration_lock(db_conn: &DatabaseConnection) -> Result<(), DbErr> {
+pub async fn drop_migration_lock(db_conn: &DatabaseConnection) -> anyhow::Result<()> {
     let db_backend = db_conn.get_database_backend();
 
     let drop_lock_statment = db_backend.build(Table::drop().table(Alias::new("migration_lock")));
 
-    db_conn.execute(drop_lock_statment).await?;
+    db_conn
+        .execute(drop_lock_statment)
+        .await
+        .context("dropping lock")?;
 
     debug!("migration lock unlocked");
 
@@ -59,7 +64,7 @@ pub async fn drop_migration_lock(db_conn: &DatabaseConnection) -> Result<(), DbE
 pub async fn migrate_db(
     db_conn: &DatabaseConnection,
     override_existing_lock: bool,
-) -> Result<(), DbErr> {
+) -> anyhow::Result<()> {
     let db_backend = db_conn.get_database_backend();
 
     // TODO: put the timestamp and hostname into this as columns?
@@ -74,6 +79,8 @@ pub async fn migrate_db(
             info!("no migrations to apply");
             return Ok(());
         }
+
+        info!("waiting for migration lock...");
 
         // there are migrations to apply
         // acquire a lock
@@ -96,13 +103,15 @@ pub async fn migrate_db(
         break;
     }
 
+    info!("migrating...");
+
     let migration_result = Migrator::up(db_conn, None).await;
 
     // drop the distributed lock
     drop_migration_lock(db_conn).await?;
 
     // return if migrations erred
-    migration_result
+    migration_result.map_err(Into::into)
 }
 
 /// Connect to the database and run migrations
@@ -110,11 +119,13 @@ pub async fn get_migrated_db(
     db_url: String,
     min_connections: u32,
     max_connections: u32,
-) -> Result<DatabaseConnection, DbErr> {
+) -> anyhow::Result<DatabaseConnection> {
     // TODO: this seems to fail silently
-    let db_conn = get_db(db_url, min_connections, max_connections).await?;
+    let db_conn = get_db(db_url, min_connections, max_connections)
+        .await
+        .context("getting db")?;
 
-    migrate_db(&db_conn, false).await?;
+    migrate_db(&db_conn, false).await.context("migrating db")?;
 
     Ok(db_conn)
 }

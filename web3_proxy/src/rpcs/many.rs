@@ -1565,7 +1565,7 @@ mod tests {
             .await
             .unwrap();
 
-        dbg!(&x);
+        info!(?x);
 
         assert!(matches!(x, OpenRequestResult::NotReady));
 

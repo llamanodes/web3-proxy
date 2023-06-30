@@ -10,9 +10,16 @@ use tokio::{
 };
 use web3_proxy::rpcs::blockchain::ArcBlock;
 
+#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
+#[ignore = "under construction"]
+#[test_log::test(tokio::test)]
+async fn it_migrates_the_db() {
+    TestApp::spawn(true).await;
+}
+
 #[test_log::test(tokio::test)]
 async fn it_starts_and_stops() {
-    let x = TestApp::spawn().await;
+    let x = TestApp::spawn(false).await;
 
     let anvil_provider = &x.anvil_provider;
     let proxy_provider = &x.proxy_provider;

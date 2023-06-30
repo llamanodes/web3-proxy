@@ -12,6 +12,7 @@ deadlock_detection = ["parking_lot/deadlock_detection"]
 mimalloc = ["dep:mimalloc"]
 tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
 rdkafka-src = ["rdkafka/cmake-build", "rdkafka/libz", "rdkafka/ssl-vendored", "rdkafka/zstd-pkg-config"]
+tests-needing-docker = []
 
 [dependencies]
 deferred-rate-limiter = { path = "../deferred-rate-limiter" }
