@@ -94,7 +94,7 @@ serde_prometheus = "0.2.3"
 strum = { version = "0.25.0", features = ["derive"] }
 time_01 = { package = "time", version = "0.1" }
 time_03 = { package = "time", version = "0.3" }
-tokio = { version = "1.29.0", features = ["full", "tracing"] }
+tokio = { version = "1.29.1", features = ["full", "tracing"] }
 tokio-console = { version = "0.1.8", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 tokio-uring = { version = "0.4.0", optional = true }
@@ -115,6 +115,6 @@ test-log = { version = "0.2.12", default-features = false, features = ["trace"] 
 [dev-dependencies]
 env_logger = "0.10"
 test-log = "0.2.12"
-tokio = { version = "1.29.0", features = ["full", "test-util"] }
+tokio = { version = "1.29.1", features = ["full", "test-util"] }
 tracing = {version = "0.1", default-features = false}
 tracing-subscriber = {version = "0.3", default-features = false, features = ["env-filter", "fmt"]}
