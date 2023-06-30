@@ -403,7 +403,6 @@ dependencies = [
  "thiserror",
  "time-core",
  "tokio",
- "uuid 0.8.2",
 ]
 
 [[package]]
@@ -1457,7 +1456,6 @@ dependencies = [
  "redis-rate-limiter",
  "tokio",
  "tracing",
- "workspace-hack",
 ]
 
 [[package]]
@@ -1687,7 +1685,6 @@ dependencies = [
  "serde",
  "ulid",
  "uuid 1.4.0",
- "workspace-hack",
 ]
 
 [[package]]
@@ -3189,7 +3186,6 @@ dependencies = [
  "tokio",
  "tracing",
  "watermill",
- "workspace-hack",
 ]
 
 [[package]]
@@ -3362,7 +3358,6 @@ version = "0.32.0"
 dependencies = [
  "sea-orm-migration",
  "tokio",
- "workspace-hack",
 ]
 
 [[package]]
@@ -3963,7 +3958,6 @@ version = "0.1.0"
 dependencies = [
  "ethers",
  "glob",
- "workspace-hack",
 ]
 
 [[package]]
@@ -4513,7 +4507,6 @@ name = "rate-counter"
 version = "0.1.0"
 dependencies = [
  "tokio",
- "workspace-hack",
 ]
 
 [[package]]
@@ -4621,7 +4614,6 @@ dependencies = [
  "chrono",
  "deadpool-redis",
  "tokio",
- "workspace-hack",
 ]
 
 [[package]]
@@ -7184,7 +7176,6 @@ dependencies = [
  "ulid",
  "url",
  "uuid 1.4.0",
- "workspace-hack",
 ]
 
 [[package]]
@@ -7410,106 +7401,6 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "workspace-hack"
-version = "0.1.0"
-dependencies = [
- "Inflector",
- "allocator-api2",
- "anyhow",
- "arrayvec",
- "backtrace",
- "bitflags 1.3.2",
- "byteorder",
- "bytes",
- "cc",
- "chrono",
- "clap",
- "crossbeam-utils",
- "derive_more",
- "digest 0.10.7",
- "ecdsa",
- "either",
- "elliptic-curve",
- "ethbloom",
- "ethers",
- "ethers-contract",
- "ethers-contract-abigen",
- "ethers-etherscan",
- "ethers-middleware",
- "ethers-providers",
- "futures",
- "futures-channel",
- "futures-core",
- "futures-io",
- "futures-sink",
- "futures-task",
- "futures-util",
- "generic-array",
- "getrandom 0.2.10",
- "hashbrown 0.14.0",
- "heck 0.4.1",
- "hyper",
- "indexmap 1.9.3",
- "io-lifetimes",
- "ipnet",
- "k256",
- "lazy_static",
- "libc",
- "lock_api",
- "log",
- "memchr",
- "num-bigint",
- "num-integer",
- "num-iter",
- "num-traits",
- "once_cell",
- "openssl-sys",
- "parking_lot 0.12.1",
- "parking_lot_core 0.9.8",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "rdkafka",
- "rdkafka-sys",
- "regex",
- "regex-syntax 0.7.2",
- "reqwest",
- "rust_decimal",
- "rustix",
- "sea-orm",
- "sea-query",
- "sea-query-binder",
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.10.7",
- "sha3",
- "signal-hook",
- "spki 0.7.2",
- "sqlx",
- "sqlx-core",
- "sqlx-macros",
- "subtle",
- "syn 1.0.109",
- "syn 2.0.22",
- "test-log",
- "time 0.3.20",
- "time-macros",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tower",
- "tracing",
- "tracing-core",
- "tracing-subscriber",
- "ulid",
- "unicode-bidi",
- "unicode-normalization",
- "url",
- "uuid 1.4.0",
- "zeroize",
 ]
 
 [[package]]

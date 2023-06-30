@@ -37,13 +37,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     \
     cargo check || [ "$?" -eq 101 ]
 
-# hakari manages a 'workspace-hack' to hopefully build faster
 # nextest runs tests in parallel
 # We only pay the installation cost once, it will be cached from the second build onwards
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     \
-    cargo install --locked cargo-hakari cargo-nextest
+    cargo install --locked cargo-nextest
 
 # foundry/anvil are needed to run tests
 RUN --mount=type=cache,target=/usr/local/cargo/git \
@@ -56,14 +55,12 @@ ENV WEB3_PROXY_FEATURES "rdkafka-src"
 
 FROM rust as build_tests
 
-# check hakari and test the application with cargo-nextest
+# test the application with cargo-nextest
 RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target,id=build_tests_target \
     \
-    cargo hakari generate --diff && \
-    cargo hakari manage-deps --dry-run && \
     RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
     touch /test_success
 

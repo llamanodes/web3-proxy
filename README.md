@@ -47,15 +47,6 @@ Quickly run tests:
 RUST_LOG=web3_proxy=trace,info cargo nextest run
 ```
 
-Keep workspace-hack package up-to-date:
-
-```
-cargo install cargo-hakari --locked
-
-cargo hakari generate
-cargo hakari verify
-```
-
 ## Common commands
 
 Create a user:

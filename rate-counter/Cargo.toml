@@ -6,4 +6,3 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1.29.1", features = ["time"] }
-workspace-hack = { version = "0.1", path = "../workspace-hack" }

@@ -10,7 +10,6 @@ path = "src/lib.rs"
 
 [dependencies]
 tokio = { version = "1.29.1", features = ["full", "tracing"] }
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dependencies.sea-orm-migration]
 version = "0.11.3"
