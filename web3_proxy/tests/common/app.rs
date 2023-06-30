@@ -23,7 +23,7 @@ use tokio::{
     task::JoinHandle,
     time::{sleep, Instant},
 };
-use tracing::{info, trace};
+use tracing::{info, trace, warn};
 use web3_proxy::{
     config::{AppConfig, TopConfig, Web3RpcConfig},
     relational_db::get_migrated_db,
@@ -192,12 +192,31 @@ impl TestApp {
                 sleep(Duration::from_secs(1)).await;
             }
 
-            info!(%db_url, "db is ready for connections");
+            // TODO: make sure mysql is actually ready for connections
+            sleep(Duration::from_secs(7)).await;
+
+            info!(%db_url, elapsed=%start.elapsed().as_secs_f32(), "db is ready for connections. Migrating now...");
 
             // try to migrate
-            let _ = get_migrated_db(db_url, 1, 1)
-                .await
-                .expect("failed migration");
+            let start = Instant::now();
+            let max_wait = Duration::from_secs(30);
+            loop {
+                if start.elapsed() > max_wait {
+                    panic!("db took too long to start");
+                }
+
+                if let Err(err) = get_migrated_db(db_url.clone(), 1, 1).await {
+                    // not connected. sleep and then try again
+                    warn!(?err, "unable to migrate db");
+                    sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+
+                // it worked! yey!
+                break;
+            }
+
+            info!(%db_url, elapsed=%start.elapsed().as_secs_f32(), "db is migrated");
 
             Some(db_data)
         } else {
@@ -314,7 +333,6 @@ impl Drop for TestApp {
 
 impl Drop for DbData {
     fn drop(&mut self) {
-        // TODO: this doesn't seem to run
         info!(%self.container_name, "killing db");
 
         let _ = SyncCommand::new("docker")

@@ -291,6 +291,11 @@ impl Web3Rpcs {
             // TODO: check known uncles
         }
 
+        if hash == &H256::zero() {
+            // TODO: think more about this
+            return Err(Web3ProxyError::UnknownBlockHash(*hash));
+        }
+
         // block not in cache. we need to ask an rpc for it
         let get_block_params = (*hash, false);
 

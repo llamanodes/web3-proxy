@@ -5,7 +5,7 @@ use migration::sea_query::table::ColumnDef;
 use migration::{Alias, DbErr, Migrator, MigratorTrait, Table};
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 pub use migration::sea_orm::DatabaseConnection;
 
@@ -39,7 +39,7 @@ pub async fn get_db(
         .connect_timeout(Duration::from_secs(5))
         .min_connections(min_connections)
         .max_connections(max_connections)
-        .sqlx_logging_level(tracing::log::LevelFilter::Warn)
+        .sqlx_logging_level(tracing::log::LevelFilter::Trace)
         .sqlx_logging(true);
 
     Database::connect(db_opt).await
