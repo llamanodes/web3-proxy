@@ -28,7 +28,7 @@ use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use migration::{Expr, OnConflict};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
@@ -38,11 +38,11 @@ use time_03::{Duration, OffsetDateTime};
 use tracing::{info, trace, warn};
 use ulid::Ulid;
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AdminIncreaseBalancePost {
-    user_address: Address,
-    note: Option<String>,
-    amount: Decimal,
+    pub user_address: Address,
+    pub note: Option<String>,
+    pub amount: Decimal,
 }
 
 /// `POST /admin/increase_balance` -- As an admin, modify a user's user-tier

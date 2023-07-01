@@ -23,7 +23,7 @@ use migration::sea_orm::{
     QueryFilter, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
 use std::str::FromStr;
@@ -48,6 +48,16 @@ pub struct PostLogin {
     pub sig: String,
     pub msg: String,
     pub referral_code: Option<String>,
+}
+
+/// TODO: use this type in the frontend
+#[derive(Debug, Deserialize)]
+pub struct LoginPostResponse {
+    pub bearer_token: Ulid,
+    pub rpc_keys: Value,
+    /// unknown data gets put here
+    #[serde(flatten, default = "HashMap::default")]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
