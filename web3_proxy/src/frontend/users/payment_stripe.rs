@@ -103,6 +103,8 @@ pub async fn user_balance_stripe_post(
     // TODO Get this from the header
     let signature = if let Some(x) = headers.get("stripe-signature") {
         x
+    } else if let Some(x) = headers.get("Stripe-Signature") {
+        x
     } else if let Some(x) = headers.get("STRIPE_SIGNATURE") {
         x
     } else if let Some(x) = headers.get("HTTP_STRIPE_SIGNATURE") {
