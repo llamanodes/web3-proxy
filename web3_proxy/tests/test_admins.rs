@@ -86,7 +86,7 @@ async fn test_admin_grant_credits() {
     };
     info!(?user_post_login_data);
     let user_login_response = r
-        .post(login_post_url)
+        .post(&login_post_url)
         .json(&user_post_login_data)
         .send()
         .await
@@ -95,8 +95,6 @@ async fn test_admin_grant_credits() {
         .await
         .unwrap();
     info!(?user_login_response);
-
-    // Now I need to make the user an admin ...
 
     info!("Make the user an admin ...");
     // Change Admin SubCommand struct
@@ -122,6 +120,37 @@ async fn test_admin_grant_credits() {
     // Pass on the database into it ...
     let _ = admin_status_changer.main(&db_conn).await.unwrap();
 
+    // Login the admin again, because he was just signed out
+    let admin_login_get_url = format!(
+        "{}user/login/{:?}",
+        x.proxy_provider.url(),
+        admin_wallet.address()
+    );
+    let admin_login_message = r.get(admin_login_get_url).send().await.unwrap();
+    let admin_login_message = admin_login_message.text().await.unwrap();
+    // Sign the message and POST it to login as admin
+    let admin_signed: Signature = admin_wallet
+        .sign_message(&admin_login_message)
+        .await
+        .unwrap();
+    info!(?admin_signed);
+    let admin_post_login_data = PostLogin {
+        msg: admin_login_message,
+        sig: admin_signed.to_string(),
+        referral_code: None,
+    };
+    info!(?admin_post_login_data);
+    let admin_login_response = r
+        .post(&login_post_url)
+        .json(&admin_post_login_data)
+        .send()
+        .await
+        .unwrap()
+        .json::<LoginPostResponse>()
+        .await
+        .unwrap();
+    info!(?admin_login_response);
+
     // Make the admin user an admin
 
     info!("Increasing balance");
@@ -132,6 +161,9 @@ async fn test_admin_grant_credits() {
         amount: Decimal::from(100),          // set amount to increase
         note: Some("Test increasing balance".to_string()),
     };
+    info!(?increase_balance_post_url);
+    info!(?increase_balance_data);
+    info!(?admin_login_response.bearer_token);
     let increase_balance_response = r
         .post(increase_balance_post_url)
         .json(&increase_balance_data)
