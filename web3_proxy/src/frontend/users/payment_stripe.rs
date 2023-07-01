@@ -101,11 +101,19 @@ pub async fn user_balance_stripe_post(
     // ))?;
 
     // TODO Get this from the header
-    let signature = headers
-        .get("STRIPE_SIGNATURE")
-        .ok_or(Web3ProxyError::BadRequest(
+    let signature = if let Some(x) = headers.get("stripe-signature") {
+        x
+    } else if let Some(x) = headers.get("STRIPE_SIGNATURE") {
+        x
+    } else if let Some(x) = headers.get("HTTP_STRIPE_SIGNATURE") {
+        x
+    } else {
+        return Err(Web3ProxyError::BadRequest(
             "You have not provided a 'STRIPE_SIGNATURE' for the Stripe payload".into(),
-        ))?
+        ));
+    };
+
+    let signature = signature
         .to_str()
         .web3_context("Could not parse stripe signature as byte-string")?;
 
