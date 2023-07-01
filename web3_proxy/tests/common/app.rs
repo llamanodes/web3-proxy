@@ -30,9 +30,10 @@ use web3_proxy::{
     sub_commands::ProxydSubCommand,
 };
 
+#[derive(Clone)]
 pub struct DbData {
-    container_name: String,
-    url: Option<String>,
+    pub container_name: String,
+    pub url: Option<String>,
 }
 
 pub struct TestApp {

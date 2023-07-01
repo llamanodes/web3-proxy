@@ -14,11 +14,11 @@ use tracing::{debug, info};
 pub struct ChangeAdminStatusSubCommand {
     /// the address of the user whose admin status you want to modify
     #[argh(positional)]
-    address: String,
+    pub address: String,
 
     /// true if the user should be an admin, false otherwise
     #[argh(positional)]
-    should_be_admin: bool,
+    pub should_be_admin: bool,
 }
 
 impl ChangeAdminStatusSubCommand {
