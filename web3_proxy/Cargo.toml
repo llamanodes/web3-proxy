@@ -82,7 +82,7 @@ pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 prettytable = "0.10.0"
 proctitle = "0.1.1"
-rdkafka = { version = "0.32.2", features = ["tracing"] }
+rdkafka = { version = "0.33.0", features = ["tracing"] }
 regex = "1.8.4"
 reqwest = { version = "0.11.18", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
 rmp-serde = "1.1.1"
@@ -93,7 +93,7 @@ serde = { version = "1.0.164" }
 serde_json = { version = "1.0.99", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
 strum = { version = "0.25.0", features = ["derive"] }
-time_01 = { package = "time", version = "0.1" }
+time_01 = { package = "time", version = "0.1.45" }
 time_03 = { package = "time", version = "0.3" }
 tokio = { version = "1.29.1", features = ["full", "tracing"] }
 tokio-console = { version = "0.1.8", optional = true }
