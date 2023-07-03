@@ -17,12 +17,11 @@ use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
 use migration::{Expr, OnConflict};
-use serde::Deserialize;
 use serde_json::json;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use stripe::Webhook;
-use tracing::{error, info, trace};
+use tracing::{debug, error, info, trace};
 
 /// `GET /user/balance/stripe` -- Use a bearer token to get the user's balance and spend.
 ///
@@ -64,7 +63,7 @@ pub async fn user_balance_stripe_post(
     // TODO: maybe instead, a bad stripe-header should ban the IP? or a good one should allow it?
 
     // TODO: lower log level when done testing
-    info!(?payload, ?headers);
+    debug!(%payload, ?headers);
 
     // get the signature from the header
     // the docs are inconsistent on the key, so we just check all of them
