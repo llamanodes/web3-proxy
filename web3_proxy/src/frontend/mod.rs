@@ -12,7 +12,7 @@ pub mod users;
 
 use crate::app::Web3ProxyApp;
 use axum::{
-    routing::{get, post, put},
+    routing::{get, post},
     Extension, Router,
 };
 use http::{header::AUTHORIZATION, StatusCode};
@@ -164,8 +164,7 @@ pub async fn serve(
             "/subuser/rpc_keys",
             get(users::subuser::get_keys_as_subuser),
         )
-        .route("/user", get(users::user_get))
-        .route("/user", post(users::user_post))
+        .route("/user", get(users::user_get).post(users::user_post))
         .route("/user/balance", get(users::payment::user_balance_get))
         .route("/user/deposits", get(users::payment::user_deposits_get))
         .route(
@@ -181,9 +180,12 @@ pub async fn serve(
             "/user/balance_uncle/:uncle_hash",
             post(users::payment::user_balance_uncle_post),
         )
-        .route("/user/keys", get(users::rpc_keys::rpc_keys_get))
-        .route("/user/keys", post(users::rpc_keys::rpc_keys_management))
-        .route("/user/keys", put(users::rpc_keys::rpc_keys_management))
+        .route(
+            "/user/keys",
+            get(users::rpc_keys::rpc_keys_get)
+                .post(users::rpc_keys::rpc_keys_management)
+                .put(users::rpc_keys::rpc_keys_management),
+        )
         // .route("/user/referral/:referral_link", get(users::user_referral_link_get))
         .route(
             "/user/referral",
