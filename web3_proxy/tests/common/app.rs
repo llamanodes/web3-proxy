@@ -8,6 +8,7 @@ use ethers::{
     utils::{Anvil, AnvilInstance},
 };
 use hashbrown::HashMap;
+use migration::sea_orm::DatabaseConnection;
 use parking_lot::Mutex;
 use std::{
     env,
@@ -32,6 +33,7 @@ use web3_proxy::{
 
 #[derive(Clone)]
 pub struct DbData {
+    pub conn: Option<DatabaseConnection>,
     pub container_name: String,
     pub url: Option<String>,
 }
@@ -97,6 +99,7 @@ impl TestApp {
             // create the db_data as soon as the url is known
             // when this is dropped, the db will be stopped
             let mut db_data = DbData {
+                conn: None,
                 container_name: db_container_name.clone(),
                 url: None,
             };
@@ -195,7 +198,7 @@ impl TestApp {
             }
 
             // TODO: make sure mysql is actually ready for connections
-            sleep(Duration::from_secs(7)).await;
+            sleep(Duration::from_secs(1)).await;
 
             info!(%db_url, elapsed=%start.elapsed().as_secs_f32(), "db is ready for connections. Migrating now...");
 
@@ -207,15 +210,18 @@ impl TestApp {
                     panic!("db took too long to start");
                 }
 
-                if let Err(err) = get_migrated_db(db_url.clone(), 1, 1).await {
-                    // not connected. sleep and then try again
-                    warn!(?err, "unable to migrate db");
-                    sleep(Duration::from_secs(1)).await;
-                    continue;
+                match get_migrated_db(db_url.clone(), 1, 1).await {
+                    Ok(x) => {
+                        // it worked! yey!
+                        db_data.conn = Some(x);
+                        break;
+                    }
+                    Err(err) => {
+                        // not connected. sleep and then try again
+                        warn!(?err, "unable to migrate db");
+                        sleep(Duration::from_secs(1)).await;
+                    }
                 }
-
-                // it worked! yey!
-                break;
             }
 
             info!(%db_url, elapsed=%start.elapsed().as_secs_f32(), "db is migrated");
@@ -300,6 +306,11 @@ impl TestApp {
             proxy_provider,
             shutdown_sender,
         }
+    }
+
+    #[allow(unused)]
+    pub fn db_conn(&self) -> &DatabaseConnection {
+        self.db.as_ref().unwrap().conn.as_ref().unwrap()
     }
 
     pub fn stop(&self) -> Result<usize, SendError<()>> {
