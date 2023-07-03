@@ -152,7 +152,7 @@ pub async fn user_balance_stripe_post(
     let txn = db_conn.begin().await?;
 
     // Assert that it's usd
-    if intent.currency.to_string() != "USD" || recipient.is_none() {
+    if intent.currency.to_string() != "usd" || recipient.is_none() {
         // In this case I should probably still save it to the database,
         // but not increase balance (this should be refunded)
         // TODO: I suppose we could send a refund request right away from here
