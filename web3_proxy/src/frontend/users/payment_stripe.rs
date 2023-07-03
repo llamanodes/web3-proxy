@@ -1,15 +1,11 @@
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
-use crate::frontend::authorization::{
-    login_is_authorized, Authorization as Web3ProxyAuthorization,
-};
 use anyhow::Context;
 use axum::{
     headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
     Extension, Json, TypedHeader,
 };
-use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use entities::{
     balance, increase_on_chain_balance_receipt, rpc_key, stripe_increase_balance_receipt, user,
@@ -21,12 +17,12 @@ use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
 use migration::{Expr, OnConflict};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use stripe::Webhook;
-use tracing::{debug, error, trace};
+use tracing::{error, info, trace};
 
 /// `GET /user/balance/stripe` -- Use a bearer token to get the user's balance and spend.
 ///
@@ -55,12 +51,9 @@ pub async fn user_stripe_deposits_get(
     Ok(Json(response).into_response())
 }
 
-// /// the JSON input to the `post_user` handler.
-// /// TODO: what else can we update here? password hash? subscription to newsletter?
-#[derive(Debug, Serialize, Deserialize)]
+/// the JSON input to the `user_balance_stripe_post` handler.
+#[derive(Debug, Deserialize)]
 pub struct StripePost {
-    // email: Option<String>,
-    // referral_code: Option<String>,
     data: Box<serde_json::value::RawValue>,
 }
 
@@ -69,38 +62,18 @@ pub struct StripePost {
 #[debug_handler]
 pub async fn user_balance_stripe_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    InsecureClientIp(ip): InsecureClientIp,
+    // InsecureClientIp(ip): InsecureClientIp,
     headers: HeaderMap,
-    bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Json(payload): Json<StripePost>,
 ) -> Web3ProxyResponse {
-    // rate limit by bearer token **OR** IP address
-    let (_, _semaphore) = if let Some(TypedHeader(Authorization(bearer))) = bearer {
-        let (_, semaphore) = app.bearer_is_authorized(bearer).await?;
+    // TODO: (high) rate limits by IP address. login limiter is probably too low
+    // TODO: maybe instead, a bad stripe-header should ban the IP? or a good one should allow it?
 
-        // TODO: is handling this as internal fine?
-        let authorization = Web3ProxyAuthorization::internal(app.db_conn().ok().cloned())?;
+    // TODO: lower log level when done testing
+    info!(?payload, ?headers);
 
-        (authorization, Some(semaphore))
-    } else {
-        let authorization = login_is_authorized(&app, ip).await?;
-        (authorization, None)
-    };
-
-    // let recipient_user_id: u64 = params
-    //     .remove("user_id")
-    //     .ok_or(Web3ProxyError::BadRouting)?
-    //     .parse()
-    //     .or(Err(Web3ProxyError::ParseAddressError))?;
-
-    trace!(?payload);
-
-    // Get the payload, and the header
-    // let payload = payload.data.get("data").ok_or(Web3ProxyError::BadRequest(
-    //     "You have not provided a 'data' for the Stripe payload".into(),
-    // ))?;
-
-    // TODO Get this from the header
+    // get the signature from the header
+    // the docs are inconsistent on the key, so we just check all of them
     let signature = if let Some(x) = headers.get("stripe-signature") {
         x
     } else if let Some(x) = headers.get("Stripe-Signature") {
@@ -115,30 +88,28 @@ pub async fn user_balance_stripe_post(
         ));
     };
 
+    let payload =
+        serde_json::to_string(&payload.data).web3_context("could not parse payload data")?;
+
     let signature = signature
         .to_str()
         .web3_context("Could not parse stripe signature as byte-string")?;
 
-    // Now parse the payload and signature
-    // TODO: Move env variable elsewhere
-    let event = Webhook::construct_event(
-        payload.data.get(),
-        signature,
-        app.config
-            .stripe_api_key
-            .clone()
-            .web3_context("Stripe API key not found in config!")?
-            .as_str(),
-    )
-    .context(Web3ProxyError::BadRequest(
-        "Could not parse the stripe webhook request!".into(),
-    ))?;
+    let secret = app
+        .config
+        .stripe_api_key
+        .clone()
+        .web3_context("Stripe API key not found in config!")?;
+
+    let event = Webhook::construct_event(&payload, signature, secret.as_str())?;
 
     let intent = match event.data.object {
         stripe::EventObject::PaymentIntent(intent) => intent,
         _ => return Ok("Received irrelevant webhook".into_response()),
     };
-    debug!("Found PaymentIntent Event: {:?}", intent);
+
+    // TODO: lower log level when done testing
+    info!(?intent);
 
     if intent.status.as_str() != "succeeded" {
         return Ok("Received Webhook".into_response());
