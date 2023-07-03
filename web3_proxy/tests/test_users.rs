@@ -1,14 +1,21 @@
 mod common;
 
 use crate::common::TestApp;
-use axum::headers::Authorization;
 use ethers::{signers::Signer, types::Signature};
-use hashbrown::HashMap;
 use serde::Deserialize;
-use serde_json::Value;
 use tracing::{debug, info, trace};
 use ulid::Ulid;
-use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
+use web3_proxy::frontend::users::authentication::PostLogin;
+
+/// TODO: use this type in the frontend
+#[derive(Debug, Deserialize)]
+struct LoginPostResponse {
+    pub bearer_token: Ulid,
+    // pub rpc_keys: Value,
+    // /// unknown data gets put here
+    // #[serde(flatten, default = "HashMap::default")]
+    // pub extra: HashMap<String, serde_json::Value>,
+}
 
 /// TODO: 191 and the other message formats in another test
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]

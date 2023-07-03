@@ -10,7 +10,7 @@ use tokio::{
 };
 use web3_proxy::rpcs::blockchain::ArcBlock;
 
-#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
+// #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn it_migrates_the_db() {

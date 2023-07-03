@@ -146,6 +146,7 @@ pub enum Web3ProxyError {
     /// simple way to return an error message to the user and an anyhow to our logs
     #[display(fmt = "{}, {}, {:?}", _0, _1, _2)]
     StatusCode(StatusCode, Cow<'static, str>, Option<anyhow::Error>),
+    StripeWebhookError(stripe::WebhookError),
     /// TODO: what should be attached to the timout?
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
@@ -498,7 +499,7 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
                         // TODO: is it safe to expose our io error strings?
-                        message: err.to_string().into(),
+                        message: format!("std io error: {}", err).into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -674,7 +675,7 @@ impl Web3ProxyError {
                 num_known,
                 min_head_rpcs,
             } => {
-                error!("NotEnoughRpcs {}/{}", num_known, min_head_rpcs);
+                error!(%num_known, %min_head_rpcs, "NotEnoughRpcs");
                 (
                     StatusCode::BAD_GATEWAY,
                     JsonRpcErrorData {
@@ -689,7 +690,7 @@ impl Web3ProxyError {
                 )
             }
             Self::NotEnoughSoftLimit { available, needed } => {
-                error!("NotEnoughSoftLimit {}/{}", available, needed);
+                error!(available, needed, "NotEnoughSoftLimit");
                 (
                     StatusCode::BAD_GATEWAY,
                     JsonRpcErrorData {
@@ -742,7 +743,7 @@ impl Web3ProxyError {
                 )
             }
             Self::OriginNotAllowed(origin) => {
-                trace!("OriginNotAllowed origin={}", origin);
+                trace!(?origin, "OriginNotAllowed");
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
@@ -753,7 +754,7 @@ impl Web3ProxyError {
                 )
             }
             Self::ParseBytesError(err) => {
-                trace!("ParseBytesError err={:#?}", err);
+                trace!(?err, "ParseBytesError");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -764,7 +765,7 @@ impl Web3ProxyError {
                 )
             }
             Self::ParseMsgError(err) => {
-                trace!("ParseMsgError err={:#?}", err);
+                trace!(?err, "ParseMsgError");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
@@ -936,9 +937,22 @@ impl Web3ProxyError {
                     },
                 )
             }
+            Self::StripeWebhookError(err) => {
+                trace!(?err, "StripeWebhookError");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcErrorData {
+                        message: format!("stripe webhook error: {}", err).into(),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        // TODO: include the stripe signature? anything else?
+                        data: None,
+                    },
+                )
+            }
             Self::Timeout(x) => (
                 StatusCode::REQUEST_TIMEOUT,
                 JsonRpcErrorData {
+                    // TODO: prettier message
                     message: format!("request timed out: {:?}", x).into(),
                     code: StatusCode::REQUEST_TIMEOUT.as_u16().into(),
                     // TODO: include the actual id!
@@ -946,11 +960,11 @@ impl Web3ProxyError {
                 },
             ),
             Self::UlidDecode(err) => {
-                // trace!(?err, "UlidDecodeError");
+                trace!(?err, "UlidDecodeError");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: format!("{}", err).into(),
+                        message: format!("ulid decode error: {}", err).into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: None,
                     },
@@ -1010,7 +1024,7 @@ impl Web3ProxyError {
                 )
             }
             Self::UserAgentNotAllowed(ua) => {
-                trace!("UserAgentNotAllowed ua={}", ua);
+                trace!(%ua, "UserAgentNotAllowed");
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
@@ -1033,7 +1047,7 @@ impl Web3ProxyError {
                 )
             }
             Self::WatchRecvError(err) => {
-                error!("WatchRecvError err={:#?}", err);
+                error!(?err, "WatchRecvError");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
