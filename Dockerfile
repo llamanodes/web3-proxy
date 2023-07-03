@@ -7,11 +7,11 @@ ENV PATH "/root/.foundry/bin:/root/.cargo/bin:${PATH}"
 
 # install rustup dependencies
 # also install web3-proxy system dependencies. most things are rust-only, but not everything
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+RUN set -eux; \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     \
-    apt-get update && \
-    apt-get install --no-install-recommends --yes \
+    apt-get update && apt-get install --no-install-recommends --yes \
     build-essential \
     ca-certificates \
     cmake \
@@ -22,7 +22,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libsasl2-dev \
     libzstd-dev \
     make \
-    pkg-config
+    pkg-config;
+    apt-get clean; \
+	rm -rf /var/lib/apt/lists/*;
 
 # install rustup
 RUN --mount=type=cache,target=/usr/local/cargo/git \
