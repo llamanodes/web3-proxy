@@ -43,19 +43,23 @@ pub async fn user_balance_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let user = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app.db_replica()?;
 
-    // Just return the balance for the user
-    let user_balance = balance::Entity::find()
-        .filter(balance::Column::UserId.eq(_user.id))
+    let user_balance_row = balance::Entity::find()
+        .filter(balance::Column::UserId.eq(user.id))
         .one(db_replica.as_ref())
         .await?
-        .map(|x| x.total_deposits - x.total_spent_outside_free_tier)
         .unwrap_or_default();
 
+    let user_balance =
+        user_balance_row.total_deposits - user_balance_row.total_spent_outside_free_tier;
+
     let response = json!({
+        "total_deposits": user_balance_row.total_deposits,
+        "total_spent_outside_free_tier": user_balance_row.total_spent_outside_free_tier,
+        "total_spent": user_balance_row.total_spent_including_free_tier,
         "balance": user_balance,
     });
 
@@ -71,7 +75,7 @@ pub async fn user_deposits_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let user = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app.db_replica()?;
 
@@ -110,17 +114,13 @@ pub async fn user_balance_post(
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
 ) -> Web3ProxyResponse {
     // rate limit by bearer token **OR** IP address
-    let (authorization, _semaphore) = if let Some(TypedHeader(Authorization(bearer))) = bearer {
-        let (_, semaphore) = app.bearer_is_authorized(bearer).await?;
+    let authorization = if let Some(TypedHeader(Authorization(bearer))) = bearer {
+        app.bearer_is_authorized(bearer).await?;
 
         // TODO: is handling this as internal fine?
-        let authorization = Web3ProxyAuthorization::internal(app.db_conn().ok().cloned())?;
-
-        (authorization, Some(semaphore))
+        Web3ProxyAuthorization::internal(app.db_conn().ok().cloned())?
     } else if let Some(InsecureClientIp(ip)) = ip {
-        let authorization = login_is_authorized(&app, ip).await?;
-
-        (authorization, None)
+        login_is_authorized(&app, ip).await?
     } else {
         return Err(Web3ProxyError::AccessDenied("no bearer token or ip".into()));
     };

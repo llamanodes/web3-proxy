@@ -31,7 +31,7 @@ pub async fn user_stripe_deposits_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let user = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app.db_replica().context("Getting database connection")?;
 

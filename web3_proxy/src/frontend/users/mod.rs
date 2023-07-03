@@ -31,7 +31,7 @@ pub async fn user_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
+    let user = app.bearer_is_authorized(bearer_token).await?;
 
     Ok(Json(user).into_response())
 }
@@ -51,7 +51,7 @@ pub async fn user_post(
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<UserPost>,
 ) -> Web3ProxyResponse {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer_token).await?;
+    let user = app.bearer_is_authorized(bearer_token).await?;
 
     let user_id = user.id;
 

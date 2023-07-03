@@ -32,13 +32,13 @@ pub async fn query_user_stats<'a>(
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
-    let (caller_user, _semaphore) = match bearer {
+    let caller_user = match bearer {
         Some(TypedHeader(Authorization(bearer))) => {
-            let (user, semaphore) = app.bearer_is_authorized(bearer).await?;
+            let user = app.bearer_is_authorized(bearer).await?;
 
-            (Some(user), Some(semaphore))
+            Some(user)
         }
-        None => (None, None),
+        None => None,
     };
 
     // Return an error if the bearer is **not** set, but the StatType is Detailed

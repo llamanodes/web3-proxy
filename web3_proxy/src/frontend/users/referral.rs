@@ -33,7 +33,7 @@ pub async fn user_referral_link_get(
     Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // First get the bearer token and check if the user is logged in
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let user = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app.db_replica()?;
 
@@ -78,7 +78,7 @@ pub async fn user_used_referral_stats(
     Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // First get the bearer token and check if the user is logged in
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let user = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app.db_replica()?;
 
@@ -136,7 +136,7 @@ pub async fn user_shared_referral_stats(
     Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // First get the bearer token and check if the user is logged in
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let user = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app.db_replica()?;
 

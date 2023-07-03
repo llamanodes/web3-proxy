@@ -168,7 +168,6 @@ async fn test_admin_grant_credits() {
         .send()
         .await
         .unwrap();
-    info!("bug is on the line above. it never returns");
     info!(?increase_balance_response, "http response");
 
     let increase_balance_response = increase_balance_response

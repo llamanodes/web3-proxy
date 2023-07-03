@@ -200,7 +200,7 @@ impl TestApp {
             // TODO: make sure mysql is actually ready for connections
             sleep(Duration::from_secs(1)).await;
 
-            info!(%db_url, elapsed=%start.elapsed().as_secs_f32(), "db is ready for connections. Migrating now...");
+            info!(%db_url, elapsed=%start.elapsed().as_secs_f32(), "db post is open. Migrating now...");
 
             // try to migrate
             let start = Instant::now();
@@ -218,7 +218,7 @@ impl TestApp {
                     }
                     Err(err) => {
                         // not connected. sleep and then try again
-                        warn!(?err, "unable to migrate db");
+                        warn!(?err, "unable to migrate db. retrying in 1 second");
                         sleep(Duration::from_secs(1)).await;
                     }
                 }

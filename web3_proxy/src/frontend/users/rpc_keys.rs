@@ -29,7 +29,7 @@ pub async fn rpc_keys_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let user = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app.db_replica()?;
 
@@ -125,7 +125,7 @@ pub async fn rpc_keys_delete(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let (_user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let _user = app.bearer_is_authorized(bearer).await?;
 
     // TODO: think about how cascading deletes and billing should work
     Err(Web3ProxyError::NotImplemented("rpc_keys_delete".into()))
@@ -158,7 +158,7 @@ pub async fn rpc_keys_management(
 ) -> Web3ProxyResponse {
     // TODO: is there a way we can know if this is a PUT or POST? right now we can modify or create keys with either. though that probably doesn't matter
 
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let user = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app.db_replica()?;
 

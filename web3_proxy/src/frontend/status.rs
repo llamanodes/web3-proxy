@@ -196,7 +196,6 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
         "balanced_rpcs": app.balanced_rpcs,
         "bundler_4337_rpcs": app.bundler_4337_rpcs,
         "caches": [
-            MokaCacheSerializer(&app.bearer_token_semaphores),
             MokaCacheSerializer(&app.ip_semaphores),
             MokaCacheSerializer(&app.jsonrpc_response_cache),
             MokaCacheSerializer(&app.rpc_secret_key_cache),

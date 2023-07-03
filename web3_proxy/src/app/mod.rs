@@ -23,7 +23,6 @@ use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::provider::{connect_http, EthersHttpProvider};
 use crate::rpcs::transactions::TxStatus;
 use crate::stats::{AppStat, StatBuffer};
-use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::http::StatusCode;
 use chrono::Utc;
@@ -83,8 +82,6 @@ pub type UserBalanceCache = Cache<NonZeroU64, Arc<RwLock<Balance>>>;
 pub struct Web3ProxyApp {
     /// Send requests to the best server available
     pub balanced_rpcs: Arc<Web3Rpcs>,
-    /// concurrent/parallel application request limits for authenticated users
-    pub bearer_token_semaphores: Cache<UserBearerToken, Arc<Semaphore>>,
     /// Send 4337 Abstraction Bundler requests to one of these servers
     pub bundler_4337_rpcs: Option<Arc<Web3Rpcs>>,
     /// application config
@@ -501,11 +498,7 @@ impl Web3ProxyApp {
         let max_users = 20_000;
 
         // create semaphores for concurrent connection limits
-        // TODO: how can we implement time til idle?
-        // TODO: what should tti be for semaphores?
-        let bearer_token_semaphores = CacheBuilder::new(max_users)
-            .name("bearer_token_semaphores")
-            .build();
+        // TODO: time-to-idle on these. need to make sure the arcs aren't anywhere though. so maybe arc isn't correct and it should be refs
         let ip_semaphores = CacheBuilder::new(max_users).name("ip_semaphores").build();
         let user_semaphores = CacheBuilder::new(max_users).name("user_semaphores").build();
 
@@ -594,7 +587,6 @@ impl Web3ProxyApp {
 
         let app = Self {
             balanced_rpcs,
-            bearer_token_semaphores,
             bundler_4337_rpcs,
             config: top_config.app.clone(),
             db_conn,

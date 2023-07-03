@@ -33,7 +33,7 @@ pub async fn get_keys_as_subuser(
     Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // First, authenticate
-    let (subuser, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let subuser = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app.db_replica()?;
 
@@ -98,7 +98,7 @@ pub async fn get_subusers(
     Query(mut params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // First, authenticate
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let user = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app.db_replica()?;
 
@@ -170,7 +170,7 @@ pub async fn modify_subuser(
     Query(mut params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // First, authenticate
-    let (user, _semaphore) = app.bearer_is_authorized(bearer).await?;
+    let user = app.bearer_is_authorized(bearer).await?;
 
     let db_replica = app.db_replica()?;
 

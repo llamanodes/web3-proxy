@@ -1010,23 +1010,9 @@ impl Web3ProxyApp {
     /// Verify that the given bearer token and address are allowed to take the specified action.
     /// This includes concurrent request limiting.
     /// keep the semaphore alive until the user's request is entirely complete
-    pub async fn bearer_is_authorized(
-        &self,
-        bearer: Bearer,
-    ) -> Web3ProxyResult<(user::Model, OwnedSemaphorePermit)> {
+    pub async fn bearer_is_authorized(&self, bearer: Bearer) -> Web3ProxyResult<user::Model> {
         // get the user id for this bearer token
         let user_bearer_token = UserBearerToken::try_from(bearer)?;
-
-        // limit concurrent requests
-        let semaphore = self
-            .bearer_token_semaphores
-            .get_with_by_ref(&user_bearer_token, async move {
-                let s = Semaphore::new(self.config.bearer_token_max_concurrent_requests as usize);
-                Arc::new(s)
-            })
-            .await;
-
-        let semaphore_permit = semaphore.acquire_owned().await?;
 
         // get the attached address from the database for the given auth_token.
         let db_replica = self.db_replica()?;
@@ -1041,7 +1027,7 @@ impl Web3ProxyApp {
             .web3_context("fetching user from db by bearer token")?
             .web3_context("unknown bearer token")?;
 
-        Ok((user, semaphore_permit))
+        Ok(user)
     }
 
     pub async fn rate_limit_login(

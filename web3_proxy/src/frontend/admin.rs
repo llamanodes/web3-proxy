@@ -55,16 +55,14 @@ pub async fn admin_increase_balance(
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<AdminIncreaseBalancePost>,
 ) -> Web3ProxyResponse {
-    let (caller, _semaphore) = app.bearer_is_authorized(bearer).await?;
-
-    let caller_id = caller.id;
+    let caller = app.bearer_is_authorized(bearer).await?;
 
     // Establish connections
     let txn = app.db_transaction().await?;
 
     // Check if the caller is an admin (if not, return early)
     let admin_entry: admin::Model = admin::Entity::find()
-        .filter(admin::Column::UserId.eq(caller_id))
+        .filter(admin::Column::UserId.eq(caller.id))
         .one(&txn)
         .await?
         .ok_or_else(|| Web3ProxyError::AccessDenied("not an admin".into()))?;

@@ -122,11 +122,6 @@ pub struct AppConfig {
     /// do not serve any requests if the best known block is behind the best known block by more than this many blocks.
     pub max_head_block_lag: Option<U64>,
 
-    /// Rate limit for bearer token authenticated entrypoints.
-    /// This is separate from the rpc limits.
-    #[serde(default = "default_bearer_token_max_concurrent_requests")]
-    pub bearer_token_max_concurrent_requests: u64,
-
     /// Rate limit for the login entrypoint.
     /// This is separate from the rpc limits.
     #[serde(default = "default_login_rate_limit_per_period")]
@@ -210,11 +205,6 @@ fn default_min_sum_soft_limit() -> u32 {
 /// Only require 1 server. This might cause a thundering herd!
 fn default_min_synced_rpcs() -> usize {
     1
-}
-
-/// Having a low amount of concurrent requests for bearer tokens keeps us from hammering the database.
-fn default_bearer_token_max_concurrent_requests() -> u64 {
-    2
 }
 
 /// Having a low amount of requests per period (usually minute) for login is safest.
