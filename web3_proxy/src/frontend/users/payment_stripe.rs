@@ -51,12 +51,6 @@ pub async fn user_stripe_deposits_get(
     Ok(Json(response).into_response())
 }
 
-/// the JSON input to the `user_balance_stripe_post` handler.
-#[derive(Debug, Deserialize)]
-pub struct StripePost {
-    data: Box<serde_json::value::RawValue>,
-}
-
 /// `POST /user/balance/stripe` -- Process a stripe transaction;
 /// this endpoint is called from the webhook with the user_id parameter in the request
 #[debug_handler]
@@ -64,7 +58,7 @@ pub async fn user_balance_stripe_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     // InsecureClientIp(ip): InsecureClientIp,
     headers: HeaderMap,
-    Json(payload): Json<StripePost>,
+    payload: String,
 ) -> Web3ProxyResponse {
     // TODO: (high) rate limits by IP address. login limiter is probably too low
     // TODO: maybe instead, a bad stripe-header should ban the IP? or a good one should allow it?
@@ -87,9 +81,6 @@ pub async fn user_balance_stripe_post(
             "You have not provided a 'STRIPE_SIGNATURE' for the Stripe payload".into(),
         ));
     };
-
-    let payload =
-        serde_json::to_string(&payload.data).web3_context("could not parse payload data")?;
 
     let signature = signature
         .to_str()
