@@ -43,7 +43,7 @@ siwe = { git = "https://github.com/llamanodes/siwe-rs", rev = "013be5204ff1c8577
 anyhow = { version = "1.0.71", features = ["backtrace"] }
 arc-swap = { version = "1.6.0" }
 argh = "0.1.10"
-async-stripe = { version = "0.22.2", default-features = false, features = ["full", "runtime-tokio-hyper-rustls", "webhook-events"] }
+async-stripe = { version = "0.22.2", default-features = false, features = ["billing", "checkout", "connect", "runtime-tokio-hyper-rustls", "webhook-events"] }
 async-trait = "0.1.69"
 axum = { version = "0.6.18", features = ["headers", "tracing", "ws"] }
 axum-client-ip = "0.4.1"
