@@ -34,11 +34,6 @@ siwe = { git = "https://github.com/llamanodes/siwe-rs", rev = "013be5204ff1c8577
 # TODO: import num_traits from sea-orm so we always have the same version
 # TODO: import chrono from sea-orm so we always have the same version
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
-# TODO: rdkafka has a tracing feature
-# TODO: axum has a tracing feature
-# TODO: siwe ha a ethers feature that is blocked by 
-
-# TODO: hdrhistogram for automated tiers
 
 anyhow = { version = "1.0.71", features = ["backtrace"] }
 arc-swap = { version = "1.6.0" }
