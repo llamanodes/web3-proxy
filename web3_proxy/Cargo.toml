@@ -46,7 +46,7 @@ axum-macros = "0.3.7"
 base64 = "0.21.2"
 check-if-email-exists = "0.9.0"
 chrono = { version = "0.4.26" }
-console-subscriber = { version = "0.1.9", features = ["env-filter", "parking_lot"], optional = true }
+console-subscriber = { version = "0.1.10", features = ["env-filter", "parking_lot"], optional = true }
 counter = "0.5.7"
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", features = ["nightly"] }
@@ -91,7 +91,7 @@ strum = { version = "0.25.0", features = ["derive"] }
 time_01 = { package = "time", version = "0.1.45" }
 time_03 = { package = "time", version = "0.3" }
 tokio = { version = "1.29.1", features = ["full", "tracing"] }
-tokio-console = { version = "0.1.8", optional = true }
+tokio-console = { version = "0.1.9", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 tokio-uring = { version = "0.4.0", optional = true }
 toml = "0.7.5"
