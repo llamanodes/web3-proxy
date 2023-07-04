@@ -4,9 +4,7 @@ use ethers::types::Signature;
 use tracing::info;
 use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
 
-/// Helper function to create admin
-
-/// Create user as admin
+/// Helper function to create an "ordinary" user
 pub async fn create_user(x: &TestApp, r: &reqwest::Client) -> (LocalWallet, LoginPostResponse) {
     let user_wallet = x.wallet(2);
 

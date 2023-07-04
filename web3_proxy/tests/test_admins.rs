@@ -3,8 +3,10 @@ mod common;
 use std::str::FromStr;
 use std::time::Duration;
 
+use crate::common::admin_increases_balance::admin_increase_balance;
 use crate::common::create_admin::create_user_as_admin;
 use crate::common::create_user::create_user;
+use crate::common::get_user_balance::user_get_balance;
 use crate::common::TestApp;
 use ethers::prelude::Signer;
 use ethers::types::Signature;
@@ -34,44 +36,30 @@ async fn test_admin_grant_credits() {
         .unwrap();
 
     // Setup variables that will be used
-    let increase_balance_post_url = format!("{}admin/increase_balance", x.proxy_provider.url());
 
-    let (user_wallet, _) = create_user(&x, &r).await;
+    let (user_wallet, user_login_response) = create_user(&x, &r).await;
     let (admin_wallet, admin_login_response) = create_user_as_admin(&x, &r).await;
     info!(?admin_wallet);
     info!(?admin_login_response);
 
-    info!("Increasing balance");
-    // Login the user
-    // Use the bearer token of admin to increase user balance
-    let increase_balance_data = AdminIncreaseBalancePost {
-        user_address: user_wallet.address(), // set user address to increase balance
-        amount: Decimal::from(100),          // set amount to increase
-        note: Some("Test increasing balance".to_string()),
-    };
-    info!(?increase_balance_post_url);
-    info!(?increase_balance_data);
-    info!(?admin_login_response.bearer_token);
-
-    let increase_balance_response = r
-        .post(increase_balance_post_url)
-        .json(&increase_balance_data)
-        .bearer_auth(admin_login_response.bearer_token)
-        .send()
-        .await
-        .unwrap();
-    info!(?increase_balance_response, "http response");
-
-    let increase_balance_response = increase_balance_response
-        .json::<serde_json::Value>()
-        .await
-        .unwrap();
-    info!(?increase_balance_response, "json response");
-
-    // Check if the response is as expected
-    // TODO: assert_eq!(increase_balance_response["user"], user_wallet.address());
+    let (increase_balance_response) = admin_increase_balance(
+        &x,
+        &r,
+        &admin_login_response,
+        &user_wallet,
+        Decimal::from(100),
+    )
+    .await;
+    // First assert
     assert_eq!(
         Decimal::from_str(increase_balance_response["amount"].as_str().unwrap()).unwrap(),
+        Decimal::from(100)
+    );
+
+    // TODO: We should actually check the user's balance here ...
+    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
+    assert_eq!(
+        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap(),
         Decimal::from(100)
     );
 
