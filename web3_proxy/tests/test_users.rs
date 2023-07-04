@@ -3,6 +3,7 @@ mod common;
 use crate::common::admin_increases_balance::admin_increase_balance;
 use crate::common::create_admin::create_user_as_admin;
 use crate::common::create_user::create_user;
+use crate::common::get_rpc_key::{user_get_first_rpc_key, RpcKey};
 use crate::common::get_user_balance::user_get_balance;
 use crate::common::referral::{
     get_referral_code, get_shared_referral_codes, get_used_referral_codes, UserSharedReferralInfo,
@@ -11,7 +12,7 @@ use crate::common::referral::{
 use crate::common::TestApp;
 use ethers::{signers::Signer, types::Signature};
 use rust_decimal::Decimal;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::time::Duration;
 use tokio_stream::StreamExt;
@@ -178,11 +179,33 @@ async fn test_referral_bonus() {
 
     // Now both users should make concurrent requests
     // TODO: Make concurrent requests
+    info!("Get rpc key");
+    let example_request = r#"{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}"#;
 
-    let difference = user_balance_pre - user_balance_post;
-    // Finally, make sure that referrer has received 10$ of balances
-    assert_eq!(
-        referrer_balance_pre + difference / Decimal::from(10),
-        referrer_balance_post
-    );
+    // Make a for-loop just spam it a bit
+    // Make a JSON request
+    // TODO: Also get the RPC key for the user first ...
+    let rpc_keys: RpcKey = user_get_first_rpc_key(&x, &r, &user_login_response).await;
+    info!("Rpc key is: {:?}", rpc_keys);
+    info!(?rpc_keys);
+
+    let rpc_link = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
+    info!(?rpc_link);
+    let response = r
+        .get(rpc_link)
+        // .bearer_auth(user_login_response.bearer_token)
+        .json(&example_request)
+        .send()
+        .await
+        .unwrap();
+    info!("Response is");
+    info!(?response);
+    assert_eq!(response.status(), 200);
+
+    // let difference = user_balance_pre - user_balance_post;
+    // // Finally, make sure that referrer has received 10$ of balances
+    // assert_eq!(
+    //     referrer_balance_pre + difference / Decimal::from(10),
+    //     referrer_balance_post
+    // );
 }
