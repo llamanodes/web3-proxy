@@ -5,9 +5,12 @@ use tracing::info;
 use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
 
 /// Helper function to create an "ordinary" user
-pub async fn create_user(x: &TestApp, r: &reqwest::Client) -> (LocalWallet, LoginPostResponse) {
-    let user_wallet = x.wallet(2);
-
+pub async fn create_user(
+    x: &TestApp,
+    r: &reqwest::Client,
+    user_wallet: &LocalWallet,
+    referral_code: Option<String>,
+) -> (LoginPostResponse) {
     let login_post_url = format!("{}user/login", x.proxy_provider.url());
     let user_login_get_url = format!(
         "{}user/login/{:?}",
@@ -24,7 +27,7 @@ pub async fn create_user(x: &TestApp, r: &reqwest::Client) -> (LocalWallet, Logi
     let user_post_login_data = PostLogin {
         msg: user_login_message,
         sig: user_signed.to_string(),
-        referral_code: None,
+        referral_code,
     };
     info!(?user_post_login_data);
 
@@ -39,5 +42,5 @@ pub async fn create_user(x: &TestApp, r: &reqwest::Client) -> (LocalWallet, Logi
         .unwrap();
     info!(?user_login_response);
 
-    (user_wallet, user_login_response)
+    user_login_response
 }

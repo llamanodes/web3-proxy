@@ -1,9 +1,18 @@
 mod common;
 
+use crate::common::admin_increases_balance::admin_increase_balance;
+use crate::common::create_admin::create_user_as_admin;
+use crate::common::create_user::create_user;
+use crate::common::get_user_balance::user_get_balance;
+use crate::common::referral::{
+    get_referral_code, get_shared_referral_codes, get_used_referral_codes, UserSharedReferralInfo,
+    UserUsedReferralInfo,
+};
 use crate::common::TestApp;
 use ethers::{signers::Signer, types::Signature};
-use migration::Value::Decimal;
+use rust_decimal::Decimal;
 use serde::Deserialize;
+use std::str::FromStr;
 use std::time::Duration;
 use tokio_stream::StreamExt;
 use tracing::{debug, info, trace};
@@ -76,175 +85,104 @@ async fn test_log_in_and_out() {
     assert_eq!(logout_response, "goodbye");
 }
 
-// #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
-#[ignore = "under construction"]
+#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn test_referral_bonus() {
-    // info!("Starting referral bonus test");
-    // let x = TestApp::spawn(true).await;
-    // let r = reqwest::Client::new()
-    //     .timeout(Duration::from_secs(3))
-    //     .build()
-    //     .unwrap();
-    //
-    // // Setup variables that will be used
-    // let login_post_url = format!("{}user/login", x.proxy_provider.url());
-    // let get_referral_link = format!("{}user/referral", x.proxy_provider.url());
-    // let get_user_balance = format!("{}user/balance", x.proxy_provider.url());
-    // // let admin_provide_balance = format!("");
-    //
-    // let check_used_referral_link =
-    //     format!("{}/user/referral/stats/used-codes", x.proxy_provider.url());
-    // let check_shared_referral_link = format!(
-    //     "{}/user/referral/stats/shared-codes",
-    //     x.proxy_provider.url()
-    // );
-    //
-    // let referrer_wallet = x.wallet(1);
-    // let user_wallet = x.wallet(2);
-    //
-    // // Login the referrer
-    // let referrer_login_get_url = format!(
-    //     "{}user/login/{:?}",
-    //     x.proxy_provider.url(),
-    //     referrer_wallet.address()
-    // );
-    // let referrer_login_message = r.get(referrer_login_get_url).send().await.unwrap();
-    // let referrer_login_message = referrer_login_message.text().await.unwrap();
-    // // Sign the message and POST it to login as admin
-    // let referrer_signed: Signature = referrer_wallet
-    //     .sign_message(&referrer_login_message)
-    //     .await
-    //     .unwrap();
-    // info!(?referrer_signed);
-    // let referrer_post_login_data = PostLogin {
-    //     msg: referrer_login_message,
-    //     sig: referrer_signed.to_string(),
-    //     referral_code: None,
-    // };
-    // info!(?referrer_post_login_data);
-    // let referrer_login_response = r
-    //     .post(&login_post_url)
-    //     .json(&referrer_post_login_data)
-    //     .send()
-    //     .await
-    //     .unwrap()
-    //     .json::<LoginPostResponse>()
-    //     .await
-    //     .unwrap();
-    // info!(?referrer_login_response);
-    //
-    // // Now the referrer needs to access his referral code
-    // let referrer_get_referral_link_login = r
-    //     .post(&get_referral_link)
-    //     .send()
-    //     .await
-    //     .unwrap()
-    //     .json::<GetReferralLinkResponse>()
-    //     .await
-    //     .unwrap();
-    // info!(?referrer_get_referral_link_login);
-    //
-    // // Also login the user (to create the user)
-    // let user_login_get_url = format!(
-    //     "{}user/login/{:?}",
-    //     x.proxy_provider.url(),
-    //     user_wallet.address()
-    // );
-    // let user_login_message = r.get(user_login_get_url).send().await.unwrap();
-    // let user_login_message = user_login_message.text().await.unwrap();
-    //
-    // // Sign the message and POST it to login as admin
-    // let user_signed: Signature = user_wallet.sign_message(&user_login_message).await.unwrap();
-    // info!(?user_signed);
-    // let user_post_login_data = PostLogin {
-    //     msg: user_login_message,
-    //     sig: user_signed.to_string(),
-    //     referral_code: Some(referrer_get_referral_link_login.referral_code),
-    // };
-    // info!(?user_post_login_data);
-    // let user_login_response = r
-    //     .post(&login_post_url)
-    //     .json(&user_post_login_data)
-    //     .send()
-    //     .await
-    //     .unwrap()
-    //     .json::<LoginPostResponse>()
-    //     .await
-    //     .unwrap();
-    // info!(?user_login_response);
-    //
-    // // The referrer makes sure that the user is registered as a referred used
-    // let referrer_check_user = r
-    //     .post(&check_shared_referral_link)
-    //     .send()
-    //     .await
-    //     .unwrap()
-    //     .json::<serde_json::Value>()
-    //     .await
-    //     .unwrap();
-    // info!(?"Referrer check user");
-    // info!(?referrer_check_user);
-    //
-    // // The referee makes sure that the referrer is registered as the referrer
-    // let user_check_referrer = r
-    //     .post(&check_used_referral_link)
-    //     .send()
-    //     .await
-    //     .unwrap()
-    //     .json::<serde_json::Value>()
-    //     .await
-    //     .unwrap();
-    // info!(?"User check referrer");
-    // info!(?user_check_referrer);
-    //
-    // // TODO: Assign credits to both users (10$)
-    //
-    // // Then we ask both users for their balance
-    // let referrer_balance_pre = r
-    //     .post(get_user_balance.clone())
-    //     .bearer_auth(referrer_login_response.bearer_token)
-    //     .send()
-    //     .await
-    //     .unwrap();
-    // info!(?referrer_balance_pre);
-    // let user_balance_pre = r
-    //     .post(get_user_balance.clone())
-    //     .bearer_auth(user_login_response.bearer_token)
-    //     .send()
-    //     .await
-    //     .unwrap();
-    // info!(?user_balance_pre);
-    //
-    // // We make sure that the referrer has $10 + 10% of the used balance
-    // // The admin provides credits for both
-    //
-    // assert_eq!(referrer_balance_pre, Decimal::from(20));
-    // assert_eq!(user_balance_pre, Decimal::from(20));
-    //
-    // // Now both users should make concurrent requests
-    //
-    // // Then we assert the balances to be distributed
-    // let referrer_balance_post = r
-    //     .post(get_user_balance.clone())
-    //     .bearer_auth(referrer_login_response.bearer_token)
-    //     .send()
-    //     .await
-    //     .unwrap();
-    // info!(?referrer_balance_post);
-    // let user_balance_post = r
-    //     .post(get_user_balance.clone())
-    //     .bearer_auth(user_login_response.bearer_token)
-    //     .send()
-    //     .await
-    //     .unwrap();
-    // info!(?user_balance_post);
-    //
-    // let difference = user_balance_pre - user_balance_post;
-    // // Finally, make sure that referrer has received 10$ of balances
-    // assert_eq!(
-    //     referrer_balance_pre + difference / Decimal::from(10),
-    //     referrer_balance_post
-    // );
-    todo!();
+    info!("Starting referral bonus test");
+    let x = TestApp::spawn(true).await;
+    let r = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+
+    let user_wallet = x.wallet(0);
+    let referrer_wallet = x.wallet(1);
+    let admin_wallet = x.wallet(2);
+
+    // Create three users, one referrer, one admin who bumps both their balances
+    let referrer_login_response = create_user(&x, &r, &referrer_wallet, None).await;
+    let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
+    // Get the first user's referral link
+    let referral_link = get_referral_code(&x, &r, &referrer_login_response).await;
+
+    let user_login_response = create_user(&x, &r, &user_wallet, Some(referral_link.clone())).await;
+
+    // Bump both user's wallet to $20
+    admin_increase_balance(
+        &x,
+        &r,
+        &admin_login_response,
+        &user_wallet,
+        Decimal::from(20),
+    )
+    .await;
+    admin_increase_balance(
+        &x,
+        &r,
+        &admin_login_response,
+        &referrer_wallet,
+        Decimal::from(20),
+    )
+    .await;
+
+    // Get balance before for both users
+    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
+    let user_balance_pre =
+        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    let referrer_balance_response = user_get_balance(&x, &r, &user_login_response).await;
+    let referrer_balance_pre =
+        Decimal::from_str(referrer_balance_response["balance"].as_str().unwrap()).unwrap();
+
+    // Make sure they both have balance now
+    assert_eq!(user_balance_pre, Decimal::from(20));
+    assert_eq!(referrer_balance_pre, Decimal::from(20));
+
+    // Setup variables that will be used
+    let shared_referral_code: UserSharedReferralInfo =
+        get_shared_referral_codes(&x, &r, &referrer_login_response).await;
+    let used_referral_code: UserUsedReferralInfo =
+        get_used_referral_codes(&x, &r, &user_login_response).await;
+
+    // assert that the used referral code is used
+    assert_eq!(
+        format!("{:?}", user_wallet.address()),
+        shared_referral_code
+            .clone()
+            .referrals
+            .get(0)
+            .unwrap()
+            .referred_address
+            .clone()
+            .unwrap()
+    );
+    assert_eq!(
+        referral_link.clone(),
+        used_referral_code
+            .clone()
+            .referrals
+            .get(0)
+            .unwrap()
+            .used_referral_code
+            .clone()
+            .unwrap()
+    );
+
+    // We make sure that the referrer has $10 + 10% of the used balance
+    // The admin provides credits for both
+    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
+    let user_balance_post =
+        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    let referrer_balance_response = user_get_balance(&x, &r, &user_login_response).await;
+    let referrer_balance_post =
+        Decimal::from_str(referrer_balance_response["balance"].as_str().unwrap()).unwrap();
+
+    // Now both users should make concurrent requests
+    // TODO: Make concurrent requests
+
+    let difference = user_balance_pre - user_balance_post;
+    // Finally, make sure that referrer has received 10$ of balances
+    assert_eq!(
+        referrer_balance_pre + difference / Decimal::from(10),
+        referrer_balance_post
+    );
 }
