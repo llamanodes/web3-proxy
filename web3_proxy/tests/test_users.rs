@@ -10,6 +10,7 @@ use crate::common::referral::{
     UserUsedReferralInfo,
 };
 use crate::common::TestApp;
+use ethers::prelude::{Http, Provider};
 use ethers::{signers::Signer, types::Signature};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -180,7 +181,9 @@ async fn test_referral_bonus() {
     // Now both users should make concurrent requests
     // TODO: Make concurrent requests
     info!("Get rpc key");
-    let example_request = r#"{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}"#;
+    let example_request =
+        serde_json::from_str(r#"{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}"#)
+            .unwrap();
 
     // Make a for-loop just spam it a bit
     // Make a JSON request
@@ -189,8 +192,20 @@ async fn test_referral_bonus() {
     info!("Rpc key is: {:?}", rpc_keys);
     info!(?rpc_keys);
 
+    let proxy_endpoint = format!(
+        "http://127.0.0.1:{}/rpc/{}",
+        frontend_port, rpc_keys.secret_key
+    );
+    let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
+
     let rpc_link = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
     info!(?rpc_link);
+    let test = r
+        .get(rpc_link.clone())
+        // .bearer_auth(user_login_response.bearer_token)
+        .json(&example_request);
+    info!("Testing rpc");
+    info!(?test);
     let response = r
         .get(rpc_link)
         // .bearer_auth(user_login_response.bearer_token)
