@@ -20,6 +20,7 @@ use tokio_stream::StreamExt;
 use tracing::{debug, info, trace};
 use ulid::Ulid;
 use web3_proxy::frontend::users::authentication::PostLogin;
+use web3_proxy::rpcs::blockchain::ArcBlock;
 
 /// TODO: use this type in the frontend
 #[derive(Debug, Deserialize)]
@@ -89,11 +90,11 @@ async fn test_log_in_and_out() {
 
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
-async fn test_referral_bonus() {
+async fn test_referral_bonus_non_concurrent() {
     info!("Starting referral bonus test");
     let x = TestApp::spawn(true).await;
     let r = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
 
@@ -131,7 +132,7 @@ async fn test_referral_bonus() {
     let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
     let user_balance_pre =
         Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
-    let referrer_balance_response = user_get_balance(&x, &r, &user_login_response).await;
+    let referrer_balance_response = user_get_balance(&x, &r, &referrer_login_response).await;
     let referrer_balance_pre =
         Decimal::from_str(referrer_balance_response["balance"].as_str().unwrap()).unwrap();
 
@@ -169,22 +170,6 @@ async fn test_referral_bonus() {
             .unwrap()
     );
 
-    // We make sure that the referrer has $10 + 10% of the used balance
-    // The admin provides credits for both
-    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    let user_balance_post =
-        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
-    let referrer_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    let referrer_balance_post =
-        Decimal::from_str(referrer_balance_response["balance"].as_str().unwrap()).unwrap();
-
-    // Now both users should make concurrent requests
-    // TODO: Make concurrent requests
-    info!("Get rpc key");
-    let example_request =
-        serde_json::from_str(r#"{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}"#)
-            .unwrap();
-
     // Make a for-loop just spam it a bit
     // Make a JSON request
     // TODO: Also get the RPC key for the user first ...
@@ -192,35 +177,47 @@ async fn test_referral_bonus() {
     info!("Rpc key is: {:?}", rpc_keys);
     info!(?rpc_keys);
 
-    let proxy_endpoint = format!(
-        "http://127.0.0.1:{}/rpc/{}",
-        frontend_port, rpc_keys.secret_key
-    );
+    let proxy_endpoint = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
     let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
 
-    let rpc_link = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
-    info!(?rpc_link);
-    let test = r
-        .get(rpc_link.clone())
-        // .bearer_auth(user_login_response.bearer_token)
-        .json(&example_request);
-    info!("Testing rpc");
-    info!(?test);
-    let response = r
-        .get(rpc_link)
-        // .bearer_auth(user_login_response.bearer_token)
-        .json(&example_request)
-        .send()
-        .await
-        .unwrap();
-    info!("Response is");
-    info!(?response);
-    assert_eq!(response.status(), 200);
+    for _ in 1..10_000 {
+        let proxy_result = proxy_provider
+            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
+            .await
+            .unwrap()
+            .unwrap();
+        // info!("Provider is");
+        // info!(?proxy_result);
+    }
 
-    // let difference = user_balance_pre - user_balance_post;
-    // // Finally, make sure that referrer has received 10$ of balances
-    // assert_eq!(
-    //     referrer_balance_pre + difference / Decimal::from(10),
-    //     referrer_balance_post
-    // );
+    // Check that at least something was earned:
+    let shared_referral_code: UserSharedReferralInfo =
+        get_shared_referral_codes(&x, &r, &referrer_login_response).await;
+    info!("Referral code");
+    info!("{:?}", shared_referral_code.referrals.get(0).unwrap());
+
+    // We make sure that the referrer has $10 + 10% of the used balance
+    // The admin provides credits for both
+    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
+    let user_balance_post =
+        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    let referrer_balance_response = user_get_balance(&x, &r, &referrer_login_response).await;
+    let referrer_balance_post =
+        Decimal::from_str(referrer_balance_response["balance"].as_str().unwrap()).unwrap();
+
+    let difference = user_balance_pre - user_balance_post;
+
+    // Make sure that the pre and post balance is not the same (i.e. some change has occurred)
+    assert_ne!(
+        user_balance_pre, user_balance_post,
+        "Pre and post balnace is equivalent"
+    );
+    assert!(user_balance_pre > user_balance_post);
+    assert!(referrer_balance_pre < referrer_balance_post);
+
+    // Finally, make sure that referrer has received 10$ of balances
+    assert_eq!(
+        referrer_balance_pre + difference / Decimal::from(10),
+        referrer_balance_post
+    );
 }
