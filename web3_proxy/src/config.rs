@@ -53,15 +53,17 @@ pub struct TopConfig {
 
 /// shared configuration between Web3Rpcs
 // TODO: no String, only &str
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Derivative, Deserialize, PartialEq, Eq)]
+#[derivative(Default)]
 pub struct AppConfig {
     /// Request limit for allowed origins for anonymous users.
     /// These requests get rate limited by IP.
-    #[serde(default = "default_allowed_origin_requests_per_period")]
+    #[serde(default)]
     pub allowed_origin_requests_per_period: HashMap<String, u64>,
 
     /// erigon defaults to pruning beyond 90,000 blocks
-    #[serde(default = "default_archive_depth")]
+    #[serde(default)]
+    #[derivative(Default(value = "90_000"))]
     pub archive_depth: u64,
 
     /// EVM chain id. 1 for ETH
@@ -113,7 +115,8 @@ pub struct AppConfig {
     /// Used by /debug/:rpc_key urls for logging requests and responses. No other endpoints log request/response data.
     pub kafka_urls: Option<String>,
 
-    #[serde(default = "default_kafka_protocol")]
+    #[serde(default)]
+    #[derivative(Default(value = r#""ssl".to_string()"#))]
     pub kafka_protocol: String,
 
     /// domain in sign-in-with-ethereum messages
@@ -124,15 +127,18 @@ pub struct AppConfig {
 
     /// Rate limit for the login entrypoint.
     /// This is separate from the rpc limits.
-    #[serde(default = "default_login_rate_limit_per_period")]
+    #[serde(default)]
+    #[derivative(Default(value = "10"))]
     pub login_rate_limit_per_period: u64,
 
     /// The soft limit prevents thundering herds as new blocks are seen.
-    #[serde(default = "default_min_sum_soft_limit")]
+    #[serde(default)]
+    #[derivative(Default(value = "1"))]
     pub min_sum_soft_limit: u32,
 
     /// Another knob for preventing thundering herds as new blocks are seen.
-    #[serde(default = "default_min_synced_rpcs")]
+    #[serde(default)]
+    #[derivative(Default(value = "1"))]
     pub min_synced_rpcs: usize,
 
     /// Concurrent request limit for anonymous users.
@@ -149,7 +155,8 @@ pub struct AppConfig {
     pub public_recent_ips_salt: Option<String>,
 
     /// RPC responses are cached locally
-    #[serde(default = "default_response_cache_max_bytes")]
+    #[serde(default)]
+    #[derivative(Default(value = "10u64.pow(8)"))]
     pub response_cache_max_bytes: u64,
 
     /// the stats page url for an anonymous user.
@@ -187,39 +194,6 @@ pub struct AppConfig {
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
-}
-
-fn default_archive_depth() -> u64 {
-    90_000
-}
-
-fn default_allowed_origin_requests_per_period() -> HashMap<String, u64> {
-    HashMap::new()
-}
-
-/// This might cause a thundering herd!
-fn default_min_sum_soft_limit() -> u32 {
-    1
-}
-
-/// Only require 1 server. This might cause a thundering herd!
-fn default_min_synced_rpcs() -> usize {
-    1
-}
-
-/// Having a low amount of requests per period (usually minute) for login is safest.
-fn default_login_rate_limit_per_period() -> u64 {
-    10
-}
-
-fn default_kafka_protocol() -> String {
-    "ssl".to_string()
-}
-
-fn default_response_cache_max_bytes() -> u64 {
-    // TODO: default to some percentage of the system?
-    // 100 megabytes
-    10u64.pow(8)
 }
 
 /// TODO: we can't query a provider because we need this to create a provider
