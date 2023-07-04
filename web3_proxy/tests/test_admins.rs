@@ -3,6 +3,8 @@ mod common;
 use std::str::FromStr;
 use std::time::Duration;
 
+use crate::common::create_admin::create_user_as_admin;
+use crate::common::create_user::create_user;
 use crate::common::TestApp;
 use ethers::prelude::Signer;
 use ethers::types::Signature;
@@ -32,121 +34,11 @@ async fn test_admin_grant_credits() {
         .unwrap();
 
     // Setup variables that will be used
-    let login_post_url = format!("{}user/login", x.proxy_provider.url());
     let increase_balance_post_url = format!("{}admin/increase_balance", x.proxy_provider.url());
 
-    let admin_wallet = x.wallet(1);
-    let user_wallet = x.wallet(2);
-
-    // Login the admin to create their account. they aren't an admin yet
-    let admin_login_get_url = format!(
-        "{}user/login/{:?}",
-        x.proxy_provider.url(),
-        admin_wallet.address()
-    );
-    let admin_login_message = r.get(admin_login_get_url).send().await.unwrap();
-    let admin_login_message = admin_login_message.text().await.unwrap();
-
-    // Sign the message and POST it to login as admin
-    let admin_signed: Signature = admin_wallet
-        .sign_message(&admin_login_message)
-        .await
-        .unwrap();
-    info!(?admin_signed);
-
-    let admin_post_login_data = PostLogin {
-        msg: admin_login_message,
-        sig: admin_signed.to_string(),
-        referral_code: None,
-    };
-    info!(?admin_post_login_data);
-
-    let admin_login_response = r
-        .post(&login_post_url)
-        .json(&admin_post_login_data)
-        .send()
-        .await
-        .unwrap()
-        .json::<LoginPostResponse>()
-        .await
-        .unwrap();
-    info!(?admin_login_response);
-
-    // Also login the user (to create the user)
-    let user_login_get_url = format!(
-        "{}user/login/{:?}",
-        x.proxy_provider.url(),
-        user_wallet.address()
-    );
-    let user_login_message = r.get(user_login_get_url).send().await.unwrap();
-    let user_login_message = user_login_message.text().await.unwrap();
-
-    // Sign the message and POST it to login as the user
-    let user_signed: Signature = user_wallet.sign_message(&user_login_message).await.unwrap();
-    info!(?user_signed);
-
-    let user_post_login_data = PostLogin {
-        msg: user_login_message,
-        sig: user_signed.to_string(),
-        referral_code: None,
-    };
-    info!(?user_post_login_data);
-
-    let user_login_response = r
-        .post(&login_post_url)
-        .json(&user_post_login_data)
-        .send()
-        .await
-        .unwrap()
-        .json::<LoginPostResponse>()
-        .await
-        .unwrap();
-    info!(?user_login_response);
-
-    info!("Make the user an admin ...");
-    // Change Admin SubCommand struct
-    let admin_status_changer = ChangeAdminStatusSubCommand {
-        address: format!("{:?}", admin_wallet.address()),
-        should_be_admin: true,
-    };
-    info!(?admin_status_changer);
-
-    info!("Changing the status of the admin_wallet to be an admin");
-    // Pass on the database into it ...
-    admin_status_changer.main(x.db_conn()).await.unwrap();
-
-    // Login the admin again, because he was just signed out
-    let admin_login_get_url = format!(
-        "{}user/login/{:?}",
-        x.proxy_provider.url(),
-        admin_wallet.address()
-    );
-    let admin_login_message = r.get(admin_login_get_url).send().await.unwrap();
-    let admin_login_message = admin_login_message.text().await.unwrap();
-
-    // Sign the message and POST it to login as admin
-    let admin_signed: Signature = admin_wallet
-        .sign_message(&admin_login_message)
-        .await
-        .unwrap();
-    info!(?admin_signed);
-
-    let admin_post_login_data = PostLogin {
-        msg: admin_login_message,
-        sig: admin_signed.to_string(),
-        referral_code: None,
-    };
-    info!(?admin_post_login_data);
-
-    let admin_login_response = r
-        .post(&login_post_url)
-        .json(&admin_post_login_data)
-        .send()
-        .await
-        .unwrap()
-        .json::<LoginPostResponse>()
-        .await
-        .unwrap();
+    let (user_wallet, _) = create_user(&x, &r).await;
+    let (admin_wallet, admin_login_response) = create_user_as_admin(&x, &r).await;
+    info!(?admin_wallet);
     info!(?admin_login_response);
 
     info!("Increasing balance");
