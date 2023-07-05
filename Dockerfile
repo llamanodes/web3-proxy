@@ -83,13 +83,14 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/app/target,id=build_app_target \
     set -eux; \
     \
-    cargo build --features "$WEB3_PROXY_FEATURES" --locked --release -p payment-contracts \
+    cargo build --features "$WEB3_PROXY_FEATURES" --locked --release -p payment-contracts; \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
     --locked \
     --no-default-features \
     --path ./web3_proxy \
-    --root /usr/local && \
+    --root /usr/local \
+    ; \
     /usr/local/bin/web3_proxy_cli --help | grep 'Usage: web3_proxy_cli'
 
 # copy this file so that docker actually creates the build_tests container
@@ -106,7 +107,7 @@ RUN set -eux; \
     \
     mkdir /llama; \
     adduser --home /llama --shell /sbin/nologin --gecos '' --no-create-home --disabled-password --uid 1001 llama; \
-    chown -R llama /llama;
+    chown -R llama /llama
 
 USER llama
 
