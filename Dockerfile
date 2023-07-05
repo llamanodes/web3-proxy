@@ -82,7 +82,7 @@ COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/app/target,sharing=private \
+    --mount=type=cache,target=/app/target \
     set -eux; \
     \
     RUST_LOG=web3_proxy=trace,info \
