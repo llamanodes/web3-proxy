@@ -70,7 +70,7 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/app/target \
     set -eux; \
     \
-    cargo --locked fetch
+    cargo --locked --verbose fetch
 
 # build tests (done its in own FROM so that it can run in parallel)
 FROM rust_with_env as build_tests
@@ -82,10 +82,17 @@ COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target,sharing=private \
     set -eux; \
     \
-    RUST_LOG=web3_proxy=trace,info cargo --frozen --offline nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features; \
+    RUST_LOG=web3_proxy=trace,info \
+    cargo \
+    --frozen \
+    --offline \
+    --verbose \
+    nextest run \
+    --features "$WEB3_PROXY_FEATURES" --no-default-features \
+    ; \
     touch /test_success
 
 FROM rust_with_env as build_app
@@ -100,12 +107,13 @@ RUN --mount=type=bind,target=.,rw \
     set -eux; \
     \
     cargo install \
-    --frozen \
-    --offline \
     --features "$WEB3_PROXY_FEATURES" \
+    --frozen \
     --no-default-features \
+    --offline \
     --path ./web3_proxy \
     --root /usr/local \
+    --verbose \
     ; \
     /usr/local/bin/web3_proxy_cli --help | grep 'Usage: web3_proxy_cli'
 
