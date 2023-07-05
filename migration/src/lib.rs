@@ -34,6 +34,7 @@ mod m20230618_230611_longer_payload;
 mod m20230619_172237_default_tracking;
 mod m20230622_104142_stripe_deposits;
 mod m20230705_210858_split_errors;
+mod m20230705_214013_type_fixes;
 
 pub struct Migrator;
 
@@ -75,6 +76,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20230619_172237_default_tracking::Migration),
             Box::new(m20230622_104142_stripe_deposits::Migration),
             Box::new(m20230705_210858_split_errors::Migration),
+            Box::new(m20230705_214013_type_fixes::Migration),
         ]
     }
 }

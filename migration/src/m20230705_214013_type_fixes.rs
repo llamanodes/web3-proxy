@@ -6,14 +6,14 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Replace the sample below with your own migration scripts
         manager
             .alter_table(
                 Table::alter()
-                    .table(RpcAccountingV2::Table)
-                    .add_column(
-                        ColumnDef::new(RpcAccountingV2::UserErrorResponse)
+                    .table(IncreaseOnChainBalanceReceipt::Table)
+                    .modify_column(
+                        ColumnDef::new(IncreaseOnChainBalanceReceipt::LogIndex)
                             .big_unsigned()
-                            .default(0)
                             .not_null(),
                     )
                     .to_owned(),
@@ -25,8 +25,13 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(RpcAccountingV2::Table)
-                    .drop_column(RpcAccountingV2::UserErrorResponse)
+                    .table(IncreaseOnChainBalanceReceipt::Table)
+                    .modify_column(
+                        ColumnDef::new(IncreaseOnChainBalanceReceipt::LogIndex)
+                            .big_integer()
+                            .unsigned()
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await
@@ -35,7 +40,7 @@ impl MigrationTrait for Migration {
 
 /// Learn more at https://docs.rs/sea-query#iden
 #[derive(Iden)]
-enum RpcAccountingV2 {
+enum IncreaseOnChainBalanceReceipt {
     Table,
-    UserErrorResponse,
+    LogIndex,
 }
