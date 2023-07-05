@@ -68,7 +68,6 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/app/target,id=build_tests_target \
     set -eux; \
     \
-    cargo build --features "$WEB3_PROXY_FEATURES" --locked -p payment-contracts; \
     RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features; \
     touch /test_success
 
@@ -83,7 +82,6 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/app/target,id=build_app_target \
     set -eux; \
     \
-    cargo build --features "$WEB3_PROXY_FEATURES" --locked --release -p payment-contracts; \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
     --locked \
