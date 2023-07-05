@@ -168,8 +168,8 @@ pub struct AppConfig {
     /// Optionally send errors to <https://sentry.io>
     pub sentry_url: Option<Dsn>,
 
-    /// Stripe api key from environment variable,
-    pub stripe_api_key: Option<String>,
+    /// Stripe api key for checking validity of webhooks
+    pub stripe_whsec_key: Option<String>,
 
     /// Track rate limits in a redis (or compatible backend)
     /// It is okay if this data is lost.

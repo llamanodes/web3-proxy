@@ -87,7 +87,7 @@ pub async fn user_balance_stripe_post(
 
     let secret = app
         .config
-        .stripe_api_key
+        .stripe_whsec_key
         .clone()
         .web3_context("Stripe API key not found in config!")?;
 
