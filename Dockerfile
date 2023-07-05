@@ -85,7 +85,7 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/app/target \
     set -eux; \
     \
-    RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features; \
+    RUST_LOG=web3_proxy=trace,info cargo --frozen --offline nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features; \
     touch /test_success
 
 FROM rust_with_env as build_app
@@ -100,6 +100,8 @@ RUN --mount=type=bind,target=.,rw \
     set -eux; \
     \
     cargo install \
+    --frozen \
+    --offline \
     --features "$WEB3_PROXY_FEATURES" \
     --no-default-features \
     --path ./web3_proxy \
