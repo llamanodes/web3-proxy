@@ -29,7 +29,7 @@ use std::borrow::Cow;
 use std::mem;
 use std::num::NonZeroU64;
 use std::str::FromStr;
-use std::sync::atomic::{self, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::trace;
 
@@ -61,6 +61,8 @@ pub struct RpcQueryStats {
     /// The cost of the query in USD
     /// If the user is on a free tier, this is still calculated so we know how much we are giving away.
     pub compute_unit_cost: Decimal,
+    /// If the request is invalid or received a jsonrpc error response (excluding reverts)
+    pub user_error_response: bool,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
@@ -784,9 +786,11 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
         let response_bytes = metadata.response_bytes.load(Ordering::Acquire);
 
         let mut error_response = metadata.error_response.load(Ordering::Acquire);
-        let mut response_millis = metadata.response_millis.load(atomic::Ordering::Acquire);
+        let mut response_millis = metadata.response_millis.load(Ordering::Acquire);
 
-        let response_timestamp = match metadata.response_timestamp.load(atomic::Ordering::Acquire) {
+        let user_error_response = metadata.user_error_response.load(Ordering::Acquire);
+
+        let response_timestamp = match metadata.response_timestamp.load(Ordering::Acquire) {
             0 => {
                 // no response timestamp!
                 if !error_response {
@@ -836,6 +840,7 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
             response_bytes,
             response_millis,
             response_timestamp,
+            user_error_response,
         };
 
         Ok(x)

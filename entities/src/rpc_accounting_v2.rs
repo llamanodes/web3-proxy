@@ -24,7 +24,6 @@ pub struct Model {
     pub sum_response_bytes: u64,
     #[sea_orm(column_type = "Decimal(Some((20, 10)))")]
     pub sum_credits_used: Decimal,
-    pub user_error_response: u64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
