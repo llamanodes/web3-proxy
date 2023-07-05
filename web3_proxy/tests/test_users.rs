@@ -180,7 +180,7 @@ async fn test_referral_bonus_non_concurrent() {
     let proxy_endpoint = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
     let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
 
-    for _ in 1..10_000 {
+    for _ in 1..100_000 {
         let proxy_result = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
