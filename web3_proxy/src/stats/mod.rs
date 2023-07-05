@@ -73,11 +73,13 @@ pub struct RpcQueryKey {
     response_timestamp: i64,
     /// true if an archive server was needed to serve the request.
     archive_needed: bool,
-    /// true if the response was some sort of JSONRPC error.
+    /// true if the response was some sort of application error.
     error_response: bool,
+    /// true if the response was some sort of JSONRPC error.
+    user_error_response: bool,
     /// the rpc method used.
     method: Cow<'static, str>,
-    /// origin tracking was opt-in. Now it is "None"
+    /// origin tracking **was** opt-in. Now, it is always "None"
     origin: Option<Origin>,
     /// None if the public url was used.
     rpc_secret_key_id: Option<NonZeroU64>,
@@ -105,6 +107,9 @@ impl RpcQueryStats {
         // we used to optionally store origin, but wallets don't set it, so its almost always None
         let origin = None;
 
+        // user_error_response is always set to false because we don't bother tracking this in the database
+        let user_error_response = false;
+
         // Depending on method, add some arithmetic around calculating credits_used
         // I think balance should not go here, this looks more like a key thingy
         RpcQueryKey {
@@ -115,6 +120,7 @@ impl RpcQueryStats {
             rpc_secret_key_id,
             rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
             origin,
+            user_error_response,
         }
     }
 
@@ -135,6 +141,7 @@ impl RpcQueryStats {
             method,
             rpc_secret_key_id,
             rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
+            user_error_response: self.user_error_response,
             origin,
         }
     }
@@ -153,6 +160,7 @@ impl RpcQueryStats {
             method,
             rpc_secret_key_id: self.authorization.checks.rpc_secret_key_id,
             rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
+            user_error_response: self.user_error_response,
             origin,
         };
 
@@ -734,6 +742,7 @@ impl BufferedRpcQueryStats {
         builder = builder
             .tag("archive_needed", key.archive_needed.to_string())
             .tag("error_response", key.error_response.to_string())
+            .tag("user_error_response", key.user_error_response.to_string())
             .field("frontend_requests", self.frontend_requests as i64)
             .field("backend_requests", self.backend_requests as i64)
             .field("no_servers", self.no_servers as i64)

@@ -263,6 +263,7 @@ pub async fn query_user_stats<'a>(
             "error_response",
             "method",
             "rpc_secret_key_id",
+            "user_error_response",
         ]"#
         }
     };
@@ -332,7 +333,7 @@ pub async fn query_user_stats<'a>(
     // TODO: lower log level
     debug!("Raw query to db is: {:#}", query);
     let query = Query::new(query.to_string());
-    trace!("Query to db is: {:#?}", query);
+    trace!(?query, "Query to db is: {:#?}");
 
     // Make the query and collect all data
     let raw_influx_responses: Vec<FluxRecord> = influxdb_client
@@ -575,7 +576,25 @@ pub async fn query_user_stats<'a>(
                             );
                         }
                         _ => {
-                            error!("error_response should always be a Long!");
+                            error!("error_response should always be a String!");
+                        }
+                    }
+                } else if key == "user_error_response" {
+                    match value {
+                        influxdb2_structmap::value::Value::String(inner) => {
+                            out.insert(
+                                "user_error_response",
+                                if inner == "true" {
+                                    serde_json::Value::Bool(true)
+                                } else if inner == "false" {
+                                    serde_json::Value::Bool(false)
+                                } else {
+                                    serde_json::Value::String("error".to_owned())
+                                },
+                            );
+                        }
+                        _ => {
+                            error!("user_error_response should always be a String!");
                         }
                     }
                 }
