@@ -579,7 +579,7 @@ pub async fn query_user_stats<'a>(
                             error!("error_response should always be a String!");
                         }
                     }
-                } else if key == "user_error_response" {
+                } else if stat_response_type == StatType::Detailed && key == "user_error_response" {
                     match value {
                         influxdb2_structmap::value::Value::String(inner) => {
                             out.insert(
