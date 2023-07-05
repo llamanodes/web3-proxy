@@ -75,7 +75,7 @@ RUN --mount=type=bind,target=.,rw \
 # build tests (done its in own FROM so that it can run in parallel)
 FROM rust_with_env as build_tests
 
-COPY --from=rust_foundry /root/.foundry /root/
+COPY --from=rust_foundry /root/.foundry/bin/anvil /root/.foundry/bin/
 COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 
 # test the application with cargo-nextest
