@@ -9,8 +9,9 @@ ENV PATH "/root/.foundry/bin:/root/.cargo/bin:${PATH}"
 # also install web3-proxy system dependencies. most things are rust-only, but not everything
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    set -eux; \
     \
-    apt-get update && \
+    apt-get update; \
     apt-get install --no-install-recommends --yes \
     build-essential \
     ca-certificates \
@@ -22,11 +23,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libsasl2-dev \
     libzstd-dev \
     make \
-    pkg-config
+    pkg-config \
+    ;
 
 # install rustup
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
+    set -eux; \
     \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile=minimal
 
@@ -34,6 +37,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
 COPY rust-toolchain.toml ./
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
+    set -eux; \
     \
     cargo check || [ "$?" -eq 101 ]
 
@@ -41,12 +45,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
 # We only pay the installation cost once, it will be cached from the second build onwards
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
+    set -eux; \
     \
     cargo install --locked cargo-nextest
 
 # foundry/anvil are needed to run tests
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
+    set -eux; \
     \
     curl -L https://foundry.paradigm.xyz | bash && foundryup
 
@@ -60,8 +66,10 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target,id=build_tests_target \
+    set -eux; \
     \
-    RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
+    cargo build --features "$WEB3_PROXY_FEATURES" --locked -p payment-contracts; \
+    RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features; \
     touch /test_success
 
 FROM rust as build_app
@@ -73,7 +81,9 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target,id=build_app_target \
+    set -eux; \
     \
+    cargo build --features "$WEB3_PROXY_FEATURES" --locked --release -p payment-contracts \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
     --locked \
@@ -92,9 +102,11 @@ COPY --from=build_tests /test_success /
 FROM debian:bullseye-slim AS runtime
 
 # Create llama user to avoid running container with root
-RUN mkdir /llama \
-    && adduser --home /llama --shell /sbin/nologin --gecos '' --no-create-home --disabled-password --uid 1001 llama \
-    && chown -R llama /llama
+RUN set -eux; \
+    \
+    mkdir /llama; \
+    adduser --home /llama --shell /sbin/nologin --gecos '' --no-create-home --disabled-password --uid 1001 llama; \
+    chown -R llama /llama;
 
 USER llama
 
