@@ -117,12 +117,12 @@ RUN --mount=type=bind,target=.,rw \
     ; \
     /usr/local/bin/web3_proxy_cli --help | grep 'Usage: web3_proxy_cli'
 
-# # copy this file so that docker actually creates the build_tests container
-# # without this, the runtime container doesn't need build_tests and so docker build skips it
+# copy this file so that docker actually creates the build_tests container
+# without this, the runtime container doesn't need build_tests and so docker build skips it
 COPY --from=build_tests /test_success /
 
 #
-# We do not need the Rust toolchain to run the binary!
+# We do not need the Rust toolchain or any deps to run the binary!
 #
 FROM debian:bullseye-slim AS runtime
 
