@@ -59,6 +59,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
 # changing our features doesn't change any of the steps above
 ENV WEB3_PROXY_FEATURES "rdkafka-src"
 
+# check downloads all the packages
+RUN --mount=type=bind,target=.,rw \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    set -eux; \
+    \
+    cargo fetch --locked
+
 FROM rust as build_tests
 
 # test the application with cargo-nextest
@@ -68,7 +77,7 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/app/target,id=build_tests_target \
     set -eux; \
     \
-    RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features; \
+    RUST_LOG=web3_proxy=trace,info cargo --frozen nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features --offline; \
     touch /test_success
 
 FROM rust as build_app
@@ -79,13 +88,14 @@ FROM rust as build_app
 RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,id=build_app_target \
+    --mount=type=cache,target=/app/target \
     set -eux; \
     \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
-    --locked \
+    --frozen \
     --no-default-features \
+    --offline \
     --path ./web3_proxy \
     --root /usr/local \
     ; \
