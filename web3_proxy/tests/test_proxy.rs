@@ -13,7 +13,7 @@ use web3_proxy::rpcs::blockchain::ArcBlock;
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn it_migrates_the_db() {
-    let x = TestApp::spawn(false).await;
+    let x = TestApp::spawn(true).await;
 
     x.flush_stats().await.unwrap();
 }
