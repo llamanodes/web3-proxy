@@ -28,7 +28,7 @@ use mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-#[cfg(feature = "deadlock")]
+#[cfg(feature = "deadlock_detection")]
 use {parking_lot::deadlock, std::thread, tokio::time::Duration};
 
 #[derive(Debug, FromArgs)]
