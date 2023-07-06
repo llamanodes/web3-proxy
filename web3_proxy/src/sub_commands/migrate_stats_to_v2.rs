@@ -72,19 +72,15 @@ impl MigrateStatsToV2SubCommand {
             None => None,
         };
 
-        let (_flush_sender, flush_receiver) = broadcast::channel(1);
+        let (_flush_sender, flush_receiver) = flume::bounded(1);
 
         // Spawn the stat-sender
         let emitter_spawn = StatBuffer::try_spawn(
             BILLING_PERIOD_SECONDS,
-            top_config
-                .app
-                .influxdb_bucket
-                .clone()
-                .context("No influxdb bucket was provided")?,
             top_config.app.chain_id,
             Some(db_conn.clone()),
             30,
+            top_config.app.influxdb_bucket.clone(),
             influxdb_client.clone(),
             None,
             None,

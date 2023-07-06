@@ -51,7 +51,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::sync::{broadcast, watch, Semaphore};
+use tokio::sync::{broadcast, watch, Semaphore, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
 use tracing::{error, info, trace, warn, Level};
@@ -185,7 +185,7 @@ impl Web3ProxyApp {
         top_config: TopConfig,
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
-        flush_stat_buffer_receiver: broadcast::Receiver<()>
+        flush_stat_buffer_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         let stat_buffer_shutdown_receiver = shutdown_sender.subscribe();
         let mut background_shutdown_receiver = shutdown_sender.subscribe();
@@ -385,31 +385,27 @@ impl Web3ProxyApp {
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
         // stats can be saved in mysql, influxdb, both, or none
-        let mut stat_sender = None;
-        if let Some(influxdb_bucket) = top_config.app.influxdb_bucket.clone() {
-            if let Some(spawned_stat_buffer) = StatBuffer::try_spawn(
-                BILLING_PERIOD_SECONDS,
-                influxdb_bucket,
-                top_config.app.chain_id,
-                db_conn.clone(),
-                60,
-                influxdb_client.clone(),
-                Some(rpc_secret_key_cache.clone()),
-                Some(user_balance_cache.clone()),
-                stat_buffer_shutdown_receiver,
-                1,
-                flush_stat_buffer_receiver,
-            )? {
-                // since the database entries are used for accounting, we want to be sure everything is saved before exiting
-                important_background_handles.push(spawned_stat_buffer.background_handle);
+        let stat_sender = if let Some(spawned_stat_buffer) = StatBuffer::try_spawn(
+            BILLING_PERIOD_SECONDS,
+            top_config.app.chain_id,
+            db_conn.clone(),
+            60,
+            top_config.app.influxdb_bucket.clone(),
+            influxdb_client.clone(),
+            Some(rpc_secret_key_cache.clone()),
+            Some(user_balance_cache.clone()),
+            stat_buffer_shutdown_receiver,
+            1,
+            flush_stat_buffer_receiver,
+        )? {
+            // since the database entries are used for accounting, we want to be sure everything is saved before exiting
+            important_background_handles.push(spawned_stat_buffer.background_handle);
 
-                stat_sender = Some(spawned_stat_buffer.stat_sender);
-            }
-        }
-
-        if stat_sender.is_none() {
+            Some(spawned_stat_buffer.stat_sender)
+        } else {
             info!("stats will not be collected");
-        }
+            None
+        };
 
         // make a http shared client
         // TODO: can we configure the connection pool? should we?

@@ -1,3 +1,3 @@
-mod app;
+pub mod app;
 
 pub use self::app::TestApp;

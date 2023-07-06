@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
 use tokio::select;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, oneshot};
 use tokio::time::{sleep_until, Instant};
 use tracing::{error, info, trace, warn};
 
@@ -37,12 +37,12 @@ impl ProxydSubCommand {
         top_config_path: PathBuf,
         num_workers: usize,
     ) -> anyhow::Result<()> {
-        let (shutdown_sender, _) = broadcast::channel(1);
+        let (frontend_shutdown_sender, _) = broadcast::channel(1);
         // TODO: i think there is a small race. if config_path changes
 
         let frontend_port = Arc::new(self.port.into());
         let prometheus_port = Arc::new(self.prometheus_port.into());
-        let (flush_stat_buffer_sender, _) = broadcast::channel(1);
+        let (_flush_stat_buffer_sender, flush_stat_buffer_receiver) = flume::bounded(1);
 
         Self::_main(
             top_config,
@@ -50,8 +50,8 @@ impl ProxydSubCommand {
             frontend_port,
             prometheus_port,
             num_workers,
-            shutdown_sender,
-            flush_stat_buffer_sender,
+            frontend_shutdown_sender,
+            flush_stat_buffer_receiver,
         )
         .await
     }
@@ -64,7 +64,7 @@ impl ProxydSubCommand {
         prometheus_port: Arc<AtomicU16>,
         num_workers: usize,
         frontend_shutdown_sender: broadcast::Sender<()>,
-        flush_stat_buffer_sender: broadcast::Sender<()>,
+        flush_stat_buffer_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
     ) -> anyhow::Result<()> {
         // tokio has code for catching ctrl+c so we use that to shut down in most cases
         // frontend_shutdown_sender is currently only used in tests, but we might make a /shutdown endpoint or something
@@ -85,7 +85,7 @@ impl ProxydSubCommand {
             top_config.clone(),
             num_workers,
             app_shutdown_sender.clone(),
-            flush_stat_buffer_sender.subscribe(),
+            flush_stat_buffer_receiver,
         )
         .await?;
 

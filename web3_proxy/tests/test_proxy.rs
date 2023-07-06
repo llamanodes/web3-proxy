@@ -10,11 +10,13 @@ use tokio::{
 };
 use web3_proxy::rpcs::blockchain::ArcBlock;
 
-// #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
-#[ignore = "under construction"]
+#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn it_migrates_the_db() {
-    TestApp::spawn(true).await;
+    let x = TestApp::spawn(true).await;
+
+    // we call flush stats more to be sure it works than because we expect it to save any stats
+    x.flush_stats().await.unwrap();
 }
 
 #[test_log::test(tokio::test)]
@@ -88,6 +90,9 @@ async fn it_starts_and_stops() {
     }
 
     assert_eq!(anvil_result, proxy_result.unwrap());
+
+    // this won't do anything since stats aren't tracked when there isn't a db
+    x.flush_stats().await.unwrap_err();
 
     // most tests won't need to wait, but we should wait here to be sure all the shutdown logic works properly
     x.wait().await;
