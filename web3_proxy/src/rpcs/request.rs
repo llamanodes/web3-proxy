@@ -275,9 +275,9 @@ impl OpenRequestHandle {
                     } else if msg.contains("limit") || msg.contains("request") {
                         // TODO: too verbose
                         if self.rpc.backup {
-                            trace!("rate limit from {}", self.rpc);
+                            trace!(%msg, "rate limit from {}", self.rpc);
                         } else {
-                            warn!("rate limit from {}", self.rpc);
+                            warn!(%msg, "rate limit from {}", self.rpc);
                         }
                         ResponseTypes::RateLimit
                     } else {

@@ -10,6 +10,7 @@ use ethers::{
 use hashbrown::HashMap;
 use migration::sea_orm::DatabaseConnection;
 use parking_lot::Mutex;
+use serde_json::json;
 use std::{
     env,
     process::Command as SyncCommand,
@@ -242,21 +243,23 @@ impl TestApp {
         // make a test TopConfig
         // TODO: test influx
         // TODO: test redis
+        let app_config: AppConfig = serde_json::from_value(json!({
+            "chain_id": 31337,
+            "db_url": db_url,
+            "default_user_max_requests_per_period": Some(6_000_000),
+            "deposit_factory_contract": Address::from_str(
+                "4e3BC2054788De923A04936C6ADdB99A05B0Ea36",
+            )
+            .ok(),
+            "min_sum_soft_limit": 1,
+            "min_synced_rpcs": 1,
+            "public_requests_per_period": Some(1_000_000),
+            "response_cache_max_bytes": 10_u64.pow(7),
+        }))
+        .unwrap();
+
         let top_config = TopConfig {
-            app: AppConfig {
-                chain_id: 31337,
-                db_url,
-                default_user_max_requests_per_period: Some(6_000_000),
-                deposit_factory_contract: Address::from_str(
-                    "4e3BC2054788De923A04936C6ADdB99A05B0Ea36",
-                )
-                .ok(),
-                min_sum_soft_limit: 1,
-                min_synced_rpcs: 1,
-                public_requests_per_period: Some(1_000_000),
-                response_cache_max_bytes: 10_u64.pow(7),
-                ..Default::default()
-            },
+            app: app_config,
             balanced_rpcs: HashMap::from([(
                 "anvil".to_string(),
                 Web3RpcConfig {

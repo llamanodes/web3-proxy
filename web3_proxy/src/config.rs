@@ -2,13 +2,13 @@ use crate::app::Web3ProxyJoinHandle;
 use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
-use derivative::Derivative;
 use ethers::prelude::{Address, TxHash};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
 use migration::sea_orm::DatabaseConnection;
 use sentry::types::Dsn;
 use serde::Deserialize;
+use serde_inline_default::serde_inline_default;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::warn;
@@ -53,17 +53,16 @@ pub struct TopConfig {
 
 /// shared configuration between Web3Rpcs
 // TODO: no String, only &str
-#[derive(Clone, Debug, Derivative, Deserialize, PartialEq, Eq)]
-#[derivative(Default)]
+#[serde_inline_default]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct AppConfig {
     /// Request limit for allowed origins for anonymous users.
     /// These requests get rate limited by IP.
-    #[serde(default)]
+    #[serde(default = "Default::default")]
     pub allowed_origin_requests_per_period: HashMap<String, u64>,
 
     /// erigon defaults to pruning beyond 90,000 blocks
-    #[serde(default)]
-    #[derivative(Default(value = "90_000"))]
+    #[serde_inline_default(90_000u64)]
     pub archive_depth: u64,
 
     /// EVM chain id. 1 for ETH
@@ -115,8 +114,7 @@ pub struct AppConfig {
     /// Used by /debug/:rpc_key urls for logging requests and responses. No other endpoints log request/response data.
     pub kafka_urls: Option<String>,
 
-    #[serde(default)]
-    #[derivative(Default(value = r#""ssl".to_string()"#))]
+    #[serde_inline_default("ssl".to_string())]
     pub kafka_protocol: String,
 
     /// domain in sign-in-with-ethereum messages
@@ -127,18 +125,15 @@ pub struct AppConfig {
 
     /// Rate limit for the login entrypoint.
     /// This is separate from the rpc limits.
-    #[serde(default)]
-    #[derivative(Default(value = "10"))]
+    #[serde_inline_default(10u64)]
     pub login_rate_limit_per_period: u64,
 
     /// The soft limit prevents thundering herds as new blocks are seen.
-    #[serde(default)]
-    #[derivative(Default(value = "1"))]
+    #[serde_inline_default(1u32)]
     pub min_sum_soft_limit: u32,
 
     /// Another knob for preventing thundering herds as new blocks are seen.
-    #[serde(default)]
-    #[derivative(Default(value = "1"))]
+    #[serde_inline_default(1usize)]
     pub min_synced_rpcs: usize,
 
     /// Concurrent request limit for anonymous users.
@@ -155,8 +150,7 @@ pub struct AppConfig {
     pub public_recent_ips_salt: Option<String>,
 
     /// RPC responses are cached locally
-    #[serde(default)]
-    #[derivative(Default(value = "10u64.pow(8)"))]
+    #[serde_inline_default(10u64.pow(8))]
     pub response_cache_max_bytes: u64,
 
     /// the stats page url for an anonymous user.
@@ -224,11 +218,11 @@ pub fn average_block_interval(chain_id: u64) -> Duration {
 }
 
 /// Configuration for a backend web3 RPC server
-#[derive(Clone, Debug, Derivative, Deserialize, PartialEq, Eq)]
-#[derivative(Default)]
+#[serde_inline_default]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct Web3RpcConfig {
     /// simple way to disable a connection without deleting the row
-    #[serde(default)]
+    #[serde(default = "Default::default")]
     pub disabled: bool,
     /// a name used in /status and other user facing messages
     pub display_name: Option<String>,
@@ -239,17 +233,16 @@ pub struct Web3RpcConfig {
     /// block data limit. If None, will be queried
     pub block_data_limit: Option<u64>,
     /// the requests per second at which the server starts slowing down
-    #[serde(default)]
-    #[derivative(Default(value = "1"))]
+    #[serde_inline_default(1u32)]
     pub soft_limit: u32,
     /// the requests per second at which the server throws errors (rate limit or otherwise)
     pub hard_limit: Option<u64>,
     /// only use this rpc if everything else is lagging too far. this allows us to ignore fast but very low limit rpcs
-    #[serde(default)]
+    #[serde(default = "Default::default")]
     pub backup: bool,
     /// Subscribe to the firehose of pending transactions
     /// Don't do this with free rpcs
-    #[serde(default)]
+    #[serde(default = "Default::default")]
     pub subscribe_txs: bool,
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
@@ -289,5 +282,17 @@ impl Web3RpcConfig {
             tx_id_sender,
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Web3RpcConfig;
+
+    #[test]
+    fn expected_defaults() {
+        let a: Web3RpcConfig = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(a.soft_limit, 1);
     }
 }

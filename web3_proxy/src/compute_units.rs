@@ -109,6 +109,8 @@ impl ComputeUnit {
                 (_, "web3_clientVersion") => 15,
                 (_, "web3_sha3") => 15,
                 (_, method) => {
+                    // TODO: emit a stat
+                    // TODO: do some filtering on these to tarpit peers that are trying to do silly things like sql/influx inject
                     warn!("unknown method {}", method);
                     return Self::unimplemented();
                 }
