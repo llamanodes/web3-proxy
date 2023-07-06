@@ -15,6 +15,7 @@ use web3_proxy::rpcs::blockchain::ArcBlock;
 async fn it_migrates_the_db() {
     let x = TestApp::spawn(true).await;
 
+    // we call flush stats more to be sure it works than because we expect it to save any stats
     x.flush_stats().await.unwrap();
 }
 
