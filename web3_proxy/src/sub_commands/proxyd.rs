@@ -11,7 +11,9 @@ use std::sync::atomic::AtomicU16;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
+use tokio::select;
 use tokio::sync::broadcast;
+use tokio::time::{sleep_until, Instant};
 use tracing::{error, info, trace, warn};
 
 /// start the main proxy daemon
@@ -87,6 +89,8 @@ impl ProxydSubCommand {
         )
         .await?;
 
+        let mut head_block_receiver = spawned_app.app.head_block_receiver();
+
         // start thread for watching config
         if let Some(top_config_path) = top_config_path {
             let config_sender = spawned_app.new_top_config;
@@ -128,18 +132,26 @@ impl ProxydSubCommand {
         ));
 
         info!("waiting for head block");
+        let max_wait_until = Instant::now() + Duration::from_secs(35);
         loop {
-            spawned_app.app.head_block_receiver().changed().await?;
-
-            if spawned_app
-                .app
-                .head_block_receiver()
-                .borrow_and_update()
-                .is_some()
-            {
-                break;
-            } else {
-                info!("no head block yet!");
+            select! {
+                _ = sleep_until(max_wait_until) => {
+                    return Err(anyhow::anyhow!("oh no! we never got a head block!"))
+                }
+                _ = head_block_receiver.changed() => {
+                    if let Some(head_block) = spawned_app
+                        .app
+                        .head_block_receiver()
+                        .borrow_and_update()
+                        .as_ref()
+                    {
+                        info!(head_hash=?head_block.hash(), head_num=%head_block.number());
+                        break;
+                    } else {
+                        info!("no head block yet!");
+                        continue;
+                    }
+                }
             }
         }
 

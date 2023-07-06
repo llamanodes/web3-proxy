@@ -14,6 +14,7 @@ use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
 use core::fmt;
 use deferred_rate_limiter::DeferredRateLimitResult;
+use derivative::Derivative;
 use derive_more::From;
 use entities::{balance, login, rpc_key, user, user_tier};
 use ethers::types::{Bytes, U64};
@@ -309,7 +310,8 @@ impl KafkaDebugLogger {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Derivative)]
+#[derivative(Default)]
 pub struct RequestMetadata {
     /// TODO: set archive_request during the new instead of after
     /// TODO: this is more complex than "requires a block older than X height". different types of data can be pruned differently
@@ -329,7 +331,8 @@ pub struct RequestMetadata {
 
     /// Instant that the request was received (or at least close to it)
     /// We use Instant and not timestamps to avoid problems with leap seconds and similar issues
-    pub start_instant: tokio::time::Instant,
+    #[derivative(Default(value = "Instant::now()"))]
+    pub start_instant: Instant,
     /// if this is empty, there was a cache_hit
     /// otherwise, it is populated with any rpc servers that were used by this request
     pub backend_requests: BackendRequests,
@@ -348,6 +351,8 @@ pub struct RequestMetadata {
     /// True if the response required querying a backup RPC
     /// RPC aggregators that query multiple providers to compare response may use this header to ignore our response.
     pub response_from_backup_rpc: AtomicBool,
+    /// If the request is invalid or received a jsonrpc error response (excluding reverts)
+    pub user_error_response: AtomicBool,
 
     /// ProxyMode::Debug logs requests and responses with Kafka
     /// TODO: maybe this shouldn't be determined by ProxyMode. A request param should probably enable this
@@ -360,30 +365,6 @@ pub struct RequestMetadata {
 impl Default for Authorization {
     fn default() -> Self {
         Authorization::internal(None).unwrap()
-    }
-}
-
-/// this is only implemented so that we can use `mem::take`. You probably shouldn't use this.
-impl Default for RequestMetadata {
-    fn default() -> Self {
-        Self {
-            archive_request: Default::default(),
-            authorization: Default::default(),
-            backend_requests: Default::default(),
-            chain_id: Default::default(),
-            error_response: Default::default(),
-            kafka_debug_logger: Default::default(),
-            method: Default::default(),
-            no_servers: Default::default(),
-            request_bytes: Default::default(),
-            request_ulid: Default::default(),
-            response_bytes: Default::default(),
-            response_from_backup_rpc: Default::default(),
-            response_millis: Default::default(),
-            response_timestamp: Default::default(),
-            start_instant: Instant::now(),
-            stat_sender: Default::default(),
-        }
     }
 }
 
@@ -531,6 +512,7 @@ impl RequestMetadata {
             response_timestamp: 0.into(),
             start_instant: Instant::now(),
             stat_sender: app.stat_sender.clone(),
+            user_error_response: false.into(),
         };
 
         Arc::new(x)

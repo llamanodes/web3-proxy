@@ -64,6 +64,7 @@ impl StatBuffer {
         user_balance_cache: Option<UserBalanceCache>,
         shutdown_receiver: broadcast::Receiver<()>,
         tsdb_save_interval_seconds: u32,
+        flush_receiver: broadcast::Receiver<()>,
     ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
         if db_conn.is_none() && influxdb_client.is_none() {
             return Ok(None);
@@ -89,7 +90,7 @@ impl StatBuffer {
 
         // any errors inside this task will cause the application to exit
         let handle = tokio::spawn(async move {
-            new.aggregate_and_save_loop(bucket, stat_receiver, shutdown_receiver)
+            new.aggregate_and_save_loop(bucket, stat_receiver, shutdown_receiver, flush_receiver)
                 .await
         });
 
@@ -101,6 +102,7 @@ impl StatBuffer {
         bucket: String,
         stat_receiver: flume::Receiver<AppStat>,
         mut shutdown_receiver: broadcast::Receiver<()>,
+        mut flush_receiver: broadcast::Receiver<()>,
     ) -> Web3ProxyResult<()> {
         let mut tsdb_save_interval =
             interval(Duration::from_secs(self.tsdb_save_interval_seconds as u64));
@@ -148,6 +150,19 @@ impl StatBuffer {
                     let count = self.save_tsdb_stats(&bucket).await;
                     if count > 0 {
                         trace!("Saved {} stats to the tsdb", count);
+                    }
+                }
+                _ = flush_receiver.recv() => {
+                    trace!("flush");
+
+                    let count = self.save_tsdb_stats(&bucket).await;
+                    if count > 0 {
+                        trace!("Flushed {} stats to the tsdb", count);
+                    }
+
+                    let count = self.save_relational_stats().await;
+                    if count > 0 {
+                        trace!("Flushed {} stats to the relational db", count);
                     }
                 }
                 x = shutdown_receiver.recv() => {

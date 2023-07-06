@@ -9,8 +9,9 @@ ENV PATH "/root/.foundry/bin:/root/.cargo/bin:${PATH}"
 # also install web3-proxy system dependencies. most things are rust-only, but not everything
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    set -eux; \
     \
-    apt-get update && \
+    apt-get update; \
     apt-get install --no-install-recommends --yes \
     build-essential \
     ca-certificates \
@@ -22,64 +23,98 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libsasl2-dev \
     libzstd-dev \
     make \
-    pkg-config
+    pkg-config \
+    ;
 
 # install rustup
-RUN --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    set -eux; \
     \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile=minimal
 
-# run a cargo command which install our desired version of rust
+# run a cargo command to install our desired version of rust
+# it is expected to exit code 101 since no Cargo.toml exists
 COPY rust-toolchain.toml ./
-RUN --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    set -eux; \
     \
     cargo check || [ "$?" -eq 101 ]
 
-# nextest runs tests in parallel
-# We only pay the installation cost once, it will be cached from the second build onwards
-RUN --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/local/cargo/registry \
+# nextest runs tests in parallel (done its in own FROM so that it can run in parallel)
+FROM rust as rust_nextest
+RUN --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    set -eux; \
     \
     cargo install --locked cargo-nextest
 
-# foundry/anvil are needed to run tests
-RUN --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/local/cargo/registry \
+# foundry/anvil are needed to run tests (done its in own FROM so that it can run in parallel)
+FROM rust as rust_foundry
+RUN --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    set -eux; \
     \
     curl -L https://foundry.paradigm.xyz | bash && foundryup
+
+FROM rust as rust_with_env
 
 # changing our features doesn't change any of the steps above
 ENV WEB3_PROXY_FEATURES "rdkafka-src"
 
-FROM rust as build_tests
+# fetch deps
+RUN --mount=type=bind,target=.,rw \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/app/target \
+    set -eux; \
+    \
+    cargo --locked --verbose fetch
+
+# build tests (done its in own FROM so that it can run in parallel)
+FROM rust_with_env as build_tests
+
+COPY --from=rust_foundry /root/.foundry/bin/anvil /root/.foundry/bin/
+COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 
 # test the application with cargo-nextest
 RUN --mount=type=bind,target=.,rw \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,id=build_tests_target \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/app/target \
+    set -eux; \
     \
-    RUST_LOG=web3_proxy=trace,info cargo --locked nextest run --features "$WEB3_PROXY_FEATURES" --no-default-features && \
+    RUST_LOG=web3_proxy=trace,info \
+    cargo \
+    --frozen \
+    --offline \
+    --verbose \
+    nextest run \
+    --features "$WEB3_PROXY_FEATURES" --no-default-features \
+    ; \
     touch /test_success
 
-FROM rust as build_app
+FROM rust_with_env as build_app
 
-# build the release application
-# using a "release" profile (which install does by default) is **very** important
-# TODO: use the "faster_release" profile which builds with `codegen-units = 1` (but compile is SLOW)
+# # build the release application
+# # using a "release" profile (which install does by default) is **very** important
+# # TODO: use the "faster_release" profile which builds with `codegen-units = 1` (but compile is SLOW)
 RUN --mount=type=bind,target=.,rw \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,id=build_app_target \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/app/target \
+    set -eux; \
     \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
-    --locked \
+    --frozen \
     --no-default-features \
+    --offline \
     --path ./web3_proxy \
-    --root /usr/local && \
+    --root /usr/local \
+    --verbose \
+    ; \
     /usr/local/bin/web3_proxy_cli --help | grep 'Usage: web3_proxy_cli'
 
 # copy this file so that docker actually creates the build_tests container
@@ -87,14 +122,16 @@ RUN --mount=type=bind,target=.,rw \
 COPY --from=build_tests /test_success /
 
 #
-# We do not need the Rust toolchain to run the binary!
+# We do not need the Rust toolchain or any deps to run the binary!
 #
 FROM debian:bullseye-slim AS runtime
 
 # Create llama user to avoid running container with root
-RUN mkdir /llama \
-    && adduser --home /llama --shell /sbin/nologin --gecos '' --no-create-home --disabled-password --uid 1001 llama \
-    && chown -R llama /llama
+RUN set -eux; \
+    \
+    mkdir /llama; \
+    adduser --home /llama --shell /sbin/nologin --gecos '' --no-create-home --disabled-password --uid 1001 llama; \
+    chown -R llama /llama
 
 USER llama
 
