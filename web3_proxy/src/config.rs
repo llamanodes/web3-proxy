@@ -190,6 +190,12 @@ pub struct AppConfig {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
+impl Default for AppConfig {
+    fn default() -> Self {
+        serde_json::from_str("{}").unwrap()
+    }
+}
+
 /// TODO: we can't query a provider because we need this to create a provider
 pub fn average_block_interval(chain_id: u64) -> Duration {
     match chain_id {
@@ -249,6 +255,12 @@ pub struct Web3RpcConfig {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
+impl Default for Web3RpcConfig {
+    fn default() -> Self {
+        serde_json::from_str("{}").unwrap()
+    }
+}
+
 impl Web3RpcConfig {
     /// Create a Web3Rpc from config
     /// TODO: move this into Web3Rpc? (just need to make things pub(crate))
@@ -294,5 +306,11 @@ mod tests {
         let a: Web3RpcConfig = serde_json::from_str("{}").unwrap();
 
         assert_eq!(a.soft_limit, 1);
+
+        let b: Web3RpcConfig = Default::default();
+
+        assert_eq!(b.soft_limit, 1);
+
+        assert_eq!(a, b);
     }
 }
