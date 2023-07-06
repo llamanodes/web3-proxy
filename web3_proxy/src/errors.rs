@@ -252,7 +252,7 @@ impl Web3ProxyError {
                 )
             }
             Self::Contract(err) => {
-                warn!("Contract Error: {:#?}", err);
+                warn!(?err, "Contract Error");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
@@ -263,7 +263,7 @@ impl Web3ProxyError {
                 )
             }
             Self::Database(err) => {
-                error!("database err={:#?}", err);
+                error!(?err, "database err");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
@@ -274,7 +274,7 @@ impl Web3ProxyError {
                 )
             }
             Self::Decimal(err) => {
-                debug!("Decimal Error: {:#?}", err);
+                debug!(?err, "Decimal Error");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
