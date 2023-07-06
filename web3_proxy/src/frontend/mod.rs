@@ -166,7 +166,18 @@ pub async fn serve(
         )
         .route("/user", get(users::user_get).post(users::user_post))
         .route("/user/balance", get(users::payment::user_balance_get))
-        .route("/user/deposits", get(users::payment::user_deposits_get))
+        .route(
+            "/user/deposits/chain",
+            get(users::payment::user_chain_deposits_get),
+        )
+        .route(
+            "/user/deposits/stripe",
+            get(users::payment::user_stripe_deposits_get),
+        )
+        .route(
+            "/user/deposits/admin",
+            get(users::payment::user_admin_deposits_get),
+        )
         .route(
             "/user/balance/stripe",
             get(users::payment_stripe::user_stripe_deposits_get)
