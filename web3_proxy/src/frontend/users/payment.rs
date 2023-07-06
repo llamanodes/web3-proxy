@@ -122,7 +122,7 @@ pub async fn user_stripe_deposits_get(
 
     // Filter by user ...
     let receipts = stripe_increase_balance_receipt::Entity::find()
-        .filter(increase_on_chain_balance_receipt::Column::DepositToUserId.eq(Some(user.id)))
+        .filter(stripe_increase_balance_receipt::Column::DepositToUserId.eq(Some(user.id)))
         .all(db_replica.as_ref())
         .await?;
 
@@ -165,7 +165,7 @@ pub async fn user_admin_deposits_get(
 
     // Filter by user ...
     let receipts = admin_increase_balance_receipt::Entity::find()
-        .filter(increase_on_chain_balance_receipt::Column::DepositToUserId.eq(user.id))
+        .filter(admin_increase_balance_receipt::Column::DepositToUserId.eq(user.id))
         .all(db_replica.as_ref())
         .await?;
 

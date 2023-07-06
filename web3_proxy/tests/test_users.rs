@@ -3,6 +3,7 @@ mod common;
 use crate::common::admin_increases_balance::admin_increase_balance;
 use crate::common::create_admin::create_user_as_admin;
 use crate::common::create_user::create_user;
+use crate::common::get_admin_deposits::get_admin_deposits;
 use crate::common::get_rpc_key::{user_get_first_rpc_key, RpcKey};
 use crate::common::get_user_balance::user_get_balance;
 use crate::common::referral::{
@@ -85,6 +86,53 @@ async fn test_log_in_and_out() {
     info!(?logout_response);
 
     assert_eq!(logout_response, "goodbye");
+}
+
+#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
+#[test_log::test(tokio::test)]
+async fn test_admin_balance_increase() {
+    info!("Starting balance decreases with usage test");
+    let x = TestApp::spawn(true).await;
+    let r = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap();
+
+    let user_wallet = x.wallet(0);
+    let admin_wallet = x.wallet(1);
+
+    // Create three users, one referrer, one admin who bumps both their balances
+    let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
+    let user_login_response = create_user(&x, &r, &user_wallet, None).await;
+
+    // Bump both user's wallet to $20
+    admin_increase_balance(
+        &x,
+        &r,
+        &admin_login_response,
+        &user_wallet,
+        Decimal::from(20),
+    )
+    .await;
+
+    info!("Getting admin deposits");
+    let response = get_admin_deposits(&x, &r, &user_login_response).await;
+    info!(?response);
+    assert_eq!(
+        Decimal::from_str(
+            response["deposits"].get(0).unwrap()["amount"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap(),
+        Decimal::from(20)
+    );
+    assert_eq!(
+        response["deposits"].get(0).unwrap()["note"]
+            .as_str()
+            .unwrap(),
+        "Test increasing balance"
+    );
 }
 
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
