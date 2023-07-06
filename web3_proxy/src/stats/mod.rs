@@ -833,7 +833,7 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
 
         let cache_hit = !backend_rpcs_used.is_empty();
 
-        let compute_unit_cost = cu.cost(archive_request, cache_hit, usd_per_cu);
+        let compute_unit_cost = cu.cost(archive_request, cache_hit, error_response, usd_per_cu);
 
         let method = mem::take(&mut metadata.method);
 

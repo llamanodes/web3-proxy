@@ -135,8 +135,16 @@ impl ComputeUnit {
     /// Compute cost per request
     /// All methods cost the same
     /// The number of bytes are based on input, and output bytes
-    pub fn cost(&self, archive_request: bool, cache_hit: bool, usd_per_cu: Decimal) -> Decimal {
-        // TODO: server errors are free. need to split server and user errors
+    pub fn cost(
+        &self,
+        archive_request: bool,
+        cache_hit: bool,
+        error_response: bool,
+        usd_per_cu: Decimal,
+    ) -> Decimal {
+        if error_response {
+            return 0.into();
+        }
 
         let mut cost = self.0 * usd_per_cu;
 
