@@ -72,22 +72,21 @@ impl MigrateStatsToV2SubCommand {
             None => None,
         };
 
+        let (_flush_sender, flush_receiver) = flume::bounded(1);
+
         // Spawn the stat-sender
         let emitter_spawn = StatBuffer::try_spawn(
             BILLING_PERIOD_SECONDS,
-            top_config
-                .app
-                .influxdb_bucket
-                .clone()
-                .context("No influxdb bucket was provided")?,
             top_config.app.chain_id,
             Some(db_conn.clone()),
             30,
+            top_config.app.influxdb_bucket.clone(),
             influxdb_client.clone(),
             None,
             None,
             rpc_account_shutdown_recevier,
             1,
+            flush_receiver,
         )
         .context("Error spawning stat buffer")?
         .context("No stat buffer spawned. Maybe missing influx or db credentials?")?;
@@ -203,6 +202,7 @@ impl MigrateStatsToV2SubCommand {
                         start_instant: Instant::now(),
                         stat_sender: Some(stat_sender.clone()),
                         request_ulid,
+                        user_error_response: false.into(),
                     };
 
                     if let Some(x) = request_metadata.try_send_stat()? {

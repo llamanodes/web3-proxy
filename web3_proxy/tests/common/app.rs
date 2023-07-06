@@ -20,7 +20,10 @@ use std::{sync::Arc, time::Duration};
 use tokio::{
     net::TcpStream,
     process::Command as AsyncCommand,
-    sync::broadcast::{self, error::SendError},
+    sync::{
+        broadcast::{self, error::SendError},
+        oneshot,
+    },
     task::JoinHandle,
     time::{sleep, Instant},
 };
@@ -53,6 +56,9 @@ pub struct TestApp {
 
     /// connection to the proxy that is connected to anil.
     pub proxy_provider: Provider<Http>,
+
+    /// tell the app to flush stats to the database
+    flush_stat_buffer_sender: flume::Sender<oneshot::Sender<(usize, usize)>>,
 
     /// tell the app to shut down (use `self.stop()`).
     shutdown_sender: broadcast::Sender<()>,
@@ -269,6 +275,8 @@ impl TestApp {
         let frontend_port_arc = Arc::new(AtomicU16::new(0));
         let prometheus_port_arc = Arc::new(AtomicU16::new(0));
 
+        let (flush_stat_buffer_sender, flush_stat_buffer_receiver) = flume::bounded(1);
+
         // spawn the app
         // TODO: spawn in a thread so we can run from non-async tests and so the Drop impl can wait for it to stop
         let handle = {
@@ -279,6 +287,7 @@ impl TestApp {
                 prometheus_port_arc,
                 num_workers,
                 shutdown_sender.clone(),
+                flush_stat_buffer_receiver,
             ))
         };
 
@@ -304,6 +313,7 @@ impl TestApp {
             db,
             proxy_handle: Mutex::new(Some(handle)),
             proxy_provider,
+            flush_stat_buffer_sender,
             shutdown_sender,
         }
     }
@@ -311,6 +321,17 @@ impl TestApp {
     #[allow(unused)]
     pub fn db_conn(&self) -> &DatabaseConnection {
         self.db.as_ref().unwrap().conn.as_ref().unwrap()
+    }
+
+    #[allow(unused)]
+    pub async fn flush_stats(&self) -> anyhow::Result<(usize, usize)> {
+        let (tx, rx) = oneshot::channel();
+
+        self.flush_stat_buffer_sender.send(tx)?;
+
+        let x = rx.await?;
+
+        Ok(x)
     }
 
     pub fn stop(&self) -> Result<usize, SendError<()>> {

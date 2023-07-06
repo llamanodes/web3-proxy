@@ -852,9 +852,11 @@ impl Web3Rpcs {
                                 request_metadata
                                     .response_from_backup_rpc
                                     .store(is_backup_response, Ordering::Release);
-                            }
 
-                            if let Some(request_metadata) = request_metadata {
+                                request_metadata
+                                    .user_error_response
+                                    .store(false, Ordering::Release);
+
                                 request_metadata
                                     .error_response
                                     .store(false, Ordering::Release);
@@ -863,20 +865,28 @@ impl Web3Rpcs {
                             return Ok(response);
                         }
                         Err(error) => {
-                            // trace!(?response, "rpc error");
-
-                            // TODO: separate tracking for jsonrpc error and web3 proxy error!
-                            if let Some(request_metadata) = request_metadata {
-                                request_metadata
-                                    .error_response
-                                    .store(true, Ordering::Release);
-                            }
-
                             // TODO: if this is an error, do NOT return. continue to try on another server
                             let error = match JsonRpcErrorData::try_from(&error) {
-                                Ok(x) => x,
+                                Ok(x) => {
+                                    if let Some(request_metadata) = request_metadata {
+                                        request_metadata
+                                            .user_error_response
+                                            .store(true, Ordering::Release);
+                                    }
+                                    x
+                                }
                                 Err(err) => {
                                     warn!(?err, "error from {}", rpc);
+
+                                    if let Some(request_metadata) = request_metadata {
+                                        request_metadata
+                                            .error_response
+                                            .store(true, Ordering::Release);
+
+                                        request_metadata
+                                            .user_error_response
+                                            .store(false, Ordering::Release);
+                                    }
 
                                     last_provider_error = Some(error);
 
@@ -1012,19 +1022,27 @@ impl Web3Rpcs {
                     }
                 }
                 OpenRequestResult::NotReady => {
+                    if let Some(request_metadata) = request_metadata {
+                        request_metadata
+                            .error_response
+                            .store(true, Ordering::Release);
+                    }
                     break;
                 }
             }
         }
 
-        // TODO: do we need this here, or do we do it somewhere else? like, the code could change and a try operator in here would skip this increment
-        if let Some(request_metadata) = request_metadata {
-            request_metadata
-                .error_response
-                .store(true, Ordering::Release);
-        }
-
         if let Some(err) = method_not_available_response {
+            if let Some(request_metadata) = request_metadata {
+                request_metadata
+                    .error_response
+                    .store(false, Ordering::Release);
+
+                request_metadata
+                    .user_error_response
+                    .store(true, Ordering::Release);
+            }
+
             // this error response is likely the user's fault
             // TODO: emit a stat for unsupported methods. then we can know what there is demand for or if we are missing a feature
             return Err(err.into());

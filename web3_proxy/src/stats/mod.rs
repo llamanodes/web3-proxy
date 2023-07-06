@@ -29,7 +29,7 @@ use std::borrow::Cow;
 use std::mem;
 use std::num::NonZeroU64;
 use std::str::FromStr;
-use std::sync::atomic::{self, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::trace;
 
@@ -61,6 +61,8 @@ pub struct RpcQueryStats {
     /// The cost of the query in USD
     /// If the user is on a free tier, this is still calculated so we know how much we are giving away.
     pub compute_unit_cost: Decimal,
+    /// If the request is invalid or received a jsonrpc error response (excluding reverts)
+    pub user_error_response: bool,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
@@ -71,11 +73,13 @@ pub struct RpcQueryKey {
     response_timestamp: i64,
     /// true if an archive server was needed to serve the request.
     archive_needed: bool,
-    /// true if the response was some sort of JSONRPC error.
+    /// true if the response was some sort of application error.
     error_response: bool,
+    /// true if the response was some sort of JSONRPC error.
+    user_error_response: bool,
     /// the rpc method used.
     method: Cow<'static, str>,
-    /// origin tracking was opt-in. Now it is "None"
+    /// origin tracking **was** opt-in. Now, it is always "None"
     origin: Option<Origin>,
     /// None if the public url was used.
     rpc_secret_key_id: Option<NonZeroU64>,
@@ -103,6 +107,9 @@ impl RpcQueryStats {
         // we used to optionally store origin, but wallets don't set it, so its almost always None
         let origin = None;
 
+        // user_error_response is always set to false because we don't bother tracking this in the database
+        let user_error_response = false;
+
         // Depending on method, add some arithmetic around calculating credits_used
         // I think balance should not go here, this looks more like a key thingy
         RpcQueryKey {
@@ -113,6 +120,7 @@ impl RpcQueryStats {
             rpc_secret_key_id,
             rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
             origin,
+            user_error_response,
         }
     }
 
@@ -133,6 +141,7 @@ impl RpcQueryStats {
             method,
             rpc_secret_key_id,
             rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
+            user_error_response: self.user_error_response,
             origin,
         }
     }
@@ -151,6 +160,7 @@ impl RpcQueryStats {
             method,
             rpc_secret_key_id: self.authorization.checks.rpc_secret_key_id,
             rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
+            user_error_response: self.user_error_response,
             origin,
         };
 
@@ -732,6 +742,7 @@ impl BufferedRpcQueryStats {
         builder = builder
             .tag("archive_needed", key.archive_needed.to_string())
             .tag("error_response", key.error_response.to_string())
+            .tag("user_error_response", key.user_error_response.to_string())
             .field("frontend_requests", self.frontend_requests as i64)
             .field("backend_requests", self.backend_requests as i64)
             .field("no_servers", self.no_servers as i64)
@@ -784,9 +795,11 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
         let response_bytes = metadata.response_bytes.load(Ordering::Acquire);
 
         let mut error_response = metadata.error_response.load(Ordering::Acquire);
-        let mut response_millis = metadata.response_millis.load(atomic::Ordering::Acquire);
+        let mut response_millis = metadata.response_millis.load(Ordering::Acquire);
 
-        let response_timestamp = match metadata.response_timestamp.load(atomic::Ordering::Acquire) {
+        let user_error_response = metadata.user_error_response.load(Ordering::Acquire);
+
+        let response_timestamp = match metadata.response_timestamp.load(Ordering::Acquire) {
             0 => {
                 // no response timestamp!
                 if !error_response {
@@ -820,7 +833,7 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
 
         let cache_hit = !backend_rpcs_used.is_empty();
 
-        let compute_unit_cost = cu.cost(archive_request, cache_hit, usd_per_cu);
+        let compute_unit_cost = cu.cost(archive_request, cache_hit, error_response, usd_per_cu);
 
         let method = mem::take(&mut metadata.method);
 
@@ -836,6 +849,7 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
             response_bytes,
             response_millis,
             response_timestamp,
+            user_error_response,
         };
 
         Ok(x)

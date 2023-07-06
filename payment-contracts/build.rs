@@ -3,6 +3,8 @@ use glob::glob;
 
 fn main() {
     // Tell Cargo that if the given file changes, to rerun this build script.
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=Cargo.toml");
     glob("./abi/*.json").unwrap().for_each(|x| {
         if let Ok(x) = x {
             println!("cargo:rerun-if-changed={}", x.display());

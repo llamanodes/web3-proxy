@@ -27,7 +27,6 @@ use anyhow::Context;
 use axum::http::StatusCode;
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimiter;
-use derive_more::From;
 use entities::user;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U64};
@@ -52,7 +51,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::sync::{broadcast, watch, Semaphore};
+use tokio::sync::{broadcast, watch, Semaphore, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
 use tracing::{error, info, trace, warn, Level};
@@ -165,7 +164,6 @@ pub async fn flatten_handles<T>(
 }
 
 /// starting an app creates many tasks
-#[derive(From)]
 pub struct Web3ProxyAppSpawn {
     /// the app. probably clone this to use in other groups of handles
     pub app: Arc<Web3ProxyApp>,
@@ -187,6 +185,7 @@ impl Web3ProxyApp {
         top_config: TopConfig,
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
+        flush_stat_buffer_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         let stat_buffer_shutdown_receiver = shutdown_sender.subscribe();
         let mut background_shutdown_receiver = shutdown_sender.subscribe();
@@ -386,30 +385,27 @@ impl Web3ProxyApp {
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
         // stats can be saved in mysql, influxdb, both, or none
-        let mut stat_sender = None;
-        if let Some(influxdb_bucket) = top_config.app.influxdb_bucket.clone() {
-            if let Some(spawned_stat_buffer) = StatBuffer::try_spawn(
-                BILLING_PERIOD_SECONDS,
-                influxdb_bucket,
-                top_config.app.chain_id,
-                db_conn.clone(),
-                60,
-                influxdb_client.clone(),
-                Some(rpc_secret_key_cache.clone()),
-                Some(user_balance_cache.clone()),
-                stat_buffer_shutdown_receiver,
-                1,
-            )? {
-                // since the database entries are used for accounting, we want to be sure everything is saved before exiting
-                important_background_handles.push(spawned_stat_buffer.background_handle);
+        let stat_sender = if let Some(spawned_stat_buffer) = StatBuffer::try_spawn(
+            BILLING_PERIOD_SECONDS,
+            top_config.app.chain_id,
+            db_conn.clone(),
+            60,
+            top_config.app.influxdb_bucket.clone(),
+            influxdb_client.clone(),
+            Some(rpc_secret_key_cache.clone()),
+            Some(user_balance_cache.clone()),
+            stat_buffer_shutdown_receiver,
+            1,
+            flush_stat_buffer_receiver,
+        )? {
+            // since the database entries are used for accounting, we want to be sure everything is saved before exiting
+            important_background_handles.push(spawned_stat_buffer.background_handle);
 
-                stat_sender = Some(spawned_stat_buffer.stat_sender);
-            }
-        }
-
-        if stat_sender.is_none() {
+            Some(spawned_stat_buffer.stat_sender)
+        } else {
             info!("stats will not be collected");
-        }
+            None
+        };
 
         // make a http shared client
         // TODO: can we configure the connection pool? should we?
@@ -653,14 +649,13 @@ impl Web3ProxyApp {
             important_background_handles.push(f);
         }
 
-        Ok((
+        Ok(Web3ProxyAppSpawn {
             app,
             app_handles,
-            important_background_handles,
-            new_top_config_sender,
-            consensus_connections_watcher,
-        )
-            .into())
+            background_handles: important_background_handles,
+            new_top_config: new_top_config_sender,
+            ranked_rpcs: consensus_connections_watcher,
+        })
     }
 
     pub async fn apply_top_config(&self, new_top_config: TopConfig) -> Web3ProxyResult<()> {

@@ -11,7 +11,9 @@ use std::sync::atomic::AtomicU16;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
-use tokio::sync::broadcast;
+use tokio::select;
+use tokio::sync::{broadcast, oneshot};
+use tokio::time::{sleep_until, Instant};
 use tracing::{error, info, trace, warn};
 
 /// start the main proxy daemon
@@ -35,11 +37,12 @@ impl ProxydSubCommand {
         top_config_path: PathBuf,
         num_workers: usize,
     ) -> anyhow::Result<()> {
-        let (shutdown_sender, _) = broadcast::channel(1);
+        let (frontend_shutdown_sender, _) = broadcast::channel(1);
         // TODO: i think there is a small race. if config_path changes
 
         let frontend_port = Arc::new(self.port.into());
         let prometheus_port = Arc::new(self.prometheus_port.into());
+        let (_flush_stat_buffer_sender, flush_stat_buffer_receiver) = flume::bounded(1);
 
         Self::_main(
             top_config,
@@ -47,7 +50,8 @@ impl ProxydSubCommand {
             frontend_port,
             prometheus_port,
             num_workers,
-            shutdown_sender,
+            frontend_shutdown_sender,
+            flush_stat_buffer_receiver,
         )
         .await
     }
@@ -60,14 +64,11 @@ impl ProxydSubCommand {
         prometheus_port: Arc<AtomicU16>,
         num_workers: usize,
         frontend_shutdown_sender: broadcast::Sender<()>,
+        flush_stat_buffer_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
     ) -> anyhow::Result<()> {
-        // tokio has code for catching ctrl+c so we use that
-        // this shutdown sender is currently only used in tests, but we might make a /shutdown endpoint or something
+        // tokio has code for catching ctrl+c so we use that to shut down in most cases
+        // frontend_shutdown_sender is currently only used in tests, but we might make a /shutdown endpoint or something
         // we do not need this receiver. new receivers are made by `shutdown_sender.subscribe()`
-
-        // TODO: should we use a watch or broadcast for these?
-        // Maybe this one ?
-        // let mut shutdown_receiver = shutdown_sender.subscribe();
         let (app_shutdown_sender, _app_shutdown_receiver) = broadcast::channel(1);
 
         let frontend_shutdown_receiver = frontend_shutdown_sender.subscribe();
@@ -84,8 +85,11 @@ impl ProxydSubCommand {
             top_config.clone(),
             num_workers,
             app_shutdown_sender.clone(),
+            flush_stat_buffer_receiver,
         )
         .await?;
+
+        let mut head_block_receiver = spawned_app.app.head_block_receiver();
 
         // start thread for watching config
         if let Some(top_config_path) = top_config_path {
@@ -128,18 +132,26 @@ impl ProxydSubCommand {
         ));
 
         info!("waiting for head block");
+        let max_wait_until = Instant::now() + Duration::from_secs(35);
         loop {
-            spawned_app.app.head_block_receiver().changed().await?;
-
-            if spawned_app
-                .app
-                .head_block_receiver()
-                .borrow_and_update()
-                .is_some()
-            {
-                break;
-            } else {
-                info!("no head block yet!");
+            select! {
+                _ = sleep_until(max_wait_until) => {
+                    return Err(anyhow::anyhow!("oh no! we never got a head block!"))
+                }
+                _ = head_block_receiver.changed() => {
+                    if let Some(head_block) = spawned_app
+                        .app
+                        .head_block_receiver()
+                        .borrow_and_update()
+                        .as_ref()
+                    {
+                        info!(head_hash=?head_block.hash(), head_num=%head_block.number());
+                        break;
+                    } else {
+                        info!("no head block yet!");
+                        continue;
+                    }
+                }
             }
         }
 

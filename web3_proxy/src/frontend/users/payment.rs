@@ -13,7 +13,10 @@ use axum::{
 };
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
-use entities::{balance, increase_on_chain_balance_receipt, rpc_key, user};
+use entities::{
+    admin_increase_balance_receipt, balance, increase_on_chain_balance_receipt, rpc_key,
+    stripe_increase_balance_receipt, user,
+};
 use ethers::abi::AbiEncode;
 use ethers::types::{Address, Block, TransactionReceipt, TxHash, H256};
 use hashbrown::{HashMap, HashSet};
@@ -67,11 +70,11 @@ pub async fn user_balance_get(
     Ok(Json(response).into_response())
 }
 
-/// `GET /user/deposits` -- Use a bearer token to get the user's balance and spend.
+/// `GET /user/deposits/chain` -- Use a bearer token to get the user's balance and spend.
 ///
 /// - shows a list of all deposits, including their chain-id, amount and tx-hash
 #[debug_handler]
-pub async fn user_deposits_get(
+pub async fn user_chain_deposits_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
@@ -93,6 +96,88 @@ pub async fn user_deposits_get(
                 "amount": x.amount,
                 "chain_id": x.chain_id,
                 "tx_hash": x.tx_hash,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let response = json!({
+        "user": Address::from_slice(&user.address),
+        "deposits": receipts,
+    });
+
+    Ok(Json(response).into_response())
+}
+
+/// `GET /user/deposits/stripe` -- Use a bearer token to get the user's balance and spend.
+///
+/// - shows a list of all deposits done through stripe
+#[debug_handler]
+pub async fn user_stripe_deposits_get(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+) -> Web3ProxyResponse {
+    let user = app.bearer_is_authorized(bearer).await?;
+
+    let db_replica = app.db_replica()?;
+
+    // Filter by user ...
+    let receipts = stripe_increase_balance_receipt::Entity::find()
+        .filter(increase_on_chain_balance_receipt::Column::DepositToUserId.eq(Some(user.id)))
+        .all(db_replica.as_ref())
+        .await?;
+
+    // Return the response, all except the user ...
+    let receipts = receipts
+        .into_iter()
+        .map(|x| {
+            json!({
+                "id": x.id,
+                "stripe_payment_intend_id": x.stripe_payment_intend_id,
+                "deposit_to_user_id": x.deposit_to_user_id,
+                "amount": x.amount,
+                "currency": x.currency,
+                "status": x.status,
+                "description": x.description,
+                "date_created": x.date_created
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let response = json!({
+        "user": Address::from_slice(&user.address),
+        "deposits": receipts,
+    });
+
+    Ok(Json(response).into_response())
+}
+
+/// `GET /user/deposits/admin` -- Use a bearer token to get the user's balance and spend.
+///
+/// - shows a list of all deposits done by admins
+#[debug_handler]
+pub async fn user_admin_deposits_get(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+) -> Web3ProxyResponse {
+    let user = app.bearer_is_authorized(bearer).await?;
+
+    let db_replica = app.db_replica()?;
+
+    // Filter by user ...
+    let receipts = admin_increase_balance_receipt::Entity::find()
+        .filter(increase_on_chain_balance_receipt::Column::DepositToUserId.eq(user.id))
+        .all(db_replica.as_ref())
+        .await?;
+
+    // Return the response, all except the user ...
+    let receipts = receipts
+        .into_iter()
+        .map(|x| {
+            json!({
+                "id": x.id,
+                "amount": x.amount,
+                "deposit_to_user_id": x.deposit_to_user_id,
+                "note": x.note,
             })
         })
         .collect::<Vec<_>>();
