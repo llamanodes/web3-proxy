@@ -302,7 +302,16 @@ mod tests {
     use super::Web3RpcConfig;
 
     #[test]
-    fn expected_defaults() {
+    fn expected_app_defaults() {
+        let a: AppConfig = serde_json::from_str("{}").unwrap();
+
+        let b: AppConfig = Default::default();
+
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn expected_rpc_defaults() {
         let a: Web3RpcConfig = serde_json::from_str("{}").unwrap();
 
         assert_eq!(a.soft_limit, 1);
