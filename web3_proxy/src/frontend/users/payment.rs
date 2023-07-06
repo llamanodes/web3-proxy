@@ -110,7 +110,7 @@ pub async fn user_chain_deposits_get(
 
 /// `GET /user/deposits/stripe` -- Use a bearer token to get the user's balance and spend.
 ///
-/// - shows a list of all deposits, including their chain-id, amount and tx-hash
+/// - shows a list of all deposits done through stripe
 #[debug_handler]
 pub async fn user_stripe_deposits_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
@@ -153,7 +153,7 @@ pub async fn user_stripe_deposits_get(
 
 /// `GET /user/deposits/admin` -- Use a bearer token to get the user's balance and spend.
 ///
-/// - shows a list of all deposits, including their chain-id, amount and tx-hash
+/// - shows a list of all deposits done by admins
 #[debug_handler]
 pub async fn user_admin_deposits_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
