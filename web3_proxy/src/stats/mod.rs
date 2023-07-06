@@ -413,8 +413,8 @@ impl BufferedRpcQueryStats {
                 deltas.balance_spent_including_free_credits = self.sum_credits_used;
                 deltas.balance_spent_excluding_free_credits = self.sum_credits_used;
             } else {
-                deltas.balance_spent_including_free_credits = user_balance;
-                deltas.balance_spent_excluding_free_credits = self.sum_credits_used;
+                deltas.balance_spent_including_free_credits = self.sum_credits_used;
+                deltas.balance_spent_excluding_free_credits = user_balance;
             }
 
             Ok((deltas, Some((referral_entity, referrer_code_entity))))
@@ -428,8 +428,8 @@ impl BufferedRpcQueryStats {
                 deltas.balance_spent_including_free_credits = self.sum_credits_used;
                 deltas.balance_spent_excluding_free_credits = self.sum_credits_used;
             } else {
-                deltas.balance_spent_including_free_credits = user_balance;
-                deltas.balance_spent_excluding_free_credits = self.sum_credits_used;
+                deltas.balance_spent_including_free_credits = self.sum_credits_used;
+                deltas.balance_spent_excluding_free_credits = user_balance;
             }
 
             Ok((deltas, None))
@@ -575,7 +575,6 @@ impl BufferedRpcQueryStats {
         deltas: &Deltas,
         db_conn: &DatabaseConnection,
         sender_rpc_entity: &rpc_key::Model,
-        referral_objects: &Option<(referee::Model, referrer::Model)>,
         rpc_secret_key_cache: &RpcSecretKeyCache,
         user_balance_cache: &UserBalanceCache,
     ) -> Web3ProxyResult<()> {
@@ -710,7 +709,6 @@ impl BufferedRpcQueryStats {
             &deltas,
             db_conn,
             &sender_rpc_entity,
-            &referral_objects,
             rpc_secret_key_cache,
             user_balance_cache,
         )
