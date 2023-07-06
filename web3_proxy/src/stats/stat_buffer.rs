@@ -160,24 +160,27 @@ impl StatBuffer {
                     }
                 }
                 x = flush_receiver.recv_async() => {
-                    if let Ok(x) = x {
-                        trace!("flush");
+                    match x {
+                        Ok(x) => {
+                            trace!("flush");
 
-                        let tsdb_count = self.save_tsdb_stats().await;
-                        if tsdb_count > 0 {
-                            trace!("Flushed {} stats to the tsdb", tsdb_count);
-                        }
+                            let tsdb_count = self.save_tsdb_stats().await;
+                            if tsdb_count > 0 {
+                                trace!("Flushed {} stats to the tsdb", tsdb_count);
+                            }
 
-                        let relational_count = self.save_relational_stats().await;
-                        if relational_count > 0 {
-                            trace!("Flushed {} stats to the relational db", relational_count);
-                        }
+                            let relational_count = self.save_relational_stats().await;
+                            if relational_count > 0 {
+                                trace!("Flushed {} stats to the relational db", relational_count);
+                            }
 
-                        if let Err(err) = x.send((tsdb_count, relational_count)) {
-                            warn!(%tsdb_count, %relational_count, ?err, "unable to notify about flushed stats");
+                            if let Err(err) = x.send((tsdb_count, relational_count)) {
+                                warn!(%tsdb_count, %relational_count, ?err, "unable to notify about flushed stats");
+                            }
                         }
-                    } else {
-                        warn!("unable to flush stat buffer!");
+                        Err(err) => {
+                            warn!(?err, "unable to flush stat buffer!");
+                        }
                     }
                 }
                 x = shutdown_receiver.recv() => {
