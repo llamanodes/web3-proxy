@@ -177,8 +177,6 @@ pub struct Web3ProxyAppSpawn {
     pub new_top_config: watch::Sender<TopConfig>,
     /// watch this to know when the app is ready to serve requests
     pub ranked_rpcs: watch::Receiver<Option<Arc<RankedRpcs>>>,
-    /// send on this to flush stats to influx/mysql
-    pub stat_buffer_flush_sender: broadcast::Sender<()>,
 }
 
 impl Web3ProxyApp {
@@ -189,11 +187,10 @@ impl Web3ProxyApp {
         top_config: TopConfig,
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
+        flush_stat_buffer_receiver: broadcast::Receiver<()>
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         let stat_buffer_shutdown_receiver = shutdown_sender.subscribe();
         let mut background_shutdown_receiver = shutdown_sender.subscribe();
-
-        let (stat_buffer_flush_sender, stat_buffer_flush_receiver) = broadcast::channel(1);
 
         // safety checks on the config
         // while i would prefer this to be in a "apply_top_config" function, that is a larger refactor
@@ -403,7 +400,7 @@ impl Web3ProxyApp {
                 Some(user_balance_cache.clone()),
                 stat_buffer_shutdown_receiver,
                 1,
-                stat_buffer_flush_receiver,
+                flush_stat_buffer_receiver,
             )? {
                 // since the database entries are used for accounting, we want to be sure everything is saved before exiting
                 important_background_handles.push(spawned_stat_buffer.background_handle);
@@ -664,7 +661,6 @@ impl Web3ProxyApp {
             background_handles: important_background_handles,
             new_top_config: new_top_config_sender,
             ranked_rpcs: consensus_connections_watcher,
-            stat_buffer_flush_sender,
         })
     }
 
