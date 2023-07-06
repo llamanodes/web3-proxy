@@ -70,7 +70,7 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/app/target \
     set -eux; \
     \
-    [ -e "payment-contracts/src/contracts.rs" ] || touch payment-contracts/build.rs ; \
+    [ -e "./payment-contracts/src/contracts/mod.rs" ] || touch ./payment-contracts/build.rs; \
     cargo --locked --verbose fetch
 
 # build tests (done its in own FROM so that it can run in parallel)
@@ -86,6 +86,7 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/app/target \
     set -eux; \
     \
+    [ -e "./payment-contracts/src/contracts/mod.rs" ] || touch ./payment-contracts/build.rs; \
     RUST_LOG=web3_proxy=trace,info \
     cargo \
     --frozen \
@@ -107,6 +108,7 @@ RUN --mount=type=bind,target=.,rw \
     --mount=type=cache,target=/app/target \
     set -eux; \
     \
+    [ -e "./payment-contracts/src/contracts/mod.rs" ] || touch ./payment-contracts/build.rs; \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
     --frozen \
