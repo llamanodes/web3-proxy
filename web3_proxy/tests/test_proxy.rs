@@ -91,7 +91,7 @@ async fn it_starts_and_stops() {
     assert_eq!(anvil_result, proxy_result.unwrap());
 
     // this won't do anything since stats aren't tracked when there isn't a db
-    x.flush_stats().await.unwrap();
+    x.flush_stats().await.unwrap_err();
 
     // most tests won't need to wait, but we should wait here to be sure all the shutdown logic works properly
     x.wait().await;
