@@ -413,8 +413,8 @@ impl BufferedRpcQueryStats {
                 deltas.balance_spent_including_free_credits = self.sum_credits_used;
                 deltas.balance_spent_excluding_free_credits = self.sum_credits_used;
             } else {
-                deltas.balance_spent_including_free_credits = user_balance;
-                deltas.balance_spent_excluding_free_credits = self.sum_credits_used;
+                deltas.balance_spent_including_free_credits = self.sum_credits_used;
+                deltas.balance_spent_excluding_free_credits = user_balance;
             }
 
             Ok((deltas, Some((referral_entity, referrer_code_entity))))
@@ -428,8 +428,8 @@ impl BufferedRpcQueryStats {
                 deltas.balance_spent_including_free_credits = self.sum_credits_used;
                 deltas.balance_spent_excluding_free_credits = self.sum_credits_used;
             } else {
-                deltas.balance_spent_including_free_credits = user_balance;
-                deltas.balance_spent_excluding_free_credits = self.sum_credits_used;
+                deltas.balance_spent_including_free_credits = self.sum_credits_used;
+                deltas.balance_spent_excluding_free_credits = user_balance;
             }
 
             Ok((deltas, None))
