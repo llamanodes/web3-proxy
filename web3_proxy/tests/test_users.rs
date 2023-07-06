@@ -122,7 +122,7 @@ async fn test_user_balance_decreases() {
     }
 
     // Flush all stats here
-    x.flush_stats();
+    x.flush_stats().await.unwrap();
     let now = time::Instant::now();
     sleep(Duration::from_secs(2)).await;
     let later = time::Instant::now();
@@ -152,7 +152,7 @@ async fn test_user_balance_decreases() {
     }
 
     // Flush all stats here
-    x.flush_stats();
+    x.flush_stats().await.unwrap();
     let now = time::Instant::now();
     sleep(Duration::from_secs(2)).await;
     let later = time::Instant::now();
@@ -274,7 +274,6 @@ async fn test_referral_bonus_non_concurrent() {
     // Make a JSON request
     let rpc_keys: RpcKey = user_get_first_rpc_key(&x, &r, &user_login_response).await;
     info!("Rpc key is: {:?}", rpc_keys);
-    info!(?rpc_keys);
 
     let proxy_endpoint = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
     let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
@@ -288,7 +287,7 @@ async fn test_referral_bonus_non_concurrent() {
     }
 
     // Flush all stats here
-    x.flush_stats();
+    x.flush_stats().await.unwrap();
     let now = time::Instant::now();
     sleep(Duration::from_secs(2)).await;
     let later = time::Instant::now();
