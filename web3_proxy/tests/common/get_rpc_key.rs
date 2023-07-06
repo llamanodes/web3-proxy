@@ -1,12 +1,8 @@
 use crate::TestApp;
-use ethers::prelude::{LocalWallet, Signer};
-use ethers::types::Signature;
-use reqwest::Response;
-use rust_decimal::Decimal;
 use serde::Deserialize;
 use tracing::info;
-use web3_proxy::frontend::admin::AdminIncreaseBalancePost;
-use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
+use ulid::Ulid;
+use web3_proxy::frontend::users::authentication::LoginPostResponse;
 
 #[derive(Debug, Deserialize)]
 pub struct RpcKeyResponse {
@@ -26,16 +22,17 @@ pub struct RpcKey {
     pub log_revert_chance: f64,
     pub private_txs: bool,
     pub role: String,
-    pub secret_key: String,
+    pub secret_key: Ulid,
     pub user_id: u64,
 }
 
 /// Helper function to get the user's balance
+#[allow(unused)]
 pub async fn user_get_first_rpc_key(
     x: &TestApp,
     r: &reqwest::Client,
     login_response: &LoginPostResponse,
-) -> (RpcKey) {
+) -> RpcKey {
     let get_keys = format!("{}user/keys", x.proxy_provider.url());
 
     info!("Get balance");

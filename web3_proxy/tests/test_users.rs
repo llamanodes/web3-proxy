@@ -13,12 +13,9 @@ use crate::common::TestApp;
 use ethers::prelude::{Http, Provider};
 use ethers::{signers::Signer, types::Signature};
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::str::FromStr;
 use std::time::Duration;
-use tokio::time;
-use tokio::time::sleep;
-use tokio_stream::StreamExt;
 use tracing::{debug, info, trace};
 use ulid::Ulid;
 use web3_proxy::frontend::users::authentication::PostLogin;
@@ -114,7 +111,7 @@ async fn test_user_balance_decreases() {
 
     // Make somre requests while in the free tier, so we can test bookkeeping here
     for _ in 1..10_000 {
-        let proxy_result = proxy_provider
+        let _ = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
             .unwrap()
@@ -122,12 +119,9 @@ async fn test_user_balance_decreases() {
     }
 
     // Flush all stats here
-    x.flush_stats().await.unwrap();
-    let now = time::Instant::now();
-    sleep(Duration::from_secs(2)).await;
-    let later = time::Instant::now();
-    assert!(later - now >= Duration::from_secs(2));
-    info!("Now vs later {:?} {:?}", now, later);
+    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
+    assert_eq!(influx_count, 0);
+    assert!(mysql_count > 0);
 
     // Bump both user's wallet to $20
     admin_increase_balance(
@@ -144,7 +138,7 @@ async fn test_user_balance_decreases() {
     assert_eq!(user_balance_pre, Decimal::from(20));
 
     for _ in 1..10_000 {
-        let proxy_result = proxy_provider
+        let _ = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
             .unwrap()
@@ -152,12 +146,9 @@ async fn test_user_balance_decreases() {
     }
 
     // Flush all stats here
-    x.flush_stats().await.unwrap();
-    let now = time::Instant::now();
-    sleep(Duration::from_secs(2)).await;
-    let later = time::Instant::now();
-    assert!(later - now >= Duration::from_secs(2));
-    info!("Now vs later {:?} {:?}", now, later);
+    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
+    assert_eq!(influx_count, 0);
+    assert!(mysql_count > 0);
 
     // Deposits should not be affected, and should be equal to what was initially provided
     let total_deposits =
@@ -279,7 +270,7 @@ async fn test_referral_bonus_non_concurrent() {
     let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
 
     for _ in 1..20_000 {
-        let proxy_result = proxy_provider
+        let _proxy_result = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
             .unwrap()
@@ -287,12 +278,9 @@ async fn test_referral_bonus_non_concurrent() {
     }
 
     // Flush all stats here
-    x.flush_stats().await.unwrap();
-    let now = time::Instant::now();
-    sleep(Duration::from_secs(2)).await;
-    let later = time::Instant::now();
-    assert!(later - now >= Duration::from_secs(2));
-    info!("Now vs later {:?} {:?}", now, later);
+    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
+    assert_eq!(influx_count, 0);
+    assert!(mysql_count > 0);
 
     // Check that at least something was earned:
     let shared_referral_code: UserSharedReferralInfo =

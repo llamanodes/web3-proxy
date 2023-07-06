@@ -1,13 +1,9 @@
 use crate::TestApp;
-use ethers::prelude::{LocalWallet, Signer};
-use ethers::types::Signature;
-use reqwest::Response;
-use rust_decimal::Decimal;
 use tracing::info;
-use web3_proxy::frontend::admin::AdminIncreaseBalancePost;
-use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
+use web3_proxy::frontend::users::authentication::LoginPostResponse;
 
 /// Helper function to get the user's balance
+#[allow(unused)]
 pub async fn user_get_balance(
     x: &TestApp,
     r: &reqwest::Client,

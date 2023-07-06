@@ -8,11 +8,12 @@ use web3_proxy::sub_commands::ChangeAdminStatusSubCommand;
 /// Helper function to create admin
 
 /// Create user as admin
+#[allow(unused)]
 pub async fn create_user_as_admin(
     x: &TestApp,
     r: &reqwest::Client,
     admin_wallet: &LocalWallet,
-) -> (LoginPostResponse) {
+) -> LoginPostResponse {
     // Create the account
     let login_post_url = format!("{}user/login", x.proxy_provider.url());
     let admin_login_get_url = format!(

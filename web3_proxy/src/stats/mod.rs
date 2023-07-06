@@ -575,7 +575,6 @@ impl BufferedRpcQueryStats {
         deltas: &Deltas,
         db_conn: &DatabaseConnection,
         sender_rpc_entity: &rpc_key::Model,
-        referral_objects: &Option<(referee::Model, referrer::Model)>,
         rpc_secret_key_cache: &RpcSecretKeyCache,
         user_balance_cache: &UserBalanceCache,
     ) -> Web3ProxyResult<()> {
@@ -710,7 +709,6 @@ impl BufferedRpcQueryStats {
             &deltas,
             db_conn,
             &sender_rpc_entity,
-            &referral_objects,
             rpc_secret_key_cache,
             user_balance_cache,
         )

@@ -3,10 +3,9 @@
 ///     - get referral link
 ///     - getting code for referral (shared and used)
 use crate::TestApp;
-use ethers::prelude::{LocalWallet, Signer};
-use ethers::types::Signature;
 use tracing::info;
-use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
+use ulid::Ulid;
+use web3_proxy::frontend::users::authentication::LoginPostResponse;
 
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub struct UserSharedReferralInfo {
     pub user: User,
     pub referrals: Vec<Referral>,
-    pub used_referral_code: String,
+    pub used_referral_code: Ulid,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +41,7 @@ pub struct Referral {
 }
 
 /// Helper function to create an "ordinary" user
+#[allow(unused)]
 pub async fn get_referral_code(
     x: &TestApp,
     r: &reqwest::Client,
@@ -63,9 +63,10 @@ pub async fn get_referral_code(
     let referral_link = referral_link["referral_code"].as_str().unwrap().to_string();
     info!(?referral_link);
 
-    (referral_link)
+    referral_link
 }
 
+#[allow(unused)]
 pub async fn get_shared_referral_codes(
     x: &TestApp,
     r: &reqwest::Client,
@@ -94,6 +95,7 @@ pub async fn get_shared_referral_codes(
     user_referral_info
 }
 
+#[allow(unused)]
 pub async fn get_used_referral_codes(
     x: &TestApp,
     r: &reqwest::Client,

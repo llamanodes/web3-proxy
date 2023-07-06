@@ -5,6 +5,7 @@ use tracing::info;
 use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
 
 /// Helper function to create an "ordinary" user
+#[allow(unused)]
 pub async fn create_user(
     x: &TestApp,
     r: &reqwest::Client,

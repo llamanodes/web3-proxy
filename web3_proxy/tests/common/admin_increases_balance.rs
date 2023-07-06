@@ -1,19 +1,19 @@
 use crate::TestApp;
 use ethers::prelude::{LocalWallet, Signer};
-use ethers::types::Signature;
 use rust_decimal::Decimal;
 use tracing::info;
 use web3_proxy::frontend::admin::AdminIncreaseBalancePost;
-use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
+use web3_proxy::frontend::users::authentication::LoginPostResponse;
 
 /// Helper function to increase the balance of a user, from an admin
+#[allow(unused)]
 pub async fn admin_increase_balance(
     x: &TestApp,
     r: &reqwest::Client,
     admin_login_response: &LoginPostResponse,
     target_wallet: &LocalWallet,
     amount: Decimal,
-) -> (serde_json::Value) {
+) -> serde_json::Value {
     let increase_balance_post_url = format!("{}admin/increase_balance", x.proxy_provider.url());
     info!("Increasing balance");
     // Login the user
