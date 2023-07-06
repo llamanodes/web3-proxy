@@ -27,7 +27,6 @@ use anyhow::Context;
 use axum::http::StatusCode;
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimiter;
-use derive_more::From;
 use entities::user;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U64};
@@ -165,7 +164,6 @@ pub async fn flatten_handles<T>(
 }
 
 /// starting an app creates many tasks
-#[derive(From)]
 pub struct Web3ProxyAppSpawn {
     /// the app. probably clone this to use in other groups of handles
     pub app: Arc<Web3ProxyApp>,
