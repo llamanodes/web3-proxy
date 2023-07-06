@@ -27,7 +27,6 @@ use anyhow::Context;
 use axum::http::StatusCode;
 use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimiter;
-use derive_more::From;
 use entities::user;
 use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U64};
@@ -165,7 +164,6 @@ pub async fn flatten_handles<T>(
 }
 
 /// starting an app creates many tasks
-#[derive(From)]
 pub struct Web3ProxyAppSpawn {
     /// the app. probably clone this to use in other groups of handles
     pub app: Arc<Web3ProxyApp>,
@@ -187,6 +185,7 @@ impl Web3ProxyApp {
         top_config: TopConfig,
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
+        flush_stat_buffer_receiver: broadcast::Receiver<()>
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         let stat_buffer_shutdown_receiver = shutdown_sender.subscribe();
         let mut background_shutdown_receiver = shutdown_sender.subscribe();
@@ -399,6 +398,7 @@ impl Web3ProxyApp {
                 Some(user_balance_cache.clone()),
                 stat_buffer_shutdown_receiver,
                 1,
+                flush_stat_buffer_receiver,
             )? {
                 // since the database entries are used for accounting, we want to be sure everything is saved before exiting
                 important_background_handles.push(spawned_stat_buffer.background_handle);
@@ -653,14 +653,13 @@ impl Web3ProxyApp {
             important_background_handles.push(f);
         }
 
-        Ok((
+        Ok(Web3ProxyAppSpawn {
             app,
             app_handles,
-            important_background_handles,
-            new_top_config_sender,
-            consensus_connections_watcher,
-        )
-            .into())
+            background_handles: important_background_handles,
+            new_top_config: new_top_config_sender,
+            ranked_rpcs: consensus_connections_watcher,
+        })
     }
 
     pub async fn apply_top_config(&self, new_top_config: TopConfig) -> Web3ProxyResult<()> {

@@ -54,6 +54,9 @@ pub struct TestApp {
     /// connection to the proxy that is connected to anil.
     pub proxy_provider: Provider<Http>,
 
+    /// tell the app to flush stats to the database
+    flush_stat_buffer_sender: broadcast::Sender<()>,
+
     /// tell the app to shut down (use `self.stop()`).
     shutdown_sender: broadcast::Sender<()>,
 }
@@ -269,6 +272,8 @@ impl TestApp {
         let frontend_port_arc = Arc::new(AtomicU16::new(0));
         let prometheus_port_arc = Arc::new(AtomicU16::new(0));
 
+        let (flush_stat_buffer_sender, _flush_stat_buffer_receiver) = broadcast::channel(1);
+
         // spawn the app
         // TODO: spawn in a thread so we can run from non-async tests and so the Drop impl can wait for it to stop
         let handle = {
@@ -279,6 +284,7 @@ impl TestApp {
                 prometheus_port_arc,
                 num_workers,
                 shutdown_sender.clone(),
+                flush_stat_buffer_sender.clone(),
             ))
         };
 
@@ -304,6 +310,7 @@ impl TestApp {
             db,
             proxy_handle: Mutex::new(Some(handle)),
             proxy_provider,
+            flush_stat_buffer_sender,
             shutdown_sender,
         }
     }
@@ -311,6 +318,10 @@ impl TestApp {
     #[allow(unused)]
     pub fn db_conn(&self) -> &DatabaseConnection {
         self.db.as_ref().unwrap().conn.as_ref().unwrap()
+    }
+
+    pub fn flush_stats(&self) {
+        self.flush_stat_buffer_sender.send(()).unwrap();
     }
 
     pub fn stop(&self) -> Result<usize, SendError<()>> {

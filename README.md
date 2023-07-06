@@ -133,6 +133,7 @@ cargo install sea-orm-cli
 3. `sea-orm-cli generate entity -u mysql://root:dev_web3_proxy@127.0.0.1:13306/dev_web3_proxy -o entities/src --with-serde both`
     - Be careful when adding the `--tables THE,MODIFIED,TABLES` flag. It will delete relationships if they aren't listed
 4. After running the above, you will need to manually fix some things
+    - Add any derives that got removed (like `Default`)
     - `Vec<u8>` -> `sea_orm::prelude::Uuid` (Related: <https://github.com/SeaQL/sea-query/issues/375>)
     - `i8` -> `bool` (Related: <https://github.com/SeaQL/sea-orm/issues/924>)
     - add all the tables back into `mod.rs`
