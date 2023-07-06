@@ -177,7 +177,7 @@ impl StatBuffer {
                             warn!(%tsdb_count, %relational_count, ?err, "unable to notify about flushed stats");
                         }
                     } else {
-                        unimplemented!()
+                        warn!("unable to flush stat buffer!");
                     }
                 }
                 x = shutdown_receiver.recv() => {
