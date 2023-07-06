@@ -87,7 +87,7 @@ fn main() -> anyhow::Result<()> {
     // this probably won't matter for us in docker, but better safe than sorry
     fdlimit::raise_fd_limit();
 
-    #[cfg(feature = "deadlock")]
+    #[cfg(feature = "deadlock_detection")]
     {
         // spawn a thread for deadlock detection
         thread::spawn(move || loop {
@@ -105,6 +105,8 @@ fn main() -> anyhow::Result<()> {
                     println!("{:#?}", t.backtrace());
                 }
             }
+
+            panic!("deadlock detected!");
         });
     }
 
