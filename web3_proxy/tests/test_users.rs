@@ -16,6 +16,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::time::Duration;
+use tokio::time;
+use tokio::time::sleep;
 use tokio_stream::StreamExt;
 use tracing::{debug, info, trace};
 use ulid::Ulid;
@@ -86,6 +88,104 @@ async fn test_log_in_and_out() {
     info!(?logout_response);
 
     assert_eq!(logout_response, "goodbye");
+}
+
+#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
+#[test_log::test(tokio::test)]
+async fn test_user_balance_decreases() {
+    info!("Starting balance decreases with usage test");
+    let x = TestApp::spawn(true).await;
+    let r = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap();
+
+    let user_wallet = x.wallet(0);
+    let admin_wallet = x.wallet(1);
+
+    // Create three users, one referrer, one admin who bumps both their balances
+    let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
+    let user_login_response = create_user(&x, &r, &user_wallet, None).await;
+
+    // Get the rpc keys for this user
+    let rpc_keys: RpcKey = user_get_first_rpc_key(&x, &r, &user_login_response).await;
+    let proxy_endpoint = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
+    let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
+
+    // Make somre requests while in the free tier, so we can test bookkeeping here
+    for _ in 1..10_000 {
+        let proxy_result = proxy_provider
+            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    // Flush all stats here
+    x.flush_stats();
+    let now = time::Instant::now();
+    sleep(Duration::from_secs(2)).await;
+    let later = time::Instant::now();
+    assert!(later - now >= Duration::from_secs(2));
+    info!("Now vs later {:?} {:?}", now, later);
+
+    // Bump both user's wallet to $20
+    admin_increase_balance(
+        &x,
+        &r,
+        &admin_login_response,
+        &user_wallet,
+        Decimal::from(20),
+    )
+    .await;
+    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
+    let user_balance_pre =
+        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    assert_eq!(user_balance_pre, Decimal::from(20));
+
+    for _ in 1..10_000 {
+        let proxy_result = proxy_provider
+            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    // Flush all stats here
+    x.flush_stats();
+    let now = time::Instant::now();
+    sleep(Duration::from_secs(2)).await;
+    let later = time::Instant::now();
+    assert!(later - now >= Duration::from_secs(2));
+    info!("Now vs later {:?} {:?}", now, later);
+
+    // Deposits should not be affected, and should be equal to what was initially provided
+    let total_deposits =
+        Decimal::from_str(user_balance_response["total_deposits"].as_str().unwrap()).unwrap();
+    assert_eq!(total_deposits, Decimal::from(20));
+
+    // Get the full balance endpoint
+    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
+    let user_balance_post =
+        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    assert!(user_balance_post < user_balance_pre);
+
+    // Balance should be total deposits - usage while in the paid tier
+    let total_spent_outside_free_tier = Decimal::from_str(
+        user_balance_response["total_spent_outside_free_tier"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        total_deposits - total_spent_outside_free_tier,
+        user_balance_post
+    );
+
+    // This should never be negative
+    let user_balance_total_spent =
+        Decimal::from_str(user_balance_response["total_spent"].as_str().unwrap()).unwrap();
+    assert!(user_balance_total_spent > Decimal::from(0));
 }
 
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
@@ -172,7 +272,6 @@ async fn test_referral_bonus_non_concurrent() {
 
     // Make a for-loop just spam it a bit
     // Make a JSON request
-    // TODO: Also get the RPC key for the user first ...
     let rpc_keys: RpcKey = user_get_first_rpc_key(&x, &r, &user_login_response).await;
     info!("Rpc key is: {:?}", rpc_keys);
     info!(?rpc_keys);
@@ -180,15 +279,21 @@ async fn test_referral_bonus_non_concurrent() {
     let proxy_endpoint = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
     let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
 
-    for _ in 1..100_000 {
+    for _ in 1..20_000 {
         let proxy_result = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
             .unwrap()
             .unwrap();
-        // info!("Provider is");
-        // info!(?proxy_result);
     }
+
+    // Flush all stats here
+    x.flush_stats();
+    let now = time::Instant::now();
+    sleep(Duration::from_secs(2)).await;
+    let later = time::Instant::now();
+    assert!(later - now >= Duration::from_secs(2));
+    info!("Now vs later {:?} {:?}", now, later);
 
     // Check that at least something was earned:
     let shared_referral_code: UserSharedReferralInfo =
