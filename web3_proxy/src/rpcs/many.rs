@@ -1075,6 +1075,7 @@ impl Web3Rpcs {
             );
         } else if head_block_num.as_ref() > needed {
             // we have synced past the needed block
+            // TODO: log ranked rpcs
             // TODO: only log params in development
             error!(
                 min=?min_block_needed,
@@ -1087,6 +1088,7 @@ impl Web3Rpcs {
             );
         } else {
             // TODO: only log params in development
+            // TODO: log ranked rpcs
             error!(
                 min=?min_block_needed,
                 max=?max_block_needed,
@@ -1097,8 +1099,6 @@ impl Web3Rpcs {
                 ?params,
                 "Requested data is not available",
             );
-            // TODO: remove this, or move to trace level
-            // debug!("{}", serde_json::to_string(&request).unwrap());
         }
 
         // TODO: what error code?

@@ -271,8 +271,7 @@ impl CacheMode {
 
                         BlockNumAndHash(block_num, block_hash)
                     } else {
-                        warn!("if no from, what should we default? 0 or head?");
-                        head_block.into()
+                        BlockNumAndHash(U64::zero(), H256::zero())
                     };
 
                     let to_block = if let Some(x) = obj.get_mut("toBlock") {
