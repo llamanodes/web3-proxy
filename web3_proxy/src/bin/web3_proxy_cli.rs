@@ -210,9 +210,10 @@ fn main() -> anyhow::Result<()> {
         dsn: cli_config.sentry_url.clone(),
         release: sentry::release_name!(),
         environment: Some(sentry_env),
-        // Enable capturing of traces
-        // TODO: make this configurable!
-        traces_sample_rate: 0.001,
+        // TODO: make sample_rate configurable!
+        sample_rate: 1.0,
+        // TODO: make traces_sample_rate configurable! (its not yet available for our rust project)
+        traces_sample_rate: 0.0,
         ..Default::default()
     });
 
