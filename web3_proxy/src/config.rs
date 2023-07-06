@@ -67,6 +67,7 @@ pub struct AppConfig {
 
     /// EVM chain id. 1 for ETH
     /// TODO: better type for chain_id? max of `u64::MAX / 2 - 36` <https://github.com/ethereum/EIPs/issues/2294>
+    #[serde_inline_default(1u64)]
     pub chain_id: u64,
 
     /// Database is used for user data.
@@ -299,13 +300,20 @@ impl Web3RpcConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::Web3RpcConfig;
+    use super::{AppConfig, Web3RpcConfig};
+    use serde_json::json;
 
     #[test]
     fn expected_app_defaults() {
-        let a: AppConfig = serde_json::from_str("{}").unwrap();
+        let a: AppConfig = serde_json::from_value(json!({
+            "chain_id": 1,
+        })).unwrap();
+
+        assert_eq!(a.min_synced_rpcs, 1);
 
         let b: AppConfig = Default::default();
+
+        assert_eq!(b.min_synced_rpcs, 1);
 
         assert_eq!(a, b);
     }
