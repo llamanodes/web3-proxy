@@ -4,16 +4,6 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "log_level")]
-pub enum LogLevel {
-    #[sea_orm(string_value = "none")]
-    None,
-    #[sea_orm(string_value = "aggregated")]
-    Aggregated,
-    #[sea_orm(string_value = "detailed")]
-    Detailed,
-}
-#[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "method")]
 pub enum Method {
     #[sea_orm(string_value = "eth_call")]
