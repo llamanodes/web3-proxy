@@ -322,7 +322,7 @@ impl StatBuffer {
                         .await
                     {
                         // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
-                        error!(?err, "unable to save {} tsdb stats!", batch_size);
+                        error!(?err, batch_size, "unable to save tsdb stats!");
                         // TODO: we should probably wait a second to give errors a chance to settle
                     }
 
