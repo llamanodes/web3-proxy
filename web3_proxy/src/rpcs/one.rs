@@ -965,6 +965,8 @@ impl Web3Rpc {
         max_wait: Option<Duration>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestHandle> {
+        // TODO: what should the default be?
+        // TODO: split max_wait_connect (which might wait if a rate limit is pending) and max_wait_request
         let max_wait_until = max_wait.map(|x| Instant::now() + x);
 
         loop {

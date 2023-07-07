@@ -273,12 +273,6 @@ impl OpenRequestHandle {
                         trace!("revert from {}", self.rpc);
                         ResponseTypes::Revert
                     } else if msg.contains("limit") || msg.contains("request") {
-                        // TODO: too verbose
-                        if self.rpc.backup {
-                            trace!(%msg, "rate limit from {}", self.rpc);
-                        } else {
-                            warn!(%msg, "rate limit from {}", self.rpc);
-                        }
                         ResponseTypes::RateLimit
                     } else {
                         ResponseTypes::Error
@@ -295,16 +289,13 @@ impl OpenRequestHandle {
                     // TODO: how long should we actually wait? different providers have different times
                     // TODO: if rate_limit_period_seconds is set, use that
                     // TODO: check response headers for rate limits too
-                    // TODO: warn if production, debug if backup
-                    if self.rpc.backup {
-                        debug!("unexpected rate limit on {}!", self.rpc);
-                    } else {
-                        warn!("unexpected rate limit on {}!", self.rpc);
-                    }
-
                     let retry_at = Instant::now() + Duration::from_secs(1);
 
-                    trace!("retry {} at: {:?}", self.rpc, retry_at);
+                    if self.rpc.backup {
+                        debug!(?retry_at, "rate limited on {}!", self.rpc);
+                    } else {
+                        warn!(?retry_at, "rate limited on {}!", self.rpc);
+                    }
 
                     hard_limit_until.send_replace(retry_at);
                 }
