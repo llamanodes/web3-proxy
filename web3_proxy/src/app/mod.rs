@@ -53,7 +53,7 @@ use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::sync::{broadcast, watch, Semaphore, oneshot};
 use tokio::task::JoinHandle;
-use tokio::time::{timeout};
+use tokio::time::timeout;
 use tracing::{error, info, trace, warn, Level};
 
 // TODO: make this customizable?
@@ -125,7 +125,7 @@ pub struct Web3ProxyApp {
     /// cache user balances so we don't have to check downgrade logic every single time
     pub user_balance_cache: UserBalanceCache,
     /// concurrent/parallel RPC request limits for authenticated users
-    pub user_semaphores: Cache<NonZeroU64, Arc<Semaphore>>,
+    pub user_semaphores: Cache<(NonZeroU64, IpAddr), Arc<Semaphore>>,
     /// volatile cache used for rate limits
     /// TODO: i think i might just delete this entirely. instead use local-only concurrency limits.
     pub vredis_pool: Option<RedisPool>,
