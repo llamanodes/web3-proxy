@@ -19,7 +19,7 @@ use serde_json::json;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use stripe::Webhook;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 /// `GET /user/balance/stripe` -- Use a bearer token to get the user's balance and spend.
 ///
@@ -96,8 +96,7 @@ pub async fn user_balance_stripe_post(
         _ => return Ok("Received irrelevant webhook".into_response()),
     };
 
-    // TODO: lower log level when done testing
-    info!(?intent);
+    debug!(?intent);
 
     if intent.status.as_str() != "succeeded" {
         return Ok("Received Webhook".into_response());
