@@ -12,7 +12,7 @@ impl MigrationTrait for Migration {
             .limit(1)
             .values([
                 (UserTier::MaxRequestsPerPeriod, Some("3900").into()),
-                (UserTier::MaxConcurrentRequests, Some("5").into()),
+                (UserTier::MaxConcurrentRequests, Some("3").into()),
             ])
             .and_where(Expr::col(UserTier::Title).eq("Premium Out Of Funds"))
             .to_owned();
