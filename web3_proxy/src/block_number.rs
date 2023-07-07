@@ -355,7 +355,7 @@ impl CacheMode {
                 cache_errors: true,
             }),
             Err(err) => {
-                error!(%method, ?params, ?err, "could not get block from params");
+                warn!(%method, ?params, ?err, "could not get block from params");
                 Ok(CacheMode::Cache {
                     block: head_block.into(),
                     cache_errors: true,
