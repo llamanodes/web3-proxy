@@ -2,7 +2,7 @@
 use moka::future::{Cache, CacheBuilder};
 use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
 use std::cmp::Eq;
-use std::fmt::{Debug, Display};
+use std::fmt::Display;
 use std::hash::Hash;
 use std::sync::atomic::Ordering;
 use std::sync::{atomic::AtomicU64, Arc};
@@ -31,7 +31,7 @@ pub enum DeferredRateLimitResult {
 
 impl<K> DeferredRateLimiter<K>
 where
-    K: Copy + Debug + Display + Hash + Eq + Send + Sync + 'static,
+    K: Copy + Display + Hash + Eq + Send + Sync + 'static,
 {
     pub async fn new(
         // TODO: change this to cache_size in bytes
@@ -181,7 +181,7 @@ where
                             Err(err) => {
                                 // don't let redis errors block our users!
                                 error!(
-                                    "unable to query rate limits, but local cache is available. key={:?} err={:?}",
+                                    "unable to query rate limits, but local cache is available. key={} err={:?}",
                                     key,
                                     err,
                                 );

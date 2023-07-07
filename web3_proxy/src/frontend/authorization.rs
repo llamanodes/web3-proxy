@@ -2,6 +2,7 @@
 
 use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
+use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::blockchain::Web3ProxyBlock;
@@ -1388,7 +1389,7 @@ impl Web3ProxyApp {
             if let Some(rate_limiter) = &self.frontend_registered_user_rate_limiter {
                 match rate_limiter
                     .throttle(
-                        authorization.checks.user_id,
+                        RegisteredUserRateLimitKey(authorization.checks.user_id, *ip),
                         Some(user_max_requests_per_period),
                         1,
                     )

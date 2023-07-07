@@ -6,7 +6,7 @@ pub mod db_queries;
 pub mod influxdb_queries;
 
 use self::stat_buffer::BufferedRpcQueryStats;
-use crate::app::{RpcSecretKeyCache, UserBalanceCache};
+use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::compute_units::ComputeUnit;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};

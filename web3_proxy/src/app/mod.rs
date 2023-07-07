@@ -1,11 +1,11 @@
 mod ws;
 
 use crate::block_number::CacheMode;
+use crate::caches::{RegisteredUserRateLimitKey, RpcSecretKeyCache, UserBalanceCache};
 use crate::config::{AppConfig, TopConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{
-    Authorization, AuthorizationChecks, Balance, RequestMetadata, RequestOrMethod, ResponseOrBytes,
-    RpcSecretKey,
+    Authorization, RequestMetadata, RequestOrMethod, ResponseOrBytes,
 };
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::jsonrpc::{
@@ -38,7 +38,6 @@ use hashbrown::{HashMap, HashSet};
 use migration::sea_orm::{DatabaseTransaction, EntityTrait, PaginatorTrait, TransactionTrait};
 use moka::future::{Cache, CacheBuilder};
 use once_cell::sync::OnceCell;
-use parking_lot::RwLock;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{redis, DeadpoolRuntime, RedisConfig, RedisPool, RedisRateLimiter};
 use serde::Serialize;
@@ -71,11 +70,6 @@ pub const BILLING_PERIOD_SECONDS: i64 = 60 * 60 * 24 * 7;
 /// Convenience type
 pub type Web3ProxyJoinHandle<T> = JoinHandle<Web3ProxyResult<T>>;
 
-/// Cache data from the database about rpc keys
-pub type RpcSecretKeyCache = Cache<RpcSecretKey, AuthorizationChecks>;
-/// Cache data from the database about user balances
-pub type UserBalanceCache = Cache<NonZeroU64, Arc<RwLock<Balance>>>;
-
 /// The application
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
 pub struct Web3ProxyApp {
@@ -105,7 +99,7 @@ pub struct Web3ProxyApp {
     /// rate limit anonymous users
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     /// rate limit authenticated users
-    pub frontend_registered_user_rate_limiter: Option<DeferredRateLimiter<u64>>,
+    pub frontend_registered_user_rate_limiter: Option<DeferredRateLimiter<RegisteredUserRateLimitKey>>,
     /// concurrent/parallel request limits for anonymous users
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>>,
     pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
@@ -439,10 +433,10 @@ impl Web3ProxyApp {
                 // these are deferred rate limiters because we don't want redis network requests on the hot path
                 // TODO: take cache_size from config
                 frontend_ip_rate_limiter = Some(
-                    DeferredRateLimiter::<IpAddr>::new(20_000, "ip", rpc_rrl.clone(), None).await,
+                    DeferredRateLimiter::new(20_000, "ip", rpc_rrl.clone(), None).await,
                 );
                 frontend_registered_user_rate_limiter =
-                    Some(DeferredRateLimiter::<u64>::new(10_000, "key", rpc_rrl, None).await);
+                    Some(DeferredRateLimiter::new(20_000, "key", rpc_rrl, None).await);
             }
 
             // login rate limiter
