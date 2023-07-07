@@ -244,7 +244,7 @@ impl StatBuffer {
                     )
                     .await
                 {
-                    error!("unable to save accounting entry! err={:?}", err);
+                    error!(?err, "unable to save accounting entry!");
                 };
             }
         }
@@ -275,7 +275,7 @@ impl StatBuffer {
                         points.push(point);
                     }
                     Err(err) => {
-                        error!("unable to build global stat! err={:?}", err);
+                        error!(?err, "unable to build global stat!");
                     }
                 };
             }
@@ -322,7 +322,8 @@ impl StatBuffer {
                         .await
                     {
                         // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
-                        error!("unable to save {} tsdb stats! err={:?}", batch_size, err);
+                        error!(?err, "unable to save {} tsdb stats!", batch_size);
+                        // TODO: we should probably wait a second to give errors a chance to settle
                     }
 
                     points = p;
