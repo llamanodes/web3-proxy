@@ -36,6 +36,7 @@ pub struct SpawnedStatBuffer {
     /// these handles are important and must be allowed to finish
     pub background_handle: Web3ProxyJoinHandle<()>,
 }
+
 pub struct StatBuffer {
     accounting_db_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     billing_period_seconds: i64,
