@@ -11,7 +11,7 @@ use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::sync::{broadcast, oneshot};
 use tokio::time::{interval, sleep};
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, trace};
 
 #[derive(Debug, Default)]
 pub struct BufferedRpcQueryStats {
@@ -175,11 +175,11 @@ impl StatBuffer {
                             }
 
                             if let Err(err) = x.send((tsdb_count, relational_count)) {
-                                warn!(%tsdb_count, %relational_count, ?err, "unable to notify about flushed stats");
+                                error!(%tsdb_count, %relational_count, ?err, "unable to notify about flushed stats");
                             }
                         }
                         Err(err) => {
-                            warn!(?err, "unable to flush stat buffer!");
+                            error!(?err, "unable to flush stat buffer!");
                         }
                     }
                 }
