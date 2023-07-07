@@ -7,9 +7,7 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::{
-    balance, increase_on_chain_balance_receipt, rpc_key, stripe_increase_balance_receipt, user,
-};
+use entities::{balance, rpc_key, stripe_increase_balance_receipt, user};
 use ethers::types::Address;
 use http::HeaderMap;
 use migration::sea_orm::prelude::Decimal;

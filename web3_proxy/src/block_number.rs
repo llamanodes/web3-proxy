@@ -11,7 +11,7 @@ use ethers::{
 };
 use serde_json::json;
 use std::sync::Arc;
-use tracing::{error, trace, warn};
+use tracing::{trace, warn};
 
 use crate::{frontend::authorization::Authorization, rpcs::many::Web3Rpcs};
 
