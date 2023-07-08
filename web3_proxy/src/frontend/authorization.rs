@@ -525,17 +525,19 @@ impl RequestMetadata {
 
     pub fn try_send_stat(mut self) -> Web3ProxyResult<Option<Self>> {
         if let Some(stat_sender) = self.stat_sender.take() {
-            trace!("sending stat! {:?}", self);
+            trace!(?self, "sending stat");
 
             let stat: RpcQueryStats = self.try_into()?;
 
             let stat: AppStat = stat.into();
 
-            if let Err(err) = stat_sender.send(stat) {
-                error!("failed sending stat {:?}: {:?}", err.0, err);
+            if let Err(err) = stat_sender.try_send(stat) {
+                error!(?err, "failed sending stat");
                 // TODO: return it? that seems like it might cause an infinite loop
                 // TODO: but dropping stats is bad... hmm... i guess better to undercharge customers than overcharge
             };
+
+            trace!("stat sent successfully");
 
             Ok(None)
         } else {
