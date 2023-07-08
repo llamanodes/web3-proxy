@@ -31,7 +31,7 @@ use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tracing::trace;
+use tracing::{info, trace};
 
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 
@@ -828,6 +828,8 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
             137 => Decimal::from_str("0.000000533333333333333"),
             _ => Decimal::from_str("0.000000400000000000000"),
         }?;
+        info!("usd_per_cu");
+        info!("{}", usd_per_cu);
 
         let cache_hit = !backend_rpcs_used.is_empty();
 
