@@ -902,7 +902,11 @@ impl Web3Rpcs {
                             let rate_limit_substrings = ["limit", "exceeded", "quota usage"];
                             for rate_limit_substr in rate_limit_substrings {
                                 if error_msg.contains(rate_limit_substr) {
-                                    if error_msg.contains("result on length") {
+                                    if error_msg.contains("block size") {
+                                        // TODO: this message is likely wrong, but i can't find the actual one in my terminal now
+                                        // they hit an expected limit. return the error now
+                                        return Err(error.into());
+                                    } else if error_msg.contains("result on length") {
                                         // this error contains "limit" but is not a rate limit error
                                         // TODO: make the expected limit configurable
                                         // TODO: parse the rate_limit_substr and only continue if it is < expected limit
@@ -910,10 +914,10 @@ impl Web3Rpcs {
                                             // they hit our expected limit. return the error now
                                             return Err(error.into());
                                         } else {
-                                            // they hit a limit lower than what we expect
-                                            warn!(
+                                            // they hit a limit lower than what we expect. the server is misconfigured
+                                            error!(
                                                 %error_msg,
-                                                "unexpected result limitby {}",
+                                                "unexpected result limit by {}",
                                                 skip_rpcs.last().unwrap(),
                                             );
                                             continue;

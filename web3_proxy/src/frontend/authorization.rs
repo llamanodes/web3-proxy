@@ -2,6 +2,7 @@
 
 use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
+use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::blockchain::Web3ProxyBlock;
@@ -524,17 +525,19 @@ impl RequestMetadata {
 
     pub fn try_send_stat(mut self) -> Web3ProxyResult<Option<Self>> {
         if let Some(stat_sender) = self.stat_sender.take() {
-            trace!("sending stat! {:?}", self);
+            trace!(?self, "sending stat");
 
             let stat: RpcQueryStats = self.try_into()?;
 
             let stat: AppStat = stat.into();
 
-            if let Err(err) = stat_sender.send(stat) {
-                error!("failed sending stat {:?}: {:?}", err.0, err);
+            if let Err(err) = stat_sender.try_send(stat) {
+                error!(?err, "failed sending stat");
                 // TODO: return it? that seems like it might cause an infinite loop
                 // TODO: but dropping stats is bad... hmm... i guess better to undercharge customers than overcharge
             };
+
+            trace!("stat sent successfully");
 
             Ok(None)
         } else {
@@ -965,6 +968,7 @@ impl Web3ProxyApp {
     pub async fn user_semaphore(
         &self,
         authorization_checks: &AuthorizationChecks,
+        ip: &IpAddr,
     ) -> Web3ProxyResult<Option<OwnedSemaphorePermit>> {
         if let Some(max_concurrent_requests) = authorization_checks.max_concurrent_requests {
             let user_id = authorization_checks
@@ -974,7 +978,7 @@ impl Web3ProxyApp {
 
             let semaphore = self
                 .user_semaphores
-                .get_with_by_ref(&user_id, async move {
+                .get_with_by_ref(&(user_id, *ip), async move {
                     let s = Semaphore::new(max_concurrent_requests as usize);
                     Arc::new(s)
                 })
@@ -1368,11 +1372,9 @@ impl Web3ProxyApp {
             return Ok(RateLimitResult::UnknownKey);
         }
 
-        // TODO: rpc_key should have an option to rate limit by ip instead of by key
-
         // only allow this rpc_key to run a limited amount of concurrent requests
         // TODO: rate limit should be BEFORE the semaphore!
-        let semaphore = self.user_semaphore(&authorization_checks).await?;
+        let semaphore = self.user_semaphore(&authorization_checks, ip).await?;
 
         let authorization = Authorization::try_new(
             authorization_checks,
@@ -1384,53 +1386,49 @@ impl Web3ProxyApp {
             AuthorizationType::Frontend,
         )?;
 
-        let user_max_requests_per_period = match authorization.checks.max_requests_per_period {
-            None => {
-                return Ok(RateLimitResult::Allowed(authorization, semaphore));
-            }
-            Some(x) => x,
-        };
-
         // user key is valid. now check rate limits
-        if let Some(rate_limiter) = &self.frontend_registered_user_rate_limiter {
-            match rate_limiter
-                .throttle(
-                    authorization.checks.user_id,
-                    Some(user_max_requests_per_period),
-                    1,
-                )
-                .await
-            {
-                Ok(DeferredRateLimitResult::Allowed) => {
-                    Ok(RateLimitResult::Allowed(authorization, semaphore))
-                }
-                Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
-                    // TODO: set headers so they know when they can retry
-                    // TODO: debug or trace?
-                    // this is too verbose, but a stat might be good
-                    // TODO: keys are secrets! use the id instead
-                    // TODO: emit a stat
-                    // // trace!(?rpc_key, "rate limit exceeded until {:?}", retry_at);
-                    Ok(RateLimitResult::RateLimited(authorization, Some(retry_at)))
-                }
-                Ok(DeferredRateLimitResult::RetryNever) => {
-                    // TODO: keys are secret. don't log them!
-                    // // trace!(?rpc_key, "rate limit is 0");
-                    // TODO: emit a stat
-                    Ok(RateLimitResult::RateLimited(authorization, None))
-                }
-                Err(err) => {
-                    // internal error, not rate limit being hit
-                    // TODO: i really want axum to do this for us in a single place.
-                    error!("rate limiter is unhappy. allowing ip. err={:?}", err);
+        if let Some(user_max_requests_per_period) = authorization.checks.max_requests_per_period {
+            if let Some(rate_limiter) = &self.frontend_registered_user_rate_limiter {
+                match rate_limiter
+                    .throttle(
+                        RegisteredUserRateLimitKey(authorization.checks.user_id, *ip),
+                        Some(user_max_requests_per_period),
+                        1,
+                    )
+                    .await
+                {
+                    Ok(DeferredRateLimitResult::Allowed) => {
+                        return Ok(RateLimitResult::Allowed(authorization, semaphore))
+                    }
+                    Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
+                        // TODO: set headers so they know when they can retry
+                        // TODO: debug or trace?
+                        // this is too verbose, but a stat might be good
+                        // TODO: keys are secrets! use the id instead
+                        // TODO: emit a stat
+                        // trace!(?rpc_key, "rate limit exceeded until {:?}", retry_at);
+                        return Ok(RateLimitResult::RateLimited(authorization, Some(retry_at)));
+                    }
+                    Ok(DeferredRateLimitResult::RetryNever) => {
+                        // TODO: keys are secret. don't log them!
+                        // trace!(?rpc_key, "rate limit is 0");
+                        // TODO: emit a stat
+                        return Ok(RateLimitResult::RateLimited(authorization, None));
+                    }
+                    Err(err) => {
+                        // internal error, not rate limit being hit
+                        // TODO: i really want axum to do this for us in a single place.
+                        error!(?err, "rate limiter is unhappy. allowing rpc_key");
 
-                    Ok(RateLimitResult::Allowed(authorization, semaphore))
+                        return Ok(RateLimitResult::Allowed(authorization, semaphore));
+                    }
                 }
+            } else {
+                // TODO: if no redis, rate limit with just a local cache?
             }
-        } else {
-            // TODO: if no redis, rate limit with just a local cache?
-            Ok(RateLimitResult::Allowed(authorization, semaphore))
         }
+
+        Ok(RateLimitResult::Allowed(authorization, semaphore))
     }
 }
 

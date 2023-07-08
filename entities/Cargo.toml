@@ -1,6 +1,6 @@
 [package]
 name = "entities"
-version = "0.34.0"
+version = "0.35.0"
 edition = "2021"
 
 [lib]
@@ -12,6 +12,5 @@ path = "src/mod.rs"
 [dependencies]
 ethers = { version = "2.0.7", default-features = false }
 sea-orm = "0.11.3"
-serde = "1.0.166"
+serde = "1.0.167"
 ulid = "1.0.0"
-uuid = "1.4.0"

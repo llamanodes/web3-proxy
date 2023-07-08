@@ -1,8 +1,5 @@
 use crate::TestApp;
-use ethers::prelude::{LocalWallet, Signer};
-use rust_decimal::Decimal;
-use tracing::info;
-use web3_proxy::frontend::admin::AdminIncreaseBalancePost;
+use tracing::trace;
 use web3_proxy::frontend::users::authentication::LoginPostResponse;
 
 /// Helper function to increase the balance of a user, from an admin
@@ -13,7 +10,7 @@ pub async fn get_admin_deposits(
     user: &LoginPostResponse,
 ) -> serde_json::Value {
     let increase_balance_post_url = format!("{}user/deposits/admin", x.proxy_provider.url());
-    info!("Get admin increase deposits");
+    trace!("Get admin increase deposits");
     // Login the user
     // Use the bearer token of admin to increase user balance
     let admin_balance_deposits = r
@@ -22,12 +19,12 @@ pub async fn get_admin_deposits(
         .send()
         .await
         .unwrap();
-    info!(?admin_balance_deposits, "http response");
+    trace!(?admin_balance_deposits, "http response");
     let admin_balance_deposits = admin_balance_deposits
         .json::<serde_json::Value>()
         .await
         .unwrap();
-    info!(?admin_balance_deposits, "json response");
+    trace!(?admin_balance_deposits, "json response");
 
     admin_balance_deposits
 }

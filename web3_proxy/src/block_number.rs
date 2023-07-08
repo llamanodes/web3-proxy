@@ -11,7 +11,7 @@ use ethers::{
 };
 use serde_json::json;
 use std::sync::Arc;
-use tracing::{error, trace, warn};
+use tracing::{trace, warn};
 
 use crate::{frontend::authorization::Authorization, rpcs::many::Web3Rpcs};
 
@@ -64,7 +64,8 @@ impl From<&Web3ProxyBlock> for BlockNumAndHash {
     }
 }
 
-/// modify params to always have a block number and not "latest"
+/// modify params to always have a block hash and not "latest"
+/// TODO: this should replace all block numbers with hashes, not just "latest"
 pub async fn clean_block_number(
     authorization: &Arc<Authorization>,
     params: &mut serde_json::Value,
@@ -112,7 +113,22 @@ pub async fn clean_block_number(
                     // it might be a string like "latest" or a block number or a block hash
                     // TODO: "BlockNumber" needs a better name
                     // TODO: move this to a helper function?
-                    if let Ok(block_number) = serde_json::from_value::<BlockNumber>(x.clone()) {
+                    if let Ok(block_num) = serde_json::from_value::<U64>(x.clone()) {
+                        let (block_hash, _) = rpcs
+                            .block_hash(authorization, &block_num)
+                            .await
+                            .context("fetching block hash from number")?;
+
+                        let block = rpcs
+                            .block(authorization, &block_hash, None, Some(3), None)
+                            .await
+                            .context("fetching block from hash")?;
+
+                        // TODO: do true here? will that work for **all** methods on **all** chains? if not we need something smarter
+                        (BlockNumAndHash::from(&block), false)
+                    } else if let Ok(block_number) =
+                        serde_json::from_value::<BlockNumber>(x.clone())
+                    {
                         let (block_num, change) =
                             BlockNumber_to_U64(block_number, latest_block.number());
 
@@ -145,7 +161,7 @@ pub async fn clean_block_number(
                     }
                 };
 
-                // if we changed "latest" to a number, update the params to match
+                // if we changed "latest" to a hash, update the params to match
                 if change {
                     trace!(old=%x, new=%block.hash(), "changing block number");
                     *x = json!(block.hash());
@@ -355,7 +371,7 @@ impl CacheMode {
                 cache_errors: true,
             }),
             Err(err) => {
-                error!(%method, ?params, ?err, "could not get block from params");
+                warn!(%method, ?params, ?err, "could not get block from params");
                 Ok(CacheMode::Cache {
                     block: head_block.into(),
                     cache_errors: true,

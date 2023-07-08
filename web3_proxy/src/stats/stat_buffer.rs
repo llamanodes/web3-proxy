@@ -1,5 +1,6 @@
 use super::{AppStat, RpcQueryKey};
-use crate::app::{RpcSecretKeyCache, UserBalanceCache, Web3ProxyJoinHandle};
+use crate::app::Web3ProxyJoinHandle;
+use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::Web3ProxyResult;
 use crate::frontend::authorization::Balance;
 use derive_more::From;
@@ -11,7 +12,7 @@ use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::sync::{broadcast, oneshot};
 use tokio::time::{interval, sleep};
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, trace};
 
 #[derive(Debug, Default)]
 pub struct BufferedRpcQueryStats {
@@ -36,6 +37,7 @@ pub struct SpawnedStatBuffer {
     /// these handles are important and must be allowed to finish
     pub background_handle: Web3ProxyJoinHandle<()>,
 }
+
 pub struct StatBuffer {
     accounting_db_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     billing_period_seconds: i64,
@@ -160,24 +162,27 @@ impl StatBuffer {
                     }
                 }
                 x = flush_receiver.recv_async() => {
-                    if let Ok(x) = x {
-                        trace!("flush");
+                    match x {
+                        Ok(x) => {
+                            trace!("flush");
 
-                        let tsdb_count = self.save_tsdb_stats().await;
-                        if tsdb_count > 0 {
-                            trace!("Flushed {} stats to the tsdb", tsdb_count);
-                        }
+                            let tsdb_count = self.save_tsdb_stats().await;
+                            if tsdb_count > 0 {
+                                trace!("Flushed {} stats to the tsdb", tsdb_count);
+                            }
 
-                        let relational_count = self.save_relational_stats().await;
-                        if relational_count > 0 {
-                            trace!("Flushed {} stats to the relational db", relational_count);
-                        }
+                            let relational_count = self.save_relational_stats().await;
+                            if relational_count > 0 {
+                                trace!("Flushed {} stats to the relational db", relational_count);
+                            }
 
-                        if let Err(err) = x.send((tsdb_count, relational_count)) {
-                            warn!(%tsdb_count, %relational_count, ?err, "unable to notify about flushed stats");
+                            if let Err(err) = x.send((tsdb_count, relational_count)) {
+                                error!(%tsdb_count, %relational_count, ?err, "unable to notify about flushed stats");
+                            }
                         }
-                    } else {
-                        unimplemented!()
+                        Err(err) => {
+                            error!(?err, "unable to flush stat buffer!");
+                        }
                     }
                 }
                 x = shutdown_receiver.recv() => {
@@ -239,7 +244,7 @@ impl StatBuffer {
                     )
                     .await
                 {
-                    error!("unable to save accounting entry! err={:?}", err);
+                    error!(?err, "unable to save accounting entry!");
                 };
             }
         }
@@ -270,7 +275,7 @@ impl StatBuffer {
                         points.push(point);
                     }
                     Err(err) => {
-                        error!("unable to build global stat! err={:?}", err);
+                        error!(?err, "unable to build global stat!");
                     }
                 };
             }
@@ -317,7 +322,8 @@ impl StatBuffer {
                         .await
                     {
                         // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
-                        error!("unable to save {} tsdb stats! err={:?}", batch_size, err);
+                        error!(?err, batch_size, "unable to save tsdb stats!");
+                        // TODO: we should probably wait a second to give errors a chance to settle
                     }
 
                     points = p;

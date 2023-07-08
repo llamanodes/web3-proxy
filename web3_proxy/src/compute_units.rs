@@ -100,6 +100,7 @@ impl ComputeUnit {
                 (_, "test") => 0,
                 (_, "trace_block") => 24,
                 (_, "trace_call") => 75,
+                (_, "trace_callMany") => 75 * 3,
                 (_, "trace_filter") => 75,
                 (_, "trace_get") => 17,
                 (_, "trace_rawTransaction") => 75,

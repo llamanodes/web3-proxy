@@ -97,16 +97,17 @@ fn main() -> anyhow::Result<()> {
                 continue;
             }
 
-            println!("{} deadlocks detected", deadlocks.len());
+            let mut msg = format!("{} deadlocks detected\n", deadlocks.len());
+
             for (i, threads) in deadlocks.iter().enumerate() {
-                println!("Deadlock #{}", i);
+                msg += &format!("Deadlock #{}", i);
                 for t in threads {
-                    println!("Thread Id {:#?}", t.thread_id());
-                    println!("{:#?}", t.backtrace());
+                    msg += &format!("Thread Id {:#?}\n", t.thread_id());
+                    msg += &format!("{:#?}\n", t.backtrace());
                 }
             }
 
-            panic!("deadlock detected!");
+            panic!("{:#}", msg);
         });
     }
 

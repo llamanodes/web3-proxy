@@ -7,9 +7,7 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::{
-    balance, increase_on_chain_balance_receipt, rpc_key, stripe_increase_balance_receipt, user,
-};
+use entities::{balance, rpc_key, stripe_increase_balance_receipt, user};
 use ethers::types::Address;
 use http::HeaderMap;
 use migration::sea_orm::prelude::Decimal;
@@ -21,7 +19,7 @@ use serde_json::json;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use stripe::Webhook;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 /// `GET /user/balance/stripe` -- Use a bearer token to get the user's balance and spend.
 ///
@@ -37,7 +35,7 @@ pub async fn user_stripe_deposits_get(
 
     // Filter by user ...
     let receipts = stripe_increase_balance_receipt::Entity::find()
-        .filter(increase_on_chain_balance_receipt::Column::DepositToUserId.eq(user.id))
+        .filter(stripe_increase_balance_receipt::Column::DepositToUserId.eq(user.id))
         .all(db_replica.as_ref())
         .await?;
 
@@ -98,8 +96,7 @@ pub async fn user_balance_stripe_post(
         _ => return Ok("Received irrelevant webhook".into_response()),
     };
 
-    // TODO: lower log level when done testing
-    info!(?intent);
+    debug!(?intent);
 
     if intent.status.as_str() != "succeeded" {
         return Ok("Received Webhook".into_response());
