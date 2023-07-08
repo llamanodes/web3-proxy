@@ -22,6 +22,4 @@ FROM
         LEFT JOIN
     rpc_accounting_v2 AS racv2 ON rk.id = racv2.rpc_key_id
         LEFT JOIN
-    user_tier AS ut ON u.user_tier_id = ut.id
-GROUP BY
-    u.id;
+    user_tier AS ut ON u.user_tier_id = ut.id;

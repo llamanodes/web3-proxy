@@ -35,6 +35,8 @@ mod m20230619_172237_default_tracking;
 mod m20230622_104142_stripe_deposits;
 mod m20230705_214013_type_fixes;
 mod m20230707_211936_premium_tier_changes;
+mod m20230708_151756_rpc_accounting_free_usage_credits;
+mod m20230708_152131_referral_track_one_time_bonus_bonus;
 
 pub struct Migrator;
 
@@ -77,6 +79,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20230622_104142_stripe_deposits::Migration),
             Box::new(m20230705_214013_type_fixes::Migration),
             Box::new(m20230707_211936_premium_tier_changes::Migration),
+            Box::new(m20230708_151756_rpc_accounting_free_usage_credits::Migration),
+            Box::new(m20230708_152131_referral_track_one_time_bonus_bonus::Migration),
         ]
     }
 }

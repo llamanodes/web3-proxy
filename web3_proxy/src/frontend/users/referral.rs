@@ -92,7 +92,7 @@ pub async fn user_used_referral_stats(
     // For each related referral person, find the corresponding user-address
     #[derive(Debug, Serialize)]
     struct Info {
-        credits_applied_for_referee: bool,
+        credits_applied_for_referee: Decimal,
         credits_applied_for_referrer: Decimal,
         referral_start_date: DateTime,
         used_referral_code: String,
@@ -150,7 +150,7 @@ pub async fn user_shared_referral_stats(
     // collect info about each referral
     #[derive(Debug, Serialize)]
     struct Info {
-        credits_applied_for_referee: bool,
+        credits_applied_for_referee: Decimal,
         credits_applied_for_referrer: Decimal,
         referral_start_date: DateTime,
         referred_address: Address,

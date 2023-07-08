@@ -1154,7 +1154,6 @@ impl Web3ProxyApp {
                 .user_balance_cache
                 .try_get_with(x, async move {
                     let db_replica = self.db_replica()?;
-
                     loop {
                         match balance::Entity::find()
                             .filter(balance::Column::UserId.eq(user_id))
