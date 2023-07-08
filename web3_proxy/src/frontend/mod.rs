@@ -11,11 +11,13 @@ pub mod status;
 pub mod users;
 
 use crate::app::Web3ProxyApp;
+use crate::errors::Web3ProxyResult;
 use axum::{
     routing::{get, post},
     Extension, Router,
 };
-use http::{header::AUTHORIZATION, StatusCode};
+use http::{header::AUTHORIZATION, Request, StatusCode};
+use hyper::Body;
 use listenfd::ListenFd;
 use moka::future::{Cache, CacheBuilder};
 use std::sync::Arc;
@@ -23,11 +25,10 @@ use std::{iter::once, time::Duration};
 use std::{net::SocketAddr, sync::atomic::Ordering};
 use strum::{EnumCount, EnumIter};
 use tokio::sync::broadcast;
-use tower_http::cors::CorsLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
-use tracing::info;
-
-use crate::errors::Web3ProxyResult;
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tracing::{error_span, info};
+use ulid::Ulid;
 
 /// simple keys for caching responses
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, EnumCount, EnumIter)]
@@ -257,6 +258,28 @@ pub async fn serve(
         .layer(Extension(app.clone()))
         // frontend caches
         .layer(Extension(Arc::new(response_cache)))
+        // request id
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+                // We get the request id from the header
+                // If no header, a new Ulid is created
+                // TODO: move this header name to config
+                let request_id = request
+                    .headers()
+                    .get("x-amzn-trace-id")
+                    .and_then(|x| x.to_str().ok())
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| Ulid::new().to_string());
+
+                // And then we put it along with other information into the `request` span
+                error_span!(
+                    "request",
+                    id = %request_id,
+                    // method = %request.method(),
+                    // path = %request.uri().path(),
+                )
+            }),
+        )
         // 404 for any unknown routes
         .fallback(errors::handler_404);
 
