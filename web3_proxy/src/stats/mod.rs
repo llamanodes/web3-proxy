@@ -340,16 +340,26 @@ impl BufferedRpcQueryStats {
                 trace!("Will get it from the balance cache");
                 let out: Arc<AsyncRwLock<Balance>> = user_balance_cache
                     .try_get_with(_user_id, async {
-                        if false {
-                            error!(
+                        let x = match balance::Entity::find()
+                            .filter(balance::Column::UserId.eq(user_id))
+                            .one(db_conn)
+                            .await
+                            .map_err(|err| err.to_string())? {
+                            None => {
+                                error!(
                                     "It seems like this user has no balance entry {:?}, this should never be possible because this guy is a referrer, or a request sender with a non-zero user-id",
                                     user_id
                                 );
-                            return Err("Could not find user in balance table");
+                                Err("Could not find user in balance table".to_string())
+                            }
+                            Some(x) => Ok(x)
+                        }?;
+                        if false {
+                            return Err("Could not find user in balance table".to_string());
                         }
                         let x = Balance {
-                            total_deposit: Default::default(), // x.total_deposits, // x.total_deposits,
-                            total_spend: Default::default(), // x.total_spent_outside_free_tier,   // x.total_spent_outside_free_tier,
+                            total_deposit: x.total_deposits, // x.total_deposits,
+                            total_spend: x.total_spent_outside_free_tier,   // x.total_spent_outside_free_tier,
                         };
                         return Ok(Arc::new(AsyncRwLock::new(x)));
                     })
@@ -361,14 +371,6 @@ impl BufferedRpcQueryStats {
                     });
                 out
             }
-            // let x = match balance::Entity::find()
-            //     .filter(balance::Column::UserId.eq(user_id))
-            //     .one(db_conn)
-            //     .await? {
-            //     None => {
-            //     }
-            //     Some(x) => Ok(x)
-            // }?;
             // We are just instantiating this for type-safety's sake
             Err(_) => Arc::new(AsyncRwLock::new(Balance::default())),
         }
