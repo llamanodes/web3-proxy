@@ -2,6 +2,7 @@
 
 use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
+use crate::balance::{get_balance_from_db, Balance};
 use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
@@ -92,20 +93,6 @@ pub enum RateLimitResult {
 pub enum AuthorizationType {
     Internal,
     Frontend,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Balance {
-    /// The total USD value deposited.
-    pub total_deposit: Decimal,
-    /// The amount spent outside the free tier.
-    pub total_spend: Decimal,
-}
-
-impl Balance {
-    pub fn remaining(&self) -> Decimal {
-        self.total_deposit - self.total_spend
-    }
 }
 
 /// TODO: move this
@@ -1149,58 +1136,25 @@ impl Web3ProxyApp {
         &self,
         user_id: u64,
     ) -> Web3ProxyResult<Arc<AsyncRwLock<Balance>>> {
-        match NonZeroU64::try_from(user_id) {
-            Err(_) => Ok(Arc::new(Default::default())),
-            Ok(x) => self
-                .user_balance_cache
-                .try_get_with(x, async move {
-                    let db_replica = self.db_replica()?;
-                    loop {
-                        match balance::Entity::find()
-                            .filter(balance::Column::UserId.eq(user_id))
-                            .one(db_replica.as_ref())
-                            .await?
+        self.user_balance_cache
+            .try_get_with(user_id, async move {
+                let db_replica = self.db_replica()?;
+                loop {
+                    let x =
+                        match crate::balance::get_balance_from_db(db_replica.conn(), user_id).await
                         {
-                            Some(x) => {
-                                let x = Balance {
-                                    total_deposit: x.total_deposits,
-                                    total_spend: x.total_spent_outside_free_tier,
-                                };
-                                trace!("Balance for cache retrieved from database is {:?}", x);
-
-                                return Ok(Arc::new(AsyncRwLock::new(x)));
-                            }
                             None => {
-                                // no balance row. make one now
-                                let db_conn = self.db_conn()?;
-
-                                let balance_entry = balance::ActiveModel {
-                                    id: sea_orm::NotSet,
-                                    user_id: sea_orm::Set(user_id),
-                                    ..Default::default()
-                                };
-
-                                balance::Entity::insert(balance_entry)
-                                    .on_conflict(
-                                        OnConflict::new()
-                                            .values([(
-                                                balance::Column::TotalDeposits,
-                                                Expr::col(balance::Column::TotalDeposits).add(0),
-                                            )])
-                                            .to_owned(),
-                                    )
-                                    .exec(db_conn)
-                                    .await
-                                    .web3_context("creating empty balance row for existing user")?;
-
-                                continue;
+                                return Err(format!("user_id {:?} has no balance entry", user_id)
+                                    .to_owned())
                             }
+                            Some(x) => x,
                         };
-                    }
-                })
-                .await
-                .map_err(Into::into),
-        }
+                    trace!("Balance for cache retrieved from database is {:?}", x);
+                    return Ok(Arc::new(AsyncRwLock::new(x)));
+                }
+            })
+            .await
+            .map_err(Into::into)
     }
 
     // check the local cache for user data, or query the database
@@ -1312,7 +1266,7 @@ impl Web3ProxyApp {
 
                             // only consider the user premium if they have paid at least $10 and have a balance > $.01
                             // otherwise, set user_tier_model to the downograded tier
-                            if balance.total_deposit < Decimal::from(10)
+                            if balance.total_deposits > Decimal::from(10)
                                 || balance.remaining() < Decimal::new(1, 2)
                             {
                                 // TODO: include boolean to mark that the user is downgraded

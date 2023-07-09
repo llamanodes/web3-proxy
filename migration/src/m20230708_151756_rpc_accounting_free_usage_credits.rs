@@ -13,6 +13,7 @@ impl MigrationTrait for Migration {
                     .add_column(
                         ColumnDef::new(RpcAccountingV2::SumInclFreeCreditsUsed)
                             .decimal_len(20, 10)
+                            .default("0.0")
                             .not_null(),
                     )
                     .to_owned(),

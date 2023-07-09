@@ -3,6 +3,7 @@
 
 pub mod admin_queries;
 pub mod app;
+pub mod balance;
 pub mod block_number;
 pub mod caches;
 pub mod compute_units;

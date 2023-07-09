@@ -1,8 +1,8 @@
 use super::{AppStat, RpcQueryKey};
 use crate::app::Web3ProxyJoinHandle;
+use crate::balance::Balance;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::Web3ProxyResult;
-use crate::frontend::authorization::Balance;
 use derive_more::From;
 use futures::stream;
 use hashbrown::HashMap;

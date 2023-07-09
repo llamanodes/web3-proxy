@@ -284,12 +284,6 @@ pub async fn modify_subuser(
                 .await
                 .web3_context("Failed saving new user key")?];
 
-            // We should also create the balance entry ...
-            let subuser_balance = balance::ActiveModel {
-                user_id: sea_orm::Set(subuser.id),
-                ..Default::default()
-            };
-            subuser_balance.insert(&txn).await?;
             // save the user and key to the database
             txn.commit().await?;
 

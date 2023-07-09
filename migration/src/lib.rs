@@ -37,7 +37,6 @@ mod m20230705_214013_type_fixes;
 mod m20230707_211936_premium_tier_changes;
 mod m20230708_151756_rpc_accounting_free_usage_credits;
 mod m20230708_152131_referral_track_one_time_bonus_bonus;
-mod m20230708_225009_balance_view_v2;
 
 pub struct Migrator;
 
@@ -82,7 +81,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20230707_211936_premium_tier_changes::Migration),
             Box::new(m20230708_151756_rpc_accounting_free_usage_credits::Migration),
             Box::new(m20230708_152131_referral_track_one_time_bonus_bonus::Migration),
-            Box::new(m20230708_225009_balance_view_v2::Migration),
         ]
     }
 }

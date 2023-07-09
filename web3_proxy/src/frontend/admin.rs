@@ -83,26 +83,6 @@ pub async fn admin_increase_balance(
         ..Default::default()
     };
     increase_balance_receipt.save(&txn).await?;
-
-    // update balance
-    let balance_entry = balance::ActiveModel {
-        total_deposits: sea_orm::Set(payload.amount),
-        user_id: sea_orm::Set(user_entry.id),
-        ..Default::default()
-    };
-    balance::Entity::insert(balance_entry)
-        .on_conflict(
-            OnConflict::new()
-                .values([(
-                    balance::Column::TotalDeposits,
-                    Expr::col(balance::Column::TotalDeposits).add(payload.amount),
-                )])
-                .to_owned(),
-        )
-        .exec(&txn)
-        .await
-        .web3_context("admin is increasing balance")?;
-
     txn.commit().await?;
 
     let out = json!({

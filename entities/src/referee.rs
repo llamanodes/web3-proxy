@@ -9,7 +9,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
     #[sea_orm(column_type = "Decimal(Some((20, 10)))")]
-    pub credits_applied_for_referee: Decimal,
+    pub one_time_bonus_applied_for_referee: Decimal,
     #[sea_orm(column_type = "Decimal(Some((20, 10)))")]
     pub credits_applied_for_referrer: Decimal,
     pub referral_start_date: DateTime,

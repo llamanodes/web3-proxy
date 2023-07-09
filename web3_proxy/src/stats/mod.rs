@@ -9,13 +9,12 @@ use self::stat_buffer::BufferedRpcQueryStats;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::compute_units::ComputeUnit;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::{Authorization, Balance, RequestMetadata};
+use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
 use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
-use entities::balance::Model;
 use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key};
 use futures::TryFutureExt;
 use hyper::body::Buf;
@@ -41,6 +40,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::{error, info, trace};
 
+use crate::balance::{get_balance_from_db, Balance};
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -194,6 +194,7 @@ pub enum AppStat {
 
 // TODO: move to stat_buffer.rs?
 impl BufferedRpcQueryStats {
+
     async fn add(&mut self, stat: RpcQueryStats) {
         // a stat always come from just 1 frontend request
         self.frontend_requests += 1;
@@ -335,44 +336,24 @@ impl BufferedRpcQueryStats {
         user_balance_cache: &UserBalanceCache,
         db_conn: &DbConn,
     ) -> Arc<AsyncRwLock<Balance>> {
-        match NonZeroU64::try_from(user_id) {
-            Ok(_user_id) => {
-                trace!("Will get it from the balance cache");
-                let out: Arc<AsyncRwLock<Balance>> = user_balance_cache
-                    .try_get_with(_user_id, async {
-                        let x = match balance::Entity::find()
-                            .filter(balance::Column::UserId.eq(user_id))
-                            .one(db_conn)
-                            .await
-                            .map_err(|err| err.to_string())? {
-                            None => {
-                                error!(
-                                    "It seems like this user has no balance entry {:?}, this should never be possible because this guy is a referrer, or a request sender with a non-zero user-id",
-                                    user_id
-                                );
-                                Err("Could not find user in balance table".to_string())
-                            }
-                            Some(x) => Ok(x)
-                        }?;
-                        if false {
+            trace!("Will get it from the balance cache");
+            let out: Arc<AsyncRwLock<Balance>> = user_balance_cache
+                .try_get_with(_user_id, async {
+                    let x = match get_balance_from_db(db_conn, user_id).await {
+                        Some(x) => x,
+                        None => {
                             return Err("Could not find user in balance table".to_string());
                         }
-                        let x = Balance {
-                            total_deposit: x.total_deposits, // x.total_deposits,
-                            total_spend: x.total_spent_outside_free_tier,   // x.total_spent_outside_free_tier,
-                        };
-                        return Ok(Arc::new(AsyncRwLock::new(x)));
-                    })
-                    .await
-                    .unwrap_or_else(|err| {
-                        error!("Could not find balance for user !{}", err);
-                        // We are just instantiating this for type-safety's sake
-                        Arc::new(AsyncRwLock::new(Balance::default()))
-                    });
-                out
-            }
-            // We are just instantiating this for type-safety's sake
-            Err(_) => Arc::new(AsyncRwLock::new(Balance::default())),
+                    };
+                    return Ok(Arc::new(AsyncRwLock::new(x)));
+                })
+                .await
+                .unwrap_or_else(|err| {
+                    error!("Could not find balance for user !{}", err);
+                    // We are just instantiating this for type-safety's sake
+                    Arc::new(AsyncRwLock::new(Balance::default()))
+                });
+            out
         }
     }
 
@@ -475,17 +456,15 @@ impl BufferedRpcQueryStats {
                     trace!("Adding sender bonus balance");
                     new_referee_entity = referee::ActiveModel {
                         id: sea_orm::Unchanged(Default::default()),
-                        credits_applied_for_referee: sea_orm::Set(bonus_for_user),
+                        one_time_bonus_applied_for_referee: sea_orm::Set(bonus_for_user),
                         credits_applied_for_referrer: sea_orm::Unchanged(Default::default()),
                         referral_start_date: sea_orm::Unchanged(Default::default()),
                         used_referral_code: sea_orm::Unchanged(Default::default()),
                         user_id: sea_orm::Unchanged(Default::default()),
                     };
                     // Update the cache
-                    {
-                        // Also no need to invalidate the cache here, just by itself
-                        user_balance.total_deposit += bonus_for_user;
-                    }
+                    // Also no need to invalidate the cache here, just by itself
+                    user_balance.total_deposit += bonus_for_user;
                     // The resulting field will not be read again, so I will not try to turn the ActiveModel into a Model one
                     new_referee_entity = new_referee_entity.save(&txn).await?;
                 }

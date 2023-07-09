@@ -1,4 +1,5 @@
 use crate::app::Web3ProxyApp;
+use crate::balance::{get_balance_from_db, Balance};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse, Web3ProxyResult};
 use crate::frontend::authorization::{
     login_is_authorized, Authorization as Web3ProxyAuthorization,
@@ -21,17 +22,18 @@ use ethers::abi::AbiEncode;
 use ethers::types::{Address, Block, TransactionReceipt, TxHash, H256};
 use hashbrown::{HashMap, HashSet};
 use http::StatusCode;
-use migration::LockType;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, IntoActiveModel, ModelTrait,
     QueryFilter, QuerySelect, TransactionTrait,
 };
+use migration::LockType;
 use migration::{Expr, OnConflict};
 use payment_contracts::ierc20::IERC20;
 use payment_contracts::payment_factory::{self, PaymentFactory};
+use rdkafka::bindings::rd_kafka_AclBinding_destroy;
 use serde_json::json;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, TryFromIntError};
 use std::sync::Arc;
 use tracing::{debug, info, trace};
 
@@ -51,20 +53,16 @@ pub async fn user_balance_get(
 
     let db_replica = app.db_replica()?;
 
-    let user_balance_row = balance::Entity::find()
-        .filter(balance::Column::UserId.eq(user.id))
-        .one(db_replica.as_ref())
-        .await?
-        .unwrap_or_default();
-
-    let user_balance =
-        user_balance_row.total_deposits - user_balance_row.total_spent_outside_free_tier;
+    let user_balance = match get_balance_from_db(db_replica.conn(), user.id).await {
+        None => Balance::default(),
+        Some(x) => x,
+    };
 
     let response = json!({
-        "total_deposits": user_balance_row.total_deposits,
-        "total_spent_outside_free_tier": user_balance_row.total_spent_outside_free_tier,
-        "total_spent": user_balance_row.total_spent_including_free_tier,
-        "balance": user_balance,
+        "total_deposits": user_balance.total_deposits,
+        "total_spent_outside_free_tier": user_balance.total_spent_outside_free_tier,
+        "total_spent": user_balance.total_spent_including_free_tier,
+        "balance": user_balance.remaining(),
     });
 
     // TODO: Gotta create a new table for the spend part
@@ -391,27 +389,6 @@ pub async fn user_balance_post(
                 payment_token_amount
             );
 
-            // create or update the balance
-            let balance_entry = balance::ActiveModel {
-                id: sea_orm::NotSet,
-                total_deposits: sea_orm::Set(payment_token_amount),
-                user_id: sea_orm::Set(recipient.id),
-                ..Default::default()
-            };
-            trace!("Trying to insert into balance entry: {:?}", balance_entry);
-            balance::Entity::insert(balance_entry)
-                .on_conflict(
-                    OnConflict::new()
-                        .values([(
-                            balance::Column::TotalDeposits,
-                            Expr::col(balance::Column::TotalDeposits).add(payment_token_amount),
-                        )])
-                        .to_owned(),
-                )
-                .exec(&txn)
-                .await
-                .web3_context("increasing balance")?;
-
             trace!("Saving log {} of txid {:?}", log_index, tx_hash);
             let receipt = increase_on_chain_balance_receipt::ActiveModel {
                 id: sea_orm::ActiveValue::NotSet,
@@ -543,22 +520,6 @@ pub async fn handle_uncle_block(
     }
 
     debug!("removing balances: {:#?}", reversed_balances);
-
-    for (user_id, reversed_balance) in reversed_balances.iter() {
-        if let Some(user_balance) = balance::Entity::find()
-            .lock(LockType::Update)
-            .filter(balance::Column::Id.eq(*user_id))
-            .one(&txn)
-            .await?
-        {
-            let mut user_balance = user_balance.into_active_model();
-
-            user_balance.total_deposits =
-                ActiveValue::Set(user_balance.total_deposits.as_ref() - reversed_balance);
-
-            user_balance.update(&txn).await?;
-        }
-    }
 
     txn.commit().await?;
 
