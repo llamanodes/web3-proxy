@@ -1,8 +1,8 @@
 use crate::errors::{Web3ProxyResponse, Web3ProxyResult};
 use migration::sea_orm::{
-    DbBackend, DbConn, JsonValue, SqlxMySqlPoolConnection, Statement, TryGetableMany,
+    DbBackend, DbConn, FromQueryResult, JsonValue, QueryResult, SqlxMySqlPoolConnection, Statement,
 };
-use migration::ConnectionTrait;
+use migration::{sea_orm, ConnectionTrait};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -10,7 +10,7 @@ use std::num::NonZeroU64;
 use tracing::info;
 
 /// Implements the balance getter
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, FromQueryResult)]
 pub struct Balance {
     pub user_id: i32,
     pub total_spent_paid_credits: Decimal,
@@ -34,23 +34,60 @@ pub async fn get_balance_from_db(
         return Ok(None);
     }
 
-    // Make the SQL query
-    // let balance: Vec<JsonValue> =
-    //     JsonValue::find_by_statement::<MySqlConnection>(Statement::from_sql_and_values(
-    //         db_conn.get_database_backend(),
-    //         r#"SELECT "cake"."name" FROM "cake" GROUP BY "cake"."name"#,
-    //         [],
-    //     ))
-    //     .all(db_conn)
-    //     .await?;
+    let balance: Balance = match Balance::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::MySql,
+        r#"SELECT "cake"."name" FROM "cake" GROUP BY "cake"."name"#,
+        [],
+    ))
+    .one(db_conn)
+    .await?
+    {
+        None => return Ok(None),
+        Some(x) => x,
+    };
 
-    // let balance = match balance {
+    // let raw_sql = r#"
+    //     SELECT
+    //         user.id AS user_id,
+    //         COALESCE(SUM(admin_receipt.amount), 0) + COALESCE(SUM(chain_receipt.amount), 0) + COALESCE(SUM(stripe_receipt.amount), 0) + COALESCE(SUM(referee.one_time_bonus_applied_for_referee), 0) + COALESCE(referrer_bonus.total_bonus, 0) AS total_deposits,
+    //         COALESCE(SUM(accounting.sum_credits_used), 0) AS total_spent_including_free_tier,
+    //         COALESCE(SUM(accounting.sum_incl_free_credits_used), 0) AS total_spent_outside_free_tier
+    //     FROM
+    //         user
+    //             LEFT JOIN
+    //         admin_increase_balance_receipt AS admin_receipt ON user.id = admin_receipt.deposit_to_user_id
+    //             LEFT JOIN
+    //         increase_on_chain_balance_receipt AS chain_receipt ON user.id = chain_receipt.deposit_to_user_id
+    //             LEFT JOIN
+    //         stripe_increase_balance_receipt AS stripe_receipt ON user.id = stripe_receipt.deposit_to_user_id
+    //             LEFT JOIN
+    //         referee ON user.id = referee.user_id
+    //             LEFT JOIN
+    //         (SELECT referrer.user_id, SUM(referee.credits_applied_for_referrer) AS total_bonus
+    //          FROM referrer
+    //                   JOIN referee ON referrer.id = referee.used_referral_code
+    //          GROUP BY referrer.user_id) AS referrer_bonus ON user.id = referrer_bonus.user_id
+    //             LEFT JOIN
+    //         rpc_key ON user.id = rpc_key.user_id
+    //             LEFT JOIN
+    //         rpc_accounting_v2 AS accounting ON rpc_key.id = accounting.rpc_key_id
+    //             LEFT JOIN
+    //         user_tier ON user.user_tier_id = user_tier.id
+    //             WHERE
+    //         user.id = {user_id};
+    // "#;
+
+    // let statement = Statement::from_sql_and_values(DbBackend::MySql, raw_sql, []);
+    //
+    // let rows = db_conn.query_one(statement).await?;
+    // match rows {
     //     None => return Ok(None),
-    //     Some(x) => x,
+    //     Some(query_result) => match query_result {
+    //         QueryResult { .. } => {}
+    //     },
     // };
-
-    // info!("Balance is {:?}", balance);
+    // println!("Rows is {:?}", rows);
 
     // Return None if there is no entry
-    Ok(Some(Balance::default()))
+    Ok(Some(balance))
 }
