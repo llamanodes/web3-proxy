@@ -1,10 +1,10 @@
 use crate::frontend::authorization::{AuthorizationChecks, Balance, RpcSecretKey};
 use moka::future::Cache;
-use parking_lot::RwLock;
 use std::fmt;
 use std::net::IpAddr;
 use std::num::NonZeroU64;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Cache data from the database about rpc keys
 pub type RpcSecretKeyCache = Cache<RpcSecretKey, AuthorizationChecks>;
