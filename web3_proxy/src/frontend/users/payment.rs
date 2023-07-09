@@ -53,15 +53,15 @@ pub async fn user_balance_get(
 
     let db_replica = app.db_replica()?;
 
-    let user_balance = match get_balance_from_db(db_replica.conn(), user.id).await {
+    let user_balance = match get_balance_from_db(db_replica.as_ref(), user.id).await? {
         None => Balance::default(),
         Some(x) => x,
     };
 
     let response = json!({
         "total_deposits": user_balance.total_deposits,
-        "total_spent_outside_free_tier": user_balance.total_spent_outside_free_tier,
-        "total_spent": user_balance.total_spent_including_free_tier,
+        "total_spent_paid_credits": user_balance.total_spent_paid_credits,
+        "total_spent": user_balance.total_spent,
         "balance": user_balance.remaining(),
     });
 
@@ -372,7 +372,7 @@ pub async fn user_balance_post(
             {
                 Some(x) => x,
                 None => {
-                    let (user, _, _) = register_new_user(&txn, recipient_account).await?;
+                    let (user, _) = register_new_user(&txn, recipient_account).await?;
 
                     user
                 }
@@ -413,7 +413,7 @@ pub async fn user_balance_post(
             match NonZeroU64::try_from(recipient.id) {
                 Err(_) => {}
                 Ok(x) => {
-                    app.user_balance_cache.invalidate(&x).await;
+                    app.user_balance_cache.invalidate(&x.get()).await;
                 }
             };
 

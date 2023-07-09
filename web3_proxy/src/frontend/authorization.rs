@@ -1140,15 +1140,15 @@ impl Web3ProxyApp {
             .try_get_with(user_id, async move {
                 let db_replica = self.db_replica()?;
                 loop {
-                    let x =
-                        match crate::balance::get_balance_from_db(db_replica.conn(), user_id).await
-                        {
-                            None => {
-                                return Err(format!("user_id {:?} has no balance entry", user_id)
-                                    .to_owned())
-                            }
-                            Some(x) => x,
-                        };
+                    let x = match crate::balance::get_balance_from_db(db_replica.as_ref(), user_id)
+                        .await?
+                    {
+                        None => {
+                            format!("user_id {:?} has no balance entry", user_id).to_owned();
+                            return Err(Web3ProxyError::InvalidUserKey);
+                        }
+                        Some(x) => x,
+                    };
                     trace!("Balance for cache retrieved from database is {:?}", x);
                     return Ok(Arc::new(AsyncRwLock::new(x)));
                 }

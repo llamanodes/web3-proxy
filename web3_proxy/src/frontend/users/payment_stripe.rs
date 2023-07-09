@@ -176,7 +176,7 @@ pub async fn user_balance_stripe_post(
             match NonZeroU64::try_from(recipient.id) {
                 Err(_) => {}
                 Ok(x) => {
-                    app.user_balance_cache.invalidate(&x).await;
+                    app.user_balance_cache.invalidate(&x.get()).await;
                 }
             };
             for rpc_key_entity in recipient_rpc_keys {
