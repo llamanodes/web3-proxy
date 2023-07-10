@@ -1,4 +1,5 @@
 use crate::errors::{Web3ProxyResponse, Web3ProxyResult};
+use fstrings::{f, format_args_f};
 use migration::sea_orm::{
     DbBackend, DbConn, FromQueryResult, JsonValue, QueryResult, SqlxMySqlPoolConnection, Statement,
 };
@@ -33,7 +34,8 @@ pub async fn get_balance_from_db(
         return Ok(None);
     }
 
-    let raw_sql = r#"
+    // Injecting the variable directly, should be fine because Rust is typesafe, especially with primitives
+    let raw_sql = f!(r#"
         SELECT
             user.id AS user_id,
             COALESCE(SUM(admin_receipt.amount), 0) + COALESCE(SUM(chain_receipt.amount), 0) + COALESCE(SUM(stripe_receipt.amount), 0) + COALESCE(SUM(referee.one_time_bonus_applied_for_referee), 0) + COALESCE(referrer_bonus.total_bonus, 0) AS total_deposits,
@@ -61,13 +63,13 @@ pub async fn get_balance_from_db(
                 LEFT JOIN
             user_tier ON user.user_tier_id = user_tier.id
                 WHERE
-            user.id = $1;
-    "#;
+            user.id = {};
+    "#, user_id).to_string();
 
-    let balance: Balance = match Balance::find_by_statement(Statement::from_sql_and_values(
+    let balance: Balance = match Balance::find_by_statement(Statement::from_string(
         DbBackend::MySql,
         raw_sql,
-        [user_id.into()],
+        // [.into()],
     ))
     .one(db_conn)
     .await?

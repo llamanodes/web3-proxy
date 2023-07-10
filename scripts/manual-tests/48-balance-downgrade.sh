@@ -86,3 +86,8 @@ done
 
 # TODO: Now implement and test withdrawal
 
+
+curl \
+  -X POST "127.0.0.1:8544" \
+  -H "Content-Type: application/json" \
+  --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
