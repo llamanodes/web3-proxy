@@ -171,7 +171,7 @@ pub async fn user_balance_stripe_post(
             txn.commit().await?;
 
             // Finally invalidate the cache as well
-            app.user_balance_cache.invalidate(&recipient.id).await;
+            // app.user_balance_cache.invalidate(&recipient.id).await;
             for rpc_key_entity in recipient_rpc_keys {
                 app.rpc_secret_key_cache
                     .invalidate(&rpc_key_entity.secret_key.into())

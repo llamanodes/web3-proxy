@@ -46,9 +46,9 @@ pub async fn user_balance_get(
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_conn = app.db_conn()?;
 
-    let user_balance = match Balance::try_from_db(db_replica.as_ref(), user.id).await? {
+    let user_balance = match Balance::try_from_db(db_conn, user.id).await? {
         None => Balance::default(),
         Some(x) => x,
     };
@@ -396,7 +396,7 @@ pub async fn user_balance_post(
                 .all(&txn)
                 .await?;
 
-            app.user_balance_cache.invalidate(&recipient.id).await;
+            // app.user_balance_cache.invalidate(&recipient.id).await;
 
             for rpc_key_entity in rpc_keys {
                 app.rpc_secret_key_cache

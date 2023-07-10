@@ -60,7 +60,7 @@ pub async fn query_user_stats<'a>(
     // Only allow stats if the user has an active premium role
     if let Some(caller_user) = &caller_user {
         // get the balance of the user whose stats we are going to fetch (might be self, but might be another user)
-        let balance = match Balance::try_from_db(db_replica.as_ref(), user_id).await? {
+        let balance = match Balance::try_from_db(app.db_conn()?, user_id).await? {
             None => {
                 return Err(Web3ProxyError::AccessDenied(
                     "User Stats Response requires you to authorize with a bearer token".into(),

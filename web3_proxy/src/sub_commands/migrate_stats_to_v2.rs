@@ -82,7 +82,7 @@ impl MigrateStatsToV2SubCommand {
             30,
             top_config.app.influxdb_bucket.clone(),
             influxdb_client.clone(),
-            None,
+            // None,
             None,
             rpc_account_shutdown_recevier,
             1,

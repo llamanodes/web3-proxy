@@ -1,7 +1,8 @@
 use super::{AppStat, RpcQueryKey};
 use crate::app::Web3ProxyJoinHandle;
 use crate::balance::Balance;
-use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
+use crate::caches::RpcSecretKeyCache;
+// use crate::caches::UserBalanceCache;
 use crate::errors::Web3ProxyResult;
 use derive_more::From;
 use futures::stream;
@@ -49,7 +50,7 @@ pub struct StatBuffer {
     influxdb_client: Option<influxdb2::Client>,
     opt_in_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     rpc_secret_key_cache: RpcSecretKeyCache,
-    user_balance_cache: UserBalanceCache,
+    // user_balance_cache: UserBalanceCache,
     timestamp_precision: TimestampPrecision,
     tsdb_save_interval_seconds: u32,
 }
@@ -64,7 +65,7 @@ impl StatBuffer {
         influxdb_bucket: Option<String>,
         mut influxdb_client: Option<influxdb2::Client>,
         rpc_secret_key_cache: Option<RpcSecretKeyCache>,
-        user_balance_cache: Option<UserBalanceCache>,
+        // user_balance_cache: Option<UserBalanceCache>,
         shutdown_receiver: broadcast::Receiver<()>,
         tsdb_save_interval_seconds: u32,
         flush_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
@@ -92,7 +93,7 @@ impl StatBuffer {
             influxdb_client,
             opt_in_timeseries_buffer: Default::default(),
             rpc_secret_key_cache: rpc_secret_key_cache.unwrap(),
-            user_balance_cache: user_balance_cache.unwrap(),
+            // user_balance_cache: user_balance_cache.unwrap(),
             timestamp_precision,
             tsdb_save_interval_seconds,
         };
@@ -240,7 +241,7 @@ impl StatBuffer {
                         db_conn,
                         key,
                         &self.rpc_secret_key_cache,
-                        &self.user_balance_cache,
+                        // &self.user_balance_cache,
                     )
                     .await
                 {

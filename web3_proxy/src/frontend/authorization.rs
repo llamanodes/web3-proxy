@@ -1134,18 +1134,26 @@ impl Web3ProxyApp {
         &self,
         user_id: u64,
     ) -> Web3ProxyResult<Arc<AsyncRwLock<Balance>>> {
-        self.user_balance_cache
-            .try_get_with(user_id, async move {
-                let db_replica = self.db_replica()?;
-                let x = match Balance::try_from_db(db_replica.as_ref(), user_id).await? {
-                    None => Err(Web3ProxyError::InvalidUserKey),
-                    Some(x) => Ok(x),
-                }?;
-                trace!("Balance for cache retrieved from database is {:?}", x);
-                Ok(Arc::new(AsyncRwLock::new(x)))
-            })
-            .await
-            .map_err(Into::into)
+        // self.user_balance_cache
+        //     .try_get_with(user_id, async move {
+        // TODO: Move this to the real database
+        //         let db_replica = self.db_replica()?;
+        //         let x = match Balance::try_from_db(db_replica.as_ref(), user_id).await? {
+        //             None => Err(Web3ProxyError::InvalidUserKey),
+        //             Some(x) => Ok(x),
+        //         }?;
+        //         trace!("Balance for cache retrieved from database is {:?}", x);
+        //         Ok(Arc::new(AsyncRwLock::new(x)))
+        //     })
+        //     .await
+        //     .map_err(Into::into)
+        let db_conn = self.db_conn()?;
+        let x = match Balance::try_from_db(db_conn, user_id).await? {
+            None => Balance::default(),
+            Some(x) => x,
+        };
+        trace!("Balance for cache retrieved from database is {:?}", x);
+        Ok(Arc::new(AsyncRwLock::new(x)))
     }
 
     // check the local cache for user data, or query the database

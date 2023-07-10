@@ -17,8 +17,7 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::{
-    admin, admin_increase_balance_receipt, admin_trail, login, pending_login, rpc_key,
-    user,
+    admin, admin_increase_balance_receipt, admin_trail, login, pending_login, rpc_key, user,
 };
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
@@ -85,7 +84,7 @@ pub async fn admin_increase_balance(
     txn.commit().await?;
 
     // Invalidate the user_balance_cache for this user:
-    app.user_balance_cache.invalidate(&user_entry.id).await;
+    // app.user_balance_cache.invalidate(&user_entry.id).await;
 
     let out = json!({
         "user": payload.user_address,

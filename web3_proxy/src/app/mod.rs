@@ -1,7 +1,8 @@
 mod ws;
 
 use crate::block_number::CacheMode;
-use crate::caches::{RegisteredUserRateLimitKey, RpcSecretKeyCache, UserBalanceCache};
+use crate::caches::{RegisteredUserRateLimitKey, RpcSecretKeyCache};
+// use crate::caches::UserBalanceCache;
 use crate::config::{AppConfig, TopConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{
@@ -116,8 +117,8 @@ pub struct Web3ProxyApp {
     /// cache authenticated users so that we don't have to query the database on the hot path
     // TODO: should the key be our RpcSecretKey class instead of Ulid?
     pub rpc_secret_key_cache: RpcSecretKeyCache,
-    /// cache user balances so we don't have to check downgrade logic every single time
-    pub user_balance_cache: UserBalanceCache,
+    // /// cache user balances so we don't have to check downgrade logic every single time
+    // pub user_balance_cache: UserBalanceCache,
     /// concurrent/parallel RPC request limits for authenticated users
     pub user_semaphores: Cache<(NonZeroU64, IpAddr), Arc<Semaphore>>,
     /// volatile cache used for rate limits
@@ -371,10 +372,10 @@ impl Web3ProxyApp {
             .build();
 
         // TODO: TTL left low, this could also be a solution instead of modifiying the cache, that may be disgusting across threads / slow anyways
-        let user_balance_cache = CacheBuilder::new(10_000)
-            .name("user_balance")
-            .time_to_live(Duration::from_secs(600))
-            .build();
+        // let user_balance_cache = CacheBuilder::new(10_000)
+        //     .name("user_balance")
+        //     .time_to_live(Duration::from_secs(600))
+        //     .build();
 
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
@@ -387,7 +388,7 @@ impl Web3ProxyApp {
             top_config.app.influxdb_bucket.clone(),
             influxdb_client.clone(),
             Some(rpc_secret_key_cache.clone()),
-            Some(user_balance_cache.clone()),
+            // Some(user_balance_cache.clone()),
             stat_buffer_shutdown_receiver,
             1,
             flush_stat_buffer_receiver,
@@ -598,7 +599,7 @@ impl Web3ProxyApp {
             prometheus_port: prometheus_port.clone(),
             rpc_secret_key_cache,
             stat_sender,
-            user_balance_cache,
+            // user_balance_cache,
             user_semaphores,
             vredis_pool,
             watch_consensus_head_receiver,

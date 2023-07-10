@@ -8,8 +8,8 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 /// Cache data from the database about rpc keys
 pub type RpcSecretKeyCache = Cache<RpcSecretKey, AuthorizationChecks>;
-/// Cache data from the database about user balances
-pub type UserBalanceCache = Cache<u64, Arc<AsyncRwLock<Balance>>>;
+// /// Cache data from the database about user balances
+// pub type UserBalanceCache = Cache<u64, Arc<AsyncRwLock<Balance>>>;
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub struct RegisteredUserRateLimitKey(pub u64, pub IpAddr);

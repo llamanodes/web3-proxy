@@ -6,7 +6,8 @@ pub mod db_queries;
 pub mod influxdb_queries;
 
 use self::stat_buffer::BufferedRpcQueryStats;
-use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
+use crate::caches::RpcSecretKeyCache;
+// use crate::caches::UserBalanceCache;
 use crate::compute_units::ComputeUnit;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
@@ -329,7 +330,7 @@ impl BufferedRpcQueryStats {
     async fn _get_user_balance(
         &self,
         user_id: u64,
-        user_balance_cache: &UserBalanceCache,
+        // user_balance_cache: &UserBalanceCache,
         db_conn: &DbConn,
     ) -> Web3ProxyResult<Arc<AsyncRwLock<Balance>>> {
         if user_id == 0 {
@@ -338,17 +339,20 @@ impl BufferedRpcQueryStats {
 
         trace!("Will get it from the balance cache");
 
-        let x = user_balance_cache
-            .try_get_with(user_id, async {
-                let x = match Balance::try_from_db(db_conn, user_id).await? {
-                    Some(x) => x,
-                    None => return Err(Web3ProxyError::InvalidUserKey),
-                };
-                Ok(Arc::new(AsyncRwLock::new(x)))
-            })
-            .await?;
-
-        Ok(x)
+        // let x = user_balance_cache
+        //     .try_get_with(user_id, async {
+        //         let x = match Balance::try_from_db(db_conn, user_id).await? {
+        //             Some(x) => x,
+        //             None => return Err(Web3ProxyError::InvalidUserKey),
+        //         };
+        //         Ok(Arc::new(AsyncRwLock::new(x)))
+        //     })
+        //     .await?;
+        let x = match Balance::try_from_db(db_conn, user_id).await? {
+            Some(x) => x,
+            None => Balance::default(),
+        };
+        Ok(Arc::new(AsyncRwLock::new(x)))
     }
 
     // TODO: take a db transaction instead so that we can batch?
@@ -358,7 +362,7 @@ impl BufferedRpcQueryStats {
         db_conn: &DatabaseConnection,
         key: RpcQueryKey,
         rpc_secret_key_cache: &RpcSecretKeyCache,
-        user_balance_cache: &UserBalanceCache,
+        // user_balance_cache: &UserBalanceCache,
     ) -> Web3ProxyResult<()> {
         // Sanity check, if we need to save stats
         if key.response_timestamp == 0 {
@@ -373,9 +377,8 @@ impl BufferedRpcQueryStats {
         let sender_user_id = key.rpc_key_user_id.map_or(0, |x| x.get());
 
         // Gathering cache and database rows
-        let user_balance = self
-            ._get_user_balance(sender_user_id, user_balance_cache, db_conn)
-            .await?;
+        // user_balance_cache
+        let user_balance = self._get_user_balance(sender_user_id, db_conn).await?;
 
         let mut user_balance = user_balance.write().await;
 
@@ -432,9 +435,9 @@ impl BufferedRpcQueryStats {
             {
                 Some((referral_entity, Some(referrer))) => {
                     // Get the balance for the referrer, see if they're premium or not
-                    let referrer_balance = self
-                        ._get_user_balance(referrer.user_id, user_balance_cache, db_conn)
-                        .await?;
+                    // user_balance_cache
+                    let referrer_balance =
+                        self._get_user_balance(referrer.user_id, db_conn).await?;
 
                     // Just to keep locking simple, read and clone. if the value is slightly delayed, that is okay
                     let referrer_balance = referrer_balance.read().await.clone();
