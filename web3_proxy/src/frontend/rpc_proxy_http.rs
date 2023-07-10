@@ -168,6 +168,7 @@ pub async fn debug_proxy_web3_rpc_with_key(
     // add some headers that might be useful while debugging
     let response_headers = response.headers_mut();
 
+    // TODO: move this header name to config
     if let Some(x) = request_headers.get("x-amzn-trace-id").cloned() {
         response_headers.insert("x-amzn-trace-id", x);
     }
