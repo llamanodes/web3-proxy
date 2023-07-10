@@ -72,9 +72,10 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/app/target \
     set -eux; \
     \
+    pwd; \
     ls -la; \
-    ls -la payments-contracts; \
-    [ -e payments-contracts/src/contracts/mod.rs ] || touch ./payments-contracts/build.rs; \
+    ls -la ./payments-contracts; \
+    [ -e $(pwd)/payments-contracts/src/contracts/mod.rs ] || touch $(pwd)/payments-contracts/build.rs; \
     cargo --locked --verbose fetch
 
 # build tests (done its in own FROM so that it can run in parallel)
@@ -89,8 +90,10 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/app/target \
     set -eux; \
     \
+    pwd; \
     ls -la; \
-    ls -la payments-contracts; \
+    ls -la ./payments-contracts; \
+    [ -e $(pwd)/payments-contracts/src/contracts/mod.rs ] || touch $(pwd)/payments-contracts/build.rs; \
     [ -e payments-contracts/src/contracts/mod.rs ] || touch ./payments-contracts/build.rs; \
     RUST_LOG=web3_proxy=trace,info \
     cargo \
@@ -112,9 +115,10 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/app/target \
     set -eux; \
     \
+    pwd; \
     ls -la; \
-    ls -la payments-contracts; \
-    [ -e payments-contracts/src/contracts/mod.rs ] || touch ./payments-contracts/build.rs; \
+    ls -la ./payments-contracts; \
+    [ -e $(pwd)/payments-contracts/src/contracts/mod.rs ] || touch $(pwd)/payments-contracts/build.rs; \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
     --frozen \
