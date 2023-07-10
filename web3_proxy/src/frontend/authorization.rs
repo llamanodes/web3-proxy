@@ -1139,19 +1139,17 @@ impl Web3ProxyApp {
         self.user_balance_cache
             .try_get_with(user_id, async move {
                 let db_replica = self.db_replica()?;
-                loop {
-                    let x = match crate::balance::get_balance_from_db(db_replica.as_ref(), user_id)
-                        .await?
-                    {
-                        None => {
-                            format!("user_id {:?} has no balance entry", user_id).to_owned();
-                            return Err(Web3ProxyError::InvalidUserKey);
-                        }
-                        Some(x) => x,
-                    };
-                    trace!("Balance for cache retrieved from database is {:?}", x);
-                    return Ok(Arc::new(AsyncRwLock::new(x)));
-                }
+                let x = match crate::balance::get_balance_from_db(db_replica.as_ref(), user_id)
+                    .await?
+                {
+                    None => {
+                        format!("user_id {:?} has no balance entry", user_id).to_owned();
+                        Err(Web3ProxyError::InvalidUserKey)
+                    }
+                    Some(x) => Ok(x),
+                }?;
+                trace!("Balance for cache retrieved from database is {:?}", x);
+                Ok(Arc::new(AsyncRwLock::new(x)))
             })
             .await
             .map_err(Into::into)
@@ -1266,7 +1264,7 @@ impl Web3ProxyApp {
 
                             // only consider the user premium if they have paid at least $10 and have a balance > $.01
                             // otherwise, set user_tier_model to the downograded tier
-                            if balance.total_deposits > Decimal::from(10)
+                            if balance.total_deposits < Decimal::from(10)
                                 || balance.remaining() < Decimal::new(1, 2)
                             {
                                 // TODO: include boolean to mark that the user is downgraded

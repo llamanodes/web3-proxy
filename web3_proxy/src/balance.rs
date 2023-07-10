@@ -12,13 +12,12 @@ use tracing::info;
 /// Implements the balance getter
 #[derive(Clone, Debug, Default, Serialize, Deserialize, FromQueryResult)]
 pub struct Balance {
-    pub user_id: i32,
+    pub user_id: u64,
     pub total_spent_paid_credits: Decimal,
     pub total_spent: Decimal,
     pub total_deposits: Decimal,
 }
 
-// TODO: Implement remaining
 impl Balance {
     pub fn remaining(&self) -> Decimal {
         self.total_deposits - self.total_spent_paid_credits
@@ -62,7 +61,7 @@ pub async fn get_balance_from_db(
                 LEFT JOIN
             user_tier ON user.user_tier_id = user_tier.id
                 WHERE
-            user.id = {user_id};
+            user.id = $1;
     "#;
 
     let balance: Balance = match Balance::find_by_statement(Statement::from_sql_and_values(
