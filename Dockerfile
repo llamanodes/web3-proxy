@@ -74,7 +74,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     \
     pwd; \
     ls -la; \
-    ls -la ./payments-contracts; \
+    ls -la $(pwd)/payments-contracts; \
     [ -e $(pwd)/payments-contracts/src/contracts/mod.rs ] || touch $(pwd)/payments-contracts/build.rs; \
     cargo --locked --verbose fetch
 
@@ -92,7 +92,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     \
     pwd; \
     ls -la; \
-    ls -la ./payments-contracts; \
+    ls -la $(pwd)/payments-contracts; \
     [ -e $(pwd)/payments-contracts/src/contracts/mod.rs ] || touch $(pwd)/payments-contracts/build.rs; \
     [ -e payments-contracts/src/contracts/mod.rs ] || touch ./payments-contracts/build.rs; \
     RUST_LOG=web3_proxy=trace,info \
@@ -117,7 +117,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     \
     pwd; \
     ls -la; \
-    ls -la ./payments-contracts; \
+    ls -la $(pwd)/payments-contracts; \
     [ -e $(pwd)/payments-contracts/src/contracts/mod.rs ] || touch $(pwd)/payments-contracts/build.rs; \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
