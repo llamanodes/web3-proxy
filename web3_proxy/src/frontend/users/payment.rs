@@ -53,15 +53,7 @@ pub async fn user_balance_get(
         Some(x) => x,
     };
 
-    let response = json!({
-        "total_deposits": user_balance.total_deposits,
-        "total_spent_paid_credits": user_balance.total_spent_paid_credits,
-        "total_spent": user_balance.total_spent,
-        "balance": user_balance.remaining(),
-    });
-
-    // TODO: Gotta create a new table for the spend part
-    Ok(Json(response).into_response())
+    Ok(Json(user_balance).into_response())
 }
 
 /// `GET /user/deposits/chain` -- Use a bearer token to get the user's balance and spend.

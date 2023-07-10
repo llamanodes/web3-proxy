@@ -423,6 +423,7 @@ impl BufferedRpcQueryStats {
             // referral_entity.credits_applied_for_referrer * (Decimal::from(10) checks (atomically using this table only), whether the user has brought in >$100 to the referer
             // In this case, the sender receives $100 as a bonus / gift
             // Apply a 10$ bonus onto the user, if the user has spent 100$
+            // TODO: i think we do want a LockType::Update on this
             match referee::Entity::find()
                 .filter(referee::Column::UserId.eq(sender_user_id))
                 .find_also_related(referrer::Entity)
@@ -465,8 +466,10 @@ impl BufferedRpcQueryStats {
 
                             referral_entity.one_time_bonus_applied_for_referee =
                                 sea_orm::Set(bonus_for_user);
+
                             // Update the cache
-                            user_balance.total_deposits += bonus_for_user;
+                            // TODO: race condition here?
+                            user_balance.one_time_referee_bonus += bonus_for_user;
                         }
 
                         let now = Utc::now();
