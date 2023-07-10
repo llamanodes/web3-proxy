@@ -33,7 +33,7 @@ use std::str::FromStr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
 use crate::balance::Balance;
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
@@ -331,9 +331,14 @@ impl BufferedRpcQueryStats {
         user_id: u64,
         user_balance_cache: &UserBalanceCache,
         db_conn: &DbConn,
-    ) -> Arc<AsyncRwLock<Balance>> {
+    ) -> Web3ProxyResult<Arc<AsyncRwLock<Balance>>> {
+        if user_id == 0 {
+            return Ok(Arc::new(AsyncRwLock::new(Balance::default())));
+        }
+
         trace!("Will get it from the balance cache");
-        user_balance_cache
+
+        let x = user_balance_cache
             .try_get_with(user_id, async {
                 let x = match Balance::try_from_db(db_conn, user_id).await? {
                     Some(x) => x,
@@ -341,12 +346,9 @@ impl BufferedRpcQueryStats {
                 };
                 Ok(Arc::new(AsyncRwLock::new(x)))
             })
-            .await
-            .unwrap_or_else(|err| {
-                error!("Could not find balance for user !{}", err);
-                // We are just instantiating this for type-safety's sake
-                Arc::new(AsyncRwLock::new(Balance::default()))
-            })
+            .await?;
+
+        Ok(x)
     }
 
     // TODO: take a db transaction instead so that we can batch?
@@ -367,12 +369,13 @@ impl BufferedRpcQueryStats {
             )));
         }
 
+        // TODO: rename to owner_id?
         let sender_user_id = key.rpc_key_user_id.map_or(0, |x| x.get());
 
         // Gathering cache and database rows
         let user_balance = self
             ._get_user_balance(sender_user_id, user_balance_cache, db_conn)
-            .await;
+            .await?;
 
         let mut user_balance = user_balance.write().await;
 
@@ -389,16 +392,13 @@ impl BufferedRpcQueryStats {
 
         // Update and possible invalidate rpc caches if necessary (if there was a downgrade)
         {
-            let balance_before = user_balance.remaining();
-            info!("Balance before is {:?}", balance_before);
+            let premium_before = user_balance.active_premium();
+
             user_balance.total_spent_paid_credits += paid_credits_used;
 
-            // Invalidate caches if remaining is below a threshold
+            // Invalidate caches if remaining is getting close to $0
             // It will be re-fetched again if needed
-            if sender_user_id != 0
-                && balance_before > Decimal::from(10)
-                && user_balance.remaining() < Decimal::from(1)
-            {
+            if premium_before && user_balance.remaining() < Decimal::from(1) {
                 let rpc_keys = rpc_key::Entity::find()
                     .filter(rpc_key::Column::UserId.eq(sender_user_id))
                     .all(db_conn)
@@ -434,7 +434,7 @@ impl BufferedRpcQueryStats {
                     // Get the balance for the referrer, see if they're premium or not
                     let referrer_balance = self
                         ._get_user_balance(referrer.user_id, user_balance_cache, db_conn)
-                        .await;
+                        .await?;
 
                     // Just to keep locking simple, read and clone. if the value is slightly delayed, that is okay
                     let referrer_balance = referrer_balance.read().await.clone();
