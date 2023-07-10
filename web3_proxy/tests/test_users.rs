@@ -167,6 +167,11 @@ async fn test_user_balance_decreases() {
             .unwrap();
     }
 
+    // Flush all stats here
+    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
+    assert_eq!(influx_count, 0);
+    assert!(mysql_count > 0);
+
     // Check the balance, it should not have decreased; there should have been accounted free credits, however
     let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
     // Check that the balance is 0
@@ -194,11 +199,6 @@ async fn test_user_balance_decreases() {
         Decimal::from_str(user_balance_response["total_spent"].as_str().unwrap()).unwrap()
             > Decimal::from(0)
     );
-
-    // Flush all stats here
-    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
-    assert_eq!(influx_count, 0);
-    assert!(mysql_count > 0);
 
     // Bump both user's wallet to $20
     admin_increase_balance(
@@ -232,9 +232,17 @@ async fn test_user_balance_decreases() {
     let total_deposits =
         Decimal::from_str(user_balance_response["total_deposits"].as_str().unwrap()).unwrap();
     assert_eq!(total_deposits, Decimal::from(20));
-
+    // Check that total_spent_paid credits is equal to total_spent, because we are all still inside premium
+    assert_eq!(
+        Decimal::from_str(
+            user_balance_response["total_spent_paid_credits"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap(),
+        Decimal::from_str(user_balance_response["total_spent"].as_str().unwrap()).unwrap()
+    );
     // Get the full balance endpoint
-    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
     let user_balance_post =
         Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
     assert!(user_balance_post < user_balance_pre);

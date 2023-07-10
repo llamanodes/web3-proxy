@@ -410,12 +410,7 @@ pub async fn user_balance_post(
                 .all(&txn)
                 .await?;
 
-            match NonZeroU64::try_from(recipient.id) {
-                Err(_) => {}
-                Ok(x) => {
-                    app.user_balance_cache.invalidate(&x.get()).await;
-                }
-            };
+            app.user_balance_cache.invalidate(&recipient.id).await;
 
             for rpc_key_entity in rpc_keys {
                 app.rpc_secret_key_cache
