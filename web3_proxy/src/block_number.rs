@@ -11,7 +11,7 @@ use ethers::{
 };
 use serde_json::json;
 use std::sync::Arc;
-use tracing::{trace, warn};
+use tracing::{error, trace, warn};
 
 use crate::{frontend::authorization::Authorization, rpcs::many::Web3Rpcs};
 
@@ -371,7 +371,7 @@ impl CacheMode {
                 cache_errors: true,
             }),
             Err(err) => {
-                warn!(%method, ?params, ?err, "could not get block from params");
+                error!(%method, ?params, ?err, "could not get block from params");
                 Ok(CacheMode::Cache {
                     block: head_block.into(),
                     cache_errors: true,
