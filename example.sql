@@ -1,4 +1,3 @@
-CREATE VIEW user_balance AS
 SELECT
     user.id AS user_id,
     COALESCE(SUM(admin_receipt.amount), 0) + COALESCE(SUM(chain_receipt.amount), 0) + COALESCE(SUM(stripe_receipt.amount), 0) + COALESCE(SUM(referee.one_time_bonus_applied_for_referee), 0) + COALESCE(referrer_bonus.total_bonus, 0) AS total_deposits,
@@ -26,4 +25,4 @@ FROM
         LEFT JOIN
     user_tier ON user.user_tier_id = user_tier.id
 WHERE
-                user.id = <user_id>;
+                user.id = 1;

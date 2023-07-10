@@ -39,8 +39,8 @@ pub async fn get_balance_from_db(
         SELECT
             user.id AS user_id,
             COALESCE(SUM(admin_receipt.amount), 0) + COALESCE(SUM(chain_receipt.amount), 0) + COALESCE(SUM(stripe_receipt.amount), 0) + COALESCE(SUM(referee.one_time_bonus_applied_for_referee), 0) + COALESCE(referrer_bonus.total_bonus, 0) AS total_deposits,
-            COALESCE(SUM(accounting.sum_credits_used), 0) AS total_spent_including_free_tier,
-            COALESCE(SUM(accounting.sum_incl_free_credits_used), 0) AS total_spent_outside_free_tier
+            COALESCE(SUM(accounting.sum_credits_used), 0) AS total_spent_paid_credits,
+            COALESCE(SUM(accounting.sum_incl_free_credits_used), 0) AS total_spent
         FROM
             user
                 LEFT JOIN
