@@ -15,6 +15,14 @@ pub struct Balance {
 }
 
 impl Balance {
+    pub fn active_premium(&self) -> bool {
+        self.was_ever_premium() && self.total_deposits > self.total_spent_paid_credits
+    }
+
+    pub fn was_ever_premium(&self) -> bool {
+        self.user_id != 0 && self.total_deposits >= Decimal::from(10)
+    }
+
     pub fn remaining(&self) -> Decimal {
         self.total_deposits - self.total_spent_paid_credits
     }

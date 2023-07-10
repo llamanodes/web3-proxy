@@ -21,7 +21,6 @@ use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
-use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
 use tracing::{debug, error, trace, warn};
@@ -59,7 +58,6 @@ pub async fn query_user_stats<'a>(
         .unwrap_or_else(|| caller_user.as_ref().map(|x| x.id).unwrap_or_default());
 
     // Only allow stats if the user has an active premium role
-    // TODO: move this to a helper. it should be simple to check that a user has an active premium account
     if let Some(caller_user) = &caller_user {
         // get the balance of the user whose stats we are going to fetch (might be self, but might be another user)
         let balance = match Balance::try_from_db(db_replica.as_ref(), user_id).await? {
@@ -71,29 +69,28 @@ pub async fn query_user_stats<'a>(
             Some(x) => x,
         };
 
-        // TODO: We should add the threshold that determines if a user is premium into app.config. hard coding to $10 works for now
-        // TODO: @Bryan this condition seems off, can you double-check?
-        if balance.total_deposits < Decimal::from(10) || balance.remaining() <= Decimal::from(0) {
-            // get the user tier so we can see if it is a tier that has downgrades
-            let relevant_balance_user_tier_id = if user_id == caller_user.id {
-                caller_user.user_tier_id
-            } else {
-                let user = user::Entity::find_by_id(user_id)
-                    .one(db_replica.as_ref())
-                    .await?
-                    .web3_context("user_id not found")?;
-
-                user.user_tier_id
-            };
-            let user_tier = user_tier::Entity::find_by_id(relevant_balance_user_tier_id)
+        // get the user tier so we can see if it is a tier that has downgrades
+        let relevant_balance_user_tier_id = if user_id == caller_user.id {
+            // use the caller's tier
+            caller_user.user_tier_id
+        } else {
+            // use the tier of the primary user from a secondary user
+            let user = user::Entity::find_by_id(user_id)
                 .one(db_replica.as_ref())
                 .await?
-                .web3_context("user_tier not found")?;
+                .web3_context("user_id not found")?;
 
-            if user_tier.downgrade_tier_id.is_some() {
-                trace!(%user_id, "User does not have enough balance to qualify for premium");
-                return Err(Web3ProxyError::PaymentRequired);
-            }
+            user.user_tier_id
+        };
+
+        let user_tier = user_tier::Entity::find_by_id(relevant_balance_user_tier_id)
+            .one(db_replica.as_ref())
+            .await?
+            .web3_context("user_tier not found")?;
+
+        if user_tier.downgrade_tier_id.is_some() && !balance.active_premium() {
+            trace!(%user_id, "User does not have enough balance to qualify for premium");
+            return Err(Web3ProxyError::PaymentRequired);
         }
 
         if user_id != caller_user.id {

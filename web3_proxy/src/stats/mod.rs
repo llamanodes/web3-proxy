@@ -20,9 +20,9 @@ use influxdb2::models::DataPoint;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, DbConn, EntityTrait, IntoActiveModel,
-    QueryFilter, TransactionTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
-use migration::{Expr, OnConflict};
+use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::borrow::Cow;
@@ -33,7 +33,7 @@ use std::str::FromStr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
 use crate::balance::Balance;
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
@@ -221,16 +221,18 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         db_conn: &DatabaseConnection,
         key: &RpcQueryKey,
-        user_balance: Decimal,
+        active_premium: bool,
     ) -> Web3ProxyResult<Decimal> {
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
-        // Because reading the balance and updating the stats here is not atomically locked, this may lead to a negative balance
-        // This negative balance shouldn't be large tough
-        let paid_credits_used = if self.sum_credits_used >= user_balance {
-            user_balance
-        } else {
+        // // Because reading the balance and updating the stats here is not atomically locked, this may lead to a negative balance
+        // // This negative balance shouldn't be large tough
+        // // TODO: I'm not so sure about this. @david can you explain more? if someone spends over their balance, they **should** go slightly negative. after all, they would have received the premium limits for these queries
+        // // sum_credits_used is definitely correct. the balance can be slightly off. so it seems like we should trust sum_credits_used over balance
+        let paid_credits_used = if active_premium {
             self.sum_credits_used
+        } else {
+            0.into()
         };
 
         // =============================== //
@@ -319,7 +321,7 @@ impl BufferedRpcQueryStats {
             .exec(db_conn)
             .await?;
 
-        Ok(paid_credits_used)
+        Ok(self.sum_credits_used)
     }
 
     // TODO: This is basically a duplicate with the balance_checks, except the database
@@ -329,9 +331,14 @@ impl BufferedRpcQueryStats {
         user_id: u64,
         user_balance_cache: &UserBalanceCache,
         db_conn: &DbConn,
-    ) -> Arc<AsyncRwLock<Balance>> {
+    ) -> Web3ProxyResult<Arc<AsyncRwLock<Balance>>> {
+        if user_id == 0 {
+            return Ok(Arc::new(AsyncRwLock::new(Balance::default())));
+        }
+
         trace!("Will get it from the balance cache");
-        user_balance_cache
+
+        let x = user_balance_cache
             .try_get_with(user_id, async {
                 let x = match Balance::try_from_db(db_conn, user_id).await? {
                     Some(x) => x,
@@ -339,12 +346,9 @@ impl BufferedRpcQueryStats {
                 };
                 Ok(Arc::new(AsyncRwLock::new(x)))
             })
-            .await
-            .unwrap_or_else(|err| {
-                error!("Could not find balance for user !{}", err);
-                // We are just instantiating this for type-safety's sake
-                Arc::new(AsyncRwLock::new(Balance::default()))
-            })
+            .await?;
+
+        Ok(x)
     }
 
     // TODO: take a db transaction instead so that we can batch?
@@ -365,18 +369,19 @@ impl BufferedRpcQueryStats {
             )));
         }
 
+        // TODO: rename to owner_id?
         let sender_user_id = key.rpc_key_user_id.map_or(0, |x| x.get());
 
         // Gathering cache and database rows
         let user_balance = self
             ._get_user_balance(sender_user_id, user_balance_cache, db_conn)
-            .await;
+            .await?;
 
         let mut user_balance = user_balance.write().await;
 
         // First of all, save the statistics to the database:
         let paid_credits_used = self
-            ._save_db_stats(chain_id, db_conn, &key, user_balance.remaining())
+            ._save_db_stats(chain_id, db_conn, &key, user_balance.active_premium())
             .await?;
 
         // No need to continue if no credits were used
@@ -387,16 +392,13 @@ impl BufferedRpcQueryStats {
 
         // Update and possible invalidate rpc caches if necessary (if there was a downgrade)
         {
-            let balance_before = user_balance.remaining();
-            info!("Balance before is {:?}", balance_before);
+            let premium_before = user_balance.active_premium();
+
             user_balance.total_spent_paid_credits += paid_credits_used;
 
-            // Invalidate caches if remaining is below a threshold
+            // Invalidate caches if remaining is getting close to $0
             // It will be re-fetched again if needed
-            if sender_user_id != 0
-                && balance_before > Decimal::from(10)
-                && user_balance.remaining() < Decimal::from(10)
-            {
+            if premium_before && user_balance.remaining() < Decimal::from(1) {
                 let rpc_keys = rpc_key::Entity::find()
                     .filter(rpc_key::Column::UserId.eq(sender_user_id))
                     .all(db_conn)
@@ -411,100 +413,101 @@ impl BufferedRpcQueryStats {
             }
         }
 
-        // Start a transaction
-        let txn = db_conn.begin().await?;
+        if user_balance.active_premium() {
+            // Start a transaction
+            let txn = db_conn.begin().await?;
 
-        // Apply all the referral logic; let's keep it simple and flat for now
-        // Calculate if we are above the usage threshold, and apply a bonus
-        // Optimally we would read this from the balance, but if we do it like this, we only have to lock a single table (much safer w.r.t. deadlocks)
-        // referral_entity.credits_applied_for_referrer * (Decimal::from(10) checks (atomically using this table only), whether the user has brought in >$100 to the referer
-        // In this case, the sender receives $100 as a bonus / gift
-        // Apply a 10$ bonus onto the user, if the user has spent 100$
-        match referee::Entity::find()
-            .filter(referee::Column::UserId.eq(sender_user_id))
-            .find_also_related(referrer::Entity)
-            .one(&txn)
-            .await?
-        {
-            Some((referral_entity, Some(referrer))) => {
-                // Get the balance for the referrer, see if they're premium or not
-                let referrer_balance = self
-                    ._get_user_balance(referrer.user_id, user_balance_cache, db_conn)
-                    .await;
-                // Just to keep locking simple, keep things where they are
-                let referrer_balance = referrer_balance.read().await;
-                let mut new_referee_entity: referee::ActiveModel;
+            // Apply all the referral logic; let's keep it simple and flat for now
+            // Calculate if we are above the usage threshold, and apply a bonus
+            // Optimally we would read this from the balance, but if we do it like this, we only have to lock a single table (much safer w.r.t. deadlocks)
+            // referral_entity.credits_applied_for_referrer * (Decimal::from(10) checks (atomically using this table only), whether the user has brought in >$100 to the referer
+            // In this case, the sender receives $100 as a bonus / gift
+            // Apply a 10$ bonus onto the user, if the user has spent 100$
+            match referee::Entity::find()
+                .filter(referee::Column::UserId.eq(sender_user_id))
+                .find_also_related(referrer::Entity)
+                .lock(LockType::Update)
+                .one(&txn)
+                .await?
+            {
+                Some((referral_entity, Some(referrer))) => {
+                    // Get the balance for the referrer, see if they're premium or not
+                    let referrer_balance = self
+                        ._get_user_balance(referrer.user_id, user_balance_cache, db_conn)
+                        .await?;
 
-                let bonus_for_user_threshold = Decimal::from(100);
-                let bonus_for_user = Decimal::from(10);
+                    // Just to keep locking simple, read and clone. if the value is slightly delayed, that is okay
+                    let referrer_balance = referrer_balance.read().await.clone();
 
-                // Provide one-time bonus to user, if more than 100$ was spent,
-                // and if the one-time bonus was not already provided
-                if referral_entity.one_time_bonus_applied_for_referee.is_zero()
-                    && (referral_entity.credits_applied_for_referrer * Decimal::from(10)
-                        + self.sum_credits_used)
-                        >= bonus_for_user_threshold
-                {
-                    trace!("Adding sender bonus balance");
-                    // TODO: Should it be Unchanged, or do we have to load all numbers there again ..
-                    let mut new_referral_entity = referral_entity.clone().into_active_model();
-                    new_referral_entity.one_time_bonus_applied_for_referee =
-                        sea_orm::Set(bonus_for_user);
-                    // Update the cache
-                    {
-                        // Also no need to invalidate the cache here, just by itself
-                        user_balance.total_deposits += bonus_for_user;
+                    // Apply the bonuses only if they have the necessary premium statuses
+                    if referrer_balance.was_ever_premium() {
+                        // spend $100
+                        let bonus_for_user_threshold = Decimal::from(100);
+                        // get $10
+                        let bonus_for_user = Decimal::from(10);
+
+                        let referral_start_date = referral_entity.referral_start_date;
+
+                        let mut referral_entity = referral_entity.into_active_model();
+
+                        // Provide one-time bonus to user, if more than 100$ was spent,
+                        // and if the one-time bonus was not already provided
+                        // TODO: make sure that if we change the bonus from 10%, we also change this multiplication of 10!
+                        if referral_entity
+                            .one_time_bonus_applied_for_referee
+                            .as_ref()
+                            .is_zero()
+                            && (referral_entity.credits_applied_for_referrer.as_ref()
+                                * Decimal::from(10)
+                                + self.sum_credits_used)
+                                >= bonus_for_user_threshold
+                        {
+                            trace!("Adding sender bonus balance");
+
+                            referral_entity.one_time_bonus_applied_for_referee =
+                                sea_orm::Set(bonus_for_user);
+                            // Update the cache
+                            user_balance.total_deposits += bonus_for_user;
+                        }
+
+                        let now = Utc::now();
+                        let valid_until =
+                            DateTime::<Utc>::from_utc(referral_start_date, Utc) + Months::new(12);
+
+                        // If the referrer ever had premium, provide credits to them
+                        // Also only works if the referrer referred the person less than 1 year ago
+                        // TODO: Perhaps let's not worry about the referral cache here, to avoid deadlocks (hence only reading)
+
+                        if now <= valid_until {
+                            let referrer_bonus = self.sum_credits_used / Decimal::from(10);
+                            referral_entity.credits_applied_for_referrer = sea_orm::Set(
+                                referral_entity.credits_applied_for_referrer.as_ref()
+                                    + referrer_bonus,
+                            );
+                            // No need to invalidate the referrer every single time;
+                            // this is no major change and can wait for a bit
+                            // Let's not worry about the referrer balance bcs possibility of deadlock
+                            // referrer_balance.total_deposits += referrer_bonus;
+                        }
+
+                        // The resulting field will not be read again, so I will not try to turn the ActiveModel into a Model one
+                        referral_entity.save(&txn).await?;
                     }
-                    // The resulting field will not be read again, so I will not try to turn the ActiveModel into a Model one
-                    new_referral_entity = new_referral_entity.save(&txn).await?;
                 }
-
-                // Apply the bonus to the referrer if they are premium right now
-                {
-                    let now = Utc::now();
-                    let valid_until =
-                        DateTime::<Utc>::from_utc(referral_entity.referral_start_date, Utc)
-                            + Months::new(12);
-
-                    // There must be a conflict, if there isn't than there's a clear bug!
-                    // If the referrer has more than $10, provide credits to them
-                    // Also only works if the referrer referred the person less than 1 year ago
-                    // TODO: Perhaps let's not worry about the referral cache here, to avoid deadlocks (hence only reading)
-                    let referrer_bonus = self.sum_credits_used / Decimal::from(10);
-                    if referrer_balance.remaining() > Decimal::from(10) && now <= valid_until {
-                        referee::Entity::insert(referral_entity.into_active_model())
-                            .on_conflict(
-                                OnConflict::new()
-                                    .values([(
-                                        // Provide credits to referrer
-                                        referee::Column::CreditsAppliedForReferrer,
-                                        Expr::col(referee::Column::CreditsAppliedForReferrer)
-                                            .add(referrer_bonus),
-                                    )])
-                                    .to_owned(),
-                            )
-                            .exec(&txn)
-                            .await?;
-                    }
-                    // No need to invalidate the referrer every single time;
-                    // this is no major change and can wait for a bit
-                    // Let's not worry about the referrer balance bcs possibility of deadlock
-                    // referrer_balance.total_deposits += referrer_bonus;
+                Some((referee, None)) => {
+                    error!(
+                        ?referee,
+                        "No referrer code found for this referrer, this should never happen!",
+                    );
                 }
-            }
-            Some((referee, None)) => {
-                error!(
-                    "No referrer code found for this referrer, this should never happen! {:?}",
-                    referee
-                );
-            }
-            _ => {}
-        };
+                _ => {}
+            };
 
-        // Finally commit the transaction in the database
-        txn.commit()
-            .await
-            .context("Failed to update referral and balance updates")?;
+            // Finally commit the transaction in the database
+            txn.commit()
+                .await
+                .context("Failed to update referral and balance updates")?;
+        }
 
         Ok(())
     }
