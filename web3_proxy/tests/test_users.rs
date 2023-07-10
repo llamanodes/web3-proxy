@@ -195,10 +195,9 @@ async fn test_user_balance_decreases() {
         Decimal::from(0)
     );
     // Check that total credits incl free used is larger than 0
-    assert!(
-        Decimal::from_str(user_balance_response["total_spent"].as_str().unwrap()).unwrap()
-            > Decimal::from(0)
-    );
+    let previously_free_spent =
+        Decimal::from_str(user_balance_response["total_spent"].as_str().unwrap()).unwrap();
+    assert!(previously_free_spent > Decimal::from(0));
 
     // Bump both user's wallet to $20
     admin_increase_balance(
@@ -239,7 +238,8 @@ async fn test_user_balance_decreases() {
                 .as_str()
                 .unwrap()
         )
-        .unwrap(),
+        .unwrap()
+            + previously_free_spent,
         Decimal::from_str(user_balance_response["total_spent"].as_str().unwrap()).unwrap()
     );
     // Get the full balance endpoint
@@ -248,14 +248,14 @@ async fn test_user_balance_decreases() {
     assert!(user_balance_post < user_balance_pre);
 
     // Balance should be total deposits - usage while in the paid tier
-    let total_spent_outside_free_tier = Decimal::from_str(
-        user_balance_response["total_spent_outside_free_tier"]
+    let total_spent_in_paid_credits = Decimal::from_str(
+        user_balance_response["total_spent_paid_credits"]
             .as_str()
             .unwrap(),
     )
     .unwrap();
     assert_eq!(
-        total_deposits - total_spent_outside_free_tier,
+        total_deposits - total_spent_in_paid_credits,
         user_balance_post
     );
 

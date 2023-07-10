@@ -33,7 +33,7 @@ pub struct User {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Referral {
-    pub credits_applied_for_referee: bool,
+    pub credits_applied_for_referee: String,
     pub credits_applied_for_referrer: String,
     pub referral_start_date: String,
     pub referred_address: Option<String>,
