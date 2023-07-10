@@ -1,80 +1,166 @@
-use crate::errors::Web3ProxyResult;
-use fstrings::{f, format_args_f};
-use migration::sea_orm;
+use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
+use entities::{
+    admin_increase_balance_receipt, increase_on_chain_balance_receipt, rpc_accounting_v2, rpc_key,
+    stripe_increase_balance_receipt,
+};
 use migration::sea_orm::prelude::Decimal;
-use migration::sea_orm::{DbBackend, DbConn, FromQueryResult, Statement};
-use serde::{Deserialize, Serialize};
+use migration::sea_orm::DbConn;
+use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+use migration::{Func, SimpleExpr};
+use serde::ser::SerializeStruct;
+use serde::Serialize;
 
-/// Implements the balance getter
-#[derive(Clone, Debug, Default, Serialize, Deserialize, FromQueryResult)]
+/// Implements the balance getter which combines data from several tables
+#[derive(Clone, Debug, Default)]
 pub struct Balance {
-    pub user_id: u64,
-    pub total_spent_paid_credits: Decimal,
+    pub admin_deposits: Decimal,
+    pub chain_deposits: Decimal,
+    pub referal_bonus: Decimal,
+    pub referee_bonus: Decimal,
+    pub stripe_deposits: Decimal,
     pub total_spent: Decimal,
-    pub total_deposits: Decimal,
+    pub total_spent_paid_credits: Decimal,
+    pub user_id: u64,
+}
+
+impl Serialize for Balance {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("balance", 12)?;
+
+        state.serialize_field("admin_deposits", &self.admin_deposits)?;
+        state.serialize_field("chain_deposits", &self.chain_deposits)?;
+        state.serialize_field("referal_bonus", &self.referal_bonus)?;
+        state.serialize_field("referee_bonus", &self.referee_bonus)?;
+        state.serialize_field("stripe_deposits", &self.stripe_deposits)?;
+        state.serialize_field("total_spent", &self.total_spent)?;
+        state.serialize_field("total_spent_paid_credits", &self.total_spent_paid_credits)?;
+        state.serialize_field("user_id", &self.user_id)?;
+
+        state.serialize_field("active_premium", &self.active_premium())?;
+        state.serialize_field("was_ever_premium", &self.was_ever_premium())?;
+        state.serialize_field("balance", &self.remaining())?;
+        state.serialize_field("total_deposits", &self.total_deposits())?;
+
+        state.end()
+    }
 }
 
 impl Balance {
     pub fn active_premium(&self) -> bool {
-        self.was_ever_premium() && self.total_deposits > self.total_spent_paid_credits
+        self.was_ever_premium() && self.total_deposits() > self.total_spent_paid_credits
     }
 
     pub fn was_ever_premium(&self) -> bool {
-        self.user_id != 0 && self.total_deposits >= Decimal::from(10)
+        self.user_id != 0 && self.total_deposits() >= Decimal::from(10)
     }
 
     pub fn remaining(&self) -> Decimal {
-        self.total_deposits - self.total_spent_paid_credits
+        self.total_deposits() - self.total_spent_paid_credits
     }
 
+    pub fn total_deposits(&self) -> Decimal {
+        self.admin_deposits
+            + self.chain_deposits
+            + self.referal_bonus
+            + self.referee_bonus
+            + self.stripe_deposits
+    }
+
+    /// TODO: do this with a single db query
     pub async fn try_from_db(db_conn: &DbConn, user_id: u64) -> Web3ProxyResult<Option<Self>> {
         // Return early if user_id == 0
         if user_id == 0 {
             return Ok(None);
         }
 
-        // Injecting the variable directly, should be fine because Rust is typesafe, especially with primitives
-        let raw_sql = f!(r#"
-            SELECT
-                user.id AS user_id,
-                COALESCE(SUM(admin_receipt.amount), 0) + COALESCE(SUM(chain_receipt.amount), 0) + COALESCE(SUM(stripe_receipt.amount), 0) + COALESCE(SUM(referee.one_time_bonus_applied_for_referee), 0) + COALESCE(referrer_bonus.total_bonus, 0) AS total_deposits,
-                COALESCE(SUM(accounting.sum_credits_used), 0) AS total_spent_paid_credits,
-                COALESCE(SUM(accounting.sum_incl_free_credits_used), 0) AS total_spent
-            FROM
-                user
-                    LEFT JOIN
-                admin_increase_balance_receipt AS admin_receipt ON user.id = admin_receipt.deposit_to_user_id
-                    LEFT JOIN
-                increase_on_chain_balance_receipt AS chain_receipt ON user.id = chain_receipt.deposit_to_user_id
-                    LEFT JOIN
-                stripe_increase_balance_receipt AS stripe_receipt ON user.id = stripe_receipt.deposit_to_user_id
-                    LEFT JOIN
-                referee ON user.id = referee.user_id
-                    LEFT JOIN
-                (SELECT referrer.user_id, SUM(referee.credits_applied_for_referrer) AS total_bonus
-                FROM referrer
-                        JOIN referee ON referrer.id = referee.used_referral_code
-                GROUP BY referrer.user_id) AS referrer_bonus ON user.id = referrer_bonus.user_id
-                    LEFT JOIN
-                rpc_key ON user.id = rpc_key.user_id
-                    LEFT JOIN
-                rpc_accounting_v2 AS accounting ON rpc_key.id = accounting.rpc_key_id
-                    LEFT JOIN
-                user_tier ON user.user_tier_id = user_tier.id
-                    WHERE
-                user.id = {user_id};
-        "#);
+        let (admin_deposits,) = admin_increase_balance_receipt::Entity::find()
+            .select_only()
+            .column_as(
+                SimpleExpr::from(Func::coalesce([
+                    admin_increase_balance_receipt::Column::Amount.sum(),
+                    0.into(),
+                ])),
+                "admin_deposits",
+            )
+            .filter(admin_increase_balance_receipt::Column::DepositToUserId.eq(user_id))
+            .into_tuple()
+            .one(db_conn)
+            .await
+            .web3_context("fetching admin deposits")?
+            .unwrap_or_default();
 
-        let balance: Balance = match Self::find_by_statement(Statement::from_string(
-            DbBackend::MySql,
-            raw_sql,
-            // [.into()],
-        ))
-        .one(db_conn)
-        .await?
-        {
-            None => return Ok(None),
-            Some(x) => x,
+        let (chain_deposits,) = increase_on_chain_balance_receipt::Entity::find()
+            .select_only()
+            .column_as(
+                SimpleExpr::from(Func::coalesce([
+                    increase_on_chain_balance_receipt::Column::Amount.sum(),
+                    0.into(),
+                ])),
+                "chain_deposits",
+            )
+            .filter(increase_on_chain_balance_receipt::Column::DepositToUserId.eq(user_id))
+            .into_tuple()
+            .one(db_conn)
+            .await
+            .web3_context("fetching chain deposits")?
+            .unwrap_or_default();
+
+        let (stripe_deposits,) = stripe_increase_balance_receipt::Entity::find()
+            .select_only()
+            .column_as(
+                SimpleExpr::from(Func::coalesce([
+                    stripe_increase_balance_receipt::Column::Amount.sum(),
+                    0.into(),
+                ])),
+                "stripe_deposits",
+            )
+            .filter(stripe_increase_balance_receipt::Column::DepositToUserId.eq(user_id))
+            .into_tuple()
+            .one(db_conn)
+            .await
+            .web3_context("fetching stripe deposits")?
+            .unwrap_or_default();
+
+        let (total_spent_paid_credits, total_spent) = rpc_accounting_v2::Entity::find()
+            .select_only()
+            .column_as(
+                SimpleExpr::from(Func::coalesce([
+                    rpc_accounting_v2::Column::SumCreditsUsed.sum(),
+                    0.into(),
+                ])),
+                "total_spent_paid_credits",
+            )
+            .column_as(
+                SimpleExpr::from(Func::coalesce([
+                    rpc_accounting_v2::Column::SumInclFreeCreditsUsed.sum(),
+                    0.into(),
+                ])),
+                "total_spent",
+            )
+            .left_join(rpc_key::Entity)
+            // .filter(rpc_key::Column::Id.eq(rpc_accounting_v2::Column::RpcKeyId))  // TODO: i think the left_join function handles this
+            .filter(rpc_key::Column::UserId.eq(user_id))
+            .into_tuple()
+            .one(db_conn)
+            .await
+            .web3_context("fetching rpc_accounting_v2")?
+            .unwrap_or_default();
+
+        let referee_bonus = Default::default();
+        let referal_bonus = Default::default();
+
+        let balance = Self {
+            admin_deposits,
+            chain_deposits,
+            referal_bonus,
+            referee_bonus,
+            stripe_deposits,
+            total_spent,
+            total_spent_paid_credits,
+            user_id,
         };
 
         // Return None if there is no entry
