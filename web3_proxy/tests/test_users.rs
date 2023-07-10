@@ -92,7 +92,7 @@ async fn test_log_in_and_out() {
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn test_admin_balance_increase() {
-    info!("Starting balance decreases with usage test");
+    info!("Starting admin can increase balance");
     let x = TestApp::spawn(true).await;
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -158,7 +158,7 @@ async fn test_user_balance_decreases() {
     let proxy_endpoint = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
     let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
 
-    // Make somre requests while in the free tier, so we can test bookkeeping here
+    // Make some requests while in the free tier, so we can test bookkeeping here
     for _ in 1..10_000 {
         let _ = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
@@ -166,6 +166,34 @@ async fn test_user_balance_decreases() {
             .unwrap()
             .unwrap();
     }
+
+    // Check the balance, it should not have decreased; there should have been accounted free credits, however
+    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
+    // Check that the balance is 0
+    assert_eq!(
+        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap(),
+        Decimal::from(0)
+    );
+    // Check that paid credits is 0 (because balance is 0)
+    assert_eq!(
+        Decimal::from_str(
+            user_balance_response["total_spent_paid_credits"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap(),
+        Decimal::from(0)
+    );
+    // Check that paid credits is 0 (because balance is 0)
+    assert_eq!(
+        Decimal::from_str(user_balance_response["total_deposits"].as_str().unwrap()).unwrap(),
+        Decimal::from(0)
+    );
+    // Check that total credits incl free used is larger than 0
+    assert!(
+        Decimal::from_str(user_balance_response["total_spent"].as_str().unwrap()).unwrap()
+            > Decimal::from(0)
+    );
 
     // Flush all stats here
     let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
@@ -200,6 +228,7 @@ async fn test_user_balance_decreases() {
     assert!(mysql_count > 0);
 
     // Deposits should not be affected, and should be equal to what was initially provided
+    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
     let total_deposits =
         Decimal::from_str(user_balance_response["total_deposits"].as_str().unwrap()).unwrap();
     assert_eq!(total_deposits, Decimal::from(20));

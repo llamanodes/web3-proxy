@@ -1,5 +1,5 @@
 use crate::app::Web3ProxyApp;
-use crate::balance::{get_balance_from_db, Balance};
+use crate::balance::{try_get_balance_from_db, Balance};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse, Web3ProxyResult};
 use crate::frontend::authorization::{
     login_is_authorized, Authorization as Web3ProxyAuthorization,
@@ -53,7 +53,7 @@ pub async fn user_balance_get(
 
     let db_replica = app.db_replica()?;
 
-    let user_balance = match get_balance_from_db(db_replica.as_ref(), user.id).await? {
+    let user_balance = match try_get_balance_from_db(db_replica.as_ref(), user.id).await? {
         None => Balance::default(),
         Some(x) => x,
     };

@@ -2,7 +2,7 @@
 
 use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
-use crate::balance::{get_balance_from_db, Balance};
+use crate::balance::{try_get_balance_from_db, Balance};
 use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
@@ -1139,7 +1139,7 @@ impl Web3ProxyApp {
         self.user_balance_cache
             .try_get_with(user_id, async move {
                 let db_replica = self.db_replica()?;
-                let x = match crate::balance::get_balance_from_db(db_replica.as_ref(), user_id)
+                let x = match crate::balance::try_get_balance_from_db(db_replica.as_ref(), user_id)
                     .await?
                 {
                     None => {

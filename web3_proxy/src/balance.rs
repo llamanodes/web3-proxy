@@ -25,7 +25,7 @@ impl Balance {
     }
 }
 
-pub async fn get_balance_from_db(
+pub async fn try_get_balance_from_db(
     db_conn: &DbConn,
     user_id: u64,
 ) -> Web3ProxyResult<Option<Balance>> {

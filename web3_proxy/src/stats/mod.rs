@@ -40,7 +40,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::{error, info, trace};
 
-use crate::balance::{get_balance_from_db, Balance};
+use crate::balance::{try_get_balance_from_db, Balance};
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -338,7 +338,7 @@ impl BufferedRpcQueryStats {
         trace!("Will get it from the balance cache");
         let out: Arc<AsyncRwLock<Balance>> = user_balance_cache
             .try_get_with(user_id, async {
-                let x = match get_balance_from_db(db_conn, user_id).await? {
+                let x = match try_get_balance_from_db(db_conn, user_id).await? {
                     Some(x) => x,
                     None => return Err(Web3ProxyError::InvalidUserKey),
                 };
@@ -394,6 +394,7 @@ impl BufferedRpcQueryStats {
         // Update and possible invalidate rpc caches if necessary (if there was a downgrade)
         {
             let balance_before = user_balance.remaining();
+            info!("Balance before is {:?}", balance_before);
             user_balance.total_spent_paid_credits += paid_credits_used;
 
             // Invalidate caches if remaining is below a threshold
@@ -440,16 +441,18 @@ impl BufferedRpcQueryStats {
                 let referrer_balance = referrer_balance.read().await;
                 let mut new_referee_entity: referee::ActiveModel;
 
-                let bonus_for_user = Decimal::from(100);
+                let bonus_for_user_threshold = Decimal::from(100);
+                let bonus_for_user = Decimal::from(10);
 
                 // Provide one-time bonus to user, if more than 100$ was spent,
                 // and if the one-time bonus was not already provided
                 if referral_entity.one_time_bonus_applied_for_referee.is_zero()
                     && (referral_entity.credits_applied_for_referrer * Decimal::from(10)
                         + self.sum_credits_used)
-                        >= bonus_for_user
+                        >= bonus_for_user_threshold
                 {
                     trace!("Adding sender bonus balance");
+                    // TODO: Should it be Unchanged, or do we have to load all numbers there again ..
                     new_referee_entity = referee::ActiveModel {
                         id: sea_orm::Unchanged(Default::default()),
                         one_time_bonus_applied_for_referee: sea_orm::Set(bonus_for_user),

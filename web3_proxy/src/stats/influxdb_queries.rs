@@ -1,5 +1,5 @@
 use super::StatType;
-use crate::balance::{get_balance_from_db, Balance};
+use crate::balance::{try_get_balance_from_db, Balance};
 use crate::errors::Web3ProxyErrorContext;
 use crate::{
     app::Web3ProxyApp,
@@ -62,7 +62,7 @@ pub async fn query_user_stats<'a>(
     // TODO: move this to a helper. it should be simple to check that a user has an active premium account
     if let Some(caller_user) = &caller_user {
         // get the balance of the user whose stats we are going to fetch (might be self, but might be another user)
-        let balance = match get_balance_from_db(db_replica.as_ref(), user_id).await? {
+        let balance = match try_get_balance_from_db(db_replica.as_ref(), user_id).await? {
             None => {
                 return Err(Web3ProxyError::AccessDenied(
                     "User Stats Response requires you to authorize with a bearer token".into(),
