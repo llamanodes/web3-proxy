@@ -266,7 +266,6 @@ async fn test_user_balance_decreases() {
 }
 
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
-#[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_referral_bonus_non_concurrent() {
     info!("Starting referral bonus test");
@@ -411,7 +410,6 @@ async fn test_referral_bonus_non_concurrent() {
 }
 
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
-#[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_referral_bonus_concurrent_referrer_only() {
     info!("Starting referral bonus test");
@@ -569,7 +567,6 @@ async fn test_referral_bonus_concurrent_referrer_only() {
 }
 
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
-#[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_referral_bonus_concurrent_referrer_and_user() {
     info!("Starting referral bonus test");
