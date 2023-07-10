@@ -1,6 +1,6 @@
 use crate::TestApp;
 use ethers::prelude::{LocalWallet, Signer};
-use rust_decimal::Decimal;
+use migration::sea_orm::prelude::Decimal;
 use tracing::info;
 use web3_proxy::frontend::admin::AdminIncreaseBalancePost;
 use web3_proxy::frontend::users::authentication::LoginPostResponse;

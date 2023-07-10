@@ -6,7 +6,6 @@ use ethers::prelude::{Address, TxHash};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
 use migration::sea_orm::DatabaseConnection;
-use rust_decimal::Decimal;
 use sentry::types::Dsn;
 use serde::Deserialize;
 use serde_inline_default::serde_inline_default;
@@ -311,7 +310,8 @@ mod tests {
     fn expected_app_defaults() {
         let a: AppConfig = serde_json::from_value(json!({
             "chain_id": 1,
-        })).unwrap();
+        }))
+        .unwrap();
 
         assert_eq!(a.min_synced_rpcs, 1);
 

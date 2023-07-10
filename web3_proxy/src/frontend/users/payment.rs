@@ -1,6 +1,6 @@
 use crate::app::Web3ProxyApp;
-use crate::balance::{try_get_balance_from_db, Balance};
-use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse, Web3ProxyResult};
+use crate::balance::Balance;
+use crate::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
 use crate::frontend::authorization::{
     login_is_authorized, Authorization as Web3ProxyAuthorization,
 };
@@ -15,7 +15,7 @@ use axum::{
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use entities::{
-    admin_increase_balance_receipt, balance, increase_on_chain_balance_receipt, rpc_key,
+    admin_increase_balance_receipt, increase_on_chain_balance_receipt, rpc_key,
     stripe_increase_balance_receipt, user,
 };
 use ethers::abi::AbiEncode;
@@ -24,16 +24,13 @@ use hashbrown::{HashMap, HashSet};
 use http::StatusCode;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
-    self, ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, IntoActiveModel, ModelTrait,
-    QueryFilter, QuerySelect, TransactionTrait,
+    self, ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QuerySelect,
+    TransactionTrait,
 };
 use migration::LockType;
-use migration::{Expr, OnConflict};
 use payment_contracts::ierc20::IERC20;
 use payment_contracts::payment_factory::{self, PaymentFactory};
-use rdkafka::bindings::rd_kafka_AclBinding_destroy;
 use serde_json::json;
-use std::num::{NonZeroU64, TryFromIntError};
 use std::sync::Arc;
 use tracing::{debug, info, trace};
 
@@ -53,7 +50,7 @@ pub async fn user_balance_get(
 
     let db_replica = app.db_replica()?;
 
-    let user_balance = match try_get_balance_from_db(db_replica.as_ref(), user.id).await? {
+    let user_balance = match Balance::try_from_db(db_replica.as_ref(), user.id).await? {
         None => Balance::default(),
         Some(x) => x,
     };

@@ -3,7 +3,6 @@
 use super::authorization::login_is_authorized;
 use crate::admin_queries::query_admin_modify_usertier;
 use crate::app::Web3ProxyApp;
-use crate::caches::UserBalanceCache;
 use crate::errors::Web3ProxyResponse;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::frontend::users::authentication::PostLogin;
@@ -18,7 +17,7 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::{
-    admin, admin_increase_balance_receipt, admin_trail, balance, login, pending_login, rpc_key,
+    admin, admin_increase_balance_receipt, admin_trail, login, pending_login, rpc_key,
     user,
 };
 use ethers::{prelude::Address, types::Bytes};
@@ -28,7 +27,6 @@ use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
-use migration::{Expr, OnConflict};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use siwe::{Message, VerificationOpts};

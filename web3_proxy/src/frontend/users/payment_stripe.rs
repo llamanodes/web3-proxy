@@ -7,19 +7,17 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::{balance, rpc_key, stripe_increase_balance_receipt, user};
+use entities::{rpc_key, stripe_increase_balance_receipt, user};
 use ethers::types::Address;
 use http::HeaderMap;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
-use migration::{Expr, OnConflict};
 use serde_json::json;
-use std::num::NonZeroU64;
 use std::sync::Arc;
 use stripe::Webhook;
-use tracing::{debug, error, trace};
+use tracing::{debug, error};
 
 /// `GET /user/balance/stripe` -- Use a bearer token to get the user's balance and spend.
 ///

@@ -8,7 +8,7 @@ use crate::common::create_admin::create_user_as_admin;
 use crate::common::create_user::create_user;
 use crate::common::get_user_balance::user_get_balance;
 use crate::common::TestApp;
-use rust_decimal::Decimal;
+use migration::sea_orm::prelude::Decimal;
 use tracing::info;
 
 // #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]

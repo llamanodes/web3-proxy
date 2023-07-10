@@ -15,32 +15,27 @@ use anyhow::{anyhow, Context};
 use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
-use entities::{balance, referee, referrer, rpc_accounting_v2, rpc_key};
-use futures::TryFutureExt;
-use hyper::body::Buf;
+use entities::{referee, referrer, rpc_accounting_v2, rpc_key};
 use influxdb2::models::DataPoint;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, DbConn, EntityTrait, IntoActiveModel,
     QueryFilter, TransactionTrait,
 };
-use migration::sea_orm::{DatabaseTransaction, QuerySelect};
-use migration::{Expr, LockType, OnConflict};
-use num_traits::{ToPrimitive, Zero};
-use parking_lot::{Mutex, RwLock};
-use sentry::User;
+use migration::{Expr, OnConflict};
+use num_traits::ToPrimitive;
+use parking_lot::Mutex;
 use std::borrow::Cow;
-use std::convert::Infallible;
 use std::default::Default;
 use std::mem;
-use std::num::{NonZeroU64, TryFromIntError};
+use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::{error, info, trace};
 
-use crate::balance::{try_get_balance_from_db, Balance};
+use crate::balance::Balance;
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -336,21 +331,20 @@ impl BufferedRpcQueryStats {
         db_conn: &DbConn,
     ) -> Arc<AsyncRwLock<Balance>> {
         trace!("Will get it from the balance cache");
-        let out: Arc<AsyncRwLock<Balance>> = user_balance_cache
+        user_balance_cache
             .try_get_with(user_id, async {
-                let x = match try_get_balance_from_db(db_conn, user_id).await? {
+                let x = match Balance::try_from_db(db_conn, user_id).await? {
                     Some(x) => x,
                     None => return Err(Web3ProxyError::InvalidUserKey),
                 };
-                return Ok(Arc::new(AsyncRwLock::new(x)));
+                Ok(Arc::new(AsyncRwLock::new(x)))
             })
             .await
             .unwrap_or_else(|err| {
                 error!("Could not find balance for user !{}", err);
                 // We are just instantiating this for type-safety's sake
                 Arc::new(AsyncRwLock::new(Balance::default()))
-            });
-        out
+            })
     }
 
     // TODO: take a db transaction instead so that we can batch?
@@ -375,14 +369,14 @@ impl BufferedRpcQueryStats {
 
         // Gathering cache and database rows
         let user_balance = self
-            ._get_user_balance(sender_user_id, user_balance_cache, &db_conn)
+            ._get_user_balance(sender_user_id, user_balance_cache, db_conn)
             .await;
 
         let mut user_balance = user_balance.write().await;
 
         // First of all, save the statistics to the database:
         let paid_credits_used = self
-            ._save_db_stats(chain_id, &db_conn, &key, user_balance.remaining())
+            ._save_db_stats(chain_id, db_conn, &key, user_balance.remaining())
             .await?;
 
         // No need to continue if no credits were used
@@ -435,7 +429,7 @@ impl BufferedRpcQueryStats {
             Some((referral_entity, Some(referrer))) => {
                 // Get the balance for the referrer, see if they're premium or not
                 let referrer_balance = self
-                    ._get_user_balance(referrer.user_id, &user_balance_cache, &db_conn)
+                    ._get_user_balance(referrer.user_id, user_balance_cache, db_conn)
                     .await;
                 // Just to keep locking simple, keep things where they are
                 let referrer_balance = referrer_balance.read().await;

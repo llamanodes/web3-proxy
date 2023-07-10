@@ -1,5 +1,5 @@
 use super::StatType;
-use crate::balance::{try_get_balance_from_db, Balance};
+use crate::balance::Balance;
 use crate::errors::Web3ProxyErrorContext;
 use crate::{
     app::Web3ProxyApp,
@@ -16,13 +16,13 @@ use axum::{
     Json, TypedHeader,
 };
 use entities::sea_orm_active_enums::Role;
-use entities::{balance, rpc_key, secondary_user, user, user_tier};
+use entities::{rpc_key, secondary_user, user, user_tier};
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
+use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use rust_decimal::Decimal;
 use serde_json::json;
 use tracing::{debug, error, trace, warn};
 use ulid::Ulid;
@@ -62,7 +62,7 @@ pub async fn query_user_stats<'a>(
     // TODO: move this to a helper. it should be simple to check that a user has an active premium account
     if let Some(caller_user) = &caller_user {
         // get the balance of the user whose stats we are going to fetch (might be self, but might be another user)
-        let balance = match try_get_balance_from_db(db_replica.as_ref(), user_id).await? {
+        let balance = match Balance::try_from_db(db_replica.as_ref(), user_id).await? {
             None => {
                 return Err(Web3ProxyError::AccessDenied(
                     "User Stats Response requires you to authorize with a bearer token".into(),

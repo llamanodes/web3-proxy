@@ -12,7 +12,7 @@ use axum::{
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
-use entities::{self, balance, login, pending_login, referee, referrer, rpc_key, user};
+use entities::{self, login, pending_login, referee, referrer, rpc_key, user};
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;

@@ -13,8 +13,7 @@ use crate::common::referral::{
 use crate::common::TestApp;
 use ethers::prelude::{Http, Provider};
 use ethers::{signers::Signer, types::Signature};
-use futures::future::select_all;
-use rust_decimal::Decimal;
+use migration::sea_orm::prelude::Decimal;
 use serde::Deserialize;
 use std::str::FromStr;
 use std::time::Duration;
@@ -501,17 +500,18 @@ async fn test_referral_bonus_concurrent_referrer_only() {
     // Spin up concurrent requests ...
     let mut handles = Vec::with_capacity(number_requests);
     for _ in 1..number_requests {
-        let url = (&x).proxy_provider.url().clone();
-        let secret_key = (&rpc_keys).secret_key.clone();
+        let url = x.proxy_provider.url().clone();
+        let secret_key = rpc_keys.secret_key;
+
         handles.push(tokio::spawn(async move {
             let proxy_endpoint = format!("{}rpc/{}", url, secret_key);
             let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
-            let _proxy_result = proxy_provider
+
+            proxy_provider
                 .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
                 .await
                 .unwrap()
-                .unwrap();
-            _proxy_result
+                .unwrap()
         }));
     }
 
@@ -660,7 +660,7 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
     let mut handles = Vec::with_capacity(number_requests);
 
     // Make one request to create the cache; this originates from no user
-    let url = (&x).proxy_provider.url().clone();
+    let url = x.proxy_provider.url().clone();
     let proxy_endpoint = format!("{}", url);
     let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
     let _proxy_result = proxy_provider
@@ -670,29 +670,27 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
         .unwrap();
 
     for _ in 1..number_requests {
-        let url = (&x).proxy_provider.url().clone();
-        let user_secret_key = (&user_rpc_keys).secret_key.clone();
+        let url = x.proxy_provider.url().clone();
+        let user_secret_key = user_rpc_keys.secret_key;
         handles.push(tokio::spawn(async move {
             let proxy_endpoint = format!("{}rpc/{}", url, user_secret_key);
             let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
-            let _proxy_result = proxy_provider
+            proxy_provider
                 .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
                 .await
                 .unwrap()
-                .unwrap();
-            _proxy_result
+                .unwrap()
         }));
-        let url = (&x).proxy_provider.url().clone();
-        let referrer_secret_key = (&referre_rpc_keys).secret_key.clone();
+        let url = x.proxy_provider.url().clone();
+        let referrer_secret_key = referre_rpc_keys.secret_key;
         handles.push(tokio::spawn(async move {
             let proxy_endpoint = format!("{}rpc/{}", url, referrer_secret_key);
             let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
-            let _proxy_result = proxy_provider
+            proxy_provider
                 .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
                 .await
                 .unwrap()
-                .unwrap();
-            _proxy_result
+                .unwrap()
         }));
     }
 

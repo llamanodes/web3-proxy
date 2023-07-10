@@ -2,7 +2,7 @@
 
 use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
-use crate::balance::{try_get_balance_from_db, Balance};
+use crate::balance::Balance;
 use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
@@ -18,7 +18,7 @@ use core::fmt;
 use deferred_rate_limiter::DeferredRateLimitResult;
 use derivative::Derivative;
 use derive_more::From;
-use entities::{balance, login, rpc_key, user, user_tier};
+use entities::{login, rpc_key, user, user_tier};
 use ethers::types::{Bytes, U64};
 use ethers::utils::keccak256;
 use futures::TryFutureExt;
@@ -26,9 +26,7 @@ use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
 use migration::sea_orm::prelude::Decimal;
-use migration::sea_orm::{self, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use migration::{Expr, OnConflict};
-use parking_lot::RwLock;
+use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use rdkafka::message::{Header as KafkaHeader, OwnedHeaders as KafkaOwnedHeaders, OwnedMessage};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
@@ -1139,13 +1137,8 @@ impl Web3ProxyApp {
         self.user_balance_cache
             .try_get_with(user_id, async move {
                 let db_replica = self.db_replica()?;
-                let x = match crate::balance::try_get_balance_from_db(db_replica.as_ref(), user_id)
-                    .await?
-                {
-                    None => {
-                        format!("user_id {:?} has no balance entry", user_id).to_owned();
-                        Err(Web3ProxyError::InvalidUserKey)
-                    }
+                let x = match Balance::try_from_db(db_replica.as_ref(), user_id).await? {
+                    None => Err(Web3ProxyError::InvalidUserKey),
                     Some(x) => Ok(x),
                 }?;
                 trace!("Balance for cache retrieved from database is {:?}", x);

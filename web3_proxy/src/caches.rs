@@ -3,7 +3,6 @@ use crate::frontend::authorization::{AuthorizationChecks, RpcSecretKey};
 use moka::future::Cache;
 use std::fmt;
 use std::net::IpAddr;
-use std::num::NonZeroU64;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
 

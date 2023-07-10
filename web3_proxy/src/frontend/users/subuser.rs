@@ -11,7 +11,7 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use entities::sea_orm_active_enums::Role;
-use entities::{balance, rpc_key, secondary_user, user};
+use entities::{rpc_key, secondary_user, user};
 use ethers::types::Address;
 use hashbrown::HashMap;
 use http::StatusCode;
