@@ -447,21 +447,16 @@ impl BufferedRpcQueryStats {
                 {
                     trace!("Adding sender bonus balance");
                     // TODO: Should it be Unchanged, or do we have to load all numbers there again ..
-                    new_referee_entity = referee::ActiveModel {
-                        id: sea_orm::Unchanged(Default::default()),
-                        one_time_bonus_applied_for_referee: sea_orm::Set(bonus_for_user),
-                        credits_applied_for_referrer: sea_orm::Unchanged(Default::default()),
-                        referral_start_date: sea_orm::Unchanged(Default::default()),
-                        used_referral_code: sea_orm::Unchanged(Default::default()),
-                        user_id: sea_orm::Unchanged(Default::default()),
-                    };
+                    let mut new_referral_entity = referral_entity.clone().into_active_model();
+                    new_referral_entity.one_time_bonus_applied_for_referee =
+                        sea_orm::Set(bonus_for_user);
                     // Update the cache
                     {
                         // Also no need to invalidate the cache here, just by itself
                         user_balance.total_deposits += bonus_for_user;
                     }
                     // The resulting field will not be read again, so I will not try to turn the ActiveModel into a Model one
-                    new_referee_entity = new_referee_entity.save(&txn).await?;
+                    new_referral_entity = new_referral_entity.save(&txn).await?;
                 }
 
                 // Apply the bonus to the referrer if they are premium right now
