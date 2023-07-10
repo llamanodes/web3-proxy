@@ -1,7 +1,8 @@
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
+use crate::frontend::users::referral;
 use entities::{
-    admin_increase_balance_receipt, increase_on_chain_balance_receipt, rpc_accounting_v2, rpc_key,
-    stripe_increase_balance_receipt,
+    admin_increase_balance_receipt, increase_on_chain_balance_receipt, referee, referrer,
+    rpc_accounting_v2, rpc_key, stripe_increase_balance_receipt,
 };
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DbConn;
@@ -16,7 +17,7 @@ pub struct Balance {
     pub admin_deposits: Decimal,
     pub chain_deposits: Decimal,
     pub referal_bonus: Decimal,
-    pub referee_bonus: Decimal,
+    pub one_time_referee_bonus: Decimal,
     pub stripe_deposits: Decimal,
     pub total_spent: Decimal,
     pub total_spent_paid_credits: Decimal,
@@ -33,7 +34,7 @@ impl Serialize for Balance {
         state.serialize_field("admin_deposits", &self.admin_deposits)?;
         state.serialize_field("chain_deposits", &self.chain_deposits)?;
         state.serialize_field("referal_bonus", &self.referal_bonus)?;
-        state.serialize_field("referee_bonus", &self.referee_bonus)?;
+        state.serialize_field("one_time_referee_bonus", &self.one_time_referee_bonus)?;
         state.serialize_field("stripe_deposits", &self.stripe_deposits)?;
         state.serialize_field("total_spent", &self.total_spent)?;
         state.serialize_field("total_spent_paid_credits", &self.total_spent_paid_credits)?;
@@ -65,7 +66,7 @@ impl Balance {
         self.admin_deposits
             + self.chain_deposits
             + self.referal_bonus
-            + self.referee_bonus
+            + self.one_time_referee_bonus
             + self.stripe_deposits
     }
 
@@ -149,14 +150,41 @@ impl Balance {
             .web3_context("fetching rpc_accounting_v2")?
             .unwrap_or_default();
 
-        let referee_bonus = Default::default();
-        let referal_bonus = Default::default();
+        let one_time_referee_bonus = referee::Entity::find()
+            .select_only()
+            .column_as(
+                referee::Column::OneTimeBonusAppliedForReferee,
+                "one_time_bonus_applied_for_referee",
+            )
+            .filter(referee::Column::UserId.eq(user_id))
+            .into_tuple()
+            .one(db_conn)
+            .await
+            .web3_context("fetching referee")?
+            .unwrap_or_default();
+
+        let referal_bonus = referee::Entity::find()
+            .select_only()
+            .column_as(
+                SimpleExpr::from(Func::coalesce([
+                    referee::Column::CreditsAppliedForReferrer.sum(),
+                    0.into(),
+                ])),
+                "credits_applied_for_referrer",
+            )
+            .left_join(referrer::Entity)
+            .filter(referrer::Column::UserId.eq(user_id))
+            .into_tuple()
+            .one(db_conn)
+            .await
+            .web3_context("fetching referee and referral_codes")?
+            .unwrap_or_default();
 
         let balance = Self {
             admin_deposits,
             chain_deposits,
             referal_bonus,
-            referee_bonus,
+            one_time_referee_bonus,
             stripe_deposits,
             total_spent,
             total_spent_paid_credits,

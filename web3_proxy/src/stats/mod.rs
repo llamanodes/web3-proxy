@@ -469,7 +469,7 @@ impl BufferedRpcQueryStats {
 
                             // Update the cache
                             // TODO: race condition here?
-                            user_balance.referee_bonus += bonus_for_user;
+                            user_balance.one_time_referee_bonus += bonus_for_user;
                         }
 
                         let now = Utc::now();
