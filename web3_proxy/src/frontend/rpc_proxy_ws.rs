@@ -34,7 +34,7 @@ use std::net::IpAddr;
 use std::str::from_utf8_mut;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock};
+use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock as AsyncRwLock};
 use tracing::{info, trace};
 
 /// How to select backend servers for a request
@@ -319,7 +319,7 @@ async fn handle_socket_payload(
     payload: &str,
     response_sender: &flume::Sender<Message>,
     subscription_count: &AtomicU64,
-    subscriptions: Arc<RwLock<HashMap<U64, AbortHandle>>>,
+    subscriptions: Arc<AsyncRwLock<HashMap<U64, AbortHandle>>>,
 ) -> Web3ProxyResult<(Message, Option<OwnedSemaphorePermit>)> {
     let (authorization, semaphore) = authorization.check_again(&app).await?;
 
@@ -436,8 +436,7 @@ async fn read_web3_socket(
     mut ws_rx: SplitStream<WebSocket>,
     response_sender: flume::Sender<Message>,
 ) {
-    // RwLock should be fine here. a user isn't going to be opening tons of subscriptions
-    let subscriptions = Arc::new(RwLock::new(HashMap::new()));
+    let subscriptions = Arc::new(AsyncRwLock::new(HashMap::new()));
     let subscription_count = Arc::new(AtomicU64::new(1));
 
     let (close_sender, mut close_receiver) = broadcast::channel(1);

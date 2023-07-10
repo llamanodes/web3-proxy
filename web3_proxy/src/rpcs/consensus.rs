@@ -658,7 +658,10 @@ impl ConsensusFinder {
         let latency = first_seen.elapsed();
 
         // record the time behind the fastest node
-        rpc.head_delay.write().record_secs(latency.as_secs_f32());
+        rpc.head_delay
+            .write()
+            .await
+            .record_secs(latency.as_secs_f32());
 
         // update the local mapping of rpc -> block
         self.rpc_heads.insert(rpc, block)

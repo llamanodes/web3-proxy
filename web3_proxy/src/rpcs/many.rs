@@ -20,8 +20,7 @@ use futures::StreamExt;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use migration::sea_orm::DatabaseConnection;
-use moka::future::{Cache, CacheBuilder};
-use parking_lot::RwLock;
+use moka::future::{Cache, CacheBuilder, ConcurrentCacheExt};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
@@ -45,7 +44,7 @@ pub struct Web3Rpcs {
     pub(crate) block_sender: flume::Sender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
     /// any requests will be forwarded to one (or more) of these connections
     /// TODO: hopefully this not being an async lock will be okay. if you need it across awaits, clone the arc
-    pub(crate) by_name: RwLock<HashMap<String, Arc<Web3Rpc>>>,
+    pub(crate) by_name: Cache<String, Arc<Web3Rpc>>,
     /// all providers with the same consensus head block. won't update if there is no `self.watch_consensus_head_sender`
     /// TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
     /// TODO: why is watch_consensus_head_sender in an Option, but this one isn't?
@@ -114,7 +113,7 @@ impl Web3Rpcs {
             watch::channel(Default::default());
 
         // by_name starts empty. self.apply_server_configs will add to it
-        let by_name = Default::default();
+        let by_name = Cache::builder().build();
 
         let max_head_block_lag = max_head_block_lag.unwrap_or(5.into());
 
@@ -230,9 +229,7 @@ impl Web3Rpcs {
                     // web3 connection worked
 
                     // clean up the old rpc if it exists
-                    let old_rpc = self.by_name.read().get(&rpc.name).map(Arc::clone);
-
-                    if let Some(old_rpc) = old_rpc {
+                    if let Some(old_rpc) = self.by_name.get(&rpc.name) {
                         trace!("old_rpc: {}", old_rpc);
 
                         // if the old rpc was synced, wait for the new one to sync
@@ -251,7 +248,8 @@ impl Web3Rpcs {
 
                         // new rpc is synced (or old one was not synced). update the local map
                         // make sure that any new requests use the new connection
-                        self.by_name.write().insert(rpc.name.clone(), rpc);
+                        self.by_name.insert(rpc.name.clone(), rpc).await;
+                        self.by_name.sync();
 
                         // tell the old rpc to disconnect
                         if let Some(ref disconnect_sender) = old_rpc.disconnect_watch {
@@ -259,7 +257,8 @@ impl Web3Rpcs {
                             disconnect_sender.send_replace(true);
                         }
                     } else {
-                        self.by_name.write().insert(rpc.name.clone(), rpc);
+                        self.by_name.insert(rpc.name.clone(), rpc).await;
+                        self.by_name.sync();
                     }
                 }
                 Ok(Err(err)) => {
@@ -288,17 +287,20 @@ impl Web3Rpcs {
     }
 
     pub fn get(&self, conn_name: &str) -> Option<Arc<Web3Rpc>> {
-        self.by_name.read().get(conn_name).map(Arc::clone)
+        self.by_name.get(conn_name)
     }
 
     pub fn len(&self) -> usize {
-        self.by_name.read().len()
+        // // TODO: this seems not great. investigate better ways to do this
+        // self.by_name.sync();
+        self.by_name.entry_count() as usize
     }
 
     pub fn is_empty(&self) -> bool {
-        self.by_name.read().is_empty()
+        self.len() > 0
     }
 
+    /// TODO: rename to be consistent between "head" and "synced"
     pub fn min_head_rpcs(&self) -> usize {
         self.min_synced_rpcs
     }
@@ -527,7 +529,7 @@ impl Web3Rpcs {
 
         let mut watch_ranked_rpcs = self.watch_ranked_rpcs.subscribe();
 
-        let mut potential_rpcs = Vec::with_capacity(self.len());
+        let mut potential_rpcs = Vec::new();
 
         loop {
             // TODO: need a change so that protected and 4337 rpcs set watch_consensus_rpcs on start
@@ -649,10 +651,13 @@ impl Web3Rpcs {
     ) -> Result<Vec<OpenRequestHandle>, Option<Instant>> {
         let mut earliest_retry_at = None;
 
+        // TODO: filter the rpcs with Ranked.will_work_now
+        let mut all_rpcs: Vec<_> = self.by_name.iter().map(|x| x.1).collect();
+
         let mut max_count = if let Some(max_count) = max_count {
             max_count
         } else {
-            self.len()
+            all_rpcs.len()
         };
 
         trace!("max_count: {}", max_count);
@@ -663,9 +668,6 @@ impl Web3Rpcs {
         }
 
         let mut selected_rpcs = Vec::with_capacity(max_count);
-
-        // TODO: filter the rpcs with Ranked.will_work_now
-        let mut all_rpcs: Vec<_> = self.by_name.read().values().cloned().collect();
 
         // TODO: this sorts them all even though we probably won't need all of them. think about this more
         all_rpcs.sort_by_cached_key(|x| x.sort_for_load_balancing_on(max_block_needed.copied()));
@@ -1298,8 +1300,7 @@ impl Serialize for Web3Rpcs {
         let mut state = serializer.serialize_struct("Web3Rpcs", 6)?;
 
         {
-            let by_name = self.by_name.read();
-            let rpcs: Vec<&Web3Rpc> = by_name.values().map(|x| x.as_ref()).collect();
+            let rpcs: Vec<Arc<Web3Rpc>> = self.by_name.iter().map(|x| x.1).collect();
             // TODO: coordinate with frontend team to rename "conns" to "rpcs"
             state.serialize_field("conns", &rpcs)?;
         }
@@ -1352,7 +1353,6 @@ mod tests {
     use ethers::types::{Block, U256};
     use latency::PeakEwmaLatency;
     use moka::future::CacheBuilder;
-    use parking_lot::RwLock;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tracing::trace;
 
@@ -1508,11 +1508,6 @@ mod tests {
         let head_rpc = Arc::new(head_rpc);
         let lagged_rpc = Arc::new(lagged_rpc);
 
-        let rpcs_by_name = HashMap::from([
-            (head_rpc.name.clone(), head_rpc.clone()),
-            (lagged_rpc.name.clone(), lagged_rpc.clone()),
-        ]);
-
         let (block_sender, _block_receiver) = flume::unbounded();
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (watch_ranked_rpcs, _watch_consensus_rpcs_receiver) = watch::channel(None);
@@ -1520,10 +1515,18 @@ mod tests {
 
         let chain_id = 1;
 
+        let by_name = Cache::builder().build();
+        by_name
+            .insert(head_rpc.name.clone(), head_rpc.clone())
+            .await;
+        by_name
+            .insert(lagged_rpc.name.clone(), lagged_rpc.clone())
+            .await;
+
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
             block_sender: block_sender.clone(),
-            by_name: RwLock::new(rpcs_by_name),
+            by_name,
             chain_id,
             name: "test".to_string(),
             watch_head_block: Some(watch_consensus_head_sender),
@@ -1779,11 +1782,6 @@ mod tests {
         let pruned_rpc = Arc::new(pruned_rpc);
         let archive_rpc = Arc::new(archive_rpc);
 
-        let rpcs_by_name = HashMap::from([
-            (pruned_rpc.name.clone(), pruned_rpc.clone()),
-            (archive_rpc.name.clone(), archive_rpc.clone()),
-        ]);
-
         let (block_sender, _) = flume::unbounded();
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (watch_ranked_rpcs, _) = watch::channel(None);
@@ -1791,9 +1789,17 @@ mod tests {
 
         let chain_id = 1;
 
+        let by_name = Cache::builder().build();
+        by_name
+            .insert(pruned_rpc.name.clone(), pruned_rpc.clone())
+            .await;
+        by_name
+            .insert(archive_rpc.name.clone(), archive_rpc.clone())
+            .await;
+
         let rpcs = Web3Rpcs {
             block_sender,
-            by_name: RwLock::new(rpcs_by_name),
+            by_name,
             chain_id,
             name: "test".to_string(),
             watch_head_block: Some(watch_consensus_head_sender),
@@ -1964,14 +1970,6 @@ mod tests {
         let mock_geth = Arc::new(mock_geth);
         let mock_erigon_archive = Arc::new(mock_erigon_archive);
 
-        let rpcs_by_name = HashMap::from([
-            (mock_geth.name.clone(), mock_geth.clone()),
-            (
-                mock_erigon_archive.name.clone(),
-                mock_erigon_archive.clone(),
-            ),
-        ]);
-
         let (block_sender, _) = flume::unbounded();
         let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
         let (watch_ranked_rpcs, _) = watch::channel(None);
@@ -1979,10 +1977,21 @@ mod tests {
 
         let chain_id = 1;
 
+        let by_name = Cache::builder().build();
+        by_name
+            .insert(mock_geth.name.clone(), mock_geth.clone())
+            .await;
+        by_name
+            .insert(
+                mock_erigon_archive.name.clone(),
+                mock_erigon_archive.clone(),
+            )
+            .await;
+
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
             block_sender,
-            by_name: RwLock::new(rpcs_by_name),
+            by_name,
             chain_id,
             name: "test".to_string(),
             watch_head_block: Some(watch_consensus_head_sender),
