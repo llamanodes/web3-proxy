@@ -6,6 +6,7 @@ use ethers::prelude::{Address, TxHash};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
 use migration::sea_orm::DatabaseConnection;
+use rust_decimal::Decimal;
 use sentry::types::Dsn;
 use serde::Deserialize;
 use serde_inline_default::serde_inline_default;
@@ -69,6 +70,9 @@ pub struct AppConfig {
     /// TODO: better type for chain_id? max of `u64::MAX / 2 - 36` <https://github.com/ethereum/EIPs/issues/2294>
     #[serde_inline_default(1u64)]
     pub chain_id: u64,
+
+    /// Cost per computational unit
+    // pub cost_per_cu: Decimal,
 
     /// Database is used for user data.
     /// Currently supports mysql or compatible backend.

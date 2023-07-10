@@ -92,7 +92,7 @@ pub async fn user_used_referral_stats(
     // For each related referral person, find the corresponding user-address
     #[derive(Debug, Serialize)]
     struct Info {
-        credits_applied_for_referee: bool,
+        credits_applied_for_referee: Decimal,
         credits_applied_for_referrer: Decimal,
         referral_start_date: DateTime,
         used_referral_code: String,
@@ -109,7 +109,7 @@ pub async fn user_used_referral_stats(
         //     .context("Database error, no foreign key found for referring user")?;
 
         let tmp = Info {
-            credits_applied_for_referee: referral_record.credits_applied_for_referee,
+            credits_applied_for_referee: referral_record.one_time_bonus_applied_for_referee,
             credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
             referral_start_date: referral_record.referral_start_date,
             used_referral_code: referrer_record.referral_code,
@@ -150,7 +150,7 @@ pub async fn user_shared_referral_stats(
     // collect info about each referral
     #[derive(Debug, Serialize)]
     struct Info {
-        credits_applied_for_referee: bool,
+        credits_applied_for_referee: Decimal,
         credits_applied_for_referrer: Decimal,
         referral_start_date: DateTime,
         referred_address: Address,
@@ -170,7 +170,7 @@ pub async fn user_shared_referral_stats(
                 .context("Database error, no foreign key found for referring user")?;
 
             let info = Info {
-                credits_applied_for_referee: referral_record.credits_applied_for_referee,
+                credits_applied_for_referee: referral_record.one_time_bonus_applied_for_referee,
                 credits_applied_for_referrer: referral_record.credits_applied_for_referrer,
                 referral_start_date: referral_record.referral_start_date,
                 referred_address: Address::from_slice(&referred_user.address),

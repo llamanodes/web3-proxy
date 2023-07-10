@@ -3,6 +3,7 @@
 use super::authorization::login_is_authorized;
 use crate::admin_queries::query_admin_modify_usertier;
 use crate::app::Web3ProxyApp;
+use crate::caches::UserBalanceCache;
 use crate::errors::Web3ProxyResponse;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::frontend::users::authentication::PostLogin;
@@ -83,27 +84,10 @@ pub async fn admin_increase_balance(
         ..Default::default()
     };
     increase_balance_receipt.save(&txn).await?;
-
-    // update balance
-    let balance_entry = balance::ActiveModel {
-        total_deposits: sea_orm::Set(payload.amount),
-        user_id: sea_orm::Set(user_entry.id),
-        ..Default::default()
-    };
-    balance::Entity::insert(balance_entry)
-        .on_conflict(
-            OnConflict::new()
-                .values([(
-                    balance::Column::TotalDeposits,
-                    Expr::col(balance::Column::TotalDeposits).add(payload.amount),
-                )])
-                .to_owned(),
-        )
-        .exec(&txn)
-        .await
-        .web3_context("admin is increasing balance")?;
-
     txn.commit().await?;
+
+    // Invalidate the user_balance_cache for this user:
+    app.user_balance_cache.invalidate(&user_entry.id).await;
 
     let out = json!({
         "user": payload.user_address,

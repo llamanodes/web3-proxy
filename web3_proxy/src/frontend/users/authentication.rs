@@ -189,7 +189,7 @@ pub async fn user_login_get(
 pub async fn register_new_user(
     txn: &DatabaseTransaction,
     address: Address,
-) -> anyhow::Result<(user::Model, rpc_key::Model, balance::Model)> {
+) -> anyhow::Result<(user::Model, rpc_key::Model)> {
     // the only thing we need from them is an address
     // everything else is optional
     // TODO: different invite codes should allow different levels
@@ -217,15 +217,7 @@ pub async fn register_new_user(
         .await
         .web3_context("Failed saving new user key")?;
 
-    // create an empty balance entry
-    let user_balance = balance::ActiveModel {
-        user_id: sea_orm::Set(new_user.id),
-        ..Default::default()
-    };
-
-    let user_balance = user_balance.insert(txn).await?;
-
-    Ok((new_user, user_rpc_key, user_balance))
+    Ok((new_user, user_rpc_key))
 }
 
 /// `POST /user/login` - Register or login by posting a signed "siwe" message.
@@ -323,7 +315,7 @@ pub async fn user_login_post(
 
             let txn = db_conn.begin().await?;
 
-            let (caller, caller_key, _) = register_new_user(&txn, our_msg.address.into()).await?;
+            let (caller, caller_key) = register_new_user(&txn, our_msg.address.into()).await?;
 
             txn.commit().await?;
 
@@ -347,7 +339,7 @@ pub async fn user_login_post(
                 let used_referral = referee::ActiveModel {
                     used_referral_code: sea_orm::Set(user_referrer.id),
                     user_id: sea_orm::Set(caller.id),
-                    credits_applied_for_referee: sea_orm::Set(false),
+                    one_time_bonus_applied_for_referee: sea_orm::Set(Decimal::new(0, 10)),
                     credits_applied_for_referrer: sea_orm::Set(Decimal::new(0, 10)),
                     ..Default::default()
                 };
@@ -380,7 +372,7 @@ pub async fn user_login_post(
                 let used_referral = referee::ActiveModel {
                     used_referral_code: sea_orm::Set(user_referrer.id),
                     user_id: sea_orm::Set(caller.id),
-                    credits_applied_for_referee: sea_orm::Set(false),
+                    one_time_bonus_applied_for_referee: sea_orm::Set(Decimal::new(0, 10)),
                     credits_applied_for_referrer: sea_orm::Set(Decimal::new(0, 10)),
                     ..Default::default()
                 };

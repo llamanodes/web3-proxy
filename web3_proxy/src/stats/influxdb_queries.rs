@@ -1,4 +1,5 @@
 use super::StatType;
+use crate::balance::{try_get_balance_from_db, Balance};
 use crate::errors::Web3ProxyErrorContext;
 use crate::{
     app::Web3ProxyApp,
@@ -61,22 +62,18 @@ pub async fn query_user_stats<'a>(
     // TODO: move this to a helper. it should be simple to check that a user has an active premium account
     if let Some(caller_user) = &caller_user {
         // get the balance of the user whose stats we are going to fetch (might be self, but might be another user)
-        let (total_deposits, total_spent) = match balance::Entity::find()
-            .filter(balance::Column::UserId.eq(user_id))
-            .one(db_replica.as_ref())
-            .await?
-        {
-            Some(user_balance) => (
-                user_balance.total_deposits,
-                user_balance.total_spent_outside_free_tier,
-            ),
-            None => (0.into(), 0.into()),
+        let balance = match try_get_balance_from_db(db_replica.as_ref(), user_id).await? {
+            None => {
+                return Err(Web3ProxyError::AccessDenied(
+                    "User Stats Response requires you to authorize with a bearer token".into(),
+                ));
+            }
+            Some(x) => x,
         };
 
-        let balance_remaining = total_deposits - total_spent;
-
         // TODO: We should add the threshold that determines if a user is premium into app.config. hard coding to $10 works for now
-        if total_deposits < Decimal::from(10) || balance_remaining <= Decimal::from(0) {
+        // TODO: @Bryan this condition seems off, can you double-check?
+        if balance.total_deposits < Decimal::from(10) || balance.remaining() <= Decimal::from(0) {
             // get the user tier so we can see if it is a tier that has downgrades
             let relevant_balance_user_tier_id = if user_id == caller_user.id {
                 caller_user.user_tier_id

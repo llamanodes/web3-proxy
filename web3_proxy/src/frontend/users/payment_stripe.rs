@@ -163,27 +163,6 @@ pub async fn user_balance_stripe_post(
     // Otherwise, also increase the balance ...
     match recipient {
         Some(recipient) => {
-            // Create a balance update as well
-            let balance_entry = balance::ActiveModel {
-                id: sea_orm::NotSet,
-                total_deposits: sea_orm::Set(amount),
-                user_id: sea_orm::Set(recipient.id),
-                ..Default::default()
-            };
-            trace!(?balance_entry, "Trying to insert into balance entry");
-            balance::Entity::insert(balance_entry)
-                .on_conflict(
-                    OnConflict::new()
-                        .values([(
-                            balance::Column::TotalDeposits,
-                            Expr::col(balance::Column::TotalDeposits).add(amount),
-                        )])
-                        .to_owned(),
-                )
-                .exec(&txn)
-                .await
-                .web3_context("increasing balance")?;
-
             let _ = insert_receipt_model.save(&txn).await;
 
             let recipient_rpc_keys = rpc_key::Entity::find()
@@ -194,12 +173,7 @@ pub async fn user_balance_stripe_post(
             txn.commit().await?;
 
             // Finally invalidate the cache as well
-            match NonZeroU64::try_from(recipient.id) {
-                Err(_) => {}
-                Ok(x) => {
-                    app.user_balance_cache.invalidate(&x).await;
-                }
-            };
+            app.user_balance_cache.invalidate(&recipient.id).await;
             for rpc_key_entity in recipient_rpc_keys {
                 app.rpc_secret_key_cache
                     .invalidate(&rpc_key_entity.secret_key.into())
