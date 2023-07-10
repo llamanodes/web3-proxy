@@ -23,6 +23,9 @@ impl ComputeUnit {
         let cu = if method.starts_with("ots_") {
             // TODO: refine the different methods
             1000
+        } else if method.starts_with("admin_") {
+            // maybe charge extra since they are doing things they aren't supposed to
+            return Self::unimplemented();
         } else {
             match (chain_id, method) {
                 (1101, "zkevm_batchNumber") => 0,
