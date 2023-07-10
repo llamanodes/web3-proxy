@@ -1253,13 +1253,11 @@ impl Web3ProxyApp {
                         // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
                         // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
                         if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
-                            let balance = latest_balance.read().await.clone();
+                            let active_premium = latest_balance.read().await.active_premium();
 
                             // only consider the user premium if they have paid at least $10 and have a balance > $.01
                             // otherwise, set user_tier_model to the downograded tier
-                            if balance.total_deposits < Decimal::from(10)
-                                || balance.remaining() < Decimal::new(1, 2)
-                            {
+                            if !active_premium {
                                 // TODO: include boolean to mark that the user is downgraded
                                 user_tier_model =
                                     user_tier::Entity::find_by_id(downgrade_user_tier)
