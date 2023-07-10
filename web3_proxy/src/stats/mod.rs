@@ -20,9 +20,9 @@ use influxdb2::models::DataPoint;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, DbConn, EntityTrait, IntoActiveModel,
-    QueryFilter, QuerySelect, TransactionTrait,
+    QueryFilter, TransactionTrait,
 };
-use migration::{Expr, LockType, OnConflict};
+use migration::{Expr, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::borrow::Cow;
@@ -426,7 +426,6 @@ impl BufferedRpcQueryStats {
             match referee::Entity::find()
                 .filter(referee::Column::UserId.eq(sender_user_id))
                 .find_also_related(referrer::Entity)
-                .lock(LockType::Update)
                 .one(&txn)
                 .await?
             {

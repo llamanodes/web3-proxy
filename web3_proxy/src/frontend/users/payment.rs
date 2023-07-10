@@ -24,10 +24,8 @@ use hashbrown::{HashMap, HashSet};
 use http::StatusCode;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QuerySelect,
-    TransactionTrait,
+    self, ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, TransactionTrait,
 };
-use migration::LockType;
 use payment_contracts::ierc20::IERC20;
 use payment_contracts::payment_factory::{self, PaymentFactory};
 use serde_json::json;
@@ -232,7 +230,6 @@ pub async fn user_balance_post(
 
     // check for uncles
     let mut find_uncles = increase_on_chain_balance_receipt::Entity::find()
-        .lock(LockType::Update)
         .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
         .filter(increase_on_chain_balance_receipt::Column::ChainId.eq(app.config.chain_id));
 
@@ -496,7 +493,6 @@ pub async fn handle_uncle_block(
 
     // delete any deposit txids with uncle_hash
     for reversed_deposit in increase_on_chain_balance_receipt::Entity::find()
-        .lock(LockType::Update)
         .filter(increase_on_chain_balance_receipt::Column::BlockHash.eq(uncle_hash.encode_hex()))
         .all(&txn)
         .await?
