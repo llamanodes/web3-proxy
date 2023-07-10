@@ -141,8 +141,8 @@ impl Balance {
                 ])),
                 "total_spent",
             )
-            .left_join(rpc_key::Entity)
-            // .filter(rpc_key::Column::Id.eq(rpc_accounting_v2::Column::RpcKeyId))  // TODO: i think the left_join function handles this
+            .inner_join(rpc_key::Entity)
+            // .filter(rpc_key::Column::Id.eq(rpc_accounting_v2::Column::RpcKeyId))  // TODO: i think the inner_join function handles this
             .filter(rpc_key::Column::UserId.eq(user_id))
             .into_tuple()
             .one(db_conn)
@@ -172,7 +172,7 @@ impl Balance {
                 ])),
                 "credits_applied_for_referrer",
             )
-            .left_join(referrer::Entity)
+            .inner_join(referrer::Entity)
             .filter(referrer::Column::UserId.eq(user_id))
             .into_tuple()
             .one(db_conn)

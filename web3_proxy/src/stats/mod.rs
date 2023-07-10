@@ -379,9 +379,11 @@ impl BufferedRpcQueryStats {
 
         let mut user_balance = user_balance.write().await;
 
+        let premium_before = user_balance.active_premium();
+
         // First of all, save the statistics to the database:
         let paid_credits_used = self
-            ._save_db_stats(chain_id, db_conn, &key, user_balance.active_premium())
+            ._save_db_stats(chain_id, db_conn, &key, premium_before)
             .await?;
 
         // No need to continue if no credits were used
@@ -392,8 +394,6 @@ impl BufferedRpcQueryStats {
 
         // Update and possible invalidate rpc caches if necessary (if there was a downgrade)
         {
-            let premium_before = user_balance.active_premium();
-
             user_balance.total_spent_paid_credits += paid_credits_used;
 
             // Invalidate caches if remaining is getting close to $0
@@ -413,7 +413,7 @@ impl BufferedRpcQueryStats {
             }
         }
 
-        if user_balance.active_premium() {
+        if premium_before {
             // Start a transaction
             let txn = db_conn.begin().await?;
 
