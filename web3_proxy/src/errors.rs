@@ -230,7 +230,7 @@ impl Web3ProxyError {
             }
             Self::BadResponse(err) => {
                 // TODO: think about this one more. ankr gives us this because ethers fails to parse responses without an id
-                debug!(?err, "BAD_RESPONSE");
+                debug!(?err, "BAD_RESPONSE: {}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
@@ -252,7 +252,7 @@ impl Web3ProxyError {
                 )
             }
             Self::Contract(err) => {
-                warn!(?err, "Contract Error");
+                warn!(?err, "Contract Error: {}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
@@ -263,7 +263,7 @@ impl Web3ProxyError {
                 )
             }
             Self::Database(err) => {
-                error!(?err, "database err");
+                error!(?err, "database err: {}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
@@ -274,7 +274,7 @@ impl Web3ProxyError {
                 )
             }
             Self::Decimal(err) => {
-                debug!(?err, "Decimal Error");
+                debug!(?err, "Decimal Error: {}", err);
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
