@@ -1181,8 +1181,10 @@ impl Web3Rpcs {
                 }
                 Err(None) => {
                     warn!(
-                        "No servers in sync on {:?} (block {:?} - {:?})! Retrying",
-                        self, min_block_needed, max_block_needed
+                        ?self,
+                        ?min_block_needed,
+                        ?max_block_needed,
+                        "No servers in sync on! Retrying",
                     );
 
                     if let Some(request_metadata) = &request_metadata {
@@ -1286,8 +1288,13 @@ impl Display for Web3Rpcs {
 impl fmt::Debug for Web3Rpcs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
+        self.by_name.sync();
+
+        let consensus_rpcs = self.watch_ranked_rpcs.borrow().is_some();
+
         f.debug_struct("Web3Rpcs")
             .field("rpcs", &self.by_name)
+            .field("consensus_rpcs", &consensus_rpcs)
             .finish_non_exhaustive()
     }
 }
