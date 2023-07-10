@@ -1164,7 +1164,7 @@ impl Web3Rpcs {
                                     only_backups_used = false;
                                 }
 
-                                x.clone_connection()
+                                rpc
                             }),
                         );
 
@@ -1201,7 +1201,7 @@ impl Web3Rpcs {
                     tokio::select! {
                         _ = sleep_until(max_sleep) => {
                             // rpcs didn't change and we have waited too long. break to return an error
-                            warn!("timeout waiting for try_send_all_synced_connections!");
+                            warn!(?self, "timeout waiting for try_send_all_synced_connections!");
                             break;
                         },
                         _ = watch_consensus_rpcs.changed() => {
@@ -1219,7 +1219,10 @@ impl Web3Rpcs {
 
                     if let Some(max_wait) = max_wait {
                         if start.elapsed() > max_wait {
-                            warn!("All rate limits exceeded. And sleeping would take too long");
+                            warn!(
+                                ?self,
+                                "All rate limits exceeded. And sleeping would take too long"
+                            );
                             break;
                         }
 
@@ -1237,7 +1240,7 @@ impl Web3Rpcs {
 
                         continue;
                     } else {
-                        warn!("All rate limits exceeded.");
+                        warn!(?self, "all rate limits exceeded");
                         break;
                     }
                 }
