@@ -1300,6 +1300,9 @@ impl Serialize for Web3Rpcs {
         let mut state = serializer.serialize_struct("Web3Rpcs", 6)?;
 
         {
+            // TODO: i didn't think we'd need this, but it shouldn't hurt
+            self.by_name.sync();
+
             let rpcs: Vec<Arc<Web3Rpc>> = self.by_name.iter().map(|x| x.1).collect();
             // TODO: coordinate with frontend team to rename "conns" to "rpcs"
             state.serialize_field("conns", &rpcs)?;
@@ -1522,6 +1525,7 @@ mod tests {
         by_name
             .insert(lagged_rpc.name.clone(), lagged_rpc.clone())
             .await;
+        by_name.sync();
 
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
@@ -1796,6 +1800,7 @@ mod tests {
         by_name
             .insert(archive_rpc.name.clone(), archive_rpc.clone())
             .await;
+        by_name.sync();
 
         let rpcs = Web3Rpcs {
             block_sender,
@@ -1987,6 +1992,7 @@ mod tests {
                 mock_erigon_archive.clone(),
             )
             .await;
+        by_name.sync();
 
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
