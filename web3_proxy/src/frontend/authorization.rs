@@ -1138,7 +1138,7 @@ impl Web3ProxyApp {
                     None => Err(Web3ProxyError::InvalidUserKey),
                     Some(x) => Ok(x),
                 }?;
-                trace!("Balance for cache retrieved from database is {:?}", x);
+                trace!(?x, "from database");
                 Ok(Arc::new(AsyncRwLock::new(x)))
             })
             .await

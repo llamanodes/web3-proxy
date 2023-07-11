@@ -222,7 +222,9 @@ async fn test_user_balance_decreases() {
     // Get the full balance endpoint
     let user_balance_post = user_balance.remaining();
     assert!(user_balance_post < user_balance_pre);
-    assert_eq!(user_balance.total_frontend_requests, 10_000);
+
+    // 10k while free, 10k while premium
+    assert_eq!(user_balance.total_frontend_requests, 20_000);
 
     // Balance should be total deposits - usage while in the paid tier
     let total_spent_in_paid_credits = user_balance.total_spent_paid_credits;

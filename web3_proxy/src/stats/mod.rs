@@ -20,9 +20,9 @@ use influxdb2::models::DataPoint;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, DbConn, EntityTrait, IntoActiveModel,
-    QueryFilter, TransactionTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
-use migration::{Expr, OnConflict};
+use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::borrow::Cow;
@@ -228,19 +228,9 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         db_conn: &DatabaseConnection,
         key: &RpcQueryKey,
-        active_premium: bool,
-    ) -> Web3ProxyResult<Decimal> {
+        paid_credits_used: Decimal,
+    ) -> Web3ProxyResult<()> {
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
-
-        // // Because reading the balance and updating the stats here is not atomically locked, this may lead to a negative balance
-        // // This negative balance shouldn't be large tough
-        // // TODO: I'm not so sure about this. @david can you explain more? if someone spends over their balance, they **should** go slightly negative. after all, they would have received the premium limits for these queries
-        // // sum_credits_used should be definitely correct. the balance can be slightly off. so it seems like we should trust sum_credits_used over balance
-        let paid_credits_used = if active_premium {
-            self.sum_credits_used
-        } else {
-            0.into()
-        };
 
         // =============================== //
         //       UPDATE STATISTICS         //
@@ -328,7 +318,7 @@ impl BufferedRpcQueryStats {
             .exec(db_conn)
             .await?;
 
-        Ok(self.sum_credits_used)
+        Ok(())
     }
 
     // TODO: This is basically a duplicate with the balance_checks, except the database
@@ -380,32 +370,42 @@ impl BufferedRpcQueryStats {
         let sender_user_id = key.rpc_key_user_id.map_or(0, |x| x.get());
 
         // Gathering cache and database rows
-        let user_balance = self
+        let user_balance_lock = self
             ._get_user_balance(sender_user_id, user_balance_cache, db_conn)
             .await?;
 
-        let mut user_balance = user_balance.write().await;
+        let mut user_balance = user_balance_lock.write().await;
 
         let premium_before = user_balance.active_premium();
 
-        // First of all, save the statistics to the database:
-        let paid_credits_used = self
-            ._save_db_stats(chain_id, db_conn, &key, premium_before)
-            .await?;
+        let premium_after;
 
-        // No need to continue if no credits were used
-        if self.sum_credits_used == 0.into() {
-            // write-lock is released
-            return Ok(());
-        }
+        let paid_credits_used;
 
-        // Update and possible invalidate rpc caches if necessary (if there was a downgrade)
-        {
+        if premium_before {
+            paid_credits_used = self.sum_credits_used;
+
             user_balance.total_spent_paid_credits += paid_credits_used;
 
+            // TODO: this lets them go past 0. we should clear if close to 0
+            premium_after = user_balance.active_premium();
+        } else {
+            paid_credits_used = 0.into();
+            premium_after = false;
+        };
+
+        // close the write lock
+        drop(user_balance);
+
+        // save the statistics to the database:
+        self._save_db_stats(chain_id, db_conn, &key, paid_credits_used)
+            .await?;
+
+        if premium_before && paid_credits_used > 0.into() {
+            // Update and possible invalidate rpc caches if necessary (if there was a downgrade)
             // Invalidate caches if remaining is getting close to $0
             // It will be re-fetched again if needed
-            if premium_before && user_balance.remaining() < Decimal::from(1) {
+            if !premium_after {
                 let rpc_keys = rpc_key::Entity::find()
                     .filter(rpc_key::Column::UserId.eq(sender_user_id))
                     .all(db_conn)
@@ -418,13 +418,12 @@ impl BufferedRpcQueryStats {
                         .await;
                 }
             }
-        }
 
-        if premium_before {
+            // Apply all the referral logic; let's keep it simple and flat for now
+
             // Start a transaction
             let txn = db_conn.begin().await?;
 
-            // Apply all the referral logic; let's keep it simple and flat for now
             // Calculate if we are above the usage threshold, and apply a bonus
             // Optimally we would read this from the balance, but if we do it like this, we only have to lock a single table (much safer w.r.t. deadlocks)
             // referral_entity.credits_applied_for_referrer * (Decimal::from(10) checks (atomically using this table only), whether the user has brought in >$100 to the referer
@@ -432,6 +431,7 @@ impl BufferedRpcQueryStats {
             // Apply a 10$ bonus onto the user, if the user has spent 100$
             // TODO: i think we do want a LockType::Update on this
             match referee::Entity::find()
+                .lock(LockType::Update)
                 .filter(referee::Column::UserId.eq(sender_user_id))
                 .find_also_related(referrer::Entity)
                 .one(&txn)
@@ -457,6 +457,8 @@ impl BufferedRpcQueryStats {
 
                         let mut referral_entity = referral_entity.into_active_model();
 
+                        let mut invalidate_sender_balance_cache = false;
+
                         // Provide one-time bonus to user, if more than 100$ was spent,
                         // and if the one-time bonus was not already provided
                         // TODO: make sure that if we change the bonus from 10%, we also change this multiplication of 10!
@@ -474,9 +476,8 @@ impl BufferedRpcQueryStats {
                             referral_entity.one_time_bonus_applied_for_referee =
                                 sea_orm::Set(bonus_for_user);
 
-                            // Update the cache
-                            // TODO: race condition here?
-                            user_balance.one_time_referee_bonus += bonus_for_user;
+                            // writing here with `+= 100` has a race unless we lock outside of the mysql query. and thats just too slow
+                            invalidate_sender_balance_cache = true;
                         }
 
                         let now = Utc::now();
@@ -501,6 +502,10 @@ impl BufferedRpcQueryStats {
 
                         // The resulting field will not be read again, so I will not try to turn the ActiveModel into a Model one
                         referral_entity.save(&txn).await?;
+
+                        if invalidate_sender_balance_cache {
+                            user_balance_cache.invalidate(&sender_user_id).await;
+                        }
                     }
                 }
                 Some((referee, None)) => {
