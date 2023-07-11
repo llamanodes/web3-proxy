@@ -164,19 +164,30 @@ impl ComputeUnit {
         usd_per_cu: &Decimal,
     ) -> Decimal {
         if error_response {
+            trace!("error responses are free");
             return 0.into();
         }
 
         let mut cost = self.0 * usd_per_cu;
 
+        trace!(x=%cost, "base cost");
+
         if archive_request {
+            // TODO: get from config
             cost *= Decimal::from_str("2.5").unwrap();
+
+            trace!(x=%cost, "archive_request cost");
         }
 
-        // cache hits get a 25% discount
         if cache_hit {
-            cost *= Decimal::from_str("0.75").unwrap()
+            // cache hits get a 25% discount
+            // TODO: get from config
+            cost *= Decimal::from_str("0.75").unwrap();
+
+            trace!(x=%cost, "cache_hit cost");
         }
+
+        trace!(x=%cost, "final cost");
 
         cost
     }
