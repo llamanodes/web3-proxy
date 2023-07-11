@@ -60,6 +60,7 @@ pub async fn user_get_first_rpc_key(
     rpc_key.user_rpc_keys.into_iter().next().unwrap().1
 }
 
+#[allow(unused)]
 pub async fn user_get_provider(
     x: &TestApp,
     r: &reqwest::Client,

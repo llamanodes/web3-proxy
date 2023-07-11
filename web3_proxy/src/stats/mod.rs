@@ -628,13 +628,15 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
 
         let cu = ComputeUnit::new(&metadata.method, metadata.chain_id, response_bytes);
 
-        // TODO: get from config? a helper function? how should we pick this?
+        // TODO: get from config? a helper function? how should we pick this? we should also store it when the app is created
         let usd_per_cu = match metadata.chain_id {
             #[cfg(test)]
             999_001_999 => Decimal::from_str("0.10"),
             137 => Decimal::from_str("0.000000533333333333333"),
             _ => Decimal::from_str("0.000000400000000000000"),
         }?;
+
+        trace!(%usd_per_cu);
 
         let cache_hit = !backend_rpcs_used.is_empty();
 

@@ -8,12 +8,14 @@
 
 use migration::sea_orm::prelude::Decimal;
 use std::str::FromStr;
-use tracing::warn;
+use tracing::{instrument, trace, warn};
 
+#[derive(Debug)]
 pub struct ComputeUnit(Decimal);
 
 impl ComputeUnit {
     /// costs can vary widely depending on method and chain
+    #[instrument(level = "trace")]
     pub fn new(method: &str, chain_id: u64, response_bytes: u64) -> Self {
         // TODO: this works, but this is fragile. think of a better way to check the method is a subscription
         if method.ends_with(')') {
@@ -123,11 +125,14 @@ impl ComputeUnit {
 
         let cu = Decimal::from(cu);
 
+        trace!(%cu);
+
         Self(cu)
     }
 
     /// notifications and subscription responses cost per-byte
-    pub fn subscription_response<D: Into<Decimal>>(num_bytes: D) -> Self {
+    #[instrument(level = "trace")]
+    pub fn subscription_response<D: Into<Decimal> + std::fmt::Debug>(num_bytes: D) -> Self {
         let cu = num_bytes.into() * Decimal::new(4, 2);
 
         Self(cu)
@@ -141,6 +146,7 @@ impl ComputeUnit {
     /// Compute cost per request
     /// All methods cost the same
     /// The number of bytes are based on input, and output bytes
+    #[instrument(level = "trace")]
     pub fn cost(
         &self,
         archive_request: bool,
