@@ -1,5 +1,4 @@
 mod common;
-use web3_proxy::{balance::Balance, rpcs::blockchain::ArcBlock};
 
 use crate::common::{
     admin_increases_balance::admin_increase_balance, create_admin::create_user_as_admin,
@@ -7,6 +6,7 @@ use crate::common::{
 };
 use migration::sea_orm::prelude::Decimal;
 use std::time::Duration;
+use web3_proxy::{balance::Balance, rpcs::blockchain::ArcBlock};
 
 #[test_log::test(tokio::test)]
 async fn test_sum_credits_used() {

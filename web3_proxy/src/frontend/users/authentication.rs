@@ -263,7 +263,7 @@ pub async fn user_login_post(
     let db_replica = app.db_replica()?;
 
     let user_pending_login = pending_login::Entity::find()
-        .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce.clone())))
+        .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce)))
         .one(db_replica.as_ref())
         .await
         .web3_context("database error while finding pending_login")?
@@ -321,7 +321,7 @@ pub async fn user_login_post(
             trace!(?payload.referral_code);
             if let Some(referral_code) = payload.referral_code.as_ref() {
                 // If it is not inside, also check in the database
-                trace!("Using register referral code:  {:?}", referral_code);
+                trace!("Using register referral code: {:?}", referral_code);
                 let user_referrer = referrer::Entity::find()
                     .filter(referrer::Column::ReferralCode.eq(referral_code))
                     .one(&txn)
@@ -399,8 +399,8 @@ pub async fn user_login_post(
 
     let user_login = login::ActiveModel {
         id: sea_orm::NotSet,
-        bearer_token: sea_orm::Set(user_bearer_token.clone().into()),
-        user_id: sea_orm::Set(caller.id.clone()),
+        bearer_token: sea_orm::Set(user_bearer_token.into()),
+        user_id: sea_orm::Set(caller.id),
         expires_at: sea_orm::Set(expires_at),
         read_only: sea_orm::Set(false),
     };

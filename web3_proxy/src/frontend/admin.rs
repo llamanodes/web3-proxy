@@ -17,8 +17,7 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::{
-    admin, admin_increase_balance_receipt, admin_trail, login, pending_login, rpc_key,
-    user,
+    admin, admin_increase_balance_receipt, admin_trail, login, pending_login, rpc_key, user,
 };
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
@@ -327,7 +326,7 @@ pub async fn admin_imitate_login_post(
     let db_replica = app.db_replica()?;
 
     let user_pending_login = pending_login::Entity::find()
-        .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce.clone())))
+        .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce)))
         .one(db_replica.as_ref())
         .await
         .web3_context("database error while finding pending_login")?
