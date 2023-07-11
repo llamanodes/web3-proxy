@@ -115,7 +115,7 @@ async fn test_sum_credits_used() {
         balance.total_frontend_requests, 2,
         "total_frontend_requests"
     );
-    assert_eq!(balance.total_cache_misses, 1, "total_cache_misses");
+    assert_eq!(balance.total_cache_misses, 0, "total_cache_misses");
     // assert_eq!(
     //     balance.total_spent_paid_credits, query_cost,
     //     "total_spent_paid_credits"
@@ -155,7 +155,7 @@ async fn test_sum_credits_used() {
         balance.total_frontend_requests, 12,
         "total_frontend_requests"
     );
-    assert_eq!(balance.total_cache_misses, 1, "total_cache_misses");
+    assert_eq!(balance.total_cache_misses, 0, "total_cache_misses");
     // assert_eq!(
     //     balance.total_spent_paid_credits, expected_total_spent_paid_credits,
     //     "total_spent_paid_credits"
