@@ -23,6 +23,7 @@ use migration::sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use siwe::{Message, VerificationOpts};
+use std::collections::BTreeMap;
 use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -51,7 +52,7 @@ pub struct PostLogin {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LoginPostResponse {
     pub bearer_token: UserBearerToken,
-    pub rpc_keys: HashMap<u64, rpc_key::Model>,
+    pub rpc_keys: BTreeMap<u64, rpc_key::Model>,
     pub user: user::Model,
 }
 
@@ -420,7 +421,7 @@ pub async fn user_login_post(
         rpc_keys: user_rpc_keys
             .into_iter()
             .map(|user_rpc_key| (user_rpc_key.id, user_rpc_key))
-            .collect::<HashMap<_, _>>(),
+            .collect(),
         bearer_token: user_bearer_token,
         user: caller,
     };

@@ -2,7 +2,7 @@ mod common;
 
 use crate::common::{
     admin_increases_balance::admin_increase_balance, create_admin::create_user_as_admin,
-    create_user::create_user, user_balance::user_get_balance, TestApp,
+    create_user::create_user, rpc_key::user_get_provider, user_balance::user_get_balance, TestApp,
 };
 use migration::sea_orm::prelude::Decimal;
 use std::time::Duration;
@@ -47,8 +47,19 @@ async fn test_sum_credits_used() {
     assert!(!balance.active_premium(), "active_premium");
     assert!(!balance.was_ever_premium(), "was_ever_premium");
 
-    // make one free request of 16 CU
+    // make one free request against the public RPC of 16 CU
     x.proxy_provider
+        .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
+        .await
+        .unwrap();
+
+    // connect to the user's rpc url
+    let user_proxy_provider = user_get_provider(&x, &r, &user_login_response)
+        .await
+        .unwrap();
+
+    // make one free request against the public RPC of 16 CU
+    user_proxy_provider
         .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
         .await
         .unwrap();
@@ -78,15 +89,21 @@ async fn test_sum_credits_used() {
     assert!(balance.active_premium());
     assert!(balance.was_ever_premium());
 
-    // make one rpc request of 16 CU
+    // make one public rpc request of 16 CU
     x.proxy_provider
+        .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
+        .await
+        .unwrap();
+
+    // make one authenticated rpc request of 16 CU
+    user_proxy_provider
         .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
         .await
         .unwrap();
 
     // flush stats
     let flushed = x.flush_stats().await.unwrap();
-    assert_eq!(flushed.relational, 1);
+    assert_eq!(flushed.relational, 2);
 
     // check balance
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
@@ -104,7 +121,7 @@ async fn test_sum_credits_used() {
 
     // make ten rpc request of 16 CU
     for _ in 0..10 {
-        x.proxy_provider
+        user_proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
             .unwrap();
