@@ -28,7 +28,7 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::{watch, RwLock as AsyncRwLock};
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
-use tracing::{debug, info, trace, warn, Level};
+use tracing::{debug, error, info, trace, warn, Level};
 use url::Url;
 
 /// An active connection to a Web3 RPC server like geth or erigon.
@@ -723,7 +723,11 @@ impl Web3Rpc {
                         if let Err(err) = rpc.healthcheck(error_handler).await {
                             // TODO: different level depending on the error handler
                             // TODO: if rate limit error, set "retry_at"
-                            warn!(?err, "health check on {} failed", rpc);
+                            if rpc.backup {
+                                warn!(?err, "health check on {} failed", rpc);
+                            } else {
+                                error!(?err, "health check on {} failed", rpc);
+                            }
                         }
                     }
 

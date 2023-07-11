@@ -686,7 +686,7 @@ impl ConsensusFinder {
 
                 if let Some(max_age) = self.max_head_block_age {
                     if rpc_head_block.age() > max_age {
-                        trace!("rpc_head_block from {} is too old! {}", rpc, rpc_head_block);
+                        warn!("rpc_head_block from {} is too old! {}", rpc, rpc_head_block);
                         return Ok(self.remove(&rpc).is_some());
                     }
                 }
