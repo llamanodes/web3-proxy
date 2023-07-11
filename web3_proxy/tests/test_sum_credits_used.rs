@@ -79,7 +79,6 @@ async fn test_sum_credits_used() {
 
     // check balance
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
-    info!(?balance, "after 1 free request and being given $1000");
     assert_eq!(
         balance.total_frontend_requests, 1,
         "total_frontend_requests"
@@ -150,7 +149,7 @@ async fn test_sum_credits_used() {
     // check balance
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
 
-    // the first request was on the free tier
+    // the first of our 12 total requests request was on the free tier
     let expected_total_spent_paid_credits = Decimal::from(11) * cached_query_cost;
 
     assert_eq!(
