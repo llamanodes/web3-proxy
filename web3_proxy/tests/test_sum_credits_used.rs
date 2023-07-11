@@ -82,9 +82,9 @@ async fn test_sum_credits_used() {
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
     info!(?balance, "after 1 free request and being given $1000");
     assert_eq!(balance.total_frontend_requests, 1);
-    assert_eq!(balance.total_cache_misses, 1);
+    assert_eq!(balance.total_cache_misses, 0);
     assert_eq!(balance.total_spent_paid_credits, 0.into());
-    assert_eq!(balance.total_spent, query_cost); // TODO: what should this actually be?
+    assert_eq!(balance.total_spent, cached_query_cost);
     assert_eq!(balance.remaining(), 1000.into());
     assert!(balance.active_premium());
     assert!(balance.was_ever_premium());
