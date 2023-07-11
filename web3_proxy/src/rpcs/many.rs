@@ -931,7 +931,11 @@ impl Web3Rpcs {
                                         // this error contains "limit" but is not a rate limit error
                                         // TODO: make the expected limit configurable
                                         // TODO: parse the rate_limit_substr and only continue if it is < expected limit
-                                        if error_msg.contains("exceeding limit 2000000") {
+                                        if error_msg.contains("exceeding limit 2000000")
+                                            || error_msg.endswith(
+                                                "exceeding --rpc.returndata.limit 2000000",
+                                            )
+                                        {
                                             // they hit our expected limit. return the error now
                                             return Err(error.into());
                                         } else {
