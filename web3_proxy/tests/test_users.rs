@@ -158,7 +158,7 @@ async fn test_user_balance_decreases() {
     let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
 
     // Make some requests while in the free tier, so we can test bookkeeping here
-    for _ in 1..10_000 {
+    for _ in 1..=10_000 {
         let _ = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
@@ -196,7 +196,7 @@ async fn test_user_balance_decreases() {
     let user_balance_pre = user_balance_response.remaining();
     assert_eq!(user_balance_pre, Decimal::from(20));
 
-    for _ in 1..10_000 {
+    for _ in 1..=10_000 {
         let _ = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
@@ -323,7 +323,7 @@ async fn test_referral_bonus_non_concurrent() {
     let proxy_endpoint = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
     let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
 
-    for _ in 1..20_000 {
+    for _ in 1..=20_000 {
         let _proxy_result = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await

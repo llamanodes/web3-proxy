@@ -3,7 +3,7 @@ use crate::config::TopConfig;
 use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::StatBuffer;
-use anyhow::{Context};
+use anyhow::Context;
 use argh::FromArgs;
 use entities::{rpc_accounting, rpc_key};
 use futures::stream::FuturesUnordered;
