@@ -95,7 +95,11 @@ impl PopularityContestSubCommand {
 
             highest_block = highest_block.max(head_block);
 
-            let head_delay_ms = conn.get("head_delay_ms").unwrap().as_f64().unwrap();
+            // TODO: this was moved to an async lock and so serialize can't fetch it
+            let head_delay_ms = conn
+                .get("head_delay_ms")
+                .and_then(|x| x.as_f64())
+                .unwrap_or_default();
 
             let peak_latency_ms = conn
                 .get("peak_latency_ms")
