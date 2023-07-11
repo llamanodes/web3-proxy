@@ -179,6 +179,7 @@ impl Web3ProxyApp {
         top_config: TopConfig,
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
+        flush_stat_buffer_sender: flume::Sender<oneshot::Sender<(usize, usize)>>,
         flush_stat_buffer_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         let stat_buffer_shutdown_receiver = shutdown_sender.subscribe();
@@ -390,6 +391,7 @@ impl Web3ProxyApp {
             Some(user_balance_cache.clone()),
             stat_buffer_shutdown_receiver,
             1,
+            flush_stat_buffer_sender.clone(),
             flush_stat_buffer_receiver,
         )? {
             // since the database entries are used for accounting, we want to be sure everything is saved before exiting

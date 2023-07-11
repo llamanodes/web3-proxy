@@ -14,7 +14,7 @@ use std::{fs, thread};
 use tokio::select;
 use tokio::sync::{broadcast, oneshot};
 use tokio::time::{sleep_until, Instant};
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// start the main proxy daemon
 #[derive(FromArgs, PartialEq, Debug, Eq)]
@@ -42,7 +42,7 @@ impl ProxydSubCommand {
 
         let frontend_port = Arc::new(self.port.into());
         let prometheus_port = Arc::new(self.prometheus_port.into());
-        let (_flush_stat_buffer_sender, flush_stat_buffer_receiver) = flume::bounded(1);
+        let (flush_stat_buffer_sender, flush_stat_buffer_receiver) = flume::bounded(8);
 
         Self::_main(
             top_config,
@@ -51,12 +51,14 @@ impl ProxydSubCommand {
             prometheus_port,
             num_workers,
             frontend_shutdown_sender,
+            flush_stat_buffer_sender,
             flush_stat_buffer_receiver,
         )
         .await
     }
 
     /// this shouldn't really be pub except it makes test fixtures easier
+    #[allow(clippy::too_many_arguments)]
     pub async fn _main(
         top_config: TopConfig,
         top_config_path: Option<PathBuf>,
@@ -64,6 +66,7 @@ impl ProxydSubCommand {
         prometheus_port: Arc<AtomicU16>,
         num_workers: usize,
         frontend_shutdown_sender: broadcast::Sender<()>,
+        flush_stat_buffer_sender: flume::Sender<oneshot::Sender<(usize, usize)>>,
         flush_stat_buffer_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
     ) -> anyhow::Result<()> {
         // tokio has code for catching ctrl+c so we use that to shut down in most cases
@@ -85,6 +88,7 @@ impl ProxydSubCommand {
             top_config.clone(),
             num_workers,
             app_shutdown_sender.clone(),
+            flush_stat_buffer_sender,
             flush_stat_buffer_receiver,
         )
         .await?;
@@ -102,6 +106,9 @@ impl ProxydSubCommand {
                         Ok(new_top_config) => match toml::from_str::<TopConfig>(&new_top_config) {
                             Ok(new_top_config) => {
                                 if new_top_config != current_config {
+                                    trace!("current_config: {:#?}", current_config);
+                                    trace!("new_top_config: {:#?}", new_top_config);
+
                                     // TODO: print the differences
                                     // TODO: first run seems to always see differences. why?
                                     info!("config @ {:?} changed", top_config_path);

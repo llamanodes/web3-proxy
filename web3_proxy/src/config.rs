@@ -279,6 +279,7 @@ impl Web3RpcConfig {
         http_client: Option<reqwest::Client>,
         blocks_by_hash_cache: BlocksByHashCache,
         block_sender: Option<flume::Sender<BlockAndRpc>>,
+        max_head_block_age: Duration,
         tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         if !self.extra.is_empty() {
@@ -295,6 +296,7 @@ impl Web3RpcConfig {
             block_interval,
             blocks_by_hash_cache,
             block_sender,
+            max_head_block_age,
             tx_id_sender,
         )
         .await

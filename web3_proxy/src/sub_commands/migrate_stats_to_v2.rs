@@ -72,7 +72,7 @@ impl MigrateStatsToV2SubCommand {
             None => None,
         };
 
-        let (_flush_sender, flush_receiver) = flume::bounded(1);
+        let (flush_sender, flush_receiver) = flume::bounded(1);
 
         // Spawn the stat-sender
         let emitter_spawn = StatBuffer::try_spawn(
@@ -86,6 +86,7 @@ impl MigrateStatsToV2SubCommand {
             None,
             rpc_account_shutdown_recevier,
             1,
+            flush_sender,
             flush_receiver,
         )
         .context("Error spawning stat buffer")?

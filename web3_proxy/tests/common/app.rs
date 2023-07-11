@@ -290,6 +290,7 @@ impl TestApp {
                 prometheus_port_arc,
                 num_workers,
                 shutdown_sender.clone(),
+                flush_stat_buffer_sender.clone(),
                 flush_stat_buffer_receiver,
             ))
         };

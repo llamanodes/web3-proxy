@@ -71,6 +71,8 @@ pub struct Web3Rpc {
     pub(super) internal_requests: AtomicUsize,
     /// Track total external requests served
     pub(super) external_requests: AtomicUsize,
+    /// If the head block is too old, it is ignored.
+    pub(super) max_head_block_age: Duration,
     /// Track time used by external requests served
     /// request_ms_histogram is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) median_latency: Option<RollingQuantileLatency>,
@@ -97,6 +99,7 @@ impl Web3Rpc {
         block_interval: Duration,
         block_map: BlocksByHashCache,
         block_and_rpc_sender: Option<flume::Sender<BlockAndRpc>>,
+        max_head_block_age: Duration,
         tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         let created_at = Instant::now();
@@ -193,6 +196,7 @@ impl Web3Rpc {
             hard_limit_until: Some(hard_limit_until),
             head_block: Some(head_block),
             http_provider,
+            max_head_block_age,
             name,
             peak_latency: Some(peak_latency),
             median_latency: Some(median_request_latency),
@@ -544,9 +548,12 @@ impl Web3Rpc {
         let head_block = self.head_block.as_ref().unwrap().borrow().clone();
 
         if let Some(head_block) = head_block {
-            let head_block = head_block.block;
-
             // TODO: if head block is very old and not expected to be syncing, emit warning
+            if head_block.age() > self.max_head_block_age {
+                return Err(anyhow::anyhow!("head_block is too old!").into());
+            }
+
+            let head_block = head_block.block;
 
             let block_number = head_block.number.context("no block number")?;
 

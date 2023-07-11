@@ -49,9 +49,11 @@ pub struct StatBuffer {
     influxdb_client: Option<influxdb2::Client>,
     opt_in_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     rpc_secret_key_cache: RpcSecretKeyCache,
-    user_balance_cache: UserBalanceCache,
     timestamp_precision: TimestampPrecision,
     tsdb_save_interval_seconds: u32,
+    user_balance_cache: UserBalanceCache,
+
+    _flush_sender: flume::Sender<oneshot::Sender<(usize, usize)>>,
 }
 
 impl StatBuffer {
@@ -67,6 +69,7 @@ impl StatBuffer {
         user_balance_cache: Option<UserBalanceCache>,
         shutdown_receiver: broadcast::Receiver<()>,
         tsdb_save_interval_seconds: u32,
+        flush_sender: flume::Sender<oneshot::Sender<(usize, usize)>>,
         flush_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
     ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
         if influxdb_bucket.is_none() {
@@ -92,9 +95,10 @@ impl StatBuffer {
             influxdb_client,
             opt_in_timeseries_buffer: Default::default(),
             rpc_secret_key_cache: rpc_secret_key_cache.unwrap(),
-            user_balance_cache: user_balance_cache.unwrap(),
             timestamp_precision,
             tsdb_save_interval_seconds,
+            user_balance_cache: user_balance_cache.unwrap(),
+            _flush_sender: flush_sender,
         };
 
         // any errors inside this task will cause the application to exit

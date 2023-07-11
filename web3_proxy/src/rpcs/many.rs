@@ -221,6 +221,7 @@ impl Web3Rpcs {
                     http_client,
                     blocks_by_hash_cache,
                     block_sender,
+                    self.max_head_block_age,
                     pending_tx_id_sender,
                 ));
 
