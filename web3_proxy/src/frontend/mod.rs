@@ -316,7 +316,10 @@ pub async fn serve(
     //     router.into_make_service()
     // };
 
-    let server = server_builder.serve(make_service);
+    // TODO: get settings from app config
+    let server = server_builder
+        .http2_keep_alive_timeout(Duration::from_secs(70))
+        .serve(make_service);
 
     let port = server.local_addr().port();
     info!("listening on port {}", port);
