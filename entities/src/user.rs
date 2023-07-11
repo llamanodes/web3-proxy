@@ -10,7 +10,10 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: u64,
     #[sea_orm(column_type = "Binary(BlobSize::Blob(Some(20)))", unique)]
-    #[serde(serialize_with = "serialization::vec_as_address")]
+    #[serde(
+        serialize_with = "serialization::vec_as_address",
+        deserialize_with = "serialization::address_to_vec"
+    )]
     pub address: Vec<u8>,
     pub description: Option<String>,
     pub email: Option<String>,

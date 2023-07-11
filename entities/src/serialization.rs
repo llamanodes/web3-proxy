@@ -19,6 +19,12 @@ where
     x.serialize(s)
 }
 
+pub fn address_to_vec<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+    let address = Address::deserialize(deserializer)?;
+
+    Ok(address.to_fixed_bytes().into())
+}
+
 pub fn uuid_as_ulid<S>(x: &Uuid, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
