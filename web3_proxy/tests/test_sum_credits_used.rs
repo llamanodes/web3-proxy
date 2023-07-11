@@ -117,20 +117,20 @@ async fn test_sum_credits_used() {
         "total_frontend_requests"
     );
     assert_eq!(balance.total_cache_misses, 0, "total_cache_misses");
-    // assert_eq!(
-    //     balance.total_spent_paid_credits, query_cost,
-    //     "total_spent_paid_credits"
-    // );
-    // assert_eq!(
-    //     balance.total_spent,
-    //     query_cost + cached_query_cost,
-    //     "total_spent"
-    // );
-    // assert_eq!(
-    //     balance.remaining(),
-    //     Decimal::from(1000) - query_cost - cached_query_cost,
-    //     "remaining"
-    // );
+    assert_eq!(
+        balance.total_spent_paid_credits, query_cost,
+        "total_spent_paid_credits"
+    );
+    assert_eq!(
+        balance.total_spent,
+        query_cost + cached_query_cost,
+        "total_spent"
+    );
+    assert_eq!(
+        balance.remaining(),
+        Decimal::from(1000) - query_cost - cached_query_cost,
+        "remaining"
+    );
     assert!(balance.active_premium(), "active_premium");
     assert!(balance.was_ever_premium(), "was_ever_premium");
 
@@ -158,19 +158,19 @@ async fn test_sum_credits_used() {
         "total_frontend_requests"
     );
     assert_eq!(balance.total_cache_misses, 0, "total_cache_misses");
-    // assert_eq!(
-    //     balance.total_spent_paid_credits, expected_total_spent_paid_credits,
-    //     "total_spent_paid_credits"
-    // );
-    // assert_eq!(
-    //     balance.total_spent,
-    //     expected_total_spent_paid_credits + cached_query_cost,
-    //     "total_spent"
-    // );
-    // assert_eq!(
-    //     balance.remaining(),
-    //     Decimal::from(1000) - expected_total_spent_paid_credits
-    // );
+    assert_eq!(
+        balance.total_spent_paid_credits, expected_total_spent_paid_credits,
+        "total_spent_paid_credits"
+    );
+    assert_eq!(
+        balance.total_spent,
+        expected_total_spent_paid_credits + cached_query_cost,
+        "total_spent"
+    );
+    assert_eq!(
+        balance.remaining(),
+        Decimal::from(1000) - expected_total_spent_paid_credits
+    );
     assert!(balance.active_premium(), "active_premium");
     assert!(balance.was_ever_premium(), "was_ever_premium");
 
