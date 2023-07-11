@@ -163,7 +163,7 @@ impl Balance {
                 .inner_join(rpc_key::Entity)
                 // .filter(rpc_key::Column::Id.eq(rpc_accounting_v2::Column::RpcKeyId))  // TODO: i think the inner_join function handles this
                 .filter(rpc_key::Column::UserId.eq(user_id))
-                .into_tuple()
+                .into_tuple::<(Decimal, Decimal, Decimal, Decimal)>()
                 .one(db_conn)
                 .await
                 .web3_context("fetching total_spent_paid_credits and total_spent")?
@@ -198,6 +198,9 @@ impl Balance {
             .await
             .web3_context("fetching referal bonus")?
             .unwrap_or_default();
+
+        let total_cache_misses: u64 = total_cache_misses.try_into()?;
+        let total_frontend_requests: u64 = total_frontend_requests.try_into()?;
 
         let balance = Self {
             admin_deposits,

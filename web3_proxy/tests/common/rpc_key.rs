@@ -47,7 +47,7 @@ pub async fn user_get_first_rpc_key(
     let rpc_key_response = rpc_key_response.json::<serde_json::Value>().await.unwrap();
     info!(?rpc_key_response);
 
-    info!("Rpc Key");
+    info!("Parsing rpc key as json");
     let rpc_key: RpcKeyResponse = serde_json::from_value(rpc_key_response).unwrap();
     info!(?rpc_key);
 
