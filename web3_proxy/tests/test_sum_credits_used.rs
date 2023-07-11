@@ -72,7 +72,7 @@ async fn test_sum_credits_used() {
 
     // flush stats
     let flushed = x.flush_stats().await.unwrap();
-    assert_eq!(flushed.relational, 1);
+    assert_eq!(flushed.relational, 2);
     assert_eq!(flushed.timeseries, 0);
 
     // Give user wallet $1000
