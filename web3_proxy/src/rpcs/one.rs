@@ -12,7 +12,7 @@ use anyhow::{anyhow, Context};
 use arc_swap::ArcSwapOption;
 use ethers::prelude::{Bytes, Middleware, TxHash, U64};
 use ethers::types::{Address, Transaction, U256};
-use futures::stream::FuturesUnordered;
+use futures::future::try_join_all;
 use futures::StreamExt;
 use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
 use migration::sea_orm::DatabaseConnection;
@@ -672,7 +672,7 @@ impl Web3Rpc {
             .await
             .web3_context("failed check_provider")?;
 
-        let mut futures = FuturesUnordered::new();
+        let mut futures = vec![];
 
         // TODO: use this channel instead of self.disconnect_watch
         let (subscribe_stop_tx, subscribe_stop_rx) = watch::channel(false);
@@ -745,13 +745,25 @@ impl Web3Rpc {
         if let Some(block_and_rpc_sender) = block_and_rpc_sender.clone() {
             let clone = self.clone();
             let subscribe_stop_rx = subscribe_stop_tx.subscribe();
-            let block_map = block_map.clone();
 
             let f = async move {
+                let x = clone
+                    .subscribe_new_heads(
+                        block_and_rpc_sender.clone(),
+                        block_map.clone(),
+                        subscribe_stop_rx,
+                    )
+                    .await;
+
+                // error or success, we clear the block when subscribe_new_heads exits
                 clone
-                    .subscribe_new_heads(block_and_rpc_sender.clone(), block_map, subscribe_stop_rx)
-                    .await
+                    .send_head_block_result(Ok(None), &block_and_rpc_sender, &block_map)
+                    .await?;
+
+                x
             };
+
+            // TODO: if
 
             futures.push(flatten_handle(tokio::spawn(f)));
         }
@@ -768,16 +780,12 @@ impl Web3Rpc {
             futures.push(flatten_handle(tokio::spawn(f)));
         }
 
-        // exit if any of the futures exit
-        let first_exit = futures.next().await;
+        // try_join on the futures
+        if let Err(err) = try_join_all(futures).await {
+            warn!(?err, "subscription erred");
+        }
 
-        debug!(?first_exit, "subscriptions on {} exited", self);
-
-        // clear the head block
-        if let Some(block_and_rpc_sender) = block_and_rpc_sender {
-            self.send_head_block_result(Ok(None), &block_and_rpc_sender, &block_map)
-                .await?
-        };
+        debug!("subscriptions on {} exited", self);
 
         subscribe_stop_tx.send_replace(true);
 
@@ -848,7 +856,7 @@ impl Web3Rpc {
 
             loop {
                 if *subscribe_stop_rx.borrow() {
-                    trace!(%self, "stopping http block subscription");
+                    trace!("stopping http block subscription on {}", self);
                     break;
                 }
 
@@ -877,7 +885,7 @@ impl Web3Rpc {
             .await?;
 
         if *subscribe_stop_rx.borrow() {
-            debug!(%self, "new heads subscription exited");
+            debug!("new heads subscription exited");
             Ok(())
         } else {
             Err(anyhow!("new_heads subscription exited. reconnect needed").into())

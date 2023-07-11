@@ -184,8 +184,6 @@ impl Web3Rpcs {
 
         let block_interval = average_block_interval(chain_id);
 
-        let mut names_to_keep = vec![];
-
         // turn configs into connections (in parallel)
         let mut spawn_handles: FuturesUnordered<_> = rpc_configs
             .into_iter()
@@ -209,8 +207,6 @@ impl Web3Rpcs {
                 let blocks_by_hash_cache = self.blocks_by_hash.clone();
 
                 debug!("spawning tasks for {}", server_name);
-
-                names_to_keep.push(server_name.clone());
 
                 let handle = tokio::spawn(server_config.spawn(
                     server_name,
@@ -259,7 +255,7 @@ impl Web3Rpcs {
 
                         // tell the old rpc to disconnect
                         if let Some(ref disconnect_sender) = old_rpc.disconnect_watch {
-                            debug!("telling old {} to disconnect", old_rpc);
+                            trace!("telling {} to disconnect", old_rpc);
                             disconnect_sender.send_replace(true);
                         }
                     } else {
@@ -275,20 +271,6 @@ impl Web3Rpcs {
                 Err(err) => {
                     // something actually bad happened. exit with an error
                     return Err(err.into());
-                }
-            }
-        }
-
-        // TODO: remove any RPCs that were part of the config, but are now removed
-        let active_names: Vec<_> = self.by_name.read().keys().cloned().collect();
-        for name in active_names {
-            if names_to_keep.contains(&name) {
-                continue;
-            }
-            if let Some(old_rpc) = self.by_name.write().remove(&name) {
-                if let Some(ref disconnect_sender) = old_rpc.disconnect_watch {
-                    debug!("telling {} to disconnect. no longer needed", old_rpc);
-                    disconnect_sender.send_replace(true);
                 }
             }
         }
