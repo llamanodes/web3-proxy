@@ -3,6 +3,7 @@ use std::sync::Arc;
 use portable_atomic::{AtomicF32, Ordering};
 use serde::ser::Serializer;
 use serde::Serialize;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use watermill::quantile::RollingQuantile;
@@ -12,7 +13,7 @@ pub struct RollingQuantileLatency {
     /// Join handle for the latency calculation task.
     pub join_handle: JoinHandle<()>,
     /// Send to update with each request duration.
-    latency_tx: flume::Sender<f32>,
+    latency_tx: mpsc::Sender<f32>,
     /// rolling quantile latency in seconds. Updated async.
     seconds: Arc<AtomicF32>,
 }
@@ -20,7 +21,7 @@ pub struct RollingQuantileLatency {
 /// Task to be spawned per-RollingMedianLatency for calculating the value
 struct RollingQuantileLatencyTask {
     /// Receive to update each request duration
-    latency_rx: flume::Receiver<f32>,
+    latency_rx: mpsc::Receiver<f32>,
     /// Current estimate and update time
     seconds: Arc<AtomicF32>,
     /// quantile value.
@@ -29,7 +30,7 @@ struct RollingQuantileLatencyTask {
 
 impl RollingQuantileLatencyTask {
     fn new(
-        latency_rx: flume::Receiver<f32>,
+        latency_rx: mpsc::Receiver<f32>,
         seconds: Arc<AtomicF32>,
         q: f32,
         window_size: usize,
@@ -45,7 +46,7 @@ impl RollingQuantileLatencyTask {
 
     /// Run the loop for updating latency.
     async fn run(mut self) {
-        while let Ok(rtt) = self.latency_rx.recv_async().await {
+        while let Some(rtt) = self.latency_rx.recv().await {
             self.update(rtt);
         }
     }
@@ -88,7 +89,7 @@ impl RollingQuantileLatency {
 impl RollingQuantileLatency {
     pub async fn spawn(quantile_value: f32, window_size: usize) -> Self {
         // TODO: how should queue size and window size be related?
-        let (latency_tx, latency_rx) = flume::bounded(window_size);
+        let (latency_tx, latency_rx) = mpsc::channel(window_size);
 
         let seconds = Arc::new(AtomicF32::new(0.0));
 

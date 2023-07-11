@@ -12,9 +12,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
 use tokio::select;
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{sleep_until, Instant};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{error, info, trace, warn};
 
 /// start the main proxy daemon
 #[derive(FromArgs, PartialEq, Debug, Eq)]
@@ -42,7 +42,7 @@ impl ProxydSubCommand {
 
         let frontend_port = Arc::new(self.port.into());
         let prometheus_port = Arc::new(self.prometheus_port.into());
-        let (flush_stat_buffer_sender, flush_stat_buffer_receiver) = flume::bounded(8);
+        let (flush_stat_buffer_sender, flush_stat_buffer_receiver) = mpsc::channel(8);
 
         Self::_main(
             top_config,
@@ -66,8 +66,8 @@ impl ProxydSubCommand {
         prometheus_port: Arc<AtomicU16>,
         num_workers: usize,
         frontend_shutdown_sender: broadcast::Sender<()>,
-        flush_stat_buffer_sender: flume::Sender<oneshot::Sender<(usize, usize)>>,
-        flush_stat_buffer_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
+        flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
+        flush_stat_buffer_receiver: mpsc::Receiver<oneshot::Sender<(usize, usize)>>,
     ) -> anyhow::Result<()> {
         // tokio has code for catching ctrl+c so we use that to shut down in most cases
         // frontend_shutdown_sender is currently only used in tests, but we might make a /shutdown endpoint or something

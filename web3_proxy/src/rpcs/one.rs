@@ -26,7 +26,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
-use tokio::sync::{watch, RwLock as AsyncRwLock};
+use tokio::sync::{mpsc, watch, RwLock as AsyncRwLock};
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{debug, error, info, trace, warn, Level};
 use url::Url;
@@ -98,9 +98,9 @@ impl Web3Rpc {
         redis_pool: Option<RedisPool>,
         block_interval: Duration,
         block_map: BlocksByHashCache,
-        block_and_rpc_sender: Option<flume::Sender<BlockAndRpc>>,
+        block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
         max_head_block_age: Duration,
-        tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
+        tx_id_sender: Option<mpsc::UnboundedSender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         let created_at = Instant::now();
 
@@ -465,7 +465,7 @@ impl Web3Rpc {
     pub(crate) async fn send_head_block_result(
         self: &Arc<Self>,
         new_head_block: Web3ProxyResult<Option<ArcBlock>>,
-        block_and_rpc_sender: &flume::Sender<BlockAndRpc>,
+        block_and_rpc_sender: &mpsc::UnboundedSender<BlockAndRpc>,
         block_map: &BlocksByHashCache,
     ) -> Web3ProxyResult<()> {
         let head_block_sender = self.head_block.as_ref().unwrap();
@@ -530,8 +530,7 @@ impl Web3Rpc {
 
         // tell web3rpcs about this rpc having this block
         block_and_rpc_sender
-            .send_async((new_head_block, self.clone()))
-            .await
+            .send((new_head_block, self.clone()))
             .context("block_and_rpc_sender failed sending")?;
 
         Ok(())
@@ -601,9 +600,9 @@ impl Web3Rpc {
     async fn subscribe_with_reconnect(
         self: Arc<Self>,
         block_map: BlocksByHashCache,
-        block_and_rpc_sender: Option<flume::Sender<BlockAndRpc>>,
+        block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
         chain_id: u64,
-        tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
+        tx_id_sender: Option<mpsc::UnboundedSender<(TxHash, Arc<Self>)>>,
     ) -> Web3ProxyResult<()> {
         loop {
             if let Err(err) = self
@@ -644,9 +643,9 @@ impl Web3Rpc {
     async fn subscribe(
         self: Arc<Self>,
         block_map: BlocksByHashCache,
-        block_and_rpc_sender: Option<flume::Sender<BlockAndRpc>>,
+        block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
         chain_id: u64,
-        tx_id_sender: Option<flume::Sender<(TxHash, Arc<Self>)>>,
+        tx_id_sender: Option<mpsc::UnboundedSender<(TxHash, Arc<Self>)>>,
     ) -> Web3ProxyResult<()> {
         let error_handler = if self.backup {
             Some(RequestErrorHandler::DebugLevel)
@@ -803,7 +802,7 @@ impl Web3Rpc {
     /// Subscribe to new blocks.
     async fn subscribe_new_heads(
         self: &Arc<Self>,
-        block_sender: flume::Sender<BlockAndRpc>,
+        block_sender: mpsc::UnboundedSender<BlockAndRpc>,
         block_map: BlocksByHashCache,
         subscribe_stop_rx: watch::Receiver<bool>,
     ) -> Web3ProxyResult<()> {
@@ -898,7 +897,7 @@ impl Web3Rpc {
     /// Turn on the firehose of pending transactions
     async fn subscribe_pending_transactions(
         self: Arc<Self>,
-        tx_id_sender: flume::Sender<(TxHash, Arc<Self>)>,
+        tx_id_sender: mpsc::UnboundedSender<(TxHash, Arc<Self>)>,
         mut subscribe_stop_rx: watch::Receiver<bool>,
     ) -> Web3ProxyResult<()> {
         // TODO: check that it actually changed to true

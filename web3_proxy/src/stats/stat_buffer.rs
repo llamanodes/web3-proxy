@@ -10,7 +10,7 @@ use influxdb2::api::write::TimestampPrecision;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{interval, sleep};
 use tracing::{error, info, trace};
 
@@ -33,7 +33,7 @@ pub struct BufferedRpcQueryStats {
 
 #[derive(From)]
 pub struct SpawnedStatBuffer {
-    pub stat_sender: flume::Sender<AppStat>,
+    pub stat_sender: mpsc::UnboundedSender<AppStat>,
     /// these handles are important and must be allowed to finish
     pub background_handle: Web3ProxyJoinHandle<()>,
 }
@@ -53,7 +53,7 @@ pub struct StatBuffer {
     tsdb_save_interval_seconds: u32,
     user_balance_cache: UserBalanceCache,
 
-    _flush_sender: flume::Sender<oneshot::Sender<(usize, usize)>>,
+    _flush_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
 }
 
 impl StatBuffer {
@@ -69,8 +69,8 @@ impl StatBuffer {
         user_balance_cache: Option<UserBalanceCache>,
         shutdown_receiver: broadcast::Receiver<()>,
         tsdb_save_interval_seconds: u32,
-        flush_sender: flume::Sender<oneshot::Sender<(usize, usize)>>,
-        flush_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
+        flush_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
+        flush_receiver: mpsc::Receiver<oneshot::Sender<(usize, usize)>>,
     ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
         if influxdb_bucket.is_none() {
             influxdb_client = None;
@@ -80,7 +80,7 @@ impl StatBuffer {
             return Ok(None);
         }
 
-        let (stat_sender, stat_receiver) = flume::unbounded();
+        let (stat_sender, stat_receiver) = mpsc::unbounded_channel();
 
         let timestamp_precision = TimestampPrecision::Seconds;
 
@@ -113,9 +113,9 @@ impl StatBuffer {
 
     async fn aggregate_and_save_loop(
         &mut self,
-        stat_receiver: flume::Receiver<AppStat>,
+        mut stat_receiver: mpsc::UnboundedReceiver<AppStat>,
         mut shutdown_receiver: broadcast::Receiver<()>,
-        flush_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
+        mut flush_receiver: mpsc::Receiver<oneshot::Sender<(usize, usize)>>,
     ) -> Web3ProxyResult<()> {
         let mut tsdb_save_interval =
             interval(Duration::from_secs(self.tsdb_save_interval_seconds as u64));
@@ -124,11 +124,11 @@ impl StatBuffer {
 
         loop {
             tokio::select! {
-                stat = stat_receiver.recv_async() => {
+                stat = stat_receiver.recv() => {
                     // trace!("Received stat");
                     // save the stat to a buffer
                     match stat {
-                        Ok(AppStat::RpcQuery(stat)) => {
+                        Some(AppStat::RpcQuery(stat)) => {
                             if self.influxdb_client.is_some() {
                                 // TODO: round the timestamp at all?
 
@@ -145,8 +145,8 @@ impl StatBuffer {
                                 self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat).await;
                             }
                         }
-                        Err(err) => {
-                            info!("error receiving stat: {}", err);
+                        None => {
+                            info!("error receiving stat");
                             break;
                         }
                     }
@@ -165,9 +165,9 @@ impl StatBuffer {
                         trace!("Saved {} stats to the tsdb", count);
                     }
                 }
-                x = flush_receiver.recv_async() => {
+                x = flush_receiver.recv() => {
                     match x {
-                        Ok(x) => {
+                        Some(x) => {
                             trace!("flush");
 
                             let tsdb_count = self.save_tsdb_stats().await;
@@ -184,8 +184,9 @@ impl StatBuffer {
                                 error!(%tsdb_count, %relational_count, ?err, "unable to notify about flushed stats");
                             }
                         }
-                        Err(err) => {
-                            error!(?err, "unable to flush stat buffer!");
+                        None => {
+                            error!("unable to flush stat buffer!");
+                            break;
                         }
                     }
                 }

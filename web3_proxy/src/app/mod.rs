@@ -50,7 +50,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::sync::{broadcast, watch, Semaphore, oneshot};
+use tokio::sync::{broadcast, mpsc, watch, Semaphore, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::{error, info, trace, warn, Level};
@@ -124,7 +124,7 @@ pub struct Web3ProxyApp {
     /// TODO: i think i might just delete this entirely. instead use local-only concurrency limits.
     pub vredis_pool: Option<RedisPool>,
     /// channel for sending stats in a background task
-    pub stat_sender: Option<flume::Sender<AppStat>>,
+    pub stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
 
     /// Optional time series database for making pretty graphs that load quickly
     influxdb_client: Option<influxdb2::Client>,
@@ -179,8 +179,8 @@ impl Web3ProxyApp {
         top_config: TopConfig,
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
-        flush_stat_buffer_sender: flume::Sender<oneshot::Sender<(usize, usize)>>,
-        flush_stat_buffer_receiver: flume::Receiver<oneshot::Sender<(usize, usize)>>,
+        flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
+        flush_stat_buffer_receiver: mpsc::Receiver<oneshot::Sender<(usize, usize)>>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         let stat_buffer_shutdown_receiver = shutdown_sender.subscribe();
         let mut background_shutdown_receiver = shutdown_sender.subscribe();

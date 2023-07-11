@@ -23,7 +23,7 @@ use tokio::{
     process::Command as AsyncCommand,
     sync::{
         broadcast::{self, error::SendError},
-        oneshot,
+        mpsc, oneshot,
     },
     task::JoinHandle,
     time::{sleep, Instant},
@@ -59,7 +59,7 @@ pub struct TestApp {
     pub proxy_provider: Provider<Http>,
 
     /// tell the app to flush stats to the database
-    flush_stat_buffer_sender: flume::Sender<oneshot::Sender<(usize, usize)>>,
+    flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
 
     /// tell the app to shut down (use `self.stop()`).
     shutdown_sender: broadcast::Sender<()>,
@@ -278,7 +278,7 @@ impl TestApp {
         let frontend_port_arc = Arc::new(AtomicU16::new(0));
         let prometheus_port_arc = Arc::new(AtomicU16::new(0));
 
-        let (flush_stat_buffer_sender, flush_stat_buffer_receiver) = flume::bounded(1);
+        let (flush_stat_buffer_sender, flush_stat_buffer_receiver) = mpsc::channel(1);
 
         // spawn the app
         // TODO: spawn in a thread so we can run from non-async tests and so the Drop impl can wait for it to stop
@@ -331,7 +331,7 @@ impl TestApp {
     pub async fn flush_stats(&self) -> anyhow::Result<(usize, usize)> {
         let (tx, rx) = oneshot::channel();
 
-        self.flush_stat_buffer_sender.send(tx)?;
+        self.flush_stat_buffer_sender.send(tx).await?;
 
         let x = rx.await?;
 

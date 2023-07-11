@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_inline_default::serde_inline_default;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tracing::warn;
 
 pub type BlockAndRpc = (Option<Web3ProxyBlock>, Arc<Web3Rpc>);
@@ -278,9 +279,9 @@ impl Web3RpcConfig {
         block_interval: Duration,
         http_client: Option<reqwest::Client>,
         blocks_by_hash_cache: BlocksByHashCache,
-        block_sender: Option<flume::Sender<BlockAndRpc>>,
+        block_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
         max_head_block_age: Duration,
-        tx_id_sender: Option<flume::Sender<TxHashAndRpc>>,
+        tx_id_sender: Option<mpsc::UnboundedSender<TxHashAndRpc>>,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         if !self.extra.is_empty() {
             warn!(extra=?self.extra.keys(), "unknown Web3RpcConfig fields!");

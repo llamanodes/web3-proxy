@@ -15,7 +15,7 @@ use serde_json::json;
 use std::hash::Hash;
 use std::time::Duration;
 use std::{fmt::Display, sync::Arc};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tokio::time::timeout;
 use tracing::{debug, error, warn};
 
@@ -427,7 +427,7 @@ impl Web3Rpcs {
     pub(super) async fn process_incoming_blocks(
         &self,
         authorization: &Arc<Authorization>,
-        block_receiver: flume::Receiver<BlockAndRpc>,
+        mut block_receiver: mpsc::UnboundedReceiver<BlockAndRpc>,
         // TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
         // Geth's subscriptions have the same potential for skipping blocks.
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
@@ -441,8 +441,8 @@ impl Web3Rpcs {
         let mut had_first_success = false;
 
         loop {
-            match timeout(double_block_time, block_receiver.recv_async()).await {
-                Ok(Ok((new_block, rpc))) => {
+            match timeout(double_block_time, block_receiver.recv()).await {
+                Ok(Some((new_block, rpc))) => {
                     let rpc_name = rpc.name.clone();
                     let rpc_is_backup = rpc.backup;
 
@@ -485,10 +485,9 @@ impl Web3Rpcs {
                         }
                     }
                 }
-                Ok(Err(err)) => {
+                Ok(None) => {
                     // TODO: panic is probably too much, but getting here is definitely not good
-                    error!("block_receiver on {} exited! {:#?}", self, err);
-                    return Err(err.into());
+                    return Err(anyhow::anyhow!("block_receiver on {} exited", self).into());
                 }
                 Err(_) => {
                     // TODO: what timeout on this?

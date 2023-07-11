@@ -31,7 +31,7 @@ use std::fmt::{self, Display};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::select;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, mpsc, watch, RwLock as AsyncRwLock};
 use tokio::time::{sleep, sleep_until, Duration, Instant};
 use tracing::{debug, error, info, trace, warn};
 
@@ -42,7 +42,7 @@ pub struct Web3Rpcs {
     pub(crate) name: String,
     pub(crate) chain_id: u64,
     /// if watch_consensus_head_sender is some, Web3Rpc inside self will send blocks here when they get them
-    pub(crate) block_sender: flume::Sender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
+    pub(crate) block_sender: mpsc::UnboundedSender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
     /// any requests will be forwarded to one (or more) of these connections
     /// TODO: hopefully this not being an async lock will be okay. if you need it across awaits, clone the arc
     pub(crate) by_name: RwLock<HashMap<String, Arc<Web3Rpc>>>,
@@ -55,8 +55,8 @@ pub struct Web3Rpcs {
     pub(super) watch_head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// keep track of transactions that we have sent through subscriptions
     pub(super) pending_transaction_cache: Cache<TxHash, TxStatus>,
-    pub(super) pending_tx_id_receiver: flume::Receiver<TxHashAndRpc>,
-    pub(super) pending_tx_id_sender: flume::Sender<TxHashAndRpc>,
+    pub(super) pending_tx_id_receiver: AsyncRwLock<mpsc::UnboundedReceiver<TxHashAndRpc>>,
+    pub(super) pending_tx_id_sender: mpsc::UnboundedSender<TxHashAndRpc>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
     pub(super) blocks_by_hash: BlocksByHashCache,
@@ -91,8 +91,8 @@ impl Web3Rpcs {
         Web3ProxyJoinHandle<()>,
         watch::Receiver<Option<Arc<RankedRpcs>>>,
     )> {
-        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
-        let (block_sender, block_receiver) = flume::unbounded::<BlockAndRpc>();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = mpsc::unbounded_channel();
+        let (block_sender, block_receiver) = mpsc::unbounded_channel::<BlockAndRpc>();
 
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         // TODO: actual weighter on this
@@ -133,7 +133,7 @@ impl Web3Rpcs {
             min_sum_soft_limit,
             name,
             pending_transaction_cache,
-            pending_tx_id_receiver,
+            pending_tx_id_receiver: AsyncRwLock::new(pending_tx_id_receiver),
             pending_tx_id_sender,
             watch_head_block: watch_consensus_head_sender,
             watch_ranked_rpcs: watch_consensus_rpcs_sender,
@@ -329,7 +329,7 @@ impl Web3Rpcs {
     async fn subscribe(
         self: Arc<Self>,
         authorization: Arc<Authorization>,
-        block_receiver: flume::Receiver<BlockAndRpc>,
+        block_receiver: mpsc::UnboundedReceiver<BlockAndRpc>,
         pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> Web3ProxyResult<()> {
         let mut futures = vec![];
@@ -341,10 +341,11 @@ impl Web3Rpcs {
         if let Some(pending_tx_sender) = pending_tx_sender.clone() {
             let clone = self.clone();
             let authorization = authorization.clone();
-            let pending_tx_id_receiver = self.pending_tx_id_receiver.clone();
             let handle = tokio::task::spawn(async move {
                 // TODO: set up this future the same as the block funnel
-                while let Ok((pending_tx_id, rpc)) = pending_tx_id_receiver.recv_async().await {
+                while let Some((pending_tx_id, rpc)) =
+                    clone.pending_tx_id_receiver.write().await.recv().await
+                {
                     let f = clone.clone().process_incoming_tx_id(
                         authorization.clone(),
                         rpc,
@@ -1323,7 +1324,7 @@ impl Serialize for Web3Rpcs {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Web3Rpcs", 6)?;
+        let mut state = serializer.serialize_struct("Web3Rpcs", 5)?;
 
         {
             let by_name = self.by_name.read();
@@ -1351,8 +1352,6 @@ impl Serialize for Web3Rpcs {
                 MokaCacheSerializer(&self.pending_transaction_cache),
             ),
         )?;
-
-        state.serialize_field("block_sender_len", &self.block_sender.len())?;
 
         state.serialize_field(
             "watch_consensus_rpcs_receivers",
@@ -1535,8 +1534,8 @@ mod tests {
         let head_rpc = Arc::new(head_rpc);
         let lagged_rpc = Arc::new(lagged_rpc);
 
-        let (block_sender, _block_receiver) = flume::unbounded();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
+        let (block_sender, _block_receiver) = mpsc::unbounded_channel();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = mpsc::unbounded_channel();
         let (watch_ranked_rpcs, _watch_consensus_rpcs_receiver) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
@@ -1557,7 +1556,7 @@ mod tests {
             pending_transaction_cache: CacheBuilder::new(100)
                 .time_to_live(Duration::from_secs(60))
                 .build(),
-            pending_tx_id_receiver,
+            pending_tx_id_receiver: AsyncRwLock::new(pending_tx_id_receiver),
             pending_tx_id_sender,
             blocks_by_hash: CacheBuilder::new(100)
                 .time_to_live(Duration::from_secs(60))
@@ -1805,8 +1804,8 @@ mod tests {
         let pruned_rpc = Arc::new(pruned_rpc);
         let archive_rpc = Arc::new(archive_rpc);
 
-        let (block_sender, _) = flume::unbounded();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
+        let (block_sender, _) = mpsc::unbounded_channel();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = mpsc::unbounded_channel();
         let (watch_ranked_rpcs, _) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
@@ -1826,7 +1825,7 @@ mod tests {
             pending_transaction_cache: CacheBuilder::new(100)
                 .time_to_live(Duration::from_secs(120))
                 .build(),
-            pending_tx_id_receiver,
+            pending_tx_id_receiver: AsyncRwLock::new(pending_tx_id_receiver),
             pending_tx_id_sender,
             blocks_by_hash: CacheBuilder::new(100)
                 .time_to_live(Duration::from_secs(120))
@@ -1989,8 +1988,8 @@ mod tests {
         let mock_geth = Arc::new(mock_geth);
         let mock_erigon_archive = Arc::new(mock_erigon_archive);
 
-        let (block_sender, _) = flume::unbounded();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = flume::unbounded();
+        let (block_sender, _) = mpsc::unbounded_channel();
+        let (pending_tx_id_sender, pending_tx_id_receiver) = mpsc::unbounded_channel();
         let (watch_ranked_rpcs, _) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
@@ -2012,7 +2011,7 @@ mod tests {
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
             pending_transaction_cache: Cache::new(10_000),
-            pending_tx_id_receiver,
+            pending_tx_id_receiver: AsyncRwLock::new(pending_tx_id_receiver),
             pending_tx_id_sender,
             blocks_by_hash: Cache::new(10_000),
             blocks_by_number: Cache::new(10_000),

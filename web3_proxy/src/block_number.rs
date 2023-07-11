@@ -72,11 +72,11 @@ pub async fn clean_block_number(
     block_param_id: usize,
     latest_block: &Web3ProxyBlock,
     rpcs: &Web3Rpcs,
-) -> anyhow::Result<BlockNumAndHash> {
+) -> Web3ProxyResult<BlockNumAndHash> {
     match params.as_array_mut() {
         None => {
             // TODO: this needs the correct error code in the response
-            Err(anyhow::anyhow!("params not an array"))
+            Err(anyhow::anyhow!("params not an array").into())
         }
         Some(params) => match params.get_mut(block_param_id) {
             None => {
@@ -107,7 +107,7 @@ pub async fn clean_block_number(
 
                         (BlockNumAndHash::from(&block), false)
                     } else {
-                        return Err(anyhow::anyhow!("blockHash missing"));
+                        return Err(anyhow::anyhow!("blockHash missing").into());
                     }
                 } else {
                     // it might be a string like "latest" or a block number or a block hash
@@ -157,7 +157,8 @@ pub async fn clean_block_number(
                     } else {
                         return Err(anyhow::anyhow!(
                             "param not a block identifier, block number, or block hash"
-                        ));
+                        )
+                        .into());
                     }
                 };
 
@@ -370,6 +371,13 @@ impl CacheMode {
                 block,
                 cache_errors: true,
             }),
+            Err(Web3ProxyError::NoBlocksKnown) => {
+                warn!(%method, ?params, "no servers available to get block from params");
+                Ok(CacheMode::Cache {
+                    block: head_block.into(),
+                    cache_errors: true,
+                })
+            }
             Err(err) => {
                 error!(%method, ?params, ?err, "could not get block from params");
                 Ok(CacheMode::Cache {

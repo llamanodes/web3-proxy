@@ -189,7 +189,7 @@ These are roughly in order of completition
 - [x] graceful shutdown. stop taking new requests and don't stop until all outstanding queries are handled
   - https://github.com/tokio-rs/mini-redis/blob/master/src/shutdown.rs
   - we need this because we need to be sure all the queries are saved in the db. maybe put stuff in Drop
-  - need an flume::watch on unflushed stats that we can subscribe to. wait for it to flip to true
+  - need a tokio::sync::watch on unflushed stats that we can subscribe to. wait for it to flip to true
 - [x] don't use unix timestamps for response_millis since leap seconds will confuse it
 - [x] config to allow origins even on the anonymous endpoints
 - [x] send logs to sentry

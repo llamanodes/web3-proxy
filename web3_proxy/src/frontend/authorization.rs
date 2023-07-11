@@ -42,7 +42,7 @@ use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64, AtomicUsize};
 use std::time::Duration;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::RwLock as AsyncRwLock;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tracing::{error, trace, warn};
@@ -346,7 +346,7 @@ pub struct RequestMetadata {
     pub kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
 
     /// Cancel-safe channel for sending stats to the buffer
-    pub stat_sender: Option<flume::Sender<AppStat>>,
+    pub stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
 }
 
 impl Default for Authorization {
@@ -517,7 +517,7 @@ impl RequestMetadata {
 
             let stat: AppStat = stat.into();
 
-            if let Err(err) = stat_sender.try_send(stat) {
+            if let Err(err) = stat_sender.send(stat) {
                 error!(?err, "failed sending stat");
                 // TODO: return it? that seems like it might cause an infinite loop
                 // TODO: but dropping stats is bad... hmm... i guess better to undercharge customers than overcharge

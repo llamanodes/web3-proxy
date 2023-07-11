@@ -18,7 +18,7 @@ pub struct KQCacheWithTTL<Key, Qey, Val, We, B> {
     max_item_weight: NonZeroU32,
     name: &'static str,
     ttl: Duration,
-    tx: flume::Sender<(Instant, Key, Qey)>,
+    tx: mpsc::Sender<(Instant, Key, Qey)>,
     weighter: We,
 
     pub task_handle: JoinHandle<()>,
@@ -27,7 +27,7 @@ pub struct KQCacheWithTTL<Key, Qey, Val, We, B> {
 struct KQCacheWithTTLTask<Key, Qey, Val, We, B> {
     cache: Arc<KQCache<Key, Qey, Val, We, B>>,
     name: &'static str,
-    rx: flume::Receiver<(Instant, Key, Qey)>,
+    rx: mpsc::Receiver<(Instant, Key, Qey)>,
 }
 
 pub struct PlaceholderGuardWithTTL<'a, Key, Qey, Val, We, B> {
@@ -54,7 +54,7 @@ impl<
         hash_builder: B,
         ttl: Duration,
     ) -> Self {
-        let (tx, rx) = flume::unbounded();
+        let (tx, rx) = mpsc::unbounded();
 
         let cache = KQCache::with(
             estimated_items_capacity,

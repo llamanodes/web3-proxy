@@ -63,7 +63,6 @@ pub enum Web3ProxyError {
     EthersHttpClient(ethers::prelude::HttpClientError),
     EthersProvider(ethers::prelude::ProviderError),
     EthersWsClient(ethers::prelude::WsClientError),
-    FlumeRecv(flume::RecvError),
     GasEstimateNotU256,
     HdrRecord(hdrhistogram::errors::RecordError),
     Headers(headers::Error),
@@ -140,7 +139,6 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     RefererNotAllowed(headers::Referer),
     SemaphoreAcquireError(AcquireError),
-    SendAppStatError(flume::SendError<crate::stats::AppStat>),
     SerdeJson(serde_json::Error),
     SiweVerification(VerificationError),
     /// simple way to return an error message to the user and an anyhow to our logs
@@ -331,17 +329,6 @@ impl Web3ProxyError {
                         },
                     )
                 }
-            }
-            Self::FlumeRecv(err) => {
-                warn!(?err, "FlumeRecvError");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcErrorData {
-                        message: "flume recv error!".into(),
-                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
-                    },
-                )
             }
             // Self::JsonRpcForwardedError(x) => (StatusCode::OK, x),
             Self::GasEstimateNotU256 => {
@@ -881,17 +868,6 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         // TODO: is it safe to expose all of our anyhow strings?
                         message: "semaphore acquire error".into(),
-                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
-                    },
-                )
-            }
-            Self::SendAppStatError(err) => {
-                error!(?err, "SendAppStatError");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcErrorData {
-                        message: "error stat_sender sending response_stat".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },

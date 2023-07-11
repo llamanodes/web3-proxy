@@ -1,13 +1,12 @@
 mod rtt_estimate;
 
+use self::rtt_estimate::AtomicRttEstimate;
+use crate::util::nanos::nanos;
 use std::sync::Arc;
-
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 use tracing::{enabled, error, trace, Level};
-
-use self::rtt_estimate::AtomicRttEstimate;
-use crate::util::nanos::nanos;
 
 /// Latency calculation using Peak EWMA algorithm
 ///
@@ -18,7 +17,7 @@ pub struct PeakEwmaLatency {
     /// Join handle for the latency calculation task
     pub join_handle: JoinHandle<()>,
     /// Send to update with each request duration
-    request_tx: flume::Sender<Duration>,
+    request_tx: mpsc::Sender<Duration>,
     /// Latency average and last update time
     rtt_estimate: Arc<AtomicRttEstimate>,
     /// Decay time
@@ -35,7 +34,7 @@ impl PeakEwmaLatency {
 
         debug_assert!(decay_ns > 0.0, "decay_ns must be positive");
 
-        let (request_tx, request_rx) = flume::bounded(buf_size);
+        let (request_tx, request_rx) = mpsc::channel(buf_size);
         let rtt_estimate = Arc::new(AtomicRttEstimate::new(start_latency));
         let task = PeakEwmaLatencyTask {
             request_rx,
@@ -92,7 +91,7 @@ impl PeakEwmaLatency {
 #[derive(Debug)]
 struct PeakEwmaLatencyTask {
     /// Receive new request timings for update
-    request_rx: flume::Receiver<Duration>,
+    request_rx: mpsc::Receiver<Duration>,
     /// Current estimate and update time
     rtt_estimate: Arc<AtomicRttEstimate>,
     /// Last update time, used for decay calculation
@@ -103,8 +102,8 @@ struct PeakEwmaLatencyTask {
 
 impl PeakEwmaLatencyTask {
     /// Run the loop for updating latency
-    async fn run(self) {
-        while let Ok(rtt) = self.request_rx.recv_async().await {
+    async fn run(mut self) {
+        while let Some(rtt) = self.request_rx.recv().await {
             self.update(rtt);
         }
         trace!("latency loop exited");

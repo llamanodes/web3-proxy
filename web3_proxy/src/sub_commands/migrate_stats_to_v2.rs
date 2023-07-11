@@ -16,7 +16,7 @@ use migration::{Expr, Value};
 use parking_lot::Mutex;
 use std::num::NonZeroU64;
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tokio::time::Instant;
 use tracing::{error, info};
 use ulid::Ulid;
@@ -72,7 +72,7 @@ impl MigrateStatsToV2SubCommand {
             None => None,
         };
 
-        let (flush_sender, flush_receiver) = flume::bounded(1);
+        let (flush_sender, flush_receiver) = mpsc::channel(1);
 
         // Spawn the stat-sender
         let emitter_spawn = StatBuffer::try_spawn(

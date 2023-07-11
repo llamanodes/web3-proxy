@@ -34,7 +34,7 @@ use std::net::IpAddr;
 use std::str::from_utf8_mut;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use tokio::sync::{broadcast, OwnedSemaphorePermit, RwLock as AsyncRwLock};
+use tokio::sync::{broadcast, mpsc, OwnedSemaphorePermit, RwLock as AsyncRwLock};
 use tracing::{info, trace};
 
 /// How to select backend servers for a request
@@ -306,7 +306,8 @@ async fn proxy_web3_socket(
     let (ws_tx, ws_rx) = socket.split();
 
     // create a channel for our reader and writer can communicate. todo: benchmark different channels
-    let (response_sender, response_receiver) = flume::unbounded::<Message>();
+    // TODO: this should be bounded. async blocking on too many messages would be fine
+    let (response_sender, response_receiver) = mpsc::unbounded_channel::<Message>();
 
     tokio::spawn(write_web3_socket(response_receiver, ws_tx));
     tokio::spawn(read_web3_socket(app, authorization, ws_rx, response_sender));
@@ -317,7 +318,7 @@ async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
     authorization: &Arc<Authorization>,
     payload: &str,
-    response_sender: &flume::Sender<Message>,
+    response_sender: &mpsc::UnboundedSender<Message>,
     subscription_count: &AtomicU64,
     subscriptions: Arc<AsyncRwLock<HashMap<U64, AbortHandle>>>,
 ) -> Web3ProxyResult<(Message, Option<OwnedSemaphorePermit>)> {
@@ -434,7 +435,7 @@ async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
     authorization: Arc<Authorization>,
     mut ws_rx: SplitStream<WebSocket>,
-    response_sender: flume::Sender<Message>,
+    response_sender: mpsc::UnboundedSender<Message>,
 ) {
     let subscriptions = Arc::new(AsyncRwLock::new(HashMap::new()));
     let subscription_count = Arc::new(AtomicU64::new(1));
@@ -519,7 +520,7 @@ async fn read_web3_socket(
                             }
                         };
 
-                        if response_sender.send_async(response_msg).await.is_err() {
+                        if response_sender.send(response_msg).is_err() {
                             let _ = close_sender.send(true);
                         };
                     };
@@ -537,12 +538,12 @@ async fn read_web3_socket(
 }
 
 async fn write_web3_socket(
-    response_rx: flume::Receiver<Message>,
+    mut response_rx: mpsc::UnboundedReceiver<Message>,
     mut ws_tx: SplitSink<WebSocket, Message>,
 ) {
     // TODO: increment counter for open websockets
 
-    while let Ok(msg) = response_rx.recv_async().await {
+    while let Some(msg) = response_rx.recv().await {
         // a response is ready
 
         // we do not check rate limits here. they are checked before putting things into response_sender;
