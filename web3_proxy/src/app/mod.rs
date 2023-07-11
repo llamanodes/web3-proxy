@@ -654,6 +654,7 @@ impl Web3ProxyApp {
 
     pub async fn apply_top_config(&self, new_top_config: TopConfig) -> Web3ProxyResult<()> {
         // TODO: also update self.config from new_top_config.app
+        info!("applying new config");
 
         // connect to the backends
         self.balanced_rpcs
@@ -684,6 +685,8 @@ impl Web3ProxyApp {
                 todo!("handle toggling bundler_4337_rpcs")
             }
         }
+
+        info!("config applied successfully");
 
         Ok(())
     }

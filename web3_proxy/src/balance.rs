@@ -1,5 +1,4 @@
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::users::referral;
 use entities::{
     admin_increase_balance_receipt, increase_on_chain_balance_receipt, referee, referrer,
     rpc_accounting_v2, rpc_key, stripe_increase_balance_receipt,
@@ -147,7 +146,7 @@ impl Balance {
             .into_tuple()
             .one(db_conn)
             .await
-            .web3_context("fetching rpc_accounting_v2")?
+            .web3_context("fetching total_spent_paid_credits and total_spent")?
             .unwrap_or_default();
 
         let one_time_referee_bonus = referee::Entity::find()
@@ -160,7 +159,7 @@ impl Balance {
             .into_tuple()
             .one(db_conn)
             .await
-            .web3_context("fetching referee")?
+            .web3_context("fetching one time referee bonus")?
             .unwrap_or_default();
 
         let referal_bonus = referee::Entity::find()
@@ -177,7 +176,7 @@ impl Balance {
             .into_tuple()
             .one(db_conn)
             .await
-            .web3_context("fetching referee and referral_codes")?
+            .web3_context("fetching referal bonus")?
             .unwrap_or_default();
 
         let balance = Self {
