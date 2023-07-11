@@ -582,7 +582,7 @@ impl Drop for RequestMetadata {
             // turn `&mut self` into `self`
             let x = mem::take(self);
 
-            trace!(?self, "request metadata dropped without stat send");
+            trace!(?x, "request metadata dropped without stat send");
             let _ = x.try_send_stat();
         }
     }
