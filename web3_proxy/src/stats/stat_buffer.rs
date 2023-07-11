@@ -171,16 +171,12 @@ impl StatBuffer {
                             trace!("flush");
 
                             let tsdb_count = self.save_tsdb_stats().await;
-                            if tsdb_count > 0 {
-                                trace!("Flushed {} stats to the tsdb", tsdb_count);
-                            }
 
                             let relational_count = self.save_relational_stats().await;
-                            if relational_count > 0 {
-                                trace!("Flushed {} stats to the relational db", relational_count);
-                            }
 
                             let flushed_stats = FlushedStats{ timeseries: tsdb_count, relational: relational_count};
+
+                            trace!(?flushed_stats);
 
                             if let Err(err) = x.send(flushed_stats) {
                                 error!(?flushed_stats, ?err, "unable to notify about flushed stats");

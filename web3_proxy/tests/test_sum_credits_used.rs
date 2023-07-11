@@ -59,6 +59,7 @@ async fn test_sum_credits_used() {
     // flush stats
     let flushed = x.flush_stats().await.unwrap();
     assert_eq!(flushed.relational, 1);
+    assert_eq!(flushed.timeseries, 0);
 
     // Give user wallet $1000
     admin_increase_balance(&x, &r, &admin_login_response, &user_wallet, 1000.into()).await;
