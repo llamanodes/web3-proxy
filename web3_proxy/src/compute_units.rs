@@ -10,6 +10,15 @@ use migration::sea_orm::prelude::Decimal;
 use std::str::FromStr;
 use tracing::{instrument, trace, warn};
 
+pub fn default_usd_per_cu(chain_id: u64) -> Decimal {
+    match chain_id {
+        // TODO: only include if `cfg(test)`?
+        999_001_999 => Decimal::from_str("0.10").unwrap(),
+        137 => Decimal::from_str("0.000000533333333333333").unwrap(),
+        _ => Decimal::from_str("0.000000400000000000000").unwrap(),
+    }
+}
+
 #[derive(Debug)]
 pub struct ComputeUnit(Decimal);
 
@@ -152,7 +161,7 @@ impl ComputeUnit {
         archive_request: bool,
         cache_hit: bool,
         error_response: bool,
-        usd_per_cu: Decimal,
+        usd_per_cu: &Decimal,
     ) -> Decimal {
         if error_response {
             return 0.into();

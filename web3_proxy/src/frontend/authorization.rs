@@ -308,6 +308,8 @@ pub struct RequestMetadata {
 
     pub chain_id: u64,
 
+    pub usd_per_cu: Decimal,
+
     pub request_ulid: Ulid,
 
     /// Size of the JSON request. Does not include headers or things like that.
@@ -482,11 +484,13 @@ impl RequestMetadata {
             }
         }
 
+        let chain_id = app.config.chain_id;
+
         let x = Self {
             archive_request: false.into(),
             authorization: Some(authorization),
             backend_requests: Default::default(),
-            chain_id: app.config.chain_id,
+            chain_id,
             error_response: false.into(),
             kafka_debug_logger,
             method,
@@ -499,6 +503,7 @@ impl RequestMetadata {
             response_timestamp: 0.into(),
             start_instant: Instant::now(),
             stat_sender: app.stat_sender.clone(),
+            usd_per_cu: app.config.usd_per_cu.unwrap_or_default(),
             user_error_response: false.into(),
         };
 

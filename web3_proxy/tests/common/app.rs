@@ -32,7 +32,8 @@ use tracing::{info, trace, warn};
 use web3_proxy::{
     config::{AppConfig, TopConfig, Web3RpcConfig},
     relational_db::get_migrated_db,
-    sub_commands::ProxydSubCommand, stats::FlushedStats,
+    stats::FlushedStats,
+    sub_commands::ProxydSubCommand,
 };
 
 #[derive(Clone)]
@@ -67,12 +68,14 @@ pub struct TestApp {
 
 impl TestApp {
     pub async fn spawn(chain_id: u64, setup_db: bool) -> Self {
+        info!(?chain_id);
+
         let num_workers = 2;
 
         // TODO: move basic setup into a test fixture
         let path = env::var("PATH").unwrap();
 
-        info!("path: {}", path);
+        info!(%path);
 
         // TODO: configurable rpc and block
         let anvil = Anvil::new()

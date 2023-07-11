@@ -31,7 +31,6 @@ async fn test_sum_credits_used() {
     // TODO: set the user's user_id to the "Premium" tier
 
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
-    info!(?balance, "starting");
     assert_eq!(
         balance.total_frontend_requests, 0,
         "total_frontend_requests"
@@ -72,8 +71,8 @@ async fn test_sum_credits_used() {
 
     // flush stats
     let flushed = x.flush_stats().await.unwrap();
-    assert_eq!(flushed.relational, 2);
-    assert_eq!(flushed.timeseries, 0);
+    assert_eq!(flushed.relational, 2, "relational");
+    assert_eq!(flushed.timeseries, 0, "timeseries");
 
     // Give user wallet $1000
     admin_increase_balance(&x, &r, &admin_login_response, &user_wallet, 1000.into()).await;
@@ -81,13 +80,20 @@ async fn test_sum_credits_used() {
     // check balance
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
     info!(?balance, "after 1 free request and being given $1000");
-    assert_eq!(balance.total_frontend_requests, 1);
-    assert_eq!(balance.total_cache_misses, 0);
-    assert_eq!(balance.total_spent_paid_credits, 0.into());
-    assert_eq!(balance.total_spent, cached_query_cost);
-    assert_eq!(balance.remaining(), 1000.into());
-    assert!(balance.active_premium());
-    assert!(balance.was_ever_premium());
+    assert_eq!(
+        balance.total_frontend_requests, 1,
+        "total_frontend_requests"
+    );
+    assert_eq!(balance.total_cache_misses, 0, "total_cache_misses");
+    assert_eq!(
+        balance.total_spent_paid_credits,
+        0.into(),
+        "total_spent_paid_credits"
+    );
+    assert_eq!(balance.total_spent, cached_query_cost, "total_spent");
+    assert_eq!(balance.remaining(), 1000.into(), "remaining");
+    assert!(balance.active_premium(), "active_premium");
+    assert!(balance.was_ever_premium(), "was_ever_premium");
 
     // make one public rpc request of 16 CU
     x.proxy_provider
@@ -107,17 +113,27 @@ async fn test_sum_credits_used() {
 
     // check balance
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
-    info!(?balance, "after 1 premium request");
-    assert_eq!(balance.total_frontend_requests, 2);
-    assert_eq!(balance.total_cache_misses, 1);
-    assert_eq!(balance.total_spent_paid_credits, query_cost);
-    assert_eq!(balance.total_spent, query_cost + cached_query_cost);
+    assert_eq!(
+        balance.total_frontend_requests, 2,
+        "total_frontend_requests"
+    );
+    assert_eq!(balance.total_cache_misses, 1, "total_cache_misses");
+    assert_eq!(
+        balance.total_spent_paid_credits, query_cost,
+        "total_spent_paid_credits"
+    );
+    assert_eq!(
+        balance.total_spent,
+        query_cost + cached_query_cost,
+        "total_spent"
+    );
     assert_eq!(
         balance.remaining(),
-        Decimal::from(1000) - query_cost - cached_query_cost
+        Decimal::from(1000) - query_cost - cached_query_cost,
+        "remaining"
     );
-    assert!(balance.active_premium());
-    assert!(balance.was_ever_premium());
+    assert!(balance.active_premium(), "active_premium");
+    assert!(balance.was_ever_premium(), "was_ever_premium");
 
     // make ten rpc request of 16 CU
     for _ in 0..10 {
@@ -133,39 +149,50 @@ async fn test_sum_credits_used() {
 
     // check balance
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
-    info!(?balance, "after 10 more requests");
 
     // the first request was on the free tier
     let expected_total_spent_paid_credits = Decimal::from(11) * cached_query_cost;
 
-    assert_eq!(balance.total_frontend_requests, 12);
-    assert_eq!(balance.total_cache_misses, 1);
     assert_eq!(
-        balance.total_spent_paid_credits,
-        expected_total_spent_paid_credits
+        balance.total_frontend_requests, 12,
+        "total_frontend_requests"
+    );
+    assert_eq!(balance.total_cache_misses, 1, "total_cache_misses");
+    assert_eq!(
+        balance.total_spent_paid_credits, expected_total_spent_paid_credits,
+        "total_spent_paid_credits"
     );
     assert_eq!(
         balance.total_spent,
-        expected_total_spent_paid_credits - cached_query_cost
+        expected_total_spent_paid_credits + cached_query_cost,
+        "total_spent"
     );
     assert_eq!(
         balance.remaining(),
         Decimal::from(1000) - expected_total_spent_paid_credits
     );
-    assert!(balance.active_premium());
-    assert!(balance.was_ever_premium());
+    assert!(balance.active_premium(), "active_premium");
+    assert!(balance.was_ever_premium(), "was_ever_premium");
 
     // TODO: make enough queries to push the user balance negative
 
     // check admin's balance to make sure nothing is leaking
     let admin_balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
-    info!(?admin_balance);
 
-    assert_eq!(admin_balance.remaining(), 0.into());
-    assert!(!admin_balance.active_premium());
-    assert!(!admin_balance.was_ever_premium());
-    assert_eq!(admin_balance.total_frontend_requests, 0);
-    assert_eq!(admin_balance.total_cache_misses, 0);
-    assert_eq!(admin_balance.total_spent_paid_credits, 0.into());
-    assert_eq!(admin_balance.total_spent, 0.into());
+    assert!(!admin_balance.active_premium(), "active_premium");
+    assert!(!admin_balance.was_ever_premium(), "was_ever_premium");
+    assert_eq!(
+        admin_balance.total_frontend_requests, 0,
+        "total_frontend_requests"
+    );
+    assert_eq!(admin_balance.total_cache_misses, 0, "total_cache_misses");
+    assert_eq!(
+        admin_balance.total_spent_paid_credits,
+        0.into(),
+        "total_spent_paid_credits"
+    );
+    assert_eq!(admin_balance.total_spent, 0.into(), "total_spent");
+    assert_eq!(admin_balance.remaining(), 0.into(), "remaining");
+
+    // TODO: query "user 0" to get the public counts
 }
