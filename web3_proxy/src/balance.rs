@@ -8,16 +8,17 @@ use migration::sea_orm::DbConn;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use migration::{Func, SimpleExpr};
 use serde::ser::SerializeStruct;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Implements the balance getter which combines data from several tables
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Balance {
     pub admin_deposits: Decimal,
     pub chain_deposits: Decimal,
     pub referal_bonus: Decimal,
     pub one_time_referee_bonus: Decimal,
     pub stripe_deposits: Decimal,
+    /// this includes credits spent inside a "free" or "downgraded" tier
     pub total_spent: Decimal,
     pub total_spent_paid_credits: Decimal,
     pub user_id: u64,

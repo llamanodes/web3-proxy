@@ -1267,6 +1267,22 @@ impl fmt::Debug for Web3Rpc {
             f.field("blocks", &block_data_limit);
         }
 
+        f.field("backup", &self.backup);
+
+        f.field("tier", &self.tier.load(atomic::Ordering::Relaxed));
+
+        f.field("weighted_ms", &self.weighted_peak_latency().as_millis());
+
+        if let Some(head_block_watch) = self.head_block.as_ref() {
+            if let Some(head_block) = head_block_watch.borrow().as_ref() {
+                f.field("head_num", head_block.number());
+                f.field("head_hash", head_block.hash());
+            } else {
+                f.field("head_num", &None::<()>);
+                f.field("head_hash", &None::<()>);
+            }
+        }
+
         f.finish_non_exhaustive()
     }
 }

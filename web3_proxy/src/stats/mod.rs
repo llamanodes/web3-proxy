@@ -622,6 +622,8 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
 
         // TODO: get from config? a helper function? how should we pick this?
         let usd_per_cu = match metadata.chain_id {
+            #[cfg(test)]
+            999_001_999 => Decimal::from_str("0.10"),
             137 => Decimal::from_str("0.000000533333333333333"),
             _ => Decimal::from_str("0.000000400000000000000"),
         }?;

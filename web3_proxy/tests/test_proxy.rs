@@ -13,7 +13,7 @@ use web3_proxy::rpcs::blockchain::ArcBlock;
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn it_migrates_the_db() {
-    let x = TestApp::spawn(true).await;
+    let x = TestApp::spawn(31337, true).await;
 
     // we call flush stats more to be sure it works than because we expect it to save any stats
     x.flush_stats().await.unwrap();
@@ -21,7 +21,7 @@ async fn it_migrates_the_db() {
 
 #[test_log::test(tokio::test)]
 async fn it_starts_and_stops() {
-    let x = TestApp::spawn(false).await;
+    let x = TestApp::spawn(31337, false).await;
 
     let anvil_provider = &x.anvil_provider;
     let proxy_provider = &x.proxy_provider;

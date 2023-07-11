@@ -66,7 +66,7 @@ pub struct TestApp {
 }
 
 impl TestApp {
-    pub async fn spawn(setup_db: bool) -> Self {
+    pub async fn spawn(chain_id: u64, setup_db: bool) -> Self {
         let num_workers = 2;
 
         // TODO: move basic setup into a test fixture
@@ -76,6 +76,7 @@ impl TestApp {
 
         // TODO: configurable rpc and block
         let anvil = Anvil::new()
+            .chain_id(chain_id)
             // .fork("https://polygon.llamarpc.com@44300000")
             .spawn();
 
@@ -244,7 +245,7 @@ impl TestApp {
         // TODO: test influx
         // TODO: test redis
         let app_config: AppConfig = serde_json::from_value(json!({
-            "chain_id": 31337,
+            "chain_id": chain_id,
             "db_url": db_url,
             "default_user_max_requests_per_period": Some(6_000_000),
             "deposit_factory_contract": Address::from_str(

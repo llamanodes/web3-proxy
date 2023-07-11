@@ -15,7 +15,7 @@ use tracing::info;
 #[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_admin_imitate_user() {
-    let x = TestApp::spawn(true).await;
+    let x = TestApp::spawn(31337, true).await;
 
     todo!();
 }
@@ -24,7 +24,7 @@ async fn test_admin_imitate_user() {
 #[test_log::test(tokio::test)]
 async fn test_admin_grant_credits() {
     info!("Starting admin grant credits test");
-    let x = TestApp::spawn(true).await;
+    let x = TestApp::spawn(31337, true).await;
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
@@ -53,11 +53,8 @@ async fn test_admin_grant_credits() {
         Decimal::from(100)
     );
 
-    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    assert_eq!(
-        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap(),
-        Decimal::from(100)
-    );
+    let user_balance = user_get_balance(&x, &r, &user_login_response).await;
+    assert_eq!(user_balance.remaining(), Decimal::from(100));
 
     x.wait().await;
 }
@@ -66,6 +63,6 @@ async fn test_admin_grant_credits() {
 #[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_admin_change_user_tier() {
-    let x = TestApp::spawn(true).await;
+    let x = TestApp::spawn(31337, true).await;
     todo!();
 }
