@@ -29,13 +29,20 @@ async fn test_sum_credits_used() {
     // TODO: set the user's user_id to the "Premium" tier
 
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
-    assert_eq!(balance.total_frontend_requests, 0);
-    assert_eq!(balance.total_cache_misses, 0);
-    assert_eq!(balance.total_spent_paid_credits, 0.into());
-    assert_eq!(balance.total_spent, 0.into());
-    assert_eq!(balance.remaining(), 0.into());
-    assert!(!balance.active_premium());
-    assert!(!balance.was_ever_premium());
+    assert_eq!(
+        balance.total_frontend_requests, 0,
+        "total_frontend_requests"
+    );
+    assert_eq!(balance.total_cache_misses, 0, "total_cache_misses");
+    assert_eq!(
+        balance.total_spent_paid_credits,
+        0.into(),
+        "total_spent_paid_credits"
+    );
+    assert_eq!(balance.total_spent, 0.into(), "total_spent");
+    assert_eq!(balance.remaining(), 0.into(), "remaining");
+    assert!(!balance.active_premium(), "active_premium");
+    assert!(!balance.was_ever_premium(), "was_ever_premium");
 
     // make one free request of 16 CU
     x.proxy_provider
