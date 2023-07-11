@@ -514,7 +514,7 @@ impl RequestMetadata {
         self.backend_requests.lock().clone()
     }
 
-    pub fn try_send_stat(mut self) -> Web3ProxyResult<Option<Self>> {
+    pub fn try_send_stat(mut self) -> Web3ProxyResult<()> {
         if let Some(stat_sender) = self.stat_sender.take() {
             trace!(?self, "sending stat");
 
@@ -529,11 +529,9 @@ impl RequestMetadata {
             };
 
             trace!("stat sent successfully");
-
-            Ok(None)
-        } else {
-            Ok(Some(self))
         }
+
+        Ok(())
     }
 
     pub fn add_response<'a, R: Into<ResponseOrBytes<'a>>>(&'a self, response: R) {
@@ -561,18 +559,12 @@ impl RequestMetadata {
         }
     }
 
-    pub fn try_send_arc_stat(self: Arc<Self>) -> anyhow::Result<Option<Arc<Self>>> {
-        match Arc::try_unwrap(self) {
-            Ok(x) => {
-                let not_sent = x.try_send_stat()?.map(Arc::new);
-                Ok(not_sent)
-            }
-            Err(not_sent) => {
-                trace!(
-                    "could not send stat while {} arcs are active",
-                    Arc::strong_count(&not_sent)
-                );
-                Ok(Some(not_sent))
+    pub fn try_send_arc_stat(self: Arc<Self>) -> Web3ProxyResult<()> {
+        match Arc::into_inner(self) {
+            Some(x) => x.try_send_stat(),
+            None => {
+                trace!("could not send stat while other arcs are active");
+                Ok(())
             }
         }
     }

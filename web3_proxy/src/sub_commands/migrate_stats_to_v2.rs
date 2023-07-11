@@ -3,7 +3,7 @@ use crate::config::TopConfig;
 use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::StatBuffer;
-use anyhow::{anyhow, Context};
+use anyhow::{Context};
 use argh::FromArgs;
 use entities::{rpc_accounting, rpc_key};
 use futures::stream::FuturesUnordered;
@@ -209,9 +209,7 @@ impl MigrateStatsToV2SubCommand {
                         usd_per_cu: top_config.app.usd_per_cu.unwrap_or_default(),
                     };
 
-                    if let Some(x) = request_metadata.try_send_stat()? {
-                        return Err(anyhow!("failed saving stat! {:?}", x));
-                    }
+                    request_metadata.try_send_stat()?;
                 }
             }
 

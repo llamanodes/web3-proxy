@@ -1158,6 +1158,9 @@ impl Web3ProxyApp {
 
         let rpcs = request_metadata.backend_rpcs_used();
 
+        // there might be clones in the background, so this isn't a sure thing
+        let _ = request_metadata.try_send_arc_stat();
+
         (code, response, rpcs)
     }
 

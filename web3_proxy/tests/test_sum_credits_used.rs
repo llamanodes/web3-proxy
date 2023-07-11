@@ -6,7 +6,6 @@ use crate::common::{
 };
 use migration::sea_orm::prelude::Decimal;
 use std::time::Duration;
-use tracing::info;
 use web3_proxy::{balance::Balance, rpcs::blockchain::ArcBlock};
 
 // TODO: #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]

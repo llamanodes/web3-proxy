@@ -76,7 +76,7 @@ async fn _proxy_web3_rpc(
 
     let mut response = (status_code, Json(response)).into_response();
 
-    // TODO: DRY this up. same for public and private queries
+    // TODO: DRY this up. it is the same code for public and private queries
     let response_headers = response.headers_mut();
 
     // TODO: this might be slow. think about this more
