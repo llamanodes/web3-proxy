@@ -6,6 +6,7 @@ use crate::common::{
 };
 use migration::sea_orm::prelude::Decimal;
 use std::time::Duration;
+use tracing::info;
 use web3_proxy::{balance::Balance, rpcs::blockchain::ArcBlock};
 
 // TODO: #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
@@ -146,6 +147,7 @@ async fn test_sum_credits_used() {
     assert_eq!(flushed.relational, 1);
 
     // check balance
+    info!("checking the final balance");
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
 
     // the first of our 12 total requests request was on the free tier
@@ -175,7 +177,8 @@ async fn test_sum_credits_used() {
     // TODO: make enough queries to push the user balance negative
 
     // check admin's balance to make sure nothing is leaking
-    let admin_balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
+    info!("checking the admin");
+    let admin_balance: Balance = user_get_balance(&x, &r, &admin_login_response).await;
 
     assert!(!admin_balance.active_premium(), "active_premium");
     assert!(!admin_balance.was_ever_premium(), "was_ever_premium");
