@@ -1,5 +1,6 @@
 #![feature(let_chains)]
 #![feature(trait_alias)]
+#![forbid(unsafe_code)]
 
 pub mod admin_queries;
 pub mod app;

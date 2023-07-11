@@ -212,9 +212,9 @@ impl RankedRpcs {
         self.inner.is_empty()
     }
 
+    /// TODO! we should also keep the number on the head block saved
     #[inline]
-    pub fn num_consensus_rpcs(&self) -> usize {
-        // TODO! wrong! this is now the total num of rpcs. we should keep the number on the head block saved
+    pub fn num_active_rpcs(&self) -> usize {
         self.inner.len()
     }
 
@@ -452,7 +452,7 @@ impl ConsensusFinder {
         let worst_tier = self.worst_tier().unwrap_or_default();
         let backups_needed = new_consensus_rpcs.backups_needed;
         let consensus_head_block = new_consensus_rpcs.head_block.clone();
-        let num_consensus_rpcs = new_consensus_rpcs.num_consensus_rpcs();
+        let num_consensus_rpcs = new_consensus_rpcs.num_active_rpcs();
         let num_active_rpcs = self.len();
         let total_rpcs = web3_rpcs.len();
 

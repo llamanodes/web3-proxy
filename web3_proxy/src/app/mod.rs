@@ -22,7 +22,7 @@ use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::provider::{connect_http, EthersHttpProvider};
 use crate::rpcs::transactions::TxStatus;
-use crate::stats::{AppStat, StatBuffer};
+use crate::stats::{AppStat, StatBuffer, FlushedStats};
 use anyhow::Context;
 use axum::http::StatusCode;
 use chrono::Utc;
@@ -179,8 +179,8 @@ impl Web3ProxyApp {
         top_config: TopConfig,
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
-        flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
-        flush_stat_buffer_receiver: mpsc::Receiver<oneshot::Sender<(usize, usize)>>,
+        flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
+        flush_stat_buffer_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         let stat_buffer_shutdown_receiver = shutdown_sender.subscribe();
         let mut background_shutdown_receiver = shutdown_sender.subscribe();

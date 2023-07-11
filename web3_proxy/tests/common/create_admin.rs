@@ -38,15 +38,20 @@ pub async fn create_user_as_admin(
     };
     info!(?admin_post_login_data);
 
-    let admin_login_response = r
+    let admin_post_login_data = r
         .post(&login_post_url)
         .json(&admin_post_login_data)
         .send()
         .await
         .unwrap()
-        .json::<LoginPostResponse>()
+        .text()
         .await
         .unwrap();
+
+    info!("admin_post_login_data: {:#}", admin_post_login_data);
+
+    let admin_login_response: LoginPostResponse =
+        serde_json::from_str(&admin_post_login_data).unwrap();
     info!(?admin_login_response);
 
     // Upgrade the account to admin

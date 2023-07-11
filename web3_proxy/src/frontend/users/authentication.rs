@@ -22,7 +22,6 @@ use migration::sea_orm::{
     QueryFilter, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use siwe::{Message, VerificationOpts};
 use std::ops::Add;
 use std::str::FromStr;
@@ -49,14 +48,11 @@ pub struct PostLogin {
     pub referral_code: Option<String>,
 }
 
-/// TODO: use this type in the frontend
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct LoginPostResponse {
-    pub bearer_token: Ulid,
-    pub rpc_keys: Value,
-    /// unknown data gets put here
-    #[serde(flatten, default = "HashMap::default")]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub bearer_token: UserBearerToken,
+    pub rpc_keys: HashMap<u64, rpc_key::Model>,
+    pub user: user::Model,
 }
 
 /// `GET /user/login/:user_address` or `GET /user/login/:user_address/:message_eip` -- Start the "Sign In with Ethereum" (siwe) login flow.
@@ -394,19 +390,6 @@ pub async fn user_login_post(
     // create a bearer token for the user.
     let user_bearer_token = UserBearerToken::default();
 
-    // json response with everything in it
-    // we could return just the bearer token, but I think they will always request api keys and the user profile
-    let response_json = json!({
-        "rpc_keys": user_rpc_keys
-            .into_iter()
-            .map(|user_rpc_key| (user_rpc_key.id, user_rpc_key))
-            .collect::<HashMap<_, _>>(),
-        "bearer_token": user_bearer_token,
-        "user": caller,
-    });
-
-    let response = (status_code, Json(response_json)).into_response();
-
     // add bearer to the database
 
     // expire in 4 weeks
@@ -416,8 +399,8 @@ pub async fn user_login_post(
 
     let user_login = login::ActiveModel {
         id: sea_orm::NotSet,
-        bearer_token: sea_orm::Set(user_bearer_token.into()),
-        user_id: sea_orm::Set(caller.id),
+        bearer_token: sea_orm::Set(user_bearer_token.clone().into()),
+        user_id: sea_orm::Set(caller.id.clone()),
         expires_at: sea_orm::Set(expires_at),
         read_only: sea_orm::Set(false),
     };
@@ -430,6 +413,19 @@ pub async fn user_login_post(
     if let Err(err) = user_pending_login.into_active_model().delete(db_conn).await {
         error!("Failed to delete nonce:{}: {}", login_nonce, err);
     }
+
+    // json response with everything in it
+    // we could return just the bearer token, but I think they will always request api keys and the user profile
+    let response_json = LoginPostResponse {
+        rpc_keys: user_rpc_keys
+            .into_iter()
+            .map(|user_rpc_key| (user_rpc_key.id, user_rpc_key))
+            .collect::<HashMap<_, _>>(),
+        bearer_token: user_bearer_token,
+        user: caller,
+    };
+
+    let response = (status_code, Json(response_json)).into_response();
 
     Ok(response)
 }

@@ -25,11 +25,3 @@ pub async fn user_get_balance(
 
     balance_response
 }
-
-pub async fn user_get_total_frontend_requests(
-    x: &TestApp,
-    r: &reqwest::Client,
-    login_response: &LoginPostResponse,
-) -> u64 {
-    todo!();
-}

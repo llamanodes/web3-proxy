@@ -46,6 +46,12 @@ pub enum StatType {
 
 pub type BackendRequests = Mutex<Vec<Arc<Web3Rpc>>>;
 
+#[derive(Copy, Clone, Debug)]
+pub struct FlushedStats {
+    pub relational: usize,
+    pub timeseries: usize,
+}
+
 /// TODO: better name? RpcQueryStatBuilder?
 #[derive(Clone, Debug)]
 pub struct RpcQueryStats {

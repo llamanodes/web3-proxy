@@ -6,7 +6,7 @@ use std::time::Duration;
 use crate::common::admin_increases_balance::admin_increase_balance;
 use crate::common::create_admin::create_user_as_admin;
 use crate::common::create_user::create_user;
-use crate::common::get_user_balance::user_get_balance;
+use crate::common::user_balance::user_get_balance;
 use crate::common::TestApp;
 use migration::sea_orm::prelude::Decimal;
 use tracing::info;

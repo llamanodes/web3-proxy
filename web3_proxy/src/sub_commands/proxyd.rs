@@ -1,7 +1,6 @@
-#![forbid(unsafe_code)]
-
 use crate::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use crate::config::TopConfig;
+use crate::stats::FlushedStats;
 use crate::{frontend, prometheus};
 use argh::FromArgs;
 use futures::StreamExt;
@@ -66,8 +65,8 @@ impl ProxydSubCommand {
         prometheus_port: Arc<AtomicU16>,
         num_workers: usize,
         frontend_shutdown_sender: broadcast::Sender<()>,
-        flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
-        flush_stat_buffer_receiver: mpsc::Receiver<oneshot::Sender<(usize, usize)>>,
+        flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
+        flush_stat_buffer_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
     ) -> anyhow::Result<()> {
         // tokio has code for catching ctrl+c so we use that to shut down in most cases
         // frontend_shutdown_sender is currently only used in tests, but we might make a /shutdown endpoint or something

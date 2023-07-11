@@ -1,4 +1,4 @@
-use super::{AppStat, RpcQueryKey};
+use super::{AppStat, FlushedStats, RpcQueryKey};
 use crate::app::Web3ProxyJoinHandle;
 use crate::balance::Balance;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
@@ -53,7 +53,7 @@ pub struct StatBuffer {
     tsdb_save_interval_seconds: u32,
     user_balance_cache: UserBalanceCache,
 
-    _flush_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
+    _flush_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
 }
 
 impl StatBuffer {
@@ -69,8 +69,8 @@ impl StatBuffer {
         user_balance_cache: Option<UserBalanceCache>,
         shutdown_receiver: broadcast::Receiver<()>,
         tsdb_save_interval_seconds: u32,
-        flush_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
-        flush_receiver: mpsc::Receiver<oneshot::Sender<(usize, usize)>>,
+        flush_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
+        flush_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
     ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
         if influxdb_bucket.is_none() {
             influxdb_client = None;
@@ -115,7 +115,7 @@ impl StatBuffer {
         &mut self,
         mut stat_receiver: mpsc::UnboundedReceiver<AppStat>,
         mut shutdown_receiver: broadcast::Receiver<()>,
-        mut flush_receiver: mpsc::Receiver<oneshot::Sender<(usize, usize)>>,
+        mut flush_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
     ) -> Web3ProxyResult<()> {
         let mut tsdb_save_interval =
             interval(Duration::from_secs(self.tsdb_save_interval_seconds as u64));
@@ -180,8 +180,10 @@ impl StatBuffer {
                                 trace!("Flushed {} stats to the relational db", relational_count);
                             }
 
-                            if let Err(err) = x.send((tsdb_count, relational_count)) {
-                                error!(%tsdb_count, %relational_count, ?err, "unable to notify about flushed stats");
+                            let flushed_stats = FlushedStats{ timeseries: tsdb_count, relational: relational_count};
+
+                            if let Err(err) = x.send(flushed_stats) {
+                                error!(?flushed_stats, ?err, "unable to notify about flushed stats");
                             }
                         }
                         None => {

@@ -167,9 +167,9 @@ async fn test_user_balance_decreases() {
     }
 
     // Flush all stats here
-    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
-    assert_eq!(influx_count, 0);
-    assert!(mysql_count > 0);
+    let flush_count = x.flush_stats().await.unwrap();
+    assert_eq!(flush_count.timeseries, 0);
+    assert!(flush_count.relational > 0);
 
     // Check the balance, it should not have decreased; there should have been accounted free credits, however
     let user_balance = user_get_balance(&x, &r, &user_login_response).await;
@@ -205,14 +205,13 @@ async fn test_user_balance_decreases() {
     }
 
     // Flush all stats here
-    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
-    assert_eq!(influx_count, 0);
-    assert!(mysql_count == 1);
-
-    todo!("confirm that the user has 10_000 frontend requests in the db");
+    let flush_count = x.flush_stats().await.unwrap();
+    assert_eq!(flush_count.timeseries, 0);
+    assert!(flush_count.relational == 1);
 
     // Deposits should not be affected, and should be equal to what was initially provided
     let user_balance = user_get_balance(&x, &r, &user_login_response).await;
+
     let total_deposits = user_balance.total_deposits();
     assert_eq!(total_deposits, Decimal::from(20));
     // Check that total_spent_paid credits is equal to total_spent, because we are all still inside premium
@@ -223,6 +222,7 @@ async fn test_user_balance_decreases() {
     // Get the full balance endpoint
     let user_balance_post = user_balance.remaining();
     assert!(user_balance_post < user_balance_pre);
+    assert_eq!(user_balance.total_frontend_requests, 10_000);
 
     // Balance should be total deposits - usage while in the paid tier
     let total_spent_in_paid_credits = user_balance.total_spent_paid_credits;
@@ -331,25 +331,26 @@ async fn test_referral_bonus_non_concurrent() {
             .unwrap();
     }
 
-    todo!("make sure there are 20k frontend requests in the database");
-
     // Flush all stats here
-    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
-    assert_eq!(influx_count, 0);
-    assert!(mysql_count > 0);
+    let flush_count = x.flush_stats().await.unwrap();
+    assert_eq!(flush_count.timeseries, 0);
+    assert!(flush_count.relational > 0);
 
     // Check that at least something was earned:
     let shared_referral_code: UserSharedReferralInfo =
         get_shared_referral_codes(&x, &r, &referrer_login_response).await;
-    info!("Referral code");
-    info!("{:?}", shared_referral_code.referrals.get(0).unwrap());
+    info!(referrals=?shared_referral_code.referrals.get(0).unwrap(), "Referral code");
+
+    let user_balance = user_get_balance(&x, &r, &user_login_response).await;
+
+    // first, make sure that 20k requests were saved to the db
+    assert_eq!(user_balance.total_frontend_requests, 20_000);
 
     // We make sure that the referrer has $10 + 10% of the used balance
     // The admin provides credits for both
-    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    let user_balance_post = user_balance_response.remaining();
-    let referrer_balance_response = user_get_balance(&x, &r, &referrer_login_response).await;
-    let referrer_balance_post = referrer_balance_response.remaining();
+    let user_balance_post = user_balance.remaining();
+    let referrer_balance = user_get_balance(&x, &r, &referrer_login_response).await;
+    let referrer_balance_post = referrer_balance.remaining();
 
     info!(
         "Balances before and after are (user): {:?} {:?}",
@@ -488,9 +489,9 @@ async fn test_referral_bonus_concurrent_referrer_only() {
     }
 
     // Flush all stats here
-    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
-    assert_eq!(influx_count, 0);
-    assert!(mysql_count > 0);
+    let flush_count = x.flush_stats().await.unwrap();
+    assert_eq!(flush_count.timeseries, 0);
+    assert!(flush_count.relational > 0);
 
     // Check that at least something was earned:
     let shared_referral_code: UserSharedReferralInfo =
@@ -663,9 +664,9 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
     }
 
     // Flush all stats here
-    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
-    assert_eq!(influx_count, 0);
-    assert!(mysql_count > 0);
+    let flush_count = x.flush_stats().await.unwrap();
+    assert_eq!(flush_count.timeseries, 0);
+    assert!(flush_count.relational > 0);
 
     // Check that at least something was earned:
     let shared_referral_code: UserSharedReferralInfo =

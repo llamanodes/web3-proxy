@@ -32,7 +32,7 @@ use tracing::{info, trace, warn};
 use web3_proxy::{
     config::{AppConfig, TopConfig, Web3RpcConfig},
     relational_db::get_migrated_db,
-    sub_commands::ProxydSubCommand,
+    sub_commands::ProxydSubCommand, stats::FlushedStats,
 };
 
 #[derive(Clone)]
@@ -59,7 +59,7 @@ pub struct TestApp {
     pub proxy_provider: Provider<Http>,
 
     /// tell the app to flush stats to the database
-    flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
+    flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
 
     /// tell the app to shut down (use `self.stop()`).
     shutdown_sender: broadcast::Sender<()>,
@@ -329,7 +329,7 @@ impl TestApp {
     }
 
     #[allow(unused)]
-    pub async fn flush_stats(&self) -> anyhow::Result<(usize, usize)> {
+    pub async fn flush_stats(&self) -> anyhow::Result<FlushedStats> {
         let (tx, rx) = oneshot::channel();
 
         self.flush_stat_buffer_sender.send(tx).await?;
