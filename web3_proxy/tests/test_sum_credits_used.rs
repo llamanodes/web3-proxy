@@ -6,8 +6,10 @@ use crate::common::{
 };
 use migration::sea_orm::prelude::Decimal;
 use std::time::Duration;
+use tracing::info;
 use web3_proxy::{balance::Balance, rpcs::blockchain::ArcBlock};
 
+// TODO: #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn test_sum_credits_used() {
     // chain_id 999_001_999 costs $.10/CU
@@ -29,6 +31,7 @@ async fn test_sum_credits_used() {
     // TODO: set the user's user_id to the "Premium" tier
 
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
+    info!(?balance, "starting");
     assert_eq!(
         balance.total_frontend_requests, 0,
         "total_frontend_requests"
@@ -66,6 +69,7 @@ async fn test_sum_credits_used() {
 
     // check balance
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
+    info!(?balance, "after 1 free request and being given $1000");
     assert_eq!(balance.total_frontend_requests, 1);
     assert_eq!(balance.total_cache_misses, 1);
     assert_eq!(balance.total_spent_paid_credits, 0.into());
@@ -86,6 +90,7 @@ async fn test_sum_credits_used() {
 
     // check balance
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
+    info!(?balance, "after 1 premium request");
     assert_eq!(balance.total_frontend_requests, 2);
     assert_eq!(balance.total_cache_misses, 1);
     assert_eq!(balance.total_spent_paid_credits, query_cost);
@@ -111,6 +116,7 @@ async fn test_sum_credits_used() {
 
     // check balance
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
+    info!(?balance, "after 10 more requests");
 
     // the first request was on the free tier
     let expected_total_spent_paid_credits = Decimal::from(11) * cached_query_cost;
@@ -136,6 +142,8 @@ async fn test_sum_credits_used() {
 
     // check admin's balance to make sure nothing is leaking
     let admin_balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
+    info!(?admin_balance);
+
     assert_eq!(admin_balance.remaining(), 0.into());
     assert!(!admin_balance.active_premium());
     assert!(!admin_balance.was_ever_premium());

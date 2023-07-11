@@ -220,6 +220,8 @@ impl BufferedRpcQueryStats {
 
         let latest_balance = stat.authorization.checks.latest_balance.read().await;
         self.approximate_latest_balance_for_influx = latest_balance.clone();
+
+        trace!(?stat, ?self, "added");
     }
 
     async fn _save_db_stats(
@@ -234,7 +236,7 @@ impl BufferedRpcQueryStats {
         // // Because reading the balance and updating the stats here is not atomically locked, this may lead to a negative balance
         // // This negative balance shouldn't be large tough
         // // TODO: I'm not so sure about this. @david can you explain more? if someone spends over their balance, they **should** go slightly negative. after all, they would have received the premium limits for these queries
-        // // sum_credits_used is definitely correct. the balance can be slightly off. so it seems like we should trust sum_credits_used over balance
+        // // sum_credits_used should be definitely correct. the balance can be slightly off. so it seems like we should trust sum_credits_used over balance
         let paid_credits_used = if active_premium {
             self.sum_credits_used
         } else {
