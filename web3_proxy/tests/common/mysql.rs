@@ -18,6 +18,7 @@ pub struct TestMysql {
 }
 
 impl TestMysql {
+    #[allow(unused)]
     pub async fn spawn() -> Self {
         // sqlite doesn't seem to work. our migrations are written for mysql
         // so lets use docker to start mysql
