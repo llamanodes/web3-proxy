@@ -1623,7 +1623,9 @@ impl Web3ProxyApp {
                     } => {
                         let block_depth = (head_block.number().saturating_sub(*block.num())).as_u64();
 
-                        if block_depth < self.config.archive_depth {
+                        if block_depth > self.config.archive_depth {
+                            trace!(%block_depth, archive_depth=%self.config.archive_depth);
+
                             request_metadata
                                 .archive_request
                                 .store(true, atomic::Ordering::Release);
@@ -1644,7 +1646,9 @@ impl Web3ProxyApp {
                     } => {
                         let block_depth = (head_block.number().saturating_sub(*from_block.num())).as_u64();
 
-                        if block_depth < self.config.archive_depth {
+                        if block_depth > self.config.archive_depth {
+                            trace!(%block_depth, archive_depth=%self.config.archive_depth);
+
                             request_metadata
                                 .archive_request
                                 .store(true, atomic::Ordering::Release);
