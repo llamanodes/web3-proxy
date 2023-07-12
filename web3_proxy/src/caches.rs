@@ -9,6 +9,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 /// Cache data from the database about rpc keys
 pub type RpcSecretKeyCache = Cache<RpcSecretKey, AuthorizationChecks>;
 /// Cache data from the database about user balances
+/// TODO: impl get_from_db on this
 pub type UserBalanceCache = Cache<u64, Arc<AsyncRwLock<Balance>>>;
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]

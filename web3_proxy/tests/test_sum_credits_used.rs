@@ -47,7 +47,7 @@ async fn test_sum_credits_used() {
     assert!(!balance.active_premium(), "active_premium");
     assert!(!balance.was_ever_premium(), "was_ever_premium");
 
-    // make one free request against the public RPC of 16 CU
+    info!("make one free request against the public RPC of 16 CU");
     x.proxy_provider
         .request::<_, Option<U64>>("eth_blockNumber", ())
         .await
@@ -58,7 +58,7 @@ async fn test_sum_credits_used() {
         .await
         .unwrap();
 
-    // make one free request against the public RPC of 16 CU
+    info!("make one free request against the user RPC of 16 CU");
     user_proxy_provider
         .request::<_, Option<U64>>("eth_blockNumber", ())
         .await
@@ -92,7 +92,7 @@ async fn test_sum_credits_used() {
         0.into(),
         "total_spent_paid_credits"
     );
-    // assert_eq!(balance.total_spent, cached_query_cost, "total_spent");
+    assert_eq!(balance.total_spent, cached_query_cost, "total_spent"); // TODO: not sure what this should be
     assert_eq!(balance.remaining(), 1000.into(), "remaining");
     assert!(balance.active_premium(), "active_premium");
     assert!(balance.was_ever_premium(), "was_ever_premium");

@@ -340,17 +340,14 @@ impl BufferedRpcQueryStats {
             return Ok(Arc::new(AsyncRwLock::new(Balance::default())));
         }
 
-        trace!("Will get it from the balance cache");
+        // TODO: get this from the cache
 
-        let x = user_balance_cache
-            .try_get_with(user_id, async {
-                let x = match Balance::try_from_db(db_conn, user_id).await? {
-                    Some(x) => x,
-                    None => return Err(Web3ProxyError::InvalidUserKey),
-                };
-                Ok(Arc::new(AsyncRwLock::new(x)))
-            })
-            .await?;
+        let x = match Balance::try_from_db(db_conn, user_id).await? {
+            Some(x) => x,
+            None => return Err(Web3ProxyError::InvalidUserKey),
+        };
+
+        let x = Arc::new(AsyncRwLock::new(x));
 
         Ok(x)
     }
