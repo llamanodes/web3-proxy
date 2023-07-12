@@ -4,7 +4,7 @@ use crate::frontend::authorization::{AuthorizationChecks, RpcSecretKey};
 use derive_more::From;
 use entities::rpc_key;
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use moka::future::Cache;
+use moka::future::{Cache, ConcurrentCacheExt};
 use std::fmt;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -12,6 +12,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tracing::trace;
 
 /// Cache data from the database about rpc keys
+/// TODO: try Ulid/u128 instead of RpcSecretKey in case my hash method is broken
 pub type RpcSecretKeyCache = Cache<RpcSecretKey, AuthorizationChecks>;
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
@@ -76,7 +77,7 @@ impl UserBalanceCache {
             let rpc_key_id = rpc_key_entity.id;
             let secret_key = rpc_key_entity.secret_key.into();
 
-            trace!(%rpc_key_id, "invalidating");
+            trace!(%user_id, %rpc_key_id, ?secret_key, "invalidating");
 
             rpc_secret_key_cache.invalidate(&secret_key).await;
         }

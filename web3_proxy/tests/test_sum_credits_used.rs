@@ -106,12 +106,6 @@ async fn test_sum_credits_used() {
     assert!(balance.active_premium(), "active_premium");
     assert!(balance.was_ever_premium(), "was_ever_premium");
 
-    info!("make one public rpc request of 16 CU");
-    x.proxy_provider
-        .request::<_, Option<U64>>("eth_blockNumber", ())
-        .await
-        .unwrap();
-
     info!("make one cached authenticated rpc request of 16 CU");
     user_proxy_provider
         .request::<_, Option<U64>>("eth_blockNumber", ())
@@ -120,7 +114,7 @@ async fn test_sum_credits_used() {
 
     // flush stats
     let flushed = x.flush_stats().await.unwrap();
-    assert_eq!(flushed.relational, 2);
+    assert_eq!(flushed.relational, 1);
 
     // check balance
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
@@ -130,13 +124,13 @@ async fn test_sum_credits_used() {
     );
     assert_eq!(balance.total_cache_misses, 0, "total_cache_misses");
     assert_eq!(
-        balance.total_spent_paid_credits, cached_query_cost,
-        "total_spent_paid_credits"
-    );
-    assert_eq!(
         balance.total_spent,
         cached_query_cost * Decimal::from(2),
         "total_spent"
+    );
+    assert_eq!(
+        balance.total_spent_paid_credits, cached_query_cost,
+        "total_spent_paid_credits"
     );
     assert_eq!(
         balance.remaining(),

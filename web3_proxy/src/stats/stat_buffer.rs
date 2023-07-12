@@ -170,7 +170,13 @@ impl StatBuffer {
                                             warn!(?err, "unable to clear caches");
                                         }
                                     } else if user_balance.active_premium() {
-                                        panic!("wtf");
+                                        // paid credits were not used, but now we have active premium. invalidate the caches
+                                        // TODO: this seems unliekly. should we warn if this happens so we can investigate?
+                                        if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, db_conn, &self.rpc_secret_key_cache).await {
+                                            // was premium, but isn't anymore due to paying for this query. clear the cache
+                                            // TODO: stop at <$0.000001 instead of negative?
+                                            warn!(?err, "unable to clear caches");
+                                        }
                                     }
 
                                     approximate_balance_remaining = user_balance.remaining();

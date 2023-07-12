@@ -27,6 +27,7 @@ use http::HeaderValue;
 use ipnet::IpNet;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use parking_lot::Mutex;
 use rdkafka::message::{Header as KafkaHeader, OwnedHeaders as KafkaOwnedHeaders, OwnedMessage};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
@@ -34,6 +35,7 @@ use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::mem;
@@ -45,16 +47,50 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
 use ulid::Ulid;
 use uuid::Uuid;
 
 /// This lets us use UUID and ULID while we transition to only ULIDs
 /// TODO: custom deserialize that can also go from String to Ulid
-#[derive(Copy, Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Deserialize)]
 pub enum RpcSecretKey {
     Ulid(Ulid),
     Uuid(Uuid),
+}
+
+impl RpcSecretKey {
+    pub fn new() -> Self {
+        Ulid::new().into()
+    }
+
+    fn as_128(&self) -> u128 {
+        match self {
+            Self::Ulid(x) => x.0,
+            Self::Uuid(x) => x.as_u128(),
+        }
+    }
+}
+
+impl PartialEq for RpcSecretKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_128() == other.as_128()
+    }
+}
+
+impl Eq for RpcSecretKey {}
+
+impl Debug for RpcSecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ulid(x) => Debug::fmt(x, f),
+            Self::Uuid(x) => {
+                let x = Ulid::from(x.as_u128());
+
+                Debug::fmt(&x, f)
+            }
+        }
+    }
 }
 
 /// always serialize as a ULID.
@@ -157,10 +193,7 @@ pub struct KafkaDebugLogger {
 /// Ulids and Uuids matching the same bits hash the same
 impl Hash for RpcSecretKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        let x = match self {
-            Self::Ulid(x) => x.0,
-            Self::Uuid(x) => x.as_u128(),
-        };
+        let x = self.as_128();
 
         x.hash(state);
     }
@@ -367,17 +400,6 @@ impl RequestMetadata {
             .as_ref()
             .map(|x| x.checks.proxy_mode)
             .unwrap_or_default()
-    }
-
-    /// this may drift slightly if multiple servers are handling the same users, but should be close
-    pub async fn latest_balance(&self) -> Option<Decimal> {
-        if let Some(x) = self.authorization.as_ref() {
-            let x = x.checks.latest_balance.read().await.remaining();
-
-            Some(x)
-        } else {
-            None
-        }
     }
 }
 
@@ -587,12 +609,6 @@ impl Drop for RequestMetadata {
     }
 }
 
-impl RpcSecretKey {
-    pub fn new() -> Self {
-        Ulid::new().into()
-    }
-}
-
 impl Default for RpcSecretKey {
     fn default() -> Self {
         Self::new()
@@ -604,7 +620,7 @@ impl Display for RpcSecretKey {
         // TODO: do this without dereferencing
         let ulid: Ulid = (*self).into();
 
-        ulid.fmt(f)
+        Display::fmt(&ulid, f)
     }
 }
 
@@ -1132,9 +1148,18 @@ impl Web3ProxyApp {
         rpc_secret_key: &RpcSecretKey,
     ) -> Web3ProxyResult<AuthorizationChecks> {
         // TODO: move onto a helper function
-        self.rpc_secret_key_cache
+
+        let fresh = Arc::new(Mutex::new(false));
+
+        let fresh_clone = fresh.clone();
+
+        let x = self
+            .rpc_secret_key_cache
             .try_get_with_by_ref(rpc_secret_key, async move {
-                trace!(?rpc_secret_key, "user cache miss");
+                {
+                    let mut f = fresh.lock_arc();
+                    *f = true;
+                }
 
                 let db_replica = self.db_replica()?;
 
@@ -1283,8 +1308,15 @@ impl Web3ProxyApp {
                     None => Ok(AuthorizationChecks::default()),
                 }
             })
-            .await
-            .map_err(Into::into)
+            .await?;
+
+        if *fresh_clone.lock() {
+            info!(?rpc_secret_key, "authorization_checks miss");
+        } else {
+            info!(?rpc_secret_key, "authorization_checks hit");
+        }
+
+        Ok(x)
     }
 
     /// Authorized the ip/origin/referer/useragent and rate limit and concurrency
