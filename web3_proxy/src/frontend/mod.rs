@@ -181,8 +181,7 @@ pub async fn serve(
         )
         .route(
             "/user/balance/stripe",
-            get(users::payment_stripe::user_stripe_deposits_get)
-                .post(users::payment_stripe::user_balance_stripe_post),
+            post(users::payment_stripe::user_balance_stripe_post),
         )
         .route(
             "/user/balance/:tx_hash",
