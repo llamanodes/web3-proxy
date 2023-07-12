@@ -238,7 +238,6 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         db_conn: &DatabaseConnection,
         key: &RpcQueryKey,
-        paid_credits_used: &Decimal,
     ) -> Web3ProxyResult<()> {
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
@@ -261,7 +260,7 @@ impl BufferedRpcQueryStats {
             sum_request_bytes: sea_orm::Set(self.sum_request_bytes),
             sum_response_millis: sea_orm::Set(self.sum_response_millis),
             sum_response_bytes: sea_orm::Set(self.sum_response_bytes),
-            sum_credits_used: sea_orm::Set(*paid_credits_used),
+            sum_credits_used: sea_orm::Set(self.paid_credits_used),
             sum_incl_free_credits_used: sea_orm::Set(self.sum_credits_used),
         };
 
@@ -379,8 +378,7 @@ impl BufferedRpcQueryStats {
         let sender_user_id = key.rpc_key_user_id.map_or(0, |x| x.get());
 
         // save the statistics to the database:
-        self._save_db_stats(chain_id, db_conn, &key, &self.paid_credits_used)
-            .await?;
+        self._save_db_stats(chain_id, db_conn, &key).await?;
 
         // Apply all the referral logic; let's keep it simple and flat for now
         if self.paid_credits_used > 0.into() {
