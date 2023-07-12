@@ -4,7 +4,7 @@ use crate::frontend::authorization::{AuthorizationChecks, RpcSecretKey};
 use derive_more::From;
 use entities::rpc_key;
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use moka::future::{Cache, ConcurrentCacheExt};
+use moka::future::Cache;
 use std::fmt;
 use std::net::IpAddr;
 use std::sync::Arc;
