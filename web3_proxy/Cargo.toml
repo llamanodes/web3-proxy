@@ -67,7 +67,7 @@ listenfd = "1.0.1"
 mimalloc = { version = "0.1.37", optional = true}
 moka = { version = "0.11.2", default-features = false, features = ["atomic64", "future", "parking_lot", "quanta", "triomphe"] }
 nanorand = { version = "0.7.0", default-features = false, features = ["std", "tls", "wyrand"] }
-num = { version = "0.4.0" }
+num = { version = "0.4.1" }
 num-traits = "0.2.15"
 once_cell = { version = "1.18.0" }
 ordered-float = {version = "3.7.0" }
@@ -83,7 +83,7 @@ rust_decimal = { version = "1.30.0", features = ["maths"] }
 sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.5"
 serde = { version = "1.0.171" }
-serde_json = { version = "1.0.100", default-features = false, features = ["raw_value"] }
+serde_json = { version = "1.0.102", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
 strum = { version = "0.25.0", features = ["derive"] }
 time_01 = { package = "time", version = "0.1.45" }
