@@ -71,8 +71,8 @@ pub struct RpcQueryStats {
     pub compute_unit_cost: Decimal,
     /// If the request is invalid or received a jsonrpc error response (excluding reverts)
     pub user_error_response: bool,
-    /// set automatically when the cached Balance is updated to match how much was spent
-    pub paid_credits_used: Option<bool>,
+    // /// set automatically when the cached Balance is updated to match how much was spent
+    // pub paid_credits_used: Option<bool>,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
@@ -191,7 +191,7 @@ impl RpcQueryStats {
 /// For now there is just one, but I think there might be others later
 #[derive(Debug, From)]
 pub enum AppStat {
-    RpcQuery(RpcQueryStats),
+    RpcQuery(RequestMetadata),
 }
 
 // TODO: move to stat_buffer.rs?
@@ -549,10 +549,8 @@ impl BufferedRpcQueryStats {
 /// this is **intentionally** not a TryFrom<Arc<RequestMetadata>>
 /// We want this to run when there is **one and only one** copy of this RequestMetadata left
 /// There are often multiple copies if a request is being sent to multiple servers in parallel
-impl TryFrom<RequestMetadata> for RpcQueryStats {
-    type Error = Web3ProxyError;
-
-    fn try_from(mut metadata: RequestMetadata) -> Result<Self, Self::Error> {
+impl RpcQueryStats {
+    fn try_from_metadata(mut metadata: RequestMetadata) -> Web3ProxyResult<Self> {
         let mut authorization = metadata.authorization.take();
 
         if authorization.is_none() {
@@ -624,7 +622,6 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
             response_millis,
             response_timestamp,
             user_error_response,
-            paid_credits_used: None,
         };
 
         Ok(x)

@@ -8,7 +8,7 @@ use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::one::Web3Rpc;
-use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
+use crate::stats::{AppStat, BackendRequests};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::authorization::Bearer;
@@ -518,9 +518,7 @@ impl RequestMetadata {
         if let Some(stat_sender) = self.stat_sender.take() {
             trace!(?self, "sending stat");
 
-            let stat: RpcQueryStats = self.try_into()?;
-
-            let stat: AppStat = stat.into();
+            let stat: AppStat = self.into();
 
             if let Err(err) = stat_sender.send(stat) {
                 error!(?err, "failed sending stat");

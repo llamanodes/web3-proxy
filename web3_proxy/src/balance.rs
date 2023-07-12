@@ -21,6 +21,7 @@ pub struct Balance {
     pub total_cache_misses: u64,
     pub total_frontend_requests: u64,
     /// this includes credits spent inside a "free" or "downgraded" tier
+    /// this always increments and so will always be >= total_spent_paid_credits
     pub total_spent: Decimal,
     pub total_spent_paid_credits: Decimal,
     pub user_id: u64,

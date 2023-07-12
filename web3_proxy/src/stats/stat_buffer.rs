@@ -3,6 +3,7 @@ use crate::app::Web3ProxyJoinHandle;
 use crate::balance::Balance;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::Web3ProxyResult;
+use crate::stats::RpcQueryStats;
 use derive_more::From;
 use entities::rpc_key;
 use futures::stream;
@@ -133,17 +134,20 @@ impl StatBuffer {
 
                     // TODO: tokio spawn this!
                     match stat {
-                        Some(AppStat::RpcQuery(stat)) => {
-                            let mut paid_credits_used = false;
+                        Some(AppStat::RpcQuery(request_metadata)) => {
+                            // we convert on this side of the channel so that we don't slow down the request
+                            let stat = RpcQueryStats::try_from_metadata(request_metadata)?;
 
                             // update the latest balance
-                            // do this BEFORE emitting any stats```
+                            // do this BEFORE emitting any stats
+                            let paid_credits_used: bool;
                             let latest_balance: Balance;
                             if let Some(db_conn) = self.db_conn.as_ref() {
                                 let user_id = stat.authorization.checks.user_id;
 
                                 // update the user's balance
                                 if user_id == 0 {
+                                    paid_credits_used = false;
                                     latest_balance = Balance::default();
                                 } else {
                                     // update the user's cached balance
@@ -191,6 +195,7 @@ impl StatBuffer {
                                 self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat.clone(), latest_balance.clone(), paid_credits_used).await;
                             } else {
                                 latest_balance = Balance::default();
+                                paid_credits_used = false;
                             }
 
                             if self.influxdb_client.is_some() {
