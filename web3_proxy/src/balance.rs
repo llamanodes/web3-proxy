@@ -62,6 +62,8 @@ impl Balance {
     }
 
     pub fn was_ever_premium(&self) -> bool {
+        // TODO: technically we should also check that user_tier.downgrade_tier_id.is_some()
+        // but now we set premium automatically on deposit, so its fine for now
         self.user_id != 0 && self.total_deposits() >= Decimal::from(10)
     }
 

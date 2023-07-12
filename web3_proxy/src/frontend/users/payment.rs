@@ -1,10 +1,11 @@
 use crate::app::Web3ProxyApp;
 use crate::balance::Balance;
-use crate::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse, Web3ProxyResult};
 use crate::frontend::authorization::{
     login_is_authorized, Authorization as Web3ProxyAuthorization,
 };
 use crate::frontend::users::authentication::register_new_user;
+use crate::premium::grant_premium_tier;
 use anyhow::Context;
 use axum::{
     extract::Path,
@@ -16,7 +17,7 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use entities::{
     admin_increase_balance_receipt, increase_on_chain_balance_receipt,
-    stripe_increase_balance_receipt, user,
+    stripe_increase_balance_receipt, user, user_tier,
 };
 use ethers::abi::AbiEncode;
 use ethers::types::{Address, Block, TransactionReceipt, TxHash, H256};
@@ -302,6 +303,8 @@ pub async fn user_balance_post(
 
     // TODO: check bloom filters
 
+    let mut user_ids_need_premium = HashSet::new();
+
     // the transaction might contain multiple relevant logs. collect them all
     let mut response_data = vec![];
     let mut user_ids_to_invalidate = HashSet::new();
@@ -405,7 +408,19 @@ pub async fn user_balance_post(
             debug!("deposit data: {:#?}", x);
 
             response_data.push(x);
+
+            user_ids_need_premium.insert(recipient);
         }
+    }
+
+    for user in user_ids_need_premium.into_iter() {
+        let user_tier = user_tier::Entity::find_by_id(user.user_tier_id)
+            .one(&txn)
+            .await?;
+
+        grant_premium_tier(&user, user_tier.as_ref(), &txn)
+            .await
+            .web3_context("granting premium tier")?;
     }
 
     txn.commit().await?;

@@ -1,12 +1,8 @@
 mod common;
 
 use crate::common::{
-    admin_increases_balance::admin_increase_balance,
-    create_admin::create_user_as_admin,
-    create_user::{create_user, set_user_tier},
-    rpc_key::user_get_provider,
-    user_balance::user_get_balance,
-    TestApp,
+    admin_increases_balance::admin_increase_balance, create_admin::create_user_as_admin,
+    create_user::create_user, rpc_key::user_get_provider, user_balance::user_get_balance, TestApp,
 };
 use ethers::prelude::U64;
 use migration::sea_orm::prelude::Decimal;
@@ -32,12 +28,6 @@ async fn test_sum_credits_used() {
     // log in to create users
     let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
-
-    set_user_tier(&x, user_login_response.user.clone(), "Premium")
-        .await
-        .unwrap();
-
-    // TODO: set the user's user_id to the "Premium" tier
 
     info!("starting balance");
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;

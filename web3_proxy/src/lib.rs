@@ -14,6 +14,7 @@ pub mod frontend;
 pub mod http_params;
 pub mod jsonrpc;
 pub mod pagerduty;
+pub mod premium;
 pub mod prometheus;
 pub mod referral_code;
 pub mod relational_db;

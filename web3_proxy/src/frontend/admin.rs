@@ -6,6 +6,7 @@ use crate::app::Web3ProxyApp;
 use crate::errors::Web3ProxyResponse;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::frontend::users::authentication::PostLogin;
+use crate::premium::{get_user_and_tier_from_address, grant_premium_tier};
 use crate::user_token::UserBearerToken;
 use axum::{
     extract::{Path, Query},
@@ -65,13 +66,15 @@ pub async fn admin_increase_balance(
         .await?
         .ok_or_else(|| Web3ProxyError::AccessDenied("not an admin".into()))?;
 
-    let user_entry: user::Model = user::Entity::find()
-        .filter(user::Column::Address.eq(payload.user_address.as_bytes()))
-        .one(&txn)
+    let (user_entry, user_tier_entry) = get_user_and_tier_from_address(&payload.user_address, &txn)
         .await?
         .ok_or(Web3ProxyError::BadRequest(
             format!("No user found with {:?}", payload.user_address).into(),
         ))?;
+
+    grant_premium_tier(&user_entry, user_tier_entry.as_ref(), &txn)
+        .await
+        .web3_context("granting premium tier")?;
 
     let increase_balance_receipt = admin_increase_balance_receipt::ActiveModel {
         amount: sea_orm::Set(payload.amount),
@@ -81,6 +84,7 @@ pub async fn admin_increase_balance(
         ..Default::default()
     };
     increase_balance_receipt.save(&txn).await?;
+
     txn.commit().await?;
 
     // Invalidate the user_balance_cache for this user:
