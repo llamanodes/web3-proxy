@@ -127,6 +127,10 @@ pub struct AuthorizationChecks {
     /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
     pub private_txs: bool,
     pub proxy_mode: ProxyMode,
+    /// if the account had premium when this request metadata was created
+    /// they might spend slightly more than they've paid, but we are okay with that
+    /// TODO: we could price the request now and if its too high, downgrade. but thats more complex than we need
+    pub paid_credits_used: bool,
 }
 
 /// TODO: include the authorization checks in this?
@@ -1247,12 +1251,17 @@ impl Web3ProxyApp {
 
                         // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
                         // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
+                        let paid_credits_used: bool;
                         if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
                             let active_premium = latest_balance.read().await.active_premium();
 
                             // only consider the user premium if they have paid at least $10 and have a balance > $.01
                             // otherwise, set user_tier_model to the downograded tier
-                            if !active_premium {
+                            if active_premium {
+                                paid_credits_used = true;
+                            } else {
+                                paid_credits_used = false;
+
                                 // TODO: include boolean to mark that the user is downgraded
                                 user_tier_model =
                                     user_tier::Entity::find_by_id(downgrade_user_tier)
@@ -1263,10 +1272,14 @@ impl Web3ProxyApp {
                                             downgrade_user_tier
                                         ))?;
                             }
+                        } else {
+                            paid_credits_used = false;
                         }
 
                         let rpc_key_id =
                             Some(rpc_key_model.id.try_into().context("db ids are never 0")?);
+
+                        // TODO: 
 
                         Ok(AuthorizationChecks {
                             allowed_ips,
@@ -1284,6 +1297,7 @@ impl Web3ProxyApp {
                             rpc_secret_key: Some(*rpc_secret_key),
                             rpc_secret_key_id: rpc_key_id,
                             user_id: rpc_key_model.user_id,
+                            paid_credits_used,
                         })
                     }
                     None => Ok(AuthorizationChecks::default()),

@@ -140,28 +140,26 @@ impl StatBuffer {
 
                             // update the latest balance
                             // do this BEFORE emitting any stats
-                            let paid_credits_used: bool;
                             let latest_balance: Balance;
                             if let Some(db_conn) = self.db_conn.as_ref() {
                                 let user_id = stat.authorization.checks.user_id;
 
                                 // update the user's balance
                                 if user_id == 0 {
-                                    paid_credits_used = false;
                                     latest_balance = Balance::default();
                                 } else {
                                     // update the user's cached balance
                                     let mut user_balance = stat.authorization.checks.latest_balance.write().await;
 
-                                    paid_credits_used = user_balance.active_premium();
-
+                                    // TODO: move this to a helper function
                                     user_balance.total_frontend_requests += 1;
+                                    user_balance.total_spent += stat.compute_unit_cost;
 
                                     if !stat.backend_rpcs_used.is_empty() {
                                         user_balance.total_cache_misses += 1;
                                     }
 
-                                    if paid_credits_used {
+                                    if stat.authorization.checks.paid_credits_used {
                                         // TODO: this lets them get a negative remaining balance. we should clear if close to 0
                                         user_balance.total_spent_paid_credits += stat.compute_unit_cost;
 
@@ -185,29 +183,26 @@ impl StatBuffer {
                                                     .await;
                                             }
                                         }
-                                    } else {
-                                        user_balance.total_spent += stat.compute_unit_cost;
                                     }
 
                                     latest_balance = user_balance.clone();
                                 }
 
-                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat.clone(), latest_balance.clone(), paid_credits_used).await;
+                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat.clone(), latest_balance.clone()).await;
                             } else {
                                 latest_balance = Balance::default();
-                                paid_credits_used = false;
                             }
 
                             if self.influxdb_client.is_some() {
                                 // TODO: round the timestamp at all?
 
                                 if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key() {
-                                    self.opt_in_timeseries_buffer.entry(opt_in_timeseries_key).or_default().add(stat.clone(), latest_balance.clone(), paid_credits_used).await;
+                                    self.opt_in_timeseries_buffer.entry(opt_in_timeseries_key).or_default().add(stat.clone(), latest_balance.clone()).await;
                                 }
 
                                 let global_timeseries_key = stat.global_timeseries_key();
 
-                                self.global_timeseries_buffer.entry(global_timeseries_key).or_default().add(stat, latest_balance, paid_credits_used).await;
+                                self.global_timeseries_buffer.entry(global_timeseries_key).or_default().add(stat, latest_balance).await;
                             }
                         }
                         None => {

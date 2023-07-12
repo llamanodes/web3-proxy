@@ -71,8 +71,6 @@ pub struct RpcQueryStats {
     pub compute_unit_cost: Decimal,
     /// If the request is invalid or received a jsonrpc error response (excluding reverts)
     pub user_error_response: bool,
-    // /// set automatically when the cached Balance is updated to match how much was spent
-    // pub paid_credits_used: Option<bool>,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
@@ -158,6 +156,10 @@ impl RpcQueryStats {
 
     /// stats for a single key
     fn owned_timeseries_key(&self) -> Option<RpcQueryKey> {
+        if !self.authorization.checks.paid_credits_used {
+            return None;
+        }
+
         // we don't store origin in the timeseries db. its only optionaly used for accounting
         let origin = None;
 
@@ -197,12 +199,7 @@ pub enum AppStat {
 // TODO: move to stat_buffer.rs?
 impl BufferedRpcQueryStats {
     #[instrument(level = "trace")]
-    async fn add(
-        &mut self,
-        stat: RpcQueryStats,
-        approximate_latest_balance_for_influx: Balance,
-        paid_credits_used: bool,
-    ) {
+    async fn add(&mut self, stat: RpcQueryStats, approximate_latest_balance_for_influx: Balance) {
         // a stat always come from just 1 frontend request
         self.frontend_requests += 1;
 
@@ -225,7 +222,7 @@ impl BufferedRpcQueryStats {
         self.sum_response_millis += stat.response_millis;
         self.sum_credits_used += stat.compute_unit_cost;
 
-        if paid_credits_used {
+        if stat.authorization.checks.paid_credits_used {
             self.paid_credits_used += stat.compute_unit_cost;
         }
 

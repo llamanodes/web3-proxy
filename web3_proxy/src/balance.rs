@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 pub struct Balance {
     pub admin_deposits: Decimal,
     pub chain_deposits: Decimal,
-    pub referal_bonus: Decimal,
     pub one_time_referee_bonus: Decimal,
+    pub referal_bonus: Decimal,
     pub stripe_deposits: Decimal,
     pub total_cache_misses: u64,
     pub total_frontend_requests: u64,
@@ -36,13 +36,13 @@ impl Serialize for Balance {
 
         state.serialize_field("admin_deposits", &self.admin_deposits)?;
         state.serialize_field("chain_deposits", &self.chain_deposits)?;
-        state.serialize_field("referal_bonus", &self.referal_bonus)?;
         state.serialize_field("one_time_referee_bonus", &self.one_time_referee_bonus)?;
+        state.serialize_field("referal_bonus", &self.referal_bonus)?;
         state.serialize_field("stripe_deposits", &self.stripe_deposits)?;
-        state.serialize_field("total_spent", &self.total_spent)?;
-        state.serialize_field("total_spent_paid_credits", &self.total_spent_paid_credits)?;
         state.serialize_field("total_cache_misses", &self.total_cache_misses)?;
         state.serialize_field("total_frontend_requests", &self.total_frontend_requests)?;
+        state.serialize_field("total_spent", &self.total_spent)?;
+        state.serialize_field("total_spent_paid_credits", &self.total_spent_paid_credits)?;
         state.serialize_field("user_id", &self.user_id)?;
 
         state.serialize_field("active_premium", &self.active_premium())?;

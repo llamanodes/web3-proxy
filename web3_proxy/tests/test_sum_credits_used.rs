@@ -66,7 +66,7 @@ async fn test_sum_credits_used() {
 
     let query_cost: Decimal = "1.00".parse().unwrap();
 
-    let archive_multiplier: Decimal = "2.5".parse().unwrap();
+    // let archive_multiplier: Decimal = "2.5".parse().unwrap();
 
     let cache_multipler: Decimal = "0.75".parse().unwrap();
 
