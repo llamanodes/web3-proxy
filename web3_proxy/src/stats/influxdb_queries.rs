@@ -83,16 +83,6 @@ pub async fn query_user_stats<'a>(
             user.user_tier_id
         };
 
-        let user_tier = user_tier::Entity::find_by_id(relevant_balance_user_tier_id)
-            .one(db_replica.as_ref())
-            .await?
-            .web3_context("user_tier not found")?;
-
-        if user_tier.downgrade_tier_id.is_some() && !balance.active_premium() {
-            trace!(%user_id, "User does not have enough balance to qualify for premium");
-            return Err(Web3ProxyError::PaymentRequired);
-        }
-
         if user_id != caller_user.id {
             // check that there is at least on rpc-keys owned by the requested user and related to the caller user
             let user_rpc_key_ids: Vec<u64> = rpc_key::Entity::find()
