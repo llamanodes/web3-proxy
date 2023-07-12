@@ -181,6 +181,8 @@ impl StatBuffer {
                                                     .await;
                                             }
                                         }
+                                    } else {
+                                        user_balance.total_spent += stat.compute_unit_cost;
                                     }
 
                                     latest_balance = user_balance.clone();
