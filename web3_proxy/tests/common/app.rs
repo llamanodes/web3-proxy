@@ -32,6 +32,7 @@ use tracing::{info, trace, warn};
 use web3_proxy::{
     config::{AppConfig, TopConfig, Web3RpcConfig},
     relational_db::get_migrated_db,
+    stats::FlushedStats,
     sub_commands::ProxydSubCommand,
 };
 
@@ -59,23 +60,26 @@ pub struct TestApp {
     pub proxy_provider: Provider<Http>,
 
     /// tell the app to flush stats to the database
-    flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
+    flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
 
     /// tell the app to shut down (use `self.stop()`).
     shutdown_sender: broadcast::Sender<()>,
 }
 
 impl TestApp {
-    pub async fn spawn(setup_db: bool) -> Self {
+    pub async fn spawn(chain_id: u64, setup_db: bool) -> Self {
+        info!(?chain_id);
+
         let num_workers = 2;
 
         // TODO: move basic setup into a test fixture
         let path = env::var("PATH").unwrap();
 
-        info!("path: {}", path);
+        info!(%path);
 
         // TODO: configurable rpc and block
         let anvil = Anvil::new()
+            .chain_id(chain_id)
             // .fork("https://polygon.llamarpc.com@44300000")
             .spawn();
 
@@ -244,7 +248,7 @@ impl TestApp {
         // TODO: test influx
         // TODO: test redis
         let app_config: AppConfig = serde_json::from_value(json!({
-            "chain_id": 31337,
+            "chain_id": chain_id,
             "db_url": db_url,
             "default_user_max_requests_per_period": Some(6_000_000),
             "deposit_factory_contract": Address::from_str(
@@ -328,7 +332,7 @@ impl TestApp {
     }
 
     #[allow(unused)]
-    pub async fn flush_stats(&self) -> anyhow::Result<(usize, usize)> {
+    pub async fn flush_stats(&self) -> anyhow::Result<FlushedStats> {
         let (tx, rx) = oneshot::channel();
 
         self.flush_stat_buffer_sender.send(tx).await?;

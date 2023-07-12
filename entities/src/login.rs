@@ -10,7 +10,10 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: u64,
     #[sea_orm(column_type = "Binary(BlobSize::Blob(Some(16)))", unique)]
-    #[serde(serialize_with = "serialization::uuid_as_ulid")]
+    #[serde(
+        serialize_with = "serialization::uuid_as_ulid",
+        deserialize_with = "serialization::ulid_to_uuid"
+    )]
     pub bearer_token: Uuid,
     pub user_id: u64,
     pub expires_at: DateTimeUtc,

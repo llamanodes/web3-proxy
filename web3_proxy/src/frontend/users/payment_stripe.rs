@@ -7,7 +7,7 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::{rpc_key, stripe_increase_balance_receipt, user};
+use entities::{stripe_increase_balance_receipt, user};
 use ethers::types::Address;
 use http::HeaderMap;
 use migration::sea_orm::prelude::Decimal;
@@ -17,7 +17,7 @@ use migration::sea_orm::{
 use serde_json::json;
 use std::sync::Arc;
 use stripe::Webhook;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 /// `GET /user/balance/stripe` -- Use a bearer token to get the user's balance and spend.
 ///
@@ -163,20 +163,16 @@ pub async fn user_balance_stripe_post(
         Some(recipient) => {
             let _ = insert_receipt_model.save(&txn).await;
 
-            let recipient_rpc_keys = rpc_key::Entity::find()
-                .filter(rpc_key::Column::UserId.eq(recipient.id))
-                .all(&txn)
-                .await?;
-
             txn.commit().await?;
 
             // Finally invalidate the cache as well
-            app.user_balance_cache.invalidate(&recipient.id).await;
-            for rpc_key_entity in recipient_rpc_keys {
-                app.rpc_secret_key_cache
-                    .invalidate(&rpc_key_entity.secret_key.into())
-                    .await;
-            }
+            if let Err(err) = app
+                .user_balance_cache
+                .invalidate(&recipient.id, db_conn, &app.rpc_secret_key_cache)
+                .await
+            {
+                warn!(?err, "unable to invalidate caches");
+            };
         }
         None => {
             return Err(Web3ProxyError::BadResponse(

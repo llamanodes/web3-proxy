@@ -5,6 +5,7 @@ use argh::FromArgs;
 use ethers::prelude::{Address, TxHash};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
+use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::DatabaseConnection;
 use sentry::types::Dsn;
 use serde::Deserialize;
@@ -169,6 +170,8 @@ pub struct AppConfig {
 
     /// Stripe api key for checking validity of webhooks
     pub stripe_whsec_key: Option<String>,
+
+    pub usd_per_cu: Option<Decimal>,
 
     /// Track rate limits in a redis (or compatible backend)
     /// It is okay if this data is lost.

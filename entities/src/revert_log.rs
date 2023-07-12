@@ -14,7 +14,10 @@ pub struct Model {
     pub timestamp: DateTimeUtc,
     pub method: Method,
     #[sea_orm(column_type = "Binary(BlobSize::Blob(Some(20)))")]
-    #[serde(serialize_with = "serialization::vec_as_address")]
+    #[serde(
+        serialize_with = "serialization::vec_as_address",
+        deserialize_with = "serialization::address_to_vec"
+    )]
     pub to: Vec<u8>,
     #[sea_orm(column_type = "Text", nullable)]
     pub call_data: Option<String>,

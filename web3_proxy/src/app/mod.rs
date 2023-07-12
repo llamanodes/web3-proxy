@@ -22,7 +22,7 @@ use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::provider::{connect_http, EthersHttpProvider};
 use crate::rpcs::transactions::TxStatus;
-use crate::stats::{AppStat, StatBuffer};
+use crate::stats::{AppStat, FlushedStats, StatBuffer};
 use anyhow::Context;
 use axum::http::StatusCode;
 use chrono::Utc;
@@ -50,7 +50,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::sync::{broadcast, mpsc, watch, Semaphore, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::{error, info, trace, warn, Level};
@@ -99,7 +99,8 @@ pub struct Web3ProxyApp {
     /// rate limit anonymous users
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     /// rate limit authenticated users
-    pub frontend_registered_user_rate_limiter: Option<DeferredRateLimiter<RegisteredUserRateLimitKey>>,
+    pub frontend_registered_user_rate_limiter:
+        Option<DeferredRateLimiter<RegisteredUserRateLimitKey>>,
     /// concurrent/parallel request limits for anonymous users
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>>,
     pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
@@ -179,8 +180,8 @@ impl Web3ProxyApp {
         top_config: TopConfig,
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
-        flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
-        flush_stat_buffer_receiver: mpsc::Receiver<oneshot::Sender<(usize, usize)>>,
+        flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
+        flush_stat_buffer_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         let stat_buffer_shutdown_receiver = shutdown_sender.subscribe();
         let mut background_shutdown_receiver = shutdown_sender.subscribe();
@@ -372,10 +373,11 @@ impl Web3ProxyApp {
             .build();
 
         // TODO: TTL left low, this could also be a solution instead of modifiying the cache, that may be disgusting across threads / slow anyways
-        let user_balance_cache = CacheBuilder::new(10_000)
+        let user_balance_cache: UserBalanceCache = CacheBuilder::new(10_000)
             .name("user_balance")
             .time_to_live(Duration::from_secs(600))
-            .build();
+            .build()
+            .into();
 
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
@@ -434,9 +436,8 @@ impl Web3ProxyApp {
                 // these two rate limiters can share the base limiter
                 // these are deferred rate limiters because we don't want redis network requests on the hot path
                 // TODO: take cache_size from config
-                frontend_ip_rate_limiter = Some(
-                    DeferredRateLimiter::new(20_000, "ip", rpc_rrl.clone(), None).await,
-                );
+                frontend_ip_rate_limiter =
+                    Some(DeferredRateLimiter::new(20_000, "ip", rpc_rrl.clone(), None).await);
                 frontend_registered_user_rate_limiter =
                     Some(DeferredRateLimiter::new(20_000, "key", rpc_rrl, None).await);
             }
@@ -698,7 +699,9 @@ impl Web3ProxyApp {
     }
 
     pub fn influxdb_client(&self) -> Web3ProxyResult<&influxdb2::Client> {
-        self.influxdb_client.as_ref().ok_or(Web3ProxyError::NoDatabase)
+        self.influxdb_client
+            .as_ref()
+            .ok_or(Web3ProxyError::NoDatabase)
     }
 
     /// an ethers provider that you can use with ether's abigen.
@@ -1140,15 +1143,19 @@ impl Web3ProxyApp {
             .await
         {
             Ok(response_data) => {
-                request_metadata.error_response.store(false, Ordering::Release);
+                request_metadata
+                    .error_response
+                    .store(false, Ordering::Release);
 
                 (StatusCode::OK, response_data)
-            },
+            }
             Err(err) => {
-                request_metadata.error_response.store(true, Ordering::Release);
+                request_metadata
+                    .error_response
+                    .store(true, Ordering::Release);
 
                 err.as_response_parts()
-            },
+            }
         };
 
         let response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
@@ -1157,6 +1164,9 @@ impl Web3ProxyApp {
         request_metadata.add_response(ResponseOrBytes::Response(&response));
 
         let rpcs = request_metadata.backend_rpcs_used();
+
+        // there might be clones in the background, so this isn't a sure thing
+        let _ = request_metadata.try_send_arc_stat();
 
         (code, response, rpcs)
     }
@@ -1486,7 +1496,7 @@ impl Web3ProxyApp {
                                 Err(Web3ProxyError::NoDatabase) => {},
                                 Err(err) => {
                                     warn!(
-                                        ?err, 
+                                        ?err,
                                         "unable to save stats for eth_sendRawTransaction",
                                     )
                                 }
@@ -1620,7 +1630,9 @@ impl Web3ProxyApp {
                     } => {
                         let block_depth = (head_block.number().saturating_sub(*block.num())).as_u64();
 
-                        if block_depth < self.config.archive_depth {
+                        if block_depth > self.config.archive_depth {
+                            trace!(%block_depth, archive_depth=%self.config.archive_depth);
+
                             request_metadata
                                 .archive_request
                                 .store(true, atomic::Ordering::Release);
@@ -1641,7 +1653,9 @@ impl Web3ProxyApp {
                     } => {
                         let block_depth = (head_block.number().saturating_sub(*from_block.num())).as_u64();
 
-                        if block_depth < self.config.archive_depth {
+                        if block_depth > self.config.archive_depth {
+                            trace!(%block_depth, archive_depth=%self.config.archive_depth);
+
                             request_metadata
                                 .archive_request
                                 .store(true, atomic::Ordering::Release);

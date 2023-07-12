@@ -1,12 +1,12 @@
 use axum::headers::authorization::Bearer;
 use migration::sea_orm::prelude::Uuid;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use ulid::Ulid;
 
 /// Key used for caching the user's login
-#[derive(Clone, Hash, PartialEq, Eq, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct UserBearerToken(pub Ulid);
 

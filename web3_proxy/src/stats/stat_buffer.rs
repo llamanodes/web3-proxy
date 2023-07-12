@@ -1,8 +1,8 @@
-use super::{AppStat, RpcQueryKey};
+use super::{AppStat, FlushedStats, RpcQueryKey};
 use crate::app::Web3ProxyJoinHandle;
-use crate::balance::Balance;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::Web3ProxyResult;
+use crate::stats::RpcQueryStats;
 use derive_more::From;
 use futures::stream;
 use hashbrown::HashMap;
@@ -12,7 +12,7 @@ use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{interval, sleep};
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
 
 #[derive(Debug, Default)]
 pub struct BufferedRpcQueryStats {
@@ -27,8 +27,11 @@ pub struct BufferedRpcQueryStats {
     pub sum_response_millis: u64,
     pub sum_credits_used: Decimal,
     pub sum_cu_used: Decimal,
-    /// The user's balance at this point in time. Multiple queries might be modifying it at once.
-    pub approximate_latest_balance_for_influx: Balance,
+    pub paid_credits_used: Decimal,
+    /// The user's balance at this point in time.
+    /// Multiple queries might be modifying it at once, so this is a copy of it when received
+    /// None if this is an unauthenticated request
+    pub approximate_balance_remaining: Decimal,
 }
 
 #[derive(From)]
@@ -53,7 +56,7 @@ pub struct StatBuffer {
     tsdb_save_interval_seconds: u32,
     user_balance_cache: UserBalanceCache,
 
-    _flush_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
+    _flush_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
 }
 
 impl StatBuffer {
@@ -69,8 +72,8 @@ impl StatBuffer {
         user_balance_cache: Option<UserBalanceCache>,
         shutdown_receiver: broadcast::Receiver<()>,
         tsdb_save_interval_seconds: u32,
-        flush_sender: mpsc::Sender<oneshot::Sender<(usize, usize)>>,
-        flush_receiver: mpsc::Receiver<oneshot::Sender<(usize, usize)>>,
+        flush_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
+        flush_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
     ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
         if influxdb_bucket.is_none() {
             influxdb_client = None;
@@ -115,7 +118,7 @@ impl StatBuffer {
         &mut self,
         mut stat_receiver: mpsc::UnboundedReceiver<AppStat>,
         mut shutdown_receiver: broadcast::Receiver<()>,
-        mut flush_receiver: mpsc::Receiver<oneshot::Sender<(usize, usize)>>,
+        mut flush_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
     ) -> Web3ProxyResult<()> {
         let mut tsdb_save_interval =
             interval(Duration::from_secs(self.tsdb_save_interval_seconds as u64));
@@ -127,22 +130,71 @@ impl StatBuffer {
                 stat = stat_receiver.recv() => {
                     // trace!("Received stat");
                     // save the stat to a buffer
+
+                    // TODO: tokio spawn this!
                     match stat {
-                        Some(AppStat::RpcQuery(stat)) => {
+                        Some(AppStat::RpcQuery(request_metadata)) => {
+                            // we convert on this side of the channel so that we don't slow down the request
+                            let stat = RpcQueryStats::try_from_metadata(request_metadata)?;
+
+                            // update the latest balance
+                            // do this BEFORE emitting any stats
+                            let mut approximate_balance_remaining = 0.into();
+                            if let Some(db_conn) = self.db_conn.as_ref() {
+                                let user_id = stat.authorization.checks.user_id;
+
+                                // update the user's balance
+                                if user_id != 0 {
+                                    // update the user's cached balance
+                                    let mut user_balance = stat.authorization.checks.latest_balance.write().await;
+
+                                    // TODO: move this to a helper function
+                                    user_balance.total_frontend_requests += 1;
+                                    user_balance.total_spent += stat.compute_unit_cost;
+
+                                    if !stat.backend_rpcs_used.is_empty() {
+                                        user_balance.total_cache_misses += 1;
+                                    }
+
+                                    // if paid_credits_used is true, then they were premium at the start of the request
+                                    if stat.authorization.checks.paid_credits_used {
+                                        // TODO: this lets them get a negative remaining balance. we should clear if close to 0
+                                        user_balance.total_spent_paid_credits += stat.compute_unit_cost;
+
+                                        // check if they still have premium
+                                        if user_balance.active_premium() {
+                                            // TODO: referall credits here? i think in the save_db section still makes sense for those
+                                        } else if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, db_conn, &self.rpc_secret_key_cache).await {
+                                            // was premium, but isn't anymore due to paying for this query. clear the cache
+                                            // TODO: stop at <$0.000001 instead of negative?
+                                            warn!(?err, "unable to clear caches");
+                                        }
+                                    } else if user_balance.active_premium() {
+                                        // paid credits were not used, but now we have active premium. invalidate the caches
+                                        // TODO: this seems unliekly. should we warn if this happens so we can investigate?
+                                        if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, db_conn, &self.rpc_secret_key_cache).await {
+                                            // was premium, but isn't anymore due to paying for this query. clear the cache
+                                            // TODO: stop at <$0.000001 instead of negative?
+                                            warn!(?err, "unable to clear caches");
+                                        }
+                                    }
+
+                                    approximate_balance_remaining = user_balance.remaining();
+                                }
+
+                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat.clone(), approximate_balance_remaining).await;
+                            }
+
                             if self.influxdb_client.is_some() {
                                 // TODO: round the timestamp at all?
 
+                                if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key() {
+                                    self.opt_in_timeseries_buffer.entry(opt_in_timeseries_key).or_default().add(stat.clone(), approximate_balance_remaining).await;
+                                }
+
                                 let global_timeseries_key = stat.global_timeseries_key();
 
-                                self.global_timeseries_buffer.entry(global_timeseries_key).or_default().add(stat.clone()).await;
-
-                                if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key() {
-                                    self.opt_in_timeseries_buffer.entry(opt_in_timeseries_key).or_default().add(stat.clone()).await;
-                                }
-                            }
-
-                            if self.db_conn.is_some() {
-                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat).await;
+                                self.global_timeseries_buffer.entry(global_timeseries_key).or_default().add(stat, approximate_balance_remaining).await;
                             }
                         }
                         None => {
@@ -152,6 +204,7 @@ impl StatBuffer {
                     }
                 }
                 _ = db_save_interval.tick() => {
+                    // TODO: tokio spawn this! (but with a semaphore on db_save_interval)
                     trace!("DB save internal tick");
                     let count = self.save_relational_stats().await;
                     if count > 0 {
@@ -171,17 +224,15 @@ impl StatBuffer {
                             trace!("flush");
 
                             let tsdb_count = self.save_tsdb_stats().await;
-                            if tsdb_count > 0 {
-                                trace!("Flushed {} stats to the tsdb", tsdb_count);
-                            }
 
                             let relational_count = self.save_relational_stats().await;
-                            if relational_count > 0 {
-                                trace!("Flushed {} stats to the relational db", relational_count);
-                            }
 
-                            if let Err(err) = x.send((tsdb_count, relational_count)) {
-                                error!(%tsdb_count, %relational_count, ?err, "unable to notify about flushed stats");
+                            let flushed_stats = FlushedStats{ timeseries: tsdb_count, relational: relational_count};
+
+                            trace!(?flushed_stats);
+
+                            if let Err(err) = x.send(flushed_stats) {
+                                error!(?flushed_stats, ?err, "unable to notify about flushed stats");
                             }
                         }
                         None => {
@@ -244,8 +295,8 @@ impl StatBuffer {
                         self.chain_id,
                         db_conn,
                         key,
-                        &self.rpc_secret_key_cache,
                         &self.user_balance_cache,
+                        &self.rpc_secret_key_cache,
                     )
                     .await
                 {

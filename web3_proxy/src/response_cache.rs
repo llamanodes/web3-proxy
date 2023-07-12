@@ -1,10 +1,8 @@
-use crate::{
-    block_number::BlockNumAndHash, errors::Web3ProxyError, jsonrpc::JsonRpcErrorData,
-};
+use crate::{block_number::BlockNumAndHash, errors::Web3ProxyError, jsonrpc::JsonRpcErrorData};
 use derive_more::From;
 use ethers::{
     providers::{HttpClientError, JsonRpcError, ProviderError, WsClientError},
-    types::{U64},
+    types::U64,
 };
 use hashbrown::hash_map::DefaultHashBuilder;
 use moka::future::Cache;

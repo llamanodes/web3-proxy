@@ -1,15 +1,15 @@
 mod common;
 
+use crate::common::admin_deposits::get_admin_deposits;
 use crate::common::admin_increases_balance::admin_increase_balance;
 use crate::common::create_admin::create_user_as_admin;
-use crate::common::create_user::create_user;
-use crate::common::get_admin_deposits::get_admin_deposits;
-use crate::common::get_rpc_key::{user_get_first_rpc_key, RpcKey};
-use crate::common::get_user_balance::user_get_balance;
+use crate::common::create_user::{create_user, set_user_tier};
 use crate::common::referral::{
     get_referral_code, get_shared_referral_codes, get_used_referral_codes, UserSharedReferralInfo,
     UserUsedReferralInfo,
 };
+use crate::common::rpc_key::{user_get_first_rpc_key, RpcKey};
+use crate::common::user_balance::user_get_balance;
 use crate::common::TestApp;
 use ethers::prelude::{Http, Provider};
 use ethers::{signers::Signer, types::Signature};
@@ -36,7 +36,7 @@ struct LoginPostResponse {
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn test_log_in_and_out() {
-    let x = TestApp::spawn(true).await;
+    let x = TestApp::spawn(31337, true).await;
 
     let r = reqwest::Client::new();
 
@@ -92,7 +92,7 @@ async fn test_log_in_and_out() {
 #[test_log::test(tokio::test)]
 async fn test_admin_balance_increase() {
     info!("Starting admin can increase balance");
-    let x = TestApp::spawn(true).await;
+    let x = TestApp::spawn(31337, true).await;
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -104,6 +104,10 @@ async fn test_admin_balance_increase() {
     // Create three users, one referrer, one admin who bumps both their balances
     let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
+
+    set_user_tier(&x, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
 
     // Bump both user's wallet to $20
     admin_increase_balance(
@@ -139,7 +143,7 @@ async fn test_admin_balance_increase() {
 #[test_log::test(tokio::test)]
 async fn test_user_balance_decreases() {
     info!("Starting balance decreases with usage test");
-    let x = TestApp::spawn(true).await;
+    let x = TestApp::spawn(31337, true).await;
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -152,13 +156,17 @@ async fn test_user_balance_decreases() {
     let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
 
+    set_user_tier(&x, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
+
     // Get the rpc keys for this user
     let rpc_keys: RpcKey = user_get_first_rpc_key(&x, &r, &user_login_response).await;
     let proxy_endpoint = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
     let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
 
     // Make some requests while in the free tier, so we can test bookkeeping here
-    for _ in 1..10_000 {
+    for _ in 1..=10_000 {
         let _ = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
@@ -167,35 +175,20 @@ async fn test_user_balance_decreases() {
     }
 
     // Flush all stats here
-    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
-    assert_eq!(influx_count, 0);
-    assert!(mysql_count > 0);
+    let flush_count = x.flush_stats().await.unwrap();
+    assert_eq!(flush_count.timeseries, 0);
+    assert!(flush_count.relational > 0);
 
     // Check the balance, it should not have decreased; there should have been accounted free credits, however
-    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
+    let user_balance = user_get_balance(&x, &r, &user_login_response).await;
     // Check that the balance is 0
-    assert_eq!(
-        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap(),
-        Decimal::from(0)
-    );
+    assert_eq!(user_balance.remaining(), Decimal::from(0));
     // Check that paid credits is 0 (because balance is 0)
-    assert_eq!(
-        Decimal::from_str(
-            user_balance_response["total_spent_paid_credits"]
-                .as_str()
-                .unwrap()
-        )
-        .unwrap(),
-        Decimal::from(0)
-    );
+    assert_eq!(user_balance.total_spent_paid_credits, Decimal::from(0));
     // Check that paid credits is 0 (because balance is 0)
-    assert_eq!(
-        Decimal::from_str(user_balance_response["total_deposits"].as_str().unwrap()).unwrap(),
-        Decimal::from(0)
-    );
+    assert_eq!(user_balance.total_deposits(), Decimal::from(0));
     // Check that total credits incl free used is larger than 0
-    let previously_free_spent =
-        Decimal::from_str(user_balance_response["total_spent"].as_str().unwrap()).unwrap();
+    let previously_free_spent = user_balance.total_spent;
     assert!(previously_free_spent > Decimal::from(0));
 
     // Bump both user's wallet to $20
@@ -208,11 +201,10 @@ async fn test_user_balance_decreases() {
     )
     .await;
     let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    let user_balance_pre =
-        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    let user_balance_pre = user_balance_response.remaining();
     assert_eq!(user_balance_pre, Decimal::from(20));
 
-    for _ in 1..10_000 {
+    for _ in 1..=10_000 {
         let _ = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
@@ -221,54 +213,43 @@ async fn test_user_balance_decreases() {
     }
 
     // Flush all stats here
-    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
-    assert_eq!(influx_count, 0);
-    assert!(mysql_count > 0);
+    let flush_count = x.flush_stats().await.unwrap();
+    assert_eq!(flush_count.timeseries, 0);
+    assert!(flush_count.relational == 1);
 
     // Deposits should not be affected, and should be equal to what was initially provided
-    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    let total_deposits =
-        Decimal::from_str(user_balance_response["total_deposits"].as_str().unwrap()).unwrap();
+    let user_balance = user_get_balance(&x, &r, &user_login_response).await;
+
+    let total_deposits = user_balance.total_deposits();
     assert_eq!(total_deposits, Decimal::from(20));
     // Check that total_spent_paid credits is equal to total_spent, because we are all still inside premium
     assert_eq!(
-        Decimal::from_str(
-            user_balance_response["total_spent_paid_credits"]
-                .as_str()
-                .unwrap()
-        )
-        .unwrap()
-            + previously_free_spent,
-        Decimal::from_str(user_balance_response["total_spent"].as_str().unwrap()).unwrap()
+        user_balance.total_spent_paid_credits + previously_free_spent,
+        user_balance.total_spent,
     );
     // Get the full balance endpoint
-    let user_balance_post =
-        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    let user_balance_post = user_balance.remaining();
     assert!(user_balance_post < user_balance_pre);
 
+    // 10k while free, 10k while premium
+    assert_eq!(user_balance.total_frontend_requests, 20_000);
+
     // Balance should be total deposits - usage while in the paid tier
-    let total_spent_in_paid_credits = Decimal::from_str(
-        user_balance_response["total_spent_paid_credits"]
-            .as_str()
-            .unwrap(),
-    )
-    .unwrap();
+    let total_spent_in_paid_credits = user_balance.total_spent_paid_credits;
     assert_eq!(
         total_deposits - total_spent_in_paid_credits,
         user_balance_post
     );
 
     // This should never be negative
-    let user_balance_total_spent =
-        Decimal::from_str(user_balance_response["total_spent"].as_str().unwrap()).unwrap();
-    assert!(user_balance_total_spent > Decimal::from(0));
+    assert!(user_balance.total_spent > Decimal::from(0));
 }
 
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn test_referral_bonus_non_concurrent() {
     info!("Starting referral bonus test");
-    let x = TestApp::spawn(true).await;
+    let x = TestApp::spawn(31337, true).await;
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -285,6 +266,13 @@ async fn test_referral_bonus_non_concurrent() {
     let referral_link = get_referral_code(&x, &r, &referrer_login_response).await;
 
     let user_login_response = create_user(&x, &r, &user_wallet, Some(referral_link.clone())).await;
+
+    set_user_tier(&x, referrer_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
+    set_user_tier(&x, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
 
     // Bump both user's wallet to $20
     admin_increase_balance(
@@ -306,11 +294,9 @@ async fn test_referral_bonus_non_concurrent() {
 
     // Get balance before for both users
     let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    let user_balance_pre =
-        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    let user_balance_pre = user_balance_response.remaining();
     let referrer_balance_response = user_get_balance(&x, &r, &referrer_login_response).await;
-    let referrer_balance_pre =
-        Decimal::from_str(referrer_balance_response["balance"].as_str().unwrap()).unwrap();
+    let referrer_balance_pre = referrer_balance_response.remaining();
 
     // Make sure they both have balance now
     assert_eq!(user_balance_pre, Decimal::from(20));
@@ -354,7 +340,7 @@ async fn test_referral_bonus_non_concurrent() {
     let proxy_endpoint = format!("{}rpc/{}", x.proxy_provider.url(), rpc_keys.secret_key);
     let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
 
-    for _ in 1..20_000 {
+    for _ in 1..=20_000 {
         let _proxy_result = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
@@ -363,24 +349,25 @@ async fn test_referral_bonus_non_concurrent() {
     }
 
     // Flush all stats here
-    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
-    assert_eq!(influx_count, 0);
-    assert!(mysql_count > 0);
+    let flush_count = x.flush_stats().await.unwrap();
+    assert_eq!(flush_count.timeseries, 0);
+    assert!(flush_count.relational > 0);
 
     // Check that at least something was earned:
     let shared_referral_code: UserSharedReferralInfo =
         get_shared_referral_codes(&x, &r, &referrer_login_response).await;
-    info!("Referral code");
-    info!("{:?}", shared_referral_code.referrals.get(0).unwrap());
+    info!(referrals=?shared_referral_code.referrals.get(0).unwrap(), "Referral code");
+
+    let user_balance = user_get_balance(&x, &r, &user_login_response).await;
+
+    // first, make sure that 20k requests were saved to the db
+    assert_eq!(user_balance.total_frontend_requests, 20_000);
 
     // We make sure that the referrer has $10 + 10% of the used balance
     // The admin provides credits for both
-    let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    let user_balance_post =
-        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
-    let referrer_balance_response = user_get_balance(&x, &r, &referrer_login_response).await;
-    let referrer_balance_post =
-        Decimal::from_str(referrer_balance_response["balance"].as_str().unwrap()).unwrap();
+    let user_balance_post = user_balance.remaining();
+    let referrer_balance = user_get_balance(&x, &r, &referrer_login_response).await;
+    let referrer_balance_post = referrer_balance.remaining();
 
     info!(
         "Balances before and after are (user): {:?} {:?}",
@@ -412,7 +399,7 @@ async fn test_referral_bonus_non_concurrent() {
 #[test_log::test(tokio::test)]
 async fn test_referral_bonus_concurrent_referrer_only() {
     info!("Starting referral bonus test");
-    let x = TestApp::spawn(true).await;
+    let x = TestApp::spawn(31337, true).await;
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -429,6 +416,13 @@ async fn test_referral_bonus_concurrent_referrer_only() {
     let referral_link = get_referral_code(&x, &r, &referrer_login_response).await;
 
     let user_login_response = create_user(&x, &r, &user_wallet, Some(referral_link.clone())).await;
+
+    set_user_tier(&x, referrer_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
+    set_user_tier(&x, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
 
     // Bump both user's wallet to $20
     admin_increase_balance(
@@ -450,11 +444,9 @@ async fn test_referral_bonus_concurrent_referrer_only() {
 
     // Get balance before for both users
     let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    let user_balance_pre =
-        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    let user_balance_pre = user_balance_response.remaining();
     let referrer_balance_response = user_get_balance(&x, &r, &referrer_login_response).await;
-    let referrer_balance_pre =
-        Decimal::from_str(referrer_balance_response["balance"].as_str().unwrap()).unwrap();
+    let referrer_balance_pre = referrer_balance_response.remaining();
 
     // Make sure they both have balance now
     assert_eq!(user_balance_pre, Decimal::from(20));
@@ -521,9 +513,9 @@ async fn test_referral_bonus_concurrent_referrer_only() {
     }
 
     // Flush all stats here
-    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
-    assert_eq!(influx_count, 0);
-    assert!(mysql_count > 0);
+    let flush_count = x.flush_stats().await.unwrap();
+    assert_eq!(flush_count.timeseries, 0);
+    assert!(flush_count.relational > 0);
 
     // Check that at least something was earned:
     let shared_referral_code: UserSharedReferralInfo =
@@ -534,11 +526,9 @@ async fn test_referral_bonus_concurrent_referrer_only() {
     // We make sure that the referrer has $10 + 10% of the used balance
     // The admin provides credits for both
     let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    let user_balance_post =
-        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    let user_balance_post = user_balance_response.remaining();
     let referrer_balance_response = user_get_balance(&x, &r, &referrer_login_response).await;
-    let referrer_balance_post =
-        Decimal::from_str(referrer_balance_response["balance"].as_str().unwrap()).unwrap();
+    let referrer_balance_post = referrer_balance_response.remaining();
 
     info!(
         "Balances before and after are (user): {:?} {:?}",
@@ -570,7 +560,7 @@ async fn test_referral_bonus_concurrent_referrer_only() {
 #[test_log::test(tokio::test)]
 async fn test_referral_bonus_concurrent_referrer_and_user() {
     info!("Starting referral bonus test");
-    let x = TestApp::spawn(true).await;
+    let x = TestApp::spawn(31337, true).await;
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -587,6 +577,13 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
     let referral_link = get_referral_code(&x, &r, &referrer_login_response).await;
 
     let user_login_response = create_user(&x, &r, &user_wallet, Some(referral_link.clone())).await;
+
+    set_user_tier(&x, referrer_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
+    set_user_tier(&x, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
 
     // Bump both user's wallet to $20
     admin_increase_balance(
@@ -608,11 +605,9 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
 
     // Get balance before for both users
     let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    let user_balance_pre =
-        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    let user_balance_pre = user_balance_response.remaining();
     let referrer_balance_response = user_get_balance(&x, &r, &referrer_login_response).await;
-    let referrer_balance_pre =
-        Decimal::from_str(referrer_balance_response["balance"].as_str().unwrap()).unwrap();
+    let referrer_balance_pre = referrer_balance_response.remaining();
 
     // Make sure they both have balance now
     assert_eq!(user_balance_pre, Decimal::from(20));
@@ -700,9 +695,9 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
     }
 
     // Flush all stats here
-    let (influx_count, mysql_count) = x.flush_stats().await.unwrap();
-    assert_eq!(influx_count, 0);
-    assert!(mysql_count > 0);
+    let flush_count = x.flush_stats().await.unwrap();
+    assert_eq!(flush_count.timeseries, 0);
+    assert!(flush_count.relational > 0);
 
     // Check that at least something was earned:
     let shared_referral_code: UserSharedReferralInfo =
@@ -713,11 +708,9 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
     // We make sure that the referrer has $10 + 10% of the used balance
     // The admin provides credits for both
     let user_balance_response = user_get_balance(&x, &r, &user_login_response).await;
-    let user_balance_post =
-        Decimal::from_str(user_balance_response["balance"].as_str().unwrap()).unwrap();
+    let user_balance_post = user_balance_response.remaining();
     let referrer_balance_response = user_get_balance(&x, &r, &referrer_login_response).await;
-    let referrer_balance_post =
-        Decimal::from_str(referrer_balance_response["balance"].as_str().unwrap()).unwrap();
+    let referrer_balance_post = referrer_balance_response.remaining();
 
     info!(
         "Balances before and after are (user): {:?} {:?}",

@@ -3,7 +3,7 @@ use crate::config::TopConfig;
 use crate::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::StatBuffer;
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use argh::FromArgs;
 use entities::{rpc_accounting, rpc_key};
 use futures::stream::FuturesUnordered;
@@ -176,12 +176,14 @@ impl MigrateStatsToV2SubCommand {
 
                     let request_ulid = Ulid::new();
 
+                    let chain_id = x.chain_id;
+
                     // Create RequestMetadata
                     let request_metadata = RequestMetadata {
                         archive_request: x.archive_request.into(),
                         authorization: Some(authorization.clone()),
                         backend_requests: Mutex::new(backend_rpcs),
-                        chain_id: x.chain_id,
+                        chain_id,
                         error_response: x.error_response.into(),
                         // debug data is in kafka, not mysql or influx
                         kafka_debug_logger: None,
@@ -204,11 +206,10 @@ impl MigrateStatsToV2SubCommand {
                         stat_sender: Some(stat_sender.clone()),
                         request_ulid,
                         user_error_response: false.into(),
+                        usd_per_cu: top_config.app.usd_per_cu.unwrap_or_default(),
                     };
 
-                    if let Some(x) = request_metadata.try_send_stat()? {
-                        return Err(anyhow!("failed saving stat! {:?}", x));
-                    }
+                    request_metadata.try_send_stat()?;
                 }
             }
 

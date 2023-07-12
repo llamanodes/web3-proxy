@@ -1,5 +1,4 @@
 use super::StatType;
-use crate::balance::Balance;
 use crate::errors::Web3ProxyErrorContext;
 use crate::{
     app::Web3ProxyApp,
@@ -16,7 +15,7 @@ use axum::{
     Json, TypedHeader,
 };
 use entities::sea_orm_active_enums::Role;
-use entities::{rpc_key, secondary_user, user, user_tier};
+use entities::{rpc_key, secondary_user};
 use fstrings::{f, format_args_f};
 use hashbrown::HashMap;
 use influxdb2::api::query::FluxRecord;
@@ -59,40 +58,6 @@ pub async fn query_user_stats<'a>(
 
     // Only allow stats if the user has an active premium role
     if let Some(caller_user) = &caller_user {
-        // get the balance of the user whose stats we are going to fetch (might be self, but might be another user)
-        let balance = match Balance::try_from_db(db_replica.as_ref(), user_id).await? {
-            None => {
-                return Err(Web3ProxyError::AccessDenied(
-                    "User Stats Response requires you to authorize with a bearer token".into(),
-                ));
-            }
-            Some(x) => x,
-        };
-
-        // get the user tier so we can see if it is a tier that has downgrades
-        let relevant_balance_user_tier_id = if user_id == caller_user.id {
-            // use the caller's tier
-            caller_user.user_tier_id
-        } else {
-            // use the tier of the primary user from a secondary user
-            let user = user::Entity::find_by_id(user_id)
-                .one(db_replica.as_ref())
-                .await?
-                .web3_context("user_id not found")?;
-
-            user.user_tier_id
-        };
-
-        let user_tier = user_tier::Entity::find_by_id(relevant_balance_user_tier_id)
-            .one(db_replica.as_ref())
-            .await?
-            .web3_context("user_tier not found")?;
-
-        if user_tier.downgrade_tier_id.is_some() && !balance.active_premium() {
-            trace!(%user_id, "User does not have enough balance to qualify for premium");
-            return Err(Web3ProxyError::PaymentRequired);
-        }
-
         if user_id != caller_user.id {
             // check that there is at least on rpc-keys owned by the requested user and related to the caller user
             let user_rpc_key_ids: Vec<u64> = rpc_key::Entity::find()

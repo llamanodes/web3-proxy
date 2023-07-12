@@ -14,14 +14,13 @@ use itertools::{Itertools, MinMaxResult};
 use moka::future::Cache;
 use serde::Serialize;
 use std::cmp::{Ordering, Reverse};
-use std::fmt;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time::Instant;
 use tracing::{debug, enabled, info, trace, warn, Level};
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct ConsensusRpcData {
     head_block_num: U64,
     // TODO: this is too simple. erigon has 4 prune levels (hrct)
@@ -98,7 +97,7 @@ pub enum ShouldWaitForBlock {
 /// TODO: remove head_block/head_rpcs/tier and replace with one RankedRpcMap
 /// TODO: add `best_rpc(method_data_kind, min_block_needed, max_block_needed, include_backups)`
 /// TODO: make serializing work. the key needs to be a string. I think we need `serialize_with`
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct RankedRpcs {
     pub head_block: Web3ProxyBlock,
     pub num_synced: usize,
@@ -212,9 +211,9 @@ impl RankedRpcs {
         self.inner.is_empty()
     }
 
+    /// TODO! we should also keep the number on the head block saved
     #[inline]
-    pub fn num_consensus_rpcs(&self) -> usize {
-        // TODO! wrong! this is now the total num of rpcs. we should keep the number on the head block saved
+    pub fn num_active_rpcs(&self) -> usize {
         self.inner.len()
     }
 
@@ -340,13 +339,6 @@ impl RankedRpcs {
     // TODO: sum_hard_limit?
 }
 
-impl fmt::Debug for RankedRpcs {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: the default formatter takes forever to write. we need to print something though
-        f.debug_struct("RankedRpcs").finish_non_exhaustive()
-    }
-}
-
 // TODO: refs for all of these. borrow on a Sender is cheap enough
 impl Web3Rpcs {
     pub fn head_block(&self) -> Option<Web3ProxyBlock> {
@@ -435,7 +427,7 @@ impl ConsensusFinder {
         rpc: Option<&Arc<Web3Rpc>>,
         new_block: Option<Web3ProxyBlock>,
     ) -> Web3ProxyResult<bool> {
-        let new_consensus_rpcs = match self
+        let new_ranked_rpcs = match self
             .find_consensus_connections(authorization, web3_rpcs)
             .await
             .web3_context("error while finding consensus head block!")?
@@ -444,23 +436,23 @@ impl ConsensusFinder {
             Some(x) => x,
         };
 
-        trace!(?new_consensus_rpcs);
+        trace!(?new_ranked_rpcs);
 
         let watch_consensus_head_sender = web3_rpcs.watch_head_block.as_ref().unwrap();
         // TODO: think more about the default for tiers
         let best_tier = self.best_tier().unwrap_or_default();
         let worst_tier = self.worst_tier().unwrap_or_default();
-        let backups_needed = new_consensus_rpcs.backups_needed;
-        let consensus_head_block = new_consensus_rpcs.head_block.clone();
-        let num_consensus_rpcs = new_consensus_rpcs.num_consensus_rpcs();
+        let backups_needed = new_ranked_rpcs.backups_needed;
+        let consensus_head_block = new_ranked_rpcs.head_block.clone();
+        let num_consensus_rpcs = new_ranked_rpcs.num_active_rpcs();
         let num_active_rpcs = self.len();
         let total_rpcs = web3_rpcs.len();
 
-        let new_consensus_rpcs = Arc::new(new_consensus_rpcs);
+        let new_ranked_rpcs = Arc::new(new_ranked_rpcs);
 
-        let old_consensus_head_connections = web3_rpcs
+        let old_ranked_rpcs = web3_rpcs
             .watch_ranked_rpcs
-            .send_replace(Some(new_consensus_rpcs.clone()));
+            .send_replace(Some(new_ranked_rpcs.clone()));
 
         let backups_voted_str = if backups_needed { "B " } else { "" };
 
@@ -476,7 +468,7 @@ impl ConsensusFinder {
             "None".to_string()
         };
 
-        match old_consensus_head_connections.as_ref() {
+        match old_ranked_rpcs.as_ref() {
             None => {
                 info!(
                     "first {}/{} {}{}/{}/{} block={}, rpc={}",

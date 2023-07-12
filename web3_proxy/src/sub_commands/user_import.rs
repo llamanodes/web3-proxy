@@ -10,7 +10,7 @@ use migration::sea_orm::{
 };
 use std::path::{Path, PathBuf};
 use std::{fs::File, io::BufReader};
-use tracing::{info};
+use tracing::info;
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 /// Import users from another database.

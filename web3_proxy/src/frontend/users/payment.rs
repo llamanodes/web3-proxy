@@ -15,7 +15,7 @@ use axum::{
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use entities::{
-    admin_increase_balance_receipt, increase_on_chain_balance_receipt, rpc_key,
+    admin_increase_balance_receipt, increase_on_chain_balance_receipt,
     stripe_increase_balance_receipt, user,
 };
 use ethers::abi::AbiEncode;
@@ -30,7 +30,7 @@ use payment_contracts::ierc20::IERC20;
 use payment_contracts::payment_factory::{self, PaymentFactory};
 use serde_json::json;
 use std::sync::Arc;
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, warn};
 
 /// Implements any logic related to payments
 /// Removed this mainly from "user" as this was getting clogged
@@ -304,6 +304,7 @@ pub async fn user_balance_post(
 
     // the transaction might contain multiple relevant logs. collect them all
     let mut response_data = vec![];
+    let mut user_ids_to_invalidate = HashSet::new();
     for log in transaction_receipt.logs {
         if let Some(true) = log.removed {
             // TODO: do we need to make sure this row is deleted? it should be handled by `handle_uncle_block`
@@ -390,19 +391,7 @@ pub async fn user_balance_post(
 
             receipt.save(&txn).await?;
 
-            // Remove all RPC-keys owned by this user from the cache, s.t. rate limits are re-calculated
-            let rpc_keys = rpc_key::Entity::find()
-                .filter(rpc_key::Column::UserId.eq(recipient.id))
-                .all(&txn)
-                .await?;
-
-            app.user_balance_cache.invalidate(&recipient.id).await;
-
-            for rpc_key_entity in rpc_keys {
-                app.rpc_secret_key_cache
-                    .invalidate(&rpc_key_entity.secret_key.into())
-                    .await;
-            }
+            user_ids_to_invalidate.insert(recipient.id);
 
             let x = json!({
                 "amount": payment_token_amount,
@@ -420,6 +409,17 @@ pub async fn user_balance_post(
     }
 
     txn.commit().await?;
+
+    for user_id in user_ids_to_invalidate.into_iter() {
+        // Finally invalidate the cache as well
+        if let Err(err) = app
+            .user_balance_cache
+            .invalidate(&user_id, db_conn, &app.rpc_secret_key_cache)
+            .await
+        {
+            warn!(?err, "unable to invalidate caches");
+        };
+    }
 
     let response = (StatusCode::CREATED, Json(json!(response_data))).into_response();
 

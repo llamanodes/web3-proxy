@@ -8,7 +8,7 @@ use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::one::Web3Rpc;
-use crate::stats::{AppStat, BackendRequests, RpcQueryStats};
+use crate::stats::{AppStat, BackendRequests};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::authorization::Bearer;
@@ -27,6 +27,7 @@ use http::HeaderValue;
 use ipnet::IpNet;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use parking_lot::Mutex;
 use rdkafka::message::{Header as KafkaHeader, OwnedHeaders as KafkaOwnedHeaders, OwnedMessage};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
@@ -34,6 +35,7 @@ use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::mem;
@@ -45,16 +47,50 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
 use ulid::Ulid;
 use uuid::Uuid;
 
 /// This lets us use UUID and ULID while we transition to only ULIDs
 /// TODO: custom deserialize that can also go from String to Ulid
-#[derive(Copy, Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Deserialize)]
 pub enum RpcSecretKey {
     Ulid(Ulid),
     Uuid(Uuid),
+}
+
+impl RpcSecretKey {
+    pub fn new() -> Self {
+        Ulid::new().into()
+    }
+
+    fn as_128(&self) -> u128 {
+        match self {
+            Self::Ulid(x) => x.0,
+            Self::Uuid(x) => x.as_u128(),
+        }
+    }
+}
+
+impl PartialEq for RpcSecretKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_128() == other.as_128()
+    }
+}
+
+impl Eq for RpcSecretKey {}
+
+impl Debug for RpcSecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ulid(x) => Debug::fmt(x, f),
+            Self::Uuid(x) => {
+                let x = Ulid::from(x.as_u128());
+
+                Debug::fmt(&x, f)
+            }
+        }
+    }
 }
 
 /// always serialize as a ULID.
@@ -127,6 +163,10 @@ pub struct AuthorizationChecks {
     /// IMPORTANT! Once confirmed by a miner, they will be public on the blockchain!
     pub private_txs: bool,
     pub proxy_mode: ProxyMode,
+    /// if the account had premium when this request metadata was created
+    /// they might spend slightly more than they've paid, but we are okay with that
+    /// TODO: we could price the request now and if its too high, downgrade. but thats more complex than we need
+    pub paid_credits_used: bool,
 }
 
 /// TODO: include the authorization checks in this?
@@ -153,10 +193,7 @@ pub struct KafkaDebugLogger {
 /// Ulids and Uuids matching the same bits hash the same
 impl Hash for RpcSecretKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        let x = match self {
-            Self::Ulid(x) => x.0,
-            Self::Uuid(x) => x.as_u128(),
-        };
+        let x = self.as_128();
 
         x.hash(state);
     }
@@ -308,6 +345,8 @@ pub struct RequestMetadata {
 
     pub chain_id: u64,
 
+    pub usd_per_cu: Decimal,
+
     pub request_ulid: Ulid,
 
     /// Size of the JSON request. Does not include headers or things like that.
@@ -361,17 +400,6 @@ impl RequestMetadata {
             .as_ref()
             .map(|x| x.checks.proxy_mode)
             .unwrap_or_default()
-    }
-
-    /// this may drift slightly if multiple servers are handling the same users, but should be close
-    pub async fn latest_balance(&self) -> Option<Decimal> {
-        if let Some(x) = self.authorization.as_ref() {
-            let x = x.checks.latest_balance.read().await.remaining();
-
-            Some(x)
-        } else {
-            None
-        }
     }
 }
 
@@ -482,11 +510,13 @@ impl RequestMetadata {
             }
         }
 
+        let chain_id = app.config.chain_id;
+
         let x = Self {
             archive_request: false.into(),
             authorization: Some(authorization),
             backend_requests: Default::default(),
-            chain_id: app.config.chain_id,
+            chain_id,
             error_response: false.into(),
             kafka_debug_logger,
             method,
@@ -499,6 +529,7 @@ impl RequestMetadata {
             response_timestamp: 0.into(),
             start_instant: Instant::now(),
             stat_sender: app.stat_sender.clone(),
+            usd_per_cu: app.config.usd_per_cu.unwrap_or_default(),
             user_error_response: false.into(),
         };
 
@@ -509,13 +540,11 @@ impl RequestMetadata {
         self.backend_requests.lock().clone()
     }
 
-    pub fn try_send_stat(mut self) -> Web3ProxyResult<Option<Self>> {
+    pub fn try_send_stat(mut self) -> Web3ProxyResult<()> {
         if let Some(stat_sender) = self.stat_sender.take() {
             trace!(?self, "sending stat");
 
-            let stat: RpcQueryStats = self.try_into()?;
-
-            let stat: AppStat = stat.into();
+            let stat: AppStat = self.into();
 
             if let Err(err) = stat_sender.send(stat) {
                 error!(?err, "failed sending stat");
@@ -524,11 +553,9 @@ impl RequestMetadata {
             };
 
             trace!("stat sent successfully");
-
-            Ok(None)
-        } else {
-            Ok(Some(self))
         }
+
+        Ok(())
     }
 
     pub fn add_response<'a, R: Into<ResponseOrBytes<'a>>>(&'a self, response: R) {
@@ -556,18 +583,12 @@ impl RequestMetadata {
         }
     }
 
-    pub fn try_send_arc_stat(self: Arc<Self>) -> anyhow::Result<Option<Arc<Self>>> {
-        match Arc::try_unwrap(self) {
-            Ok(x) => {
-                let not_sent = x.try_send_stat()?.map(Arc::new);
-                Ok(not_sent)
-            }
-            Err(not_sent) => {
-                trace!(
-                    "could not send stat while {} arcs are active",
-                    Arc::strong_count(&not_sent)
-                );
-                Ok(Some(not_sent))
+    pub fn try_send_arc_stat(self: Arc<Self>) -> Web3ProxyResult<()> {
+        match Arc::into_inner(self) {
+            Some(x) => x.try_send_stat(),
+            None => {
+                trace!("could not send stat while other arcs are active");
+                Ok(())
             }
         }
     }
@@ -582,15 +603,9 @@ impl Drop for RequestMetadata {
             // turn `&mut self` into `self`
             let x = mem::take(self);
 
-            trace!(?self, "request metadata dropped without stat send");
+            trace!(?x, "request metadata dropped without stat send");
             let _ = x.try_send_stat();
         }
-    }
-}
-
-impl RpcSecretKey {
-    pub fn new() -> Self {
-        Ulid::new().into()
     }
 }
 
@@ -605,7 +620,7 @@ impl Display for RpcSecretKey {
         // TODO: do this without dereferencing
         let ulid: Ulid = (*self).into();
 
-        ulid.fmt(f)
+        Display::fmt(&ulid, f)
     }
 }
 
@@ -1126,37 +1141,25 @@ impl Web3ProxyApp {
         }
     }
 
-    /// Get the balance for the user.
-    ///
-    /// If a subuser calls this function, the subuser needs to have first attained the user_id that the rpc key belongs to.
-    /// This function should be called anywhere where balance is required (i.e. only rpc calls, I believe ... non-rpc calls don't really require balance)
-    pub(crate) async fn balance_checks(
-        &self,
-        user_id: u64,
-    ) -> Web3ProxyResult<Arc<AsyncRwLock<Balance>>> {
-        self.user_balance_cache
-            .try_get_with(user_id, async move {
-                let db_replica = self.db_replica()?;
-                let x = match Balance::try_from_db(db_replica.as_ref(), user_id).await? {
-                    None => Err(Web3ProxyError::InvalidUserKey),
-                    Some(x) => Ok(x),
-                }?;
-                trace!("Balance for cache retrieved from database is {:?}", x);
-                Ok(Arc::new(AsyncRwLock::new(x)))
-            })
-            .await
-            .map_err(Into::into)
-    }
-
     // check the local cache for user data, or query the database
     pub(crate) async fn authorization_checks(
         &self,
         proxy_mode: ProxyMode,
         rpc_secret_key: &RpcSecretKey,
     ) -> Web3ProxyResult<AuthorizationChecks> {
-        self.rpc_secret_key_cache
+        // TODO: move onto a helper function
+
+        let fresh = Arc::new(Mutex::new(false));
+
+        let fresh_clone = fresh.clone();
+
+        let x = self
+            .rpc_secret_key_cache
             .try_get_with_by_ref(rpc_secret_key, async move {
-                // trace!(?rpc_secret_key, "user cache miss");
+                {
+                    let mut f = fresh.lock_arc();
+                    *f = true;
+                }
 
                 let db_replica = self.db_replica()?;
 
@@ -1248,16 +1251,24 @@ impl Web3ProxyApp {
                             "related user tier not found, but every user should have a tier",
                         )?;
 
-                        let latest_balance = self.balance_checks(rpc_key_model.user_id).await?;
+                        let latest_balance = self
+                            .user_balance_cache
+                            .get_or_insert(db_replica.as_ref(), rpc_key_model.user_id)
+                            .await?;
 
-                        // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
-                        // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
+                        let paid_credits_used: bool;
                         if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
+                            trace!("user belongs to a premium tier. checking balance");
+
                             let active_premium = latest_balance.read().await.active_premium();
 
                             // only consider the user premium if they have paid at least $10 and have a balance > $.01
                             // otherwise, set user_tier_model to the downograded tier
-                            if !active_premium {
+                            if active_premium {
+                                paid_credits_used = true;
+                            } else {
+                                paid_credits_used = false;
+
                                 // TODO: include boolean to mark that the user is downgraded
                                 user_tier_model =
                                     user_tier::Entity::find_by_id(downgrade_user_tier)
@@ -1268,6 +1279,8 @@ impl Web3ProxyApp {
                                             downgrade_user_tier
                                         ))?;
                             }
+                        } else {
+                            paid_credits_used = false;
                         }
 
                         let rpc_key_id =
@@ -1289,13 +1302,21 @@ impl Web3ProxyApp {
                             rpc_secret_key: Some(*rpc_secret_key),
                             rpc_secret_key_id: rpc_key_id,
                             user_id: rpc_key_model.user_id,
+                            paid_credits_used,
                         })
                     }
                     None => Ok(AuthorizationChecks::default()),
                 }
             })
-            .await
-            .map_err(Into::into)
+            .await?;
+
+        if *fresh_clone.lock() {
+            info!(?rpc_secret_key, "authorization_checks miss");
+        } else {
+            info!(?rpc_secret_key, "authorization_checks hit");
+        }
+
+        Ok(x)
     }
 
     /// Authorized the ip/origin/referer/useragent and rate limit and concurrency

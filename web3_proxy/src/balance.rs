@@ -8,16 +8,22 @@ use migration::sea_orm::DbConn;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use migration::{Func, SimpleExpr};
 use serde::ser::SerializeStruct;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use tracing::info;
 
 /// Implements the balance getter which combines data from several tables
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Balance {
     pub admin_deposits: Decimal,
     pub chain_deposits: Decimal,
-    pub referal_bonus: Decimal,
     pub one_time_referee_bonus: Decimal,
+    pub referal_bonus: Decimal,
     pub stripe_deposits: Decimal,
+    pub total_cache_misses: u64,
+    pub total_frontend_requests: u64,
+    /// this includes credits spent inside a "free" or "downgraded" tier
+    /// this always increments and so will always be >= total_spent_paid_credits
     pub total_spent: Decimal,
     pub total_spent_paid_credits: Decimal,
     pub user_id: u64,
@@ -28,13 +34,15 @@ impl Serialize for Balance {
     where
         S: serde::Serializer,
     {
-        let mut state = serializer.serialize_struct("balance", 12)?;
+        let mut state = serializer.serialize_struct("balance", 14)?;
 
         state.serialize_field("admin_deposits", &self.admin_deposits)?;
         state.serialize_field("chain_deposits", &self.chain_deposits)?;
-        state.serialize_field("referal_bonus", &self.referal_bonus)?;
         state.serialize_field("one_time_referee_bonus", &self.one_time_referee_bonus)?;
+        state.serialize_field("referal_bonus", &self.referal_bonus)?;
         state.serialize_field("stripe_deposits", &self.stripe_deposits)?;
+        state.serialize_field("total_cache_misses", &self.total_cache_misses)?;
+        state.serialize_field("total_frontend_requests", &self.total_frontend_requests)?;
         state.serialize_field("total_spent", &self.total_spent)?;
         state.serialize_field("total_spent_paid_credits", &self.total_spent_paid_credits)?;
         state.serialize_field("user_id", &self.user_id)?;
@@ -124,30 +132,45 @@ impl Balance {
             .web3_context("fetching stripe deposits")?
             .unwrap_or_default();
 
-        let (total_spent_paid_credits, total_spent) = rpc_accounting_v2::Entity::find()
-            .select_only()
-            .column_as(
-                SimpleExpr::from(Func::coalesce([
-                    rpc_accounting_v2::Column::SumCreditsUsed.sum(),
-                    0.into(),
-                ])),
-                "total_spent_paid_credits",
-            )
-            .column_as(
-                SimpleExpr::from(Func::coalesce([
-                    rpc_accounting_v2::Column::SumInclFreeCreditsUsed.sum(),
-                    0.into(),
-                ])),
-                "total_spent",
-            )
-            .inner_join(rpc_key::Entity)
-            // .filter(rpc_key::Column::Id.eq(rpc_accounting_v2::Column::RpcKeyId))  // TODO: i think the inner_join function handles this
-            .filter(rpc_key::Column::UserId.eq(user_id))
-            .into_tuple()
-            .one(db_conn)
-            .await
-            .web3_context("fetching total_spent_paid_credits and total_spent")?
-            .unwrap_or_default();
+        let (total_cache_misses, total_frontend_requests, total_spent_paid_credits, total_spent) =
+            rpc_accounting_v2::Entity::find()
+                .select_only()
+                .column_as(
+                    SimpleExpr::from(Func::coalesce([
+                        rpc_accounting_v2::Column::CacheMisses.sum(),
+                        0.into(),
+                    ])),
+                    "total_cache_misses",
+                )
+                .column_as(
+                    SimpleExpr::from(Func::coalesce([
+                        rpc_accounting_v2::Column::FrontendRequests.sum(),
+                        0.into(),
+                    ])),
+                    "total_frontend_requests",
+                )
+                .column_as(
+                    SimpleExpr::from(Func::coalesce([
+                        rpc_accounting_v2::Column::SumCreditsUsed.sum(),
+                        0.into(),
+                    ])),
+                    "total_spent_paid_credits",
+                )
+                .column_as(
+                    SimpleExpr::from(Func::coalesce([
+                        rpc_accounting_v2::Column::SumInclFreeCreditsUsed.sum(),
+                        0.into(),
+                    ])),
+                    "total_spent",
+                )
+                .inner_join(rpc_key::Entity)
+                // .filter(rpc_key::Column::Id.eq(rpc_accounting_v2::Column::RpcKeyId))  // TODO: i think the inner_join function handles this
+                .filter(rpc_key::Column::UserId.eq(user_id))
+                .into_tuple::<(Decimal, Decimal, Decimal, Decimal)>()
+                .one(db_conn)
+                .await
+                .web3_context("fetching total_spent_paid_credits and total_spent")?
+                .unwrap_or_default();
 
         let one_time_referee_bonus = referee::Entity::find()
             .select_only()
@@ -179,16 +202,24 @@ impl Balance {
             .web3_context("fetching referal bonus")?
             .unwrap_or_default();
 
+        let total_cache_misses: u64 = total_cache_misses.try_into()?;
+        let total_frontend_requests: u64 = total_frontend_requests.try_into()?;
+
         let balance = Self {
             admin_deposits,
             chain_deposits,
             referal_bonus,
             one_time_referee_bonus,
             stripe_deposits,
+            total_cache_misses,
+            total_frontend_requests,
             total_spent,
             total_spent_paid_credits,
             user_id,
         };
+
+        // TODO: lower log level
+        info!("balance: {:#}", json!(&balance));
 
         // Return None if there is no entry
         Ok(Some(balance))
