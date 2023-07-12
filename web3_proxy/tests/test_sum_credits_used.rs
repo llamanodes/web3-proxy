@@ -14,7 +14,7 @@ use std::time::Duration;
 use tracing::info;
 use web3_proxy::balance::Balance;
 
-// TODO: #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
+#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn test_sum_credits_used() {
     // chain_id 999_001_999 costs $.10/CU
