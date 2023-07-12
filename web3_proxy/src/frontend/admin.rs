@@ -3,10 +3,11 @@
 use super::authorization::login_is_authorized;
 use crate::admin_queries::query_admin_modify_usertier;
 use crate::app::Web3ProxyApp;
-use crate::errors::Web3ProxyResponse;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
+use crate::errors::{Web3ProxyResponse, Web3ProxyResult};
 use crate::frontend::users::authentication::PostLogin;
 use crate::user_token::UserBearerToken;
+use anyhow::Context;
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -18,13 +19,15 @@ use axum_macros::debug_handler;
 use chrono::{TimeZone, Utc};
 use entities::{
     admin, admin_increase_balance_receipt, admin_trail, login, pending_login, rpc_key, user,
+    user_tier,
 };
 use ethers::{prelude::Address, types::Bytes};
 use hashbrown::HashMap;
 use http::StatusCode;
 use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    self, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
+    QueryFilter,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -41,6 +44,36 @@ pub struct AdminIncreaseBalancePost {
     pub user_address: Address,
     pub note: Option<String>,
     pub amount: Decimal,
+}
+
+pub async fn ensure_premium(
+    user_address: &Address,
+    txn: &DatabaseTransaction,
+) -> Web3ProxyResult<user::Model> {
+    let (user_entry, user_tier_entry): (user::Model, Option<user_tier::Model>) =
+        user::Entity::find()
+            .filter(user::Column::Address.eq(user_address.as_bytes()))
+            .find_also_related(user_tier::Entity)
+            .one(txn)
+            .await?
+            .context("user not found")?;
+
+    if user_tier_entry.is_none() || user_tier_entry.and_then(|x| x.downgrade_tier_id).is_none() {
+        // switch the user to the premium tier
+        let new_user_tier = user_tier::Entity::find()
+            .filter(user_tier::Column::Title.like("Premium"))
+            .one(txn)
+            .await?
+            .context("premium tier not found")?;
+
+        let mut user = user_entry.clone().into_active_model();
+
+        user.user_tier_id = sea_orm::Set(new_user_tier.id);
+
+        user.save(txn).await?;
+    }
+
+    Ok(user_entry)
 }
 
 /// `POST /admin/increase_balance` -- As an admin, modify a user's user-tier
@@ -65,13 +98,7 @@ pub async fn admin_increase_balance(
         .await?
         .ok_or_else(|| Web3ProxyError::AccessDenied("not an admin".into()))?;
 
-    let user_entry: user::Model = user::Entity::find()
-        .filter(user::Column::Address.eq(payload.user_address.as_bytes()))
-        .one(&txn)
-        .await?
-        .ok_or(Web3ProxyError::BadRequest(
-            format!("No user found with {:?}", payload.user_address).into(),
-        ))?;
+    let user_entry = ensure_premium(&payload.user_address, &txn).await?;
 
     let increase_balance_receipt = admin_increase_balance_receipt::ActiveModel {
         amount: sea_orm::Set(payload.amount),
@@ -81,6 +108,7 @@ pub async fn admin_increase_balance(
         ..Default::default()
     };
     increase_balance_receipt.save(&txn).await?;
+
     txn.commit().await?;
 
     // Invalidate the user_balance_cache for this user:
