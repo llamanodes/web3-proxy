@@ -48,7 +48,7 @@ async fn test_sum_credits_used() {
 
     // make one free request against the public RPC of 16 CU
     x.proxy_provider
-        .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
+        .request::<_, Option<ArcBlock>>("eth_blockNumber", ("latest", false))
         .await
         .unwrap();
 
@@ -59,11 +59,13 @@ async fn test_sum_credits_used() {
 
     // make one free request against the public RPC of 16 CU
     user_proxy_provider
-        .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
+        .request::<_, Option<ArcBlock>>("eth_blockNumber", ("latest", false))
         .await
         .unwrap();
 
-    let query_cost: Decimal = "1.60".parse().unwrap();
+    let query_cost: Decimal = "1.00".parse().unwrap();
+
+    let archive_multiplier: Decimal = "2.5".parse().unwrap();
 
     let cache_multipler: Decimal = "0.75".parse().unwrap();
 
@@ -96,13 +98,13 @@ async fn test_sum_credits_used() {
 
     // make one public rpc request of 16 CU
     x.proxy_provider
-        .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
+        .request::<_, Option<ArcBlock>>("eth_blockNumber", ("latest", false))
         .await
         .unwrap();
 
     // make one authenticated rpc request of 16 CU
     user_proxy_provider
-        .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
+        .request::<_, Option<ArcBlock>>("eth_blockNumber", ("latest", false))
         .await
         .unwrap();
 
@@ -137,7 +139,7 @@ async fn test_sum_credits_used() {
     // make ten rpc request of 16 CU
     for _ in 0..10 {
         user_proxy_provider
-            .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
+            .request::<_, Option<ArcBlock>>("eth_blockNumber", ())
             .await
             .unwrap();
     }

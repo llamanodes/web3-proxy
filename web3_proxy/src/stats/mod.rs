@@ -6,7 +6,7 @@ pub mod db_queries;
 pub mod influxdb_queries;
 
 use self::stat_buffer::BufferedRpcQueryStats;
-use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
+use crate::caches::UserBalanceCache;
 use crate::compute_units::ComputeUnit;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
@@ -15,7 +15,7 @@ use anyhow::{anyhow, Context};
 use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
-use entities::{referee, referrer, rpc_accounting_v2, rpc_key};
+use entities::{referee, referrer, rpc_accounting_v2};
 use influxdb2::models::DataPoint;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
@@ -71,6 +71,8 @@ pub struct RpcQueryStats {
     pub compute_unit_cost: Decimal,
     /// If the request is invalid or received a jsonrpc error response (excluding reverts)
     pub user_error_response: bool,
+    /// set automatically when the cached Balance is updated to match how much was spent
+    pub paid_credits_used: Option<bool>,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
@@ -194,7 +196,12 @@ pub enum AppStat {
 
 // TODO: move to stat_buffer.rs?
 impl BufferedRpcQueryStats {
-    async fn add(&mut self, stat: RpcQueryStats) {
+    async fn add(
+        &mut self,
+        stat: RpcQueryStats,
+        approximate_latest_balance_for_influx: Balance,
+        paid_credits_used: bool,
+    ) {
         // a stat always come from just 1 frontend request
         self.frontend_requests += 1;
 
@@ -217,8 +224,11 @@ impl BufferedRpcQueryStats {
         self.sum_response_millis += stat.response_millis;
         self.sum_credits_used += stat.compute_unit_cost;
 
-        let latest_balance = stat.authorization.checks.latest_balance.read().await;
-        self.approximate_latest_balance_for_influx = latest_balance.clone();
+        if paid_credits_used {
+            self.paid_credits_used += stat.compute_unit_cost;
+        }
+
+        self.approximate_latest_balance_for_influx = approximate_latest_balance_for_influx;
 
         trace!(?stat, ?self, "added");
     }
@@ -228,7 +238,7 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         db_conn: &DatabaseConnection,
         key: &RpcQueryKey,
-        paid_credits_used: Decimal,
+        paid_credits_used: &Decimal,
     ) -> Web3ProxyResult<()> {
         let period_datetime = Utc.timestamp_opt(key.response_timestamp, 0).unwrap();
 
@@ -251,7 +261,7 @@ impl BufferedRpcQueryStats {
             sum_request_bytes: sea_orm::Set(self.sum_request_bytes),
             sum_response_millis: sea_orm::Set(self.sum_response_millis),
             sum_response_bytes: sea_orm::Set(self.sum_response_bytes),
-            sum_credits_used: sea_orm::Set(paid_credits_used),
+            sum_credits_used: sea_orm::Set(*paid_credits_used),
             sum_incl_free_credits_used: sea_orm::Set(self.sum_credits_used),
         };
 
@@ -310,7 +320,7 @@ impl BufferedRpcQueryStats {
                         (
                             rpc_accounting_v2::Column::SumCreditsUsed,
                             Expr::col(rpc_accounting_v2::Column::SumCreditsUsed)
-                                .add(paid_credits_used),
+                                .add(*paid_credits_used),
                         ),
                     ])
                     .to_owned(),
@@ -354,7 +364,6 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         db_conn: &DatabaseConnection,
         key: RpcQueryKey,
-        rpc_secret_key_cache: &RpcSecretKeyCache,
         user_balance_cache: &UserBalanceCache,
     ) -> Web3ProxyResult<()> {
         // Sanity check, if we need to save stats
@@ -369,58 +378,12 @@ impl BufferedRpcQueryStats {
         // TODO: rename to owner_id?
         let sender_user_id = key.rpc_key_user_id.map_or(0, |x| x.get());
 
-        // Gathering cache and database rows
-        let user_balance_lock = self
-            ._get_user_balance(sender_user_id, user_balance_cache, db_conn)
-            .await?;
-
-        let mut user_balance = user_balance_lock.write().await;
-
-        let premium_before = user_balance.active_premium();
-
-        let premium_after;
-
-        let paid_credits_used;
-
-        if premium_before {
-            paid_credits_used = self.sum_credits_used;
-
-            user_balance.total_spent_paid_credits += paid_credits_used;
-
-            // TODO: this lets them go past 0. we should clear if close to 0
-            premium_after = user_balance.active_premium();
-        } else {
-            paid_credits_used = 0.into();
-            premium_after = false;
-        };
-
-        // close the write lock
-        drop(user_balance);
-
         // save the statistics to the database:
-        self._save_db_stats(chain_id, db_conn, &key, paid_credits_used)
+        self._save_db_stats(chain_id, db_conn, &key, &self.paid_credits_used)
             .await?;
 
-        if premium_before && paid_credits_used > 0.into() {
-            // Update and possible invalidate rpc caches if necessary (if there was a downgrade)
-            // Invalidate caches if remaining is getting close to $0
-            // It will be re-fetched again if needed
-            if !premium_after {
-                let rpc_keys = rpc_key::Entity::find()
-                    .filter(rpc_key::Column::UserId.eq(sender_user_id))
-                    .all(db_conn)
-                    .await?;
-
-                // clear all keys owned by this user from the cache
-                for rpc_key_entity in rpc_keys {
-                    rpc_secret_key_cache
-                        .invalidate(&rpc_key_entity.secret_key.into())
-                        .await;
-                }
-            }
-
-            // Apply all the referral logic; let's keep it simple and flat for now
-
+        // Apply all the referral logic; let's keep it simple and flat for now
+        if self.paid_credits_used > 0.into() {
             // Start a transaction
             let txn = db_conn.begin().await?;
 
@@ -476,7 +439,8 @@ impl BufferedRpcQueryStats {
                             referral_entity.one_time_bonus_applied_for_referee =
                                 sea_orm::Set(bonus_for_user);
 
-                            // writing here with `+= 100` has a race unless we lock outside of the mysql query. and thats just too slow
+                            // writing here with `+= 10` has a race unless we lock outside of the mysql query (and thats just too slow)
+                            // so instead we just invalidate the cache (after writing to mysql)
                             invalidate_sender_balance_cache = true;
                         }
 
@@ -489,7 +453,10 @@ impl BufferedRpcQueryStats {
                         // TODO: Perhaps let's not worry about the referral cache here, to avoid deadlocks (hence only reading)
 
                         if now <= valid_until {
-                            let referrer_bonus = self.sum_credits_used / Decimal::from(10);
+                            // TODO: make this configurable (and change all the other hard coded places for 10%)
+                            let referrer_bonus = self.paid_credits_used / Decimal::from(10);
+
+                            // there is a LockType::Update on this that should keep any raises incrementing this
                             referral_entity.credits_applied_for_referrer = sea_orm::Set(
                                 referral_entity.credits_applied_for_referrer.as_ref()
                                     + referrer_bonus,
@@ -517,7 +484,7 @@ impl BufferedRpcQueryStats {
                 _ => {}
             };
 
-            // Finally commit the transaction in the database
+            // Finally, commit the transaction in the database
             txn.commit()
                 .await
                 .context("Failed to update referral and balance updates")?;
@@ -581,6 +548,9 @@ impl BufferedRpcQueryStats {
     }
 }
 
+/// this is **intentionally** not a TryFrom<Arc<RequestMetadata>>
+/// We want this to run when there is **one and only one** copy of this RequestMetadata left
+/// There are often multiple copies if a request is being sent to multiple servers in parallel
 impl TryFrom<RequestMetadata> for RpcQueryStats {
     type Error = Web3ProxyError;
 
@@ -632,7 +602,7 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
 
         let cu = ComputeUnit::new(&metadata.method, metadata.chain_id, response_bytes);
 
-        let cache_hit = !backend_rpcs_used.is_empty();
+        let cache_hit = backend_rpcs_used.is_empty();
 
         let compute_unit_cost = cu.cost(
             archive_request,
@@ -656,6 +626,7 @@ impl TryFrom<RequestMetadata> for RpcQueryStats {
             response_millis,
             response_timestamp,
             user_error_response,
+            paid_credits_used: None,
         };
 
         Ok(x)

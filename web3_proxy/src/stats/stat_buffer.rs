@@ -4,11 +4,12 @@ use crate::balance::Balance;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::Web3ProxyResult;
 use derive_more::From;
+use entities::rpc_key;
 use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
 use migration::sea_orm::prelude::Decimal;
-use migration::sea_orm::DatabaseConnection;
+use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{interval, sleep};
@@ -27,7 +28,9 @@ pub struct BufferedRpcQueryStats {
     pub sum_response_millis: u64,
     pub sum_credits_used: Decimal,
     pub sum_cu_used: Decimal,
-    /// The user's balance at this point in time. Multiple queries might be modifying it at once.
+    pub paid_credits_used: Decimal,
+    /// The user's balance at this point in time.
+    /// Multiple queries might be modifying it at once, so this is a copy of it when received
     pub approximate_latest_balance_for_influx: Balance,
 }
 
@@ -127,22 +130,77 @@ impl StatBuffer {
                 stat = stat_receiver.recv() => {
                     // trace!("Received stat");
                     // save the stat to a buffer
+
+                    // TODO: tokio spawn this!
                     match stat {
                         Some(AppStat::RpcQuery(stat)) => {
+                            let mut paid_credits_used = false;
+
+                            // update the latest balance
+                            // do this BEFORE emitting any stats```
+                            let latest_balance: Balance;
+                            if let Some(db_conn) = self.db_conn.as_ref() {
+                                let user_id = stat.authorization.checks.user_id;
+
+                                // update the user's balance
+                                if user_id == 0 {
+                                    latest_balance = Balance::default();
+                                } else {
+                                    // update the user's cached balance
+                                    let mut user_balance = stat.authorization.checks.latest_balance.write().await;
+
+                                    paid_credits_used = user_balance.active_premium();
+
+                                    user_balance.total_frontend_requests += 1;
+
+                                    if !stat.backend_rpcs_used.is_empty() {
+                                        user_balance.total_cache_misses += 1;
+                                    }
+
+                                    if paid_credits_used {
+                                        // TODO: this lets them get a negative remaining balance. we should clear if close to 0
+                                        user_balance.total_spent_paid_credits += stat.compute_unit_cost;
+
+                                        // check if they still have premium
+                                        if user_balance.active_premium() {
+                                            // TODO: referall credits here? i think in the save_db section still makes sense for those
+                                        } else {
+                                            // was premium, but isn't anymore due to paying for this query. clear the cache
+                                            // TODO: stop at <$0.000001 instead of negative?
+                                            self.user_balance_cache.invalidate(&user_balance.user_id).await;
+
+                                            let rpc_keys = rpc_key::Entity::find()
+                                                .filter(rpc_key::Column::UserId.eq(user_id))
+                                                .all(db_conn)
+                                                .await?;
+
+                                            // clear all keys owned by this user from the cache
+                                            for rpc_key_entity in rpc_keys {
+                                                self.rpc_secret_key_cache
+                                                    .invalidate(&rpc_key_entity.secret_key.into())
+                                                    .await;
+                                            }
+                                        }
+                                    }
+
+                                    latest_balance = user_balance.clone();
+                                }
+
+                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat.clone(), latest_balance.clone(), paid_credits_used).await;
+                            } else {
+                                latest_balance = Balance::default();
+                            }
+
                             if self.influxdb_client.is_some() {
                                 // TODO: round the timestamp at all?
 
+                                if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key() {
+                                    self.opt_in_timeseries_buffer.entry(opt_in_timeseries_key).or_default().add(stat.clone(), latest_balance.clone(), paid_credits_used).await;
+                                }
+
                                 let global_timeseries_key = stat.global_timeseries_key();
 
-                                self.global_timeseries_buffer.entry(global_timeseries_key).or_default().add(stat.clone()).await;
-
-                                if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key() {
-                                    self.opt_in_timeseries_buffer.entry(opt_in_timeseries_key).or_default().add(stat.clone()).await;
-                                }
-                            }
-
-                            if self.db_conn.is_some() {
-                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat).await;
+                                self.global_timeseries_buffer.entry(global_timeseries_key).or_default().add(stat, latest_balance, paid_credits_used).await;
                             }
                         }
                         None => {
@@ -152,6 +210,7 @@ impl StatBuffer {
                     }
                 }
                 _ = db_save_interval.tick() => {
+                    // TODO: tokio spawn this! (but with a semaphore on db_save_interval)
                     trace!("DB save internal tick");
                     let count = self.save_relational_stats().await;
                     if count > 0 {
@@ -238,13 +297,7 @@ impl StatBuffer {
                 // TODO: batch saves
                 // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
                 if let Err(err) = stat
-                    .save_db(
-                        self.chain_id,
-                        db_conn,
-                        key,
-                        &self.rpc_secret_key_cache,
-                        &self.user_balance_cache,
-                    )
+                    .save_db(self.chain_id, db_conn, key, &self.user_balance_cache)
                     .await
                 {
                     error!(?err, "unable to save accounting entry!");
