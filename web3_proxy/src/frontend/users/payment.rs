@@ -364,11 +364,11 @@ pub async fn user_balance_post(
                 None => {
                     let (user, _) = register_new_user(&txn, recipient_account).await?;
 
-                    user_ids_need_premium.insert(user.id);
-
                     user
                 }
             };
+
+            user_ids_need_premium.insert(recipient.id);
 
             // For now we only accept stablecoins. This will need conversions if we accept other tokens.
             // 1$ = Decimal(1) for any stablecoin
