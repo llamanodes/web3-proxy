@@ -19,7 +19,7 @@ async fn test_sum_credits_used() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(a, Some(db)).await;
+    let x = TestApp::spawn(&a, Some(&db)).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -27,11 +27,11 @@ async fn test_sum_credits_used() {
         .unwrap();
 
     // create wallets for users
-    let user_wallet = x.wallet(0);
-    let admin_wallet = x.wallet(1);
+    let user_wallet = a.wallet(0);
+    let admin_wallet = a.wallet(1);
 
     // log in to create users
-    let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
+    let admin_login_response = create_user_as_admin(&x, &db, &r, &admin_wallet).await;
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
 
     info!("starting balance");

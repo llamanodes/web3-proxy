@@ -5,12 +5,15 @@ use tracing::info;
 use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
 use web3_proxy::sub_commands::ChangeAdminStatusSubCommand;
 
+use super::mysql::TestMysql;
+
 /// Helper function to create admin
 
 /// Create user as admin
 #[allow(unused)]
 pub async fn create_user_as_admin(
     x: &TestApp,
+    db: &TestMysql,
     r: &reqwest::Client,
     admin_wallet: &LocalWallet,
 ) -> LoginPostResponse {
@@ -65,7 +68,7 @@ pub async fn create_user_as_admin(
 
     info!("Changing the status of the admin_wallet to be an admin");
     // Pass on the database into it ...
-    admin_status_changer.main(x.db_conn()).await.unwrap();
+    admin_status_changer.main(db.conn()).await.unwrap();
 
     // Now log him in again, because he was just signed out
     // Login the admin again, because he was just signed out

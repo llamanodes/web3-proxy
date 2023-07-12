@@ -42,11 +42,11 @@ async fn test_log_in_and_out() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(a, Some(db)).await;
+    let x = TestApp::spawn(&a, Some(&db)).await;
 
     let r = reqwest::Client::new();
 
-    let w = x.wallet(0);
+    let w = a.wallet(0);
 
     let login_get_url = format!("{}user/login/{:?}", x.proxy_provider.url(), w.address());
     let login_message = r.get(login_get_url).send().await.unwrap();
@@ -103,18 +103,18 @@ async fn test_admin_balance_increase() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(a, Some(db)).await;
+    let x = TestApp::spawn(&a, Some(&db)).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
 
-    let user_wallet = x.wallet(0);
-    let admin_wallet = x.wallet(1);
+    let user_wallet = a.wallet(0);
+    let admin_wallet = a.wallet(1);
 
     // Create three users, one referrer, one admin who bumps both their balances
-    let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
+    let admin_login_response = create_user_as_admin(&x, &db, &r, &admin_wallet).await;
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
 
     // Bump both user's wallet to $20
@@ -156,18 +156,18 @@ async fn test_user_balance_decreases() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(a, Some(db)).await;
+    let x = TestApp::spawn(&a, Some(&db)).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
 
-    let user_wallet = x.wallet(0);
-    let admin_wallet = x.wallet(1);
+    let user_wallet = a.wallet(0);
+    let admin_wallet = a.wallet(1);
 
     // Create three users, one referrer, one admin who bumps both their balances
-    let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
+    let admin_login_response = create_user_as_admin(&x, &db, &r, &admin_wallet).await;
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
 
     // Get the rpc keys for this user
@@ -264,20 +264,20 @@ async fn test_referral_bonus_non_concurrent() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(a, Some(db)).await;
+    let x = TestApp::spawn(&a, Some(&db)).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
 
-    let user_wallet = x.wallet(0);
-    let referrer_wallet = x.wallet(1);
-    let admin_wallet = x.wallet(2);
+    let user_wallet = a.wallet(0);
+    let referrer_wallet = a.wallet(1);
+    let admin_wallet = a.wallet(2);
 
     // Create three users, one referrer, one admin who bumps both their balances
     let referrer_login_response = create_user(&x, &r, &referrer_wallet, None).await;
-    let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
+    let admin_login_response = create_user_as_admin(&x, &db, &r, &admin_wallet).await;
     // Get the first user's referral link
     let referral_link = get_referral_code(&x, &r, &referrer_login_response).await;
 
@@ -413,20 +413,20 @@ async fn test_referral_bonus_concurrent_referrer_only() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(a, Some(db)).await;
+    let x = TestApp::spawn(&a, Some(&db)).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
 
-    let user_wallet = x.wallet(0);
-    let referrer_wallet = x.wallet(1);
-    let admin_wallet = x.wallet(2);
+    let user_wallet = a.wallet(0);
+    let referrer_wallet = a.wallet(1);
+    let admin_wallet = a.wallet(2);
 
     // Create three users, one referrer, one admin who bumps both their balances
     let referrer_login_response = create_user(&x, &r, &referrer_wallet, None).await;
-    let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
+    let admin_login_response = create_user_as_admin(&x, &db, &r, &admin_wallet).await;
     // Get the first user's referral link
     let referral_link = get_referral_code(&x, &r, &referrer_login_response).await;
 
@@ -573,20 +573,20 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(a, Some(db)).await;
+    let x = TestApp::spawn(&a, Some(&db)).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
 
-    let user_wallet = x.wallet(0);
-    let referrer_wallet = x.wallet(1);
-    let admin_wallet = x.wallet(2);
+    let user_wallet = a.wallet(0);
+    let referrer_wallet = a.wallet(1);
+    let admin_wallet = a.wallet(2);
 
     // Create three users, one referrer, one admin who bumps both their balances
     let referrer_login_response = create_user(&x, &r, &referrer_wallet, None).await;
-    let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
+    let admin_login_response = create_user_as_admin(&x, &db, &r, &admin_wallet).await;
     // Get the first user's referral link
     let referral_link = get_referral_code(&x, &r, &referrer_login_response).await;
 

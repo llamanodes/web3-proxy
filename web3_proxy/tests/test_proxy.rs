@@ -16,7 +16,7 @@ async fn it_migrates_the_db() {
     let a = TestAnvil::spawn(31337).await;
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(a, Some(db)).await;
+    let x = TestApp::spawn(&a, Some(&db)).await;
 
     // we call flush stats more to be sure it works than because we expect it to save any stats
     x.flush_stats().await.unwrap();
@@ -26,9 +26,9 @@ async fn it_migrates_the_db() {
 async fn it_starts_and_stops() {
     let a = TestAnvil::spawn(31337).await;
 
-    let x = TestApp::spawn(a, None).await;
+    let x = TestApp::spawn(&a, None).await;
 
-    let anvil_provider = &x.anvil_provider;
+    let anvil_provider = &a.provider;
     let proxy_provider = &x.proxy_provider;
 
     let anvil_result = anvil_provider

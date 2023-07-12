@@ -9,6 +9,8 @@ use tracing::info;
 use web3_proxy::errors::Web3ProxyResult;
 use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
 
+use super::mysql::TestMysql;
+
 /// Helper function to create an "ordinary" user
 #[allow(unused)]
 pub async fn create_user(
@@ -55,10 +57,11 @@ pub async fn create_user(
 #[allow(unused)]
 pub async fn set_user_tier(
     x: &TestApp,
+    db: &TestMysql,
     user: user::Model,
     tier_name: &str,
 ) -> Web3ProxyResult<user_tier::Model> {
-    let db_conn = x.db_conn();
+    let db_conn = db.conn();
 
     let ut = user_tier::Entity::find()
         .filter(user_tier::Column::Title.like(tier_name))

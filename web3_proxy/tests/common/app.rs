@@ -1,11 +1,9 @@
 use super::{anvil::TestAnvil, mysql::TestMysql};
 use ethers::{
     prelude::{Http, Provider},
-    signers::LocalWallet,
     types::Address,
 };
 use hashbrown::HashMap;
-use migration::sea_orm::DatabaseConnection;
 use parking_lot::Mutex;
 use serde_json::json;
 use std::{
@@ -30,15 +28,6 @@ use web3_proxy::{
 };
 
 pub struct TestApp {
-    /// anvil shuts down when this guard is dropped.
-    pub anvil: TestAnvil,
-
-    /// connection to anvil.
-    pub anvil_provider: Provider<Http>,
-
-    /// keep track of the database so it can be stopped on drop
-    pub db: Option<TestMysql>,
-
     /// spawn handle for the proxy.
     pub proxy_handle: Mutex<Option<JoinHandle<anyhow::Result<()>>>>,
 
@@ -53,7 +42,7 @@ pub struct TestApp {
 }
 
 impl TestApp {
-    pub async fn spawn(anvil: TestAnvil, db: Option<TestMysql>) -> Self {
+    pub async fn spawn(anvil: &TestAnvil, db: Option<&TestMysql>) -> Self {
         let chain_id = anvil.instance.chain_id();
         let num_workers = 2;
 
@@ -62,9 +51,7 @@ impl TestApp {
 
         info!(%path);
 
-        let anvil_provider = Provider::<Http>::try_from(anvil.instance.endpoint()).unwrap();
-
-        let db_url = db.as_ref().map(|x| x.url.clone());
+        let db_url = db.map(|x| x.url.clone());
 
         // make a test TopConfig
         // TODO: test influx
@@ -138,19 +125,11 @@ impl TestApp {
         let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
 
         Self {
-            anvil,
-            anvil_provider,
-            db,
             proxy_handle: Mutex::new(Some(handle)),
             proxy_provider,
             flush_stat_buffer_sender,
             shutdown_sender,
         }
-    }
-
-    #[allow(unused)]
-    pub fn db_conn(&self) -> &DatabaseConnection {
-        self.db.as_ref().unwrap().conn()
     }
 
     #[allow(unused)]
@@ -179,11 +158,6 @@ impl TestApp {
             info!("waiting for the app to stop...");
             handle.await.unwrap().unwrap();
         }
-    }
-
-    #[allow(unused)]
-    pub fn wallet(&self, id: usize) -> LocalWallet {
-        self.anvil.instance.keys()[id].clone().into()
     }
 }
 

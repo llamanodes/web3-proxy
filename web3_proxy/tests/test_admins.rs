@@ -21,7 +21,7 @@ async fn test_admin_imitate_user() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(a, Some(db)).await;
+    let x = TestApp::spawn(&a, Some(&db)).await;
 
     todo!();
 }
@@ -35,7 +35,7 @@ async fn test_admin_grant_credits() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(a, Some(db)).await;
+    let x = TestApp::spawn(&a, Some(&db)).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -43,12 +43,12 @@ async fn test_admin_grant_credits() {
         .unwrap();
 
     // Setup variables that will be used
-    let user_wallet = x.wallet(0);
-    let admin_wallet = x.wallet(1);
+    let user_wallet = a.wallet(0);
+    let admin_wallet = a.wallet(1);
     info!(?admin_wallet);
 
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
-    let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
+    let admin_login_response = create_user_as_admin(&x, &db, &r, &admin_wallet).await;
     info!(?admin_login_response);
 
     let increase_balance_response = admin_increase_balance(
@@ -75,10 +75,10 @@ async fn test_admin_grant_credits() {
 #[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_admin_change_user_tier() {
-    let anvil = TestAnvil::spawn(31337).await;
+    let a = TestAnvil::spawn(31337).await;
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(anvil, Some(db)).await;
+    let x = TestApp::spawn(&a, Some(&db)).await;
 
     todo!();
 }
