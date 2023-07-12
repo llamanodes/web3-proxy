@@ -1,10 +1,11 @@
 use crate::app::Web3ProxyApp;
 use crate::balance::Balance;
-use crate::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse, Web3ProxyResult};
 use crate::frontend::authorization::{
     login_is_authorized, Authorization as Web3ProxyAuthorization,
 };
 use crate::frontend::users::authentication::register_new_user;
+use crate::premium::{get_user_and_tier_from_id, grant_premium_tier};
 use anyhow::Context;
 use axum::{
     extract::Path,
@@ -302,6 +303,8 @@ pub async fn user_balance_post(
 
     // TODO: check bloom filters
 
+    let mut user_ids_need_premium = HashSet::new();
+
     // the transaction might contain multiple relevant logs. collect them all
     let mut response_data = vec![];
     let mut user_ids_to_invalidate = HashSet::new();
@@ -361,6 +364,8 @@ pub async fn user_balance_post(
                 None => {
                     let (user, _) = register_new_user(&txn, recipient_account).await?;
 
+                    user_ids_need_premium.insert(user.id);
+
                     user
                 }
             };
@@ -406,6 +411,17 @@ pub async fn user_balance_post(
 
             response_data.push(x);
         }
+    }
+
+    for user_id in user_ids_need_premium.into_iter() {
+        // TODO: we query user twice because that is easiest. make this more efficient
+        let (user_entry, user_tier_entry) = get_user_and_tier_from_id(user_id, &txn)
+            .await?
+            .context("no user found")?;
+
+        grant_premium_tier(&user_entry, user_tier_entry.as_ref(), &txn)
+            .await
+            .web3_context("granting premium tier")?;
     }
 
     txn.commit().await?;

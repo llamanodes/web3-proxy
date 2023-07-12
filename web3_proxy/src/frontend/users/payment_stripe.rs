@@ -1,5 +1,6 @@
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
+use crate::premium::grant_premium_tier;
 use anyhow::Context;
 use axum::{
     headers::{authorization::Bearer, Authorization},
@@ -7,7 +8,7 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use entities::{stripe_increase_balance_receipt, user};
+use entities::{stripe_increase_balance_receipt, user, user_tier};
 use ethers::types::Address;
 use http::HeaderMap;
 use migration::sea_orm::prelude::Decimal;
@@ -162,6 +163,14 @@ pub async fn user_balance_stripe_post(
     match recipient {
         Some(recipient) => {
             let _ = insert_receipt_model.save(&txn).await;
+
+            let user_tier = user_tier::Entity::find_by_id(recipient.user_tier_id)
+                .one(&txn)
+                .await?;
+
+            grant_premium_tier(&recipient, user_tier.as_ref(), &txn)
+                .await
+                .web3_context("granting premium tier")?;
 
             txn.commit().await?;
 
